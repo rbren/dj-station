@@ -1,0 +1,21 @@
+{
+  "ext": "com.dj.adsr",
+  "knobs": {
+    "gate": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "retrig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {
+    "attack": 0.02,
+    "decay": 0.1,
+    "release": 0.15,
+    "sustain": 0.6
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio",
+      "to": "osc2",
+      "to_jack": "fm"
+    },
+    {
+      "from_jack": "audio",
+      "to": "osc3",
+      "to_jack": "sync"
+    }
+  ]
+}

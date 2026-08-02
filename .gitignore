@@ -1,0 +1,8 @@
+/target
+/extensions/target
+/app/node_modules
+/app/dist
+/app/src-tauri/target
+*.wasm.tmp
+/extensions/*/dsp.wasm
+/extensions/*/ui.js

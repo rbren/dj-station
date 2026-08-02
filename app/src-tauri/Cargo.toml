@@ -1,0 +1,23 @@
+[package]
+name = "dj-station"
+version = "0.1.0"
+edition = "2021"
+description = "Modular DJ workstation (Tauri shell)"
+
+# Standalone workspace: the Tauri shell is deliberately kept out of the root
+# workspace so `cargo test --workspace` stays lean; run.sh / CI build it
+# explicitly when a GUI toolchain (webkit2gtk) is present.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+dj-engine = { path = "../../crates/dj-engine" }
+
+[profile.release]
+strip = true

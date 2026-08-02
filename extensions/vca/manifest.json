@@ -1,0 +1,16 @@
+{
+  "id": "com.dj.vca",
+  "name": "VCA",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "inputs": [
+    { "id": "in", "name": "In", "default": 0.0 },
+    { "id": "cv", "name": "Gain / CV", "default": 10.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Out" }
+  ],
+  "params": [],
+  "latency_samples": 0
+}

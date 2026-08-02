@@ -1,0 +1,7 @@
+{
+  "block_size": 128,
+  "format": "djpatch-1",
+  "master_channels": 1,
+  "name": "e2e-osc-sine-vca",
+  "sample_rate": 48000.0
+}
