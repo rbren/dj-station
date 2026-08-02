@@ -21,5 +21,16 @@ serde_json = "1"
 anyhow = "1"
 dj-engine = { path = "../../crates/dj-engine" }
 
+[features]
+# custom-protocol embeds frontendDist (app/dist) into the binary and serves
+# it over tauri://localhost. Without it the app runs in "dev" mode and tries
+# to load devUrl (http://localhost:1420 — the Vite dev server), which shows a
+# blank window unless `npm run dev` is running. The `tauri build` CLI enables
+# this automatically, but we build with plain cargo, so default it on.
+# For live-reload dev against Vite: cargo run --no-default-features (with
+# `npm run dev` running in app/).
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [profile.release]
 strip = true

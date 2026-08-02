@@ -10,16 +10,18 @@ A modular, extensible DJ workstation — VCV-Rack-style patching for DJs. See
 ./run.sh
 ```
 
-That single script builds everything from a fresh clone (WASM extensions,
-Rust workspace, frontend), runs the full test suite, and launches the app.
-It exits nonzero on any failure.
+That single script builds what's needed from a fresh clone (WASM
+extensions, frontend, app) and launches it. It exits nonzero on any
+failure.
 
-- **With a display** (and `libwebkit2gtk-4.1-dev` installed): launches the
-  Tauri GUI.
+- **macOS, or Linux with a display** (and `libwebkit2gtk-4.1-dev`
+  installed): launches the Tauri GUI.
 - **Headless Linux** (CI, servers — no display/audio device): launches the
   engine in headless mode via `dj-cli`, streaming a demo patch on the null
   realtime backend. Use `./run.sh --smoke` to instead render 2 s of the demo
-  patch to a WAV and exit, or `./run.sh --no-launch` to build + test only.
+  patch to a WAV and exit.
+- `./run.sh --test` builds everything and runs the full test suite + lint
+  instead of launching (`--no-launch` is an alias).
 
 Prerequisites: Rust (rustup; `wasm32-unknown-unknown` target is added
 automatically), Node ≥ 20, and on Linux `libasound2-dev` (ALSA headers).

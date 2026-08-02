@@ -1,29 +1,24 @@
 #!/usr/bin/env bash
 # dj-station — single entry point (PRD M0 acceptance #1).
 #
-# From a fresh clone this script:
-#   1. checks the toolchain (Rust, wasm32 target, Node),
-#   2. builds the WASM extensions, the Rust workspace, and the frontend,
-#   3. runs the full test suite (Rust + frontend),
-#   4. launches the app:
-#        - with a display + webkit2gtk: the Tauri GUI,
-#        - headless (CI/servers): the engine in headless mode via dj-cli
-#          (documented behavior on headless Linux; use --smoke to render a
-#          short demo WAV and exit instead of streaming).
+# Default: build and launch the app.
+#   - macOS, or Linux with a display + webkit2gtk: the Tauri GUI
+#   - headless (CI/servers): the engine in headless mode via dj-cli
 #
 # Exits nonzero on any failure. Flags:
-#   --no-launch   build + test only
+#   --test        build everything, run the full test suite + lint, no launch
+#   --no-launch   alias for --test
 #   --smoke       headless: render 2s of the demo patch to /tmp and exit
 set -o pipefail
 cd "$(dirname "$0")"
 
 fail() { echo "run.sh: $*" >&2; exit 1; }
 
-NO_LAUNCH=0
+RUN_TESTS=0
 SMOKE=0
 for arg in "$@"; do
   case "$arg" in
-    --no-launch) NO_LAUNCH=1 ;;
+    --test|--no-launch) RUN_TESTS=1 ;;
     --smoke) SMOKE=1 ;;
     *) fail "unknown flag: $arg" ;;
   esac
@@ -38,27 +33,24 @@ rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown \
 echo "==> building WASM extensions"
 ./scripts/build-extensions.sh || fail "extension build failed"
 
-echo "==> building Rust workspace"
-cargo build --workspace --release || fail "Rust build failed"
-
-echo "==> installing frontend deps"
-(cd app && npm ci --no-audit --no-fund) || fail "npm ci failed"
-
-echo "==> building frontend (tsc + vite + extension UIs)"
-(cd app && npm run build) || fail "frontend build failed"
-
-echo "==> running Rust tests"
-cargo test --workspace --release || fail "Rust tests failed"
-
-echo "==> running frontend tests"
-(cd app && npm test) || fail "frontend tests failed"
-
-echo "==> running lint"
-cargo clippy --workspace --all-targets -- -D warnings || fail "clippy failed"
-cargo fmt --all --check || fail "rustfmt failed"
-(cd app && npm run lint) || fail "frontend lint failed"
-
-[ "$NO_LAUNCH" = "1" ] && { echo "==> build + tests OK (launch skipped)"; exit 0; }
+if [ "$RUN_TESTS" = "1" ]; then
+  echo "==> building Rust workspace"
+  cargo build --workspace --release || fail "Rust build failed"
+  echo "==> installing frontend deps"
+  (cd app && npm ci --no-audit --no-fund) || fail "npm ci failed"
+  echo "==> building frontend (tsc + vite + extension UIs)"
+  (cd app && npm run build) || fail "frontend build failed"
+  echo "==> running Rust tests"
+  cargo test --workspace --release || fail "Rust tests failed"
+  echo "==> running frontend tests"
+  (cd app && npm test) || fail "frontend tests failed"
+  echo "==> running lint"
+  cargo clippy --workspace --all-targets -- -D warnings || fail "clippy failed"
+  cargo fmt --all --check || fail "rustfmt failed"
+  (cd app && npm run lint) || fail "frontend lint failed"
+  echo "==> build + tests OK"
+  exit 0
+fi
 
 # GUI is available on macOS (always has a display; Tauri uses WKWebView) or
 # on Linux when a display server is reachable.
@@ -69,6 +61,7 @@ fi
 
 if [ "$SMOKE" = "1" ] || [ "$HAVE_GUI" = "0" ]; then
   echo "==> headless mode (no display detected)"
+  cargo build --release -p dj-cli || fail "dj-cli build failed"
   ./target/release/dj-cli demo /tmp/dj-demo-patch --extensions extensions \
     || fail "demo patch creation failed"
   if [ "$SMOKE" = "1" ]; then
@@ -84,6 +77,12 @@ else
   if [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
     fail "webkit2gtk-4.1 not found — install libwebkit2gtk-4.1-dev (Linux) or run headless"
   fi
+  if [ ! -d app/node_modules ]; then
+    echo "==> installing frontend deps"
+    (cd app && npm ci --no-audit --no-fund) || fail "npm ci failed"
+  fi
+  echo "==> building frontend"
+  (cd app && npm run build) || fail "frontend build failed"
   cargo build --manifest-path app/src-tauri/Cargo.toml --release || fail "Tauri build failed"
   exec ./app/src-tauri/target/release/dj-station
 fi

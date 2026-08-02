@@ -116,7 +116,8 @@ cd app && npm ci && npm test`). Individual criteria:
 ```sh
 git clone ssh://git@github.com/rbren/dj-station.git && cd dj-station
 git checkout milestone/m0
-./run.sh --smoke        # full build + all tests + lint + headless render
+./run.sh --test         # full build + all tests + lint (no launch)
+./run.sh --smoke        # build + headless 2s demo render, then exit
 ```
 
 Or piecemeal: `cargo test --workspace` (16 engine tests),
