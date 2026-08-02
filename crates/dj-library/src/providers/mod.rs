@@ -51,11 +51,23 @@ impl Query {
     }
 }
 
+/// How a provider's results are acquired. Explicit on every result so the
+/// UI never has to guess from URL presence (e.g. Internet Archive is a
+/// Download provider whose download URL is only resolved at acquire time).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcquireKind {
+    Download,
+    DeepLink,
+}
+
 /// One search hit, tagged by source provider and license.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrackResult {
     /// Provider id ("itunes", "freesound", "jamendo", "internet_archive").
     pub provider: String,
+    /// How this result is acquired (Download vs DeepLink).
+    pub acquire_kind: AcquireKind,
     /// Provider-side track/item id.
     pub id: String,
     pub title: String,

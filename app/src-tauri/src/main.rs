@@ -395,6 +395,17 @@ fn open_store_page(state: State<AppState>, result: TrackResult) -> CmdResult<Str
         .map_err(err)
 }
 
+/// Open a web URL in the system's default browser (never in the app's
+/// webview). Restricted to http(s) so IPC can't be used to launch
+/// arbitrary local files/schemes.
+#[tauri::command]
+fn open_external(url: String) -> CmdResult<()> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(format!("refusing to open non-http(s) URL: {url}"));
+    }
+    open::that_detached(&url).map_err(err)
+}
+
 #[tauri::command]
 fn add_watch_folder(state: State<AppState>, path: String) -> CmdResult<()> {
     state
@@ -517,6 +528,7 @@ fn main() {
             import_track,
             download_track,
             open_store_page,
+            open_external,
             add_watch_folder,
             watch_folders,
             playback_load,

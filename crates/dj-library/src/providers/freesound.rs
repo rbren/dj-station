@@ -8,7 +8,7 @@
 
 use anyhow::{anyhow, Result};
 
-use super::{json_f64, json_str, Acquire, AcquisitionProvider, Query, TrackResult};
+use super::{json_f64, json_str, Acquire, AcquireKind, AcquisitionProvider, Query, TrackResult};
 use crate::LicenseInfo;
 
 pub const DEFAULT_BASE_URL: &str = "https://freesound.org";
@@ -75,6 +75,7 @@ impl AcquisitionProvider for FreesoundProvider {
                 );
                 TrackResult {
                     provider: self.id().into(),
+                    acquire_kind: AcquireKind::Download,
                     id: json_str(r, "id"),
                     title: json_str(r, "name"),
                     artist: username,

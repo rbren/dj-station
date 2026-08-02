@@ -4,7 +4,9 @@
 
 use anyhow::{anyhow, Result};
 
-use super::{get_json, json_f64, json_str, Acquire, AcquisitionProvider, Query, TrackResult};
+use super::{
+    get_json, json_f64, json_str, Acquire, AcquireKind, AcquisitionProvider, Query, TrackResult,
+};
 use crate::LicenseInfo;
 
 pub const DEFAULT_BASE_URL: &str = "https://itunes.apple.com";
@@ -58,6 +60,7 @@ impl AcquisitionProvider for ItunesProvider {
             .iter()
             .map(|r| TrackResult {
                 provider: self.id().into(),
+                acquire_kind: AcquireKind::DeepLink,
                 id: json_str(r, "trackId"),
                 title: json_str(r, "trackName"),
                 artist: json_str(r, "artistName"),

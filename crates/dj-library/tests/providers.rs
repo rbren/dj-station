@@ -10,7 +10,9 @@ mod common;
 use dj_library::providers::{
     FreesoundProvider, InternetArchiveProvider, ItunesProvider, JamendoProvider,
 };
-use dj_library::{Acquire, AcquisitionHub, AcquisitionProvider, Library, Query, TrackResult};
+use dj_library::{
+    Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, Library, Query, TrackResult,
+};
 use std::sync::Mutex;
 
 // ---------------------------------------------------------------------------
@@ -147,6 +149,7 @@ fn itunes_search_results_carry_source_license_and_resolvable_preview() {
     assert_eq!(r.title, "Harder, Better, Faster, Stronger");
     assert_eq!(r.artist, "Daft Punk");
     assert_eq!(r.license.kind, "commercial", "results carry a license tag");
+    assert_eq!(r.acquire_kind, AcquireKind::DeepLink);
     assert!((r.duration_secs.unwrap() - 224.693).abs() < 1e-6);
 
     // Preview URL resolves (fetch it from the mock server).
@@ -325,6 +328,11 @@ fn internet_archive_resolves_best_audio_file_and_downloads() {
     let r = &results[0];
     assert_eq!(r.provider, "internet_archive");
     assert_eq!(r.license.kind, "cc0");
+    // IA's download URL is only resolved at acquire time, so the result
+    // must still declare itself a Download (the UI branches on this — a
+    // deep-link/"store" action would fail for IA).
+    assert_eq!(r.acquire_kind, AcquireKind::Download);
+    assert!(r.download_url.is_none());
 
     // acquire() picks the MP3 over FLAC/Text via the metadata API.
     match hub.acquire(r).unwrap() {

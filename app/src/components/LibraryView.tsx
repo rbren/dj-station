@@ -135,11 +135,20 @@ export function LibraryView({ client }: LibraryViewProps) {
                 <LicenseTag kind={r.license.kind} />
                 <span className="result-duration">{formatDuration(r.duration_secs)}</span>
                 {r.preview_url && (
-                  <a href={r.preview_url} data-testid="preview-link">
+                  <a
+                    href={r.preview_url}
+                    data-testid="preview-link"
+                    onClick={(e) => {
+                      // Never navigate the app webview — open in the
+                      // system's default browser instead.
+                      e.preventDefault();
+                      void client.openExternal(r.preview_url!);
+                    }}
+                  >
                     preview
                   </a>
                 )}
-                {r.download_url ? (
+                {r.acquire_kind === 'download' ? (
                   <button
                     onClick={() => void download(r)}
                     disabled={busy === `${r.provider}:${r.id}`}
@@ -148,11 +157,9 @@ export function LibraryView({ client }: LibraryViewProps) {
                     {busy === `${r.provider}:${r.id}` ? 'Downloading…' : 'Download'}
                   </button>
                 ) : (
-                  r.deep_link_url && (
-                    <button onClick={() => void openStore(r)} data-testid="open-store-button">
-                      Open Store
-                    </button>
-                  )
+                  <button onClick={() => void openStore(r)} data-testid="open-store-button">
+                    Open Store
+                  </button>
                 )}
               </li>
             ))}

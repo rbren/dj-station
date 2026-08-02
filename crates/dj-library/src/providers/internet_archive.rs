@@ -7,7 +7,7 @@
 
 use anyhow::{anyhow, Result};
 
-use super::{get_json, json_str, Acquire, AcquisitionProvider, Query, TrackResult};
+use super::{get_json, json_str, Acquire, AcquireKind, AcquisitionProvider, Query, TrackResult};
 use crate::LicenseInfo;
 
 pub const DEFAULT_BASE_URL: &str = "https://archive.org";
@@ -97,6 +97,7 @@ impl AcquisitionProvider for InternetArchiveProvider {
                 };
                 TrackResult {
                     provider: self.id().into(),
+                    acquire_kind: AcquireKind::Download,
                     id: identifier.clone(),
                     title,
                     artist: creator,

@@ -32,6 +32,9 @@ export interface Track {
 
 export interface TrackResult {
   provider: string;
+  /** How this result is acquired. Explicit because a Download provider's
+   *  URL may only be resolved at acquire time (e.g. Internet Archive). */
+  acquire_kind: 'download' | 'deep_link';
   id: string;
   title: string;
   artist: string;
@@ -58,6 +61,8 @@ export interface LibraryClientApi {
   importTrack(path: string): Promise<Track | null>;
   downloadTrack(result: TrackResult): Promise<Track | null>;
   openStorePage(result: TrackResult): Promise<string | null>;
+  /** Open a web URL in the system's default browser (never the webview). */
+  openExternal(url: string): Promise<void | null>;
   playbackLoad(instance: string, trackId: number): Promise<void | null>;
 }
 
@@ -102,6 +107,15 @@ export class LibraryClient implements LibraryClientApi {
   }
   openStorePage(result: TrackResult) {
     return this.call<string>('open_store_page', { result });
+  }
+  async openExternal(url: string) {
+    await this.ready;
+    if (!this.invoke) {
+      // Plain-browser dev mode: a new tab is the "default browser" here.
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return null;
+    }
+    return (await this.invoke('open_external', { url })) as void;
   }
   playbackLoad(instance: string, trackId: number) {
     return this.call<void>('playback_load', { instance, trackId });
