@@ -1,0 +1,25 @@
+[package]
+name = "dj-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "dj-station audio engine: RT-safe patch graph, WASM module host, offline/realtime backends"
+
+[features]
+default = ["cpal-backend", "midi-hw"]
+cpal-backend = ["dep:cpal"]
+midi-hw = ["dep:midir"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+wasmtime = { version = "37", default-features = false, features = ["cranelift", "runtime", "parallel-compilation"] }
+rtrb = "0.3"
+hound = "3.5"
+cpal = { version = "0.16", optional = true }
+midir = { version = "0.10", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

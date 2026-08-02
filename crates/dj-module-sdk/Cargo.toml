@@ -1,0 +1,8 @@
+[package]
+name = "dj-module-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SDK for writing dj-station DSP modules (wasm-1 ABI)"
+
+[dependencies]
