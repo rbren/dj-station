@@ -224,7 +224,12 @@ impl Engine {
             .inputs
             .iter()
             .position(|j| j.id == jack_id)
-            .ok_or_else(|| anyhow!("no input jack {jack_id:?} on {}", self.nodes[node].instance_id))
+            .ok_or_else(|| {
+                anyhow!(
+                    "no input jack {jack_id:?} on {}",
+                    self.nodes[node].instance_id
+                )
+            })
     }
 
     fn out_jack_index(&self, node: usize, jack_id: &str) -> Result<usize> {
@@ -341,7 +346,9 @@ impl Engine {
         let idx = core.graph.add_node(node, jack_rt, analyzers);
         // Apply default params.
         for (i, p) in manifest.params.iter().enumerate() {
-            core.graph.nodes[idx].module.on_param(i as u32, params[&p.id]);
+            core.graph.nodes[idx]
+                .module
+                .on_param(i as u32, params[&p.id]);
         }
         debug_assert_eq!(idx, self.nodes.len());
         self.node_by_id.insert(instance_id.to_string(), idx);
@@ -388,7 +395,12 @@ impl Engine {
     }
 
     /// Restore a full knob state (used by patch load).
-    pub fn restore_knob(&mut self, instance_id: &str, jack_id: &str, state: KnobState) -> Result<()> {
+    pub fn restore_knob(
+        &mut self,
+        instance_id: &str,
+        jack_id: &str,
+        state: KnobState,
+    ) -> Result<()> {
         let node = self.node_idx(instance_id)?;
         let jack = self.jack_index(node, jack_id)?;
         self.nodes[node].knobs[jack] = state;
@@ -432,7 +444,12 @@ impl Engine {
         Ok(())
     }
 
-    pub fn set_knob_position(&mut self, instance_id: &str, jack_id: &str, position: f32) -> Result<()> {
+    pub fn set_knob_position(
+        &mut self,
+        instance_id: &str,
+        jack_id: &str,
+        position: f32,
+    ) -> Result<()> {
         let node = self.node_idx(instance_id)?;
         let jack = self.jack_index(node, jack_id)?;
         self.nodes[node].knobs[jack].position = position.clamp(0.0, 1.0);
@@ -516,7 +533,11 @@ impl Engine {
     }
 
     /// Poll for a learned control; on success creates the mapping/jack.
-    pub fn midi_learn_poll(&mut self, instance_id: &str, name: &str) -> Result<Option<MidiMappingInfo>> {
+    pub fn midi_learn_poll(
+        &mut self,
+        instance_id: &str,
+        name: &str,
+    ) -> Result<Option<MidiMappingInfo>> {
         let node = self.node_idx(instance_id)?;
         let shared = self.nodes[node]
             .midi_shared
@@ -583,10 +604,9 @@ impl Engine {
         port_substring: &str,
     ) -> Result<midir::MidiInputConnection<()>> {
         let node = self.node_idx(instance_id)?;
-        let mut tx = self
-            .midi_producers
-            .remove(&node)
-            .ok_or_else(|| anyhow!("{instance_id:?} has no free injection ring (already connected?)"))?;
+        let mut tx = self.midi_producers.remove(&node).ok_or_else(|| {
+            anyhow!("{instance_id:?} has no free injection ring (already connected?)")
+        })?;
         let midi_in = midir::MidiInput::new("dj-station")?;
         let ports = midi_in.ports();
         let port = ports
@@ -640,9 +660,23 @@ impl Engine {
         Ok(out)
     }
 
+    /// Process blocks offline without collecting audio (stress/tripwire use).
+    pub fn process_blocks(&mut self, blocks: usize) -> Result<()> {
+        let frames = self.config.block_size;
+        let core = self.core_mut()?;
+        for _ in 0..blocks {
+            core.process_block(frames);
+        }
+        Ok(())
+    }
+
     /// Offline render straight to a WAV file. Signals are scaled from the
     /// nominal [-10, +10] to [-1, +1] and hard-clipped at the file boundary.
-    pub fn render_offline_wav(&mut self, total_frames: usize, path: &std::path::Path) -> Result<()> {
+    pub fn render_offline_wav(
+        &mut self,
+        total_frames: usize,
+        path: &std::path::Path,
+    ) -> Result<()> {
         let channels = self.config.master_channels;
         let spec = hound::WavSpec {
             channels: channels as u16,
@@ -689,6 +723,9 @@ impl Engine {
                         xruns.fetch_add(1, Ordering::Relaxed);
                         deadline = now + block_dur;
                     } else {
+                        if deadline > now + Duration::from_micros(500) {
+                            std::thread::sleep(deadline - now - Duration::from_micros(300));
+                        }
                         while Instant::now() < deadline {
                             std::hint::spin_loop();
                         }

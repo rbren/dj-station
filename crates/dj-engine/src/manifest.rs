@@ -62,13 +62,8 @@ impl ParamDecl {
     /// Params cross the ABI as f32 (toggles as 0.0/1.0).
     pub fn default_f32(&self) -> f32 {
         match &self.default {
-            serde_json::Value::Bool(b) => {
-                if *b {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
+            serde_json::Value::Bool(true) => 1.0,
+            serde_json::Value::Bool(false) => 0.0,
             serde_json::Value::Number(n) => n.as_f64().unwrap_or(0.0) as f32,
             _ => 0.0,
         }

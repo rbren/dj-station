@@ -192,8 +192,8 @@ impl Graph {
                         }
                     }
                     let dst = &mut self.in_bufs[node][jack];
-                    for s in 0..frames {
-                        dst[s] = dst[s] * rt.atten + rt.offset;
+                    for x in dst.iter_mut().take(frames) {
+                        *x = *x * rt.atten + rt.offset;
                     }
                 }
                 self.analyzers[node][jack].update(&self.in_bufs[node][jack][..frames]);
@@ -201,9 +201,12 @@ impl Graph {
 
             // Run the module.
             let mask = self.connected_mask[node];
-            self.nodes[node]
-                .module
-                .process(&self.in_bufs[node], &mut self.out_curr[node], mask, frames);
+            self.nodes[node].module.process(
+                &self.in_bufs[node],
+                &mut self.out_curr[node],
+                mask,
+                frames,
+            );
 
             // Mix audio-out nodes into the master bus (hard clip happens at
             // the device/file boundary, not here).
@@ -242,7 +245,11 @@ impl Graph {
     /// Swap a node's module in place (hot reload), transferring state.
     /// Runs at a block boundary; the save/load pair may allocate, which is
     /// the documented, bounded exception during a reload swap.
-    pub fn swap_module(&mut self, node: usize, mut new_module: Box<dyn HostModule>) -> Box<dyn HostModule> {
+    pub fn swap_module(
+        &mut self,
+        node: usize,
+        mut new_module: Box<dyn HostModule>,
+    ) -> Box<dyn HostModule> {
         let state = self.nodes[node].module.save_state();
         new_module.load_state(&state);
         std::mem::replace(&mut self.nodes[node].module, new_module)

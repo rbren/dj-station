@@ -93,9 +93,9 @@ impl<M: Module> Runtime<M> {
         let frames = frames.min(self.block_size);
         // Build fixed-size slice tables on the stack (max 64 jacks).
         let mut ins: [&[f32]; 64] = [&[]; 64];
-        for i in 0..M::N_INPUTS {
+        for (i, slot) in ins.iter_mut().enumerate().take(M::N_INPUTS) {
             let start = i * self.block_size;
-            ins[i] = &self.in_buf[start..start + frames];
+            *slot = &self.in_buf[start..start + frames];
         }
         // Split out_buf into per-jack mutable slices.
         let mut outs: [&mut [f32]; 64] = [(); 64].map(|_| &mut [] as &mut [f32]);

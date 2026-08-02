@@ -67,7 +67,8 @@ impl Module for Adsr {
         let n = io.outputs[0].len();
         let attack_rate = ENV_MAX / (self.attack.max(1e-4) * self.sample_rate);
         let decay_target = ENV_MAX * self.sustain;
-        let decay_rate = (ENV_MAX - decay_target).max(0.0) / (self.decay.max(1e-4) * self.sample_rate);
+        let decay_rate =
+            (ENV_MAX - decay_target).max(0.0) / (self.decay.max(1e-4) * self.sample_rate);
 
         for s in 0..n {
             let gate = io.inputs[IN_GATE][s];

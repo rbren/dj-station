@@ -80,8 +80,7 @@ impl KnobConfig {
             }
             KnobStyle::Stepped => {
                 let steps = self.steps.unwrap_or(2).max(2);
-                let q = (p * (steps - 1) as f32).round() / (steps - 1) as f32;
-                q
+                (p * (steps - 1) as f32).round() / (steps - 1) as f32
             }
         };
         match &self.curve {
@@ -160,7 +159,11 @@ pub struct JackRt {
 }
 
 impl JackRt {
-    pub fn from_state(state: &KnobState, manifest_config: Option<&KnobConfig>, default: f32) -> Self {
+    pub fn from_state(
+        state: &KnobState,
+        manifest_config: Option<&KnobConfig>,
+        default: f32,
+    ) -> Self {
         let cfg_owned;
         let cfg = match (&state.config, manifest_config) {
             (Some(c), _) => c,

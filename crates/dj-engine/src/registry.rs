@@ -16,7 +16,10 @@ pub struct ExtensionRegistry {
 impl ExtensionRegistry {
     pub fn discover<P: AsRef<Path>>(search_paths: &[P]) -> Result<Self> {
         let mut reg = ExtensionRegistry {
-            search_paths: search_paths.iter().map(|p| p.as_ref().to_path_buf()).collect(),
+            search_paths: search_paths
+                .iter()
+                .map(|p| p.as_ref().to_path_buf())
+                .collect(),
             extensions: BTreeMap::new(),
         };
         reg.rescan()?;
@@ -35,7 +38,9 @@ impl ExtensionRegistry {
                 .collect();
             entries.sort();
             for dir in entries {
-                if dir.is_dir() && dir.join("manifest.json").exists() && dir.join("dsp.wasm").exists()
+                if dir.is_dir()
+                    && dir.join("manifest.json").exists()
+                    && dir.join("dsp.wasm").exists()
                 {
                     match Extension::load(&dir) {
                         Ok(ext) => {

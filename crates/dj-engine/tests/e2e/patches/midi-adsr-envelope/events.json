@@ -1,0 +1,23 @@
+{
+  "seconds": 0.6,
+  "midi": [
+    {
+      "instance": "midi1",
+      "frame": 2400,
+      "data": [
+        144,
+        60,
+        100
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 12000,
+      "data": [
+        128,
+        60,
+        0
+      ]
+    }
+  ]
+}

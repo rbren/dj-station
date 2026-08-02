@@ -113,7 +113,9 @@ fn run(args: &[String]) -> Result<()> {
         other => anyhow::bail!("unknown backend {other:?} (headless build supports 'null')"),
     }
     let watcher = engine.start_watcher(Duration::from_millis(200))?;
-    let seconds: Option<f32> = arg_value(args, "--seconds").map(|s| s.parse()).transpose()?;
+    let seconds: Option<f32> = arg_value(args, "--seconds")
+        .map(|s| s.parse())
+        .transpose()?;
     println!(
         "engine running ({} backend), hot-reload watcher active; blocks={} xruns={}",
         backend,

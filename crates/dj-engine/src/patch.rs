@@ -139,11 +139,13 @@ impl Engine {
             let to = &self.nodes[w.to_node];
             let from_jack = self.output_jack_name(w.from_node, w.from_jack);
             let to_jack = to.manifest.inputs[w.to_jack].id.clone();
-            map.entry(from.instance_id.clone()).or_default().push(WireEntry {
-                from_jack,
-                to: to.instance_id.clone(),
-                to_jack,
-            });
+            map.entry(from.instance_id.clone())
+                .or_default()
+                .push(WireEntry {
+                    from_jack,
+                    to: to.instance_id.clone(),
+                    to_jack,
+                });
         }
         map
     }

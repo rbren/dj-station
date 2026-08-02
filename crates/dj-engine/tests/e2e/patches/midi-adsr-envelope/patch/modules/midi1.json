@@ -1,0 +1,13 @@
+{
+  "ext": "builtin.midi",
+  "knobs": {},
+  "params": {},
+  "midi_mappings": [
+    {
+      "name": "pad_1",
+      "kind": "note",
+      "num": 60,
+      "jack": 0
+    }
+  ]
+}

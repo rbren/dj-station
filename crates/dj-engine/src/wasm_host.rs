@@ -107,15 +107,16 @@ impl HostModule for WasmModuleHost {
         frames: usize,
     ) {
         let frames = frames.min(self.block_size);
-        // Copy inputs into linear memory.
+        // Copy inputs into linear memory. WASM linear memory is
+        // little-endian; all supported hosts (x86_64/aarch64) are too, so
+        // f32 slices can be moved as raw bytes.
         {
             let data = self.memory.data_mut(&mut self.store);
             for (i, buf) in inputs.iter().enumerate().take(self.n_inputs) {
                 let start = self.in_ptr + i * self.block_size * 4;
-                let bytes = &mut data[start..start + frames * 4];
-                for (j, &s) in buf[..frames].iter().enumerate() {
-                    bytes[j * 4..j * 4 + 4].copy_from_slice(&s.to_le_bytes());
-                }
+                let src =
+                    unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, frames * 4) };
+                data[start..start + frames * 4].copy_from_slice(src);
             }
         }
         // A trapped module writes silence rather than crashing the engine.
@@ -129,14 +130,14 @@ impl HostModule for WasmModuleHost {
             }
             return;
         }
-        // Copy outputs back out.
+        // Copy outputs back out (same little-endian rationale as above).
         let data = self.memory.data(&self.store);
         for (o, out) in outputs.iter_mut().enumerate().take(self.n_outputs) {
             let start = self.out_ptr + o * self.block_size * 4;
             let bytes = &data[start..start + frames * 4];
-            for (j, s) in out[..frames].iter_mut().enumerate() {
-                *s = f32::from_le_bytes(bytes[j * 4..j * 4 + 4].try_into().unwrap());
-            }
+            let dst =
+                unsafe { std::slice::from_raw_parts_mut(out.as_mut_ptr() as *mut u8, frames * 4) };
+            dst.copy_from_slice(bytes);
         }
     }
 
