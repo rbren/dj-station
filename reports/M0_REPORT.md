@@ -104,6 +104,12 @@ cd app && npm ci && npm test`). Individual criteria:
 - The hot-reload rebuild test invokes `cargo build` on the oscillator
   extension, so its first run needs the wasm32 target installed (run.sh and
   CI both ensure this).
+- **CI observation**: this build host has SSH-only GitHub access (no API
+  token), so the Actions run triggered by the `milestone/m0` push could not
+  be watched from here. Every CI step (extension/workspace/Tauri/frontend
+  builds, clippy/fmt/ESLint/Prettier, full release test suite, headless
+  smoke) was executed locally with the identical commands and passes; see
+  `run.sh --no-launch`.
 
 ## For the verifier
 
