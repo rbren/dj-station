@@ -5,15 +5,21 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use dj_engine::{Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, Manifest};
+use dj_library::providers::SearchOutcome;
+use dj_library::{AcquisitionHub, Library, Query, Track, TrackResult};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Manager, State};
 
 struct AppState {
     engine: Mutex<Engine>,
+    library: Arc<Library>,
+    hub: AcquisitionHub,
+    /// Watch-folder scanner; kept alive for the app's lifetime.
+    _watcher: dj_library::WatchHandle,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -217,6 +223,83 @@ fn engine_stop(state: State<AppState>) -> CmdResult<()> {
     engine.stop().map_err(err)
 }
 
+// ---------------------------------------------------------------------------
+// Library + acquisition (M1)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn library_tracks(state: State<AppState>) -> CmdResult<Vec<Track>> {
+    state.library.tracks().map_err(err)
+}
+
+#[tauri::command]
+fn library_search(state: State<AppState>, text: String) -> CmdResult<Vec<Track>> {
+    state.library.search(&text).map_err(err)
+}
+
+#[tauri::command]
+fn provider_search(state: State<AppState>, text: String) -> CmdResult<SearchOutcome> {
+    Ok(state.hub.search(&Query::new(&text)))
+}
+
+#[tauri::command]
+fn import_track(state: State<AppState>, path: String) -> CmdResult<Track> {
+    state
+        .library
+        .import_file(&PathBuf::from(path), dj_library::ImportOptions::default())
+        .map(|o| o.track().clone())
+        .map_err(err)
+}
+
+#[tauri::command]
+fn download_track(state: State<AppState>, result: TrackResult) -> CmdResult<Track> {
+    state
+        .hub
+        .download_to_library(&state.library, &result)
+        .map_err(err)
+}
+
+/// Deep-link acquisition: resolves the store URL, opens it in the system
+/// browser, and returns it (M1: iTunes purchases land via the watch folder).
+#[tauri::command]
+fn open_store_page(state: State<AppState>, result: TrackResult) -> CmdResult<String> {
+    state
+        .hub
+        .open_deep_link(&result, |url| {
+            open::that_detached(url).map_err(anyhow::Error::from)
+        })
+        .map_err(err)
+}
+
+#[tauri::command]
+fn add_watch_folder(state: State<AppState>, path: String) -> CmdResult<()> {
+    state
+        .library
+        .add_watch_folder(&PathBuf::from(path))
+        .map_err(err)
+}
+
+#[tauri::command]
+fn watch_folders(state: State<AppState>) -> CmdResult<Vec<String>> {
+    Ok(state
+        .library
+        .watch_folders()
+        .map_err(err)?
+        .into_iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect())
+}
+
+/// Load a library track into a Playback module instance.
+#[tauri::command]
+fn playback_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResult<()> {
+    let track = state.library.track(track_id).map_err(err)?;
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine
+        .playback_load(&instance, &PathBuf::from(track.file_path))
+        .map_err(err)
+}
+
 fn extension_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
@@ -247,9 +330,19 @@ fn main() {
     let engine =
         Engine::new(EngineConfig::default(), registry).expect("engine construction failed");
 
+    // Library under the single user data dir (PRD §3); watch folders +
+    // provider hub (keyed providers enabled via env, see README).
+    let library =
+        Arc::new(Library::open(&dj_library::default_data_dir()).expect("library open failed"));
+    let watcher = dj_library::start_watcher(library.clone(), dj_library::watch::DEFAULT_POLL_INTERVAL);
+    let hub = AcquisitionHub::from_env();
+
     tauri::Builder::default()
         .manage(AppState {
             engine: Mutex::new(engine),
+            library,
+            hub,
+            _watcher: watcher,
         })
         .setup(|app| {
             // System menu: platform defaults (App/Edit/Window on macOS)
@@ -288,6 +381,15 @@ fn main() {
             inject_midi,
             engine_start,
             engine_stop,
+            library_tracks,
+            library_search,
+            provider_search,
+            import_track,
+            download_track,
+            open_store_page,
+            add_watch_folder,
+            watch_folders,
+            playback_load,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AdsrUI from '../../extensions/adsr/ui-src/AdsrUI';
 import { engine, type NodeSnapshot } from './engine';
+import { library } from './library';
+import { LibraryView } from './components/LibraryView';
 import { ModulePanel } from './components/ModulePanel';
 import type { JackTelemetry, KnobConfig, ModuleHandle } from './types';
 
@@ -11,6 +13,7 @@ export default function App() {
   const [nodes, setNodes] = useState<NodeSnapshot[]>([]);
   const [telemetry, setTelemetry] = useState<Record<string, Record<string, JackTelemetry>>>({});
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [view, setView] = useState<'rack' | 'library'>('rack');
 
   const refresh = useCallback(async () => {
     const snapshot = await engine.nodes();
@@ -70,11 +73,28 @@ export default function App() {
     <main className="app">
       <header className="app-header">
         <h1>dj-station</h1>
+        <nav className="app-tabs">
+          <button
+            className={view === 'rack' ? 'tab active' : 'tab'}
+            onClick={() => setView('rack')}
+            data-testid="tab-rack"
+          >
+            Rack
+          </button>
+          <button
+            className={view === 'library' ? 'tab active' : 'tab'}
+            onClick={() => setView('library')}
+            data-testid="tab-library"
+          >
+            Library
+          </button>
+        </nav>
         <span className="engine-status" data-testid="engine-status">
           {connected === null ? 'connecting…' : connected ? 'engine connected' : 'no engine (dev)'}
         </span>
       </header>
-      <div className="rack">
+      {view === 'library' && <LibraryView client={library} />}
+      <div className="rack" style={view === 'rack' ? undefined : { display: 'none' }}>
         {nodes.map((node) => (
           <ModulePanel
             key={node.instance_id}

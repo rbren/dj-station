@@ -19,7 +19,9 @@ tauri = { version = "2", features = ["devtools"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+open = "5"
 dj-engine = { path = "../../crates/dj-engine" }
+dj-library = { path = "../../crates/dj-library" }
 
 [features]
 # custom-protocol embeds frontendDist (app/dist) into the binary and serves

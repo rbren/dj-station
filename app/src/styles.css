@@ -176,3 +176,119 @@ body {
   color: #8a93a2;
   padding: 4px 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Library view (M1)                                                  */
+/* ------------------------------------------------------------------ */
+
+.app-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.app-tabs .tab {
+  background: #1b1e24;
+  color: #8a93a2;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.app-tabs .tab.active {
+  color: #e6e9ef;
+  border-color: #62d0ff;
+}
+
+.library {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.library-search {
+  display: flex;
+  gap: 8px;
+}
+
+.library-search input {
+  flex: 1;
+  max-width: 480px;
+  background: #14161a;
+  color: #e6e9ef;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.library-status {
+  color: #7dd88f;
+  font-size: 0.85rem;
+}
+
+.library-errors {
+  color: #e08f8f;
+  font-size: 0.8rem;
+}
+
+.provider-results ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-results li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #1b1e24;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.result-title {
+  flex: 1;
+}
+
+.tag {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 2px 6px;
+  border: 1px solid #2a2f38;
+}
+
+.tag-source {
+  color: #62d0ff;
+}
+
+.tag-license {
+  color: #e6b450;
+}
+
+.tag-license-cc0,
+.tag-license-public-domain {
+  color: #7dd88f;
+}
+
+.library-tracks table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.library-tracks th,
+.library-tracks td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid #2a2f38;
+}
+
+.library-empty {
+  color: #8a93a2;
+}
