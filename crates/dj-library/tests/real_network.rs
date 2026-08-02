@@ -61,9 +61,14 @@ fn internet_archive_real_search_smoke() {
 
 #[test]
 fn freesound_real_search_smoke_gated_on_key() {
-    let Ok(key) = std::env::var("FREESOUND_API_KEY") else {
-        eprintln!("SKIP freesound_real_search_smoke: FREESOUND_API_KEY not set");
-        return;
+    // CI passes secrets through unconditionally, so an unconfigured secret
+    // arrives as an empty string — treat that the same as unset.
+    let key = match std::env::var("FREESOUND_API_KEY") {
+        Ok(k) if !k.trim().is_empty() => k,
+        _ => {
+            eprintln!("SKIP freesound_real_search_smoke: FREESOUND_API_KEY not set");
+            return;
+        }
     };
     let provider = FreesoundProvider::new(&key);
     let results = skip_on_network_error!(
@@ -77,9 +82,12 @@ fn freesound_real_search_smoke_gated_on_key() {
 
 #[test]
 fn jamendo_real_search_smoke_gated_on_key() {
-    let Ok(id) = std::env::var("JAMENDO_CLIENT_ID") else {
-        eprintln!("SKIP jamendo_real_search_smoke: JAMENDO_CLIENT_ID not set");
-        return;
+    let id = match std::env::var("JAMENDO_CLIENT_ID") {
+        Ok(i) if !i.trim().is_empty() => i,
+        _ => {
+            eprintln!("SKIP jamendo_real_search_smoke: JAMENDO_CLIENT_ID not set");
+            return;
+        }
     };
     let provider = JamendoProvider::new(&id);
     let results = skip_on_network_error!(
