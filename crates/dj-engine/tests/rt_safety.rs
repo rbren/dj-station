@@ -104,6 +104,32 @@ fn rt_thread_allocation_tripwire() {
     );
 }
 
+/// A failed cpal start (e.g. headless: no device) must hand the graph back
+/// so callers can fall back to another backend — the Tauri shell relies on
+/// this (cpal -> null fallback).
+#[cfg(feature = "cpal-backend")]
+#[test]
+fn cpal_start_failure_recovers_engine_for_fallback() {
+    let _guard = SERIAL.lock().unwrap();
+    let mut engine = common::default_engine();
+    build_stress_patch(&mut engine, 2);
+    match engine.start_cpal() {
+        Ok(()) => {
+            // Host has a real audio device; nothing to assert here.
+            engine.stop().unwrap();
+        }
+        Err(_) => {
+            // Engine must still be usable on the null backend.
+            engine
+                .start_null_realtime()
+                .expect("null fallback failed after cpal error");
+            std::thread::sleep(Duration::from_millis(100));
+            engine.stop().unwrap();
+            assert!(engine.blocks_processed() > 0);
+        }
+    }
+}
+
 #[test]
 fn stress_patch_offline_equivalent_and_realtime_xruns() {
     let _guard = SERIAL.lock().unwrap();

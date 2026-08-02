@@ -130,12 +130,23 @@ enum EngineState {
         stop: Arc<AtomicBool>,
         join: std::thread::JoinHandle<Box<EngineCore>>,
     },
+    // The cpal stream itself lives on a dedicated thread (see
+    // `start_cpal`): cpal::Stream is !Send on CoreAudio, so storing it
+    // here would make Engine !Send on macOS.
     #[cfg(feature = "cpal-backend")]
     RunningCpal {
-        stream: cpal::Stream,
+        stop: Arc<AtomicBool>,
+        join: std::thread::JoinHandle<()>,
     },
     Empty,
 }
+
+/// Engine must stay Send: the Tauri shell keeps it in shared state and its
+/// commands run on arbitrary threads.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<Engine>();
+};
 
 pub struct Engine {
     pub config: EngineConfig,
@@ -800,10 +811,6 @@ impl Engine {
                 return Err(anyhow!("engine already running"));
             }
         };
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or_else(|| anyhow!("no audio output device"))?;
         let config = cpal::StreamConfig {
             channels: self.config.master_channels as u16,
             sample_rate: cpal::SampleRate(self.config.sample_rate as u32),
@@ -813,41 +820,114 @@ impl Engine {
         let channels = self.config.master_channels;
         let xruns = self.xruns.clone();
         let block_dur = block as f64 / self.config.sample_rate as f64;
-        let mut core = core;
-        let mut leftover: Vec<f32> = Vec::with_capacity(block * channels);
-        let stream = device.build_output_stream(
-            &config,
-            move |out: &mut [f32], _| {
-                let t0 = Instant::now();
-                let mut written = 0;
-                while written < out.len() {
-                    if leftover.is_empty() {
-                        core.process_block(block);
-                        for s in 0..block {
-                            for ch in 0..channels {
-                                leftover.push(
-                                    (core.master[ch][s] / crate::graph::SIGNAL_MAX)
-                                        .clamp(-1.0, 1.0),
-                                );
-                            }
+
+        // The core sits in a shared slot until the first audio callback
+        // claims it. If stream setup fails, it is still in the slot and we
+        // restore the engine to Stopped (so callers can fall back to
+        // another backend).
+        let slot: Arc<Mutex<Option<Box<EngineCore>>>> = Arc::new(Mutex::new(Some(core)));
+        let slot_cb = slot.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = stop.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::result::Result<(), String>>();
+
+        // The stream is created, driven, and dropped entirely on this
+        // thread: cpal::Stream is !Send on CoreAudio, so it must never
+        // cross threads (and Engine must stay Send for the Tauri shell).
+        let join = std::thread::Builder::new()
+            .name("dj-cpal".into())
+            .spawn(move || {
+                let mut local: Option<Box<EngineCore>> = None;
+                let mut leftover: Vec<f32> = Vec::with_capacity(block * channels);
+                let data_cb = move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    if local.is_none() {
+                        // Claim the core on the first callback. try_lock is
+                        // non-blocking and uncontended after startup.
+                        if let Ok(mut guard) = slot_cb.try_lock() {
+                            local = guard.take();
                         }
                     }
-                    let n = (out.len() - written).min(leftover.len());
-                    out[written..written + n].copy_from_slice(&leftover[..n]);
-                    leftover.drain(..n);
-                    written += n;
+                    let Some(core) = local.as_mut() else {
+                        out.fill(0.0);
+                        return;
+                    };
+                    let t0 = Instant::now();
+                    let mut written = 0;
+                    while written < out.len() {
+                        if leftover.is_empty() {
+                            core.process_block(block);
+                            for s in 0..block {
+                                for ch in 0..channels {
+                                    leftover.push(
+                                        (core.master[ch][s] / crate::graph::SIGNAL_MAX)
+                                            .clamp(-1.0, 1.0),
+                                    );
+                                }
+                            }
+                        }
+                        let n = (out.len() - written).min(leftover.len());
+                        out[written..written + n].copy_from_slice(&leftover[..n]);
+                        leftover.drain(..n);
+                        written += n;
+                    }
+                    let budget = block_dur * (out.len() as f64 / (block * channels) as f64);
+                    if t0.elapsed().as_secs_f64() > budget {
+                        xruns.fetch_add(1, Ordering::Relaxed);
+                    }
+                };
+                let result = (|| -> std::result::Result<cpal::Stream, String> {
+                    let host = cpal::default_host();
+                    let device = host
+                        .default_output_device()
+                        .ok_or("no audio output device")?;
+                    let stream = device
+                        .build_output_stream(
+                            &config,
+                            data_cb,
+                            |err| eprintln!("cpal stream error: {err}"),
+                            None,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    stream.play().map_err(|e| e.to_string())?;
+                    Ok(stream)
+                })();
+                match result {
+                    Ok(stream) => {
+                        let _ = ready_tx.send(Ok(()));
+                        while !stop_thread.load(Ordering::Relaxed) {
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                        drop(stream);
+                    }
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(e));
+                    }
                 }
-                let budget = block_dur * (out.len() as f64 / (block * channels) as f64);
-                if t0.elapsed().as_secs_f64() > budget {
-                    xruns.fetch_add(1, Ordering::Relaxed);
-                }
-            },
-            move |err| eprintln!("cpal stream error: {err}"),
-            None,
-        )?;
-        stream.play()?;
-        self.state = EngineState::RunningCpal { stream };
-        Ok(())
+            })?;
+
+        match ready_rx.recv() {
+            Ok(Ok(())) => {
+                self.state = EngineState::RunningCpal { stop, join };
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                let _ = join.join();
+                self.recover_core_from_slot(&slot);
+                Err(anyhow!("cpal start failed: {e}"))
+            }
+            Err(_) => {
+                let _ = join.join();
+                self.recover_core_from_slot(&slot);
+                Err(anyhow!("cpal thread exited before reporting readiness"))
+            }
+        }
+    }
+
+    #[cfg(feature = "cpal-backend")]
+    fn recover_core_from_slot(&mut self, slot: &Arc<Mutex<Option<Box<EngineCore>>>>) {
+        if let Some(core) = slot.lock().ok().and_then(|mut g| g.take()) {
+            self.state = EngineState::Stopped(core);
+        }
     }
 
     /// Stop a running backend. Returns the graph to the stopped state when
@@ -860,8 +940,9 @@ impl Engine {
                 self.state = EngineState::Stopped(core);
             }
             #[cfg(feature = "cpal-backend")]
-            EngineState::RunningCpal { stream } => {
-                drop(stream);
+            EngineState::RunningCpal { stop, join } => {
+                stop.store(true, Ordering::Relaxed);
+                let _ = join.join();
                 // Graph is consumed by the cpal callback; the engine must be
                 // rebuilt (e.g. by reloading the patch) to continue offline.
             }
