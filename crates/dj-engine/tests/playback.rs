@@ -52,6 +52,22 @@ fn playback_engine(track: &Path) -> Engine {
     e
 }
 
+/// The module library sidebar lists `registry.all_manifests()`; Playback
+/// (the deck) must be instantiable from it like any other module.
+#[test]
+fn playback_is_listed_in_all_manifests() {
+    let registry = common::registry();
+    let ids: Vec<String> = registry
+        .all_manifests()
+        .iter()
+        .map(|m| m.id.clone())
+        .collect();
+    assert!(
+        ids.contains(&"builtin.playback".to_string()),
+        "builtin.playback missing from module list: {ids:?}"
+    );
+}
+
 fn zero_crossings(signal: &[f32]) -> usize {
     signal
         .windows(2)
