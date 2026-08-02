@@ -2,8 +2,8 @@
 
 A modular, extensible DJ workstation — VCV-Rack-style patching for DJs. See
 [PRD.md](PRD.md) for the full product spec. This repo currently implements
-**Milestone M0 (Engine + Extension System)** and **Milestone M1 (Sound
-Library + Playback)**.
+**Milestone M0 (Engine + Extension System)**, **Milestone M1 (Sound
+Library + Playback)**, and **Milestone M2 (DJ Deck)**.
 
 ## Quick start
 
@@ -74,6 +74,19 @@ patch graph: inputs `play_gate` (≥ 1.0 plays, low pauses) and `speed`
 (symphonia) and sample-rate conversion happen off the RT thread; the loaded
 track path persists with the patch.
 
+The **DJ Deck module** (`builtin.deck`, M2) is the full DJ deck (PRD §7):
+transport with pitch fader (`speed` × `pitch_range` param, default ±8 %) and
+`phase_nudge`, 8 hot cues (`cue_trig1..8` jacks), loops (`loop_toggle` jack,
+halve/double, saved loops), manual beatgrids (tap tempo / nudge / re-anchor),
+keylock (WSOLA-aligned granular time-stretch), slip mode, reverse, and
+beat-sync to another deck (tempo + phase lock). Outputs `audio_l/r` plus
+`beat_clock`, `bar_clock`, `beat_phase`, and `bpm_cv` for driving the rest of
+the rack. Hot cues, saved loops, and beatgrids live in the library DB as
+track metadata and follow the track across patches; the loaded track and
+sync partner persist with the patch. The stock **Crossfader**
+(`builtin.crossfader`) mixes two stereo pairs with an equal-power law
+(`xfade` input, −10 = full A, +10 = full B).
+
 Real-network provider smoke tests are optional: keyless ones (iTunes,
 Internet Archive) soft-skip on network failure; Freesound/Jamendo ones only
 run when their env keys are present. CI relies on local mock HTTP servers.
@@ -115,6 +128,12 @@ crates/
                      playback.rs   Built-in Playback module (M1): plays a library
                                    track; play_gate/speed in, audio_l/r out; decode
                                    + SR conversion off the RT thread.
+                     deck.rs       DJ Deck module (M2): hot cues, loops, manual
+                                   beatgrid, keylock (WSOLA), slip/reverse,
+                                   beat-sync between decks; beat_clock/bar_clock/
+                                   phase/bpm outputs; RT-safe command rings.
+                     mixer.rs      Crossfader module (M2): equal-power two-channel
+                                   stereo crossfade.
   dj-library       Sound library (M1): SQLite DB (tracks, hashes, licenses,
                    tags, crates, watch folders), watch-folder auto-import,
                    acquisition provider framework (iTunes deep-link,
@@ -128,7 +147,9 @@ extensions/        WASM extensions (each folder: manifest.json + dsp.wasm +
 app/               React frontend (Vite + TS). Manifest-driven auto-generated
                    module panels: every input is jack + knob; right-click knob
                    config editor; telemetry-driven jack readouts; custom module
-                   UIs (ADSR envelope editor with draggable segments).
+                   UIs (ADSR envelope editor with draggable segments; DJ deck
+                   panel with waveform overview + zoom, hot cues, loops,
+                   beatgrid and sync controls).
   src-tauri/       Tauri 2 shell hosting the engine; IPC commands wire the UI
                    to the engine (own workspace, built when webkit is present).
 ```
@@ -139,6 +160,8 @@ with 0.0 = C4 (261.626 Hz); gate high ≥ 1.0, low ≤ 0.0. Default block size
 
 ## Milestone status
 
-M0 and M1 are implemented; see [reports/M0_REPORT.md](reports/M0_REPORT.md)
-and [reports/M1_REPORT.md](reports/M1_REPORT.md) for the
+M0, M1, and M2 are implemented; see
+[reports/M0_REPORT.md](reports/M0_REPORT.md),
+[reports/M1_REPORT.md](reports/M1_REPORT.md), and
+[reports/M2_REPORT.md](reports/M2_REPORT.md) for the
 acceptance-criteria → test mapping and known gaps.

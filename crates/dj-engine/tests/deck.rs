@@ -529,10 +529,7 @@ fn reverse_plays_backward() {
     let seg = e.render_offline(SR as usize).unwrap();
     let start = ramp_pos_secs(seg[0][200], total);
     let end = ramp_pos_secs(*seg[0].last().unwrap(), total);
-    assert!(
-        (start - 5.0).abs() < 0.02,
-        "reverse started at {start:.3}s"
-    );
+    assert!((start - 5.0).abs() < 0.02, "reverse started at {start:.3}s");
     assert!(
         (end - 4.0).abs() < 0.02,
         "after 1 s of reverse expected ~4.0s, got {end:.3}s"
@@ -631,11 +628,7 @@ fn deck_track_sync_and_params_persist_through_patch_save_load() {
     let st = e2.deck_status("deckB").unwrap();
     assert_eq!(st.sync_to.as_deref(), Some("deckA"));
     // Keylock/pitch-range params round-trip via the params map.
-    let node_b = e2
-        .nodes
-        .iter()
-        .find(|n| n.instance_id == "deckB")
-        .unwrap();
+    let node_b = e2.nodes.iter().find(|n| n.instance_id == "deckB").unwrap();
     assert_eq!(node_b.params["keylock"], 1.0);
     assert_eq!(node_b.params["pitch_range"], 0.16);
 }

@@ -329,11 +329,11 @@ SQLite library, watch-folder auto-import, drag-and-drop import, acquisition prov
 Full deck module (§7): waveform views, manual beatgrids (tap/nudge/anchor), 8 hot cues, saved loops, pitch fader, phase nudge, keylock, slip, sync between decks; plus a stock **Crossfader/Mixer module**. No MIDI work (MIDI shipped in M0 — decks are controllable by wiring).
 
 **Acceptance:**
-- [ ] **[A]** Two deck instances render simultaneously; sweeping the crossfader input produces the expected gain curves on each deck's contribution (verified in offline render).
-- [ ] **[A]** Cues and loops set via API persist in the library and reappear when the track is reloaded in a fresh patch.
-- [ ] **[A]** Beat-sync: with manually set beatgrids, syncing deck B to deck A aligns tempo and phase within ±1 ms sustained over 60 s of render.
-- [ ] **[A]** `beat_clock` pulses land on the configured beatgrid timestamps within one audio block; driving an ADSR from it produces envelopes at beat positions.
-- [ ] **[A]** Keylock: rendered output at ±8% tempo holds pitch within ±10 cents (pitch-tracked).
+- [x] **[A]** Two deck instances render simultaneously; sweeping the crossfader input produces the expected gain curves on each deck's contribution (verified in offline render).
+- [x] **[A]** Cues and loops set via API persist in the library and reappear when the track is reloaded in a fresh patch.
+- [x] **[A]** Beat-sync: with manually set beatgrids, syncing deck B to deck A aligns tempo and phase within ±1 ms sustained over 60 s of render.
+- [x] **[A]** `beat_clock` pulses land on the configured beatgrid timestamps within one audio block; driving an ADSR from it produces envelopes at beat positions.
+- [x] **[A]** Keylock: rendered output at ±8% tempo holds pitch within ±10 cents (pitch-tracked).
 - [ ] **[H]** Keylock artifacts are acceptable to the ear at typical DJ tempo ranges.
 - [ ] **[H]** Beat-matching two tracks by hand with pitch fader and phase nudge feels workable; waveforms and cue behavior match DJ expectations.
 - [ ] **[H]** `MIDI.jog → deck.phase_nudge` with a hardware jog wheel: nudge/scratch response feels natural, with no deck-side MIDI code.

@@ -39,3 +39,8 @@ fails if it's missing.
   through save/load.
 - Provider smoke tests gate on env keys and must treat empty-string env vars
   as unset (CI injects unconfigured secrets as `""`).
+- DJ metadata (hot cues, saved loops, beatgrids) is canonical in the
+  library DB, not the patch: patches persist only the deck's track path +
+  sync partner, and the app layer re-applies library metadata on
+  deck_load/patch load. E2E deck cases carry grid/cue/loop state in the
+  `decks` section of their `events.json` sidecar for the same reason.

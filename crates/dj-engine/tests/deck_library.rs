@@ -51,7 +51,8 @@ fn load_track_with_metadata(e: &mut Engine, deck: &str, lib: &Library, track_id:
     let track = lib.track(track_id).unwrap();
     e.deck_load(deck, Path::new(&track.file_path)).unwrap();
     if let Some(grid) = lib.track_beatgrid(track_id).unwrap() {
-        e.deck_set_beatgrid(deck, grid.bpm, grid.anchor_secs).unwrap();
+        e.deck_set_beatgrid(deck, grid.bpm, grid.anchor_secs)
+            .unwrap();
     }
     for cue in lib.track_cues(track_id).unwrap() {
         e.deck_set_cue(deck, cue.slot as usize, Some(cue.position_secs))
