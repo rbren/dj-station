@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/dj-engine",
     "crates/dj-cli",
+    "crates/dj-library",
     "crates/dj-module-sdk",
 ]
 # Extension crates build to wasm32 separately; the Tauri app has its own workspace.
