@@ -11,19 +11,18 @@ export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128"
 cargo build --release --target wasm32-unknown-unknown \
   --manifest-path extensions/Cargo.toml || exit 1
 
+# Plain "libname:folder" pairs — macOS ships bash 3.2, which has no
+# associative arrays (declare -A).
 TARGET=extensions/target/wasm32-unknown-unknown/release
-declare -A MAP=(
-  [dj_ext_oscillator]=oscillator
-  [dj_ext_vca]=vca
-  [dj_ext_adsr]=adsr
-)
-for lib in "${!MAP[@]}"; do
+for pair in dj_ext_oscillator:oscillator dj_ext_vca:vca dj_ext_adsr:adsr; do
+  lib="${pair%%:*}"
+  folder="${pair#*:}"
   src="$TARGET/${lib}.wasm"
-  dst="extensions/${MAP[$lib]}/dsp.wasm"
+  dst="extensions/${folder}/dsp.wasm"
   if [ ! -f "$src" ]; then
     echo "missing $src" >&2
     exit 1
   fi
   cp "$src" "$dst"
-  echo "built ${MAP[$lib]}/dsp.wasm ($(stat -c%s "$dst") bytes)"
+  echo "built ${folder}/dsp.wasm ($(wc -c < "$dst" | tr -d ' ') bytes)"
 done
