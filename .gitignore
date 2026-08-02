@@ -5,3 +5,4 @@
 /app/src-tauri/target
 *.wasm.tmp
 /extensions/*/dsp.wasm
+/extensions/*/ui.js

@@ -1,0 +1,80 @@
+// Bridge to the Rust engine over Tauri IPC. Falls back to a no-op stub when
+// running outside Tauri (vite dev server / tests), so the UI stays testable
+// headless.
+
+import type { JackTelemetry, KnobConfig, Manifest } from './types';
+
+type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+async function tauriInvoke(): Promise<Invoke | null> {
+  if (!('__TAURI_INTERNALS__' in window)) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke as Invoke;
+}
+
+export interface NodeSnapshot {
+  instance_id: string;
+  type_id: string;
+  manifest: Manifest;
+  knobs: Record<string, { position: number; atten: number; offset: number }>;
+  wired_inputs: string[];
+}
+
+export class EngineClient {
+  private invoke: Invoke | null = null;
+  private ready: Promise<void>;
+
+  constructor() {
+    this.ready = tauriInvoke().then((inv) => {
+      this.invoke = inv;
+    });
+  }
+
+  private async call<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
+    await this.ready;
+    if (!this.invoke) return null;
+    return (await this.invoke(cmd, args)) as T;
+  }
+
+  listExtensions() {
+    return this.call<Manifest[]>('list_extensions');
+  }
+  nodes() {
+    return this.call<NodeSnapshot[]>('engine_nodes');
+  }
+  loadDemoPatch() {
+    return this.call<void>('load_demo_patch');
+  }
+  setKnobPosition(instance: string, jack: string, position: number) {
+    return this.call<void>('set_knob_position', { instance, jack, position });
+  }
+  setKnobConfig(instance: string, jack: string, config: KnobConfig | null) {
+    return this.call<void>('set_knob_config', { instance, jack, config });
+  }
+  setAttenOffset(instance: string, jack: string, atten: number, offset: number) {
+    return this.call<void>('set_knob_atten_offset', { instance, jack, atten, offset });
+  }
+  setParam(instance: string, param: string, value: number) {
+    return this.call<void>('set_param', { instance, param, value });
+  }
+  tap(instance: string, jack: string) {
+    return this.call<JackTelemetry>('tap', { instance, jack });
+  }
+  savePatch(dir: string, name: string) {
+    return this.call<void>('save_patch', { dir, name });
+  }
+  loadPatch(dir: string) {
+    return this.call<void>('load_patch', { dir });
+  }
+  injectMidi(instance: string, frame: number, data: [number, number, number]) {
+    return this.call<void>('inject_midi', { instance, frame, data });
+  }
+  start() {
+    return this.call<void>('engine_start');
+  }
+  stop() {
+    return this.call<void>('engine_stop');
+  }
+}
+
+export const engine = new EngineClient();

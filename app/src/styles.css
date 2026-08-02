@@ -1,0 +1,178 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #14161a;
+  color: #e6e6e6;
+}
+
+body {
+  margin: 0;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #2a2e35;
+}
+
+.app-header h1 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.engine-status {
+  font-size: 0.8rem;
+  color: #8a93a2;
+}
+
+.rack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+  align-items: flex-start;
+}
+
+.rack-empty {
+  color: #8a93a2;
+  padding: 2rem;
+}
+
+.module-panel {
+  background: #1d2026;
+  border: 1px solid #2a2e35;
+  border-radius: 8px;
+  padding: 10px;
+  min-width: 180px;
+}
+
+.module-title {
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.module-instance {
+  color: #8a93a2;
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+
+.module-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.jack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.jack-glow {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #62d0ff 0%, #20303a 70%);
+  display: inline-block;
+}
+
+.jack-readout {
+  color: #8a93a2;
+  font-variant-numeric: tabular-nums;
+}
+
+.knob {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+
+.knob-dial {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #2a2e35;
+  border: 2px solid #3c424c;
+  position: relative;
+  cursor: ns-resize;
+}
+
+.knob-pointer {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 2px;
+  height: 12px;
+  background: #62d0ff;
+  transform-origin: 50% 13px;
+}
+
+.knob-label,
+.knob-value {
+  font-size: 0.7rem;
+  color: #8a93a2;
+}
+
+.knob-config-menu {
+  position: absolute;
+  z-index: 10;
+  top: 40px;
+  left: 0;
+  background: #23272e;
+  border: 1px solid #3c424c;
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.75rem;
+  min-width: 140px;
+}
+
+.knob-config-menu label {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.knob-attenuverter {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 70px;
+}
+
+.adsr-ui {
+  width: 100%;
+}
+
+.adsr-bg {
+  fill: #14161a;
+}
+
+.adsr-path {
+  stroke: #62d0ff;
+  stroke-width: 2;
+}
+
+.adsr-handle {
+  fill: #e6b450;
+  stroke: #14161a;
+  stroke-width: 1.5;
+}
+
+.adsr-readout {
+  font-size: 0.75rem;
+  color: #8a93a2;
+  padding: 4px 0;
+}

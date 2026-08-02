@@ -22,6 +22,7 @@ pub mod wasm_host;
 
 pub use engine::{Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE};
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle};
+pub use manifest::Manifest;
 pub use registry::ExtensionRegistry;
 pub use telemetry::JackTelemetry;
 

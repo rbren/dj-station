@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/engine.ts","./src/main.tsx","./src/types.ts","./src/components/Jack.tsx","./src/components/Knob.tsx","./src/components/KnobConfigMenu.tsx","./src/components/ModulePanel.tsx","./tests/AdsrUI.test.tsx","./tests/Knob.test.tsx","./tests/ModulePanel.test.tsx","../extensions/adsr/ui-src/AdsrUI.tsx"],"version":"5.9.3"}
