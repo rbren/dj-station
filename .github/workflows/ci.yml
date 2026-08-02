@@ -78,6 +78,13 @@ jobs:
       # Full 10-minute-equivalent offline stress run (PRD M0 acceptance;
       # rendered faster than realtime, see tests/rt_safety.rs).
       STRESS_SECONDS: "600"
+      # M1 acquisition providers: the authoritative tests run against local
+      # mock HTTP servers and need no keys. These optional secrets (empty on
+      # forks) additionally enable the real-network Freesound/Jamendo smoke
+      # tests in crates/dj-library/tests/real_network.rs, which skip
+      # gracefully when the keys are absent.
+      FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+      JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -95,7 +102,8 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - name: Install system deps
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - name: Rust tests (release; includes E2E golden audio regression)
+      - name: Rust tests (release; includes E2E golden audio regression,
+          M1 library/watch-folder/provider suites, Playback module tests)
         run: cargo test --workspace --release
       - name: Frontend tests (vitest + jsdom)
         run: cd app && npm ci && npm test

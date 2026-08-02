@@ -316,14 +316,14 @@ Tauri shell, cpal audio, graph engine, WASM ABI + SDK crate, manifest loading, h
 SQLite library, watch-folder auto-import, drag-and-drop import, acquisition provider framework (iTunes deep-link, Freesound + Jamendo download; Internet Archive and Musopen fast-follow), license tracking, and a **Playback module**: load a library track, `play_gate`/`speed` in, `audio_l/r` out — connectable to Audio Out or anything else.
 
 **Acceptance:**
-- [ ] **[A]** A file copied into the watch folder is imported and appears in the library DB within seconds.
+- [x] **[A]** A file copied into the watch folder is imported and appears in the library DB within seconds.
 - [ ] **[H]** Drag-and-drop import works from Finder.
-- [ ] **[A]** Search API fans out across enabled providers; results carry source and license tags; preview URLs resolve and play.
-- [ ] **[A]** A Freesound/Jamendo result downloads directly into the library (test account/keys in CI).
-- [ ] **[A]** An iTunes result triggers a deep-link open of the correct store URL.
+- [x] **[A]** Search API fans out across enabled providers; results carry source and license tags; preview URLs resolve and play.
+- [x] **[A]** A Freesound/Jamendo result downloads directly into the library (test account/keys in CI).
+- [x] **[A]** An iTunes result triggers a deep-link open of the correct store URL.
 - [ ] **[H]** Complete a real iTunes purchase; the downloaded file auto-imports via the watch folder.
-- [ ] **[A]** Playback module: offline render of a known test file matches the source (null test); `speed = +1 octave-equivalent` doubles playback rate (measured by duration and pitch analysis of the render); output routed through a VCA attenuates correctly.
-- [ ] **[A]** Library and licenses persist across an app restart in the test harness.
+- [x] **[A]** Playback module: offline render of a known test file matches the source (null test); `speed = +1 octave-equivalent` doubles playback rate (measured by duration and pitch analysis of the render); output routed through a VCA attenuates correctly.
+- [x] **[A]** Library and licenses persist across an app restart in the test harness.
 
 ### M2 – DJ Deck
 Full deck module (§7): waveform views, manual beatgrids (tap/nudge/anchor), 8 hot cues, saved loops, pitch fader, phase nudge, keylock, slip, sync between decks; plus a stock **Crossfader/Mixer module**. No MIDI work (MIDI shipped in M0 — decks are controllable by wiring).
