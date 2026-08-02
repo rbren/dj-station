@@ -199,6 +199,24 @@ Multi-channel routing is also just modules.
 
 ---
 
+## 7.3 Gesture Control Module (built-in, native)
+
+Real-time webcam processing as a control surface — hands become another controller, no hardware required.
+
+- Live webcam feed rendered in the module's panel, with detection results visualized on top of the video.
+- On-device hand tracking (MediaPipe-Hands-class model via ONNX Runtime, CoreML EP on macOS, per the §8.2 pipeline conventions); no frames ever leave the machine.
+- A **mode system**, explicitly extensible so new interaction modes can be added later. Two modes ship first:
+  - **Wheel mode:** two on-screen wheels overlaid on the feed, each divided into **8 radial sections plus a ninth center section** (18 zones total). Each zone is mappable to a **switch**: hand presence inside the zone drives a gate-style output (0/1, §4 conventions). Active zones highlight on the overlay.
+  - **Landmark mode:** per-hand skeletal landmarks (fingertips, knuckles, palm, wrist) are detected, **named** (e.g. `L.index.tip`, `R.thumb.tip`), and drawn with labels on the feed. Two mapping types:
+    - **Presence** of a named point in frame → switch/gate output.
+    - **Distance** between any two named points → continuous value output (normalized 0..1, smoothed).
+- Like the MIDI module (§7.1), every mapping materializes as an **output jack** wireable into anything — VCA gain, deck crossfader, ADSR gate, playback speed, etc.
+- Mappings are created with a learn-style flow from the module UI and **persist in the patch** (directory format, §12.3).
+- Video capture and inference run off the RT thread; control values cross into the graph via the same lock-free path as MIDI. Target ≥ 30 fps detection; dropped/failed frames degrade gracefully (hold last value, decay gates after a timeout).
+- macOS camera permission (AVFoundation) is requested on first use with a sane denial fallback (module shows a prompt, outputs stay at 0).
+
+---
+
 ## 8. Library, Analysis & Acquisition
 
 ### 8.1 Library
@@ -339,6 +357,20 @@ Collapse-to-macro with library storage and edit propagation, native dylib module
 - [ ] **[A]** A native (dylib) module loads through the same manifest, passes the same conformance suite as WASM modules, and runs on the RT thread.
 - [ ] **[A]** Perf: 4 decks with stems + 50 WASM modules, 10-minute offline-and-live stress run, zero xruns on M4 hardware.
 - [ ] **[H]** Overall feel pass: latency, UI responsiveness, and stability during a real 30-minute mixed set.
+
+### M5 – Gesture Control (Webcam)
+The Gesture Control module (§7.3): live webcam feed with detection overlay, extensible mode system, Wheel mode (2 wheels × 8 radial sections + center = 18 mappable switch zones), Landmark mode (named hand landmarks; presence → switch, point-pair distance → continuous), learn-style mapping flow, output jacks wireable into any module, mappings persisted in the patch.
+
+**Acceptance:**
+- [ ] **[A]** Detection pipeline runs on recorded test videos (fixtures checked into the repo, camera mocked as a frame source): known hand poses produce the expected named landmarks within pixel tolerance, deterministically across runs.
+- [ ] **[A]** Wheel mode: synthetic/recorded input placing a hand in each of the 18 zones toggles exactly the mapped switch output for that zone and no others; zone activation events land in the graph as gate values per §4.
+- [ ] **[A]** Landmark mode: presence mapping emits gate 1 when the named point is detected and decays to 0 after the configured timeout when it disappears; distance mapping between two named points produces a normalized, smoothed continuous output that tracks a scripted pinch-open/close fixture monotonically.
+- [ ] **[A]** Mappings (zone → switch, presence → switch, distance → continuous) round-trip through patch save/load (directory format), including mode selection and wheel layout.
+- [ ] **[A]** E2E: a serialized patch wiring `Gesture(distance) → VCA(cv)` with `Osc → VCA → Audio Out`, driven by a recorded gesture fixture, renders audio whose amplitude tracks the gesture (golden case per §10.1).
+- [ ] **[A]** Inference throughput ≥ 30 fps on M4 hardware (timed in CI on target machine); frame drops hold last value, gates decay after timeout; RT thread remains allocation/lock-free (tripwire passes with the module active).
+- [ ] **[A]** Mode system is registered via an extensible registry: adding a stub third mode in a test requires no changes to the module core, only registration.
+- [ ] **[H]** Camera permission flow works on macOS; denial shows the fallback prompt and the app stays stable.
+- [ ] **[H]** Overlay visualization (wheels, labeled landmarks) is legible and tracks hands with no perceptible lag; controlling a VCA by pinch distance feels playable in a live set.
 
 ## 12. Resolved Decisions
 
