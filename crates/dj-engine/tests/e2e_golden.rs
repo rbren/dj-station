@@ -27,10 +27,19 @@ struct MidiEventSpec {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct TrackLoadSpec {
+    instance: String,
+    /// Audio file, relative to the case directory (keeps patches portable).
+    file: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct EventsFile {
     seconds: f32,
     #[serde(default)]
     midi: Vec<MidiEventSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tracks: Vec<TrackLoadSpec>,
 }
 
 fn e2e_dir() -> PathBuf {
@@ -49,6 +58,11 @@ fn render_case(case: &str) -> PathBuf {
         serde_json::from_str(&std::fs::read_to_string(case_dir.join("events.json")).unwrap())
             .unwrap();
     let mut engine = Engine::load_patch(&case_dir.join("patch"), common::registry()).unwrap();
+    for t in &events.tracks {
+        engine
+            .playback_load(&t.instance, &case_dir.join(&t.file))
+            .unwrap();
+    }
     for ev in &events.midi {
         engine.inject_midi(&ev.instance, ev.frame, ev.data).unwrap();
     }
@@ -132,6 +146,7 @@ fn regen_patches() {
             &EventsFile {
                 seconds: 0.5,
                 midi: vec![],
+                tracks: vec![],
             },
         );
     }
@@ -177,6 +192,7 @@ fn regen_patches() {
                         data: [0x80, 60, 0],
                     },
                 ],
+                tracks: vec![],
             },
         );
     }
@@ -215,6 +231,58 @@ fn regen_patches() {
             &EventsFile {
                 seconds: 0.5,
                 midi: vec![],
+                tracks: vec![],
+            },
+        );
+    }
+
+    // Case 4 (M1): Playback (committed 440 Hz test tone, gate high,
+    // speed 0) -> VCA (half gain) -> Audio Out.
+    {
+        let dir = patches.join("playback-tone-vca");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Deterministic 16-bit source tone, committed next to the patch.
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(dir.join("tone.wav"), spec).unwrap();
+        for i in 0..(0.4 * 48_000.0) as u32 {
+            let t = i as f32 / 48_000.0;
+            let x = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
+            writer.write_sample((x * i16::MAX as f32) as i16).unwrap();
+        }
+        writer.finalize().unwrap();
+
+        let config = EngineConfig {
+            master_channels: 1,
+            ..EngineConfig::default()
+        };
+        let mut e = Engine::new(config, common::registry()).unwrap();
+        e.add_module("play1", "builtin.playback").unwrap();
+        e.add_module("vca1", "com.dj.vca").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.connect("play1", "audio_l", "vca1", "in").unwrap();
+        e.connect("vca1", "out", "out1", "ch1").unwrap();
+        e.set_knob_position("play1", "play_gate", 1.0).unwrap(); // gate 10
+        e.set_knob_position("play1", "speed", 0.5).unwrap(); // exactly 0
+        e.set_knob_position("vca1", "cv", 0.5).unwrap(); // gain 0.5
+                                                         // The track itself is loaded via events.json (case-relative path),
+                                                         // so the committed patch stays machine-independent.
+        e.save_patch(&dir.join("patch"), "e2e-playback-tone-vca")
+            .unwrap();
+        write_events(
+            &dir,
+            &EventsFile {
+                seconds: 0.5,
+                midi: vec![],
+                tracks: vec![TrackLoadSpec {
+                    instance: "play1".into(),
+                    file: "tone.wav".into(),
+                }],
             },
         );
     }
@@ -242,4 +310,12 @@ fn e2e_waveforms_fm_sync() {
         regen_patches();
     }
     check_case("waveforms-fm-sync");
+}
+
+#[test]
+fn e2e_playback_tone_vca() {
+    if regen() {
+        regen_patches();
+    }
+    check_case("playback-tone-vca");
 }

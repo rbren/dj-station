@@ -559,6 +559,7 @@ dependencies = [
  "rtrb",
  "serde",
  "serde_json",
+ "symphonia",
  "tempfile",
  "thiserror 2.0.19",
  "wasmtime",

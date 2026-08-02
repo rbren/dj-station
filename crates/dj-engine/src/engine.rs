@@ -16,6 +16,7 @@ use crate::graph::{Graph, GraphNode, WireSpec};
 use crate::knob::{position_for_value, JackRt, KnobConfig, KnobState};
 use crate::manifest::Manifest;
 use crate::module_host::HostModule;
+use crate::playback::{decode_file, PlaybackModule, TrackData, PLAYBACK_ID};
 use crate::registry::ExtensionRegistry;
 use crate::telemetry::{JackAnalyzer, JackSlot, JackTelemetry};
 use crate::wasm_host::WasmRuntime;
@@ -81,6 +82,8 @@ pub struct NodeInfo {
     pub telemetry: Vec<Arc<JackSlot>>,
     pub midi_shared: Option<Arc<MidiShared>>,
     pub midi_mappings: Vec<MidiMappingInfo>,
+    /// Path of the track loaded into a Playback node (persisted in the patch).
+    pub playback_track: Option<String>,
 }
 
 /// RT-side core: graph + queues + counters. Lives on whichever thread the
@@ -160,6 +163,9 @@ pub struct Engine {
     cmd_tx: Arc<Mutex<rtrb::Producer<Command>>>,
     garbage_rx: rtrb::Consumer<Box<dyn HostModule>>,
     midi_producers: HashMap<usize, rtrb::Producer<MidiEvent>>,
+    playback_producers: HashMap<usize, rtrb::Producer<Arc<TrackData>>>,
+    /// Replaced tracks come back from the RT thread for off-RT drop.
+    playback_garbage: HashMap<usize, rtrb::Consumer<Arc<TrackData>>>,
     xruns: Arc<AtomicU64>,
     /// Blocks whose *processing* alone exceeded the block period — the
     /// engine itself was the bottleneck (as opposed to `xruns`, which on the
@@ -177,6 +183,8 @@ pub struct Engine {
 }
 
 const CMD_QUEUE_CAP: usize = 1024;
+/// Pending track loads per Playback node (drained at the next block).
+const PLAYBACK_QUEUE_CAP: usize = 64;
 
 /// CPU time consumed by the calling thread, in nanoseconds. Unlike wall
 /// time this excludes preemption, so per-block cost measured with it is
@@ -231,6 +239,8 @@ impl Engine {
             cmd_tx: Arc::new(Mutex::new(cmd_tx)),
             garbage_rx,
             midi_producers: HashMap::new(),
+            playback_producers: HashMap::new(),
+            playback_garbage: HashMap::new(),
             xruns: Arc::new(AtomicU64::new(0)),
             proc_misses: Arc::new(AtomicU64::new(0)),
             max_proc_nanos: Arc::new(AtomicU64::new(0)),
@@ -293,7 +303,7 @@ impl Engine {
     fn instantiate(&self, ext_id: &str, manifest: &Manifest) -> Result<Box<dyn HostModule>> {
         match ext_id {
             AUDIO_OUT_ID => Ok(Box::new(AudioOutModule { channel_offset: 0 })),
-            MIDI_ID => Err(anyhow!("midi modules are created via add_module")),
+            MIDI_ID | PLAYBACK_ID => Err(anyhow!("{ext_id} modules are created via add_module")),
             _ => {
                 let ext = self
                     .registry
@@ -330,6 +340,12 @@ impl Engine {
             midi_shared = Some(shared.clone());
             self.midi_producers.insert(self.nodes.len(), tx);
             Box::new(MidiModule::new(rx, shared))
+        } else if ext_id == PLAYBACK_ID {
+            let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+            let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+            self.playback_producers.insert(self.nodes.len(), tx);
+            self.playback_garbage.insert(self.nodes.len(), garbage_rx);
+            Box::new(PlaybackModule::new(rx, garbage_tx, self.config.sample_rate))
         } else {
             self.instantiate(ext_id, &manifest)?
         };
@@ -376,6 +392,7 @@ impl Engine {
             telemetry,
             midi_shared,
             midi_mappings: Vec::new(),
+            playback_track: None,
         };
 
         let node = GraphNode {
@@ -954,6 +971,42 @@ impl Engine {
 
     pub fn drain_garbage(&mut self) {
         while self.garbage_rx.pop().is_ok() {}
+        for rx in self.playback_garbage.values_mut() {
+            while rx.pop().is_ok() {}
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Playback
+    // ------------------------------------------------------------------
+
+    /// Decode an audio file (control thread) and hand it to a Playback node
+    /// (picked up lock-free at the next block boundary). Works stopped or
+    /// running.
+    pub fn playback_load(&mut self, instance_id: &str, path: &std::path::Path) -> Result<()> {
+        let node = self.node_idx(instance_id)?;
+        anyhow::ensure!(
+            self.playback_producers.contains_key(&node),
+            "{instance_id:?} is not a Playback module"
+        );
+        let data = Arc::new(decode_file(path)?);
+        // Reclaim tracks the RT thread replaced earlier.
+        if let Some(rx) = self.playback_garbage.get_mut(&node) {
+            while rx.pop().is_ok() {}
+        }
+        self.playback_producers
+            .get_mut(&node)
+            .unwrap()
+            .push(data)
+            .map_err(|_| anyhow!("too many pending track loads"))?;
+        self.nodes[node].playback_track = Some(path.to_string_lossy().to_string());
+        Ok(())
+    }
+
+    /// Path of the track currently loaded into a Playback node, if any.
+    pub fn playback_track(&self, instance_id: &str) -> Result<Option<String>> {
+        let node = self.node_idx(instance_id)?;
+        Ok(self.nodes[node].playback_track.clone())
     }
 
     pub fn xrun_count(&self) -> u64 {

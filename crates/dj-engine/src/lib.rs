@@ -16,6 +16,7 @@ pub mod knob;
 pub mod manifest;
 pub mod module_host;
 pub mod patch;
+pub mod playback;
 pub mod registry;
 pub mod telemetry;
 pub mod wasm_host;

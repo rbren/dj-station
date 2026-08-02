@@ -42,6 +42,9 @@ pub struct ModuleFile {
     pub params: BTreeMap<String, f32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub midi_mappings: Vec<MidiMappingInfo>,
+    /// Track path loaded into a Playback node (absolute; library-managed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -101,6 +104,7 @@ impl Engine {
                 knobs,
                 params: info.params.clone(),
                 midi_mappings: info.midi_mappings.clone(),
+                track: info.playback_track.clone(),
             };
             let fname = format!("{}.json", info.instance_id);
             write_if_changed(&dir.join("modules").join(&fname), &to_pretty(&mf)?)?;
@@ -177,6 +181,9 @@ impl Engine {
             engine.add_module(&instance_id, &mf.ext)?;
             for m in &mf.midi_mappings {
                 engine.add_midi_mapping(&instance_id, &m.kind, m.num, &m.name)?;
+            }
+            if let Some(track) = &mf.track {
+                engine.playback_load(&instance_id, Path::new(track))?;
             }
             for (param, value) in &mf.params {
                 engine.set_param(&instance_id, param, *value)?;

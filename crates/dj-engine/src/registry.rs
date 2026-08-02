@@ -59,6 +59,7 @@ impl ExtensionRegistry {
         match ext_id {
             builtin::AUDIO_OUT_ID => Some(builtin::audio_out_manifest()),
             builtin::MIDI_ID => Some(builtin::midi_manifest()),
+            crate::playback::PLAYBACK_ID => Some(crate::playback::playback_manifest()),
             _ => self.extensions.get(ext_id).map(|e| e.manifest.clone()),
         }
     }

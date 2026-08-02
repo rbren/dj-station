@@ -1,0 +1,18 @@
+{
+  "ext": "builtin.playback",
+  "knobs": {
+    "play_gate": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "speed": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {
+    "loop": 0.0
+  }
+}
