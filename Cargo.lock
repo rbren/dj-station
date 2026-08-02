@@ -426,6 +426,7 @@ dependencies = [
  "anyhow",
  "cpal",
  "hound",
+ "libc",
  "midir",
  "rtrb",
  "serde",

@@ -150,6 +150,13 @@ pub struct Engine {
     garbage_rx: rtrb::Consumer<Box<dyn HostModule>>,
     midi_producers: HashMap<usize, rtrb::Producer<MidiEvent>>,
     xruns: Arc<AtomicU64>,
+    /// Blocks whose *processing* alone exceeded the block period — the
+    /// engine itself was the bottleneck (as opposed to `xruns`, which on the
+    /// null backend also counts pacer wakeups the OS scheduler delivered
+    /// late; see `start_null_realtime`).
+    proc_misses: Arc<AtomicU64>,
+    /// Worst per-block processing time observed (nanoseconds).
+    max_proc_nanos: Arc<AtomicU64>,
     blocks: Arc<AtomicU64>,
     master_slots: Vec<Arc<JackSlot>>,
     /// dsp.wasm mtimes for the polling hot-reload watcher.
@@ -159,6 +166,28 @@ pub struct Engine {
 }
 
 const CMD_QUEUE_CAP: usize = 1024;
+
+/// CPU time consumed by the calling thread, in nanoseconds. Unlike wall
+/// time this excludes preemption, so per-block cost measured with it is
+/// attributable to the engine even on a loaded host. No allocation/locks.
+#[cfg(unix)]
+fn thread_cpu_nanos() -> u64 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: ts is a valid, writable timespec.
+    unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) };
+    ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
+}
+
+#[cfg(not(unix))]
+fn thread_cpu_nanos() -> u64 {
+    // Fallback: wall time (includes preemption; coarser attribution).
+    use std::sync::OnceLock;
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    EPOCH.get_or_init(Instant::now).elapsed().as_nanos() as u64
+}
 
 impl Engine {
     pub fn new(config: EngineConfig, registry: ExtensionRegistry) -> Result<Self> {
@@ -192,6 +221,8 @@ impl Engine {
             garbage_rx,
             midi_producers: HashMap::new(),
             xruns: Arc::new(AtomicU64::new(0)),
+            proc_misses: Arc::new(AtomicU64::new(0)),
+            max_proc_nanos: Arc::new(AtomicU64::new(0)),
             blocks,
             master_slots,
             watch_state: Arc::new(Mutex::new(HashMap::new())),
@@ -708,18 +739,36 @@ impl Engine {
         let stop = Arc::new(AtomicBool::new(false));
         let stop2 = stop.clone();
         let xruns = self.xruns.clone();
+        let proc_misses = self.proc_misses.clone();
+        let max_proc = self.max_proc_nanos.clone();
         let block = self.config.block_size;
         let block_dur = Duration::from_secs_f64(block as f64 / self.config.sample_rate as f64);
+        let block_nanos = block_dur.as_nanos() as u64;
         let join = std::thread::Builder::new()
             .name("dj-rt-null".into())
             .spawn(move || {
                 let mut core = core;
                 let mut deadline = Instant::now() + block_dur;
                 while !stop2.load(Ordering::Relaxed) {
+                    // Thread CPU time, not wall time: excludes preemption by
+                    // other processes, so a miss is attributable to the
+                    // engine itself even on a loaded, non-RT host.
+                    let t0 = thread_cpu_nanos();
                     core.process_block(block);
+                    let proc_ns = thread_cpu_nanos().saturating_sub(t0);
+                    max_proc.fetch_max(proc_ns, Ordering::Relaxed);
+                    if proc_ns > block_nanos {
+                        // Processing alone blew the budget: the engine is
+                        // the bottleneck. This is the hard failure a real
+                        // audio callback would report.
+                        proc_misses.fetch_add(1, Ordering::Relaxed);
+                    }
                     let now = Instant::now();
                     if now > deadline + block_dur {
-                        // We missed a whole block period: xrun.
+                        // Missed a whole block period. On this paced backend
+                        // that can also be a late OS wakeup (non-RT kernel,
+                        // loaded host), not necessarily slow processing —
+                        // see `proc_misses` for the engine-attributable ones.
                         xruns.fetch_add(1, Ordering::Relaxed);
                         deadline = now + block_dur;
                     } else {
@@ -828,6 +877,20 @@ impl Engine {
 
     pub fn xrun_count(&self) -> u64 {
         self.xruns.load(Ordering::Relaxed)
+    }
+
+    /// Blocks whose processing alone (thread CPU time on unix) exceeded the
+    /// block period — the engine was the bottleneck. Null backend only;
+    /// `xrun_count` additionally counts scheduler-late pacer wakeups there.
+    pub fn proc_deadline_miss_count(&self) -> u64 {
+        self.proc_misses.load(Ordering::Relaxed)
+    }
+
+    /// Worst per-block processing cost observed on the null backend, in
+    /// nanoseconds of thread CPU time (headroom metric: compare against the
+    /// block period).
+    pub fn max_block_proc_nanos(&self) -> u64 {
+        self.max_proc_nanos.load(Ordering::Relaxed)
     }
 
     pub fn blocks_processed(&self) -> u64 {
