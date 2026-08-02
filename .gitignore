@@ -6,3 +6,5 @@
 *.wasm.tmp
 /extensions/*/dsp.wasm
 /extensions/*/ui.js
+*.tsbuildinfo
+/app/src-tauri/gen/schemas
