@@ -59,7 +59,17 @@ fn with_stopped<T>(
     }
     let result = f(engine);
     match backend {
-        Some("cpal") if engine.start_cpal().is_ok() => {}
+        Some("cpal") => {
+            if let Err(e) = engine.start_cpal() {
+                // A downgrade here means audio dies after a graph edit even
+                // though the UI still shows "engine connected".
+                eprintln!(
+                    "[dj-audio] WARNING: cpal restart after graph edit failed ({e}); \
+                     falling back to the silent null backend"
+                );
+                engine.start_null_realtime().map_err(err)?;
+            }
+        }
         Some(_) => engine.start_null_realtime().map_err(err)?,
         None => {}
     }
@@ -243,6 +253,11 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     connect_as_wire(&mut engine, "adsr1", "env", "vca1", "cv")?;
     connect_as_wire(&mut engine, "vca1", "out", "out1", "ch1")?;
     connect_as_wire(&mut engine, "vca1", "out", "out1", "ch2")?;
+    eprintln!(
+        "[dj-audio] demo patch loaded: MIDI(note 60) -> ADSR(gate) -> VCA(cv), \
+         Osc -> VCA -> Out. NOTE: the VCA is gated by MIDI note 60 — without a \
+         MIDI event (hardware or inject_midi) the patch renders SILENCE by design."
+    );
     Ok(())
 }
 
@@ -331,10 +346,17 @@ fn engine_start(state: State<AppState>) -> CmdResult<String> {
         return Ok("already-running".into());
     }
     match engine.start_cpal() {
-        Ok(()) => Ok("cpal".into()),
-        Err(_) => {
+        Ok(()) => {
+            eprintln!("[dj-audio] engine started on the cpal device backend");
+            Ok("cpal".into())
+        }
+        Err(e) => {
             // Headless / no audio device: fall back to the null realtime
             // backend so telemetry and the UI still run.
+            eprintln!(
+                "[dj-audio] WARNING: cpal start failed ({e}); \
+                 falling back to the SILENT null backend — no device audio"
+            );
             engine.start_null_realtime().map_err(err)?;
             Ok("null".into())
         }

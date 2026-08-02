@@ -19,6 +19,7 @@ export default function App() {
   const [moduleLib, setModuleLib] = useState<Manifest[]>([]);
   const [telemetry, setTelemetry] = useState<Record<string, Record<string, JackTelemetry>>>({});
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [backend, setBackend] = useState<string | null>(null);
   const [view, setView] = useState<'rack' | 'library'>('rack');
   const [pending, setPending] = useState<JackRef | null>(null);
   // Callback ref (state, not useRef) so the overlay re-renders once the
@@ -36,7 +37,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await engine.loadDemoPatch();
-      await engine.start();
+      setBackend(await engine.start());
       const modules = await engine.listModules();
       if (modules) setModuleLib(modules);
       await refresh();
@@ -143,7 +144,11 @@ export default function App() {
           </button>
         </nav>
         <span className="engine-status" data-testid="engine-status">
-          {connected === null ? 'connecting…' : connected ? 'engine connected' : 'no engine (dev)'}
+          {connected === null
+            ? 'connecting…'
+            : connected
+              ? `engine connected (${backend ?? '?'}${backend === 'null' ? ' — SILENT' : ''})`
+              : 'no engine (dev)'}
         </span>
         {pending && (
           <span className="wiring-hint" data-testid="wiring-hint">

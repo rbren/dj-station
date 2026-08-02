@@ -102,8 +102,10 @@ export class EngineClient {
   injectMidi(instance: string, frame: number, data: [number, number, number]) {
     return this.call<void>('inject_midi', { instance, frame, data });
   }
+  /** Returns the backend the engine actually started on: 'cpal' (device
+   *  audio) or 'null' (silent fallback), or null outside Tauri. */
   start() {
-    return this.call<void>('engine_start');
+    return this.call<string>('engine_start');
   }
   stop() {
     return this.call<void>('engine_stop');

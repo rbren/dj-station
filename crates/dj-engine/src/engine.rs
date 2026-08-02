@@ -870,10 +870,28 @@ impl Engine {
             sample_rate: cpal::SampleRate(self.config.sample_rate as u32),
             buffer_size: cpal::BufferSize::Default,
         };
+        eprintln!(
+            "[dj-audio] start_cpal: requesting {} ch @ {} Hz (block {})",
+            config.channels, self.config.sample_rate, self.config.block_size
+        );
         let block = self.config.block_size;
         let channels = self.config.master_channels;
         let xruns = self.xruns.clone();
+        let xruns_report = self.xruns.clone();
         let block_dur = block as f64 / self.config.sample_rate as f64;
+
+        // Debug counters for the periodic level report (updated lock-free
+        // from the audio callback, printed by the control loop below).
+        let dbg_callbacks = Arc::new(AtomicU64::new(0));
+        let dbg_samples = Arc::new(AtomicU64::new(0));
+        let dbg_peak_bits = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let dbg_starved = Arc::new(AtomicU64::new(0));
+        let (cb_callbacks, cb_samples, cb_peak_bits, cb_starved) = (
+            dbg_callbacks.clone(),
+            dbg_samples.clone(),
+            dbg_peak_bits.clone(),
+            dbg_starved.clone(),
+        );
 
         // The core lives in a shared slot for the whole cpal run. The audio
         // callback try_locks it per callback: a single uncontended CAS in
@@ -895,14 +913,18 @@ impl Engine {
             .spawn(move || {
                 let mut leftover: Vec<f32> = Vec::with_capacity(block * channels);
                 let data_cb = move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    cb_callbacks.fetch_add(1, Ordering::Relaxed);
+                    cb_samples.fetch_add(out.len() as u64, Ordering::Relaxed);
                     let mut guard = match slot_cb.try_lock() {
                         Ok(g) => g,
                         Err(_) => {
+                            cb_starved.fetch_add(1, Ordering::Relaxed);
                             out.fill(0.0);
                             return;
                         }
                     };
                     let Some(core) = guard.as_mut() else {
+                        cb_starved.fetch_add(1, Ordering::Relaxed);
                         out.fill(0.0);
                         return;
                     };
@@ -925,6 +947,15 @@ impl Engine {
                         leftover.drain(..n);
                         written += n;
                     }
+                    // Track the peak sample per report interval (racy max is
+                    // fine for a debug readout; no locks/allocation).
+                    let mut peak = 0.0f32;
+                    for &s in out.iter() {
+                        peak = peak.max(s.abs());
+                    }
+                    if peak > f32::from_bits(cb_peak_bits.load(Ordering::Relaxed)) {
+                        cb_peak_bits.store(peak.to_bits(), Ordering::Relaxed);
+                    }
                     let budget = block_dur * (out.len() as f64 / (block * channels) as f64);
                     if t0.elapsed().as_secs_f64() > budget {
                         xruns.fetch_add(1, Ordering::Relaxed);
@@ -932,29 +963,81 @@ impl Engine {
                 };
                 let result = (|| -> std::result::Result<cpal::Stream, String> {
                     let host = cpal::default_host();
+                    eprintln!("[dj-audio] cpal host: {:?}", host.id());
                     let device = host
                         .default_output_device()
                         .ok_or("no audio output device")?;
+                    eprintln!(
+                        "[dj-audio] default output device: {:?}",
+                        device.name().unwrap_or_else(|e| format!("<unknown: {e}>"))
+                    );
+                    match device.default_output_config() {
+                        Ok(def) => eprintln!(
+                            "[dj-audio] device default config: {} ch @ {} Hz, {:?}, buffer {:?}",
+                            def.channels(),
+                            def.sample_rate().0,
+                            def.sample_format(),
+                            def.buffer_size()
+                        ),
+                        Err(e) => eprintln!("[dj-audio] default_output_config failed: {e}"),
+                    }
                     let stream = device
                         .build_output_stream(
                             &config,
                             data_cb,
-                            |err| eprintln!("cpal stream error: {err}"),
+                            |err| eprintln!("[dj-audio] cpal stream error: {err}"),
                             None,
                         )
-                        .map_err(|e| e.to_string())?;
-                    stream.play().map_err(|e| e.to_string())?;
+                        .map_err(|e| format!("build_output_stream: {e}"))?;
+                    eprintln!("[dj-audio] output stream built, calling play()");
+                    stream.play().map_err(|e| format!("play: {e}"))?;
+                    eprintln!("[dj-audio] stream playing");
                     Ok(stream)
                 })();
                 match result {
                     Ok(stream) => {
                         let _ = ready_tx.send(Ok(()));
+                        // Periodic debug report: proves whether the device is
+                        // pulling audio (callbacks > 0) and whether the graph
+                        // is producing signal (peak > 0). A running stream
+                        // with peak 0.000 means the patch renders silence
+                        // (e.g. the demo patch's VCA gate never opened).
+                        let mut last_report = Instant::now();
+                        let mut last_callbacks = 0u64;
+                        let mut last_samples = 0u64;
                         while !stop_thread.load(Ordering::Relaxed) {
                             std::thread::sleep(Duration::from_millis(50));
+                            if last_report.elapsed() >= Duration::from_secs(2) {
+                                let cbs = dbg_callbacks.load(Ordering::Relaxed);
+                                let samples = dbg_samples.load(Ordering::Relaxed);
+                                let peak = f32::from_bits(dbg_peak_bits.swap(0, Ordering::Relaxed));
+                                let starved = dbg_starved.load(Ordering::Relaxed);
+                                eprintln!(
+                                    "[dj-audio] cpal report: callbacks +{} ({} total), \
+                                     samples +{}, peak {:.4}, starved {}, xruns {}",
+                                    cbs - last_callbacks,
+                                    cbs,
+                                    samples - last_samples,
+                                    peak,
+                                    starved,
+                                    xruns_report.load(Ordering::Relaxed),
+                                );
+                                if cbs == last_callbacks {
+                                    eprintln!(
+                                        "[dj-audio] WARNING: no cpal callbacks in the last 2s — \
+                                         the OS is not pulling audio (device/permission issue?)"
+                                    );
+                                }
+                                last_callbacks = cbs;
+                                last_samples = samples;
+                                last_report = Instant::now();
+                            }
                         }
+                        eprintln!("[dj-audio] stop requested, dropping cpal stream");
                         drop(stream);
                     }
                     Err(e) => {
+                        eprintln!("[dj-audio] cpal setup FAILED: {e}");
                         let _ = ready_tx.send(Err(e));
                     }
                 }
