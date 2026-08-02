@@ -1,0 +1,28 @@
+[package]
+name = "dj-analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "dj-station on-device analysis pipeline: BPM/key/auto-beatgrid, stem separation, background worker queue (PRD §8.2, milestone M3)"
+
+[features]
+# ONNX-Runtime-backed stem separation (htdemucs-class models). Off by
+# default: the tested path is the pure-DSP fallback separator; this feature
+# only adds the runtime plumbing (model load, per-platform execution
+# provider). See src/onnx.rs.
+onnx = ["dep:ort"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "isomp4", "flac", "wav", "pcm", "aiff"] }
+rustfft = "6"
+flacenc = { version = "0.4", default-features = false }
+dj-library = { path = "../dj-library" }
+ort = { version = "=2.0.0-rc.13", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+hound = "3.5"

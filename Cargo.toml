@@ -5,6 +5,7 @@ members = [
     "crates/dj-cli",
     "crates/dj-library",
     "crates/dj-module-sdk",
+    "crates/dj-analysis",
 ]
 # Extension crates build to wasm32 separately; the Tauri app has its own workspace.
 exclude = ["extensions", "app/src-tauri"]

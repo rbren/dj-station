@@ -285,6 +285,24 @@ impl Library {
         self.track(id)
     }
 
+    /// Write BPM + musical key from the analysis pipeline (M3).
+    pub fn set_track_analysis(&self, track_id: i64, bpm: f64, musical_key: &str) -> Result<()> {
+        anyhow::ensure!(bpm > 0.0, "bpm must be positive");
+        self.with_conn(|c| {
+            c.execute(
+                "UPDATE tracks SET bpm = ?2, musical_key = ?3, \
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1",
+                params![track_id, bpm, musical_key],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Re-queue a track for analysis (explicit re-run from the UI).
+    pub fn requeue_analysis(&self, track_id: i64) -> Result<()> {
+        self.set_analysis_status(track_id, "queued")
+    }
+
     pub fn set_analysis_status(&self, track_id: i64, status: &str) -> Result<()> {
         self.with_conn(|c| {
             c.execute(
