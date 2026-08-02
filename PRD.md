@@ -259,9 +259,18 @@ Unified in-app search fans out across enabled providers; results are tagged by s
 - WASM overhead budget: assume 1.2–2× native for DSP; WASM SIMD (128-bit, maps to NEON) enabled.
 - Zero allocations/locks on the RT thread (enforced in review; debug-mode allocation tripwire).
 
+## 10.1 CI & Regression Testing (GitHub Actions)
+
+All quality gates run in **GitHub Actions** from M0 onward:
+
+- **CI workflow on every push/PR:** build (Rust workspace + frontend), lint (`cargo clippy -D warnings`, `cargo fmt --check`, ESLint/Prettier for the frontend), and the full test suite (`cargo test --workspace`, frontend unit/component tests).
+- **E2E audio regression tests:** test cases are **serialized patches** (the directory-tree patch format of §12.3) checked into the repo — e.g. a set of modules wired together (`Osc → VCA → Audio Out`, MIDI-driven ADSR envelopes, etc.). CI loads each patch, renders it offline to a WAV, and compares the result against a committed golden rendering (exact hash where determinism allows; otherwise spectral/RMS comparison within tolerance). Any engine or module change that alters rendered audio fails CI until the golden files are intentionally regenerated (via a documented `regen-goldens` script) and the diff is reviewed.
+- New modules and new engine features must ship with at least one serialized-patch E2E case covering them.
+- Milestone acceptance tests ([A] criteria below) are wired into CI as they land, so regressions in earlier milestones are caught while later ones are built.
+
 ## 11. Milestones & Acceptance Criteria
 
-Each criterion is tagged: **[A]** = verifiable by an agent driving the software programmatically (CLI, test harness, UI automation, offline audio render); **[H]** = requires a human using the app (ears, feel, visual judgment). The engine must support offline rendering (patch → WAV, faster than realtime) and virtual MIDI injection from M0 specifically so agents can verify audio behavior.
+Each criterion is tagged: **[A]** = verifiable by an agent driving the software programmatically (CLI, test harness, UI automation, offline audio render); **[H]** = requires a human using the app (ears, feel, visual judgment). The engine must support offline rendering (patch → WAV, faster than realtime) and virtual MIDI injection from M0 specifically so agents can verify audio behavior. All [A] criteria run in GitHub Actions per §10.1.
 
 ### M0 – Engine + Extension System
 Tauri shell, cpal audio, graph engine, WASM ABI + SDK crate, manifest loading, hot reload, auto-generated panels, knob config, wire glow/hover scopes. Ships with five modules:
@@ -283,6 +292,7 @@ Tauri shell, cpal audio, graph engine, WASM ABI + SDK crate, manifest loading, h
 - [ ] **[H]** Glow, hover readouts, and oscilloscopes look correct and legible during live use.
 - [ ] **[A]** Patch saves as a directory tree; moving one knob and re-saving produces a diff touching exactly one file.
 - [ ] **[A]** RT-thread allocation/lock tripwire passes; xrun counter reports zero over a 10-minute stress patch at 128-sample blocks.
+- [ ] **[A]** GitHub Actions CI (§10.1) is green: build + lint + full test suite, plus at least three serialized-patch E2E audio regression cases (with committed goldens and a `regen-goldens` script) covering the M0 modules.
 
 ### M1 – Sound Library + Playback
 SQLite library, watch-folder auto-import, drag-and-drop import, acquisition provider framework (iTunes deep-link, Freesound + Jamendo download; Internet Archive and Musopen fast-follow), license tracking, and a **Playback module**: load a library track, `play_gate`/`speed` in, `audio_l/r` out — connectable to Audio Out or anything else.
