@@ -613,6 +613,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cpal",
+ "dj-analysis",
  "dj-library",
  "hound",
  "libc",

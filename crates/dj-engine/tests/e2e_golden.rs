@@ -45,6 +45,11 @@ struct DeckSetupSpec {
     cues: Vec<(usize, f64)>, // (slot, position_secs)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     r#loop: Option<(f64, f64, bool)>, // (start, end, enabled)
+    /// Stem files (vocals/drums/bass/other), case-relative. Like grids and
+    /// cues, stems come from the app layer (library stem cache) rather
+    /// than the patch, so E2E cases carry them in the sidecar (M3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stems: Option<[String; 4]>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,6 +106,10 @@ fn render_case(case: &str) -> PathBuf {
         if let Some((start, end, enabled)) = d.r#loop {
             engine.deck_set_loop(&d.instance, start, end).unwrap();
             engine.deck_loop_enable(&d.instance, enabled).unwrap();
+        }
+        if let Some(stems) = &d.stems {
+            let paths: [PathBuf; 4] = std::array::from_fn(|i| case_dir.join(&stems[i]));
+            engine.deck_load_stems(&d.instance, &paths).unwrap();
         }
     }
     for ev in &events.midi {
@@ -383,6 +392,7 @@ fn regen_deck_patches() {
                     grid: Some((125.0, 0.05)),
                     cues: vec![],
                     r#loop: Some((0.5, 1.5, true)),
+                    stems: None,
                 }],
             },
         );
@@ -435,17 +445,95 @@ fn regen_deck_patches() {
                         grid: Some((128.0, 0.1)),
                         cues: vec![],
                         r#loop: None,
+                        stems: None,
                     },
                     DeckSetupSpec {
                         instance: "deckB".into(),
                         grid: Some((120.0, 0.3)),
                         cues: vec![],
                         r#loop: None,
+                        stems: None,
                     },
                 ],
             },
         );
     }
+}
+
+fn regen_stem_patches() {
+    let patches = e2e_dir().join("patches");
+
+    // Case 7 (M3): deck with stems loaded — bass muted, drums at half
+    // gain — plus the drums stem jack routed out separately.
+    // ch1 = deck mix (gain-weighted stem sum), ch2 = stem_drums jack.
+    {
+        let dir = patches.join("deck-stems-gains");
+        std::fs::create_dir_all(&dir).unwrap();
+        // One tone per stem; the "mix" is their sum.
+        let freqs = [1000.0, 2500.0, 60.0, 3500.0];
+        let names = ["vocals", "drums", "bass", "other"];
+        for (f, n) in freqs.iter().zip(names) {
+            write_case_tone(&dir.join(format!("stem-{n}.wav")), *f, 2.0);
+        }
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(dir.join("mix.wav"), spec).unwrap();
+        for i in 0..(2.0 * 48_000.0) as u64 {
+            let t = i as f64 / 48_000.0;
+            let x: f64 = freqs
+                .iter()
+                .map(|f| (2.0 * std::f64::consts::PI * f * t).sin() * 0.125)
+                .sum();
+            w.write_sample((x * i16::MAX as f64) as i16).unwrap();
+        }
+        w.finalize().unwrap();
+
+        let mut e = Engine::new(EngineConfig::default(), common::registry()).unwrap();
+        e.add_module("deck1", "builtin.deck").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+        e.connect("deck1", "stem_drums", "out1", "ch2").unwrap();
+        e.set_knob_position("deck1", "play_gate", 1.0).unwrap();
+        e.set_param("deck1", "stem_drums", 0.5).unwrap();
+        e.set_param("deck1", "stem_bass", 0.0).unwrap();
+        e.save_patch(&dir.join("patch"), "e2e-deck-stems-gains")
+            .unwrap();
+        write_events(
+            &dir,
+            &EventsFile {
+                seconds: 1.0,
+                midi: vec![],
+                tracks: vec![TrackLoadSpec {
+                    instance: "deck1".into(),
+                    file: "mix.wav".into(),
+                }],
+                decks: vec![DeckSetupSpec {
+                    instance: "deck1".into(),
+                    grid: None,
+                    cues: vec![],
+                    r#loop: None,
+                    stems: Some([
+                        "stem-vocals.wav".into(),
+                        "stem-drums.wav".into(),
+                        "stem-bass.wav".into(),
+                        "stem-other.wav".into(),
+                    ]),
+                }],
+            },
+        );
+    }
+}
+
+#[test]
+fn e2e_deck_stems_gains() {
+    if regen() {
+        regen_stem_patches();
+    }
+    check_case("deck-stems-gains");
 }
 
 #[test]

@@ -79,6 +79,14 @@ const OUT_BEAT_CLOCK: usize = 2;
 const OUT_BAR_CLOCK: usize = 3;
 const OUT_PHASE: usize = 4;
 const OUT_BPM: usize = 5;
+const OUT_STEM_BASE: usize = 6; // stem_vocals..stem_other = 6..=9
+
+/// Stems per track (M3): vocals / drums / bass / other, in this order
+/// everywhere (jacks, params, cached FLAC files).
+pub const N_STEMS: usize = 4;
+pub const STEM_IDS: [&str; N_STEMS] = ["vocals", "drums", "bass", "other"];
+/// Param indices 4..=7 are the per-stem gains (see `deck_manifest`).
+const PARAM_STEM_BASE: u32 = 4;
 
 pub fn deck_manifest() -> Manifest {
     let mut inputs = vec![
@@ -145,72 +153,94 @@ pub fn deck_manifest() -> Manifest {
             }),
         });
     }
+    let mut outputs = vec![
+        OutputDecl {
+            id: "audio_l".into(),
+            name: "Audio L".into(),
+        },
+        OutputDecl {
+            id: "audio_r".into(),
+            name: "Audio R".into(),
+        },
+        OutputDecl {
+            id: "beat_clock".into(),
+            name: "Beat Clock".into(),
+        },
+        OutputDecl {
+            id: "bar_clock".into(),
+            name: "Bar Clock".into(),
+        },
+        OutputDecl {
+            id: "phase".into(),
+            name: "Bar Phase".into(),
+        },
+        OutputDecl {
+            id: "bpm".into(),
+            name: "BPM".into(),
+        },
+    ];
+    // Stem output jacks (M3): independently routable, post-stem-gain.
+    for stem in STEM_IDS {
+        outputs.push(OutputDecl {
+            id: format!("stem_{stem}"),
+            name: format!("Stem {}{}", stem[..1].to_uppercase(), &stem[1..]),
+        });
+    }
+    let mut params = vec![
+        ParamDecl {
+            id: "pitch_range".into(),
+            name: "Pitch Range".into(),
+            param_type: "float".into(),
+            default: serde_json::json!(0.08),
+            min: Some(0.0),
+            max: Some(0.5),
+        },
+        ParamDecl {
+            id: "keylock".into(),
+            name: "Keylock".into(),
+            param_type: "toggle".into(),
+            default: serde_json::json!(false),
+            min: None,
+            max: None,
+        },
+        ParamDecl {
+            id: "reverse".into(),
+            name: "Reverse".into(),
+            param_type: "toggle".into(),
+            default: serde_json::json!(false),
+            min: None,
+            max: None,
+        },
+        ParamDecl {
+            id: "slip".into(),
+            name: "Slip".into(),
+            param_type: "toggle".into(),
+            default: serde_json::json!(false),
+            min: None,
+            max: None,
+        },
+    ];
+    // Per-stem gains (M3): 0 = muted, 1 = full. When stems are loaded the
+    // main audio outs are the gain-weighted stem sum, so muting a stem
+    // removes it from the mix; the stem jacks are post-gain too.
+    for stem in STEM_IDS {
+        params.push(ParamDecl {
+            id: format!("stem_{stem}"),
+            name: format!("Stem {}{} Gain", stem[..1].to_uppercase(), &stem[1..]),
+            param_type: "float".into(),
+            default: serde_json::json!(1.0),
+            min: Some(0.0),
+            max: Some(1.0),
+        });
+    }
     Manifest {
         id: DECK_ID.into(),
         name: "DJ Deck".into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
         inputs,
-        outputs: vec![
-            OutputDecl {
-                id: "audio_l".into(),
-                name: "Audio L".into(),
-            },
-            OutputDecl {
-                id: "audio_r".into(),
-                name: "Audio R".into(),
-            },
-            OutputDecl {
-                id: "beat_clock".into(),
-                name: "Beat Clock".into(),
-            },
-            OutputDecl {
-                id: "bar_clock".into(),
-                name: "Bar Clock".into(),
-            },
-            OutputDecl {
-                id: "phase".into(),
-                name: "Bar Phase".into(),
-            },
-            OutputDecl {
-                id: "bpm".into(),
-                name: "BPM".into(),
-            },
-        ],
-        params: vec![
-            ParamDecl {
-                id: "pitch_range".into(),
-                name: "Pitch Range".into(),
-                param_type: "float".into(),
-                default: serde_json::json!(0.08),
-                min: Some(0.0),
-                max: Some(0.5),
-            },
-            ParamDecl {
-                id: "keylock".into(),
-                name: "Keylock".into(),
-                param_type: "toggle".into(),
-                default: serde_json::json!(false),
-                min: None,
-                max: None,
-            },
-            ParamDecl {
-                id: "reverse".into(),
-                name: "Reverse".into(),
-                param_type: "toggle".into(),
-                default: serde_json::json!(false),
-                min: None,
-                max: None,
-            },
-            ParamDecl {
-                id: "slip".into(),
-                name: "Slip".into(),
-                param_type: "toggle".into(),
-                default: serde_json::json!(false),
-                min: None,
-                max: None,
-            },
-        ],
+        outputs,
+        params,
         ui: None,
         latency_samples: 0,
     }
@@ -280,11 +310,28 @@ impl DeckShared {
     }
 }
 
+/// Decoded stems for the loaded track (M3), [`STEM_IDS`] order. Same
+/// sample rate as the track so the deck reads all five sources with one
+/// position. Decoding happens on the control thread (`deck_load_stems`).
+pub struct StemData {
+    pub stems: [TrackData; N_STEMS],
+}
+
+/// Off-RT drop payloads: anything the RT thread replaces travels back to
+/// the control thread on the garbage ring.
+pub enum DeckGarbage {
+    Track(Arc<TrackData>),
+    Stems(Arc<StemData>),
+}
+
 /// Commands from the control thread, applied at block boundaries.
 /// Fixed-size; `Arc` payloads only ever decrement refcounts on the RT side
 /// (the control thread keeps its own clones alive).
 pub enum DeckCmd {
     Load(Arc<TrackData>),
+    /// Load (or clear, with `None`) the per-stem audio for the current
+    /// track.
+    LoadStems(Option<Arc<StemData>>),
     /// bpm <= 0 clears the grid.
     Grid {
         bpm: f64,
@@ -311,9 +358,11 @@ pub enum DeckCmd {
 /// the two in sync.
 pub struct DeckControl {
     pub cmd_tx: rtrb::Producer<DeckCmd>,
-    pub garbage_rx: rtrb::Consumer<Arc<TrackData>>,
+    pub garbage_rx: rtrb::Consumer<DeckGarbage>,
     pub shared: Arc<DeckShared>,
     pub track: Option<Arc<TrackData>>,
+    /// Stems currently loaded (control-side clone + source paths).
+    pub stems: Option<(Arc<StemData>, [String; N_STEMS])>,
     pub grid: Option<(f64, f64)>, // (bpm, anchor_secs)
     pub cues: [Option<f64>; N_CUES],
     pub loop_region: Option<(f64, f64)>,
@@ -326,7 +375,7 @@ pub struct DeckControl {
 impl DeckControl {
     pub fn new(
         cmd_tx: rtrb::Producer<DeckCmd>,
-        garbage_rx: rtrb::Consumer<Arc<TrackData>>,
+        garbage_rx: rtrb::Consumer<DeckGarbage>,
         shared: Arc<DeckShared>,
     ) -> Self {
         DeckControl {
@@ -334,6 +383,7 @@ impl DeckControl {
             garbage_rx,
             shared,
             track: None,
+            stems: None,
             grid: None,
             cues: [None; N_CUES],
             loop_region: None,
@@ -361,18 +411,25 @@ pub struct DeckStatus {
     pub loop_end_secs: Option<f64>,
     pub loop_enabled: bool,
     pub sync_to: Option<String>,
+    /// Stems loaded for the current track (M3): the main outs mix the
+    /// gain-weighted stems and the stem jacks are live.
+    pub stems_loaded: bool,
 }
 
 /// The RT-side deck module.
 pub struct DeckModule {
     cmd_rx: rtrb::Consumer<DeckCmd>,
-    garbage_tx: rtrb::Producer<Arc<TrackData>>,
+    garbage_tx: rtrb::Producer<DeckGarbage>,
     shared: Arc<DeckShared>,
     sync: Option<Arc<DeckShared>>,
     /// A beat-phase snap is owed as soon as the sync master goes live.
     snap_pending: bool,
 
     track: Option<Arc<TrackData>>,
+    /// Stems for the current track (M3). When present, the main audio
+    /// outs are the gain-weighted stem sum and the stem jacks are live.
+    stems: Option<Arc<StemData>>,
+    stem_gains: [f32; N_STEMS],
     engine_rate: f64,
 
     /// Audible position in track frames (fractional).
@@ -419,7 +476,7 @@ pub struct DeckModule {
 impl DeckModule {
     pub fn new(
         cmd_rx: rtrb::Consumer<DeckCmd>,
-        garbage_tx: rtrb::Producer<Arc<TrackData>>,
+        garbage_tx: rtrb::Producer<DeckGarbage>,
         shared: Arc<DeckShared>,
         engine_rate: f32,
     ) -> Self {
@@ -437,6 +494,8 @@ impl DeckModule {
             sync: None,
             snap_pending: false,
             track: None,
+            stems: None,
+            stem_gains: [1.0; N_STEMS],
             engine_rate: engine_rate as f64,
             pos: 0.0,
             ghost: 0.0,
@@ -502,7 +561,11 @@ impl DeckModule {
         match cmd {
             DeckCmd::Load(t) => {
                 if let Some(old) = self.track.replace(t) {
-                    let _ = self.garbage_tx.push(old);
+                    let _ = self.garbage_tx.push(DeckGarbage::Track(old));
+                }
+                // Stems belong to the previous track.
+                if let Some(old) = self.stems.take() {
+                    let _ = self.garbage_tx.push(DeckGarbage::Stems(old));
                 }
                 self.pos = 0.0;
                 self.ghost = 0.0;
@@ -514,6 +577,15 @@ impl DeckModule {
                 self.grid_anchor = 0.0;
                 self.cues = [f64::NAN; N_CUES];
                 self.reset_grains();
+            }
+            DeckCmd::LoadStems(stems) => {
+                let old = match stems {
+                    Some(s) => self.stems.replace(s),
+                    None => self.stems.take(),
+                };
+                if let Some(old) = old {
+                    let _ = self.garbage_tx.push(DeckGarbage::Stems(old));
+                }
             }
             DeckCmd::Grid { bpm, anchor_secs } => {
                 self.grid_bpm = if bpm > 0.0 { bpm } else { 0.0 };
@@ -747,6 +819,8 @@ impl HostModule for DeckModule {
             last_rate = rate;
 
             let (mut l, mut r) = (0.0f32, 0.0f32);
+            // Per-stem pre-gain samples for the stem jacks (M3).
+            let mut stem_lr = [(0.0f32, 0.0f32); N_STEMS];
             let beat_pos_before = if self.grid_bpm > 0.0 {
                 (self.pos / track_sr - self.grid_anchor) * self.grid_bpm / 60.0
             } else {
@@ -778,18 +852,48 @@ impl HostModule for DeckModule {
                     if self.hop_phase >= self.hop {
                         self.hop_phase = 0;
                     }
-                    let track = self.track.as_ref().unwrap();
                     let dir = if rate < 0.0 { -1.0 } else { 1.0 };
-                    for v in 0..2 {
-                        let off = self.voice_off[v];
-                        if off < self.grain_len {
-                            let read = self.voice_start[v] + off as f64 * sr_ratio * dir;
-                            let w = self.window[off];
-                            let (gl, gr) = Self::read_track(track, read);
-                            l += gl * w;
-                            r += gr * w;
-                            self.voice_off[v] = off + 1;
+                    if let Some(stems) = self.stems.as_ref() {
+                        // Same grains, read from the stems; the mix is the
+                        // gain-weighted stem sum (WSOLA alignment stays on
+                        // the original track, which the grains share).
+                        for v in 0..2 {
+                            let off = self.voice_off[v];
+                            if off < self.grain_len {
+                                let read = self.voice_start[v] + off as f64 * sr_ratio * dir;
+                                let w = self.window[off];
+                                for (k, st) in stems.stems.iter().enumerate() {
+                                    let (gl, gr) = Self::read_track(st, read);
+                                    stem_lr[k].0 += gl * w;
+                                    stem_lr[k].1 += gr * w;
+                                }
+                                self.voice_off[v] = off + 1;
+                            }
                         }
+                        for (k, &(sl, sr)) in stem_lr.iter().enumerate() {
+                            l += sl * self.stem_gains[k];
+                            r += sr * self.stem_gains[k];
+                        }
+                    } else {
+                        let track = self.track.as_ref().unwrap();
+                        for v in 0..2 {
+                            let off = self.voice_off[v];
+                            if off < self.grain_len {
+                                let read = self.voice_start[v] + off as f64 * sr_ratio * dir;
+                                let w = self.window[off];
+                                let (gl, gr) = Self::read_track(track, read);
+                                l += gl * w;
+                                r += gr * w;
+                                self.voice_off[v] = off + 1;
+                            }
+                        }
+                    }
+                } else if let Some(stems) = self.stems.as_ref() {
+                    for (k, st) in stems.stems.iter().enumerate() {
+                        let (gl, gr) = Self::read_track(st, self.pos);
+                        stem_lr[k] = (gl, gr);
+                        l += gl * self.stem_gains[k];
+                        r += gr * self.stem_gains[k];
                     }
                 } else {
                     let track = self.track.as_ref().unwrap();
@@ -868,6 +972,11 @@ impl HostModule for DeckModule {
             } else {
                 0.0
             };
+            // Stem jacks (M3): post-gain mono mix per stem; silent unless
+            // stems are loaded and playing.
+            for (k, &(sl, sr)) in stem_lr.iter().enumerate() {
+                outputs[OUT_STEM_BASE + k][s] = 0.5 * (sl + sr) * self.stem_gains[k] * SIGNAL_MAX;
+            }
         }
 
         self.engine_frame += frames as u64;
@@ -905,6 +1014,9 @@ impl HostModule for DeckModule {
                 if !was && self.slip {
                     self.ghost = self.pos;
                 }
+            }
+            i if (PARAM_STEM_BASE..PARAM_STEM_BASE + N_STEMS as u32).contains(&i) => {
+                self.stem_gains[(i - PARAM_STEM_BASE) as usize] = value.clamp(0.0, 1.0);
             }
             _ => {}
         }

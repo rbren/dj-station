@@ -1225,6 +1225,7 @@ impl Engine {
         {
             let ctl = self.decks.get_mut(&node).unwrap();
             ctl.track = Some(data.clone());
+            ctl.stems = None; // the RT Load handler drops the old stems
             ctl.grid = None;
             ctl.cues = [None; N_CUES];
             ctl.loop_region = None;
@@ -1240,6 +1241,57 @@ impl Engine {
     pub fn deck_track(&self, instance_id: &str) -> Result<Option<String>> {
         let node = self.deck_node(instance_id)?;
         Ok(self.nodes[node].track_path.clone())
+    }
+
+    /// Decode four stem files (control thread; [`crate::deck::STEM_IDS`]
+    /// order — vocals/drums/bass/other) and load them into a deck. The
+    /// stems must match the loaded track's sample rate; shorter/longer
+    /// stems are fine (reads past the end are silent).
+    pub fn deck_load_stems(
+        &mut self,
+        instance_id: &str,
+        paths: &[std::path::PathBuf; crate::deck::N_STEMS],
+    ) -> Result<()> {
+        let node = self.deck_node(instance_id)?;
+        let track_sr = {
+            let ctl = &self.decks[&node];
+            ctl.track
+                .as_ref()
+                .ok_or_else(|| anyhow!("deck {instance_id} has no track loaded"))?
+                .sample_rate
+        };
+        let mut decoded = Vec::with_capacity(crate::deck::N_STEMS);
+        for (path, stem) in paths.iter().zip(crate::deck::STEM_IDS) {
+            let data = decode_file(path)
+                .map_err(|e| anyhow!("decoding {stem} stem {}: {e}", path.display()))?;
+            anyhow::ensure!(
+                data.sample_rate == track_sr,
+                "{stem} stem sample rate {} != track {}",
+                data.sample_rate,
+                track_sr
+            );
+            decoded.push(data);
+        }
+        let stems: [TrackData; crate::deck::N_STEMS] =
+            decoded.try_into().map_err(|_| anyhow!("stem count"))?;
+        let data = Arc::new(crate::deck::StemData { stems });
+        let path_strs: [String; crate::deck::N_STEMS] =
+            std::array::from_fn(|i| paths[i].to_string_lossy().to_string());
+        self.decks.get_mut(&node).unwrap().stems = Some((data.clone(), path_strs));
+        self.deck_push(node, DeckCmd::LoadStems(Some(data)))
+    }
+
+    /// Unload stems: the deck reverts to playing the original mix.
+    pub fn deck_clear_stems(&mut self, instance_id: &str) -> Result<()> {
+        let node = self.deck_node(instance_id)?;
+        self.decks.get_mut(&node).unwrap().stems = None;
+        self.deck_push(node, DeckCmd::LoadStems(None))
+    }
+
+    /// Stem file paths currently loaded into a deck, if any.
+    pub fn deck_stems(&self, instance_id: &str) -> Result<Option<[String; crate::deck::N_STEMS]>> {
+        let node = self.deck_node(instance_id)?;
+        Ok(self.decks[&node].stems.as_ref().map(|(_, p)| p.clone()))
     }
 
     /// Set (bpm > 0) or clear (bpm <= 0) the manual beatgrid.
@@ -1450,6 +1502,7 @@ impl Engine {
             loop_end_secs: ctl.loop_region.map(|(_, e)| e),
             loop_enabled: ctl.loop_enabled,
             sync_to: ctl.sync_to.clone(),
+            stems_loaded: ctl.stems.is_some(),
         })
     }
 
