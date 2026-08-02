@@ -1,0 +1,24 @@
+{
+  "seconds": 2.5,
+  "midi": [],
+  "tracks": [
+    {
+      "instance": "deck1",
+      "file": "tone.wav"
+    }
+  ],
+  "decks": [
+    {
+      "instance": "deck1",
+      "grid": [
+        125.0,
+        0.05
+      ],
+      "loop": [
+        0.5,
+        1.5,
+        true
+      ]
+    }
+  ]
+}

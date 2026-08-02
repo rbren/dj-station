@@ -1,0 +1,30 @@
+{
+  "seconds": 2.0,
+  "midi": [],
+  "tracks": [
+    {
+      "instance": "deckA",
+      "file": "tone-a.wav"
+    },
+    {
+      "instance": "deckB",
+      "file": "tone-b.wav"
+    }
+  ],
+  "decks": [
+    {
+      "instance": "deckA",
+      "grid": [
+        128.0,
+        0.1
+      ]
+    },
+    {
+      "instance": "deckB",
+      "grid": [
+        120.0,
+        0.3
+      ]
+    }
+  ]
+}

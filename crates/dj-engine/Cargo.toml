@@ -27,3 +27,6 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+# For the M2 deck <-> library round-trip acceptance test (cues/loops/grids
+# persist in the library and reappear in a fresh patch).
+dj-library = { path = "../dj-library" }

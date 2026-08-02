@@ -10,10 +10,12 @@
 //! - Hot reload: watch extension folders, save/load state, atomic block-boundary swap.
 
 pub mod builtin;
+pub mod deck;
 pub mod engine;
 pub mod graph;
 pub mod knob;
 pub mod manifest;
+pub mod mixer;
 pub mod module_host;
 pub mod patch;
 pub mod playback;

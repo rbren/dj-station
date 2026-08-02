@@ -60,6 +60,8 @@ impl ExtensionRegistry {
             builtin::AUDIO_OUT_ID => Some(builtin::audio_out_manifest()),
             builtin::MIDI_ID => Some(builtin::midi_manifest()),
             crate::playback::PLAYBACK_ID => Some(crate::playback::playback_manifest()),
+            crate::deck::DECK_ID => Some(crate::deck::deck_manifest()),
+            crate::mixer::CROSSFADER_ID => Some(crate::mixer::crossfader_manifest()),
             _ => self.extensions.get(ext_id).map(|e| e.manifest.clone()),
         }
     }
@@ -75,6 +77,8 @@ impl ExtensionRegistry {
             builtin::audio_out_manifest(),
             builtin::midi_manifest(),
             crate::playback::playback_manifest(),
+            crate::deck::deck_manifest(),
+            crate::mixer::crossfader_manifest(),
         ];
         out.extend(self.extensions.values().map(|e| e.manifest.clone()));
         out

@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio_l",
+      "to": "out1",
+      "to_jack": "ch1"
+    },
+    {
+      "from_jack": "beat_clock",
+      "to": "out1",
+      "to_jack": "ch2"
+    }
+  ]
+}

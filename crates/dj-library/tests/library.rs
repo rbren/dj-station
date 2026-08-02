@@ -148,3 +148,80 @@ fn cc_license_urls_classify() {
     }
     assert_eq!(LicenseInfo::commercial().kind, "commercial");
 }
+
+// ---------------------------------------------------------------------------
+// DJ metadata (M2): hot cues, saved loops, beatgrids
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cues_loops_and_beatgrid_roundtrip_and_persist_across_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("data");
+    let wav = tmp.path().join("deck-track.wav");
+    common::write_test_wav(&wav, 261.0, 1.0);
+
+    let track_id;
+    {
+        let lib = Library::open(&data_dir).unwrap();
+        track_id = lib
+            .import_file(&wav, ImportOptions::default())
+            .unwrap()
+            .track()
+            .id;
+
+        lib.set_track_cue(track_id, 0, 1.25, "intro").unwrap();
+        lib.set_track_cue(track_id, 3, 32.5, "drop").unwrap();
+        // Overwriting a slot replaces it.
+        lib.set_track_cue(track_id, 0, 1.5, "intro2").unwrap();
+        lib.set_track_cue(track_id, 7, 60.0, "").unwrap();
+        lib.clear_track_cue(track_id, 7).unwrap();
+
+        let loop_id = lib.add_track_loop(track_id, "main", 16.0, 20.0).unwrap();
+        lib.add_track_loop(track_id, "outro", 90.0, 98.0).unwrap();
+        lib.update_track_loop(loop_id, 16.0, 24.0).unwrap();
+
+        lib.set_track_beatgrid(track_id, 128.0, 0.35).unwrap();
+        lib.set_track_beatgrid(track_id, 126.5, 0.4).unwrap(); // replace
+    } // dropped = app closed
+
+    let lib = Library::open(&data_dir).unwrap();
+    let cues = lib.track_cues(track_id).unwrap();
+    assert_eq!(cues.len(), 2);
+    assert_eq!(cues[0].slot, 0);
+    assert_eq!(cues[0].position_secs, 1.5);
+    assert_eq!(cues[0].label, "intro2");
+    assert_eq!(cues[1].slot, 3);
+    assert_eq!(cues[1].position_secs, 32.5);
+
+    let loops = lib.track_loops(track_id).unwrap();
+    assert_eq!(loops.len(), 2);
+    assert_eq!(loops[0].name, "main");
+    assert_eq!((loops[0].start_secs, loops[0].end_secs), (16.0, 24.0));
+    assert_eq!(loops[1].name, "outro");
+
+    let grid = lib.track_beatgrid(track_id).unwrap().unwrap();
+    assert_eq!(grid.bpm, 126.5);
+    assert_eq!(grid.anchor_secs, 0.4);
+
+    // Deleting works and unknown tracks are empty, not errors.
+    lib.delete_track_loop(loops[1].id).unwrap();
+    assert_eq!(lib.track_loops(track_id).unwrap().len(), 1);
+    assert!(lib.track_cues(9999).unwrap().is_empty());
+    assert!(lib.track_beatgrid(9999).unwrap().is_none());
+}
+
+#[test]
+fn cue_slot_and_loop_bounds_are_validated() {
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::open(&tmp.path().join("data")).unwrap();
+    let wav = tmp.path().join("t.wav");
+    common::write_test_wav(&wav, 330.0, 0.5);
+    let id = lib
+        .import_file(&wav, ImportOptions::default())
+        .unwrap()
+        .track()
+        .id;
+    assert!(lib.set_track_cue(id, 8, 1.0, "").is_err());
+    assert!(lib.add_track_loop(id, "", 5.0, 5.0).is_err());
+    assert!(lib.set_track_beatgrid(id, 0.0, 0.0).is_err());
+}

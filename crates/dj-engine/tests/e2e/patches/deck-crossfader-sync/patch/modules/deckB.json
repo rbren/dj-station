@@ -1,0 +1,72 @@
+{
+  "ext": "builtin.deck",
+  "knobs": {
+    "cue_trig1": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cue_trig2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cue_trig3": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cue_trig4": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cue_trig5": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cue_trig6": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cue_trig7": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cue_trig8": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "loop_toggle": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "phase_nudge": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "play_gate": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "speed": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {
+    "keylock": 0.0,
+    "pitch_range": 0.08,
+    "reverse": 0.0,
+    "slip": 0.0
+  },
+  "sync_to": "deckA"
+}

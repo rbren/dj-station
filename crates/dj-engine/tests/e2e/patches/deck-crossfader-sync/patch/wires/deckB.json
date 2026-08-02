@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio_l",
+      "to": "xf1",
+      "to_jack": "b_l"
+    }
+  ]
+}

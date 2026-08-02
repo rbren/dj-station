@@ -42,9 +42,15 @@ pub struct ModuleFile {
     pub params: BTreeMap<String, f32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub midi_mappings: Vec<MidiMappingInfo>,
-    /// Track path loaded into a Playback node (absolute; library-managed).
+    /// Track path loaded into a Playback/Deck node (absolute;
+    /// library-managed). Deck cues/loops/beatgrids are *not* stored here —
+    /// they are track metadata in the library DB (PRD §7) and get
+    /// re-applied by the app layer after load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<String>,
+    /// Deck instance this deck is beat-synced to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -94,7 +100,7 @@ impl Engine {
         let mut keep_modules = BTreeSet::new();
         let mut keep_wires = BTreeSet::new();
 
-        for info in &self.nodes {
+        for (node_idx, info) in self.nodes.iter().enumerate() {
             let mut knobs = BTreeMap::new();
             for (jack, state) in info.manifest.inputs.iter().zip(&info.knobs) {
                 knobs.insert(jack.id.clone(), state.clone());
@@ -104,7 +110,8 @@ impl Engine {
                 knobs,
                 params: info.params.clone(),
                 midi_mappings: info.midi_mappings.clone(),
-                track: info.playback_track.clone(),
+                track: info.track_path.clone(),
+                sync_to: self.deck_sync_to_by_node(node_idx),
             };
             let fname = format!("{}.json", info.instance_id);
             write_if_changed(&dir.join("modules").join(&fname), &to_pretty(&mf)?)?;
@@ -174,6 +181,9 @@ impl Engine {
             .filter(|p| p.extension().map(|x| x == "json").unwrap_or(false))
             .collect();
         module_files.sort();
+        // Deck sync targets are applied after every module exists (the
+        // master deck may sort after its follower).
+        let mut deferred_syncs: Vec<(String, String)> = Vec::new();
         for path in &module_files {
             let instance_id = path.file_stem().unwrap().to_string_lossy().to_string();
             let mf: ModuleFile = serde_json::from_str(&std::fs::read_to_string(path)?)
@@ -183,7 +193,14 @@ impl Engine {
                 engine.add_midi_mapping(&instance_id, &m.kind, m.num, &m.name)?;
             }
             if let Some(track) = &mf.track {
-                engine.playback_load(&instance_id, Path::new(track))?;
+                if mf.ext == crate::deck::DECK_ID {
+                    engine.deck_load(&instance_id, Path::new(track))?;
+                } else {
+                    engine.playback_load(&instance_id, Path::new(track))?;
+                }
+            }
+            if let Some(sync_to) = &mf.sync_to {
+                deferred_syncs.push((instance_id.clone(), sync_to.clone()));
             }
             for (param, value) in &mf.params {
                 engine.set_param(&instance_id, param, *value)?;
@@ -191,6 +208,9 @@ impl Engine {
             for (jack, state) in &mf.knobs {
                 engine.restore_knob(&instance_id, jack, state.clone())?;
             }
+        }
+        for (instance, master) in &deferred_syncs {
+            engine.deck_sync(instance, Some(master))?;
         }
 
         // Wires.

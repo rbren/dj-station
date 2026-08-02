@@ -59,6 +59,28 @@ CREATE TABLE IF NOT EXISTS watch_folders (
     id   INTEGER PRIMARY KEY,
     path TEXT NOT NULL UNIQUE
 );
+
+CREATE TABLE IF NOT EXISTS track_cues (
+    track_id      INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    slot          INTEGER NOT NULL,
+    position_secs REAL NOT NULL,
+    label         TEXT NOT NULL DEFAULT '',
+    UNIQUE(track_id, slot)
+);
+
+CREATE TABLE IF NOT EXISTS track_loops (
+    id         INTEGER PRIMARY KEY,
+    track_id   INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL DEFAULT '',
+    start_secs REAL NOT NULL,
+    end_secs   REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS track_beatgrids (
+    track_id    INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    bpm         REAL NOT NULL,
+    anchor_secs REAL NOT NULL DEFAULT 0
+);
 ";
 
 /// A library track row. `bpm`/`musical_key`/`analysis_status` are the
@@ -392,4 +414,165 @@ impl Library {
                 .collect())
         })
     }
+
+    // ------------------------------------------------------------------
+    // DJ metadata (M2): hot cues, saved loops, beatgrids. Stored per track
+    // so they survive across patches (PRD §7).
+    // ------------------------------------------------------------------
+
+    /// Set (or replace) a hot cue in `slot` (0..=7).
+    pub fn set_track_cue(
+        &self,
+        track_id: i64,
+        slot: u8,
+        position_secs: f64,
+        label: &str,
+    ) -> Result<()> {
+        anyhow::ensure!(slot < 8, "cue slot must be 0..=7, got {slot}");
+        self.with_conn(|c| {
+            c.execute(
+                "INSERT INTO track_cues (track_id, slot, position_secs, label) \
+                 VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT(track_id, slot) DO UPDATE \
+                 SET position_secs = ?3, label = ?4",
+                params![track_id, slot, position_secs, label],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn clear_track_cue(&self, track_id: i64, slot: u8) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute(
+                "DELETE FROM track_cues WHERE track_id = ?1 AND slot = ?2",
+                params![track_id, slot],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn track_cues(&self, track_id: i64) -> Result<Vec<CuePoint>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT slot, position_secs, label FROM track_cues \
+                 WHERE track_id = ?1 ORDER BY slot",
+            )?;
+            let rows = stmt.query_map(params![track_id], |r| {
+                Ok(CuePoint {
+                    slot: r.get(0)?,
+                    position_secs: r.get(1)?,
+                    label: r.get(2)?,
+                })
+            })?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// Save a loop for a track; returns the loop id.
+    pub fn add_track_loop(
+        &self,
+        track_id: i64,
+        name: &str,
+        start_secs: f64,
+        end_secs: f64,
+    ) -> Result<i64> {
+        anyhow::ensure!(end_secs > start_secs, "loop end must be after start");
+        self.with_conn(|c| {
+            c.execute(
+                "INSERT INTO track_loops (track_id, name, start_secs, end_secs) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![track_id, name, start_secs, end_secs],
+            )?;
+            Ok(c.last_insert_rowid())
+        })
+    }
+
+    pub fn update_track_loop(&self, loop_id: i64, start_secs: f64, end_secs: f64) -> Result<()> {
+        anyhow::ensure!(end_secs > start_secs, "loop end must be after start");
+        self.with_conn(|c| {
+            c.execute(
+                "UPDATE track_loops SET start_secs = ?2, end_secs = ?3 WHERE id = ?1",
+                params![loop_id, start_secs, end_secs],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_track_loop(&self, loop_id: i64) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute("DELETE FROM track_loops WHERE id = ?1", params![loop_id])?;
+            Ok(())
+        })
+    }
+
+    pub fn track_loops(&self, track_id: i64) -> Result<Vec<SavedLoop>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, name, start_secs, end_secs FROM track_loops \
+                 WHERE track_id = ?1 ORDER BY start_secs, id",
+            )?;
+            let rows = stmt.query_map(params![track_id], |r| {
+                Ok(SavedLoop {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    start_secs: r.get(2)?,
+                    end_secs: r.get(3)?,
+                })
+            })?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// Set (or replace) the manual beatgrid for a track.
+    pub fn set_track_beatgrid(&self, track_id: i64, bpm: f64, anchor_secs: f64) -> Result<()> {
+        anyhow::ensure!(bpm > 0.0, "bpm must be positive");
+        self.with_conn(|c| {
+            c.execute(
+                "INSERT INTO track_beatgrids (track_id, bpm, anchor_secs) VALUES (?1, ?2, ?3) \
+                 ON CONFLICT(track_id) DO UPDATE SET bpm = ?2, anchor_secs = ?3",
+                params![track_id, bpm, anchor_secs],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn track_beatgrid(&self, track_id: i64) -> Result<Option<Beatgrid>> {
+        self.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT bpm, anchor_secs FROM track_beatgrids WHERE track_id = ?1",
+                params![track_id],
+                |r| {
+                    Ok(Beatgrid {
+                        bpm: r.get(0)?,
+                        anchor_secs: r.get(1)?,
+                    })
+                },
+            )
+            .optional()?)
+        })
+    }
+}
+
+/// A hot cue point (slot 0..=7) on a track.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CuePoint {
+    pub slot: u8,
+    pub position_secs: f64,
+    pub label: String,
+}
+
+/// A saved loop region on a track.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedLoop {
+    pub id: i64,
+    pub name: String,
+    pub start_secs: f64,
+    pub end_secs: f64,
+}
+
+/// A manual beatgrid: constant tempo anchored at a downbeat.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Beatgrid {
+    pub bpm: f64,
+    pub anchor_secs: f64,
 }

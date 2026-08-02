@@ -33,6 +33,20 @@ struct TrackLoadSpec {
     file: String,
 }
 
+/// Deck DJ metadata applied after load. In the app this comes from the
+/// library DB (track metadata, PRD §7); E2E cases carry it in the sidecar
+/// so the committed patches stay self-contained.
+#[derive(Debug, Serialize, Deserialize)]
+struct DeckSetupSpec {
+    instance: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    grid: Option<(f64, f64)>, // (bpm, anchor_secs)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    cues: Vec<(usize, f64)>, // (slot, position_secs)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    r#loop: Option<(f64, f64, bool)>, // (start, end, enabled)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct EventsFile {
     seconds: f32,
@@ -40,6 +54,8 @@ struct EventsFile {
     midi: Vec<MidiEventSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     tracks: Vec<TrackLoadSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    decks: Vec<DeckSetupSpec>,
 }
 
 fn e2e_dir() -> PathBuf {
@@ -59,9 +75,33 @@ fn render_case(case: &str) -> PathBuf {
             .unwrap();
     let mut engine = Engine::load_patch(&case_dir.join("patch"), common::registry()).unwrap();
     for t in &events.tracks {
-        engine
-            .playback_load(&t.instance, &case_dir.join(&t.file))
-            .unwrap();
+        let ext = engine
+            .nodes
+            .iter()
+            .find(|n| n.instance_id == t.instance)
+            .map(|n| n.ext_id.clone())
+            .unwrap_or_default();
+        if ext == "builtin.deck" {
+            engine
+                .deck_load(&t.instance, &case_dir.join(&t.file))
+                .unwrap();
+        } else {
+            engine
+                .playback_load(&t.instance, &case_dir.join(&t.file))
+                .unwrap();
+        }
+    }
+    for d in &events.decks {
+        if let Some((bpm, anchor)) = d.grid {
+            engine.deck_set_beatgrid(&d.instance, bpm, anchor).unwrap();
+        }
+        for &(slot, pos) in &d.cues {
+            engine.deck_set_cue(&d.instance, slot, Some(pos)).unwrap();
+        }
+        if let Some((start, end, enabled)) = d.r#loop {
+            engine.deck_set_loop(&d.instance, start, end).unwrap();
+            engine.deck_loop_enable(&d.instance, enabled).unwrap();
+        }
     }
     for ev in &events.midi {
         engine.inject_midi(&ev.instance, ev.frame, ev.data).unwrap();
@@ -147,6 +187,7 @@ fn regen_patches() {
                 seconds: 0.5,
                 midi: vec![],
                 tracks: vec![],
+                decks: vec![],
             },
         );
     }
@@ -193,6 +234,7 @@ fn regen_patches() {
                     },
                 ],
                 tracks: vec![],
+                decks: vec![],
             },
         );
     }
@@ -232,6 +274,7 @@ fn regen_patches() {
                 seconds: 0.5,
                 midi: vec![],
                 tracks: vec![],
+                decks: vec![],
             },
         );
     }
@@ -283,6 +326,123 @@ fn regen_patches() {
                     instance: "play1".into(),
                     file: "tone.wav".into(),
                 }],
+                decks: vec![],
+            },
+        );
+    }
+}
+
+// Deterministic 16-bit mono tone, committed next to a deck case.
+fn write_case_tone(path: &Path, freq: f64, seconds: f64) {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(path, spec).unwrap();
+    for i in 0..(seconds * 48_000.0) as u64 {
+        let t = i as f64 / 48_000.0;
+        let x = (2.0 * std::f64::consts::PI * freq * t).sin() * 0.5;
+        w.write_sample((x * i16::MAX as f64) as i16).unwrap();
+    }
+    w.finalize().unwrap();
+}
+
+fn regen_deck_patches() {
+    let patches = e2e_dir().join("patches");
+
+    // Case 5 (M2): one deck, keylock on at +8 %, active loop, manual
+    // beatgrid. ch1 = deck audio, ch2 = beat_clock.
+    {
+        let dir = patches.join("deck-loop-keylock");
+        std::fs::create_dir_all(&dir).unwrap();
+        write_case_tone(&dir.join("tone.wav"), 220.0, 3.0);
+
+        let mut e = Engine::new(EngineConfig::default(), common::registry()).unwrap();
+        e.add_module("deck1", "builtin.deck").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+        e.connect("deck1", "beat_clock", "out1", "ch2").unwrap();
+        e.set_knob_position("deck1", "play_gate", 1.0).unwrap();
+        e.set_knob_position("deck1", "speed", 1.0).unwrap(); // +8 %
+        e.set_param("deck1", "keylock", 1.0).unwrap();
+        e.save_patch(&dir.join("patch"), "e2e-deck-loop-keylock")
+            .unwrap();
+        write_events(
+            &dir,
+            &EventsFile {
+                seconds: 2.5,
+                midi: vec![],
+                tracks: vec![TrackLoadSpec {
+                    instance: "deck1".into(),
+                    file: "tone.wav".into(),
+                }],
+                decks: vec![DeckSetupSpec {
+                    instance: "deck1".into(),
+                    grid: Some((125.0, 0.05)),
+                    cues: vec![],
+                    r#loop: Some((0.5, 1.5, true)),
+                }],
+            },
+        );
+    }
+
+    // Case 6 (M2): two decks with different grids, deck B beat-synced to
+    // deck A, mixed by the crossfader leaning toward A (xfade = -5).
+    {
+        let dir = patches.join("deck-crossfader-sync");
+        std::fs::create_dir_all(&dir).unwrap();
+        write_case_tone(&dir.join("tone-a.wav"), 440.0, 3.0);
+        write_case_tone(&dir.join("tone-b.wav"), 660.0, 3.0);
+
+        let config = EngineConfig {
+            master_channels: 1,
+            ..EngineConfig::default()
+        };
+        let mut e = Engine::new(config, common::registry()).unwrap();
+        e.add_module("deckA", "builtin.deck").unwrap();
+        e.add_module("deckB", "builtin.deck").unwrap();
+        e.add_module("xf1", "builtin.crossfader").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.connect("deckA", "audio_l", "xf1", "a_l").unwrap();
+        e.connect("deckB", "audio_l", "xf1", "b_l").unwrap();
+        e.connect("xf1", "out_l", "out1", "ch1").unwrap();
+        e.set_knob_position("deckA", "play_gate", 1.0).unwrap();
+        e.set_knob_position("deckB", "play_gate", 1.0).unwrap();
+        e.set_knob_position("xf1", "xfade", 0.25).unwrap(); // -5 = toward A
+        e.deck_sync("deckB", Some("deckA")).unwrap(); // persisted in patch
+        e.save_patch(&dir.join("patch"), "e2e-deck-crossfader-sync")
+            .unwrap();
+        write_events(
+            &dir,
+            &EventsFile {
+                seconds: 2.0,
+                midi: vec![],
+                tracks: vec![
+                    TrackLoadSpec {
+                        instance: "deckA".into(),
+                        file: "tone-a.wav".into(),
+                    },
+                    TrackLoadSpec {
+                        instance: "deckB".into(),
+                        file: "tone-b.wav".into(),
+                    },
+                ],
+                decks: vec![
+                    DeckSetupSpec {
+                        instance: "deckA".into(),
+                        grid: Some((128.0, 0.1)),
+                        cues: vec![],
+                        r#loop: None,
+                    },
+                    DeckSetupSpec {
+                        instance: "deckB".into(),
+                        grid: Some((120.0, 0.3)),
+                        cues: vec![],
+                        r#loop: None,
+                    },
+                ],
             },
         );
     }
@@ -318,4 +478,20 @@ fn e2e_playback_tone_vca() {
         regen_patches();
     }
     check_case("playback-tone-vca");
+}
+
+#[test]
+fn e2e_deck_loop_keylock() {
+    if regen() {
+        regen_deck_patches();
+    }
+    check_case("deck-loop-keylock");
+}
+
+#[test]
+fn e2e_deck_crossfader_sync() {
+    if regen() {
+        regen_deck_patches();
+    }
+    check_case("deck-crossfader-sync");
 }

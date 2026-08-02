@@ -1,0 +1,7 @@
+{
+  "block_size": 128,
+  "format": "djpatch-1",
+  "master_channels": 2,
+  "name": "e2e-deck-loop-keylock",
+  "sample_rate": 48000.0
+}

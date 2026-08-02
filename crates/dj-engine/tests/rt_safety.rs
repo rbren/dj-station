@@ -55,7 +55,9 @@ unsafe impl GlobalAlloc for TripwireAlloc {
 static ALLOCATOR: TripwireAlloc = TripwireAlloc;
 
 /// Build a stress patch: `n` oscillator->VCA voices, ADSR-modulated, MIDI
-/// gate, all mixed into the audio out — every M0 module type on the RT path.
+/// gate, plus two DJ decks (M2) — one keylocked at +8 % and beat-synced —
+/// through a crossfader, all mixed into the audio out. Every builtin module
+/// type ends up on the RT path.
 fn build_stress_patch(engine: &mut Engine, voices: usize) {
     engine.add_module("midi1", "builtin.midi").unwrap();
     engine.add_module("adsr1", "com.dj.adsr").unwrap();
@@ -76,8 +78,49 @@ fn build_stress_patch(engine: &mut Engine, voices: usize) {
             .connect(&vca, "out", "out1", if v % 2 == 0 { "ch1" } else { "ch2" })
             .unwrap();
     }
+
+    // Two decks with looping tracks; deck B keylocked and synced to A.
+    let track = stress_track_path();
+    for deck in ["deckA", "deckB"] {
+        engine.add_module(deck, "builtin.deck").unwrap();
+        engine.deck_load(deck, &track).unwrap();
+        engine.deck_set_beatgrid(deck, 125.0, 0.05).unwrap();
+        engine.deck_set_loop(deck, 0.2, 1.8).unwrap();
+        engine.deck_loop_enable(deck, true).unwrap();
+        engine.set_knob_position(deck, "play_gate", 1.0).unwrap();
+    }
+    engine.set_param("deckB", "keylock", 1.0).unwrap();
+    engine
+        .set_knob_position("deckB", "speed", 1.0) // +8 % with keylock on
+        .unwrap();
+    engine.deck_sync("deckB", Some("deckA")).unwrap();
+    engine.add_module("xf1", "builtin.crossfader").unwrap();
+    engine.connect("deckA", "audio_l", "xf1", "a_l").unwrap();
+    engine.connect("deckB", "audio_l", "xf1", "b_l").unwrap();
+    engine.connect("xf1", "out_l", "out1", "ch1").unwrap();
+
     // Hold a note so every voice is audible for the whole run.
     engine.inject_midi("midi1", 0, [0x90, 60, 100]).unwrap();
+}
+
+/// A deterministic 2 s test tone the stress decks loop, created once per
+/// test-binary run.
+fn stress_track_path() -> std::path::PathBuf {
+    let path = std::env::temp_dir().join("dj-rt-safety-stress-tone.wav");
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).unwrap();
+    for i in 0..96_000u32 {
+        let t = i as f32 / 48_000.0;
+        let x = (2.0 * std::f32::consts::PI * 220.0 * t).sin() * 0.4;
+        w.write_sample((x * i16::MAX as f32) as i16).unwrap();
+    }
+    w.finalize().unwrap();
+    path
 }
 
 #[test]
