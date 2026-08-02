@@ -140,6 +140,10 @@ enum EngineState {
     RunningCpal {
         stop: Arc<AtomicBool>,
         join: std::thread::JoinHandle<()>,
+        /// The engine core, shared with the audio callback (which try_locks
+        /// it per callback — uncontended except at stop). Lets stop() hand
+        /// the graph back, like the null backend.
+        slot: Arc<Mutex<Option<Box<EngineCore>>>>,
     },
     Empty,
 }
@@ -261,6 +265,16 @@ impl Engine {
 
     pub fn is_running(&self) -> bool {
         !matches!(self.state, EngineState::Stopped(_))
+    }
+
+    /// Name of the currently running backend, if any.
+    pub fn backend_name(&self) -> Option<&'static str> {
+        match self.state {
+            EngineState::Running { .. } => Some("null"),
+            #[cfg(feature = "cpal-backend")]
+            EngineState::RunningCpal { .. } => Some("cpal"),
+            _ => None,
+        }
     }
 
     fn node_idx(&self, instance_id: &str) -> Result<usize> {
@@ -434,6 +448,29 @@ impl Engine {
         };
         self.core_mut()?.graph.add_wire(spec);
         self.wires.push(spec);
+        Ok(())
+    }
+
+    pub fn disconnect(
+        &mut self,
+        from_id: &str,
+        from_jack: &str,
+        to_id: &str,
+        to_jack: &str,
+    ) -> Result<()> {
+        let from_node = self.node_idx(from_id)?;
+        let to_node = self.node_idx(to_id)?;
+        let from_jack = self.out_jack_index(from_node, from_jack)?;
+        let to_jack = self.jack_index(to_node, to_jack)?;
+        let spec = WireSpec {
+            from_node,
+            from_jack,
+            to_node,
+            to_jack,
+        };
+        anyhow::ensure!(self.wires.contains(&spec), "no such wire");
+        self.core_mut()?.graph.remove_wire(spec);
+        self.wires.retain(|w| *w != spec);
         Ok(())
     }
 
@@ -838,10 +875,12 @@ impl Engine {
         let xruns = self.xruns.clone();
         let block_dur = block as f64 / self.config.sample_rate as f64;
 
-        // The core sits in a shared slot until the first audio callback
-        // claims it. If stream setup fails, it is still in the slot and we
-        // restore the engine to Stopped (so callers can fall back to
-        // another backend).
+        // The core lives in a shared slot for the whole cpal run. The audio
+        // callback try_locks it per callback: a single uncontended CAS in
+        // steady state (the control thread only touches the slot after the
+        // stream is dropped). This keeps the core recoverable both when
+        // stream setup fails (fall back to another backend) and at stop()
+        // (structural edits like adding modules/wires need the graph back).
         let slot: Arc<Mutex<Option<Box<EngineCore>>>> = Arc::new(Mutex::new(Some(core)));
         let slot_cb = slot.clone();
         let stop = Arc::new(AtomicBool::new(false));
@@ -854,17 +893,16 @@ impl Engine {
         let join = std::thread::Builder::new()
             .name("dj-cpal".into())
             .spawn(move || {
-                let mut local: Option<Box<EngineCore>> = None;
                 let mut leftover: Vec<f32> = Vec::with_capacity(block * channels);
                 let data_cb = move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    if local.is_none() {
-                        // Claim the core on the first callback. try_lock is
-                        // non-blocking and uncontended after startup.
-                        if let Ok(mut guard) = slot_cb.try_lock() {
-                            local = guard.take();
+                    let mut guard = match slot_cb.try_lock() {
+                        Ok(g) => g,
+                        Err(_) => {
+                            out.fill(0.0);
+                            return;
                         }
-                    }
-                    let Some(core) = local.as_mut() else {
+                    };
+                    let Some(core) = guard.as_mut() else {
                         out.fill(0.0);
                         return;
                     };
@@ -924,7 +962,7 @@ impl Engine {
 
         match ready_rx.recv() {
             Ok(Ok(())) => {
-                self.state = EngineState::RunningCpal { stop, join };
+                self.state = EngineState::RunningCpal { stop, join, slot };
                 Ok(())
             }
             Ok(Err(e)) => {
@@ -957,11 +995,13 @@ impl Engine {
                 self.state = EngineState::Stopped(core);
             }
             #[cfg(feature = "cpal-backend")]
-            EngineState::RunningCpal { stop, join } => {
+            EngineState::RunningCpal { stop, join, slot } => {
                 stop.store(true, Ordering::Relaxed);
                 let _ = join.join();
-                // Graph is consumed by the cpal callback; the engine must be
-                // rebuilt (e.g. by reloading the patch) to continue offline.
+                // The stream is dropped (callbacks finished), so the core
+                // is back in the slot: hand the graph back like the null
+                // backend does.
+                self.recover_core_from_slot(&slot);
             }
             other => self.state = other,
         }

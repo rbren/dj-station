@@ -25,6 +25,10 @@ function mockHandle(initial: Record<string, number>) {
 
 const INITIAL = { attack: 0.5, decay: 0.5, sustain: 0.5, release: 0.5 };
 
+// The viz box is fixed at 360x150 (12px padding, 60px sustain plateau);
+// the time axis rescales to fit. For INITIAL (1.5s total) that is:
+const SCALE = (360 - 2 * 12 - 60) / 1.5; // px per second, captured at drag start
+
 function drag(el: Element, dx: number, dy: number) {
   fireEvent.mouseDown(el, { clientX: 200, clientY: 100 });
   fireEvent.mouseMove(window, { clientX: 200 + dx / 2, clientY: 100 + dy / 2 });
@@ -41,11 +45,22 @@ describe('AdsrUI', () => {
     expect(screen.getByTestId('adsr-readout').textContent).toContain('S 0.50');
   });
 
+  it('keeps the viz box a fixed size while dragging horizontal params', () => {
+    const { handle } = mockHandle(INITIAL);
+    render(<AdsrUI handle={handle} />);
+    const svg = screen.getByRole('img', { name: 'ADSR envelope' });
+    const before = svg.getAttribute('viewBox');
+    drag(screen.getByTestId('adsr-handle-release'), 200, 0);
+    expect(svg.getAttribute('viewBox')).toEqual(before);
+    expect(svg.getAttribute('width')).toBe('360');
+    expect(svg.getAttribute('height')).toBe('150');
+  });
+
   it('dragging the attack handle right increases attack', () => {
     const { handle, params } = mockHandle(INITIAL);
     render(<AdsrUI handle={handle} />);
-    drag(screen.getByTestId('adsr-handle-attack'), 100, 0); // +100px = +2s
-    expect(params.attack).toBeCloseTo(2.5, 3);
+    drag(screen.getByTestId('adsr-handle-attack'), 100, 0);
+    expect(params.attack).toBeCloseTo(0.5 + 100 / SCALE, 3);
     expect(params.decay).toBe(0.5);
     expect(params.sustain).toBe(0.5);
     expect(params.release).toBe(0.5);
@@ -61,8 +76,8 @@ describe('AdsrUI', () => {
   it('dragging the decay handle changes only decay', () => {
     const { handle, params } = mockHandle(INITIAL);
     render(<AdsrUI handle={handle} />);
-    drag(screen.getByTestId('adsr-handle-decay'), 50, 0); // +1s
-    expect(params.decay).toBeCloseTo(1.5, 3);
+    drag(screen.getByTestId('adsr-handle-decay'), 50, 0);
+    expect(params.decay).toBeCloseTo(0.5 + 50 / SCALE, 3);
     expect(params.attack).toBe(0.5);
     expect(params.sustain).toBe(0.5);
   });
@@ -86,8 +101,8 @@ describe('AdsrUI', () => {
   it('dragging the release handle changes only release', () => {
     const { handle, params } = mockHandle(INITIAL);
     render(<AdsrUI handle={handle} />);
-    drag(screen.getByTestId('adsr-handle-release'), 150, 0); // +3s
-    expect(params.release).toBeCloseTo(3.5, 3);
+    drag(screen.getByTestId('adsr-handle-release'), 150, 0);
+    expect(params.release).toBeCloseTo(0.5 + 150 / SCALE, 3);
     expect(params.sustain).toBe(0.5);
   });
 
@@ -109,5 +124,16 @@ describe('AdsrUI', () => {
     expect(touched.has('attack')).toBe(true);
     expect(touched.has('sustain')).toBe(true);
     expect(touched.has('release')).toBe(false);
+  });
+
+  it('re-syncs from the engine when params change externally (panel knobs)', () => {
+    const first = mockHandle(INITIAL);
+    const { rerender } = render(<AdsrUI handle={first.handle} />);
+    expect(screen.getByTestId('adsr-readout').textContent).toContain('A 0.500s');
+    // New handle identity with a changed attack — as App produces after a
+    // generated param knob moves and the snapshot refreshes.
+    const second = mockHandle({ ...INITIAL, attack: 2.0 });
+    rerender(<AdsrUI handle={second.handle} />);
+    expect(screen.getByTestId('adsr-readout').textContent).toContain('A 2.000s');
   });
 });

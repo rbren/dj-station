@@ -84,9 +84,14 @@ body {
   display: inline-block;
 }
 
-.jack-readout {
-  color: #8a93a2;
-  font-variant-numeric: tabular-nums;
+.jack.jack-wired .jack-glow {
+  background: radial-gradient(circle, #e6b450 0%, #3a3020 70%);
+}
+
+.jack.jack-selected {
+  outline: 2px solid #e6b450;
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .knob {
@@ -117,8 +122,7 @@ body {
   transform-origin: 50% 13px;
 }
 
-.knob-label,
-.knob-value {
+.param-name {
   font-size: 0.7rem;
   color: #8a93a2;
 }
@@ -145,11 +149,22 @@ body {
   gap: 6px;
 }
 
-.knob-attenuverter {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 70px;
+.knob-toggle {
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: #2a2e35;
+  border: 2px solid #3c424c;
+  cursor: pointer;
+}
+
+.knob-toggle-on {
+  background: #62d0ff;
+}
+
+.knob-wire {
+  min-width: 34px;
+  min-height: 10px;
 }
 
 .adsr-ui {
@@ -291,4 +306,104 @@ body {
 
 .library-empty {
   color: #8a93a2;
+}
+
+.app-body {
+  display: flex;
+  align-items: flex-start;
+}
+
+.module-library {
+  width: 180px;
+  flex-shrink: 0;
+  border-right: 1px solid #2a2e35;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: calc(100vh - 48px);
+}
+
+.module-library h2 {
+  font-size: 0.85rem;
+  margin: 0 0 4px;
+  color: #8a93a2;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.library-entry {
+  background: #1d2026;
+  border: 1px solid #2a2e35;
+  border-radius: 6px;
+  color: #e6e6e6;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-entry:hover {
+  border-color: #62d0ff;
+}
+
+.library-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.library-io,
+.library-empty {
+  font-size: 0.7rem;
+  color: #8a93a2;
+}
+
+.rack-area {
+  position: relative;
+  flex: 1;
+}
+
+.wire-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.wire-cable {
+  stroke: #e6b450;
+  stroke-width: 2.5;
+  fill: none;
+  opacity: 0.85;
+}
+
+.wiring-hint {
+  font-size: 0.8rem;
+  color: #e6b450;
+}
+
+.jack {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.module-params {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.module-param {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }

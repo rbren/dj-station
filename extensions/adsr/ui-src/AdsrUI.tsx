@@ -2,6 +2,11 @@
 // envelope display where the attack / decay / sustain / release segments
 // can be dragged directly.
 //
+// The display box is fixed-size: the time axis rescales to fit the current
+// envelope (dragging captures the scale at pointer-down so drags stay
+// linear). Param edits made elsewhere (the panel's generated knobs, patch
+// load, a wire) flow back in through the handle and re-render the curve.
+//
 // This file is bundled to ../ui.js (esm, react external) by the app build.
 // Drag math uses deltas from the pointer-down position, so it works both in
 // a real browser and under jsdom (which reports zero-size bounding boxes).
@@ -18,7 +23,6 @@ const W = 360;
 const H = 150;
 const PAD = 12;
 const SUSTAIN_W = 60; // fixed visual width of the sustain plateau
-const PX_PER_SEC = 50;
 
 const MAX_ATTACK = 5;
 const MAX_DECAY = 5;
@@ -37,20 +41,41 @@ interface Env {
 
 type Segment = "attack" | "decay" | "sustain" | "release";
 
+const readEnv = (handle: ModuleHandle): Env => ({
+  attack: handle.paramValue("attack"),
+  decay: handle.paramValue("decay"),
+  sustain: handle.paramValue("sustain"),
+  release: handle.paramValue("release"),
+});
+
+const sameEnv = (a: Env, b: Env) =>
+  a.attack === b.attack &&
+  a.decay === b.decay &&
+  a.sustain === b.sustain &&
+  a.release === b.release;
+
+/** Pixels per second so the whole envelope always fits the fixed box. */
+const pxPerSec = (env: Env) =>
+  (W - 2 * PAD - SUSTAIN_W) /
+  Math.max(0.05, env.attack + env.decay + env.release);
+
 export default function AdsrUI({ handle }: { handle: ModuleHandle }) {
-  const [env, setEnv] = useState<Env>(() => ({
-    attack: handle.paramValue("attack"),
-    decay: handle.paramValue("decay"),
-    sustain: handle.paramValue("sustain"),
-    release: handle.paramValue("release"),
-  }));
+  const [env, setEnv] = useState<Env>(() => readEnv(handle));
 
   const drag = useRef<{
     segment: Segment;
     startX: number;
     startY: number;
     startEnv: Env;
+    scale: number; // px per second, captured at pointer-down
   } | null>(null);
+
+  // Sync from the engine (panel knobs, patch load) unless mid-drag.
+  useEffect(() => {
+    if (drag.current) return;
+    const next = readEnv(handle);
+    setEnv((prev) => (sameEnv(prev, next) ? prev : next));
+  }, [handle]);
 
   const apply = useCallback(
     (next: Env) => {
@@ -68,7 +93,7 @@ export default function AdsrUI({ handle }: { handle: ModuleHandle }) {
     (e: MouseEvent) => {
       const d = drag.current;
       if (!d) return;
-      const dx = (e.clientX - d.startX) / PX_PER_SEC;
+      const dx = (e.clientX - d.startX) / d.scale;
       const dy = (e.clientY - d.startY) / (H - 2 * PAD);
       const next = { ...d.startEnv };
       switch (d.segment) {
@@ -110,18 +135,20 @@ export default function AdsrUI({ handle }: { handle: ModuleHandle }) {
       startX: e.clientX,
       startY: e.clientY,
       startEnv: env,
+      scale: pxPerSec(env),
     };
   };
 
-  // Geometry.
+  // Geometry — always inside the fixed W x H box.
+  const scale = pxPerSec(env);
   const floorY = H - PAD;
   const peakY = PAD;
   const sustainY = PAD + (1 - env.sustain) * (H - 2 * PAD);
   const x0 = PAD;
-  const xA = x0 + env.attack * PX_PER_SEC;
-  const xD = xA + env.decay * PX_PER_SEC;
+  const xA = x0 + env.attack * scale;
+  const xD = xA + env.decay * scale;
   const xS = xD + SUSTAIN_W;
-  const xR = xS + env.release * PX_PER_SEC;
+  const xR = xS + env.release * scale;
 
   const path = `M ${x0} ${floorY} L ${xA} ${peakY} L ${xD} ${sustainY} L ${xS} ${sustainY} L ${xR} ${floorY}`;
 
@@ -145,19 +172,13 @@ export default function AdsrUI({ handle }: { handle: ModuleHandle }) {
   return (
     <div className="adsr-ui" data-testid="adsr-ui">
       <svg
-        width="100%"
-        height="100%"
-        viewBox={`0 0 ${Math.max(W, xR + PAD)} ${H}`}
+        width={W}
+        height={H}
+        viewBox={`0 0 ${W} ${H}`}
         role="img"
         aria-label="ADSR envelope"
       >
-        <rect
-          x={0}
-          y={0}
-          width={Math.max(W, xR + PAD)}
-          height={H}
-          className="adsr-bg"
-        />
+        <rect x={0} y={0} width={W} height={H} className="adsr-bg" />
         <path
           d={path}
           className="adsr-path"

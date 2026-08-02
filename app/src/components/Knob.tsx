@@ -1,6 +1,8 @@
-// Data-driven knob (PRD §7.2): style/endpoints/curve come from KnobConfig.
-// Vertical drag changes position; right-click opens the config editor for
-// per-patch overrides.
+// Data-driven knob (PRD §7.2): what renders is determined by the config
+// style — a dial (continuous/stepped), a toggle (switch/button), or nothing
+// at all ('wire': the input is a plain jack). Values are not printed inline;
+// they appear in the hover tooltip. Right-click opens the config editor
+// (which also hosts attenuverter/offset when the jack is wired).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KnobConfig } from '../types';
@@ -72,6 +74,51 @@ export function Knob(props: KnobProps) {
 
   const value = mapPosition(config, position);
   const angle = -135 + clamp01(position) * 270;
+  const openMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (onConfigChange) setMenuOpen(true);
+  };
+  const menu = menuOpen && onConfigChange && (
+    <KnobConfigMenu
+      config={config}
+      onChange={(c) => onConfigChange(c)}
+      onClose={() => setMenuOpen(false)}
+      wired={wired}
+      atten={props.atten}
+      offset={props.offset}
+      onAttenOffset={props.onAttenOffset}
+    />
+  );
+
+  // A wired jack's own knob is superseded by the incoming signal
+  // (attenuverter/offset live in the right-click menu); 'wire' style means
+  // "no knob at all". Both render only the config affordance.
+  if (config.style === 'wire' || wired) {
+    return (
+      <div className="knob knob-wire" data-testid={`knob-${label}`} onContextMenu={openMenu}>
+        {menu}
+      </div>
+    );
+  }
+
+  if (config.style === 'switch' || config.style === 'button') {
+    const on = position >= 0.5;
+    return (
+      <div className="knob" data-testid={`knob-${label}`}>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={label}
+          title={`${label}: ${value.toFixed(2)}`}
+          className={`knob-toggle${on ? ' knob-toggle-on' : ''}`}
+          onClick={() => onPosition(on ? 0 : 1)}
+          onContextMenu={openMenu}
+        />
+        {menu}
+      </div>
+    );
+  }
 
   return (
     <div className="knob" data-testid={`knob-${label}`}>
@@ -82,49 +129,17 @@ export function Knob(props: KnobProps) {
         aria-valuemin={config.min}
         aria-valuemax={config.max}
         aria-valuenow={value}
+        title={`${label}: ${value.toFixed(2)}`}
         tabIndex={0}
         onMouseDown={(e) => {
           e.preventDefault();
           drag.current = { startY: e.clientY, startPos: position };
         }}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setMenuOpen(true);
-        }}
+        onContextMenu={openMenu}
       >
         <div className="knob-pointer" style={{ transform: `rotate(${angle}deg)` }} />
       </div>
-      <span className="knob-label">{label}</span>
-      <span className="knob-value" data-testid={`knob-value-${label}`}>
-        {value.toFixed(2)}
-      </span>
-      {wired && props.onAttenOffset && (
-        <div className="knob-attenuverter" data-testid={`atten-${label}`}>
-          <input
-            type="range"
-            min={-1}
-            max={1}
-            step={0.01}
-            value={props.atten ?? 1}
-            aria-label={`${label} attenuverter`}
-            onChange={(e) => props.onAttenOffset!(Number(e.target.value), props.offset ?? 0)}
-          />
-          <input
-            type="number"
-            step={0.1}
-            value={props.offset ?? 0}
-            aria-label={`${label} offset`}
-            onChange={(e) => props.onAttenOffset!(props.atten ?? 1, Number(e.target.value))}
-          />
-        </div>
-      )}
-      {menuOpen && onConfigChange && (
-        <KnobConfigMenu
-          config={config}
-          onChange={(c) => onConfigChange(c)}
-          onClose={() => setMenuOpen(false)}
-        />
-      )}
+      {menu}
     </div>
   );
 }

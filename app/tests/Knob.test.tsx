@@ -1,5 +1,6 @@
 // Knob behavior: data-driven mapping (style/endpoints/curve), drag-to-set
-// position, right-click config editing, attenuverter when wired.
+// position, style-dependent rendering (dial / toggle / plain wire jack),
+// right-click config editing, attenuverter+offset in the menu when wired.
 
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -45,6 +46,13 @@ describe('Knob', () => {
     expect(onPosition.mock.lastCall![0]).toBeCloseTo(1.0, 5);
   });
 
+  it('shows the value only in the hover tooltip, not inline', () => {
+    render(<Knob label="cv" config={LINEAR} position={0.5} onPosition={() => {}} />);
+    const dial = screen.getByRole('slider', { name: 'cv' });
+    expect(dial.getAttribute('title')).toBe('cv: 5.00');
+    expect(screen.queryByText('5.00')).toBeNull();
+  });
+
   it('right-click opens config menu and edits are reported', () => {
     const onConfigChange = vi.fn();
     render(
@@ -67,34 +75,76 @@ describe('Knob', () => {
     expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({ curve: 'exp' }));
   });
 
-  it('shows attenuverter + offset controls only when wired', () => {
-    const onAttenOffset = vi.fn();
+  it('style changes what renders: dial vs toggle vs plain wire jack', () => {
     const { rerender } = render(
+      <Knob label="g" config={LINEAR} position={0} onPosition={() => {}} />,
+    );
+    expect(screen.getByRole('slider', { name: 'g' })).toBeTruthy();
+
+    rerender(
+      <Knob label="g" config={{ ...LINEAR, style: 'switch' }} position={0} onPosition={() => {}} />,
+    );
+    expect(screen.queryByRole('slider', { name: 'g' })).toBeNull();
+    expect(screen.getByRole('switch', { name: 'g' })).toBeTruthy();
+
+    rerender(
+      <Knob label="g" config={{ ...LINEAR, style: 'wire' }} position={0} onPosition={() => {}} />,
+    );
+    expect(screen.queryByRole('slider', { name: 'g' })).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'g' })).toBeNull();
+    expect(screen.getByTestId('knob-g').className).toContain('knob-wire');
+  });
+
+  it('toggle click flips the position for switch/button styles', () => {
+    const onPosition = vi.fn();
+    render(
       <Knob
-        label="fm"
-        config={LINEAR}
+        label="gate"
+        config={{ ...LINEAR, style: 'button' }}
         position={0}
-        onPosition={() => {}}
-        onAttenOffset={onAttenOffset}
-        wired={false}
+        onPosition={onPosition}
       />,
     );
-    expect(screen.queryByTestId('atten-fm')).toBeNull();
-    rerender(
+    fireEvent.click(screen.getByRole('switch', { name: 'gate' }));
+    expect(onPosition).toHaveBeenCalledWith(1);
+  });
+
+  it('wired: no dial; attenuverter + offset live in the right-click menu', () => {
+    const onAttenOffset = vi.fn();
+    render(
       <Knob
         label="fm"
         config={LINEAR}
         position={0}
         onPosition={() => {}}
+        onConfigChange={() => {}}
         onAttenOffset={onAttenOffset}
         wired={true}
         atten={1}
         offset={0}
       />,
     );
-    fireEvent.change(screen.getByLabelText('fm attenuverter'), { target: { value: '-0.5' } });
+    expect(screen.queryByRole('slider', { name: 'fm' })).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId('knob-fm'));
+    fireEvent.change(screen.getByLabelText('knob atten'), { target: { value: '-0.5' } });
     expect(onAttenOffset).toHaveBeenCalledWith(-0.5, 0);
-    fireEvent.change(screen.getByLabelText('fm offset'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('knob offset'), { target: { value: '2' } });
     expect(onAttenOffset).toHaveBeenCalledWith(1, 2);
+  });
+
+  it('unwired: menu has no attenuverter controls', () => {
+    render(
+      <Knob
+        label="fm"
+        config={LINEAR}
+        position={0}
+        onPosition={() => {}}
+        onConfigChange={() => {}}
+        onAttenOffset={() => {}}
+        wired={false}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'fm' }));
+    expect(screen.queryByLabelText('knob atten')).toBeNull();
   });
 });

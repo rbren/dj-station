@@ -16,6 +16,9 @@ pub enum KnobStyle {
     Switch,
     Button,
     Stepped,
+    /// No knob at all — the input is a plain wire jack. Unwired it still
+    /// maps its position like a continuous knob (yielding the default).
+    Wire,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,7 +73,7 @@ impl KnobConfig {
     pub fn map(&self, position: f32) -> f32 {
         let p = position.clamp(0.0, 1.0);
         let p = match self.style {
-            KnobStyle::Continuous => p,
+            KnobStyle::Continuous | KnobStyle::Wire => p,
             KnobStyle::Switch | KnobStyle::Button => {
                 if p >= 0.5 {
                     1.0

@@ -17,7 +17,15 @@ export interface NodeSnapshot {
   type_id: string;
   manifest: Manifest;
   knobs: Record<string, { position: number; atten: number; offset: number }>;
+  params: Record<string, number>;
   wired_inputs: string[];
+}
+
+export interface WireSnapshot {
+  from_instance: string;
+  from_jack: string;
+  to_instance: string;
+  to_jack: string;
 }
 
 export class EngineClient {
@@ -39,8 +47,33 @@ export class EngineClient {
   listExtensions() {
     return this.call<Manifest[]>('list_extensions');
   }
+  listModules() {
+    return this.call<Manifest[]>('list_modules');
+  }
   nodes() {
     return this.call<NodeSnapshot[]>('engine_nodes');
+  }
+  wires() {
+    return this.call<WireSnapshot[]>('engine_wires');
+  }
+  addModule(instance: string, typeId: string) {
+    return this.call<void>('add_module', { instance, typeId });
+  }
+  connectWire(from: { instance: string; jack: string }, to: { instance: string; jack: string }) {
+    return this.call<void>('connect_wire', {
+      fromInstance: from.instance,
+      fromJack: from.jack,
+      toInstance: to.instance,
+      toJack: to.jack,
+    });
+  }
+  disconnectWire(from: { instance: string; jack: string }, to: { instance: string; jack: string }) {
+    return this.call<void>('disconnect_wire', {
+      fromInstance: from.instance,
+      fromJack: from.jack,
+      toInstance: to.instance,
+      toJack: to.jack,
+    });
   }
   loadDemoPatch() {
     return this.call<void>('load_demo_patch');

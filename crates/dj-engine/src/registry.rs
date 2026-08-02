@@ -67,4 +67,12 @@ impl ExtensionRegistry {
     pub fn extension(&self, ext_id: &str) -> Option<&Extension> {
         self.extensions.get(ext_id)
     }
+
+    /// Manifests of every module type that can be instantiated: built-ins
+    /// first, then discovered extensions (sorted by id).
+    pub fn all_manifests(&self) -> Vec<Manifest> {
+        let mut out = vec![builtin::audio_out_manifest(), builtin::midi_manifest()];
+        out.extend(self.extensions.values().map(|e| e.manifest.clone()));
+        out
+    }
 }

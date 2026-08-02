@@ -1,5 +1,6 @@
 // Right-click editor for per-patch knob config overrides (PRD §7.2):
-// style, endpoints and curve are data, not code.
+// style, endpoints and curve are data, not code. When the jack is wired
+// this menu also hosts the attenuverter/offset controls.
 
 import type { CurveName, KnobConfig, KnobStyle } from '../types';
 
@@ -7,10 +8,18 @@ export function KnobConfigMenu({
   config,
   onChange,
   onClose,
+  wired,
+  atten,
+  offset,
+  onAttenOffset,
 }: {
   config: KnobConfig;
   onChange(config: KnobConfig): void;
   onClose(): void;
+  wired?: boolean;
+  atten?: number;
+  offset?: number;
+  onAttenOffset?(atten: number, offset: number): void;
 }) {
   const curveName = typeof config.curve === 'string' ? config.curve : 'custom';
   return (
@@ -26,6 +35,7 @@ export function KnobConfigMenu({
           <option value="stepped">stepped</option>
           <option value="switch">switch</option>
           <option value="button">button</option>
+          <option value="wire">wire</option>
         </select>
       </label>
       {config.style === 'stepped' && (
@@ -72,6 +82,32 @@ export function KnobConfigMenu({
           {curveName === 'custom' && <option value="custom">custom</option>}
         </select>
       </label>
+      {wired && onAttenOffset && (
+        <>
+          <label>
+            Atten
+            <input
+              type="number"
+              aria-label="knob atten"
+              min={-1}
+              max={1}
+              step={0.01}
+              value={atten ?? 1}
+              onChange={(e) => onAttenOffset(Number(e.target.value), offset ?? 0)}
+            />
+          </label>
+          <label>
+            Offset
+            <input
+              type="number"
+              aria-label="knob offset"
+              step={0.1}
+              value={offset ?? 0}
+              onChange={(e) => onAttenOffset(atten ?? 1, Number(e.target.value))}
+            />
+          </label>
+        </>
+      )}
       <button onClick={onClose}>Close</button>
     </div>
   );

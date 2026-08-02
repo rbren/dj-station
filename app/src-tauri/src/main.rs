@@ -4,7 +4,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use dj_engine::{Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, Manifest};
+use dj_engine::{
+    Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle, Manifest,
+};
 use dj_library::providers::SearchOutcome;
 use dj_library::{AcquisitionHub, Library, Query, Track, TrackResult};
 use serde::Serialize;
@@ -37,11 +39,40 @@ struct KnobSnapshot {
 }
 
 #[derive(Serialize)]
+struct WireSnapshot {
+    from_instance: String,
+    from_jack: String,
+    to_instance: String,
+    to_jack: String,
+}
+
+/// Structural graph edits need a stopped engine; wrap them in
+/// stop -> edit -> restart-same-backend (the cpal backend hands the graph
+/// back on stop, so audio resumes with the edit applied).
+fn with_stopped<T>(
+    engine: &mut Engine,
+    f: impl FnOnce(&mut Engine) -> CmdResult<T>,
+) -> CmdResult<T> {
+    let backend = engine.backend_name();
+    if backend.is_some() {
+        engine.stop().map_err(err)?;
+    }
+    let result = f(engine);
+    match backend {
+        Some("cpal") if engine.start_cpal().is_ok() => {}
+        Some(_) => engine.start_null_realtime().map_err(err)?,
+        None => {}
+    }
+    result
+}
+
+#[derive(Serialize)]
 struct NodeSnapshot {
     instance_id: String,
     type_id: String,
     manifest: Manifest,
     knobs: BTreeMap<String, KnobSnapshot>,
+    params: BTreeMap<String, f32>,
     wired_inputs: Vec<String>,
 }
 
@@ -85,6 +116,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                     )
                 })
                 .collect(),
+            params: n.params.clone(),
             wired_inputs: wires
                 .iter()
                 .filter(|w| w.to_node == node_idx)
@@ -92,6 +124,100 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                 .collect(),
         })
         .collect())
+}
+
+/// All module types that can be added to the rack (built-ins + extensions).
+#[tauri::command]
+fn list_modules(state: State<AppState>) -> CmdResult<Vec<Manifest>> {
+    let engine = state.engine.lock().map_err(err)?;
+    Ok(engine.registry.all_manifests())
+}
+
+#[tauri::command]
+fn engine_wires(state: State<AppState>) -> CmdResult<Vec<WireSnapshot>> {
+    let engine = state.engine.lock().map_err(err)?;
+    Ok(engine
+        .wire_specs()
+        .iter()
+        .map(|w| WireSnapshot {
+            from_instance: engine.nodes[w.from_node].instance_id.clone(),
+            from_jack: engine.output_jack_name(w.from_node, w.from_jack),
+            to_instance: engine.nodes[w.to_node].instance_id.clone(),
+            to_jack: engine.nodes[w.to_node].manifest.inputs[w.to_jack]
+                .id
+                .clone(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn add_module(state: State<AppState>, instance: String, type_id: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    with_stopped(&mut engine, |e| {
+        e.add_module(&instance, &type_id).map_err(err)
+    })
+}
+
+#[tauri::command]
+fn connect_wire(
+    state: State<AppState>,
+    from_instance: String,
+    from_jack: String,
+    to_instance: String,
+    to_jack: String,
+) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    with_stopped(&mut engine, |e| {
+        connect_as_wire(e, &from_instance, &from_jack, &to_instance, &to_jack)
+    })
+}
+
+/// Connect a wire and switch the destination input's knob to the plain
+/// "wire" style so the panel shows a jack instead of a knob.
+fn connect_as_wire(
+    e: &mut Engine,
+    from_instance: &str,
+    from_jack: &str,
+    to_instance: &str,
+    to_jack: &str,
+) -> CmdResult<()> {
+    e.connect(from_instance, from_jack, to_instance, to_jack)
+        .map_err(err)?;
+    let mut cfg = e
+        .knob_state(to_instance, to_jack)
+        .ok()
+        .and_then(|k| k.config)
+        .unwrap_or_default();
+    cfg.style = KnobStyle::Wire;
+    e.set_knob_config(to_instance, to_jack, Some(cfg))
+        .map_err(err)
+}
+
+#[tauri::command]
+fn disconnect_wire(
+    state: State<AppState>,
+    from_instance: String,
+    from_jack: String,
+    to_instance: String,
+    to_jack: String,
+) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    with_stopped(&mut engine, |e| {
+        e.disconnect(&from_instance, &from_jack, &to_instance, &to_jack)
+            .map_err(err)?;
+        // Undo the automatic wire-style override so the knob comes back
+        // (only when it is still set to wire — respect manual choices).
+        if let Ok(k) = e.knob_state(&to_instance, &to_jack) {
+            if k.config
+                .as_ref()
+                .is_some_and(|c| c.style == KnobStyle::Wire)
+            {
+                e.set_knob_config(&to_instance, &to_jack, None)
+                    .map_err(err)?;
+            }
+        }
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -112,13 +238,11 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     engine
         .add_midi_mapping("midi1", "note", 60, "pad_1")
         .map_err(err)?;
-    engine
-        .connect("midi1", "pad_1", "adsr1", "gate")
-        .map_err(err)?;
-    engine.connect("osc1", "audio", "vca1", "in").map_err(err)?;
-    engine.connect("adsr1", "env", "vca1", "cv").map_err(err)?;
-    engine.connect("vca1", "out", "out1", "ch1").map_err(err)?;
-    engine.connect("vca1", "out", "out1", "ch2").map_err(err)?;
+    connect_as_wire(&mut engine, "midi1", "pad_1", "adsr1", "gate")?;
+    connect_as_wire(&mut engine, "osc1", "audio", "vca1", "in")?;
+    connect_as_wire(&mut engine, "adsr1", "env", "vca1", "cv")?;
+    connect_as_wire(&mut engine, "vca1", "out", "out1", "ch1")?;
+    connect_as_wire(&mut engine, "vca1", "out", "out1", "ch2")?;
     Ok(())
 }
 
@@ -334,7 +458,8 @@ fn main() {
     // provider hub (keyed providers enabled via env, see README).
     let library =
         Arc::new(Library::open(&dj_library::default_data_dir()).expect("library open failed"));
-    let watcher = dj_library::start_watcher(library.clone(), dj_library::watch::DEFAULT_POLL_INTERVAL);
+    let watcher =
+        dj_library::start_watcher(library.clone(), dj_library::watch::DEFAULT_POLL_INTERVAL);
     let hub = AcquisitionHub::from_env();
 
     tauri::Builder::default()
@@ -369,7 +494,12 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             list_extensions,
+            list_modules,
             engine_nodes,
+            engine_wires,
+            add_module,
+            connect_wire,
+            disconnect_wire,
             load_demo_patch,
             set_knob_position,
             set_knob_config,

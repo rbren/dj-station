@@ -1,6 +1,6 @@
 // Shared types mirroring the engine's manifest / knob / telemetry model.
 
-export type KnobStyle = 'continuous' | 'switch' | 'button' | 'stepped';
+export type KnobStyle = 'continuous' | 'switch' | 'button' | 'stepped' | 'wire';
 export type CurveName = 'linear' | 'exp' | 'log';
 
 export interface KnobConfig {
