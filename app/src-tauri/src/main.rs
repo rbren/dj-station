@@ -10,7 +10,7 @@ use dj_engine::{
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Manager, State};
@@ -324,6 +324,18 @@ fn load_patch(state: State<AppState>, dir: String) -> CmdResult<()> {
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
     *engine = Engine::load_patch(&PathBuf::from(dir), registry).map_err(err)?;
+    // Decks: re-apply library-stored DJ metadata (cues/loops/beatgrids)
+    // for every loaded deck track (PRD §7 — metadata survives across
+    // patches via the library DB, not the patch files).
+    let deck_instances: Vec<String> = engine
+        .nodes
+        .iter()
+        .filter(|n| n.ext_id == "builtin.deck")
+        .map(|n| n.instance_id.clone())
+        .collect();
+    for instance in deck_instances {
+        apply_deck_metadata(&state, &mut engine, &instance)?;
+    }
     Ok(())
 }
 
@@ -471,6 +483,211 @@ fn playback_load(state: State<AppState>, instance: String, track_id: i64) -> Cmd
         .map_err(err)
 }
 
+// ---------------------------------------------------------------------------
+// DJ Deck (M2). The library DB is the canonical store for cues/loops/
+// beatgrids (PRD §7): every set is written through to the library, and
+// loading a track (or a patch) re-applies the stored metadata.
+// ---------------------------------------------------------------------------
+
+/// Library row id for the track loaded in a deck, if it's a library track.
+fn deck_library_track(state: &AppState, engine: &Engine, instance: &str) -> Option<Track> {
+    let path = engine.deck_track(instance).ok()??;
+    state.library.track_by_path(Path::new(&path)).ok()?
+}
+
+/// Re-apply a track's library metadata (beatgrid, cues, first saved loop)
+/// to a deck. Used after deck_load and after patch load.
+fn apply_deck_metadata(state: &AppState, engine: &mut Engine, instance: &str) -> CmdResult<()> {
+    let Some(track) = deck_library_track(state, engine, instance) else {
+        return Ok(());
+    };
+    if let Some(grid) = state.library.track_beatgrid(track.id).map_err(err)? {
+        engine
+            .deck_set_beatgrid(instance, grid.bpm, grid.anchor_secs)
+            .map_err(err)?;
+    }
+    for cue in state.library.track_cues(track.id).map_err(err)? {
+        engine
+            .deck_set_cue(instance, cue.slot as usize, Some(cue.position_secs))
+            .map_err(err)?;
+    }
+    if let Some(l) = state.library.track_loops(track.id).map_err(err)?.first() {
+        engine
+            .deck_set_loop(instance, l.start_secs, l.end_secs)
+            .map_err(err)?;
+    }
+    Ok(())
+}
+
+/// Write the deck's current beatgrid through to the library.
+fn persist_deck_grid(state: &AppState, engine: &Engine, instance: &str) -> CmdResult<()> {
+    if let (Some(track), Ok(Some((bpm, anchor)))) = (
+        deck_library_track(state, engine, instance),
+        engine.deck_beatgrid(instance),
+    ) {
+        state
+            .library
+            .set_track_beatgrid(track.id, bpm, anchor)
+            .map_err(err)?;
+    }
+    Ok(())
+}
+
+/// Load a library track into a deck and re-apply its DJ metadata.
+#[tauri::command]
+fn deck_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResult<()> {
+    let track = state.library.track(track_id).map_err(err)?;
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine
+        .deck_load(&instance, &PathBuf::from(track.file_path))
+        .map_err(err)?;
+    apply_deck_metadata(&state, &mut engine, &instance)
+}
+
+#[tauri::command]
+fn deck_status(state: State<AppState>, instance: String) -> CmdResult<dj_engine::deck::DeckStatus> {
+    let engine = state.engine.lock().map_err(err)?;
+    engine.deck_status(&instance).map_err(err)
+}
+
+/// Waveform overview peaks (0..=1), `buckets` values.
+#[tauri::command]
+fn deck_waveform(state: State<AppState>, instance: String, buckets: usize) -> CmdResult<Vec<f32>> {
+    let engine = state.engine.lock().map_err(err)?;
+    engine.deck_waveform(&instance, buckets.min(20_000)).map_err(err)
+}
+
+#[tauri::command]
+fn deck_seek(state: State<AppState>, instance: String, position: f64) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_seek(&instance, position).map_err(err)
+}
+
+/// Set (Some) or clear (None) a hot cue; written through to the library.
+#[tauri::command]
+fn deck_set_cue(
+    state: State<AppState>,
+    instance: String,
+    slot: usize,
+    position: Option<f64>,
+) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_set_cue(&instance, slot, position).map_err(err)?;
+    if let Some(track) = deck_library_track(&state, &engine, &instance) {
+        match position {
+            Some(pos) => state
+                .library
+                .set_track_cue(track.id, slot as u8, pos, "")
+                .map_err(err)?,
+            None => state
+                .library
+                .clear_track_cue(track.id, slot as u8)
+                .map_err(err)?,
+        }
+    }
+    Ok(())
+}
+
+/// Set the active loop region (transient until saved).
+#[tauri::command]
+fn deck_set_loop(state: State<AppState>, instance: String, start: f64, end: f64) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_set_loop(&instance, start, end).map_err(err)
+}
+
+#[tauri::command]
+fn deck_loop_enable(state: State<AppState>, instance: String, enabled: bool) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_loop_enable(&instance, enabled).map_err(err)
+}
+
+#[tauri::command]
+fn deck_loop_halve(state: State<AppState>, instance: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_loop_halve(&instance).map_err(err)
+}
+
+#[tauri::command]
+fn deck_loop_double(state: State<AppState>, instance: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_loop_double(&instance).map_err(err)
+}
+
+/// Save the current loop region as a named library loop for the track.
+#[tauri::command]
+fn deck_save_loop(state: State<AppState>, instance: String, name: String) -> CmdResult<i64> {
+    let engine = state.engine.lock().map_err(err)?;
+    let status = engine.deck_status(&instance).map_err(err)?;
+    let (Some(start), Some(end)) = (status.loop_start_secs, status.loop_end_secs) else {
+        return Err("no loop region set".into());
+    };
+    let track = deck_library_track(&state, &engine, &instance)
+        .ok_or("deck track is not in the library")?;
+    state
+        .library
+        .add_track_loop(track.id, &name, start, end)
+        .map_err(err)
+}
+
+/// Saved loops for the deck's current track.
+#[tauri::command]
+fn deck_saved_loops(
+    state: State<AppState>,
+    instance: String,
+) -> CmdResult<Vec<dj_library::SavedLoop>> {
+    let engine = state.engine.lock().map_err(err)?;
+    match deck_library_track(&state, &engine, &instance) {
+        Some(track) => state.library.track_loops(track.id).map_err(err),
+        None => Ok(Vec::new()),
+    }
+}
+
+#[tauri::command]
+fn deck_set_beatgrid(
+    state: State<AppState>,
+    instance: String,
+    bpm: f64,
+    anchor: f64,
+) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine
+        .deck_set_beatgrid(&instance, bpm, anchor)
+        .map_err(err)?;
+    persist_deck_grid(&state, &engine, &instance)
+}
+
+/// Tap tempo at the live playhead; the resulting grid persists.
+#[tauri::command]
+fn deck_tap_tempo(state: State<AppState>, instance: String) -> CmdResult<Option<(f64, f64)>> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    let grid = engine.deck_tap_tempo(&instance).map_err(err)?;
+    persist_deck_grid(&state, &engine, &instance)?;
+    Ok(grid)
+}
+
+/// Nudge the beatgrid anchor by `delta` seconds.
+#[tauri::command]
+fn deck_nudge_beatgrid(state: State<AppState>, instance: String, delta: f64) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_nudge_beatgrid(&instance, delta).map_err(err)?;
+    persist_deck_grid(&state, &engine, &instance)
+}
+
+/// Re-anchor the beatgrid at the current playhead.
+#[tauri::command]
+fn deck_anchor_here(state: State<AppState>, instance: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_anchor_here(&instance).map_err(err)?;
+    persist_deck_grid(&state, &engine, &instance)
+}
+
+/// Beat-sync a deck to another deck (None clears sync).
+#[tauri::command]
+fn deck_sync(state: State<AppState>, instance: String, master: Option<String>) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_sync(&instance, master.as_deref()).map_err(err)
+}
+
 fn extension_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
@@ -569,6 +786,22 @@ fn main() {
             add_watch_folder,
             watch_folders,
             playback_load,
+            deck_load,
+            deck_status,
+            deck_waveform,
+            deck_seek,
+            deck_set_cue,
+            deck_set_loop,
+            deck_loop_enable,
+            deck_loop_halve,
+            deck_loop_double,
+            deck_save_loop,
+            deck_saved_loops,
+            deck_set_beatgrid,
+            deck_tap_tempo,
+            deck_nudge_beatgrid,
+            deck_anchor_here,
+            deck_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

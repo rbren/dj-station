@@ -22,7 +22,7 @@ export interface ModulePanelProps {
   wired: Record<string, boolean>;
   telemetry?: Record<string, JackTelemetry>;
   handle: ModuleHandle;
-  customUI?: ComponentType<{ handle: ModuleHandle }>;
+  customUI?: ComponentType<{ handle: ModuleHandle; instanceId?: string }>;
   /** Output jack currently armed as a pending wire source, if any. */
   pendingSource?: JackRef | null;
   onJackClick?(kind: 'input' | 'output', jackId: string): void;
@@ -46,7 +46,7 @@ export function ModulePanel(props: ModulePanelProps) {
       </header>
       {CustomUI && (
         <div className="module-custom-ui">
-          <CustomUI handle={props.handle} />
+          <CustomUI handle={props.handle} instanceId={instanceId} />
         </div>
       )}
       {numericParams.length > 0 && (

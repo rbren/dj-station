@@ -6,12 +6,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AdsrUI from '../../extensions/adsr/ui-src/AdsrUI';
 import { engine, type NodeSnapshot, type WireSnapshot } from './engine';
-import { library } from './library';
+import { library, type Track } from './library';
+import { DeckCustomUI, DeckUIContext } from './components/DeckPanel';
 import { LibraryView } from './components/LibraryView';
 import { ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
 import { ModulePanel, type JackRef } from './components/ModulePanel';
 import { WireOverlay } from './components/WireOverlay';
 import type { JackTelemetry, KnobConfig, Manifest, ModuleHandle } from './types';
+
+/** Module types with a host-registered custom UI (PRD §5.3). */
+const CUSTOM_UIS = {
+  'com.dj.adsr': AdsrUI,
+  'builtin.deck': DeckCustomUI,
+} as const;
 
 export default function App() {
   const [nodes, setNodes] = useState<NodeSnapshot[]>([]);
@@ -22,6 +29,7 @@ export default function App() {
   const [backend, setBackend] = useState<string | null>(null);
   const [view, setView] = useState<'rack' | 'library'>('rack');
   const [pending, setPending] = useState<JackRef | null>(null);
+  const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
@@ -32,6 +40,8 @@ export default function App() {
     if (snapshot) setNodes(snapshot);
     const wireList = await engine.wires();
     if (wireList) setWires(wireList);
+    const tracks = await library.tracks();
+    if (tracks) setLibraryTracks(tracks);
   }, []);
 
   useEffect(() => {
@@ -123,6 +133,20 @@ export default function App() {
     [nodes, makeHandle],
   );
 
+  // Shared state for DeckPanel custom UIs (track list, sync candidates,
+  // play_gate control) — via context so the panel component stays stable
+  // across renders.
+  const deckUI = useMemo(
+    () => ({
+      tracks: libraryTracks,
+      deckInstances: nodes.filter((n) => n.type_id === 'builtin.deck').map((n) => n.instance_id),
+      setPlayGate: (instance: string, high: boolean) => {
+        void engine.setKnobPosition(instance, 'play_gate', high ? 1 : 0).then(refresh);
+      },
+    }),
+    [libraryTracks, nodes, refresh],
+  );
+
   return (
     <main className="app">
       <header className="app-header">
@@ -159,42 +183,44 @@ export default function App() {
       {view === 'library' && <LibraryView client={library} />}
       <div className="app-body" style={view === 'rack' ? undefined : { display: 'none' }}>
         <ModuleLibrary modules={moduleLib} onAdd={(typeId) => void addModule(typeId)} />
-        <div className="rack-area" ref={setRackEl}>
-          <div className="rack">
-            {nodes.map((node) => (
-              <ModulePanel
-                key={node.instance_id}
-                instanceId={node.instance_id}
-                manifest={node.manifest}
-                knobs={node.knobs}
-                wired={Object.fromEntries(node.wired_inputs.map((j) => [j, true]))}
-                telemetry={telemetry[node.instance_id]}
-                handle={handles.get(node.instance_id)!}
-                customUI={node.type_id === 'com.dj.adsr' ? AdsrUI : undefined}
-                pendingSource={pending}
-                onJackClick={(kind, jack) => void onJackClick(node.instance_id, kind, jack)}
-                onKnobPosition={(jack, position) => {
-                  void engine.setKnobPosition(node.instance_id, jack, position).then(refresh);
-                }}
-                onKnobConfig={(jack, config: KnobConfig) => {
-                  void engine.setKnobConfig(node.instance_id, jack, config).then(refresh);
-                }}
-                onAttenOffset={(jack, atten, offset) => {
-                  void engine.setAttenOffset(node.instance_id, jack, atten, offset).then(refresh);
-                }}
-                onParam={(param, value) => {
-                  void engine.setParam(node.instance_id, param, value).then(refresh);
-                }}
-              />
-            ))}
-            {nodes.length === 0 && (
-              <p className="rack-empty">
-                No engine connection — run via <code>./run.sh</code> (Tauri) to see the live rack.
-              </p>
-            )}
+        <DeckUIContext.Provider value={deckUI}>
+          <div className="rack-area" ref={setRackEl}>
+            <div className="rack">
+              {nodes.map((node) => (
+                <ModulePanel
+                  key={node.instance_id}
+                  instanceId={node.instance_id}
+                  manifest={node.manifest}
+                  knobs={node.knobs}
+                  wired={Object.fromEntries(node.wired_inputs.map((j) => [j, true]))}
+                  telemetry={telemetry[node.instance_id]}
+                  handle={handles.get(node.instance_id)!}
+                  customUI={CUSTOM_UIS[node.type_id as keyof typeof CUSTOM_UIS]}
+                  pendingSource={pending}
+                  onJackClick={(kind, jack) => void onJackClick(node.instance_id, kind, jack)}
+                  onKnobPosition={(jack, position) => {
+                    void engine.setKnobPosition(node.instance_id, jack, position).then(refresh);
+                  }}
+                  onKnobConfig={(jack, config: KnobConfig) => {
+                    void engine.setKnobConfig(node.instance_id, jack, config).then(refresh);
+                  }}
+                  onAttenOffset={(jack, atten, offset) => {
+                    void engine.setAttenOffset(node.instance_id, jack, atten, offset).then(refresh);
+                  }}
+                  onParam={(param, value) => {
+                    void engine.setParam(node.instance_id, param, value).then(refresh);
+                  }}
+                />
+              ))}
+              {nodes.length === 0 && (
+                <p className="rack-empty">
+                  No engine connection — run via <code>./run.sh</code> (Tauri) to see the live rack.
+                </p>
+              )}
+            </div>
+            <WireOverlay wires={wires} container={rackEl} />
           </div>
-          <WireOverlay wires={wires} container={rackEl} />
-        </div>
+        </DeckUIContext.Provider>
       </div>
     </main>
   );
