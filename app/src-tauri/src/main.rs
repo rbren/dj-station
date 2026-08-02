@@ -7,8 +7,7 @@
 use dj_engine::{
     Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle, Manifest,
 };
-use dj_library::providers::SearchOutcome;
-use dj_library::{AcquisitionHub, Library, Query, Track, TrackResult};
+use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -383,9 +382,24 @@ fn library_search(state: State<AppState>, text: String) -> CmdResult<Vec<Track>>
     state.library.search(&text).map_err(err)
 }
 
+/// Enabled acquisition providers with their UI filter specs (per-store
+/// search tabs).
 #[tauri::command]
-fn provider_search(state: State<AppState>, text: String) -> CmdResult<SearchOutcome> {
-    Ok(state.hub.search(&Query::new(&text)))
+fn providers(state: State<AppState>) -> CmdResult<Vec<ProviderInfo>> {
+    Ok(state.hub.providers_info())
+}
+
+/// Search one store, with that store's filter selections.
+#[tauri::command]
+fn search_provider(
+    state: State<AppState>,
+    provider: String,
+    text: String,
+    filters: BTreeMap<String, String>,
+) -> CmdResult<Vec<TrackResult>> {
+    let mut q = Query::new(&text);
+    q.filters = filters;
+    state.hub.search_provider(&provider, &q).map_err(err)
 }
 
 #[tauri::command]
@@ -546,7 +560,8 @@ fn main() {
             engine_stop,
             library_tracks,
             library_search,
-            provider_search,
+            providers,
+            search_provider,
             import_track,
             download_track,
             open_store_page,

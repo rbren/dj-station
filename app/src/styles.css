@@ -222,6 +222,49 @@ body {
   gap: 14px;
 }
 
+.store-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid #2a2d33;
+  padding-bottom: 8px;
+}
+
+.store-tab {
+  background: #1b1d22;
+  color: #9aa0aa;
+  border: 1px solid #2a2d33;
+  border-radius: 6px 6px 0 0;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.store-tab.active {
+  background: #2a2d33;
+  color: #f2f3f5;
+}
+
+.store-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.store-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #9aa0aa;
+}
+
+.store-filter select {
+  background: #1b1d22;
+  color: #f2f3f5;
+  border: 1px solid #2a2d33;
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
 .library-search {
   display: flex;
   gap: 8px;

@@ -5,7 +5,8 @@
 use anyhow::{anyhow, Result};
 
 use super::{
-    get_json, json_f64, json_str, Acquire, AcquireKind, AcquisitionProvider, Query, TrackResult,
+    get_json, json_f64, json_str, Acquire, AcquireKind, AcquisitionProvider, FilterSpec, Query,
+    TrackResult,
 };
 use crate::LicenseInfo;
 
@@ -39,20 +40,63 @@ impl AcquisitionProvider for JamendoProvider {
         "Jamendo"
     }
 
+    fn acquire_kind(&self) -> AcquireKind {
+        AcquireKind::Download
+    }
+
+    fn filters(&self) -> Vec<FilterSpec> {
+        vec![
+            FilterSpec::new(
+                "order",
+                "Sort by",
+                &[
+                    ("", "Relevance"),
+                    ("popularity_total", "Most popular"),
+                    ("downloads_total", "Most downloaded"),
+                    ("releasedate_desc", "Newest"),
+                ],
+            ),
+            FilterSpec::new(
+                "vocalinstrumental",
+                "Vocals",
+                &[
+                    ("", "Any"),
+                    ("vocal", "Vocal"),
+                    ("instrumental", "Instrumental"),
+                ],
+            ),
+            FilterSpec::new(
+                "speed",
+                "Tempo",
+                &[
+                    ("", "Any tempo"),
+                    ("verylow", "Very slow"),
+                    ("low", "Slow"),
+                    ("medium", "Medium"),
+                    ("high", "Fast"),
+                    ("veryhigh", "Very fast"),
+                ],
+            ),
+        ]
+    }
+
     fn search(&self, q: &Query) -> Result<Vec<TrackResult>> {
         let url = format!("{}/v3.0/tracks/", self.base_url);
         let limit = q.limit.to_string();
-        let body = get_json(
-            &url,
-            &[
-                ("client_id", self.client_id.as_str()),
-                ("format", "json"),
-                ("search", q.text.as_str()),
-                ("limit", limit.as_str()),
-                ("audioformat", "mp32"),
-                ("include", "licenses"),
-            ],
-        )?;
+        let mut params = vec![
+            ("client_id", self.client_id.as_str()),
+            ("format", "json"),
+            ("search", q.text.as_str()),
+            ("limit", limit.as_str()),
+            ("audioformat", "mp32"),
+            ("include", "licenses"),
+        ];
+        for key in ["order", "vocalinstrumental", "speed"] {
+            if let Some(v) = q.filter(key) {
+                params.push((key, v));
+            }
+        }
+        let body = get_json(&url, &params)?;
         let results = body["results"].as_array().cloned().unwrap_or_default();
         Ok(results
             .iter()

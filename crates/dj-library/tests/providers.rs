@@ -11,7 +11,8 @@ use dj_library::providers::{
     FreesoundProvider, InternetArchiveProvider, ItunesProvider, JamendoProvider,
 };
 use dj_library::{
-    Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, Library, Query, TrackResult,
+    Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, Library, ProviderInfo, Query,
+    TrackResult,
 };
 use std::sync::Mutex;
 
@@ -302,7 +303,12 @@ fn internet_archive_resolves_best_audio_file_and_downloads() {
     let mut server = mockito::Server::new();
     let _search = server
         .mock("GET", "/advancedsearch.php")
-        .match_query(mockito::Matcher::Any)
+        // IA searches are always restricted to Creative Commons material.
+        .match_query(mockito::Matcher::UrlEncoded(
+            "q".into(),
+            "(grateful dead 1977) AND mediatype:(audio) AND licenseurl:(*creativecommons.org*)"
+                .into(),
+        ))
         .with_header("content-type", "application/json")
         .with_body(ia_search_body())
         .create();
@@ -466,4 +472,171 @@ fn downloading_the_same_content_twice_deduplicates() {
         .filter_map(|e| e.ok())
         .collect();
     assert_eq!(files.len(), 1, "duplicate download not cleaned up");
+}
+
+// ---------------------------------------------------------------------------
+// Provider filters: declared UI specs + mapping onto each store's API params
+// ---------------------------------------------------------------------------
+
+fn filter_ids(p: &ProviderInfo) -> Vec<&str> {
+    p.filters.iter().map(|f| f.id.as_str()).collect()
+}
+
+#[test]
+fn providers_declare_ui_filters_and_kinds() {
+    let hub = AcquisitionHub::new(vec![
+        Box::new(ItunesProvider::new()),
+        Box::new(InternetArchiveProvider::new()),
+        Box::new(FreesoundProvider::new("k")),
+        Box::new(JamendoProvider::new("c")),
+    ]);
+    let info = hub.providers_info();
+    let by_id = |id: &str| info.iter().find(|p| p.id == id).unwrap();
+
+    let itunes = by_id("itunes");
+    assert_eq!(itunes.acquire_kind, AcquireKind::DeepLink);
+    assert_eq!(filter_ids(itunes), ["country", "explicit"]);
+
+    let ia = by_id("internet_archive");
+    assert_eq!(ia.acquire_kind, AcquireKind::Download);
+    assert_eq!(filter_ids(ia), ["collection", "sort"]);
+
+    assert_eq!(
+        filter_ids(by_id("freesound")),
+        ["license", "max_duration", "sort"]
+    );
+    assert_eq!(
+        filter_ids(by_id("jamendo")),
+        ["order", "vocalinstrumental", "speed"]
+    );
+
+    // Every filter is select-style with the "any" default first, so the UI
+    // can render them blindly.
+    for p in &info {
+        for f in &p.filters {
+            assert!(!f.label.is_empty());
+            assert!(f.options.len() >= 2, "{}:{} needs choices", p.id, f.id);
+            assert_eq!(f.options[0].value, "", "{}:{} default first", p.id, f.id);
+        }
+    }
+}
+
+#[test]
+fn filter_selections_map_to_store_api_params() {
+    use mockito::Matcher::{AllOf, UrlEncoded};
+    let mut server = mockito::Server::new();
+
+    // iTunes: storefront country + explicit toggle.
+    let itunes = server
+        .mock("GET", "/search")
+        .match_query(AllOf(vec![
+            UrlEncoded("term".into(), "daft punk".into()),
+            UrlEncoded("country".into(), "gb".into()),
+            UrlEncoded("explicit".into(), "No".into()),
+        ]))
+        .with_body(r#"{"resultCount":0,"results":[]}"#)
+        .create();
+    ItunesProvider::with_base_url(&server.url())
+        .search(
+            &Query::new("daft punk")
+                .with_filter("country", "gb")
+                .with_filter("explicit", "No"),
+        )
+        .unwrap();
+    itunes.assert();
+
+    // Internet Archive: collection joins the CC-restricted query; sort is
+    // passed through.
+    let ia = server
+        .mock("GET", "/advancedsearch.php")
+        .match_query(AllOf(vec![
+            UrlEncoded(
+                "q".into(),
+                "(dub) AND mediatype:(audio) AND licenseurl:(*creativecommons.org*) \
+                 AND collection:(etree)"
+                    .into(),
+            ),
+            UrlEncoded("sort[]".into(), "downloads desc".into()),
+        ]))
+        .with_body(r#"{"response":{"numFound":0,"docs":[]}}"#)
+        .create();
+    InternetArchiveProvider::with_base_url(&server.url())
+        .search(
+            &Query::new("dub")
+                .with_filter("collection", "etree")
+                .with_filter("sort", "downloads desc"),
+        )
+        .unwrap();
+    ia.assert();
+
+    // Freesound: license + max duration become Solr filter clauses; sort is
+    // a plain param.
+    let freesound = server
+        .mock("GET", "/apiv2/search/text/")
+        .match_query(AllOf(vec![
+            UrlEncoded(
+                "filter".into(),
+                "license:\"Creative Commons 0\" duration:[0 TO 30]".into(),
+            ),
+            UrlEncoded("sort".into(), "downloads_desc".into()),
+        ]))
+        .with_body(r#"{"count":0,"results":[]}"#)
+        .create();
+    FreesoundProvider::with_base_url("test-key", &server.url())
+        .search(
+            &Query::new("kick")
+                .with_filter("license", "Creative Commons 0")
+                .with_filter("max_duration", "30")
+                .with_filter("sort", "downloads_desc"),
+        )
+        .unwrap();
+    freesound.assert();
+
+    // Jamendo: order / vocals / tempo pass through directly.
+    let jamendo = server
+        .mock("GET", "/v3.0/tracks/")
+        .match_query(AllOf(vec![
+            UrlEncoded("order".into(), "releasedate_desc".into()),
+            UrlEncoded("vocalinstrumental".into(), "instrumental".into()),
+            UrlEncoded("speed".into(), "high".into()),
+        ]))
+        .with_body(r#"{"headers":{},"results":[]}"#)
+        .create();
+    JamendoProvider::with_base_url("test-client", &server.url())
+        .search(
+            &Query::new("techno")
+                .with_filter("order", "releasedate_desc")
+                .with_filter("vocalinstrumental", "instrumental")
+                .with_filter("speed", "high"),
+        )
+        .unwrap();
+    jamendo.assert();
+}
+
+#[test]
+fn search_provider_targets_a_single_store() {
+    let mut server = mockito::Server::new();
+    let itunes_mock = server
+        .mock("GET", "/search")
+        .match_query(mockito::Matcher::Any)
+        .with_body(itunes_search_body())
+        .create();
+    // No IA mock: hitting IA here would fail the search.
+    let hub = AcquisitionHub::new(vec![
+        Box::new(ItunesProvider::with_base_url(&server.url())),
+        Box::new(InternetArchiveProvider::with_base_url(&server.url())),
+    ]);
+
+    let results = hub
+        .search_provider("itunes", &Query::new("daft punk"))
+        .unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(results.iter().all(|r| r.provider == "itunes"));
+    itunes_mock.assert();
+
+    assert!(hub
+        .search_provider("musopen", &Query::new("x"))
+        .unwrap_err()
+        .to_string()
+        .contains("not enabled"));
 }

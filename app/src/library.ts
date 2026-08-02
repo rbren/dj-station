@@ -47,9 +47,23 @@ export interface TrackResult {
   deep_link_url: string | null;
 }
 
-export interface SearchOutcome {
-  results: TrackResult[];
-  errors: [string, string][];
+export interface FilterOption {
+  value: string;
+  label: string;
+}
+
+/** A select-style filter a provider supports (first option = default). */
+export interface FilterSpec {
+  id: string;
+  label: string;
+  options: FilterOption[];
+}
+
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  acquire_kind: 'download' | 'deep_link';
+  filters: FilterSpec[];
 }
 
 /** What LibraryView needs; the Tauri-backed client below implements it and
@@ -57,7 +71,14 @@ export interface SearchOutcome {
 export interface LibraryClientApi {
   tracks(): Promise<Track[] | null>;
   search(text: string): Promise<Track[] | null>;
-  providerSearch(text: string): Promise<SearchOutcome | null>;
+  /** Enabled providers with their per-store filter specs. */
+  providers(): Promise<ProviderInfo[] | null>;
+  /** Search one store with that store's filter selections. */
+  searchProvider(
+    provider: string,
+    text: string,
+    filters: Record<string, string>,
+  ): Promise<TrackResult[] | null>;
   importTrack(path: string): Promise<Track | null>;
   downloadTrack(result: TrackResult): Promise<Track | null>;
   openStorePage(result: TrackResult): Promise<string | null>;
@@ -96,8 +117,11 @@ export class LibraryClient implements LibraryClientApi {
   search(text: string) {
     return this.call<Track[]>('library_search', { text });
   }
-  providerSearch(text: string) {
-    return this.call<SearchOutcome>('provider_search', { text });
+  providers() {
+    return this.call<ProviderInfo[]>('providers');
+  }
+  searchProvider(provider: string, text: string, filters: Record<string, string>) {
+    return this.call<TrackResult[]>('search_provider', { provider, text, filters });
   }
   importTrack(path: string) {
     return this.call<Track>('import_track', { path });

@@ -22,6 +22,7 @@ pub use jamendo::JamendoProvider;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::Write;
 
 use crate::db::{Library, Track};
@@ -36,6 +37,10 @@ pub struct Query {
     pub text: String,
     #[serde(default = "default_limit")]
     pub limit: usize,
+    /// Provider-specific filter selections, keyed by `FilterSpec::id`.
+    /// Empty string means "any" (the filter's default).
+    #[serde(default)]
+    pub filters: BTreeMap<String, String>,
 }
 
 fn default_limit() -> usize {
@@ -47,8 +52,64 @@ impl Query {
         Query {
             text: text.into(),
             limit: default_limit(),
+            filters: BTreeMap::new(),
         }
     }
+
+    pub fn with_filter(mut self, id: &str, value: &str) -> Self {
+        self.filters.insert(id.into(), value.into());
+        self
+    }
+
+    /// Selected value for a filter, if set and non-empty.
+    pub fn filter(&self, id: &str) -> Option<&str> {
+        self.filters
+            .get(id)
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+    }
+}
+
+/// One choice in a select-style provider filter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FilterOption {
+    /// Value sent back in `Query::filters` ("" = any/default).
+    pub value: String,
+    pub label: String,
+}
+
+/// A select-style filter a provider supports; the UI renders one dropdown
+/// per spec. The first option is always the default ("any").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FilterSpec {
+    pub id: String,
+    pub label: String,
+    pub options: Vec<FilterOption>,
+}
+
+impl FilterSpec {
+    pub fn new(id: &str, label: &str, options: &[(&str, &str)]) -> Self {
+        FilterSpec {
+            id: id.into(),
+            label: label.into(),
+            options: options
+                .iter()
+                .map(|(value, label)| FilterOption {
+                    value: (*value).into(),
+                    label: (*label).into(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// UI-facing description of an enabled provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderInfo {
+    pub id: String,
+    pub name: String,
+    pub acquire_kind: AcquireKind,
+    pub filters: Vec<FilterSpec>,
 }
 
 /// How a provider's results are acquired. Explicit on every result so the
@@ -109,6 +170,12 @@ pub trait AcquisitionProvider: Send + Sync {
     fn id(&self) -> &'static str;
     /// Human-readable name for the UI.
     fn name(&self) -> &'static str;
+    /// How this provider's results are acquired.
+    fn acquire_kind(&self) -> AcquireKind;
+    /// Select-style filters this provider supports (empty by default).
+    fn filters(&self) -> Vec<FilterSpec> {
+        Vec::new()
+    }
     fn search(&self, q: &Query) -> Result<Vec<TrackResult>>;
     fn acquire(&self, t: &TrackResult) -> Result<Acquire>;
     fn license(&self, t: &TrackResult) -> LicenseInfo {
@@ -158,6 +225,25 @@ impl AcquisitionHub {
 
     pub fn provider_ids(&self) -> Vec<&'static str> {
         self.providers.iter().map(|p| p.id()).collect()
+    }
+
+    /// UI-facing descriptions (id, name, acquisition kind, filters) of all
+    /// enabled providers, in fan-out order.
+    pub fn providers_info(&self) -> Vec<ProviderInfo> {
+        self.providers
+            .iter()
+            .map(|p| ProviderInfo {
+                id: p.id().into(),
+                name: p.name().into(),
+                acquire_kind: p.acquire_kind(),
+                filters: p.filters(),
+            })
+            .collect()
+    }
+
+    /// Search a single enabled provider (per-store search).
+    pub fn search_provider(&self, id: &str, q: &Query) -> Result<Vec<TrackResult>> {
+        self.provider(id)?.search(q)
     }
 
     fn provider(&self, id: &str) -> Result<&dyn AcquisitionProvider> {

@@ -1,9 +1,10 @@
-// Library view (M1, PRD §9): local library list + unified provider search.
-// Results are tagged by source and license; Download providers pull straight
-// into the library, DeepLink providers open the store page.
+// Library view (M1, PRD §9): local library + per-store search tabs.
+// Each enabled provider gets its own tab with store-specific filters;
+// results are tagged by source and license. Download providers pull
+// straight into the library, DeepLink providers open the store page.
 
 import { useCallback, useEffect, useState } from 'react';
-import type { LibraryClientApi, Track, TrackResult } from '../library';
+import type { LibraryClientApi, ProviderInfo, Track, TrackResult } from '../library';
 
 function formatDuration(secs: number | null): string {
   if (secs == null) return '—';
@@ -34,9 +35,14 @@ export interface LibraryViewProps {
 
 export function LibraryView({ client }: LibraryViewProps) {
   const [query, setQuery] = useState('');
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  // Active tab: 'local' or a provider id.
+  const [tab, setTab] = useState('local');
+  // Filter selections per provider, keyed "providerId:filterId".
+  const [filters, setFilters] = useState<Record<string, string>>({});
   const [tracks, setTracks] = useState<Track[]>([]);
   const [results, setResults] = useState<TrackResult[]>([]);
-  const [errors, setErrors] = useState<[string, string][]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -50,19 +56,33 @@ export function LibraryView({ client }: LibraryViewProps) {
 
   useEffect(() => {
     (async () => {
-      await refreshTracks('');
+      const [, available] = await Promise.all([refreshTracks(''), client.providers()]);
+      if (available) setProviders(available);
     })();
-  }, [refreshTracks]);
+  }, [client, refreshTracks]);
+
+  const active = providers.find((p) => p.id === tab) ?? null;
 
   const runSearch = useCallback(async () => {
     setStatus(null);
-    // Fan out: local library + all enabled providers in parallel.
-    const [, remote] = await Promise.all([refreshTracks(query), client.providerSearch(query)]);
-    if (remote) {
-      setResults(remote.results);
-      setErrors(remote.errors);
+    setError(null);
+    if (!active) {
+      await refreshTracks(query);
+      return;
     }
-  }, [client, query, refreshTracks]);
+    const selected: Record<string, string> = {};
+    for (const f of active.filters) {
+      const v = filters[`${active.id}:${f.id}`];
+      if (v) selected[f.id] = v;
+    }
+    try {
+      const remote = await client.searchProvider(active.id, query, selected);
+      if (remote) setResults(remote);
+    } catch (e) {
+      setError(`${active.name}: ${String(e)}`);
+      setResults([]);
+    }
+  }, [active, client, filters, query, refreshTracks]);
 
   const download = useCallback(
     async (r: TrackResult) => {
@@ -70,12 +90,12 @@ export function LibraryView({ client }: LibraryViewProps) {
       try {
         const track = await client.downloadTrack(r);
         if (track) setStatus(`Downloaded "${track.title}" into the library`);
-        await refreshTracks(query);
+        await refreshTracks('');
       } finally {
         setBusy(null);
       }
     },
-    [client, query, refreshTracks],
+    [client, refreshTracks],
   );
 
   const openStore = useCallback(
@@ -88,6 +108,30 @@ export function LibraryView({ client }: LibraryViewProps) {
 
   return (
     <section className="library" data-testid="library-view">
+      <nav className="store-tabs" data-testid="store-tabs">
+        <button
+          className={tab === 'local' ? 'store-tab active' : 'store-tab'}
+          data-testid="store-tab-local"
+          onClick={() => setTab('local')}
+        >
+          Local
+        </button>
+        {providers.map((p) => (
+          <button
+            key={p.id}
+            className={tab === p.id ? 'store-tab active' : 'store-tab'}
+            data-testid={`store-tab-${p.id}`}
+            onClick={() => {
+              setTab(p.id);
+              setResults([]);
+              setError(null);
+            }}
+          >
+            {p.name}
+          </button>
+        ))}
+      </nav>
+
       <form
         className="library-search"
         onSubmit={(e) => {
@@ -97,7 +141,7 @@ export function LibraryView({ client }: LibraryViewProps) {
       >
         <input
           type="search"
-          placeholder="Search library + providers…"
+          placeholder={active ? `Search ${active.name}…` : 'Search local library…'}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           data-testid="library-search-input"
@@ -107,24 +151,44 @@ export function LibraryView({ client }: LibraryViewProps) {
         </button>
       </form>
 
+      {active && active.filters.length > 0 && (
+        <div className="store-filters" data-testid="store-filters">
+          {active.filters.map((f) => {
+            const key = `${active.id}:${f.id}`;
+            return (
+              <label key={key} className="store-filter">
+                <span>{f.label}</span>
+                <select
+                  value={filters[key] ?? ''}
+                  data-testid={`filter-${f.id}`}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, [key]: e.target.value }))}
+                >
+                  {f.options.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
+        </div>
+      )}
+
       {status && (
         <p className="library-status" data-testid="library-status">
           {status}
         </p>
       )}
-      {errors.length > 0 && (
-        <ul className="library-errors" data-testid="provider-errors">
-          {errors.map(([provider, message]) => (
-            <li key={provider}>
-              {provider}: {message}
-            </li>
-          ))}
-        </ul>
+      {error && (
+        <p className="library-errors" data-testid="provider-error">
+          {error}
+        </p>
       )}
 
-      {results.length > 0 && (
+      {active && results.length > 0 && (
         <div className="provider-results">
-          <h2>Search results</h2>
+          <h2>{active.name} results</h2>
           <ul>
             {results.map((r) => (
               <li key={`${r.provider}:${r.id}`} data-testid="provider-result">
@@ -167,43 +231,45 @@ export function LibraryView({ client }: LibraryViewProps) {
         </div>
       )}
 
-      <div className="library-tracks">
-        <h2>Library</h2>
-        {tracks.length === 0 ? (
-          <p className="library-empty" data-testid="library-empty">
-            No tracks yet — search above, or drop files into a watch folder.
-          </p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Title</th>
-                <th>Artist</th>
-                <th>Length</th>
-                <th>Source</th>
-                <th>License</th>
-                <th>Analysis</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tracks.map((t) => (
-                <tr key={t.id} data-testid="library-track">
-                  <td>{t.title}</td>
-                  <td>{t.artist}</td>
-                  <td>{formatDuration(t.duration_secs)}</td>
-                  <td>
-                    <SourceTag source={t.source} />
-                  </td>
-                  <td>
-                    <LicenseTag kind={t.license.kind} />
-                  </td>
-                  <td>{t.analysis_status}</td>
+      {tab === 'local' && (
+        <div className="library-tracks">
+          <h2>Library</h2>
+          {tracks.length === 0 ? (
+            <p className="library-empty" data-testid="library-empty">
+              No tracks yet — search a store tab, or drop files into a watch folder.
+            </p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Artist</th>
+                  <th>Length</th>
+                  <th>Source</th>
+                  <th>License</th>
+                  <th>Analysis</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+              </thead>
+              <tbody>
+                {tracks.map((t) => (
+                  <tr key={t.id} data-testid="library-track">
+                    <td>{t.title}</td>
+                    <td>{t.artist}</td>
+                    <td>{formatDuration(t.duration_secs)}</td>
+                    <td>
+                      <SourceTag source={t.source} />
+                    </td>
+                    <td>
+                      <LicenseTag kind={t.license.kind} />
+                    </td>
+                    <td>{t.analysis_status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </section>
   );
 }

@@ -52,17 +52,19 @@ downloads).
 - **Watch folders**: folders registered in the library are polled; new
   audio files (mp3/m4a/aac/flac/wav/aiff) are content-hashed, imported, and
   queued for analysis (the analysis pipeline itself is M3).
-- **Unified search** fans out across the enabled acquisition providers;
-  every result is tagged by source and license, and the license is stored
-  per track on import.
+- **Per-store search**: the library view shows one tab per enabled
+  provider (plus the local library). Each tab searches that store only,
+  with store-specific filters; every result is tagged by source and
+  license, and the license is stored per track on import. (The Rust hub
+  also still supports fanning a query out across all providers.)
 
-| Provider | Acquire | Enabling |
-|---|---|---|
-| iTunes Search | Deep link to the store page | always on (keyless) |
-| Internet Archive | Direct download | always on (keyless) |
-| Freesound | Direct download (HQ MP3 preview rendition) | set `FREESOUND_API_KEY` (free key from freesound.org/apiv2) |
-| Jamendo | Direct download (MP3) | set `JAMENDO_CLIENT_ID` (free key from devportal.jamendo.com) |
-| Musopen | — | fast-follow (API requires manually approved accounts) |
+| Provider | Acquire | Filters | Enabling |
+|---|---|---|---|
+| iTunes Search | Deep link to the store page | storefront country, exclude explicit | always on (keyless) |
+| Internet Archive | Direct download — **Creative Commons material only** | collection, sort | always on (keyless) |
+| Freesound | Direct download (HQ MP3 preview rendition) | CC license type, max length, sort | set `FREESOUND_API_KEY` (free key from freesound.org/apiv2) |
+| Jamendo | Direct download (MP3) | sort, vocal/instrumental, tempo | set `JAMENDO_CLIENT_ID` (free key from devportal.jamendo.com) |
+| Musopen | — | — | fast-follow (API requires manually approved accounts) |
 
 Deep-link purchases (iTunes) land via the watch folder like any other file.
 
@@ -116,8 +118,8 @@ crates/
   dj-library       Sound library (M1): SQLite DB (tracks, hashes, licenses,
                    tags, crates, watch folders), watch-folder auto-import,
                    acquisition provider framework (iTunes deep-link,
-                   Freesound/Jamendo/Internet Archive download) with unified
-                   fan-out search.
+                   Freesound/Jamendo/Internet Archive download) with
+                   per-store filters and unified fan-out search.
   dj-cli           Headless harness: create/render/run/save/load patches,
                    inject virtual MIDI, print telemetry.
 extensions/        WASM extensions (each folder: manifest.json + dsp.wasm +

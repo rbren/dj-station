@@ -5,7 +5,8 @@
 use anyhow::{anyhow, Result};
 
 use super::{
-    get_json, json_f64, json_str, Acquire, AcquireKind, AcquisitionProvider, Query, TrackResult,
+    get_json, json_f64, json_str, Acquire, AcquireKind, AcquisitionProvider, FilterSpec, Query,
+    TrackResult,
 };
 use crate::LicenseInfo;
 
@@ -43,18 +44,49 @@ impl AcquisitionProvider for ItunesProvider {
         "iTunes Store"
     }
 
+    fn acquire_kind(&self) -> AcquireKind {
+        AcquireKind::DeepLink
+    }
+
+    fn filters(&self) -> Vec<FilterSpec> {
+        vec![
+            FilterSpec::new(
+                "country",
+                "Storefront",
+                &[
+                    ("", "United States"),
+                    ("gb", "United Kingdom"),
+                    ("de", "Germany"),
+                    ("fr", "France"),
+                    ("jp", "Japan"),
+                    ("ca", "Canada"),
+                    ("au", "Australia"),
+                ],
+            ),
+            FilterSpec::new(
+                "explicit",
+                "Explicit content",
+                &[("", "Include"), ("No", "Exclude")],
+            ),
+        ]
+    }
+
     fn search(&self, q: &Query) -> Result<Vec<TrackResult>> {
         let url = format!("{}/search", self.base_url);
         let limit = q.limit.to_string();
-        let body = get_json(
-            &url,
-            &[
-                ("term", q.text.as_str()),
-                ("media", "music"),
-                ("entity", "song"),
-                ("limit", limit.as_str()),
-            ],
-        )?;
+        let mut params = vec![
+            ("term", q.text.as_str()),
+            ("media", "music"),
+            ("entity", "song"),
+            ("limit", limit.as_str()),
+        ];
+        if let Some(country) = q.filter("country") {
+            params.push(("country", country));
+        }
+        if let Some(explicit) = q.filter("explicit") {
+            params.push(("explicit", explicit));
+        }
+        let body = get_json(&url, &params)?;
         let results = body["results"].as_array().cloned().unwrap_or_default();
         Ok(results
             .iter()

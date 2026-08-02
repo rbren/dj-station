@@ -1,11 +1,12 @@
-// Library view (M1): search fans out to local library + providers, results
-// carry source/license tags, download and deep-link actions call through
-// the client (which is Tauri IPC in the app; a mock here).
+// Library view (M1): per-store search tabs. Each provider tab searches that
+// store only, with store-specific filters; results carry source/license
+// tags; download and deep-link actions call through the client (Tauri IPC
+// in the app; a mock here).
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { LibraryView } from '../src/components/LibraryView';
-import type { LibraryClientApi, SearchOutcome, Track, TrackResult } from '../src/library';
+import type { LibraryClientApi, ProviderInfo, Track, TrackResult } from '../src/library';
 
 const LOCAL_TRACK: Track = {
   id: 1,
@@ -36,9 +37,9 @@ const ITUNES_RESULT: TrackResult = {
   artist: 'Daft Punk',
   album: 'Discovery',
   duration_secs: 224.7,
-  preview_url: 'https://audio.example/preview.m4a',
+  preview_url: 'https://audio-ssl.itunes.apple.com/preview.m4a',
   artwork_url: null,
-  license: { kind: 'commercial', name: 'All rights reserved', url: '', attribution: '' },
+  license: { kind: 'commercial', name: 'Commercial', url: '', attribution: '' },
   download_url: null,
   deep_link_url: 'https://music.apple.com/us/album/x?i=1440764401',
 };
@@ -51,15 +52,10 @@ const FREESOUND_RESULT: TrackResult = {
   artist: 'breaks4days',
   album: '',
   duration_secs: 1.4,
-  preview_url: 'https://cdn.example/preview.mp3',
+  preview_url: 'https://freesound.org/previews/123456-hq.mp3',
   artwork_url: null,
-  license: {
-    kind: 'cc-by',
-    name: 'CC BY',
-    url: 'https://creativecommons.org/licenses/by/4.0/',
-    attribution: '"amen break" by breaks4days',
-  },
-  download_url: 'https://cdn.example/hq.mp3',
+  license: { kind: 'cc-by', name: 'CC BY 4.0', url: '', attribution: '' },
+  download_url: 'https://freesound.org/previews/123456-hq.mp3',
   deep_link_url: null,
 };
 
@@ -80,20 +76,83 @@ const IA_RESULT: TrackResult = {
   deep_link_url: 'https://archive.org/details/gd1977-05-08',
 };
 
+const RESULT_BY_PROVIDER: Record<string, TrackResult[]> = {
+  itunes: [ITUNES_RESULT],
+  freesound: [FREESOUND_RESULT],
+  internet_archive: [IA_RESULT],
+};
+
+const PROVIDERS: ProviderInfo[] = [
+  {
+    id: 'itunes',
+    name: 'iTunes Store',
+    acquire_kind: 'deep_link',
+    filters: [
+      {
+        id: 'country',
+        label: 'Storefront',
+        options: [
+          { value: '', label: 'United States' },
+          { value: 'gb', label: 'United Kingdom' },
+        ],
+      },
+      {
+        id: 'explicit',
+        label: 'Explicit content',
+        options: [
+          { value: '', label: 'Include' },
+          { value: 'No', label: 'Exclude' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'freesound',
+    name: 'Freesound',
+    acquire_kind: 'download',
+    filters: [
+      {
+        id: 'license',
+        label: 'License',
+        options: [
+          { value: '', label: 'Any CC license' },
+          { value: 'Creative Commons 0', label: 'CC0 (public domain)' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'internet_archive',
+    name: 'Internet Archive',
+    acquire_kind: 'download',
+    filters: [
+      {
+        id: 'collection',
+        label: 'Collection',
+        options: [
+          { value: '', label: 'Any collection' },
+          { value: 'etree', label: 'Live Music Archive' },
+        ],
+      },
+    ],
+  },
+];
+
 function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi {
-  const outcome: SearchOutcome = {
-    results: [ITUNES_RESULT, FREESOUND_RESULT, IA_RESULT],
-    errors: [['jamendo', 'HTTP 500']],
-  };
   return {
     tracks: vi.fn().mockResolvedValue([LOCAL_TRACK]),
     search: vi.fn().mockResolvedValue([LOCAL_TRACK]),
-    providerSearch: vi.fn().mockResolvedValue(outcome),
+    providers: vi.fn().mockResolvedValue(PROVIDERS),
+    searchProvider: vi
+      .fn()
+      .mockImplementation((provider: string) =>
+        Promise.resolve(RESULT_BY_PROVIDER[provider] ?? []),
+      ),
     importTrack: vi.fn().mockResolvedValue(LOCAL_TRACK),
     downloadTrack: vi.fn().mockResolvedValue({
       ...LOCAL_TRACK,
       id: 2,
-      title: FREESOUND_RESULT.title,
+      title: 'amen break 174bpm',
       source: 'freesound',
       license: FREESOUND_RESULT.license,
     }),
@@ -104,10 +163,16 @@ function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi
   };
 }
 
-async function searchFor(text: string) {
+async function openTab(provider: string) {
+  await waitFor(() => expect(screen.getByTestId(`store-tab-${provider}`)).toBeTruthy());
+  fireEvent.click(screen.getByTestId(`store-tab-${provider}`));
+}
+
+async function searchStore(provider: string, text: string) {
+  await openTab(provider);
   fireEvent.change(screen.getByTestId('library-search-input'), { target: { value: text } });
   fireEvent.click(screen.getByTestId('library-search-button'));
-  await waitFor(() => expect(screen.queryAllByTestId('provider-result')).toHaveLength(3));
+  await waitFor(() => expect(screen.queryAllByTestId('provider-result').length).toBeGreaterThan(0));
 }
 
 describe('LibraryView', () => {
@@ -115,53 +180,82 @@ describe('LibraryView', () => {
     const client = mockClient();
     render(<LibraryView client={client} />);
     await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
-    expect(client.tracks).toHaveBeenCalled();
-    expect(screen.getByText('Basement Loop')).toBeTruthy();
     const row = screen.getByTestId('library-track');
+    expect(row.textContent).toContain('Basement Loop');
     expect(row.querySelector('[data-testid="source-tag"]')?.textContent).toBe('watch');
     expect(row.querySelector('[data-testid="license-tag"]')?.textContent).toBe('unknown');
   });
 
-  it('search fans out to local library and providers', async () => {
-    const client = mockClient();
-    render(<LibraryView client={client} />);
-    await searchFor('daft punk');
-    expect(client.search).toHaveBeenCalledWith('daft punk');
-    expect(client.providerSearch).toHaveBeenCalledWith('daft punk');
+  it('renders one tab per enabled provider plus Local', async () => {
+    render(<LibraryView client={mockClient()} />);
+    await waitFor(() => expect(screen.getByTestId('store-tab-internet_archive')).toBeTruthy());
+    const tabs = screen.getByTestId('store-tabs');
+    expect(tabs.textContent).toContain('Local');
+    expect(tabs.textContent).toContain('iTunes Store');
+    expect(tabs.textContent).toContain('Freesound');
+    expect(tabs.textContent).toContain('Internet Archive');
   });
 
-  it('provider results carry source and license tags and preview links', async () => {
-    render(<LibraryView client={mockClient()} />);
-    await searchFor('daft punk');
+  it('searches one store at a time from its tab', async () => {
+    const client = mockClient();
+    render(<LibraryView client={client} />);
+    await searchStore('itunes', 'daft punk');
+    expect(client.searchProvider).toHaveBeenCalledTimes(1);
+    expect(client.searchProvider).toHaveBeenCalledWith('itunes', 'daft punk', {});
     const results = screen.getAllByTestId('provider-result');
-    const sources = results.map((r) => r.querySelector('[data-testid="source-tag"]')?.textContent);
-    expect(sources).toEqual(['itunes', 'freesound', 'internet_archive']);
-    const licenses = results.map(
-      (r) => r.querySelector('[data-testid="license-tag"]')?.textContent,
+    expect(results).toHaveLength(1);
+    expect(results[0].querySelector('[data-testid="source-tag"]')?.textContent).toBe('itunes');
+    expect(results[0].querySelector('[data-testid="license-tag"]')?.textContent).toBe('commercial');
+  });
+
+  it('renders store-specific filters and passes selections to the search', async () => {
+    const client = mockClient();
+    render(<LibraryView client={client} />);
+    await openTab('itunes');
+    // iTunes tab exposes its own filters.
+    expect(screen.getByTestId('store-filters').textContent).toContain('Storefront');
+    fireEvent.change(screen.getByTestId('filter-country'), { target: { value: 'gb' } });
+    fireEvent.change(screen.getByTestId('filter-explicit'), { target: { value: 'No' } });
+    fireEvent.change(screen.getByTestId('library-search-input'), {
+      target: { value: 'daft punk' },
+    });
+    fireEvent.click(screen.getByTestId('library-search-button'));
+    await waitFor(() =>
+      expect(client.searchProvider).toHaveBeenCalledWith('itunes', 'daft punk', {
+        country: 'gb',
+        explicit: 'No',
+      }),
     );
-    expect(licenses).toEqual(['commercial', 'cc-by', 'cc0']);
-    const previews = screen.getAllByTestId('preview-link');
-    expect(previews.map((a) => a.getAttribute('href'))).toEqual([
-      ITUNES_RESULT.preview_url,
-      FREESOUND_RESULT.preview_url,
-      IA_RESULT.preview_url,
-    ]);
+
+    // Filters are per store: Internet Archive shows its own set.
+    await openTab('internet_archive');
+    expect(screen.getByTestId('store-filters').textContent).toContain('Collection');
+    expect(screen.queryByTestId('filter-country')).toBeNull();
+  });
+
+  it('shows the provider error when a store search fails', async () => {
+    const client = mockClient({
+      searchProvider: vi.fn().mockRejectedValue('HTTP 500'),
+    });
+    render(<LibraryView client={client} />);
+    await openTab('freesound');
+    fireEvent.click(screen.getByTestId('library-search-button'));
+    await waitFor(() =>
+      expect(screen.getByTestId('provider-error').textContent).toContain('Freesound'),
+    );
+    expect(screen.queryAllByTestId('provider-result')).toHaveLength(0);
   });
 
   it('Internet Archive results get a Download action even though their download URL resolves later', async () => {
     const client = mockClient();
     render(<LibraryView client={client} />);
-    await searchFor('grateful dead');
-    const iaRow = screen
-      .getAllByTestId('provider-result')
-      .find(
-        (r) => r.querySelector('[data-testid="source-tag"]')?.textContent === 'internet_archive',
-      )!;
+    await searchStore('internet_archive', 'grateful dead');
+    const row = screen.getByTestId('provider-result');
     // Regression: IA has download_url = null + a deep_link_url; it must
     // still be a Download (an "Open Store" action would fail for IA).
-    expect(iaRow.querySelector('[data-testid="download-button"]')).toBeTruthy();
-    expect(iaRow.querySelector('[data-testid="open-store-button"]')).toBeNull();
-    fireEvent.click(iaRow.querySelector('[data-testid="download-button"]')!);
+    expect(row.querySelector('[data-testid="download-button"]')).toBeTruthy();
+    expect(row.querySelector('[data-testid="open-store-button"]')).toBeNull();
+    fireEvent.click(row.querySelector('[data-testid="download-button"]')!);
     await waitFor(() =>
       expect(client.downloadTrack).toHaveBeenCalledWith(
         expect.objectContaining({ provider: 'internet_archive', id: 'gd1977-05-08' }),
@@ -172,29 +266,20 @@ describe('LibraryView', () => {
   it('preview links open in the system browser, not the webview', async () => {
     const client = mockClient();
     render(<LibraryView client={client} />);
-    await searchFor('daft punk');
-    const [itunesPreview] = screen.getAllByTestId('preview-link');
+    await searchStore('itunes', 'daft punk');
+    const preview = screen.getByTestId('preview-link');
     // In-page navigation must be prevented (would take over the app UI)…
-    const navigated = fireEvent.click(itunesPreview);
+    const navigated = fireEvent.click(preview);
     expect(navigated).toBe(false); // false = preventDefault() was called
     // …and the URL is dispatched to the system's default browser instead.
     expect(client.openExternal).toHaveBeenCalledWith(ITUNES_RESULT.preview_url);
   });
 
-  it('failed providers are reported without breaking the result list', async () => {
-    render(<LibraryView client={mockClient()} />);
-    await searchFor('anything');
-    expect(screen.getByTestId('provider-errors').textContent).toContain('jamendo');
-  });
-
   it('Download pulls the result into the library and refreshes the list', async () => {
     const client = mockClient();
     render(<LibraryView client={client} />);
-    await searchFor('amen');
-    // Freesound and Internet Archive are direct downloads (itunes is not).
-    const buttons = screen.getAllByTestId('download-button');
-    expect(buttons).toHaveLength(2);
-    fireEvent.click(buttons[0]);
+    await searchStore('freesound', 'amen');
+    fireEvent.click(screen.getByTestId('download-button'));
     await waitFor(() =>
       expect(client.downloadTrack).toHaveBeenCalledWith(
         expect.objectContaining({ provider: 'freesound', id: '123456' }),
@@ -204,15 +289,16 @@ describe('LibraryView', () => {
       expect(screen.getByTestId('library-status').textContent).toContain('amen break 174bpm'),
     );
     // Local list re-queried after the download.
-    expect(client.search).toHaveBeenCalledTimes(2);
+    expect(client.tracks).toHaveBeenCalledTimes(2);
   });
 
   it('iTunes results expose Open Store (deep link), not Download', async () => {
     const client = mockClient();
     render(<LibraryView client={client} />);
-    await searchFor('daft punk');
+    await searchStore('itunes', 'daft punk');
     const openStore = screen.getAllByTestId('open-store-button');
     expect(openStore).toHaveLength(1);
+    expect(screen.queryByTestId('download-button')).toBeNull();
     fireEvent.click(openStore[0]);
     await waitFor(() =>
       expect(client.openStorePage).toHaveBeenCalledWith(

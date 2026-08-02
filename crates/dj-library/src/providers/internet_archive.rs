@@ -7,7 +7,9 @@
 
 use anyhow::{anyhow, Result};
 
-use super::{get_json, json_str, Acquire, AcquireKind, AcquisitionProvider, Query, TrackResult};
+use super::{
+    get_json, json_str, Acquire, AcquireKind, AcquisitionProvider, FilterSpec, Query, TrackResult,
+};
 use crate::LicenseInfo;
 
 pub const DEFAULT_BASE_URL: &str = "https://archive.org";
@@ -60,22 +62,60 @@ impl AcquisitionProvider for InternetArchiveProvider {
         "Internet Archive"
     }
 
+    fn acquire_kind(&self) -> AcquireKind {
+        AcquireKind::Download
+    }
+
+    fn filters(&self) -> Vec<FilterSpec> {
+        vec![
+            FilterSpec::new(
+                "collection",
+                "Collection",
+                &[
+                    ("", "Any collection"),
+                    ("etree", "Live Music Archive"),
+                    ("opensource_audio", "Community Audio"),
+                    ("netlabels", "Netlabels"),
+                ],
+            ),
+            FilterSpec::new(
+                "sort",
+                "Sort by",
+                &[
+                    ("", "Relevance"),
+                    ("downloads desc", "Most downloaded"),
+                    ("publicdate desc", "Newest"),
+                    ("avg_rating desc", "Top rated"),
+                ],
+            ),
+        ]
+    }
+
     fn search(&self, q: &Query) -> Result<Vec<TrackResult>> {
         let url = format!("{}/advancedsearch.php", self.base_url);
-        let query = format!("({}) AND mediatype:(audio)", q.text);
+        // Only surface Creative Commons material: require a
+        // creativecommons.org license URL on every hit.
+        let mut query = format!(
+            "({}) AND mediatype:(audio) AND licenseurl:(*creativecommons.org*)",
+            q.text
+        );
+        if let Some(collection) = q.filter("collection") {
+            query.push_str(&format!(" AND collection:({collection})"));
+        }
         let rows = q.limit.to_string();
-        let body = get_json(
-            &url,
-            &[
-                ("q", query.as_str()),
-                ("fl[]", "identifier"),
-                ("fl[]", "title"),
-                ("fl[]", "creator"),
-                ("fl[]", "licenseurl"),
-                ("rows", rows.as_str()),
-                ("output", "json"),
-            ],
-        )?;
+        let mut params = vec![
+            ("q", query.as_str()),
+            ("fl[]", "identifier"),
+            ("fl[]", "title"),
+            ("fl[]", "creator"),
+            ("fl[]", "licenseurl"),
+            ("rows", rows.as_str()),
+            ("output", "json"),
+        ];
+        if let Some(sort) = q.filter("sort") {
+            params.push(("sort[]", sort));
+        }
+        let body = get_json(&url, &params)?;
         let docs = body["response"]["docs"]
             .as_array()
             .cloned()

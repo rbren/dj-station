@@ -16,7 +16,8 @@ pub mod watch;
 pub use db::{Library, Track};
 pub use import::{ImportOptions, ImportOutcome, AUDIO_EXTENSIONS};
 pub use providers::{
-    Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, Query, TrackResult,
+    Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, FilterOption, FilterSpec,
+    ProviderInfo, Query, TrackResult,
 };
 pub use watch::{start_watcher, WatchHandle};
 

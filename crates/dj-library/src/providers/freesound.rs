@@ -8,7 +8,9 @@
 
 use anyhow::{anyhow, Result};
 
-use super::{json_f64, json_str, Acquire, AcquireKind, AcquisitionProvider, Query, TrackResult};
+use super::{
+    json_f64, json_str, Acquire, AcquireKind, AcquisitionProvider, FilterSpec, Query, TrackResult,
+};
 use crate::LicenseInfo;
 
 pub const DEFAULT_BASE_URL: &str = "https://freesound.org";
@@ -45,6 +47,45 @@ impl AcquisitionProvider for FreesoundProvider {
         "Freesound"
     }
 
+    fn acquire_kind(&self) -> AcquireKind {
+        AcquireKind::Download
+    }
+
+    fn filters(&self) -> Vec<FilterSpec> {
+        vec![
+            FilterSpec::new(
+                "license",
+                "License",
+                &[
+                    ("", "Any CC license"),
+                    ("Creative Commons 0", "CC0 (public domain)"),
+                    ("Attribution", "CC BY"),
+                    ("Attribution Noncommercial", "CC BY-NC"),
+                ],
+            ),
+            FilterSpec::new(
+                "max_duration",
+                "Max length",
+                &[
+                    ("", "Any length"),
+                    ("30", "≤ 30 s (loops/one-shots)"),
+                    ("120", "≤ 2 min"),
+                    ("600", "≤ 10 min"),
+                ],
+            ),
+            FilterSpec::new(
+                "sort",
+                "Sort by",
+                &[
+                    ("", "Relevance"),
+                    ("downloads_desc", "Most downloaded"),
+                    ("rating_desc", "Top rated"),
+                    ("created_desc", "Newest"),
+                ],
+            ),
+        ]
+    }
+
     fn search(&self, q: &Query) -> Result<Vec<TrackResult>> {
         let url = format!("{}/apiv2/search/text/", self.base_url);
         let limit = q.limit.to_string();
@@ -58,6 +99,20 @@ impl AcquisitionProvider for FreesoundProvider {
                 "id,name,username,license,duration,previews,download,images",
             );
         req = req.query("token", &self.api_key);
+        // Solr filter clauses (space-separated, ANDed by the API).
+        let mut clauses = Vec::new();
+        if let Some(license) = q.filter("license") {
+            clauses.push(format!("license:\"{license}\""));
+        }
+        if let Some(max) = q.filter("max_duration") {
+            clauses.push(format!("duration:[0 TO {max}]"));
+        }
+        if !clauses.is_empty() {
+            req = req.query("filter", &clauses.join(" "));
+        }
+        if let Some(sort) = q.filter("sort") {
+            req = req.query("sort", sort);
+        }
         let body: serde_json::Value = req
             .call()
             .map_err(|e| anyhow!("GET {url}: {e}"))?
