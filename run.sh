@@ -60,7 +60,14 @@ cargo fmt --all --check || fail "rustfmt failed"
 
 [ "$NO_LAUNCH" = "1" ] && { echo "==> build + tests OK (launch skipped)"; exit 0; }
 
-if [ "$SMOKE" = "1" ] || [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+# GUI is available on macOS (always has a display; Tauri uses WKWebView) or
+# on Linux when a display server is reachable.
+HAVE_GUI=0
+if [ "$(uname -s)" = "Darwin" ] || [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+  HAVE_GUI=1
+fi
+
+if [ "$SMOKE" = "1" ] || [ "$HAVE_GUI" = "0" ]; then
   echo "==> headless mode (no display detected)"
   ./target/release/dj-cli demo /tmp/dj-demo-patch --extensions extensions \
     || fail "demo patch creation failed"
@@ -74,7 +81,7 @@ if [ "$SMOKE" = "1" ] || [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
   exec ./target/release/dj-cli run /tmp/dj-demo-patch --backend null --extensions extensions
 else
   echo "==> launching Tauri GUI"
-  if ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+  if [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
     fail "webkit2gtk-4.1 not found — install libwebkit2gtk-4.1-dev (Linux) or run headless"
   fi
   cargo build --manifest-path app/src-tauri/Cargo.toml --release || fail "Tauri build failed"
