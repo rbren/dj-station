@@ -64,6 +64,7 @@ function node(instance: string, manifest: Manifest, wired: string[] = []) {
     knobs: {},
     params: {},
     wired_inputs: wired,
+    midi_mappings: [],
   };
 }
 

@@ -12,6 +12,12 @@ async function tauriInvoke(): Promise<Invoke | null> {
   return invoke as Invoke;
 }
 
+export interface MidiMapping {
+  name: string;
+  kind: string;
+  num: number;
+}
+
 export interface NodeSnapshot {
   instance_id: string;
   type_id: string;
@@ -19,6 +25,7 @@ export interface NodeSnapshot {
   knobs: Record<string, { position: number; atten: number; offset: number }>;
   params: Record<string, number>;
   wired_inputs: string[];
+  midi_mappings: MidiMapping[];
 }
 
 export interface WireSnapshot {
@@ -101,6 +108,12 @@ export class EngineClient {
   }
   injectMidi(instance: string, frame: number, data: [number, number, number]) {
     return this.call<void>('inject_midi', { instance, frame, data });
+  }
+  addMidiMapping(instance: string, kind: string, num: number, name: string) {
+    return this.call<void>('add_midi_mapping', { instance, kind, num, name });
+  }
+  removeMidiMapping(instance: string, name: string) {
+    return this.call<void>('remove_midi_mapping', { instance, name });
   }
   /** Returns the backend the engine actually started on: 'cpal' (device
    *  audio) or 'null' (silent fallback), or null outside Tauri. */

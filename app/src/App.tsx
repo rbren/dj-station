@@ -9,8 +9,9 @@ import { engine, type NodeSnapshot, type WireSnapshot } from './engine';
 import { library, type Track } from './library';
 import { DeckCustomUI, DeckUIContext } from './components/DeckPanel';
 import { LibraryView } from './components/LibraryView';
+import { MidiPanel } from './components/MidiPanel';
 import { ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
-import { ModulePanel, type JackRef } from './components/ModulePanel';
+import { GRID, ModulePanel, type JackRef } from './components/ModulePanel';
 import { WireOverlay } from './components/WireOverlay';
 import type { JackTelemetry, KnobConfig, Manifest, ModuleHandle } from './types';
 
@@ -19,6 +20,24 @@ const CUSTOM_UIS = {
   'com.dj.adsr': AdsrUI,
   'builtin.deck': DeckCustomUI,
 } as const;
+
+type Positions = Record<string, { x: number; y: number }>;
+
+const POSITIONS_KEY = 'dj-rack-positions';
+
+function loadPositions(): Positions {
+  try {
+    return JSON.parse(localStorage.getItem(POSITIONS_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+/** Default slot for modules without a saved position: 3 columns of
+ *  grid-aligned cells below/right of existing modules. */
+function defaultPosition(index: number): { x: number; y: number } {
+  return { x: (index % 3) * GRID * 10, y: Math.floor(index / 3) * GRID * 8 };
+}
 
 export default function App() {
   const [nodes, setNodes] = useState<NodeSnapshot[]>([]);
@@ -30,9 +49,22 @@ export default function App() {
   const [view, setView] = useState<'rack' | 'library'>('rack');
   const [pending, setPending] = useState<JackRef | null>(null);
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
+  const [positions, setPositions] = useState<Positions>(() => loadPositions());
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
+
+  const moveModule = useCallback((instance: string, x: number, y: number) => {
+    setPositions((prev) => {
+      const next = { ...prev, [instance]: { x, y } };
+      try {
+        localStorage.setItem(POSITIONS_KEY, JSON.stringify(next));
+      } catch {
+        // persistence is best-effort
+      }
+      return next;
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     const snapshot = await engine.nodes();
@@ -186,7 +218,7 @@ export default function App() {
         <DeckUIContext.Provider value={deckUI}>
           <div className="rack-area" ref={setRackEl}>
             <div className="rack">
-              {nodes.map((node) => (
+              {nodes.map((node, i) => (
                 <ModulePanel
                   key={node.instance_id}
                   instanceId={node.instance_id}
@@ -196,6 +228,25 @@ export default function App() {
                   telemetry={telemetry[node.instance_id]}
                   handle={handles.get(node.instance_id)!}
                   customUI={CUSTOM_UIS[node.type_id as keyof typeof CUSTOM_UIS]}
+                  extra={
+                    node.type_id === 'builtin.midi' ? (
+                      <MidiPanel
+                        instance={node.instance_id}
+                        mappings={node.midi_mappings}
+                        onAdd={(kind, num, name) =>
+                          void engine
+                            .addMidiMapping(node.instance_id, kind, num, name)
+                            .then(refresh)
+                        }
+                        onRemove={(name) =>
+                          void engine.removeMidiMapping(node.instance_id, name).then(refresh)
+                        }
+                        onMidi={(data) => void engine.injectMidi(node.instance_id, 0, data)}
+                      />
+                    ) : undefined
+                  }
+                  position={positions[node.instance_id] ?? defaultPosition(i)}
+                  onMove={(x, y) => moveModule(node.instance_id, x, y)}
                   pendingSource={pending}
                   onJackClick={(kind, jack) => void onJackClick(node.instance_id, kind, jack)}
                   onKnobPosition={(jack, position) => {
@@ -218,7 +269,7 @@ export default function App() {
                 </p>
               )}
             </div>
-            <WireOverlay wires={wires} container={rackEl} />
+            <WireOverlay wires={wires} container={rackEl} layoutKey={JSON.stringify(positions)} />
           </div>
         </DeckUIContext.Provider>
       </div>

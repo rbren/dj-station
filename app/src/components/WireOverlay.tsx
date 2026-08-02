@@ -28,9 +28,13 @@ function jackCenter(
 export function WireOverlay({
   wires,
   container,
+  layoutKey,
 }: {
   wires: WireSnapshot[];
   container: HTMLElement | null;
+  /** Any string that changes when jack positions may have moved
+   *  (e.g. serialized module positions) to trigger a re-measure. */
+  layoutKey?: string;
 }) {
   const [cables, setCables] = useState<Cable[]>([]);
 
@@ -63,7 +67,7 @@ export function WireOverlay({
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
-  }, [wires, container]);
+  }, [wires, container, layoutKey]);
 
   return (
     <svg className="wire-overlay" data-testid="wire-overlay">

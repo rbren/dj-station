@@ -5,7 +5,7 @@
 // engine's param state. Clicking an output jack then an input jack makes a
 // wire; clicking a wired input removes its wire.
 
-import type { ComponentType } from 'react';
+import { useCallback, useEffect, useRef, type ComponentType, type ReactNode } from 'react';
 import type { JackTelemetry, KnobConfig, KnobState, Manifest, ModuleHandle } from '../types';
 import { Jack } from './Jack';
 import { Knob } from './Knob';
@@ -15,6 +15,11 @@ export interface JackRef {
   jack: string;
 }
 
+/** Coarse placement grid, ~0.5in at 96dpi. */
+export const GRID = 48;
+
+export const snap = (v: number) => Math.max(0, Math.round(v / GRID) * GRID);
+
 export interface ModulePanelProps {
   instanceId: string;
   manifest: Manifest;
@@ -23,6 +28,12 @@ export interface ModulePanelProps {
   telemetry?: Record<string, JackTelemetry>;
   handle: ModuleHandle;
   customUI?: ComponentType<{ handle: ModuleHandle; instanceId?: string }>;
+  /** Extra panel content (e.g. the MIDI module's mapping editor). */
+  extra?: ReactNode;
+  /** Rack position; when set the panel is absolutely positioned and its
+   *  header becomes a drag handle snapping to the coarse GRID. */
+  position?: { x: number; y: number };
+  onMove?(x: number, y: number): void;
   /** Output jack currently armed as a pending wire source, if any. */
   pendingSource?: JackRef | null;
   onJackClick?(kind: 'input' | 'output', jackId: string): void;
@@ -35,12 +46,53 @@ export interface ModulePanelProps {
 const DEFAULT_KNOB: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'linear' };
 
 export function ModulePanel(props: ModulePanelProps) {
-  const { manifest, instanceId, knobs, wired, telemetry, pendingSource } = props;
+  const { manifest, instanceId, knobs, wired, telemetry, pendingSource, position, onMove } = props;
   const CustomUI = props.customUI;
   const numericParams = manifest.params.filter((p) => typeof (p.default ?? 0) === 'number');
+
+  const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(
+    null,
+  );
+  const onDragMove = useCallback(
+    (e: MouseEvent) => {
+      const d = drag.current;
+      if (!d || !onMove) return;
+      onMove(snap(d.origX + e.clientX - d.startX), snap(d.origY + e.clientY - d.startY));
+    },
+    [onMove],
+  );
+  const onDragEnd = useCallback(() => {
+    drag.current = null;
+  }, []);
+  useEffect(() => {
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragEnd);
+    return () => {
+      window.removeEventListener('mousemove', onDragMove);
+      window.removeEventListener('mouseup', onDragEnd);
+    };
+  }, [onDragMove, onDragEnd]);
+
   return (
-    <div className="module-panel" data-testid={`module-${instanceId}`}>
-      <header className="module-title">
+    <div
+      className={`module-panel${position ? ' module-panel-placed' : ''}`}
+      data-testid={`module-${instanceId}`}
+      style={position ? { left: position.x, top: position.y } : undefined}
+    >
+      <header
+        className={`module-title${onMove ? ' module-title-draggable' : ''}`}
+        data-testid={`module-header-${instanceId}`}
+        onMouseDown={(e) => {
+          if (!onMove || !position || e.button !== 0) return;
+          e.preventDefault();
+          drag.current = {
+            startX: e.clientX,
+            startY: e.clientY,
+            origX: position.x,
+            origY: position.y,
+          };
+        }}
+      >
         {manifest.name}
         <span className="module-instance">{instanceId}</span>
       </header>
@@ -49,6 +101,7 @@ export function ModulePanel(props: ModulePanelProps) {
           <CustomUI handle={props.handle} instanceId={instanceId} />
         </div>
       )}
+      {props.extra}
       {numericParams.length > 0 && (
         <div className="module-params">
           {numericParams.map((p) => {

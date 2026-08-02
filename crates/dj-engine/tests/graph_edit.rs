@@ -87,3 +87,47 @@ fn wire_knob_style_roundtrips_like_any_other_config() {
     let back: dj_engine::KnobConfig = serde_json::from_str(&json).unwrap();
     assert_eq!(back.style, KnobStyle::Wire);
 }
+
+#[test]
+fn midi_mapping_remove_drops_wires_frees_the_slot_and_roundtrips() {
+    let mut engine = common::default_engine();
+    engine.add_module("midi1", "builtin.midi").unwrap();
+    engine.add_module("out1", "builtin.audio_out").unwrap();
+    engine.add_midi_mapping("midi1", "note", 60, "C4").unwrap();
+    engine.add_midi_mapping("midi1", "cc", 7, "cc7").unwrap();
+    engine.connect("midi1", "C4", "out1", "ch1").unwrap();
+    assert_eq!(engine.wire_specs().len(), 1);
+
+    // A held note drives the mapped jack…
+    engine.inject_midi("midi1", 0, [0x90, 60, 100]).unwrap();
+    engine.render_offline((0.2 * SR) as usize).unwrap();
+    assert!(engine.tap("out1", "ch1").unwrap().display > 5.0);
+
+    // …removing the mapping drops its wire and silences the input.
+    engine.remove_midi_mapping("midi1", "C4").unwrap();
+    assert!(engine.wire_specs().is_empty());
+    assert!(engine.remove_midi_mapping("midi1", "C4").is_err());
+    engine.render_offline((0.2 * SR) as usize).unwrap();
+    assert!(engine.tap("out1", "ch1").unwrap().display.abs() < 1e-3);
+
+    // The freed slot is reusable without leaking the old note's value.
+    engine.add_midi_mapping("midi1", "note", 64, "E4").unwrap();
+    engine.connect("midi1", "E4", "out1", "ch1").unwrap();
+    engine.render_offline((0.2 * SR) as usize).unwrap();
+    assert!(
+        engine.tap("out1", "ch1").unwrap().display.abs() < 1e-3,
+        "reused slot must start at 0, not the removed note's value"
+    );
+
+    // Post-removal mapping state round-trips through patch save/load.
+    let dir = tempfile::tempdir().unwrap();
+    engine.save_patch(dir.path(), "t").unwrap();
+    let reloaded = dj_engine::Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let midi = reloaded
+        .nodes
+        .iter()
+        .find(|n| n.instance_id == "midi1")
+        .unwrap();
+    let names: Vec<&str> = midi.midi_mappings.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, vec!["cc7", "E4"]);
+}

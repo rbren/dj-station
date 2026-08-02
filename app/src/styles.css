@@ -27,12 +27,28 @@ body {
   color: #8a93a2;
 }
 
+/* Free placement canvas: placed panels are absolutely positioned on a
+   coarse 48px grid; unplaced panels (tests/stories) still flow. */
 .rack {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   padding: 12px;
   align-items: flex-start;
+  position: relative;
+  min-height: 1200px;
+  min-width: 1500px;
+  background-image: radial-gradient(circle, #22262d 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.module-panel-placed {
+  position: absolute;
+}
+
+.module-title-draggable {
+  cursor: grab;
+  user-select: none;
 }
 
 .rack-empty {
@@ -62,11 +78,14 @@ body {
   font-size: 0.8rem;
 }
 
+/* Fixed two-column row (jack | control) so every input lines up with the
+   same footprint regardless of control style or label length. */
 .module-row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 112px 44px;
   gap: 10px;
-  margin: 6px 0;
+  align-items: center;
+  margin: 4px 0;
 }
 
 .jack {
@@ -74,6 +93,17 @@ body {
   align-items: center;
   gap: 6px;
   font-size: 0.8rem;
+  width: 112px;
+  min-width: 0;
+}
+
+.jack-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
 }
 
 .jack-glow {
@@ -82,6 +112,13 @@ body {
   border-radius: 50%;
   background: radial-gradient(circle, #62d0ff 0%, #20303a 70%);
   display: inline-block;
+  flex: none;
+}
+
+/* Outputs read as square green sources; inputs stay round cyan sinks. */
+.jack-output .jack-glow {
+  border-radius: 3px;
+  background: radial-gradient(circle, #7dde8a 0%, #1f3a26 70%);
 }
 
 .jack.jack-wired .jack-glow {
@@ -94,11 +131,15 @@ body {
   border-radius: 4px;
 }
 
+/* Every control style renders inside the same 44x44 box so switching
+   styles never shifts the panel layout. */
 .knob {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
   position: relative;
 }
 
@@ -163,8 +204,16 @@ body {
 }
 
 .knob-wire {
-  min-width: 34px;
-  min-height: 10px;
+  width: 44px;
+  height: 44px;
+}
+
+.knob-momentary {
+  border-radius: 6px;
+}
+
+.knob-momentary:active {
+  transform: scale(0.95);
 }
 
 .adsr-ui {
@@ -449,6 +498,114 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  width: 64px;
+}
+
+.param-name {
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-outputs {
+  border-top: 1px dashed #2a2e35;
+  margin-top: 8px;
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.midi-panel {
+  border: 1px solid #2a2e35;
+  border-radius: 6px;
+  padding: 6px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+}
+
+.midi-empty {
+  color: #8a93a2;
+  margin: 2px 0;
+}
+
+.midi-mapping {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0;
+}
+
+.midi-mapping-name {
+  font-weight: 600;
+  min-width: 40px;
+}
+
+.midi-mapping-src {
+  color: #8a93a2;
+}
+
+.midi-key {
+  margin-left: auto;
+  background: #2a2e35;
+  border: 1px solid #3c424c;
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+.midi-key-capture {
+  border-color: #e6b450;
+  color: #e6b450;
+}
+
+.midi-remove {
+  background: none;
+  border: none;
+  color: #8a93a2;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.midi-remove:hover {
+  color: #ff6b6b;
+}
+
+.midi-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.midi-add select,
+.midi-add input,
+.midi-add button {
+  background: #2a2e35;
+  border: 1px solid #3c424c;
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 2px 4px;
+}
+
+.midi-add input {
+  width: 48px;
+}
+
+.midi-add button {
+  cursor: pointer;
+}
+
+.midi-add-preview {
+  color: #8a93a2;
+  min-width: 28px;
 }
 
 /* ------------------------------------------------------------------ */

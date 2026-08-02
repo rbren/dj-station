@@ -101,7 +101,33 @@ export function Knob(props: KnobProps) {
     );
   }
 
-  if (config.style === 'switch' || config.style === 'button') {
+  // 'switch' toggles on click; 'button' is momentary — held down while the
+  // mouse button is pressed, released on mouseup/leave.
+  if (config.style === 'button') {
+    const on = position >= 0.5;
+    return (
+      <div className="knob" data-testid={`knob-${label}`}>
+        <button
+          type="button"
+          aria-pressed={on}
+          aria-label={label}
+          title={`${label}: hold for on`}
+          className={`knob-toggle knob-momentary${on ? ' knob-toggle-on' : ''}`}
+          onMouseDown={(e) => {
+            if (e.button === 0) onPosition(1);
+          }}
+          onMouseUp={() => onPosition(0)}
+          onMouseLeave={() => {
+            if (on) onPosition(0);
+          }}
+          onContextMenu={openMenu}
+        />
+        {menu}
+      </div>
+    );
+  }
+
+  if (config.style === 'switch') {
     const on = position >= 0.5;
     return (
       <div className="knob" data-testid={`knob-${label}`}>

@@ -715,6 +715,38 @@ impl Engine {
         Ok(info)
     }
 
+    /// Remove a named MIDI mapping, dropping any wires sourced from its jack.
+    /// Wire removal is a structural edit, so the engine must be stopped when
+    /// the mapping is still wired.
+    pub fn remove_midi_mapping(&mut self, instance_id: &str, name: &str) -> Result<()> {
+        let node = self.node_idx(instance_id)?;
+        let pos = self.nodes[node]
+            .midi_mappings
+            .iter()
+            .position(|m| m.name == name)
+            .ok_or_else(|| anyhow!("no MIDI mapping {name:?} on {instance_id:?}"))?;
+        let jack = self.nodes[node].midi_mappings[pos].jack;
+        let doomed: Vec<WireSpec> = self
+            .wires
+            .iter()
+            .copied()
+            .filter(|w| w.from_node == node && w.from_jack == jack)
+            .collect();
+        if !doomed.is_empty() {
+            let core = self.core_mut()?;
+            for w in &doomed {
+                core.graph.remove_wire(*w);
+            }
+            self.wires
+                .retain(|w| !(w.from_node == node && w.from_jack == jack));
+        }
+        self.nodes[node].midi_mappings.remove(pos);
+        if let Some(shared) = self.nodes[node].midi_shared.as_ref() {
+            shared.remove_mapping(jack);
+        }
+        Ok(())
+    }
+
     /// Connect a hardware MIDI input port to a MIDI node (feature `midi-hw`).
     /// The port's events are pushed into the same ring virtual injection uses,
     /// after which virtual injection on this node is no longer possible.

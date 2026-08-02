@@ -76,6 +76,13 @@ fn with_stopped<T>(
 }
 
 #[derive(Serialize)]
+struct MidiMappingSnapshot {
+    name: String,
+    kind: String,
+    num: u8,
+}
+
+#[derive(Serialize)]
 struct NodeSnapshot {
     instance_id: String,
     type_id: String,
@@ -83,6 +90,7 @@ struct NodeSnapshot {
     knobs: BTreeMap<String, KnobSnapshot>,
     params: BTreeMap<String, f32>,
     wired_inputs: Vec<String>,
+    midi_mappings: Vec<MidiMappingSnapshot>,
 }
 
 #[tauri::command]
@@ -107,7 +115,22 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
         .map(|(node_idx, n)| NodeSnapshot {
             instance_id: n.instance_id.clone(),
             type_id: n.ext_id.clone(),
-            manifest: n.manifest.clone(),
+            manifest: {
+                let mut m = n.manifest.clone();
+                // MIDI output jacks are dynamic: show only mapped controls
+                // (by mapping name), not the 64 preallocated slots.
+                if n.ext_id == dj_engine::builtin::MIDI_ID {
+                    m.outputs = n
+                        .midi_mappings
+                        .iter()
+                        .map(|mm| dj_engine::manifest::OutputDecl {
+                            id: mm.name.clone(),
+                            name: mm.name.clone(),
+                        })
+                        .collect();
+                }
+                m
+            },
             knobs: n
                 .manifest
                 .inputs
@@ -130,6 +153,15 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                 .iter()
                 .filter(|w| w.to_node == node_idx)
                 .filter_map(|w| n.manifest.inputs.get(w.to_jack).map(|d| d.id.clone()))
+                .collect(),
+            midi_mappings: n
+                .midi_mappings
+                .iter()
+                .map(|m| MidiMappingSnapshot {
+                    name: m.name.clone(),
+                    kind: m.kind.clone(),
+                    num: m.num,
+                })
                 .collect(),
         })
         .collect())
@@ -229,6 +261,61 @@ fn disconnect_wire(
     })
 }
 
+/// Map a MIDI control (note/cc) to a new output jack. Safe while running:
+/// the mapping table is lock-free and jack buffers are preallocated.
+#[tauri::command]
+fn add_midi_mapping(
+    state: State<AppState>,
+    instance: String,
+    kind: String,
+    num: u8,
+    name: String,
+) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine
+        .add_midi_mapping(&instance, &kind, num, &name)
+        .map(|_| ())
+        .map_err(err)
+}
+
+/// Remove a MIDI mapping. Any wires from its jack are disconnected first
+/// (restoring auto wire-style knobs), which needs the engine stopped.
+#[tauri::command]
+fn remove_midi_mapping(state: State<AppState>, instance: String, name: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    let doomed: Vec<(String, String)> = engine
+        .wire_specs()
+        .iter()
+        .filter(|w| {
+            engine.nodes[w.from_node].instance_id == instance
+                && engine.output_jack_name(w.from_node, w.from_jack) == name
+        })
+        .map(|w| {
+            (
+                engine.nodes[w.to_node].instance_id.clone(),
+                engine.nodes[w.to_node].manifest.inputs[w.to_jack]
+                    .id
+                    .clone(),
+            )
+        })
+        .collect();
+    with_stopped(&mut engine, |e| {
+        for (to_instance, to_jack) in &doomed {
+            e.disconnect(&instance, &name, to_instance, to_jack)
+                .map_err(err)?;
+            if let Ok(k) = e.knob_state(to_instance, to_jack) {
+                if k.config
+                    .as_ref()
+                    .is_some_and(|c| c.style == KnobStyle::Wire)
+                {
+                    e.set_knob_config(to_instance, to_jack, None).map_err(err)?;
+                }
+            }
+        }
+        e.remove_midi_mapping(&instance, &name).map_err(err)
+    })
+}
+
 #[tauri::command]
 fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     let mut engine = state.engine.lock().map_err(err)?;
@@ -245,9 +332,9 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
         .add_module("out1", "builtin.audio_out")
         .map_err(err)?;
     engine
-        .add_midi_mapping("midi1", "note", 60, "pad_1")
+        .add_midi_mapping("midi1", "note", 60, "C4")
         .map_err(err)?;
-    connect_as_wire(&mut engine, "midi1", "pad_1", "adsr1", "gate")?;
+    connect_as_wire(&mut engine, "midi1", "C4", "adsr1", "gate")?;
     connect_as_wire(&mut engine, "osc1", "audio", "vca1", "in")?;
     connect_as_wire(&mut engine, "adsr1", "env", "vca1", "cv")?;
     connect_as_wire(&mut engine, "vca1", "out", "out1", "ch1")?;
@@ -773,6 +860,8 @@ fn main() {
             save_patch,
             load_patch,
             inject_midi,
+            add_midi_mapping,
+            remove_midi_mapping,
             engine_start,
             engine_stop,
             library_tracks,

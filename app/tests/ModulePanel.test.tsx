@@ -140,4 +140,42 @@ describe('ModulePanel', () => {
     );
     expect(screen.getByTestId('adsr-ui')).toBeTruthy();
   });
+
+  it('differentiates input and output jacks visually', () => {
+    render(<ModulePanel {...baseProps} />);
+    expect(screen.getByTestId('jack-input-pitch').className).toContain('jack-input');
+    expect(screen.getByTestId('jack-output-audio').className).toContain('jack-output');
+  });
+
+  it('positions the panel and drags it on the coarse 48px grid', () => {
+    const onMove = vi.fn();
+    render(<ModulePanel {...baseProps} position={{ x: 96, y: 48 }} onMove={onMove} />);
+    const panel = screen.getByTestId('module-osc1');
+    expect(panel.className).toContain('module-panel-placed');
+    expect(panel.style.left).toBe('96px');
+    expect(panel.style.top).toBe('48px');
+
+    const header = screen.getByTestId('module-header-osc1');
+    fireEvent.mouseDown(header, { button: 0, clientX: 200, clientY: 200 });
+    // 130px right, 40px down from (96, 48) → raw (226, 88) → snapped (240, 96)
+    fireEvent.mouseMove(window, { clientX: 330, clientY: 240 });
+    expect(onMove).toHaveBeenLastCalledWith(240, 96);
+    // after mouseup further moves are ignored
+    fireEvent.mouseUp(window);
+    onMove.mockClear();
+    fireEvent.mouseMove(window, { clientX: 400, clientY: 400 });
+    expect(onMove).not.toHaveBeenCalled();
+  });
+
+  it('never drags below the canvas origin', () => {
+    const onMove = vi.fn();
+    render(<ModulePanel {...baseProps} position={{ x: 0, y: 0 }} onMove={onMove} />);
+    fireEvent.mouseDown(screen.getByTestId('module-header-osc1'), {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.mouseMove(window, { clientX: 0, clientY: 0 });
+    expect(onMove).toHaveBeenLastCalledWith(0, 0);
+  });
 });

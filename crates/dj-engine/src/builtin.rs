@@ -1,6 +1,6 @@
 //! Built-in native modules: Audio Output (PRD §7.2) and MIDI (PRD §7.1).
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::manifest::{JackDecl, Manifest, OutputDecl, ParamDecl};
@@ -108,6 +108,9 @@ pub struct MidiShared {
     /// 0 = nothing learned; else `1<<31 | kind<<8 | num`.
     pub learned: AtomicU32,
     pub mappings: [MappingCell; MAX_MIDI_JACKS],
+    /// Bitmask of jacks whose RT-side value must be zeroed (set when a slot
+    /// is removed or reused so stale values don't leak into new mappings).
+    pub reset_mask: AtomicU64,
 }
 
 impl Default for MidiShared {
@@ -116,6 +119,7 @@ impl Default for MidiShared {
             learn_armed: AtomicBool::new(false),
             learned: AtomicU32::new(0),
             mappings: std::array::from_fn(|_| MappingCell::default()),
+            reset_mask: AtomicU64::new(0),
         }
     }
 }
@@ -126,11 +130,20 @@ impl MidiShared {
             if !cell.active.load(Ordering::Acquire) {
                 cell.kind.store(kind, Ordering::Relaxed);
                 cell.num.store(num, Ordering::Relaxed);
+                // Reused slots may hold a stale value from a prior mapping.
+                self.reset_mask.fetch_or(1 << i, Ordering::Release);
                 cell.active.store(true, Ordering::Release);
                 return Some(i);
             }
         }
         None
+    }
+
+    pub fn remove_mapping(&self, jack: usize) {
+        if jack < MAX_MIDI_JACKS {
+            self.mappings[jack].active.store(false, Ordering::Release);
+            self.reset_mask.fetch_or(1 << jack, Ordering::Release);
+        }
     }
 }
 
@@ -187,6 +200,15 @@ impl HostModule for MidiModule {
         _mask: u64,
         frames: usize,
     ) {
+        // Zero values for slots the control thread removed/reused.
+        let reset = self.shared.reset_mask.swap(0, Ordering::AcqRel);
+        if reset != 0 {
+            for (i, v) in self.values.iter_mut().enumerate() {
+                if reset & (1 << i) != 0 {
+                    *v = 0.0;
+                }
+            }
+        }
         let block_start = self.frame;
         for s in 0..frames {
             let now = block_start + s as u64;

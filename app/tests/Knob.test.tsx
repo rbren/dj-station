@@ -95,9 +95,23 @@ describe('Knob', () => {
     expect(screen.getByTestId('knob-g').className).toContain('knob-wire');
   });
 
-  it('toggle click flips the position for switch/button styles', () => {
+  it('switch style toggles on click', () => {
     const onPosition = vi.fn();
     render(
+      <Knob
+        label="gate"
+        config={{ ...LINEAR, style: 'switch' }}
+        position={0}
+        onPosition={onPosition}
+      />,
+    );
+    fireEvent.click(screen.getByRole('switch', { name: 'gate' }));
+    expect(onPosition).toHaveBeenCalledWith(1);
+  });
+
+  it('button style is momentary: on while held, off on release', () => {
+    const onPosition = vi.fn();
+    const { rerender } = render(
       <Knob
         label="gate"
         config={{ ...LINEAR, style: 'button' }}
@@ -105,8 +119,27 @@ describe('Knob', () => {
         onPosition={onPosition}
       />,
     );
-    fireEvent.click(screen.getByRole('switch', { name: 'gate' }));
-    expect(onPosition).toHaveBeenCalledWith(1);
+    const btn = screen.getByRole('button', { name: 'gate' });
+    fireEvent.mouseDown(btn, { button: 0 });
+    expect(onPosition).toHaveBeenLastCalledWith(1);
+    fireEvent.mouseUp(btn);
+    expect(onPosition).toHaveBeenLastCalledWith(0);
+    // clicking alone must NOT toggle it on
+    onPosition.mockClear();
+    fireEvent.click(btn);
+    expect(onPosition).not.toHaveBeenCalledWith(1);
+    // releasing by dragging off the button also turns it off
+    onPosition.mockClear();
+    rerender(
+      <Knob
+        label="gate"
+        config={{ ...LINEAR, style: 'button' }}
+        position={1}
+        onPosition={onPosition}
+      />,
+    );
+    fireEvent.mouseLeave(screen.getByRole('button', { name: 'gate' }));
+    expect(onPosition).toHaveBeenLastCalledWith(0);
   });
 
   it('wired: no dial; attenuverter + offset live in the right-click menu', () => {
