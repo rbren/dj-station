@@ -723,8 +723,10 @@ impl Engine {
                         xruns.fetch_add(1, Ordering::Relaxed);
                         deadline = now + block_dur;
                     } else {
-                        if deadline > now + Duration::from_micros(500) {
-                            std::thread::sleep(deadline - now - Duration::from_micros(300));
+                        // Sleep the bulk of the wait but keep a ~1 ms spin
+                        // margin: OS sleep can overshoot under load.
+                        if deadline > now + Duration::from_micros(1500) {
+                            std::thread::sleep(deadline - now - Duration::from_micros(1000));
                         }
                         while Instant::now() < deadline {
                             std::hint::spin_loop();

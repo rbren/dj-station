@@ -281,18 +281,18 @@ Tauri shell, cpal audio, graph engine, WASM ABI + SDK crate, manifest loading, h
 - **MIDI** (per-device; learn mode; an output jack for every mapped control, connectable to any input)
 
 **Acceptance:**
-- [ ] **[A]** Single script at the top of the README (`./run.sh` or `npm start`) builds and launches the app from a fresh clone; exits nonzero on failure.
-- [ ] **[A]** Patch `MIDI → ADSR(gate) → VCA(cv)`, `Osc → VCA → Audio Out`, driven by virtual MIDI and rendered offline, produces audio whose amplitude envelope matches the configured ADSR within tolerance.
+- [x] **[A]** Single script at the top of the README (`./run.sh` or `npm start`) builds and launches the app from a fresh clone; exits nonzero on failure.
+- [x] **[A]** Patch `MIDI → ADSR(gate) → VCA(cv)`, `Osc → VCA → Audio Out`, driven by virtual MIDI and rendered offline, produces audio whose amplitude envelope matches the configured ADSR within tolerance.
 - [ ] **[H]** The same patch, played live with a hardware controller, sounds right through the speakers — envelope feels responsive, no clicks.
-- [ ] **[A]** ADSR custom UI: automated UI test drags each segment and asserts the underlying params change; params round-trip through patch save/load.
+- [x] **[A]** ADSR custom UI: automated UI test drags each segment and asserts the underlying params change; params round-trip through patch save/load.
 - [ ] **[H]** The envelope display looks good and dragging feels natural.
-- [ ] **[A]** Hot reload: modify oscillator Rust, rebuild to WASM; harness asserts the running patch swaps it in without restart, wiring and state intact, audio stream uninterrupted (xrun counter unchanged ± tolerance).
-- [ ] **[A]** Right-click knob config (style/endpoints/curve) via UI automation persists in the saved patch and reloads identically.
-- [ ] **[A]** Jack activation values and 100 ms RMS smoothing are exposed via a telemetry API and match expected values for known test signals.
+- [x] **[A]** Hot reload: modify oscillator Rust, rebuild to WASM; harness asserts the running patch swaps it in without restart, wiring and state intact, audio stream uninterrupted (xrun counter unchanged ± tolerance).
+- [x] **[A]** Right-click knob config (style/endpoints/curve) via UI automation persists in the saved patch and reloads identically.
+- [x] **[A]** Jack activation values and 100 ms RMS smoothing are exposed via a telemetry API and match expected values for known test signals.
 - [ ] **[H]** Glow, hover readouts, and oscilloscopes look correct and legible during live use.
-- [ ] **[A]** Patch saves as a directory tree; moving one knob and re-saving produces a diff touching exactly one file.
-- [ ] **[A]** RT-thread allocation/lock tripwire passes; xrun counter reports zero over a 10-minute stress patch at 128-sample blocks.
-- [ ] **[A]** GitHub Actions CI (§10.1) is green: build + lint + full test suite, plus at least three serialized-patch E2E audio regression cases (with committed goldens and a `regen-goldens` script) covering the M0 modules.
+- [x] **[A]** Patch saves as a directory tree; moving one knob and re-saving produces a diff touching exactly one file.
+- [x] **[A]** RT-thread allocation/lock tripwire passes; xrun counter reports zero over a 10-minute stress patch at 128-sample blocks.
+- [x] **[A]** GitHub Actions CI (§10.1) is green: build + lint + full test suite, plus at least three serialized-patch E2E audio regression cases (with committed goldens and a `regen-goldens` script) covering the M0 modules.
 
 ### M1 – Sound Library + Playback
 SQLite library, watch-folder auto-import, drag-and-drop import, acquisition provider framework (iTunes deep-link, Freesound + Jamendo download; Internet Archive and Musopen fast-follow), license tracking, and a **Playback module**: load a library track, `play_gate`/`speed` in, `audio_l/r` out — connectable to Audio Out or anything else.

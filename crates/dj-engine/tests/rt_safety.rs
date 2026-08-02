@@ -21,7 +21,11 @@ use dj_engine::{Engine, EngineConfig};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+/// Both tests here are timing/CPU sensitive; never run them concurrently.
+static SERIAL: Mutex<()> = Mutex::new(());
 
 static RT_ALLOCS: AtomicU64 = AtomicU64::new(0);
 static RT_DEALLOCS: AtomicU64 = AtomicU64::new(0);
@@ -78,6 +82,7 @@ fn build_stress_patch(engine: &mut Engine, voices: usize) {
 
 #[test]
 fn rt_thread_allocation_tripwire() {
+    let _guard = SERIAL.lock().unwrap();
     let mut engine = common::default_engine();
     build_stress_patch(&mut engine, 8);
 
@@ -101,6 +106,7 @@ fn rt_thread_allocation_tripwire() {
 
 #[test]
 fn stress_patch_offline_equivalent_and_realtime_xruns() {
+    let _guard = SERIAL.lock().unwrap();
     let seconds: f64 = std::env::var("STRESS_SECONDS")
         .ok()
         .and_then(|s| s.parse().ok())
