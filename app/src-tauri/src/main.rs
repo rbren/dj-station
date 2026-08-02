@@ -9,7 +9,8 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
+use tauri::{Manager, State};
 
 struct AppState {
     engine: Mutex<Engine>,
@@ -249,6 +250,29 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState {
             engine: Mutex::new(engine),
+        })
+        .setup(|app| {
+            // System menu: platform defaults (App/Edit/Window on macOS)
+            // plus a Debug submenu exposing the web inspector.
+            let devtools = MenuItemBuilder::with_id("toggle_devtools", "Toggle Developer Tools")
+                .accelerator("CmdOrCtrl+Alt+I")
+                .build(app)?;
+            let debug = SubmenuBuilder::new(app, "Debug").item(&devtools).build()?;
+            let menu = Menu::default(app.handle())?;
+            menu.append(&debug)?;
+            app.set_menu(menu)?;
+            Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "toggle_devtools" {
+                if let Some(window) = app.get_webview_window("main") {
+                    if window.is_devtools_open() {
+                        window.close_devtools();
+                    } else {
+                        window.open_devtools();
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             list_extensions,

@@ -13,7 +13,9 @@ description = "Modular DJ workstation (Tauri shell)"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# devtools: allow opening the web inspector from release builds too
+# (run.sh builds --release; debug builds have it regardless).
+tauri = { version = "2", features = ["devtools"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
