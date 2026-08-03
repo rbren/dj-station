@@ -125,124 +125,124 @@ export function ModulePanel(props: ModulePanelProps) {
       }}
     >
       <div className="module-panel-content" ref={contentRef}>
-      <header
-        className={`module-title${onMove ? ' module-title-draggable' : ''}`}
-        data-testid={`module-header-${instanceId}`}
-        onClick={(e) => {
-          if (e.shiftKey) {
+        <header
+          className={`module-title${onMove ? ' module-title-draggable' : ''}`}
+          data-testid={`module-header-${instanceId}`}
+          onClick={(e) => {
+            if (e.shiftKey) {
+              e.preventDefault();
+              props.onSelectToggle?.();
+            }
+          }}
+          onMouseDown={(e) => {
+            if (!onMove || !position || e.button !== 0 || e.shiftKey) return;
             e.preventDefault();
-            props.onSelectToggle?.();
-          }
-        }}
-        onMouseDown={(e) => {
-          if (!onMove || !position || e.button !== 0 || e.shiftKey) return;
-          e.preventDefault();
-          drag.current = {
-            startX: e.clientX,
-            startY: e.clientY,
-            origX: position.x,
-            origY: position.y,
-          };
-        }}
-      >
-        {manifest.name}
-        <span className="module-instance">{instanceId}</span>
-        {props.onRemove && (
-          <button
-            className="module-remove"
-            data-testid={`module-remove-${instanceId}`}
-            title="Delete module"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => props.onRemove?.()}
-          >
-            ✕
-          </button>
+            drag.current = {
+              startX: e.clientX,
+              startY: e.clientY,
+              origX: position.x,
+              origY: position.y,
+            };
+          }}
+        >
+          {manifest.name}
+          <span className="module-instance">{instanceId}</span>
+          {props.onRemove && (
+            <button
+              className="module-remove"
+              data-testid={`module-remove-${instanceId}`}
+              title="Delete module"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => props.onRemove?.()}
+            >
+              ✕
+            </button>
+          )}
+        </header>
+        {CustomUI && (
+          <div className="module-custom-ui">
+            <CustomUI handle={props.handle} instanceId={instanceId} />
+          </div>
         )}
-      </header>
-      {CustomUI && (
-        <div className="module-custom-ui">
-          <CustomUI handle={props.handle} instanceId={instanceId} />
-        </div>
-      )}
-      {props.extra}
-      {numericParams.length > 0 && (
-        <div className="module-params">
-          {numericParams.map((p) => {
-            const min = p.min ?? 0;
-            const max = p.max ?? 1;
-            const value = props.handle.paramValue(p.id);
-            const position = max === min ? 0 : (value - min) / (max - min);
-            const config: KnobConfig = { style: 'continuous', min, max, curve: 'linear' };
+        {props.extra}
+        {numericParams.length > 0 && (
+          <div className="module-params">
+            {numericParams.map((p) => {
+              const min = p.min ?? 0;
+              const max = p.max ?? 1;
+              const value = props.handle.paramValue(p.id);
+              const position = max === min ? 0 : (value - min) / (max - min);
+              const config: KnobConfig = { style: 'continuous', min, max, curve: 'linear' };
+              return (
+                <div className="module-param" key={p.id}>
+                  <Knob
+                    label={p.id}
+                    config={config}
+                    position={position}
+                    onPosition={(pos) => props.onParam?.(p.id, min + pos * (max - min))}
+                    onRelease={props.onEditEnd}
+                  />
+                  <span className="param-name">{p.id}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div
+          className={`module-inputs${manifest.inputs.length > 8 ? ' module-inputs-condensed' : ''}`}
+        >
+          {manifest.inputs.map((input) => {
+            const state = knobs[input.id];
+            const config = state?.config ?? input.knob ?? DEFAULT_KNOB;
+            const isWired = wired[input.id] ?? false;
             return (
-              <div className="module-param" key={p.id}>
+              <div className="module-row" key={input.id}>
+                <Jack
+                  instance={instanceId}
+                  id={input.id}
+                  kind="input"
+                  telemetry={telemetry?.[input.id]}
+                  wired={isWired}
+                  selected={
+                    pendingSource?.kind === 'input' &&
+                    pendingSource.instance === instanceId &&
+                    pendingSource.jack === input.id
+                  }
+                  onClick={() => props.onJackClick?.('input', input.id)}
+                />
                 <Knob
-                  label={p.id}
+                  label={input.id}
                   config={config}
-                  position={position}
-                  onPosition={(pos) => props.onParam?.(p.id, min + pos * (max - min))}
+                  position={state?.position ?? 0}
+                  wired={isWired}
+                  atten={state?.atten}
+                  offset={state?.offset}
+                  onPosition={(p) => props.onKnobPosition(input.id, p)}
+                  onConfigChange={(c) => props.onKnobConfig(input.id, c)}
+                  onAttenOffset={(a, o) => props.onAttenOffset(input.id, a, o)}
                   onRelease={props.onEditEnd}
                 />
-                <span className="param-name">{p.id}</span>
               </div>
             );
           })}
         </div>
-      )}
-      <div
-        className={`module-inputs${manifest.inputs.length > 8 ? ' module-inputs-condensed' : ''}`}
-      >
-        {manifest.inputs.map((input) => {
-          const state = knobs[input.id];
-          const config = state?.config ?? input.knob ?? DEFAULT_KNOB;
-          const isWired = wired[input.id] ?? false;
-          return (
-            <div className="module-row" key={input.id}>
-              <Jack
-                instance={instanceId}
-                id={input.id}
-                kind="input"
-                telemetry={telemetry?.[input.id]}
-                wired={isWired}
-                selected={
-                  pendingSource?.kind === 'input' &&
-                  pendingSource.instance === instanceId &&
-                  pendingSource.jack === input.id
-                }
-                onClick={() => props.onJackClick?.('input', input.id)}
-              />
-              <Knob
-                label={input.id}
-                config={config}
-                position={state?.position ?? 0}
-                wired={isWired}
-                atten={state?.atten}
-                offset={state?.offset}
-                onPosition={(p) => props.onKnobPosition(input.id, p)}
-                onConfigChange={(c) => props.onKnobConfig(input.id, c)}
-                onAttenOffset={(a, o) => props.onAttenOffset(input.id, a, o)}
-                onRelease={props.onEditEnd}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div className="module-outputs">
-        {manifest.outputs.map((output) => (
-          <Jack
-            key={output.id}
-            instance={instanceId}
-            id={output.id}
-            kind="output"
-            telemetry={telemetry?.[`out:${output.id}`]}
-            selected={
-              pendingSource?.kind === 'output' &&
-              pendingSource.instance === instanceId &&
-              pendingSource.jack === output.id
-            }
-            onClick={() => props.onJackClick?.('output', output.id)}
-          />
-        ))}
-      </div>
+        <div className="module-outputs">
+          {manifest.outputs.map((output) => (
+            <Jack
+              key={output.id}
+              instance={instanceId}
+              id={output.id}
+              kind="output"
+              telemetry={telemetry?.[`out:${output.id}`]}
+              selected={
+                pendingSource?.kind === 'output' &&
+                pendingSource.instance === instanceId &&
+                pendingSource.jack === output.id
+              }
+              onClick={() => props.onJackClick?.('output', output.id)}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

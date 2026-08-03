@@ -49,7 +49,13 @@ describe('Knob', () => {
   it('fires onRelease once when a drag gesture ends', () => {
     const onRelease = vi.fn();
     render(
-      <Knob label="cv" config={LINEAR} position={0.5} onPosition={() => {}} onRelease={onRelease} />,
+      <Knob
+        label="cv"
+        config={LINEAR}
+        position={0.5}
+        onPosition={() => {}}
+        onRelease={onRelease}
+      />,
     );
     const dial = screen.getByRole('slider', { name: 'cv' });
     fireEvent.mouseDown(dial, { clientY: 100 });
