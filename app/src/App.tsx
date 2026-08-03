@@ -9,6 +9,7 @@ import { engine, type NodeSnapshot, type WireSnapshot } from './engine';
 import { library, type Track } from './library';
 import { DeckCustomUI, DeckUIContext } from './components/DeckPanel';
 import { LibraryView } from './components/LibraryView';
+import { GesturePanel } from './components/GesturePanel';
 import { MidiPanel } from './components/MidiPanel';
 import { MODULE_DRAG_TYPE, ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
 import { GRID, ModulePanel, type JackRef } from './components/ModulePanel';
@@ -603,6 +604,21 @@ export default function App() {
                           void engine.removeMidiLedMapping(node.instance_id, name).then(refresh)
                         }
                         onMidi={(data) => void engine.injectMidi(node.instance_id, 0, data)}
+                      />
+                    ) : node.type_id === 'builtin.gesture' ? (
+                      <GesturePanel
+                        instance={node.instance_id}
+                        api={{
+                          status: (i) => engine.gestureStatus(i),
+                          setMode: (i, m) => engine.gestureSetMode(i, m),
+                          addMapping: (i, n, m, c) => engine.gestureAddMapping(i, n, m, c),
+                          removeMapping: (i, n) => engine.gestureRemoveMapping(i, n),
+                          learnBegin: (i) => engine.gestureLearnBegin(i),
+                          learnPoll: (i, n) => engine.gestureLearnPoll(i, n),
+                          feedStart: (i, src) => engine.gestureFeedStart(i, src),
+                          feedStop: (i) => engine.gestureFeedStop(i),
+                        }}
+                        onChanged={() => void refresh()}
                       />
                     ) : undefined
                   }

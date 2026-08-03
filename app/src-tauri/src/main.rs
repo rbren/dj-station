@@ -30,6 +30,16 @@ struct AppState {
     /// Background analysis worker (M3): drains the library queue so
     /// BPM/key/beatgrid/stems land in the DB with no user action.
     analysis: dj_analysis::AnalysisWorker,
+    /// Running gesture feeds by instance id (M5): stop flag + source name.
+    /// Here the source is always a recorded fixture played through the
+    /// mock pipeline; on macOS a camera source slots in behind the same
+    /// start/stop commands.
+    gesture_feeds: Mutex<BTreeMap<String, GestureFeedHandle>>,
+}
+
+struct GestureFeedHandle {
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    source: String,
 }
 
 /// Named patches live under the single user data dir (PRD §3).
@@ -283,6 +293,18 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                             name: mm.name.clone(),
                             default: 0.0,
                             knob: None,
+                        })
+                        .collect();
+                }
+                // Gesture output jacks are dynamic too (M5): one per
+                // mapping, by mapping name.
+                if let Some(g) = &n.gesture {
+                    m.outputs = g
+                        .mappings()
+                        .iter()
+                        .map(|(_, d)| dj_engine::manifest::OutputDecl {
+                            id: d.name.clone(),
+                            name: d.name.clone(),
                         })
                         .collect();
                 }
@@ -575,6 +597,237 @@ fn remove_midi_led_mapping(
     with_stopped(&mut engine, |e| {
         e.remove_midi_led_mapping(&instance, &name).map_err(err)
     })
+}
+
+// ---------------------------------------------------------------------------
+// Gesture Control (M5, PRD §7.3)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct GestureMappingSnapshot {
+    name: String,
+    mode: String,
+    config: serde_json::Value,
+    value: f32,
+}
+
+/// Everything the gesture panel needs per poll: config + live overlay data.
+#[derive(Serialize)]
+struct GestureStatus {
+    mode: String,
+    modes: Vec<String>,
+    wheels: dj_engine::dj_gesture::WheelLayout,
+    mappings: Vec<GestureMappingSnapshot>,
+    /// Latest detection (named landmarks via index order; normalized
+    /// coordinates) for the overlay.
+    detection: Option<dj_engine::dj_gesture::Detection>,
+    /// (wheel, zone) pairs currently containing a hand centroid.
+    active_zones: Vec<(usize, usize)>,
+    /// Fixture name when a mock feed is running.
+    feed: Option<String>,
+    /// Camera availability: always "mock" here. On macOS the AVFoundation
+    /// path will report "granted" / "denied" / "prompt" ([H] criterion,
+    /// not implemented on this platform).
+    camera: String,
+}
+
+#[tauri::command]
+fn gesture_status(state: State<AppState>, instance: String) -> CmdResult<GestureStatus> {
+    let engine = state.engine.lock().map_err(err)?;
+    let g = engine.gesture(&instance).map_err(err)?;
+    let mappings = g
+        .mappings()
+        .iter()
+        .map(|(jack, d)| GestureMappingSnapshot {
+            name: d.name.clone(),
+            mode: d.mode.clone(),
+            config: d.config.clone(),
+            value: g.value(*jack),
+        })
+        .collect();
+    let feed = state
+        .gesture_feeds
+        .lock()
+        .map_err(err)?
+        .get(&instance)
+        .map(|f| f.source.clone());
+    Ok(GestureStatus {
+        mode: g.active_mode().to_string(),
+        modes: g.mode_ids(),
+        wheels: *g.wheels(),
+        mappings,
+        detection: g.last_detection().cloned(),
+        active_zones: g.active_zones(),
+        feed,
+        camera: "mock".into(),
+    })
+}
+
+#[tauri::command]
+fn gesture_set_mode(state: State<AppState>, instance: String, mode: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    record_edit(&state, &engine, &format!("gest-mode:{instance}"));
+    engine.gesture_set_mode(&instance, &mode).map_err(err)
+}
+
+/// Create a gesture mapping under the given mode (a new output jack).
+/// Safe while running: jack buffers are preallocated, like MIDI.
+#[tauri::command]
+fn gesture_add_mapping(
+    state: State<AppState>,
+    instance: String,
+    name: String,
+    mode: String,
+    config: serde_json::Value,
+) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    record_edit(&state, &engine, &format!("gest+:{instance}:{name}"));
+    engine
+        .add_gesture_mapping(&instance, &name, &mode, config)
+        .map(|_| ())
+        .map_err(err)
+}
+
+/// Remove a gesture mapping. Wires from its jack are disconnected first
+/// (restoring auto wire-style knobs), which needs the engine stopped.
+#[tauri::command]
+fn gesture_remove_mapping(state: State<AppState>, instance: String, name: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    record_edit(&state, &engine, &format!("gest-:{instance}:{name}"));
+    let doomed: Vec<(String, String)> = engine
+        .wire_specs()
+        .iter()
+        .filter(|w| {
+            engine.nodes[w.from_node].instance_id == instance
+                && engine.output_jack_name(w.from_node, w.from_jack) == name
+        })
+        .map(|w| {
+            (
+                engine.nodes[w.to_node].instance_id.clone(),
+                engine.nodes[w.to_node].manifest.inputs[w.to_jack]
+                    .id
+                    .clone(),
+            )
+        })
+        .collect();
+    with_stopped(&mut engine, |e| {
+        for (to_instance, to_jack) in &doomed {
+            e.disconnect(&instance, &name, to_instance, to_jack)
+                .map_err(err)?;
+            if let Ok(k) = e.knob_state(to_instance, to_jack) {
+                if k.config
+                    .as_ref()
+                    .is_some_and(|c| c.style == KnobStyle::Wire)
+                {
+                    e.set_knob_config(to_instance, to_jack, None).map_err(err)?;
+                }
+            }
+        }
+        e.remove_gesture_mapping(&instance, &name).map_err(err)
+    })
+}
+
+/// Arm the learn flow: the next detection is offered to the active mode.
+#[tauri::command]
+fn gesture_learn_begin(state: State<AppState>, instance: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.gesture_learn_begin(&instance).map_err(err)
+}
+
+/// Poll the learn flow; on capture, creates the mapping under `name` and
+/// returns true (the frontend polls like MIDI learn).
+#[tauri::command]
+fn gesture_learn_poll(state: State<AppState>, instance: String, name: String) -> CmdResult<bool> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    record_edit(&state, &engine, &format!("gest+:{instance}:{name}"));
+    Ok(engine
+        .gesture_learn_poll(&instance, &name)
+        .map_err(err)?
+        .is_some())
+}
+
+/// Build one of the recorded fixture traces by name.
+fn gesture_fixture(
+    name: &str,
+    wheels: &dj_engine::dj_gesture::WheelLayout,
+) -> Option<dj_engine::dj_gesture::PoseTrace> {
+    use dj_engine::dj_gesture::fixtures;
+    match name {
+        "pinch" => Some(fixtures::pinch_trace(30.0, 90, 0.04, 0.3)),
+        "wheel_tour" => Some(fixtures::wheel_tour_trace(30.0, wheels, 15)),
+        "demo" => Some(fixtures::demo_trace(30.0, wheels)),
+        _ => None,
+    }
+}
+
+/// Start the (mock) gesture feed: plays a recorded fixture through the
+/// full pipeline — synthetic frames -> detector -> mappings -> RT graph —
+/// from a control-rate background thread (never the RT thread). On macOS
+/// a camera frame source will replace the fixture behind this same
+/// command; the UI is identical either way.
+#[tauri::command]
+fn gesture_feed_start(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    instance: String,
+    source: String,
+) -> CmdResult<()> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let wheels = {
+        let engine = state.engine.lock().map_err(err)?;
+        *engine.gesture(&instance).map_err(err)?.wheels()
+    };
+    let trace = gesture_fixture(&source, &wheels)
+        .ok_or_else(|| format!("unknown gesture fixture {source:?}"))?;
+    let mut feeds = state.gesture_feeds.lock().map_err(err)?;
+    if let Some(old) = feeds.remove(&instance) {
+        old.stop.store(true, Ordering::Relaxed);
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    feeds.insert(
+        instance.clone(),
+        GestureFeedHandle {
+            stop: stop.clone(),
+            source,
+        },
+    );
+    drop(feeds);
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        use dj_engine::dj_gesture::{HandDetector, MarkerDetector, TraceFrameSource};
+        let state = handle.state::<AppState>();
+        let mut detector = MarkerDetector;
+        let dt = 1.0 / trace.fps;
+        let tick = std::time::Duration::from_secs_f32(dt);
+        let mut i = 0usize;
+        while !stop.load(Ordering::Relaxed) {
+            let det =
+                TraceFrameSource::render(&trace, i).and_then(|frame| detector.detect(&frame).ok());
+            {
+                let Ok(mut engine) = state.engine.lock() else {
+                    break;
+                };
+                let frame = engine.current_frame();
+                if engine
+                    .gesture_feed(&instance, frame, det.as_ref(), dt)
+                    .is_err()
+                {
+                    break; // module removed / engine rebuilt without it
+                }
+            }
+            i = (i + 1) % trace.frames.len();
+            std::thread::sleep(tick);
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn gesture_feed_stop(state: State<AppState>, instance: String) -> CmdResult<()> {
+    if let Some(feed) = state.gesture_feeds.lock().map_err(err)?.remove(&instance) {
+        feed.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1556,6 +1809,7 @@ fn main() {
             last_autosave: Mutex::new(None),
             _watcher: watcher,
             analysis,
+            gesture_feeds: Mutex::new(BTreeMap::new()),
         })
         .setup(|app| {
             // Periodic crash-recovery autosave (skips unchanged states).
@@ -1651,6 +1905,14 @@ fn main() {
             remove_midi_mapping,
             add_midi_led_mapping,
             remove_midi_led_mapping,
+            gesture_status,
+            gesture_set_mode,
+            gesture_add_mapping,
+            gesture_remove_mapping,
+            gesture_learn_begin,
+            gesture_learn_poll,
+            gesture_feed_start,
+            gesture_feed_stop,
             undo,
             redo,
             end_edit,

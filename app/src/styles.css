@@ -959,3 +959,126 @@ body {
   color: #9aa7b5;
   margin-bottom: 2px;
 }
+
+/* --- Gesture Control panel (M5, PRD §7.3) --- */
+
+.gesture-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 240px;
+  font-size: 11px;
+}
+
+.gesture-feed {
+  position: relative;
+  border: 1px solid #2c3644;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.gesture-overlay {
+  display: block;
+  width: 100%;
+}
+
+.gesture-video-placeholder {
+  fill: #0b0f14;
+}
+
+.gesture-camera-badge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(12, 17, 24, 0.8);
+  color: #9aa7b5;
+  font-size: 10px;
+}
+
+.gesture-zone {
+  fill: rgba(90, 130, 180, 0.08);
+  stroke: #3a4a5e;
+  stroke-width: 1;
+}
+
+.gesture-zone-mapped {
+  fill: rgba(90, 160, 120, 0.2);
+  stroke: #4f8a68;
+}
+
+.gesture-zone-active {
+  fill: rgba(120, 200, 255, 0.45);
+  stroke: #7cc8ff;
+}
+
+.gesture-point {
+  fill: #ffd479;
+}
+
+.gesture-point-label {
+  fill: #ffd479;
+  font-size: 7px;
+}
+
+.gesture-controls,
+.gesture-learn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gesture-learn input {
+  flex: 1;
+  min-width: 0;
+}
+
+.gesture-learn-hint {
+  color: #7cc8ff;
+}
+
+.gesture-empty {
+  color: #9aa7b5;
+  margin: 2px 0;
+}
+
+.gesture-mapping {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.gesture-mapping-name {
+  font-weight: 600;
+}
+
+.gesture-mapping-src {
+  color: #9aa7b5;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gesture-mapping-value {
+  width: 40px;
+  height: 6px;
+  border-radius: 3px;
+  background: #1a222d;
+  overflow: hidden;
+}
+
+.gesture-mapping-value-fill {
+  display: block;
+  height: 100%;
+  background: #7cc8ff;
+}
+
+.gesture-remove {
+  background: none;
+  border: none;
+  color: #c96a6a;
+  cursor: pointer;
+}

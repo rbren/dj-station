@@ -929,6 +929,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cpal",
+ "dj-gesture",
  "dj-module-sdk",
  "hound",
  "libc",
@@ -940,6 +941,15 @@ dependencies = [
  "symphonia",
  "thiserror 2.0.19",
  "wasmtime",
+]
+
+[[package]]
+name = "dj-gesture"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
