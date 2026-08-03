@@ -11,6 +11,7 @@
 pub mod db;
 pub mod import;
 pub mod providers;
+pub mod rekordbox;
 pub mod watch;
 
 pub use db::{Beatgrid, CuePoint, Library, MacroRecord, SavedLoop, Track};
@@ -19,6 +20,7 @@ pub use providers::{
     Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, FilterOption, FilterSpec,
     ProviderInfo, Query, TrackResult,
 };
+pub use rekordbox::{parse_rekordbox_xml, RekordboxReport, RekordboxTrack};
 pub use watch::{start_watcher, WatchHandle};
 
 use serde::{Deserialize, Serialize};
