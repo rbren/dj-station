@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio",
+      "to": "tone2",
+      "to_jack": "level"
+    }
+  ]
+}

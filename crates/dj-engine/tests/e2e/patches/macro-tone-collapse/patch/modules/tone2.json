@@ -1,0 +1,17 @@
+{
+  "ext": "macro.tone",
+  "knobs": {
+    "level": {
+      "position": 0.3,
+      "atten": 0.2,
+      "offset": 3.0
+    },
+    "pitch": {
+      "position": 0.55,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {},
+  "macro_version": 1
+}

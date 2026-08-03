@@ -528,6 +528,83 @@ fn regen_stem_patches() {
     }
 }
 
+/// M4 case: a patch containing a macro instance renders byte-identically.
+/// Built by collapsing osc+vca into `macro.tone` (promoting pitch/level/out)
+/// and instantiating it twice at different levels, plus an FM wire into a
+/// promoted input across the macro boundary.
+fn regen_macro_patches() {
+    let patches = e2e_dir().join("patches");
+    let dir = patches.join("macro-tone-collapse");
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = EngineConfig {
+        master_channels: 1,
+        ..EngineConfig::default()
+    };
+    let mut e = Engine::new(config, common::registry()).unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
+    e.set_knob_position("vca1", "cv", 0.5).unwrap();
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone",
+        "Tone",
+        dj_engine::MacroInterface {
+            inputs: vec![
+                dj_engine::MacroJack {
+                    id: "pitch".into(),
+                    node: "osc1".into(),
+                    jack: "pitch".into(),
+                },
+                dj_engine::MacroJack {
+                    id: "level".into(),
+                    node: "vca1".into(),
+                    jack: "cv".into(),
+                },
+            ],
+            outputs: vec![dj_engine::MacroJack {
+                id: "out".into(),
+                node: "vca1".into(),
+                jack: "out".into(),
+            }],
+            params: vec![],
+        },
+    )
+    .unwrap();
+    // Second instance from the library, detuned and quieter, with an
+    // external LFO modulating its level through the promoted input.
+    e.add_module("tone2", "macro.tone").unwrap();
+    e.connect("tone2", "out", "out1", "l").unwrap();
+    e.set_knob_position("tone2", "pitch", 0.55).unwrap();
+    e.set_knob_position("tone2", "level", 0.3).unwrap();
+    e.add_module("lfo1", "com.dj.oscillator").unwrap();
+    e.set_knob_position("lfo1", "pitch", 0.1).unwrap();
+    e.connect("lfo1", "audio", "tone2", "level").unwrap();
+    e.set_knob_atten_offset("tone2", "level", 0.2, 3.0).unwrap();
+    e.save_patch(&dir.join("patch"), "e2e-macro-tone-collapse")
+        .unwrap();
+    write_events(
+        &dir,
+        &EventsFile {
+            seconds: 0.5,
+            midi: vec![],
+            tracks: vec![],
+            decks: vec![],
+        },
+    );
+}
+
+#[test]
+fn e2e_macro_tone_collapse() {
+    if regen() {
+        regen_macro_patches();
+    }
+    check_case("macro-tone-collapse");
+}
+
 #[test]
 fn e2e_deck_stems_gains() {
     if regen() {

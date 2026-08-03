@@ -13,7 +13,7 @@ pub mod import;
 pub mod providers;
 pub mod watch;
 
-pub use db::{Beatgrid, CuePoint, Library, SavedLoop, Track};
+pub use db::{Beatgrid, CuePoint, Library, MacroRecord, SavedLoop, Track};
 pub use import::{ImportOptions, ImportOutcome, AUDIO_EXTENSIONS};
 pub use providers::{
     Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, FilterOption, FilterSpec,

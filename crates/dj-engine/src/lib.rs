@@ -15,6 +15,7 @@ pub mod engine;
 pub mod graph;
 pub mod history;
 pub mod knob;
+pub mod macros;
 pub mod manifest;
 pub mod mixer;
 pub mod module_host;
@@ -29,6 +30,9 @@ pub use builtin::{MidiOutEvent, MidiOutSink, MockMidiSink};
 pub use engine::{Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE};
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle};
+pub use macros::{
+    MacroConflict, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroParam, MacroResolution,
+};
 pub use manifest::Manifest;
 pub use patch::PatchDoc;
 pub use registry::ExtensionRegistry;

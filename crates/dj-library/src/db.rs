@@ -81,6 +81,14 @@ CREATE TABLE IF NOT EXISTS track_beatgrids (
     bpm         REAL NOT NULL,
     anchor_secs REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS macros (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    version    INTEGER NOT NULL,
+    definition TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 ";
 
 /// A library track row. `bpm`/`musical_key`/`analysis_status` are the
@@ -569,6 +577,76 @@ impl Library {
             .optional()?)
         })
     }
+
+    // ------------------------------------------------------------------
+    // Macro modules (M4, PRD §6): the library is the canonical store for
+    // macro definitions — stable ID, version, and the definition itself
+    // as engine-format JSON (the engine's `MacroDef`).
+    // ------------------------------------------------------------------
+
+    /// Insert or update a macro definition.
+    pub fn save_macro(&self, record: &MacroRecord) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute(
+                "INSERT INTO macros (id, name, version, definition, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                 ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    version = excluded.version,
+                    definition = excluded.definition,
+                    updated_at = excluded.updated_at",
+                params![record.id, record.name, record.version, record.definition],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn macro_by_id(&self, id: &str) -> Result<Option<MacroRecord>> {
+        self.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT id, name, version, definition FROM macros WHERE id = ?1",
+                params![id],
+                macro_from_row,
+            )
+            .optional()?)
+        })
+    }
+
+    /// All stored macros, sorted by id.
+    pub fn macros(&self) -> Result<Vec<MacroRecord>> {
+        self.with_conn(|c| {
+            let mut stmt =
+                c.prepare("SELECT id, name, version, definition FROM macros ORDER BY id")?;
+            let rows = stmt.query_map([], macro_from_row)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    pub fn delete_macro(&self, id: &str) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute("DELETE FROM macros WHERE id = ?1", params![id])?;
+            Ok(())
+        })
+    }
+}
+
+/// A stored macro module (PRD §6/§8.1). `definition` is the engine's
+/// `MacroDef` serialized as JSON — the library treats it as opaque.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MacroRecord {
+    pub id: String,
+    pub name: String,
+    pub version: i64,
+    pub definition: String,
+}
+
+fn macro_from_row(row: &Row) -> rusqlite::Result<MacroRecord> {
+    Ok(MacroRecord {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        version: row.get(2)?,
+        definition: row.get(3)?,
+    })
 }
 
 /// A hot cue point (slot 0..=7) on a track.
