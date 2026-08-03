@@ -76,7 +76,7 @@ fn tone_wav(name: &str, freq: f32, secs: f32) -> PathBuf {
 /// The PRD §10 [A] patch: 4 decks, each playing a track with a full set of
 /// 4 stems loaded (looped so they play for the whole run), mixed through
 /// two crossfaders, plus exactly 50 WASM module instances (16 osc + 16 vca
-/// + 16 adsr voice chains and 2 LFO oscillators FM-ing the first voices),
+///   + 16 adsr voice chains and 2 LFO oscillators FM-ing the first voices),
 /// all MIDI-gated and mixed into the stereo out.
 fn build_prd_stress_patch(engine: &mut Engine) {
     engine.add_module("midi1", "builtin.midi").unwrap();
