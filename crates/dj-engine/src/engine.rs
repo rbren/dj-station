@@ -162,6 +162,7 @@ pub struct Engine {
     pub config: EngineConfig,
     pub registry: ExtensionRegistry,
     wasm: WasmRuntime,
+    native: crate::native_host::NativeRuntime,
     state: EngineState,
     pub nodes: Vec<NodeInfo>,
     node_by_id: HashMap<String, usize>,
@@ -243,6 +244,7 @@ impl Engine {
             config,
             registry,
             wasm: WasmRuntime::new()?,
+            native: crate::native_host::NativeRuntime::new(),
             state: EngineState::Stopped(Box::new(core)),
             nodes: Vec::new(),
             node_by_id: HashMap::new(),
@@ -334,6 +336,18 @@ impl Engine {
                     .registry
                     .extension(ext_id)
                     .ok_or_else(|| anyhow!("unknown extension {ext_id:?}"))?;
+                if ext.manifest.abi == "native-1" {
+                    // Native escape hatch: unsandboxed, trusted code (see
+                    // native_host.rs for the trust model).
+                    let host = self.native.instantiate(
+                        &ext.dsp_path,
+                        self.config.sample_rate,
+                        self.config.block_size,
+                        manifest.inputs.len(),
+                        manifest.outputs.len(),
+                    )?;
+                    return Ok(Box::new(host));
+                }
                 let compiled = self.wasm.compile_file(&ext.dsp_path)?;
                 let host = self.wasm.instantiate(
                     &compiled,

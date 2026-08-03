@@ -8,3 +8,7 @@
 /extensions/*/ui.js
 *.tsbuildinfo
 /app/src-tauri/gen/schemas
+/extensions/*/dsp.so
+/extensions/*/dsp.dylib
+/extensions/*/dsp.dll
+/extensions/gain-native/target

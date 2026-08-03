@@ -115,6 +115,156 @@ impl<M: Module> Runtime<M> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// native-1 ABI (PRD §5.2 native escape hatch)
+// ---------------------------------------------------------------------------
+
+/// Version of the `native-1` C ABI. The host refuses to load a dylib whose
+/// vtable reports a different version.
+pub const NATIVE_ABI_VERSION: u32 = 1;
+
+/// Name of the versioned entry symbol a `native-1` dylib must export:
+/// `extern "C" fn() -> *const NativeVTableV1`.
+pub const NATIVE_ENTRY_SYMBOL: &str = "dj_module_entry_v1";
+
+/// The `native-1` ABI vtable. C layout so the host never sees Rust types
+/// across the dylib boundary (PRD §5.2). All function pointers are called
+/// by the host; `process` runs on the RT thread and must not allocate,
+/// block, or perform syscalls (honor system — native modules are trusted,
+/// unsandboxed code).
+#[repr(C)]
+pub struct NativeVTableV1 {
+    /// Must equal [`NATIVE_ABI_VERSION`].
+    pub abi_version: u32,
+    /// Create an instance. Returns an opaque handle (never null on success).
+    pub create: unsafe extern "C" fn(sample_rate: f32, block_size: u32) -> *mut core::ffi::c_void,
+    pub destroy: unsafe extern "C" fn(inst: *mut core::ffi::c_void),
+    /// Per-block processing. `inputs`/`outputs` are arrays of channel
+    /// pointers (`n_inputs`/`n_outputs` entries, each `frames` samples).
+    pub process: unsafe extern "C" fn(
+        inst: *mut core::ffi::c_void,
+        inputs: *const *const f32,
+        n_inputs: u32,
+        outputs: *const *mut f32,
+        n_outputs: u32,
+        frames: u32,
+        connected_mask: u64,
+    ),
+    pub on_param: unsafe extern "C" fn(inst: *mut core::ffi::c_void, index: u32, value: f32),
+    /// Serialize state into `buf` (capacity `cap`); returns bytes written.
+    pub save: unsafe extern "C" fn(inst: *mut core::ffi::c_void, buf: *mut u8, cap: u32) -> u32,
+    pub load: unsafe extern "C" fn(inst: *mut core::ffi::c_void, buf: *const u8, len: u32),
+}
+
+// SAFETY: the vtable is a set of stateless function pointers.
+unsafe impl Sync for NativeVTableV1 {}
+
+/// Instance holder used by [`export_native_module!`]. Public for macro use.
+#[doc(hidden)]
+pub struct NativeInstance<M: Module> {
+    pub module: M,
+    pub block_size: usize,
+}
+
+/// Generate the `native-1` ABI exports (a versioned vtable behind
+/// `dj_module_entry_v1`) for a [`Module`] implementation. Build the crate
+/// as a `cdylib`.
+#[macro_export]
+macro_rules! export_native_module {
+    ($ty:ty) => {
+        #[doc(hidden)]
+        mod __dj_native_module_exports {
+            use super::*;
+            use core::ffi::c_void;
+
+            unsafe extern "C" fn create(sample_rate: f32, block_size: u32) -> *mut c_void {
+                let ctx = $crate::InitCtx {
+                    sample_rate,
+                    block_size: block_size as usize,
+                };
+                let inst = Box::new($crate::NativeInstance::<$ty> {
+                    module: <$ty as $crate::Module>::new(&ctx),
+                    block_size: block_size as usize,
+                });
+                Box::into_raw(inst) as *mut c_void
+            }
+
+            unsafe extern "C" fn destroy(inst: *mut c_void) {
+                if !inst.is_null() {
+                    drop(unsafe { Box::from_raw(inst as *mut $crate::NativeInstance<$ty>) });
+                }
+            }
+
+            unsafe extern "C" fn process(
+                inst: *mut c_void,
+                inputs: *const *const f32,
+                n_inputs: u32,
+                outputs: *const *mut f32,
+                n_outputs: u32,
+                frames: u32,
+                connected_mask: u64,
+            ) {
+                let inst = unsafe { &mut *(inst as *mut $crate::NativeInstance<$ty>) };
+                let frames = (frames as usize).min(inst.block_size);
+                let n_in = (n_inputs as usize).min(<$ty as $crate::Module>::N_INPUTS);
+                let n_out = (n_outputs as usize).min(<$ty as $crate::Module>::N_OUTPUTS);
+                // Fixed-size slice tables on the stack (max 64 jacks) —
+                // no allocation on the RT path.
+                let mut ins: [&[f32]; 64] = [&[]; 64];
+                for i in 0..n_in {
+                    let p = unsafe { *inputs.add(i) };
+                    ins[i] = unsafe { core::slice::from_raw_parts(p, frames) };
+                }
+                let mut outs: [&mut [f32]; 64] = [(); 64].map(|_| &mut [] as &mut [f32]);
+                for (o, slot) in outs.iter_mut().enumerate().take(n_out) {
+                    let p = unsafe { *outputs.add(o) };
+                    *slot = unsafe { core::slice::from_raw_parts_mut(p, frames) };
+                }
+                let mut io = $crate::ProcessIo {
+                    inputs: &ins[..n_in],
+                    outputs: &mut outs[..n_out],
+                    connected_inputs: $crate::InputMask(connected_mask),
+                };
+                $crate::Module::process(&mut inst.module, &mut io);
+            }
+
+            unsafe extern "C" fn on_param(inst: *mut c_void, index: u32, value: f32) {
+                let inst = unsafe { &mut *(inst as *mut $crate::NativeInstance<$ty>) };
+                $crate::Module::on_param(&mut inst.module, index, value);
+            }
+
+            unsafe extern "C" fn save(inst: *mut c_void, buf: *mut u8, cap: u32) -> u32 {
+                let inst = unsafe { &mut *(inst as *mut $crate::NativeInstance<$ty>) };
+                let state = $crate::Module::save_state(&inst.module);
+                let n = state.len().min(cap as usize);
+                unsafe { core::ptr::copy_nonoverlapping(state.as_ptr(), buf, n) };
+                n as u32
+            }
+
+            unsafe extern "C" fn load(inst: *mut c_void, buf: *const u8, len: u32) {
+                let inst = unsafe { &mut *(inst as *mut $crate::NativeInstance<$ty>) };
+                let bytes = unsafe { core::slice::from_raw_parts(buf, len as usize) };
+                $crate::Module::load_state(&mut inst.module, bytes);
+            }
+
+            static VTABLE: $crate::NativeVTableV1 = $crate::NativeVTableV1 {
+                abi_version: $crate::NATIVE_ABI_VERSION,
+                create,
+                destroy,
+                process,
+                on_param,
+                save,
+                load,
+            };
+
+            #[no_mangle]
+            pub extern "C" fn dj_module_entry_v1() -> *const $crate::NativeVTableV1 {
+                &VTABLE
+            }
+        }
+    };
+}
+
 /// Generate the `wasm-1` ABI exports for a [`Module`] implementation.
 #[macro_export]
 macro_rules! export_module {

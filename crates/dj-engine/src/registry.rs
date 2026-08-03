@@ -40,7 +40,7 @@ impl ExtensionRegistry {
             for dir in entries {
                 if dir.is_dir()
                     && dir.join("manifest.json").exists()
-                    && dir.join("dsp.wasm").exists()
+                    && crate::manifest::find_dsp(&dir).is_some()
                 {
                     match Extension::load(&dir) {
                         Ok(ext) => {

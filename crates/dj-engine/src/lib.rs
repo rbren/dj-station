@@ -18,6 +18,7 @@ pub mod knob;
 pub mod manifest;
 pub mod mixer;
 pub mod module_host;
+pub mod native_host;
 pub mod patch;
 pub mod playback;
 pub mod registry;

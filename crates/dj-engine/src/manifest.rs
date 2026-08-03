@@ -78,23 +78,47 @@ pub struct Extension {
     pub dsp_path: PathBuf,
 }
 
+/// File names a `native-1` extension's dylib may use (`dsp.dylib` per the
+/// PRD; the platform-native suffixes are accepted so one extension tree
+/// works across macOS/Linux/Windows).
+pub const NATIVE_DSP_NAMES: [&str; 3] = ["dsp.dylib", "dsp.so", "dsp.dll"];
+
+/// Locate the DSP artifact for `dir`, if any (wasm or native dylib).
+pub fn find_dsp(dir: &Path) -> Option<PathBuf> {
+    let wasm = dir.join("dsp.wasm");
+    if wasm.exists() {
+        return Some(wasm);
+    }
+    NATIVE_DSP_NAMES
+        .iter()
+        .map(|n| dir.join(n))
+        .find(|p| p.exists())
+}
+
 impl Extension {
     pub fn load(dir: &Path) -> anyhow::Result<Self> {
         let manifest_path = dir.join("manifest.json");
         let text = std::fs::read_to_string(&manifest_path)?;
         let manifest: Manifest = serde_json::from_str(&text)?;
         anyhow::ensure!(
-            manifest.abi == "wasm-1",
-            "unsupported abi {:?} in {}",
-            manifest.abi,
-            manifest_path.display()
-        );
-        anyhow::ensure!(
             manifest.inputs.len() <= 64 && manifest.outputs.len() <= 64,
             "at most 64 inputs/outputs supported"
         );
-        let dsp_path = dir.join("dsp.wasm");
-        anyhow::ensure!(dsp_path.exists(), "missing {}", dsp_path.display());
+        let dsp_path = match manifest.abi.as_str() {
+            "wasm-1" => {
+                let p = dir.join("dsp.wasm");
+                anyhow::ensure!(p.exists(), "missing {}", p.display());
+                p
+            }
+            "native-1" => NATIVE_DSP_NAMES
+                .iter()
+                .map(|n| dir.join(n))
+                .find(|p| p.exists())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("missing dsp.dylib/dsp.so/dsp.dll in {}", dir.display())
+                })?,
+            other => anyhow::bail!("unsupported abi {other:?} in {}", manifest_path.display()),
+        };
         Ok(Extension {
             manifest,
             dir: dir.to_path_buf(),

@@ -1,0 +1,19 @@
+# Sample native-1 module (PRD §5 native escape hatch). Standalone
+# workspace: it builds for the HOST target (cdylib), unlike the wasm32
+# extensions workspace, and must not share its target dir with the root
+# workspace (tests rebuild it while the root target dir is locked).
+[package]
+name = "dj-ext-gain-native"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dj-module-sdk = { path = "../../crates/dj-module-sdk" }
+
+[profile.release]
+opt-level = 3

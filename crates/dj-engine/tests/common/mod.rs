@@ -29,6 +29,20 @@ pub fn ensure_extensions_built() {
     });
 }
 
+/// Build the native-1 sample extension once per test binary. Separate
+/// workspace/target dir, so it can build while the root target is locked.
+pub fn ensure_native_extensions_built() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let script = repo_root().join("scripts/build-native-extensions.sh");
+        let status = std::process::Command::new("bash")
+            .arg(&script)
+            .status()
+            .expect("failed to run build-native-extensions.sh");
+        assert!(status.success(), "native extension build failed");
+    });
+}
+
 pub fn registry() -> ExtensionRegistry {
     ensure_extensions_built();
     ExtensionRegistry::discover(&[extensions_dir()]).unwrap()
