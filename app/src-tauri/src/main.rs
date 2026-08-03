@@ -803,7 +803,9 @@ fn deck_status(state: State<AppState>, instance: String) -> CmdResult<dj_engine:
 #[tauri::command]
 fn deck_waveform(state: State<AppState>, instance: String, buckets: usize) -> CmdResult<Vec<f32>> {
     let engine = state.engine.lock().map_err(err)?;
-    engine.deck_waveform(&instance, buckets.min(20_000)).map_err(err)
+    engine
+        .deck_waveform(&instance, buckets.min(20_000))
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -821,7 +823,9 @@ fn deck_set_cue(
     position: Option<f64>,
 ) -> CmdResult<()> {
     let mut engine = state.engine.lock().map_err(err)?;
-    engine.deck_set_cue(&instance, slot, position).map_err(err)?;
+    engine
+        .deck_set_cue(&instance, slot, position)
+        .map_err(err)?;
     if let Some(track) = deck_library_track(&state, &engine, &instance) {
         match position {
             Some(pos) => state
@@ -870,8 +874,8 @@ fn deck_save_loop(state: State<AppState>, instance: String, name: String) -> Cmd
     let (Some(start), Some(end)) = (status.loop_start_secs, status.loop_end_secs) else {
         return Err("no loop region set".into());
     };
-    let track = deck_library_track(&state, &engine, &instance)
-        .ok_or("deck track is not in the library")?;
+    let track =
+        deck_library_track(&state, &engine, &instance).ok_or("deck track is not in the library")?;
     state
         .library
         .add_track_loop(track.id, &name, start, end)
@@ -977,10 +981,8 @@ fn main() {
     // M3: background analysis worker. Defaults to the DSP stem separator;
     // an ONNX model can be swapped in via the `onnx` feature of
     // dj-analysis (CoreML EP on macOS, CPU EP elsewhere).
-    let analysis = dj_analysis::start_worker(
-        library.clone(),
-        dj_analysis::AnalysisSettings::default(),
-    );
+    let analysis =
+        dj_analysis::start_worker(library.clone(), dj_analysis::AnalysisSettings::default());
 
     tauri::Builder::default()
         .manage(AppState {
