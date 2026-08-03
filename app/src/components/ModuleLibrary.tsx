@@ -1,7 +1,11 @@
 // Left-hand module library: every module type the engine can instantiate
-// (built-ins + discovered extensions); clicking one drops it into the rack.
+// (built-ins + discovered extensions); drag one onto the rack (or click it)
+// to drop it in.
 
 import type { Manifest } from '../types';
+
+/** dataTransfer type used when dragging a module out of the library. */
+export const MODULE_DRAG_TYPE = 'application/dj-module';
 
 export function ModuleLibrary({
   modules,
@@ -19,6 +23,11 @@ export function ModuleLibrary({
           className="library-entry"
           data-testid={`library-add-${m.id}`}
           title={`${m.id} v${m.version}`}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData(MODULE_DRAG_TYPE, m.id);
+            e.dataTransfer.effectAllowed = 'copy';
+          }}
           onClick={() => onAdd(m.id)}
         >
           <span className="library-name">{m.name}</span>

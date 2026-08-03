@@ -24,7 +24,7 @@ use crate::registry::ExtensionRegistry;
 
 pub const PATCH_FORMAT: &str = "djpatch-1";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PatchHeader {
     pub block_size: usize,
     pub format: String,
@@ -33,7 +33,7 @@ pub struct PatchHeader {
     pub sample_rate: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleFile {
     pub ext: String,
     #[serde(default)]
@@ -60,9 +60,20 @@ pub struct WireEntry {
     pub to_jack: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WireFile {
     pub wires: Vec<WireEntry>,
+}
+
+/// A complete patch as an in-memory document — exactly what `save_patch`
+/// writes to disk. Cheap to clone/compare; used for undo/redo snapshots.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatchDoc {
+    pub header: PatchHeader,
+    /// One entry per module instance, keyed by instance id.
+    pub modules: BTreeMap<String, ModuleFile>,
+    /// One wire bundle per source instance.
+    pub wires: BTreeMap<String, WireFile>,
 }
 
 fn to_pretty(value: &impl Serialize) -> Result<String> {
@@ -83,11 +94,9 @@ fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
 }
 
 impl Engine {
-    /// Save the current patch to `dir` as a directory tree.
-    pub fn save_patch(&self, dir: &Path, name: &str) -> Result<()> {
-        std::fs::create_dir_all(dir.join("modules"))?;
-        std::fs::create_dir_all(dir.join("wires"))?;
-
+    /// Capture the full patch state as an in-memory document (the same
+    /// content `save_patch` writes to disk).
+    pub fn snapshot(&self, name: &str) -> PatchDoc {
         let header = PatchHeader {
             block_size: self.config.block_size,
             format: PATCH_FORMAT.into(),
@@ -95,36 +104,58 @@ impl Engine {
             name: name.into(),
             sample_rate: self.config.sample_rate,
         };
-        write_if_changed(&dir.join("patch.json"), &to_pretty(&header)?)?;
-
-        let mut keep_modules = BTreeSet::new();
-        let mut keep_wires = BTreeSet::new();
-
+        let mut modules = BTreeMap::new();
         for (node_idx, info) in self.nodes.iter().enumerate() {
             let mut knobs = BTreeMap::new();
             for (jack, state) in info.manifest.inputs.iter().zip(&info.knobs) {
                 knobs.insert(jack.id.clone(), state.clone());
             }
-            let mf = ModuleFile {
-                ext: info.ext_id.clone(),
-                knobs,
-                params: info.params.clone(),
-                midi_mappings: info.midi_mappings.clone(),
-                track: info.track_path.clone(),
-                sync_to: self.deck_sync_to_by_node(node_idx),
-            };
-            let fname = format!("{}.json", info.instance_id);
-            write_if_changed(&dir.join("modules").join(&fname), &to_pretty(&mf)?)?;
+            modules.insert(
+                info.instance_id.clone(),
+                ModuleFile {
+                    ext: info.ext_id.clone(),
+                    knobs,
+                    params: info.params.clone(),
+                    midi_mappings: info.midi_mappings.clone(),
+                    track: info.track_path.clone(),
+                    sync_to: self.deck_sync_to_by_node(node_idx),
+                },
+            );
+        }
+        let wires = self
+            .wire_entries()
+            .into_iter()
+            .map(|(source, mut entries)| {
+                entries.sort();
+                (source, WireFile { wires: entries })
+            })
+            .collect();
+        PatchDoc {
+            header,
+            modules,
+            wires,
+        }
+    }
+
+    /// Save the current patch to `dir` as a directory tree.
+    pub fn save_patch(&self, dir: &Path, name: &str) -> Result<()> {
+        let doc = self.snapshot(name);
+        std::fs::create_dir_all(dir.join("modules"))?;
+        std::fs::create_dir_all(dir.join("wires"))?;
+        write_if_changed(&dir.join("patch.json"), &to_pretty(&doc.header)?)?;
+
+        let mut keep_modules = BTreeSet::new();
+        let mut keep_wires = BTreeSet::new();
+
+        for (instance_id, mf) in &doc.modules {
+            let fname = format!("{instance_id}.json");
+            write_if_changed(&dir.join("modules").join(&fname), &to_pretty(mf)?)?;
             keep_modules.insert(fname);
         }
 
-        // One wire bundle per source node.
-        let wires = self.wire_entries();
-        for (source, mut entries) in wires {
-            entries.sort();
-            let wf = WireFile { wires: entries };
+        for (source, wf) in &doc.wires {
             let fname = format!("{source}.json");
-            write_if_changed(&dir.join("wires").join(&fname), &to_pretty(&wf)?)?;
+            write_if_changed(&dir.join("wires").join(&fname), &to_pretty(wf)?)?;
             keep_wires.insert(fname);
         }
 
@@ -161,76 +192,92 @@ impl Engine {
         map
     }
 
-    /// Load a patch directory into a fresh engine.
-    pub fn load_patch(dir: &Path, registry: ExtensionRegistry) -> Result<Engine> {
-        let header: PatchHeader =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("patch.json"))?)
-                .context("reading patch.json")?;
-        anyhow::ensure!(header.format == PATCH_FORMAT, "unsupported patch format");
+    /// Build a fresh engine from an in-memory patch document.
+    pub fn from_doc(doc: &PatchDoc, registry: ExtensionRegistry) -> Result<Engine> {
+        anyhow::ensure!(doc.header.format == PATCH_FORMAT, "unsupported patch format");
         let config = EngineConfig {
-            sample_rate: header.sample_rate,
-            block_size: header.block_size,
-            master_channels: header.master_channels,
+            sample_rate: doc.header.sample_rate,
+            block_size: doc.header.block_size,
+            master_channels: doc.header.master_channels,
         };
         let mut engine = Engine::new(config, registry)?;
 
-        // Modules, sorted by filename for determinism.
-        let mut module_files: Vec<_> = std::fs::read_dir(dir.join("modules"))?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().map(|x| x == "json").unwrap_or(false))
-            .collect();
-        module_files.sort();
-        // Deck sync targets are applied after every module exists (the
-        // master deck may sort after its follower).
+        // Modules in BTreeMap (instance id) order for determinism. Deck sync
+        // targets are applied after every module exists (the master deck may
+        // sort after its follower).
         let mut deferred_syncs: Vec<(String, String)> = Vec::new();
-        for path in &module_files {
-            let instance_id = path.file_stem().unwrap().to_string_lossy().to_string();
-            let mf: ModuleFile = serde_json::from_str(&std::fs::read_to_string(path)?)
-                .with_context(|| format!("reading {}", path.display()))?;
-            engine.add_module(&instance_id, &mf.ext)?;
+        for (instance_id, mf) in &doc.modules {
+            engine.add_module(instance_id, &mf.ext)?;
             for m in &mf.midi_mappings {
-                engine.add_midi_mapping(&instance_id, &m.kind, m.num, &m.name)?;
+                engine.add_midi_mapping(instance_id, &m.kind, m.num, &m.name)?;
             }
             if let Some(track) = &mf.track {
                 if mf.ext == crate::deck::DECK_ID {
-                    engine.deck_load(&instance_id, Path::new(track))?;
+                    engine.deck_load(instance_id, Path::new(track))?;
                 } else {
-                    engine.playback_load(&instance_id, Path::new(track))?;
+                    engine.playback_load(instance_id, Path::new(track))?;
                 }
             }
             if let Some(sync_to) = &mf.sync_to {
                 deferred_syncs.push((instance_id.clone(), sync_to.clone()));
             }
             for (param, value) in &mf.params {
-                engine.set_param(&instance_id, param, *value)?;
+                engine.set_param(instance_id, param, *value)?;
             }
             for (jack, state) in &mf.knobs {
-                engine.restore_knob(&instance_id, jack, state.clone())?;
+                engine.restore_knob(instance_id, jack, state.clone())?;
             }
         }
         for (instance, master) in &deferred_syncs {
             engine.deck_sync(instance, Some(master))?;
         }
 
-        // Wires.
-        let wires_dir = dir.join("wires");
-        if wires_dir.is_dir() {
-            let mut wire_files: Vec<_> = std::fs::read_dir(&wires_dir)?
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.extension().map(|x| x == "json").unwrap_or(false))
-                .collect();
-            wire_files.sort();
-            for path in &wire_files {
-                let source = path.file_stem().unwrap().to_string_lossy().to_string();
-                let wf: WireFile = serde_json::from_str(&std::fs::read_to_string(path)?)
-                    .with_context(|| format!("reading {}", path.display()))?;
-                for w in &wf.wires {
-                    engine.connect(&source, &w.from_jack, &w.to, &w.to_jack)?;
-                }
+        for (source, wf) in &doc.wires {
+            for w in &wf.wires {
+                engine.connect(source, &w.from_jack, &w.to, &w.to_jack)?;
             }
         }
         Ok(engine)
+    }
+
+    /// Load a patch directory into a fresh engine.
+    pub fn load_patch(dir: &Path, registry: ExtensionRegistry) -> Result<Engine> {
+        let header: PatchHeader =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("patch.json"))?)
+                .context("reading patch.json")?;
+
+        let mut modules = BTreeMap::new();
+        for entry in std::fs::read_dir(dir.join("modules"))? {
+            let path = entry?.path();
+            if path.extension().map(|x| x == "json").unwrap_or(false) {
+                let instance_id = path.file_stem().unwrap().to_string_lossy().to_string();
+                let mf: ModuleFile = serde_json::from_str(&std::fs::read_to_string(&path)?)
+                    .with_context(|| format!("reading {}", path.display()))?;
+                modules.insert(instance_id, mf);
+            }
+        }
+
+        let mut wires = BTreeMap::new();
+        let wires_dir = dir.join("wires");
+        if wires_dir.is_dir() {
+            for entry in std::fs::read_dir(&wires_dir)? {
+                let path = entry?.path();
+                if path.extension().map(|x| x == "json").unwrap_or(false) {
+                    let source = path.file_stem().unwrap().to_string_lossy().to_string();
+                    let wf: WireFile = serde_json::from_str(&std::fs::read_to_string(&path)?)
+                        .with_context(|| format!("reading {}", path.display()))?;
+                    wires.insert(source, wf);
+                }
+            }
+        }
+
+        Engine::from_doc(
+            &PatchDoc {
+                header,
+                modules,
+                wires,
+            },
+            registry,
+        )
     }
 }

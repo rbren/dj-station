@@ -10,7 +10,7 @@ import { library, type Track } from './library';
 import { DeckCustomUI, DeckUIContext } from './components/DeckPanel';
 import { LibraryView } from './components/LibraryView';
 import { MidiPanel } from './components/MidiPanel';
-import { ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
+import { MODULE_DRAG_TYPE, ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
 import { GRID, ModulePanel, type JackRef } from './components/ModulePanel';
 import { WireOverlay } from './components/WireOverlay';
 import type { JackTelemetry, KnobConfig, Manifest, ModuleHandle } from './types';
@@ -39,6 +39,27 @@ function defaultPosition(index: number): { x: number; y: number } {
   return { x: (index % 3) * GRID * 10, y: Math.floor(index / 3) * GRID * 8 };
 }
 
+const ZOOM_KEY = 'dj-rack-zoom';
+const ZOOM_STEP = 1.2;
+const ZOOM_MIN = 0.4;
+const ZOOM_MAX = 2.5;
+
+function loadZoom(): number {
+  const z = Number(localStorage.getItem(ZOOM_KEY));
+  return Number.isFinite(z) && z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 1;
+}
+
+/** True when a shortcut keydown should be left to a form control. */
+function isEditableTarget(t: EventTarget | null): boolean {
+  return (
+    t instanceof HTMLElement &&
+    (t.tagName === 'INPUT' ||
+      t.tagName === 'SELECT' ||
+      t.tagName === 'TEXTAREA' ||
+      t.isContentEditable)
+  );
+}
+
 export default function App() {
   const [nodes, setNodes] = useState<NodeSnapshot[]>([]);
   const [wires, setWires] = useState<WireSnapshot[]>([]);
@@ -50,9 +71,23 @@ export default function App() {
   const [pending, setPending] = useState<JackRef | null>(null);
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   const [positions, setPositions] = useState<Positions>(() => loadPositions());
+  const [zoom, setZoom] = useState<number>(() => loadZoom());
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
+
+  const changeZoom = useCallback((direction: 1 | -1 | 0) => {
+    setZoom((prev) => {
+      const next =
+        direction === 0 ? 1 : Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev * ZOOM_STEP ** direction));
+      try {
+        localStorage.setItem(ZOOM_KEY, String(next));
+      } catch {
+        // persistence is best-effort
+      }
+      return next;
+    });
+  }, []);
 
   const moveModule = useCallback((instance: string, x: number, y: number) => {
     setPositions((prev) => {
@@ -103,12 +138,69 @@ export default function App() {
   }, [connected, nodes]);
 
   const addModule = useCallback(
-    async (typeId: string) => {
+    async (typeId: string, at?: { x: number; y: number }) => {
       const taken = new Set(nodes.map((n) => n.instance_id));
-      await engine.addModule(nextInstanceId(typeId, taken), typeId);
+      const instance = nextInstanceId(typeId, taken);
+      await engine.addModule(instance, typeId);
+      if (at) moveModule(instance, at.x, at.y);
       await refresh();
     },
-    [nodes, refresh],
+    [nodes, refresh, moveModule],
+  );
+
+  // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z)
+  // and rack zoom (cmd/ctrl +/-/0).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || isEditableTarget(e.target)) return;
+      const key = e.key.toLowerCase();
+      if (key === 'z') {
+        e.preventDefault();
+        void (e.shiftKey ? engine.redo() : engine.undo()).then(refresh);
+      } else if (key === 'y') {
+        e.preventDefault();
+        void engine.redo().then(refresh);
+      } else if (key === '=' || key === '+') {
+        e.preventDefault();
+        changeZoom(1);
+      } else if (key === '-' || key === '_') {
+        e.preventDefault();
+        changeZoom(-1);
+      } else if (key === '0') {
+        e.preventDefault();
+        changeZoom(0);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [refresh, changeZoom]);
+
+  // Drop a module dragged out of the library at the pointer position,
+  // snapped to the rack grid (in unzoomed rack coordinates).
+  const onRackDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes(MODULE_DRAG_TYPE)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }, []);
+
+  const onRackDrop = useCallback(
+    (e: React.DragEvent) => {
+      const typeId = e.dataTransfer.getData(MODULE_DRAG_TYPE);
+      if (!typeId) return;
+      e.preventDefault();
+      let at: { x: number; y: number } | undefined;
+      if (rackEl) {
+        const rect = rackEl.getBoundingClientRect();
+        const snap = (v: number) => Math.max(0, Math.round(v / zoom / GRID) * GRID);
+        at = {
+          x: snap(e.clientX - rect.left + rackEl.scrollLeft),
+          y: snap(e.clientY - rect.top + rackEl.scrollTop),
+        };
+      }
+      void addModule(typeId, at);
+    },
+    [rackEl, zoom, addModule],
   );
 
   const onJackClick = useCallback(
@@ -216,8 +308,18 @@ export default function App() {
       <div className="app-body" style={view === 'rack' ? undefined : { display: 'none' }}>
         <ModuleLibrary modules={moduleLib} onAdd={(typeId) => void addModule(typeId)} />
         <DeckUIContext.Provider value={deckUI}>
-          <div className="rack-area" ref={setRackEl}>
-            <div className="rack">
+          <div
+            className="rack-area"
+            ref={setRackEl}
+            data-testid="rack-area"
+            onDragOver={onRackDragOver}
+            onDrop={onRackDrop}
+          >
+            <div
+              className="rack"
+              data-testid="rack"
+              style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}
+            >
               {nodes.map((node, i) => (
                 <ModulePanel
                   key={node.instance_id}
@@ -269,7 +371,11 @@ export default function App() {
                 </p>
               )}
             </div>
-            <WireOverlay wires={wires} container={rackEl} layoutKey={JSON.stringify(positions)} />
+            <WireOverlay
+              wires={wires}
+              container={rackEl}
+              layoutKey={`${JSON.stringify(positions)}@${zoom}`}
+            />
           </div>
         </DeckUIContext.Provider>
       </div>

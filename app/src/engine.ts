@@ -115,6 +115,12 @@ export class EngineClient {
   removeMidiMapping(instance: string, name: string) {
     return this.call<void>('remove_midi_mapping', { instance, name });
   }
+  undo() {
+    return this.call<boolean>('undo');
+  }
+  redo() {
+    return this.call<boolean>('redo');
+  }
   /** Returns the backend the engine actually started on: 'cpal' (device
    *  audio) or 'null' (silent fallback), or null outside Tauri. */
   start() {

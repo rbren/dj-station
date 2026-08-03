@@ -13,6 +13,7 @@ pub mod builtin;
 pub mod deck;
 pub mod engine;
 pub mod graph;
+pub mod history;
 pub mod knob;
 pub mod manifest;
 pub mod mixer;
@@ -24,8 +25,10 @@ pub mod telemetry;
 pub mod wasm_host;
 
 pub use engine::{Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE};
+pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle};
 pub use manifest::Manifest;
+pub use patch::PatchDoc;
 pub use registry::ExtensionRegistry;
 pub use telemetry::JackTelemetry;
 
