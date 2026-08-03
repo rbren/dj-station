@@ -92,3 +92,22 @@ fails if it's missing.
   also carry `gestures` fixture specs in `events.json`. The app's mock
   feed thread (fixture -> full pipeline at 30 fps) stands in for the
   macOS camera behind the same start/stop IPC commands.
+- Params vs. inputs (post-M5 refactor): ALL WASM-module controls
+  (oscillator `waveform`, ADSR `attack/decay/sustain/release`, playback
+  `loop`) are ordinary knob-backed input jacks — wireable, per-patch
+  knob config, set via `set_knob_value`/`set_knob_position`, never
+  `set_param`. `params` are reserved for mode-style toggles on builtins
+  (deck `keylock`/`reverse`/`slip`/`stem_*`); macro promoted params must
+  target those. After any manifest/knob change, run
+  `./scripts/regen-goldens.sh` and the full workspace suite (macro and
+  perf_m4 tests reference module controls).
+- App save/load lives in the native File menu (Tauri `MenuItemBuilder`
+  in `app/src-tauri/src/main.rs`); the frontend listens via
+  `onMenuAction` in `src/engine.ts` (menu events re-dispatched as
+  `dj-menu` CustomEvents — tests drive the dialogs by firing those).
+  Any test that mocks `../src/engine` must also export `onMenuAction`
+  (stub: `() => () => {}`).
+- `rt_safety.rs`'s realtime stress can flake when run in parallel with
+  the rest of the workspace on a loaded 4-core host (proc-deadline
+  assert); it passes standalone — rerun
+  `cargo test --release --test rt_safety` before assuming a regression.
