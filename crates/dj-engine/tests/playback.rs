@@ -45,7 +45,7 @@ fn playback_engine(track: &Path) -> Engine {
     let mut e = Engine::new(config, common::registry()).unwrap();
     e.add_module("play1", "builtin.playback").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("play1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("play1", "audio_l", "out1", "l").unwrap();
     e.set_knob_position("play1", "play_gate", 1.0).unwrap(); // gate = 10
     e.set_knob_position("play1", "speed", 0.5).unwrap(); // exactly 0.0
     e.playback_load("play1", track).unwrap();
@@ -106,8 +106,8 @@ fn stereo_file_routes_left_and_right() {
     let mut e = Engine::new(config, common::registry()).unwrap();
     e.add_module("play1", "builtin.playback").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("play1", "audio_l", "out1", "ch1").unwrap();
-    e.connect("play1", "audio_r", "out1", "ch2").unwrap();
+    e.connect("play1", "audio_l", "out1", "l").unwrap();
+    e.connect("play1", "audio_r", "out1", "r").unwrap();
     e.set_knob_position("play1", "play_gate", 1.0).unwrap();
     e.set_knob_position("play1", "speed", 0.5).unwrap();
     e.playback_load("play1", &wav).unwrap();
@@ -184,7 +184,7 @@ fn output_through_vca_attenuates_correctly() {
     e.add_module("vca1", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("play1", "audio_l", "vca1", "in").unwrap();
-    e.connect("vca1", "out", "out1", "ch1").unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
     e.set_knob_position("play1", "play_gate", 1.0).unwrap();
     e.set_knob_position("play1", "speed", 0.5).unwrap();
     e.set_knob_position("vca1", "cv", 0.5).unwrap(); // gain 0.5
@@ -216,7 +216,7 @@ fn gate_low_is_silent_and_pause_resumes() {
     let mut e = Engine::new(config, common::registry()).unwrap();
     e.add_module("play1", "builtin.playback").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("play1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("play1", "audio_l", "out1", "l").unwrap();
     e.set_knob_position("play1", "speed", 0.5).unwrap();
     e.playback_load("play1", &wav).unwrap();
     let silent = e.render_offline(9_600).unwrap();

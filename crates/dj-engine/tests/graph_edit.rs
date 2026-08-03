@@ -45,7 +45,7 @@ fn structural_edits_work_across_stop_start_cycles() {
     let mut engine = common::default_engine();
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
-    engine.connect("osc1", "audio", "out1", "ch1").unwrap();
+    engine.connect("osc1", "audio", "out1", "l").unwrap();
 
     // Run realtime (null backend), then stop: the graph must come back so
     // edits can continue — this is what GUI add-module/wiring relies on.
@@ -56,9 +56,9 @@ fn structural_edits_work_across_stop_start_cycles() {
     assert_eq!(engine.backend_name(), None);
 
     engine.add_module("vca1", "com.dj.vca").unwrap();
-    engine.disconnect("osc1", "audio", "out1", "ch1").unwrap();
+    engine.disconnect("osc1", "audio", "out1", "l").unwrap();
     engine.connect("osc1", "audio", "vca1", "in").unwrap();
-    engine.connect("vca1", "out", "out1", "ch1").unwrap();
+    engine.connect("vca1", "out", "out1", "l").unwrap();
     assert_eq!(engine.wire_specs().len(), 2);
 
     // And the edited graph still runs.
@@ -95,27 +95,27 @@ fn midi_mapping_remove_drops_wires_frees_the_slot_and_roundtrips() {
     engine.add_module("out1", "builtin.audio_out").unwrap();
     engine.add_midi_mapping("midi1", "note", 60, "C4").unwrap();
     engine.add_midi_mapping("midi1", "cc", 7, "cc7").unwrap();
-    engine.connect("midi1", "C4", "out1", "ch1").unwrap();
+    engine.connect("midi1", "C4", "out1", "l").unwrap();
     assert_eq!(engine.wire_specs().len(), 1);
 
     // A held note drives the mapped jack…
     engine.inject_midi("midi1", 0, [0x90, 60, 100]).unwrap();
     engine.render_offline((0.2 * SR) as usize).unwrap();
-    assert!(engine.tap("out1", "ch1").unwrap().display > 5.0);
+    assert!(engine.tap("out1", "l").unwrap().display > 5.0);
 
     // …removing the mapping drops its wire and silences the input.
     engine.remove_midi_mapping("midi1", "C4").unwrap();
     assert!(engine.wire_specs().is_empty());
     assert!(engine.remove_midi_mapping("midi1", "C4").is_err());
     engine.render_offline((0.2 * SR) as usize).unwrap();
-    assert!(engine.tap("out1", "ch1").unwrap().display.abs() < 1e-3);
+    assert!(engine.tap("out1", "l").unwrap().display.abs() < 1e-3);
 
     // The freed slot is reusable without leaking the old note's value.
     engine.add_midi_mapping("midi1", "note", 64, "E4").unwrap();
-    engine.connect("midi1", "E4", "out1", "ch1").unwrap();
+    engine.connect("midi1", "E4", "out1", "l").unwrap();
     engine.render_offline((0.2 * SR) as usize).unwrap();
     assert!(
-        engine.tap("out1", "ch1").unwrap().display.abs() < 1e-3,
+        engine.tap("out1", "l").unwrap().display.abs() < 1e-3,
         "reused slot must start at 0, not the removed note's value"
     );
 

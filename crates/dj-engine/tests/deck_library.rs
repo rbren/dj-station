@@ -40,7 +40,7 @@ fn mono_deck_engine() -> Engine {
     let mut e = Engine::new(config, common::registry()).unwrap();
     e.add_module("deck1", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("deck1", "audio_l", "out1", "l").unwrap();
     e
 }
 

@@ -12,7 +12,7 @@ import { LibraryView } from './components/LibraryView';
 import { MidiPanel } from './components/MidiPanel';
 import { MODULE_DRAG_TYPE, ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
 import { GRID, ModulePanel, type JackRef } from './components/ModulePanel';
-import { WireOverlay } from './components/WireOverlay';
+import { WIRE_COLORS, WireOverlay } from './components/WireOverlay';
 import type { JackTelemetry, KnobConfig, Manifest, ModuleHandle } from './types';
 
 /** Module types with a host-registered custom UI (PRD §5.3). */
@@ -49,6 +49,33 @@ function loadZoom(): number {
   return Number.isFinite(z) && z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 1;
 }
 
+const WIRE_COLORS_KEY = 'dj-wire-colors';
+const LAST_WIRE_COLOR_KEY = 'dj-wire-last-color';
+const NUM_WIRE_COLORS = WIRE_COLORS.length;
+
+/** A jack armed as one end of a wire, with the selected cable color. */
+export interface PendingWire extends JackRef {
+  kind: 'input' | 'output';
+  color: number;
+}
+
+function loadJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveJson(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // persistence is best-effort
+  }
+}
+
 /** True when a shortcut keydown should be left to a form control. */
 function isEditableTarget(t: EventTarget | null): boolean {
   return (
@@ -68,7 +95,10 @@ export default function App() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
   const [view, setView] = useState<'rack' | 'library'>('rack');
-  const [pending, setPending] = useState<JackRef | null>(null);
+  const [pending, setPending] = useState<PendingWire | null>(null);
+  const [wireColors, setWireColors] = useState<Record<string, number>>(() =>
+    loadJson(WIRE_COLORS_KEY, {}),
+  );
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   const [positions, setPositions] = useState<Positions>(() => loadPositions());
   const [zoom, setZoom] = useState<number>(() => loadZoom());
@@ -152,6 +182,10 @@ export default function App() {
   // and rack zoom (cmd/ctrl +/-/0).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPending(null);
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey) || isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
       if (key === 'z') {
@@ -205,26 +239,47 @@ export default function App() {
 
   const onJackClick = useCallback(
     async (instance: string, kind: 'input' | 'output', jack: string) => {
-      if (kind === 'output') {
-        setPending((p) =>
-          p?.instance === instance && p?.jack === jack ? null : { instance, jack },
-        );
-        return;
-      }
       if (pending) {
-        await engine.connectWire(pending, { instance, jack });
-        setPending(null);
-        await refresh();
+        // Re-clicking the armed jack cycles through the 8 cable colors.
+        if (pending.instance === instance && pending.kind === kind && pending.jack === jack) {
+          setPending({ ...pending, color: (pending.color + 1) % NUM_WIRE_COLORS });
+          return;
+        }
+        // Opposite-kind click completes the wire (either direction).
+        if (pending.kind !== kind) {
+          const armed = { instance: pending.instance, jack: pending.jack };
+          const from = kind === 'input' ? armed : { instance, jack };
+          const to = kind === 'input' ? { instance, jack } : armed;
+          await engine.connectWire(from, to);
+          const key = `${from.instance}:${from.jack}->${to.instance}:${to.jack}`;
+          setWireColors((prev) => {
+            const next = { ...prev, [key]: pending.color };
+            saveJson(WIRE_COLORS_KEY, next);
+            return next;
+          });
+          saveJson(LAST_WIRE_COLOR_KEY, pending.color);
+          setPending(null);
+          await refresh();
+          return;
+        }
+        // Same-kind click re-arms the wire from the new jack.
+        setPending({ instance, jack, kind, color: pending.color });
         return;
       }
-      const existing = wires.find((w) => w.to_instance === instance && w.to_jack === jack);
-      if (existing) {
-        await engine.disconnectWire(
-          { instance: existing.from_instance, jack: existing.from_jack },
-          { instance, jack },
-        );
-        await refresh();
+      // No pending wire: clicking a wired input unplugs it; anything else
+      // arms a new wire (starting from an output or a free input).
+      if (kind === 'input') {
+        const existing = wires.find((w) => w.to_instance === instance && w.to_jack === jack);
+        if (existing) {
+          await engine.disconnectWire(
+            { instance: existing.from_instance, jack: existing.from_jack },
+            { instance, jack },
+          );
+          await refresh();
+          return;
+        }
       }
+      setPending({ instance, jack, kind, color: loadJson(LAST_WIRE_COLOR_KEY, 0) });
     },
     [pending, wires, refresh],
   );
@@ -300,7 +355,14 @@ export default function App() {
         </span>
         {pending && (
           <span className="wiring-hint" data-testid="wiring-hint">
-            wiring from {pending.instance}:{pending.jack} — click an input jack
+            <span
+              className="wire-color-swatch"
+              data-testid="wire-color-swatch"
+              style={{ background: WIRE_COLORS[pending.color] }}
+            />
+            wiring from {pending.instance}:{pending.jack} — click an{' '}
+            {pending.kind === 'output' ? 'input' : 'output'} jack (re-click to change color, esc to
+            cancel)
           </span>
         )}
       </header>
@@ -374,6 +436,7 @@ export default function App() {
             <WireOverlay
               wires={wires}
               container={rackEl}
+              colors={wireColors}
               layoutKey={`${JSON.stringify(positions)}@${zoom}`}
             />
           </div>

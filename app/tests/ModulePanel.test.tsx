@@ -125,7 +125,12 @@ describe('ModulePanel', () => {
   });
 
   it('marks the pending wire source jack as selected', () => {
-    render(<ModulePanel {...baseProps} pendingSource={{ instance: 'osc1', jack: 'audio' }} />);
+    render(
+      <ModulePanel
+        {...baseProps}
+        pendingSource={{ instance: 'osc1', jack: 'audio', kind: 'output' }}
+      />,
+    );
     expect(screen.getByTestId('jack-output-audio').className).toContain('jack-selected');
   });
 

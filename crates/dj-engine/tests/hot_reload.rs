@@ -67,7 +67,7 @@ fn hot_reload_swaps_running_module_without_restart() {
     let mut engine = Engine::new(EngineConfig::default(), registry).unwrap();
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
-    engine.connect("osc1", "audio", "out1", "ch1").unwrap();
+    engine.connect("osc1", "audio", "out1", "l").unwrap();
     // Square wave: RMS == amplitude, making the swap observable, and the
     // param must survive the reload (re-applied to the new instance).
     engine.set_param("osc1", "waveform", 2.0).unwrap();
@@ -139,7 +139,7 @@ fn reload_preserves_module_state() {
     let mut engine = common::default_engine();
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
-    engine.connect("osc1", "audio", "out1", "ch1").unwrap();
+    engine.connect("osc1", "audio", "out1", "l").unwrap();
 
     // Render half a cycle so the phase is mid-waveform, swap, keep rendering.
     let out1 = engine.render_offline(4096).unwrap();
@@ -152,7 +152,7 @@ fn reload_preserves_module_state() {
     let mut reference = common::default_engine();
     reference.add_module("osc1", "com.dj.oscillator").unwrap();
     reference.add_module("out1", "builtin.audio_out").unwrap();
-    reference.connect("osc1", "audio", "out1", "ch1").unwrap();
+    reference.connect("osc1", "audio", "out1", "l").unwrap();
     let full = reference.render_offline(8192).unwrap();
 
     for (i, (&a, &b)) in out1[0]

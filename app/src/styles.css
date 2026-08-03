@@ -106,23 +106,52 @@ body {
   text-align: left;
 }
 
-.jack-glow {
-  width: 14px;
-  height: 14px;
+/* Hardware-style panel socket: metal ring around a dark bore. The bore
+   holds the activation glow, and the socket is the wire anchor point. */
+.jack-socket {
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: radial-gradient(circle, #62d0ff 0%, #20303a 70%);
+  background: radial-gradient(
+    circle,
+    #07090c 0%,
+    #07090c 42%,
+    #6a7382 50%,
+    #aeb7c6 62%,
+    #454c58 88%,
+    #262b33 100%
+  );
+  border: 1px solid #12151a;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.9),
+    0 1px 0 rgba(255, 255, 255, 0.08);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.jack-glow {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #62d0ff 0%, #20303a 90%);
   display: inline-block;
   flex: none;
 }
 
 /* Outputs read as square green sources; inputs stay round cyan sinks. */
+.jack-output .jack-socket {
+  border-radius: 4px;
+}
+
 .jack-output .jack-glow {
-  border-radius: 3px;
-  background: radial-gradient(circle, #7dde8a 0%, #1f3a26 70%);
+  border-radius: 2px;
+  background: radial-gradient(circle, #7dde8a 0%, #1f3a26 90%);
 }
 
 .jack.jack-wired .jack-glow {
-  background: radial-gradient(circle, #e6b450 0%, #3a3020 70%);
+  background: radial-gradient(circle, #e6b450 0%, #3a3020 90%);
 }
 
 .jack.jack-selected {
@@ -508,14 +537,40 @@ body {
   white-space: nowrap;
 }
 
+/* Outputs live in a dashed box on a lighter shade of the panel gray
+   (convention: anything inside the dashed box is a source). */
 .module-outputs {
-  border-top: 1px dashed #2a2e35;
+  border: 1px dashed #454c58;
+  border-radius: 6px;
+  background: #262a31;
   margin-top: 8px;
-  padding-top: 6px;
+  padding: 6px 8px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+/* Condensed input layout for jack-heavy modules (e.g. the DJ deck):
+   two input columns per row instead of one long column. */
+.module-inputs-condensed {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  column-gap: 14px;
+}
+
+.module-outputs .jack {
+  width: auto;
+}
+
+.wire-color-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  border: 1px solid rgba(0, 0, 0, 0.4);
 }
 
 .midi-panel {

@@ -1,42 +1,12 @@
 {
   "ext": "builtin.audio_out",
   "knobs": {
-    "ch1": {
+    "l": {
       "position": 4.5474735e-13,
       "atten": 1.0,
       "offset": 0.0
     },
-    "ch2": {
-      "position": 4.5474735e-13,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "ch3": {
-      "position": 4.5474735e-13,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "ch4": {
-      "position": 4.5474735e-13,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "ch5": {
-      "position": 4.5474735e-13,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "ch6": {
-      "position": 4.5474735e-13,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "ch7": {
-      "position": 4.5474735e-13,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "ch8": {
+    "r": {
       "position": 4.5474735e-13,
       "atten": 1.0,
       "offset": 0.0

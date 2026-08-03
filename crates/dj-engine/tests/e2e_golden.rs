@@ -177,7 +177,7 @@ fn regen_patches() {
         e.add_module("vca1", "com.dj.vca").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
         e.connect("osc1", "audio", "vca1", "in").unwrap();
-        e.connect("vca1", "out", "out1", "ch1").unwrap();
+        e.connect("vca1", "out", "out1", "l").unwrap();
         e.set_knob_position("vca1", "cv", 0.5).unwrap(); // gain 0.5
         e.save_patch(&dir.join("patch"), "e2e-osc-sine-vca")
             .unwrap();
@@ -210,7 +210,7 @@ fn regen_patches() {
         e.connect("midi1", "pad_1", "adsr1", "gate").unwrap();
         e.connect("osc1", "audio", "vca1", "in").unwrap();
         e.connect("adsr1", "env", "vca1", "cv").unwrap();
-        e.connect("vca1", "out", "out1", "ch1").unwrap();
+        e.connect("vca1", "out", "out1", "l").unwrap();
         e.set_param("adsr1", "attack", 0.02).unwrap();
         e.set_param("adsr1", "decay", 0.1).unwrap();
         e.set_param("adsr1", "sustain", 0.6).unwrap();
@@ -264,8 +264,8 @@ fn regen_patches() {
         e.connect("osc1", "audio", "osc3", "sync").unwrap();
         e.connect("osc2", "audio", "vca1", "in").unwrap();
         e.set_knob_position("vca1", "cv", 0.4).unwrap();
-        e.connect("vca1", "out", "out1", "ch1").unwrap();
-        e.connect("osc3", "audio", "out1", "ch1").unwrap();
+        e.connect("vca1", "out", "out1", "l").unwrap();
+        e.connect("osc3", "audio", "out1", "l").unwrap();
         e.save_patch(&dir.join("patch"), "e2e-waveforms-fm-sync")
             .unwrap();
         write_events(
@@ -309,7 +309,7 @@ fn regen_patches() {
         e.add_module("vca1", "com.dj.vca").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
         e.connect("play1", "audio_l", "vca1", "in").unwrap();
-        e.connect("vca1", "out", "out1", "ch1").unwrap();
+        e.connect("vca1", "out", "out1", "l").unwrap();
         e.set_knob_position("play1", "play_gate", 1.0).unwrap(); // gate 10
         e.set_knob_position("play1", "speed", 0.5).unwrap(); // exactly 0
         e.set_knob_position("vca1", "cv", 0.5).unwrap(); // gain 0.5
@@ -362,8 +362,8 @@ fn regen_deck_patches() {
         let mut e = Engine::new(EngineConfig::default(), common::registry()).unwrap();
         e.add_module("deck1", "builtin.deck").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
-        e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
-        e.connect("deck1", "beat_clock", "out1", "ch2").unwrap();
+        e.connect("deck1", "audio_l", "out1", "l").unwrap();
+        e.connect("deck1", "beat_clock", "out1", "r").unwrap();
         e.set_knob_position("deck1", "play_gate", 1.0).unwrap();
         e.set_knob_position("deck1", "speed", 1.0).unwrap(); // +8 %
         e.set_param("deck1", "keylock", 1.0).unwrap();
@@ -407,7 +407,7 @@ fn regen_deck_patches() {
         e.add_module("out1", "builtin.audio_out").unwrap();
         e.connect("deckA", "audio_l", "xf1", "a_l").unwrap();
         e.connect("deckB", "audio_l", "xf1", "b_l").unwrap();
-        e.connect("xf1", "out_l", "out1", "ch1").unwrap();
+        e.connect("xf1", "out_l", "out1", "l").unwrap();
         e.set_knob_position("deckA", "play_gate", 1.0).unwrap();
         e.set_knob_position("deckB", "play_gate", 1.0).unwrap();
         e.set_knob_position("xf1", "xfade", 0.25).unwrap(); // -5 = toward A

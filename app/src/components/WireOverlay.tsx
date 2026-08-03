@@ -1,8 +1,24 @@
-// SVG cable layer: draws a bezier for every wire between jack DOM positions
-// (jacks carry data-jack="instance:kind:jack" attributes).
+// SVG cable layer: draws a straight wire for every connection between jack
+// socket positions (sockets carry data-jack="instance:kind:jack").
 
 import { useLayoutEffect, useState } from 'react';
 import type { WireSnapshot } from '../engine';
+
+/** The 8 selectable wire colors; index 0 is the default. */
+export const WIRE_COLORS = [
+  '#e6b450',
+  '#e05c5c',
+  '#62d0ff',
+  '#7dde8a',
+  '#c792ea',
+  '#ff9e64',
+  '#f7768e',
+  '#7aa2f7',
+];
+
+export function wireKey(w: WireSnapshot): string {
+  return `${w.from_instance}:${w.from_jack}->${w.to_instance}:${w.to_jack}`;
+}
 
 interface Cable {
   key: string;
@@ -28,10 +44,13 @@ function jackCenter(
 export function WireOverlay({
   wires,
   container,
+  colors,
   layoutKey,
 }: {
   wires: WireSnapshot[];
   container: HTMLElement | null;
+  /** Wire key → WIRE_COLORS index. */
+  colors?: Record<string, number>;
   /** Any string that changes when jack positions may have moved
    *  (e.g. serialized module positions) to trigger a re-measure. */
   layoutKey?: string;
@@ -40,6 +59,7 @@ export function WireOverlay({
 
   useLayoutEffect(() => {
     if (!container) return;
+    let raf = 0;
     const measure = () => {
       const origin = container.getBoundingClientRect();
       const next: Cable[] = [];
@@ -47,42 +67,56 @@ export function WireOverlay({
         const a = jackCenter(container, origin, w.from_instance, 'output', w.from_jack);
         const b = jackCenter(container, origin, w.to_instance, 'input', w.to_jack);
         if (a && b) {
-          next.push({
-            key: `${w.from_instance}:${w.from_jack}->${w.to_instance}:${w.to_jack}`,
-            x1: a.x,
-            y1: a.y,
-            x2: b.x,
-            y2: b.y,
-          });
+          next.push({ key: wireKey(w), x1: a.x, y1: a.y, x2: b.x, y2: b.y });
         }
       }
-      setCables(next);
+      // Only update state on real changes so observer-triggered measures
+      // don't loop through our own SVG re-render.
+      setCables((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    };
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
     };
     measure();
-    window.addEventListener('resize', measure);
-    // jsdom (tests) has no ResizeObserver.
-    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
-    observer?.observe(container);
+    window.addEventListener('resize', schedule);
+    // Panels are absolutely positioned, so the container itself never
+    // resizes when a panel grows (e.g. deck waveform loading in) — observe
+    // every panel, and any DOM mutation outside the overlay itself.
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
+    ro?.observe(container);
+    container.querySelectorAll('.module-panel').forEach((p) => ro?.observe(p));
+    const mo =
+      typeof MutationObserver !== 'undefined'
+        ? new MutationObserver((records) => {
+            if (records.some((r) => !(r.target as Element).closest?.('.wire-overlay'))) {
+              schedule();
+            }
+          })
+        : null;
+    mo?.observe(container, { subtree: true, childList: true, attributes: true });
     return () => {
-      window.removeEventListener('resize', measure);
-      observer?.disconnect();
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', schedule);
+      ro?.disconnect();
+      mo?.disconnect();
     };
   }, [wires, container, layoutKey]);
 
   return (
     <svg className="wire-overlay" data-testid="wire-overlay">
-      {cables.map((c) => {
-        const sag = Math.min(60, 20 + Math.abs(c.x2 - c.x1) * 0.1);
-        const midY = Math.max(c.y1, c.y2) + sag;
-        return (
-          <path
-            key={c.key}
-            data-testid={`cable-${c.key}`}
-            d={`M ${c.x1} ${c.y1} C ${c.x1} ${midY}, ${c.x2} ${midY}, ${c.x2} ${c.y2}`}
-            className="wire-cable"
-          />
-        );
-      })}
+      {cables.map((c) => (
+        <line
+          key={c.key}
+          data-testid={`cable-${c.key}`}
+          x1={c.x1}
+          y1={c.y1}
+          x2={c.x2}
+          y2={c.y2}
+          className="wire-cable"
+          style={{ stroke: WIRE_COLORS[(colors?.[c.key] ?? 0) % WIRE_COLORS.length] }}
+        />
+      ))}
     </svg>
   );
 }

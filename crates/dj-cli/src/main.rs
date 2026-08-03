@@ -69,8 +69,8 @@ fn demo(args: &[String]) -> Result<()> {
     engine.connect("midi1", "pad_1", "adsr1", "gate")?;
     engine.connect("osc1", "audio", "vca1", "in")?;
     engine.connect("adsr1", "env", "vca1", "cv")?;
-    engine.connect("vca1", "out", "out1", "ch1")?;
-    engine.connect("vca1", "out", "out1", "ch2")?;
+    engine.connect("vca1", "out", "out1", "l")?;
+    engine.connect("vca1", "out", "out1", "r")?;
     engine.save_patch(&dir, "m0-demo")?;
     println!("wrote demo patch to {}", dir.display());
     Ok(())

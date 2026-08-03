@@ -417,8 +417,8 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     connect_as_wire(&mut engine, "midi1", "C4", "adsr1", "gate")?;
     connect_as_wire(&mut engine, "osc1", "audio", "vca1", "in")?;
     connect_as_wire(&mut engine, "adsr1", "env", "vca1", "cv")?;
-    connect_as_wire(&mut engine, "vca1", "out", "out1", "ch1")?;
-    connect_as_wire(&mut engine, "vca1", "out", "out1", "ch2")?;
+    connect_as_wire(&mut engine, "vca1", "out", "out1", "l")?;
+    connect_as_wire(&mut engine, "vca1", "out", "out1", "r")?;
     eprintln!(
         "[dj-audio] demo patch loaded: MIDI(note 60) -> ADSR(gate) -> VCA(cv), \
          Osc -> VCA -> Out. NOTE: the VCA is gated by MIDI note 60 — without a \

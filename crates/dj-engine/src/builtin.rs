@@ -8,7 +8,8 @@ use crate::module_host::HostModule;
 
 pub const AUDIO_OUT_ID: &str = "builtin.audio_out";
 pub const MIDI_ID: &str = "builtin.midi";
-pub const AUDIO_OUT_CHANNELS: usize = 8;
+pub const AUDIO_OUT_CHANNELS: usize = 2;
+const AUDIO_OUT_JACKS: [(&str, &str); AUDIO_OUT_CHANNELS] = [("l", "L"), ("r", "R")];
 pub const MAX_MIDI_JACKS: usize = 64;
 
 pub fn audio_out_manifest() -> Manifest {
@@ -17,10 +18,11 @@ pub fn audio_out_manifest() -> Manifest {
         name: "Audio Output".into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
-        inputs: (1..=AUDIO_OUT_CHANNELS)
-            .map(|i| JackDecl {
-                id: format!("ch{i}"),
-                name: format!("Ch {i}"),
+        inputs: AUDIO_OUT_JACKS
+            .iter()
+            .map(|(id, name)| JackDecl {
+                id: (*id).into(),
+                name: (*name).into(),
                 default: 0.0,
                 knob: None,
             })

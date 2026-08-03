@@ -34,8 +34,8 @@ export interface ModulePanelProps {
    *  header becomes a drag handle snapping to the coarse GRID. */
   position?: { x: number; y: number };
   onMove?(x: number, y: number): void;
-  /** Output jack currently armed as a pending wire source, if any. */
-  pendingSource?: JackRef | null;
+  /** Jack currently armed as a pending wire end, if any. */
+  pendingSource?: (JackRef & { kind: 'input' | 'output' }) | null;
   onJackClick?(kind: 'input' | 'output', jackId: string): void;
   onKnobPosition(jackId: string, position: number): void;
   onKnobConfig(jackId: string, config: KnobConfig): void;
@@ -124,7 +124,9 @@ export function ModulePanel(props: ModulePanelProps) {
           })}
         </div>
       )}
-      <div className="module-inputs">
+      <div
+        className={`module-inputs${manifest.inputs.length > 8 ? ' module-inputs-condensed' : ''}`}
+      >
         {manifest.inputs.map((input) => {
           const state = knobs[input.id];
           const config = state?.config ?? input.knob ?? DEFAULT_KNOB;
@@ -137,7 +139,11 @@ export function ModulePanel(props: ModulePanelProps) {
                 kind="input"
                 telemetry={telemetry?.[input.id]}
                 wired={isWired}
-                selected={false}
+                selected={
+                  pendingSource?.kind === 'input' &&
+                  pendingSource.instance === instanceId &&
+                  pendingSource.jack === input.id
+                }
                 onClick={() => props.onJackClick?.('input', input.id)}
               />
               <Knob
@@ -163,7 +169,11 @@ export function ModulePanel(props: ModulePanelProps) {
             id={output.id}
             kind="output"
             telemetry={telemetry?.[`out:${output.id}`]}
-            selected={pendingSource?.instance === instanceId && pendingSource?.jack === output.id}
+            selected={
+              pendingSource?.kind === 'output' &&
+              pendingSource.instance === instanceId &&
+              pendingSource.jack === output.id
+            }
             onClick={() => props.onJackClick?.('output', output.id)}
           />
         ))}

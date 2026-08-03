@@ -127,7 +127,7 @@ fn two_decks_through_crossfader_follow_equal_power_gain_curves() {
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("deckA", "audio_l", "xf1", "a_l").unwrap();
     e.connect("deckB", "audio_l", "xf1", "b_l").unwrap();
-    e.connect("xf1", "out_l", "out1", "ch1").unwrap();
+    e.connect("xf1", "out_l", "out1", "l").unwrap();
     e.deck_load("deckA", &tone_a).unwrap();
     e.deck_load("deckB", &tone_b).unwrap();
     play(&mut e, "deckA");
@@ -198,11 +198,11 @@ fn beat_clock_lands_on_beatgrid_and_drives_adsr_envelopes() {
     e.add_module("vca1", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     // ch1: the raw beat clock; ch2: osc through an ADSR'd VCA gated by it.
-    e.connect("deck1", "beat_clock", "out1", "ch1").unwrap();
+    e.connect("deck1", "beat_clock", "out1", "l").unwrap();
     e.connect("deck1", "beat_clock", "adsr1", "gate").unwrap();
     e.connect("osc1", "audio", "vca1", "in").unwrap();
     e.connect("adsr1", "env", "vca1", "cv").unwrap();
-    e.connect("vca1", "out", "out1", "ch2").unwrap();
+    e.connect("vca1", "out", "out1", "r").unwrap();
     e.set_param("adsr1", "attack", 0.005).unwrap();
     e.set_param("adsr1", "decay", 0.05).unwrap();
     e.set_param("adsr1", "sustain", 0.5).unwrap();
@@ -271,7 +271,7 @@ fn keylock_holds_pitch_within_10_cents_at_plus_minus_8_percent() {
         let mut e = mono_engine();
         e.add_module("deck1", "builtin.deck").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
-        e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+        e.connect("deck1", "audio_l", "out1", "l").unwrap();
         e.deck_load("deck1", &tone).unwrap();
         e.set_param("deck1", "keylock", 1.0).unwrap();
         // pitch_range defaults to 0.08; speed knob end stops = ±8 %.
@@ -311,7 +311,7 @@ fn keylock_holds_pitch_within_10_cents_at_plus_minus_8_percent() {
     let mut e = mono_engine();
     e.add_module("deck1", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("deck1", "audio_l", "out1", "l").unwrap();
     e.deck_load("deck1", &tone).unwrap();
     e.set_knob_position("deck1", "speed", 1.0).unwrap();
     play(&mut e, "deck1");
@@ -340,8 +340,8 @@ fn syncing_deck_b_to_deck_a_aligns_phase_within_1ms_over_60s() {
     e.add_module("deckA", "builtin.deck").unwrap();
     e.add_module("deckB", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("deckA", "beat_clock", "out1", "ch1").unwrap();
-    e.connect("deckB", "beat_clock", "out1", "ch2").unwrap();
+    e.connect("deckA", "beat_clock", "out1", "l").unwrap();
+    e.connect("deckB", "beat_clock", "out1", "r").unwrap();
 
     e.deck_load("deckA", &track_a).unwrap();
     e.deck_load("deckB", &track_b).unwrap();
@@ -413,7 +413,7 @@ fn hot_cue_trigger_jumps_and_slip_returns_to_ghost() {
     let mut e = mono_engine();
     e.add_module("deck1", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("deck1", "audio_l", "out1", "l").unwrap();
     e.deck_load("deck1", &ramp).unwrap();
     e.deck_set_cue("deck1", 2, Some(5.0)).unwrap();
     play(&mut e, "deck1");
@@ -462,7 +462,7 @@ fn loop_wraps_slip_loop_exit_returns_to_ghost_and_jack_toggles() {
     let mut e = mono_engine();
     e.add_module("deck1", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("deck1", "audio_l", "out1", "l").unwrap();
     e.deck_load("deck1", &ramp).unwrap();
     e.deck_set_loop("deck1", 2.0, 2.5).unwrap();
     e.deck_loop_enable("deck1", true).unwrap();
@@ -520,7 +520,7 @@ fn reverse_plays_backward() {
     let mut e = mono_engine();
     e.add_module("deck1", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("deck1", "audio_l", "out1", "l").unwrap();
     e.deck_load("deck1", &ramp).unwrap();
     e.deck_seek("deck1", 5.0).unwrap();
     e.set_param("deck1", "reverse", 1.0).unwrap();
@@ -549,7 +549,7 @@ fn tap_tempo_nudge_and_anchor_build_a_beatgrid() {
     let mut e = mono_engine();
     e.add_module("deck1", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("deck1", "beat_clock", "out1", "ch1").unwrap();
+    e.connect("deck1", "beat_clock", "out1", "l").unwrap();
     e.deck_load("deck1", &tone).unwrap();
 
     // Four taps at 0.5 s spacing -> 120 BPM anchored on the first tap.
@@ -605,7 +605,7 @@ fn deck_track_sync_and_params_persist_through_patch_save_load() {
         e.add_module("out1", "builtin.audio_out").unwrap();
         e.connect("deckA", "audio_l", "xf1", "a_l").unwrap();
         e.connect("deckB", "audio_l", "xf1", "b_l").unwrap();
-        e.connect("xf1", "out_l", "out1", "ch1").unwrap();
+        e.connect("xf1", "out_l", "out1", "l").unwrap();
         e.deck_load("deckA", &track_a).unwrap();
         e.deck_load("deckB", &track_b).unwrap();
         e.deck_sync("deckB", Some("deckA")).unwrap();

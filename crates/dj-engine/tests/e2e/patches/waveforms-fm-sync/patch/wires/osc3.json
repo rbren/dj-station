@@ -3,7 +3,7 @@
     {
       "from_jack": "audio",
       "to": "out1",
-      "to_jack": "ch1"
+      "to_jack": "l"
     }
   ]
 }

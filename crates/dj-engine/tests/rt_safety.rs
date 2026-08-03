@@ -75,7 +75,7 @@ fn build_stress_patch(engine: &mut Engine, voices: usize) {
         engine.connect(&osc, "audio", &vca, "in").unwrap();
         engine.connect("adsr1", "env", &vca, "cv").unwrap();
         engine
-            .connect(&vca, "out", "out1", if v % 2 == 0 { "ch1" } else { "ch2" })
+            .connect(&vca, "out", "out1", if v % 2 == 0 { "l" } else { "r" })
             .unwrap();
     }
 
@@ -97,7 +97,7 @@ fn build_stress_patch(engine: &mut Engine, voices: usize) {
     engine.add_module("xf1", "builtin.crossfader").unwrap();
     engine.connect("deckA", "audio_l", "xf1", "a_l").unwrap();
     engine.connect("deckB", "audio_l", "xf1", "b_l").unwrap();
-    engine.connect("xf1", "out_l", "out1", "ch1").unwrap();
+    engine.connect("xf1", "out_l", "out1", "l").unwrap();
 
     // Hold a note so every voice is audible for the whole run.
     engine.inject_midi("midi1", 0, [0x90, 60, 100]).unwrap();

@@ -70,6 +70,7 @@ function node(instance: string, manifest: Manifest, wired: string[] = []) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   state.nodes = [node('osc1', OSC), node('vca1', VCA)];
   state.wires = [];
 });
@@ -92,14 +93,54 @@ describe('App wiring flow', () => {
     await waitFor(() => expect(screen.queryByTestId('wiring-hint')).toBeNull());
   });
 
-  it('clicking the armed output again cancels the pending wire', async () => {
+  it('re-clicking the armed jack cycles the cable color; escape cancels', async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
     fireEvent.click(screen.getByTestId('jack-output-audio'));
-    expect(screen.getByTestId('wiring-hint')).toBeTruthy();
+    const swatch = () => screen.getByTestId('wire-color-swatch').style.background;
+    const first = swatch();
     fireEvent.click(screen.getByTestId('jack-output-audio'));
+    const second = swatch();
+    expect(second).not.toBe(first);
+    // 8 colors: seven more clicks wraps back to the first.
+    for (let i = 0; i < 7; i++) fireEvent.click(screen.getByTestId('jack-output-audio'));
+    expect(swatch()).toBe(first);
+    fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByTestId('wiring-hint')).toBeNull();
     expect(fakeEngine.connectWire).not.toHaveBeenCalled();
+  });
+
+  it('input-first wiring: click an input jack, then an output jack', async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('jack-input-in'));
+    expect(screen.getByTestId('wiring-hint').textContent).toContain('vca1:in');
+    expect(screen.getByTestId('wiring-hint').textContent).toContain('output');
+    fireEvent.click(screen.getByTestId('jack-output-audio'));
+    await waitFor(() =>
+      expect(fakeEngine.connectWire).toHaveBeenCalledWith(
+        { instance: 'osc1', jack: 'audio' },
+        { instance: 'vca1', jack: 'in' },
+      ),
+    );
+    await waitFor(() => expect(screen.queryByTestId('wiring-hint')).toBeNull());
+  });
+
+  it('the chosen color persists per wire and becomes the default', async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('jack-output-audio'));
+    fireEvent.click(screen.getByTestId('jack-output-audio')); // color 1
+    fireEvent.click(screen.getByTestId('jack-input-in'));
+    await waitFor(() => expect(fakeEngine.connectWire).toHaveBeenCalled());
+    expect(JSON.parse(localStorage.getItem('dj-wire-colors') ?? '{}')).toEqual({
+      'osc1:audio->vca1:in': 1,
+    });
+    expect(JSON.parse(localStorage.getItem('dj-wire-last-color') ?? '0')).toBe(1);
+    // Arming the next wire starts from the last used color.
+    fireEvent.click(screen.getByTestId('jack-output-audio'));
+    const swatch = screen.getByTestId('wire-color-swatch');
+    expect(swatch.style.background).toBeTruthy();
   });
 
   it('clicking a wired input with nothing pending disconnects it', async () => {

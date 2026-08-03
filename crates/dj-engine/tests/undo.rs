@@ -12,7 +12,7 @@ fn demo_engine() -> Engine {
     e.add_module("vca1", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("osc1", "audio", "vca1", "in").unwrap();
-    e.connect("vca1", "out", "out1", "ch1").unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
     e.set_knob_position("osc1", "pitch", 0.25).unwrap();
     e
 }
@@ -26,7 +26,7 @@ fn snapshot_restores_modules_wires_knobs_and_params() {
     e.set_knob_position("osc1", "pitch", 0.9).unwrap();
     e.set_param("osc1", "waveform", 2.0).unwrap();
     e.add_module("osc2", "com.dj.oscillator").unwrap();
-    e.disconnect("vca1", "out", "out1", "ch1").unwrap();
+    e.disconnect("vca1", "out", "out1", "l").unwrap();
     assert_ne!(e.snapshot("t"), before);
 
     let restored = Engine::from_doc(&before, registry()).unwrap();

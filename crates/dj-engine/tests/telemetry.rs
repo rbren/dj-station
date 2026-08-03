@@ -73,7 +73,7 @@ fn master_tap_reports_output_level() {
     let mut engine = common::default_engine();
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
-    engine.connect("osc1", "audio", "out1", "ch1").unwrap();
+    engine.connect("osc1", "audio", "out1", "l").unwrap();
 
     engine.render_offline((0.5 * SR) as usize).unwrap();
 

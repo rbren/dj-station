@@ -30,15 +30,18 @@ export function Jack({
       type="button"
       className={`jack jack-${kind}${wired ? ' jack-wired' : ''}${selected ? ' jack-selected' : ''}`}
       data-testid={`jack-${kind}-${id}`}
-      data-jack={`${instance}:${kind}:${id}`}
       title={tooltip}
       onClick={onClick}
     >
-      <span
-        className="jack-glow"
-        data-testid={`jack-glow-${id}`}
-        style={{ opacity: 0.15 + 0.85 * level }}
-      />
+      {/* The socket is the wire anchor point (data-jack), styled like a
+          hardware panel jack: metal ring around a dark bore. */}
+      <span className="jack-socket" data-jack={`${instance}:${kind}:${id}`}>
+        <span
+          className="jack-glow"
+          data-testid={`jack-glow-${id}`}
+          style={{ opacity: 0.15 + 0.85 * level }}
+        />
+      </span>
       <span className="jack-name">{id}</span>
     </button>
   );
