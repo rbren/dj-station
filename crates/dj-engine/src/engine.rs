@@ -710,6 +710,21 @@ impl Engine {
         self.push_knob_rt(node, jack)
     }
 
+    /// Set an unwired input's knob by mapped signal value (inverse of the
+    /// knob's config mapping) — convenience for tests and APIs that think
+    /// in engineering units (seconds, waveform index, …).
+    pub fn set_knob_value(&mut self, instance_id: &str, jack_id: &str, value: f32) -> Result<()> {
+        let node = self.node_idx(instance_id)?;
+        let jack = self.jack_index(node, jack_id)?;
+        let cfg = self.nodes[node].knobs[jack]
+            .config
+            .clone()
+            .or_else(|| self.nodes[node].manifest.inputs[jack].knob.clone())
+            .unwrap_or_default();
+        self.nodes[node].knobs[jack].position = position_for_value(&cfg, value);
+        self.push_knob_rt(node, jack)
+    }
+
     pub fn set_knob_atten_offset(
         &mut self,
         instance_id: &str,

@@ -524,28 +524,6 @@ body {
   cursor: pointer;
 }
 
-.module-params {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-.module-param {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  width: 64px;
-}
-
-.param-name {
-  max-width: 60px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* Outputs live in a dashed box on a lighter shade of the panel gray
    (convention: anything inside the dashed box is a source). */
 .module-outputs {
@@ -604,36 +582,83 @@ body {
   background: #2a2e35;
 }
 
-.patch-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.patch-title {
+  color: #8a93a2;
+  font-size: 12px;
 }
 
-.patch-name {
+/* Save As / Open dialogs (driven by the native File menu). */
+.file-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.file-dialog {
+  background: #1a1d22;
+  border: 1px solid #2a2e35;
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.file-dialog h3 {
+  margin: 0;
+  font-size: 13px;
+  color: #cdd3de;
+}
+
+.file-dialog input {
   background: #14171c;
   border: 1px solid #2a2e35;
   border-radius: 4px;
   color: #cdd3de;
-  padding: 3px 8px;
-  width: 130px;
+  padding: 4px 8px;
   font: inherit;
   font-size: 12px;
 }
 
-.patch-save,
-.patch-load {
+.file-dialog button {
   background: #23262c;
   border: 1px solid #2a2e35;
   border-radius: 4px;
   color: #cdd3de;
-  padding: 3px 8px;
+  padding: 4px 8px;
   font-size: 12px;
   cursor: pointer;
 }
 
-.patch-save:hover {
+.file-dialog button:hover {
   border-color: #454c58;
+}
+
+.file-dialog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.file-dialog-list button {
+  width: 100%;
+  text-align: left;
+}
+
+.file-dialog-empty {
+  margin: 0;
+  color: #8a93a2;
+  font-size: 12px;
 }
 
 .midi-panel {

@@ -12,6 +12,32 @@ async function tauriInvoke(): Promise<Invoke | null> {
   return invoke as Invoke;
 }
 
+/** Subscribe to native File-menu actions ("saved" | "save-as" | "open").
+ *  Also listens for `dj-menu` DOM CustomEvents so tests / the dev browser
+ *  can drive the same paths. Returns an unsubscribe function. */
+export function onMenuAction(cb: (action: string) => void): () => void {
+  const domHandler = (e: Event) => {
+    const action = (e as CustomEvent).detail;
+    if (typeof action === 'string') cb(action);
+  };
+  window.addEventListener('dj-menu', domHandler);
+  let tauriUnlisten: (() => void) | null = null;
+  let disposed = false;
+  if ('__TAURI_INTERNALS__' in window) {
+    void import('@tauri-apps/api/event').then(({ listen }) =>
+      listen<string>('dj-menu', (e) => cb(e.payload)).then((un) => {
+        if (disposed) un();
+        else tauriUnlisten = un;
+      }),
+    );
+  }
+  return () => {
+    disposed = true;
+    window.removeEventListener('dj-menu', domHandler);
+    tauriUnlisten?.();
+  };
+}
+
 export interface MidiMapping {
   name: string;
   kind: string;
@@ -22,7 +48,10 @@ export interface NodeSnapshot {
   instance_id: string;
   type_id: string;
   manifest: Manifest;
-  knobs: Record<string, { position: number; atten: number; offset: number }>;
+  knobs: Record<
+    string,
+    { position: number; atten: number; offset: number; config?: KnobConfig | null }
+  >;
   params: Record<string, number>;
   wired_inputs: string[];
   midi_mappings: MidiMapping[];

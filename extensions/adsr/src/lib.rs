@@ -1,17 +1,22 @@
-//! ADSR envelope generator. Inputs: gate, retrig. Output: env (0..10).
+//! ADSR envelope generator. Inputs: gate, retrig, attack, decay, sustain,
+//! release. Output: env (0..10).
 //!
 //! Linear segments: attack 0 -> 10 over `attack` seconds, decay 10 ->
 //! 10*sustain over `decay` seconds, sustain hold while the gate is high,
 //! release from the current level to 0 over `release` seconds.
 //!
-//! Params (indices per manifest order): 0=attack, 1=decay, 2=sustain,
-//! 3=release. A rising edge on `retrig` restarts the attack from the
-//! current level while the gate is held.
+//! The A/D/S/R times are ordinary inputs (jack + knob, in seconds /
+//! sustain fraction), sampled once per block. A rising edge on `retrig`
+//! restarts the attack from the current level while the gate is held.
 
 use dj_module_sdk::{export_module, InitCtx, Module, ProcessIo};
 
 const IN_GATE: usize = 0;
 const IN_RETRIG: usize = 1;
+const IN_ATTACK: usize = 2;
+const IN_DECAY: usize = 3;
+const IN_SUSTAIN: usize = 4;
+const IN_RELEASE: usize = 5;
 
 const ENV_MAX: f32 = 10.0;
 
@@ -45,7 +50,7 @@ impl Adsr {
 }
 
 impl Module for Adsr {
-    const N_INPUTS: usize = 2;
+    const N_INPUTS: usize = 6;
     const N_OUTPUTS: usize = 1;
 
     fn new(ctx: &InitCtx) -> Self {
@@ -65,6 +70,13 @@ impl Module for Adsr {
 
     fn process(&mut self, io: &mut ProcessIo) {
         let n = io.outputs[0].len();
+        if n > 0 {
+            // A/D/S/R arrive as ordinary inputs; sample at block rate.
+            self.attack = io.inputs[IN_ATTACK][0].max(0.0);
+            self.decay = io.inputs[IN_DECAY][0].max(0.0);
+            self.sustain = io.inputs[IN_SUSTAIN][0].clamp(0.0, 1.0);
+            self.release = io.inputs[IN_RELEASE][0].max(0.0);
+        }
         let attack_rate = ENV_MAX / (self.attack.max(1e-4) * self.sample_rate);
         let decay_target = ENV_MAX * self.sustain;
         let decay_rate =
@@ -114,16 +126,6 @@ impl Module for Adsr {
                 }
             }
             io.outputs[0][s] = self.level;
-        }
-    }
-
-    fn on_param(&mut self, index: u32, value: f32) {
-        match index {
-            0 => self.attack = value.max(0.0),
-            1 => self.decay = value.max(0.0),
-            2 => self.sustain = value.clamp(0.0, 1.0),
-            3 => self.release = value.max(0.0),
-            _ => {}
         }
     }
 

@@ -38,10 +38,10 @@ fn midi_adsr_vca_envelope_matches() {
 
     let mut engine = common::default_engine();
     common::build_demo_patch(&mut engine);
-    engine.set_param("adsr1", "attack", a).unwrap();
-    engine.set_param("adsr1", "decay", d).unwrap();
-    engine.set_param("adsr1", "sustain", s).unwrap();
-    engine.set_param("adsr1", "release", r).unwrap();
+    engine.set_knob_value("adsr1", "attack", a).unwrap();
+    engine.set_knob_value("adsr1", "decay", d).unwrap();
+    engine.set_knob_value("adsr1", "sustain", s).unwrap();
+    engine.set_knob_value("adsr1", "release", r).unwrap();
 
     // Virtual MIDI: note 60 on/off at sample-accurate frames.
     engine

@@ -58,6 +58,7 @@ const fakeEngine = {
 
 vi.mock('../src/engine', () => ({
   engine: new Proxy({}, { get: (_t, prop) => fakeEngine[prop as keyof typeof fakeEngine] }),
+  onMenuAction: () => () => {},
 }));
 
 import App from '../src/App';

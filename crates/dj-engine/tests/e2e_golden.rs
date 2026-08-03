@@ -236,10 +236,10 @@ fn regen_patches() {
         e.connect("osc1", "audio", "vca1", "in").unwrap();
         e.connect("adsr1", "env", "vca1", "cv").unwrap();
         e.connect("vca1", "out", "out1", "l").unwrap();
-        e.set_param("adsr1", "attack", 0.02).unwrap();
-        e.set_param("adsr1", "decay", 0.1).unwrap();
-        e.set_param("adsr1", "sustain", 0.6).unwrap();
-        e.set_param("adsr1", "release", 0.15).unwrap();
+        e.set_knob_value("adsr1", "attack", 0.02).unwrap();
+        e.set_knob_value("adsr1", "decay", 0.1).unwrap();
+        e.set_knob_value("adsr1", "sustain", 0.6).unwrap();
+        e.set_knob_value("adsr1", "release", 0.15).unwrap();
         e.save_patch(&dir.join("patch"), "e2e-midi-adsr-envelope")
             .unwrap();
         write_events(
@@ -281,9 +281,9 @@ fn regen_patches() {
         e.add_module("osc3", "com.dj.oscillator").unwrap();
         e.add_module("vca1", "com.dj.vca").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
-        e.set_param("osc1", "waveform", 3.0).unwrap(); // tri
-        e.set_param("osc2", "waveform", 2.0).unwrap(); // square
-        e.set_param("osc3", "waveform", 1.0).unwrap(); // saw
+        e.set_knob_value("osc1", "waveform", 3.0).unwrap(); // tri
+        e.set_knob_value("osc2", "waveform", 2.0).unwrap(); // square
+        e.set_knob_value("osc3", "waveform", 1.0).unwrap(); // saw
         e.set_knob_position("osc1", "pitch", 0.3).unwrap(); // -2 oct
         e.connect("osc1", "audio", "osc2", "fm").unwrap();
         e.set_knob_atten_offset("osc2", "fm", 0.2, 0.0).unwrap();

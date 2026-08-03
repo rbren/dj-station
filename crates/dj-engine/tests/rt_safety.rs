@@ -71,7 +71,9 @@ fn build_stress_patch(engine: &mut Engine, voices: usize) {
         let vca = format!("vca{v}");
         engine.add_module(&osc, "com.dj.oscillator").unwrap();
         engine.add_module(&vca, "com.dj.vca").unwrap();
-        engine.set_param(&osc, "waveform", (v % 4) as f32).unwrap();
+        engine
+            .set_knob_value(&osc, "waveform", (v % 4) as f32)
+            .unwrap();
         engine.connect(&osc, "audio", &vca, "in").unwrap();
         engine.connect("adsr1", "env", &vca, "cv").unwrap();
         engine

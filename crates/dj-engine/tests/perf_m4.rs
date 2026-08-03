@@ -130,7 +130,9 @@ fn build_prd_stress_patch(engine: &mut Engine) {
         engine.add_module(&vca, "com.dj.vca").unwrap();
         engine.add_module(&adsr, "com.dj.adsr").unwrap();
         wasm_count += 3;
-        engine.set_param(&osc, "waveform", (v % 4) as f32).unwrap();
+        engine
+            .set_knob_value(&osc, "waveform", (v % 4) as f32)
+            .unwrap();
         engine
             .set_knob_position(&osc, "pitch", 0.3 + 0.03 * v as f32)
             .unwrap();

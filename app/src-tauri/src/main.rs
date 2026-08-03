@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 struct AppState {
     engine: Mutex<Engine>,
@@ -1851,12 +1851,27 @@ fn main() {
                 }
             }
             // System menu: platform defaults (App/Edit/Window on macOS)
-            // plus a Debug submenu exposing the web inspector.
+            // plus File (save/load) and Debug (web inspector) submenus.
+            let save = MenuItemBuilder::with_id("file_save", "Save Patch")
+                .accelerator("CmdOrCtrl+S")
+                .build(app)?;
+            let save_as = MenuItemBuilder::with_id("file_save_as", "Save Patch As…")
+                .accelerator("CmdOrCtrl+Shift+S")
+                .build(app)?;
+            let open = MenuItemBuilder::with_id("file_open", "Open Patch…")
+                .accelerator("CmdOrCtrl+O")
+                .build(app)?;
+            let file = SubmenuBuilder::new(app, "File")
+                .item(&save)
+                .item(&save_as)
+                .item(&open)
+                .build()?;
             let devtools = MenuItemBuilder::with_id("toggle_devtools", "Toggle Developer Tools")
                 .accelerator("CmdOrCtrl+Alt+I")
                 .build(app)?;
             let debug = SubmenuBuilder::new(app, "Debug").item(&devtools).build()?;
             let menu = Menu::default(app.handle())?;
+            menu.append(&file)?;
             menu.append(&debug)?;
             app.set_menu(menu)?;
             Ok(())
@@ -1866,8 +1881,8 @@ fn main() {
                 autosave_now(&window.state::<AppState>());
             }
         })
-        .on_menu_event(|app, event| {
-            if event.id().as_ref() == "toggle_devtools" {
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "toggle_devtools" => {
                 if let Some(window) = app.get_webview_window("main") {
                     if window.is_devtools_open() {
                         window.close_devtools();
@@ -1876,6 +1891,28 @@ fn main() {
                     }
                 }
             }
+            // Save with the current name directly in the backend; Save As /
+            // Open need frontend interaction (name prompt / patch picker).
+            "file_save" => {
+                let state = app.state::<AppState>();
+                let name = state
+                    .patch_name
+                    .lock()
+                    .map(|n| n.clone())
+                    .unwrap_or_else(|_| "untitled".into());
+                if let Err(e) = save_patch_as(app.state::<AppState>(), name) {
+                    eprintln!("[dj-station] save failed: {e}");
+                } else {
+                    let _ = app.emit("dj-menu", "saved");
+                }
+            }
+            "file_save_as" => {
+                let _ = app.emit("dj-menu", "save-as");
+            }
+            "file_open" => {
+                let _ = app.emit("dj-menu", "open");
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             list_extensions,

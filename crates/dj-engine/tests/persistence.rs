@@ -104,22 +104,37 @@ fn adsr_params_roundtrip_through_save_load() {
     let dir = tempfile::tempdir().unwrap();
     let mut engine = common::default_engine();
     common::build_demo_patch(&mut engine);
-    engine.set_param("adsr1", "attack", 0.033).unwrap();
-    engine.set_param("adsr1", "decay", 0.21).unwrap();
-    engine.set_param("adsr1", "sustain", 0.42).unwrap();
-    engine.set_param("adsr1", "release", 1.5).unwrap();
+    engine.set_knob_value("adsr1", "attack", 0.033).unwrap();
+    engine.set_knob_value("adsr1", "decay", 0.21).unwrap();
+    engine.set_knob_value("adsr1", "sustain", 0.42).unwrap();
+    engine.set_knob_value("adsr1", "release", 1.5).unwrap();
     engine.save_patch(dir.path(), "test").unwrap();
 
     let reloaded = Engine::load_patch(dir.path(), common::registry()).unwrap();
-    let node = reloaded
-        .nodes
-        .iter()
-        .find(|n| n.instance_id == "adsr1")
-        .unwrap();
-    assert_eq!(node.params["attack"], 0.033);
-    assert_eq!(node.params["decay"], 0.21);
-    assert_eq!(node.params["sustain"], 0.42);
-    assert_eq!(node.params["release"], 1.5);
+    // A/D/S/R are ordinary input knobs; their mapped values round-trip.
+    let knob_value = |jack: &str| {
+        let node = reloaded
+            .nodes
+            .iter()
+            .find(|n| n.instance_id == "adsr1")
+            .unwrap();
+        let idx = node
+            .manifest
+            .inputs
+            .iter()
+            .position(|i| i.id == jack)
+            .unwrap();
+        let ks = &node.knobs[idx];
+        ks.config
+            .clone()
+            .or_else(|| node.manifest.inputs[idx].knob.clone())
+            .unwrap_or_default()
+            .map(ks.position)
+    };
+    assert!((knob_value("attack") - 0.033).abs() < 1e-4);
+    assert!((knob_value("decay") - 0.21).abs() < 1e-4);
+    assert!((knob_value("sustain") - 0.42).abs() < 1e-4);
+    assert!((knob_value("release") - 1.5).abs() < 1e-3);
 }
 
 #[test]

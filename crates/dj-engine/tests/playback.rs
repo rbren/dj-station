@@ -240,7 +240,7 @@ fn loop_param_wraps_instead_of_stopping() {
     let source = write_wav(&wav, 440.0, 0.1, 1); // 4800 frames
 
     let mut e = playback_engine(&wav);
-    e.set_param("play1", "loop", 1.0).unwrap();
+    e.set_knob_value("play1", "loop", 10.0).unwrap();
     let rendered = e.render_offline(source.len() * 3).unwrap();
     // Third pass still has signal.
     let third = &rendered[0][source.len() * 2..];

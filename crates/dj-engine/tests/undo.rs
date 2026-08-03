@@ -24,7 +24,7 @@ fn snapshot_restores_modules_wires_knobs_and_params() {
 
     // Mutate: knob move, param change, new wire, new module.
     e.set_knob_position("osc1", "pitch", 0.9).unwrap();
-    e.set_param("osc1", "waveform", 2.0).unwrap();
+    e.set_knob_value("osc1", "waveform", 2.0).unwrap();
     e.add_module("osc2", "com.dj.oscillator").unwrap();
     e.disconnect("vca1", "out", "out1", "l").unwrap();
     assert_ne!(e.snapshot("t"), before);
@@ -99,8 +99,8 @@ fn new_edit_clears_the_redo_stack() {
     e = Engine::from_doc(&doc, registry()).unwrap();
     assert!(h.can_redo());
 
-    h.record("param:osc1:waveform", e.snapshot("t"));
-    e.set_param("osc1", "waveform", 1.0).unwrap();
+    h.record("knob:osc1:waveform", e.snapshot("t"));
+    e.set_knob_value("osc1", "waveform", 1.0).unwrap();
     assert!(!h.can_redo());
     assert!(h.redo(e.snapshot("t")).is_none());
 }

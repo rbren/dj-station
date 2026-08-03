@@ -164,7 +164,7 @@ fn stem_jacks_are_independently_routable() {
     // Audio Output is stereo (l/r + channel_offset), so route the four
     // stems through two audio_out modules at offsets 0 and 2.
     e.add_module("out2", "builtin.audio_out").unwrap();
-    e.set_param("out2", "channel_offset", 2.0).unwrap();
+    e.set_knob_value("out2", "channel_offset", 2.0).unwrap();
     for (k, jack) in STEM_JACKS.iter().enumerate() {
         let (out, ch) = (["out1", "out2"][k / 2], ["l", "r"][k % 2]);
         e.connect("deck1", jack, out, ch).unwrap();

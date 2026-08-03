@@ -57,7 +57,6 @@ export interface ModulePanelProps {
   onKnobPosition(jackId: string, position: number): void;
   onKnobConfig(jackId: string, config: KnobConfig): void;
   onAttenOffset(jackId: string, atten: number, offset: number): void;
-  onParam?(paramId: string, value: number): void;
 }
 
 const DEFAULT_KNOB: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'linear' };
@@ -65,8 +64,6 @@ const DEFAULT_KNOB: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 
 export function ModulePanel(props: ModulePanelProps) {
   const { manifest, instanceId, knobs, wired, telemetry, pendingSource, position, onMove } = props;
   const CustomUI = props.customUI;
-  const numericParams = manifest.params.filter((p) => typeof (p.default ?? 0) === 'number');
-
   const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(
     null,
   );
@@ -165,29 +162,6 @@ export function ModulePanel(props: ModulePanelProps) {
           </div>
         )}
         {props.extra}
-        {numericParams.length > 0 && (
-          <div className="module-params">
-            {numericParams.map((p) => {
-              const min = p.min ?? 0;
-              const max = p.max ?? 1;
-              const value = props.handle.paramValue(p.id);
-              const position = max === min ? 0 : (value - min) / (max - min);
-              const config: KnobConfig = { style: 'continuous', min, max, curve: 'linear' };
-              return (
-                <div className="module-param" key={p.id}>
-                  <Knob
-                    label={p.id}
-                    config={config}
-                    position={position}
-                    onPosition={(pos) => props.onParam?.(p.id, min + pos * (max - min))}
-                    onRelease={props.onEditEnd}
-                  />
-                  <span className="param-name">{p.id}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
         <div
           className={`module-inputs${manifest.inputs.length > 8 ? ' module-inputs-condensed' : ''}`}
         >

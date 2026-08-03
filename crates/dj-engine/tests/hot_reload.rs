@@ -70,7 +70,7 @@ fn hot_reload_swaps_running_module_without_restart() {
     engine.connect("osc1", "audio", "out1", "l").unwrap();
     // Square wave: RMS == amplitude, making the swap observable, and the
     // param must survive the reload (re-applied to the new instance).
-    engine.set_param("osc1", "waveform", 2.0).unwrap();
+    engine.set_knob_value("osc1", "waveform", 2.0).unwrap();
 
     engine.start_null_realtime().unwrap();
     let watcher = engine.start_watcher(Duration::from_millis(100)).unwrap();

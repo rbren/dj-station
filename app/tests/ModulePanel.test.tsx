@@ -1,7 +1,7 @@
 // Manifest-driven auto-generated panels: every input is a single-label
-// jack + knob row, numeric params get generated knobs, values only appear
-// in hover tooltips, wired inputs drop their knob, and jack clicks drive
-// the wiring flow.
+// jack + knob row (no special-cased params), values only appear in hover
+// tooltips, wired inputs drop their knob, and jack clicks drive the
+// wiring flow.
 
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,9 +18,14 @@ const OSC_MANIFEST: Manifest = {
     { id: 'pitch', name: 'Pitch', knob: { style: 'continuous', min: -5, max: 5, curve: 'linear' } },
     { id: 'fm', name: 'FM', knob: { style: 'continuous', min: -1, max: 1, curve: 'linear' } },
     { id: 'sync', name: 'Sync' },
+    {
+      id: 'waveform',
+      name: 'Waveform',
+      knob: { style: 'stepped', min: 0, max: 3, curve: 'linear', steps: 4 },
+    },
   ],
   outputs: [{ id: 'audio', name: 'Audio' }],
-  params: [{ id: 'waveform', name: 'Waveform', default: 0, min: 0, max: 3 }],
+  params: [],
 };
 
 const HANDLE: ModuleHandle = {
@@ -102,17 +107,19 @@ describe('ModulePanel', () => {
     expect(screen.getByRole('slider', { name: 'fm' })).toBeTruthy();
   });
 
-  it('renders a generated knob per numeric param and reports edits', () => {
-    const onParam = vi.fn();
-    render(<ModulePanel {...baseProps} onParam={onParam} />);
+  it('renders formerly-special inputs (waveform) as ordinary jack + knob rows', () => {
+    const onKnobPosition = vi.fn();
+    render(<ModulePanel {...baseProps} onKnobPosition={onKnobPosition} />);
+    // Wireable like any other input.
+    expect(screen.getByTestId('jack-input-waveform')).toBeTruthy();
     const dial = screen.getByRole('slider', { name: 'waveform' });
     fireEvent.mouseDown(dial, { clientY: 100 });
     fireEvent.mouseMove(window, { clientY: 100 - 150 }); // full-range drag up
     fireEvent.mouseUp(window);
-    expect(onParam).toHaveBeenCalled();
-    const [id, value] = onParam.mock.lastCall!;
+    expect(onKnobPosition).toHaveBeenCalled();
+    const [id, position] = onKnobPosition.mock.lastCall!;
     expect(id).toBe('waveform');
-    expect(value).toBeCloseTo(3, 5); // max of the 0..3 param range
+    expect(position).toBeCloseTo(1, 5); // knob position, mapped by config
   });
 
   it('clicking jacks reports the wiring intent', () => {

@@ -9,13 +9,12 @@
     { "id": "fm", "name": "FM", "default": 0.0,
       "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
     { "id": "sync", "name": "Sync", "default": 0.0,
-      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } }
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "waveform", "name": "Waveform", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 3.0, "curve": "linear", "steps": 4 } }
   ],
   "outputs": [
     { "id": "audio", "name": "Audio" }
-  ],
-  "params": [
-    { "id": "waveform", "name": "Waveform", "type": "stepped", "default": 0, "min": 0, "max": 3 }
   ],
   "latency_samples": 0
 }

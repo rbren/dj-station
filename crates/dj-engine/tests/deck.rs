@@ -203,10 +203,10 @@ fn beat_clock_lands_on_beatgrid_and_drives_adsr_envelopes() {
     e.connect("osc1", "audio", "vca1", "in").unwrap();
     e.connect("adsr1", "env", "vca1", "cv").unwrap();
     e.connect("vca1", "out", "out1", "r").unwrap();
-    e.set_param("adsr1", "attack", 0.005).unwrap();
-    e.set_param("adsr1", "decay", 0.05).unwrap();
-    e.set_param("adsr1", "sustain", 0.5).unwrap();
-    e.set_param("adsr1", "release", 0.05).unwrap();
+    e.set_knob_value("adsr1", "attack", 0.005).unwrap();
+    e.set_knob_value("adsr1", "decay", 0.05).unwrap();
+    e.set_knob_value("adsr1", "sustain", 0.5).unwrap();
+    e.set_knob_value("adsr1", "release", 0.05).unwrap();
 
     e.deck_load("deck1", &tone).unwrap();
     e.deck_set_beatgrid("deck1", 120.0, 0.25).unwrap();

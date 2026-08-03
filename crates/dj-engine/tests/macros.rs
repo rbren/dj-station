@@ -53,16 +53,10 @@ fn tone_interface() -> MacroInterface {
     }
 }
 
-/// Like [`tone_interface`], additionally promoting the oscillator's
-/// `waveform` param.
-fn tone_interface_with_param() -> MacroInterface {
-    let mut i = tone_interface();
-    i.params.push(MacroParam {
-        id: "waveform".into(),
-        node: "osc1".into(),
-        param: "waveform".into(),
-    });
-    i
+/// Knob position of the oscillator's waveform input for a given waveform
+/// index (stepped knob, linear 0..3).
+fn wave_pos(waveform: f32) -> f32 {
+    waveform / 3.0
 }
 
 fn render(e: &mut Engine, secs: f32) -> Vec<f32> {
@@ -162,14 +156,16 @@ fn instantiate_twice_and_edit_internals_updates_both_instances() {
     assert_eq!(k2.position, 0.25);
 
     // A non-promoted internal edit *does* propagate to both instances:
-    // change the waveform via the promoted param on one def edit instead.
+    // change the internal waveform knob on one def edit instead.
     let mut def3 = e.macros.get("macro.tone").unwrap().clone();
     def3.version = 3;
     def3.modules
         .get_mut("osc1")
         .unwrap()
-        .params
-        .insert("waveform".into(), 2.0); // square
+        .knobs
+        .get_mut("waveform")
+        .unwrap()
+        .position = wave_pos(2.0); // square
     e.update_macro(def3).unwrap();
     let after = render(&mut e, 0.25);
     assert_ne!(before, after, "internal edit must change every instance");
@@ -178,8 +174,11 @@ fn instantiate_twice_and_edit_internals_updates_both_instances() {
     for inst in ["tone1", "tone2"] {
         assert_eq!(e.macro_instances()[inst].version, 3);
         let node = format!("{inst}/osc1");
-        let info = e.nodes.iter().find(|n| n.instance_id == node).unwrap();
-        assert_eq!(info.params["waveform"], 2.0, "{inst} waveform not updated");
+        let k = e.knob_state(&node, "waveform").unwrap();
+        assert!(
+            (k.position - wave_pos(2.0)).abs() < 1e-6,
+            "{inst} waveform not updated"
+        );
     }
 }
 
@@ -257,8 +256,10 @@ fn version_mismatch_prompt_logic_update_and_fork() {
         def2.modules
             .get_mut("osc1")
             .unwrap()
-            .params
-            .insert("waveform".into(), 1.0); // saw
+            .knobs
+            .get_mut("waveform")
+            .unwrap()
+            .position = wave_pos(1.0); // saw
         lib.register(def2);
     }
 
@@ -373,8 +374,10 @@ fn macros_nest_arbitrarily() {
         .modules
         .get_mut("osc1")
         .unwrap()
-        .params
-        .insert("waveform".into(), 2.0);
+        .knobs
+        .get_mut("waveform")
+        .unwrap()
+        .position = wave_pos(2.0);
     e.update_macro(inner2).unwrap();
 
     // Save before rendering: update_macro rebuilt the engine (fresh
@@ -463,18 +466,45 @@ fn promoted_params_and_macro_manifest_work() {
         "tone1",
         "macro.tone",
         "Tone",
-        tone_interface_with_param(),
+        tone_interface(),
+    )
+    .unwrap();
+
+    // Promoted params come from modules that still carry real params
+    // (mode-style toggles like the deck's keylock) — all WASM module
+    // controls are knob-backed inputs and get promoted as jacks instead.
+    e.add_module("deck1", "builtin.deck").unwrap();
+    e.collapse_to_macro(
+        &["deck1"],
+        "deckm1",
+        "macro.deck",
+        "Deck Macro",
+        MacroInterface {
+            inputs: vec![],
+            outputs: vec![MacroJack {
+                id: "out".into(),
+                node: "deck1".into(),
+                jack: "audio_l".into(),
+            }],
+            params: vec![MacroParam {
+                id: "keylock".into(),
+                node: "deck1".into(),
+                param: "keylock".into(),
+            }],
+        },
     )
     .unwrap();
 
     // Promoted param routes to the internal node.
-    e.set_param("tone1", "waveform", 3.0).unwrap();
+    e.set_param("deckm1", "keylock", 1.0).unwrap();
     let info = e
         .nodes
         .iter()
-        .find(|n| n.instance_id == "tone1/osc1")
+        .find(|n| n.instance_id == "deckm1/deck1")
         .unwrap();
-    assert_eq!(info.params["waveform"], 3.0);
+    assert_eq!(info.params["keylock"], 1.0);
+    let dm = e.macro_manifest("macro.deck").unwrap();
+    assert_eq!(dm.params[0].id, "keylock");
 
     // Synthesized manifest exposes the external interface for UIs.
     let m = e.macro_manifest("macro.tone").unwrap();
@@ -484,7 +514,6 @@ fn promoted_params_and_macro_manifest_work() {
         vec!["pitch", "level"]
     );
     assert_eq!(m.outputs[0].id, "out");
-    assert_eq!(m.params[0].id, "waveform");
 
     // Promoted input is wireable like any jack: modulate level externally.
     e.add_module("osc2", "com.dj.oscillator").unwrap();

@@ -35,6 +35,21 @@ export function mapPosition(config: KnobConfig, position: number): number {
   return config.min + p * (config.max - config.min);
 }
 
+/** Inverse of `mapPosition`: the knob position whose mapped value is
+ *  (approximately) `value`. Binary search over the monotone mapping,
+ *  mirroring the engine's `position_for_value`. */
+export function positionForValue(config: KnobConfig, value: number): number {
+  let lo = 0;
+  let hi = 1;
+  const increasing = mapPosition(config, 1) >= mapPosition(config, 0);
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (mapPosition(config, mid) < value === increasing) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 export interface KnobProps {
   label: string;
   config: KnobConfig;

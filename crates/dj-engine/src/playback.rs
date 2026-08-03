@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use crate::graph::SIGNAL_MAX;
 use crate::knob::{Curve, KnobConfig, KnobStyle};
-use crate::manifest::{JackDecl, Manifest, OutputDecl, ParamDecl};
+use crate::manifest::{JackDecl, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 
 pub const PLAYBACK_ID: &str = "builtin.playback";
@@ -56,6 +56,18 @@ pub fn playback_manifest() -> Manifest {
                     steps: None,
                 }),
             },
+            JackDecl {
+                id: "loop".into(),
+                name: "Loop".into(),
+                default: 0.0,
+                knob: Some(KnobConfig {
+                    style: KnobStyle::Switch,
+                    min: 0.0,
+                    max: 10.0,
+                    curve: Curve::Linear,
+                    steps: None,
+                }),
+            },
         ],
         outputs: vec![
             OutputDecl {
@@ -67,14 +79,7 @@ pub fn playback_manifest() -> Manifest {
                 name: "Audio R".into(),
             },
         ],
-        params: vec![ParamDecl {
-            id: "loop".into(),
-            name: "Loop".into(),
-            param_type: "toggle".into(),
-            default: serde_json::json!(false),
-            min: None,
-            max: None,
-        }],
+        params: vec![],
         ui: None,
         latency_samples: 0,
     }
@@ -242,6 +247,10 @@ impl HostModule for PlaybackModule {
 
         let gate = &inputs[0];
         let speed = &inputs[1];
+        if frames > 0 {
+            // loop is an ordinary input jack (gate semantics, block rate).
+            self.looping = inputs[2][0] >= 1.0;
+        }
         for s in 0..frames {
             let gate_high = gate[s] >= 1.0;
             // Rising edge after a completed non-looping track restarts it.
@@ -277,12 +286,6 @@ impl HostModule for PlaybackModule {
             };
             outputs[0][s] = l * SIGNAL_MAX;
             outputs[1][s] = r * SIGNAL_MAX;
-        }
-    }
-
-    fn on_param(&mut self, index: u32, value: f32) {
-        if index == 0 {
-            self.looping = value >= 0.5;
         }
     }
 

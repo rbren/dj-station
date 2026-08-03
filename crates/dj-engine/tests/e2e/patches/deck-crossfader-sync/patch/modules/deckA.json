@@ -66,6 +66,10 @@
     "keylock": 0.0,
     "pitch_range": 0.08,
     "reverse": 0.0,
-    "slip": 0.0
+    "slip": 0.0,
+    "stem_bass": 1.0,
+    "stem_drums": 1.0,
+    "stem_other": 1.0,
+    "stem_vocals": 1.0
   }
 }

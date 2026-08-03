@@ -68,11 +68,10 @@ export function WireOverlay({
   const [cables, setCables] = useState<Cable[]>([]);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
 
-  // While a wire end is armed, the free end tracks the mouse.
+  // While a wire end is armed, the free end tracks the mouse. The cursor
+  // is cleared in the cleanup so disarming never leaves a stale preview.
   useLayoutEffect(() => {
-    if (!pending || !container) {
-      return;
-    }
+    if (!pending || !container) return;
     const onMove = (e: MouseEvent) => {
       const origin = container.getBoundingClientRect();
       setCursor({ x: e.clientX - origin.left, y: e.clientY - origin.top });

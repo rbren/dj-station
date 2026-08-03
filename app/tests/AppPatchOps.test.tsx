@@ -1,6 +1,6 @@
-// Patch save/load header controls, module delete buttons, pending-wire
-// cursor preview + background-click abandon, and overlap-free module
-// placement — against a mocked engine bridge.
+// File-menu driven patch save/load dialogs, module delete buttons,
+// pending-wire cursor preview + background-click abandon, and overlap-free
+// module placement — against a mocked engine bridge.
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,9 +58,17 @@ const fakeEngine = {
 
 vi.mock('../src/engine', () => ({
   engine: new Proxy({}, { get: (_t, prop) => fakeEngine[prop as keyof typeof fakeEngine] }),
+  onMenuAction: (cb: (action: string) => void) => {
+    const h = (e: Event) => cb((e as CustomEvent).detail as string);
+    window.addEventListener('dj-menu', h);
+    return () => window.removeEventListener('dj-menu', h);
+  },
 }));
 
 import App from '../src/App';
+
+const fireMenu = (action: string) =>
+  fireEvent(window, new CustomEvent('dj-menu', { detail: action }));
 
 function node(instance: string, manifest: Manifest, wired: string[] = []) {
   return {
@@ -81,39 +89,62 @@ beforeEach(() => {
   state.wires = [];
 });
 
-describe('patch save/load header controls', () => {
-  it('shows the current patch name and saves under an edited name', async () => {
+describe('file menu patch save/load', () => {
+  it('shows the current patch name in the header (no in-app save/load controls)', async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+    expect(screen.queryByTestId('patch-save')).toBeNull();
+    expect(screen.queryByTestId('patch-load')).toBeNull();
+  });
 
-    const nameInput = screen.getByTestId('patch-name') as HTMLInputElement;
-    await waitFor(() => expect(nameInput.value).toBe('demo'));
+  it('File > Save As opens a dialog and saves under the edited name', async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
 
+    fireMenu('save-as');
+    const nameInput = (await screen.findByTestId('file-dialog-name')) as HTMLInputElement;
+    expect(nameInput.value).toBe('demo');
     fireEvent.change(nameInput, { target: { value: 'my-patch' } });
-    fireEvent.click(screen.getByTestId('patch-save'));
+    fireEvent.click(screen.getByTestId('file-dialog-confirm'));
     await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('my-patch'));
-    // Save refreshes the saved-patch list.
+    // Dialog closes; header shows the new name; patch list refreshed.
+    await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('my-patch'));
     expect(fakeEngine.listPatches.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('cmd+S saves the patch', async () => {
+  it('cmd+S saves the patch under its current name', async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
     fireEvent.keyDown(window, { key: 's', metaKey: true });
     await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo'));
   });
 
-  it('selecting a saved patch loads it and updates the name', async () => {
+  it('File > Open lists saved patches and loads the chosen one', async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
 
-    const select = screen.getByTestId('patch-load') as HTMLSelectElement;
-    await waitFor(() => expect(select.options.length).toBe(3)); // placeholder + 2
-    fireEvent.change(select, { target: { value: 'live-set' } });
+    fireMenu('open');
+    const entry = await screen.findByTestId('file-dialog-patch-live-set');
+    fireEvent.click(entry);
     await waitFor(() => expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set'));
-    await waitFor(() =>
-      expect((screen.getByTestId('patch-name') as HTMLInputElement).value).toBe('live-set'),
-    );
+    await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('live-set'));
+  });
+
+  it('the dialog cancel button closes without saving or loading', async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+
+    fireMenu('save-as');
+    await screen.findByTestId('file-dialog');
+    fireEvent.click(screen.getByTestId('file-dialog-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
+    expect(fakeEngine.savePatchAs).not.toHaveBeenCalled();
+    expect(fakeEngine.loadPatchByName).not.toHaveBeenCalled();
   });
 });
 
@@ -193,5 +224,41 @@ describe('overlap-free module placement', () => {
     fireEvent.mouseMove(window, { clientX: 480, clientY: 192 });
     fireEvent.mouseUp(window);
     await waitFor(() => expect(panel.style.top).toBe('192px'));
+  });
+
+  it('a module stuck on top of another can always be dragged away', async () => {
+    // Legacy/bad layout: both modules stacked at (0,0).
+    localStorage.setItem(
+      'dj-rack-positions',
+      JSON.stringify({ osc1: { x: 0, y: 0 }, vca1: { x: 0, y: 0 } }),
+    );
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
+
+    const panel = screen.getByTestId('module-vca1');
+    const header = screen.getByTestId('module-header-vca1');
+    // Even while overlapping, a drag to open space must not be rejected.
+    fireEvent.mouseDown(header, { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: 960, clientY: 480 });
+    fireEvent.mouseUp(window);
+    await waitFor(() => expect(panel.style.left).toBe('960px'));
+    expect(Number.parseInt(panel.style.top || '0', 10)).toBeGreaterThanOrEqual(480);
+  });
+
+  it('overlapped modules are auto-nudged apart after render', async () => {
+    localStorage.setItem(
+      'dj-rack-positions',
+      JSON.stringify({ osc1: { x: 0, y: 0 }, vca1: { x: 0, y: 0 } }),
+    );
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
+
+    // The post-render placement pass pushes vca1 below osc1's footprint.
+    const osc = screen.getByTestId('module-osc1');
+    const vca = screen.getByTestId('module-vca1');
+    await waitFor(() => {
+      expect(osc.style.top).toBe('0px');
+      expect(Number.parseInt(vca.style.top || '0', 10)).toBeGreaterThanOrEqual(96);
+    });
   });
 });

@@ -20,11 +20,14 @@
           "position": 4.5474735e-13,
           "atten": 1.0,
           "offset": 0.0
+        },
+        "waveform": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
         }
       },
-      "params": {
-        "waveform": 0.0
-      }
+      "params": {}
     },
     "vca1": {
       "ext": "com.dj.vca",

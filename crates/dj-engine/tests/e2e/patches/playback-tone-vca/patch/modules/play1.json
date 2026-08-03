@@ -1,6 +1,11 @@
 {
   "ext": "builtin.playback",
   "knobs": {
+    "loop": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
     "play_gate": {
       "position": 1.0,
       "atten": 1.0,
@@ -12,7 +17,5 @@
       "offset": 0.0
     }
   },
-  "params": {
-    "loop": 0.0
-  }
+  "params": {}
 }

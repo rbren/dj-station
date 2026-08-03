@@ -3,7 +3,8 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
-use crate::manifest::{JackDecl, Manifest, OutputDecl, ParamDecl};
+use crate::knob::{Curve, KnobConfig, KnobStyle};
+use crate::manifest::{JackDecl, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 
 pub const AUDIO_OUT_ID: &str = "builtin.audio_out";
@@ -28,16 +29,21 @@ pub fn audio_out_manifest() -> Manifest {
                 default: 0.0,
                 knob: None,
             })
+            .chain(std::iter::once(JackDecl {
+                id: "channel_offset".into(),
+                name: "Device Channel Offset".into(),
+                default: 0.0,
+                knob: Some(KnobConfig {
+                    style: KnobStyle::Stepped,
+                    min: 0.0,
+                    max: 8.0,
+                    curve: Curve::Linear,
+                    steps: Some(9),
+                }),
+            }))
             .collect(),
         outputs: vec![],
-        params: vec![ParamDecl {
-            id: "channel_offset".into(),
-            name: "Device Channel Offset".into(),
-            param_type: "int".into(),
-            default: serde_json::json!(0),
-            min: Some(0.0),
-            max: Some(64.0),
-        }],
+        params: vec![],
         ui: None,
         latency_samples: 0,
     }
@@ -81,11 +87,13 @@ pub struct AudioOutModule {
 }
 
 impl HostModule for AudioOutModule {
-    fn process(&mut self, _i: &[Vec<f32>], _o: &mut [Vec<f32>], _m: u64, _f: usize) {}
-
-    fn on_param(&mut self, index: u32, value: f32) {
-        if index == 0 {
-            self.channel_offset = value.max(0.0) as usize;
+    fn process(&mut self, i: &[Vec<f32>], _o: &mut [Vec<f32>], _m: u64, f: usize) {
+        // channel_offset is an ordinary input jack (knob or wire); the
+        // graph mixes the audio jacks using the value captured here.
+        if let Some(buf) = i.get(AUDIO_OUT_CHANNELS) {
+            if f > 0 {
+                self.channel_offset = (buf[0].round().max(0.0)) as usize;
+            }
         }
     }
 

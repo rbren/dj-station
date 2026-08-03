@@ -5,7 +5,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AdsrUI from '../../extensions/adsr/ui-src/AdsrUI';
-import { engine, type NodeSnapshot, type WireSnapshot } from './engine';
+import { engine, onMenuAction, type NodeSnapshot, type WireSnapshot } from './engine';
+import { mapPosition, positionForValue } from './components/Knob';
 import { library, type Track } from './library';
 import { DeckCustomUI, DeckUIContext } from './components/DeckPanel';
 import { LibraryView } from './components/LibraryView';
@@ -126,6 +127,9 @@ export default function App() {
   );
   const [patchName, setPatchName] = useState('untitled');
   const [patchList, setPatchList] = useState<string[]>([]);
+  // File-menu dialogs (Save As… / Open Patch…), driven by native menu events.
+  const [fileDialog, setFileDialog] = useState<null | 'save-as' | 'open'>(null);
+  const [saveAsName, setSaveAsName] = useState('untitled');
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   // Multi-select for collapse-to-macro (PRD §6): shift-click panel headers.
   const [selected, setSelected] = useState<string[]>([]);
@@ -152,25 +156,61 @@ export default function App() {
   const moveModule = useCallback(
     (instance: string, x: number, y: number) => {
       setPositions((prev) => {
-        // Reject moves that would overlap another module: the dragged
-        // panel simply stops against its neighbours.
-        const rect = moduleRect(instance, { x, y });
-        for (const [i, node] of nodes.entries()) {
-          if (node.instance_id === instance) continue;
-          const otherPos = prev[node.instance_id] ?? defaultPosition(i);
-          if (rectsOverlap(rect, moduleRect(node.instance_id, otherPos))) return prev;
-        }
+        const overlapsOthers = (pos: { x: number; y: number }) => {
+          const rect = moduleRect(instance, pos);
+          return nodes.some((node, i) => {
+            if (node.instance_id === instance) return false;
+            const otherPos = prev[node.instance_id] ?? defaultPosition(i);
+            return rectsOverlap(rect, moduleRect(node.instance_id, otherPos));
+          });
+        };
+        // Reject moves that would overlap another module — the dragged
+        // panel stops against its neighbours — but always allow escaping
+        // when the module is already overlapping (bad legacy placement).
+        const selfIdx = nodes.findIndex((n) => n.instance_id === instance);
+        const currentPos = prev[instance] ?? defaultPosition(Math.max(selfIdx, 0));
+        if (overlapsOthers({ x, y }) && !overlapsOthers(currentPos)) return prev;
         const next = { ...prev, [instance]: { x, y } };
-        try {
-          localStorage.setItem(POSITIONS_KEY, JSON.stringify(next));
-        } catch {
-          // persistence is best-effort
-        }
+        saveJson(POSITIONS_KEY, next);
         return next;
       });
     },
     [nodes],
   );
+
+  // Post-render placement pass: with real panel sizes in the DOM, nudge any
+  // module that overlaps an earlier one straight down to the next free row.
+  // Covers click-to-add, drops estimated with fallback sizes, and stale
+  // saved layouts.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPositions((prev) => {
+        const placed: Rect[] = [];
+        const next: Positions = { ...prev };
+        let changed = false;
+        for (const [i, node] of nodes.entries()) {
+          const id = node.instance_id;
+          let pos = next[id] ?? defaultPosition(i);
+          let rect = moduleRect(id, pos);
+          let tries = 0;
+          while (placed.some((r) => rectsOverlap(rect, r)) && tries < 400) {
+            pos = { x: pos.x, y: pos.y + GRID };
+            rect = moduleRect(id, pos);
+            tries++;
+          }
+          if (next[id]?.x !== pos.x || next[id]?.y !== pos.y) {
+            next[id] = pos;
+            changed = true;
+          }
+          placed.push(rect);
+        }
+        if (!changed) return prev;
+        saveJson(POSITIONS_KEY, next);
+        return next;
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [nodes]);
 
   const refresh = useCallback(async () => {
     const snapshot = await engine.nodes();
@@ -195,12 +235,15 @@ export default function App() {
     })();
   }, [refresh]);
 
-  const savePatch = useCallback(async () => {
-    const name = patchName.trim() || 'untitled';
-    await engine.savePatchAs(name);
-    setPatchName(name);
-    setPatchList((await engine.listPatches()) ?? []);
-  }, [patchName]);
+  const savePatch = useCallback(
+    async (name?: string) => {
+      const finalName = (name ?? patchName).trim() || 'untitled';
+      await engine.savePatchAs(finalName);
+      setPatchName(finalName);
+      setPatchList((await engine.listPatches()) ?? []);
+    },
+    [patchName],
+  );
 
   const loadNamedPatch = useCallback(
     async (name: string) => {
@@ -209,6 +252,27 @@ export default function App() {
       await refresh();
     },
     [refresh],
+  );
+
+  // Native File menu (Save handled fully in the backend; Save As / Open
+  // open in-app dialogs). Tests drive this via `dj-menu` CustomEvents.
+  useEffect(
+    () =>
+      onMenuAction((action) => {
+        if (action === 'saved') {
+          void engine.currentPatch().then((n) => {
+            if (n) setPatchName(n);
+          });
+          void engine.listPatches().then((l) => setPatchList(l ?? []));
+        } else if (action === 'save-as') {
+          setSaveAsName(patchName);
+          setFileDialog('save-as');
+        } else if (action === 'open') {
+          void engine.listPatches().then((l) => setPatchList(l ?? []));
+          setFileDialog('open');
+        }
+      }),
+    [patchName],
   );
 
   useEffect(() => {
@@ -387,26 +451,47 @@ export default function App() {
   );
 
   const makeHandle = useCallback(
-    (node: NodeSnapshot): ModuleHandle => ({
-      paramValue: (id) => {
-        const live = node.params[id];
-        if (typeof live === 'number') return live;
-        const p = node.manifest.params.find((p) => p.id === id);
-        return typeof p?.default === 'number' ? p.default : 0;
-      },
-      setParam: (id, v) => {
-        void engine.setParam(node.instance_id, id, v).then(refresh);
-      },
-      signalTap: (jackId) =>
-        telemetry[node.instance_id]?.[jackId] ?? {
-          instantaneous: 0,
-          rms_100ms: 0,
-          display: 0,
-          is_fast: false,
+    (node: NodeSnapshot): ModuleHandle => {
+      // Custom UIs address inputs and params uniformly through the handle;
+      // input ids resolve to their knob (mapped through the knob config).
+      const inputKnobConfig = (id: string): KnobConfig | null => {
+        const input = node.manifest.inputs.find((i) => i.id === id);
+        if (!input) return null;
+        return (
+          node.knobs[id]?.config ??
+          input.knob ?? { style: 'continuous', min: 0, max: 10, curve: 'linear' }
+        );
+      };
+      return {
+        paramValue: (id) => {
+          const cfg = inputKnobConfig(id);
+          if (cfg) return mapPosition(cfg, node.knobs[id]?.position ?? 0);
+          const live = node.params[id];
+          if (typeof live === 'number') return live;
+          const p = node.manifest.params.find((p) => p.id === id);
+          return typeof p?.default === 'number' ? p.default : 0;
         },
-      endEdit: () => void engine.endEdit(),
-      size: { w: 360, h: 200 },
-    }),
+        setParam: (id, v) => {
+          const cfg = inputKnobConfig(id);
+          if (cfg) {
+            void engine
+              .setKnobPosition(node.instance_id, id, positionForValue(cfg, v))
+              .then(refresh);
+          } else {
+            void engine.setParam(node.instance_id, id, v).then(refresh);
+          }
+        },
+        signalTap: (jackId) =>
+          telemetry[node.instance_id]?.[jackId] ?? {
+            instantaneous: 0,
+            rms_100ms: 0,
+            display: 0,
+            is_fast: false,
+          },
+        endEdit: () => void engine.endEdit(),
+        size: { w: 360, h: 200 },
+      };
+    },
     [telemetry, refresh],
   );
 
@@ -469,32 +554,12 @@ export default function App() {
             Library
           </button>
         </nav>
-        <span className="patch-controls">
-          <input
-            className="patch-name"
-            data-testid="patch-name"
-            value={patchName}
-            onChange={(e) => setPatchName(e.target.value)}
-            title="Patch name"
-          />
-          <button className="patch-save" data-testid="patch-save" onClick={() => void savePatch()}>
-            Save
-          </button>
-          <select
-            className="patch-load"
-            data-testid="patch-load"
-            value=""
-            onChange={(e) => {
-              if (e.target.value) void loadNamedPatch(e.target.value);
-            }}
-          >
-            <option value="">load…</option>
-            {patchList.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
+        <span
+          className="patch-title"
+          data-testid="patch-title"
+          title="Current patch (File menu to save/load)"
+        >
+          {patchName}
         </span>
         <span className="engine-status" data-testid="engine-status">
           {connected === null
@@ -549,6 +614,70 @@ export default function App() {
           </span>
         )}
       </header>
+      {fileDialog && (
+        <div
+          className="file-dialog-backdrop"
+          data-testid="file-dialog"
+          onClick={() => setFileDialog(null)}
+        >
+          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+            {fileDialog === 'save-as' ? (
+              <>
+                <h3>Save Patch As</h3>
+                <input
+                  className="patch-name"
+                  data-testid="file-dialog-name"
+                  value={saveAsName}
+                  autoFocus
+                  onChange={(e) => setSaveAsName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      void savePatch(saveAsName);
+                      setFileDialog(null);
+                    }
+                  }}
+                />
+                <button
+                  data-testid="file-dialog-confirm"
+                  onClick={() => {
+                    void savePatch(saveAsName);
+                    setFileDialog(null);
+                  }}
+                >
+                  Save
+                </button>
+              </>
+            ) : (
+              <>
+                <h3>Open Patch</h3>
+                {patchList.length === 0 && <p className="file-dialog-empty">no saved patches</p>}
+                <ul className="file-dialog-list">
+                  {patchList.map((n) => (
+                    <li key={n}>
+                      <button
+                        data-testid={`file-dialog-patch-${n}`}
+                        onClick={() => {
+                          void loadNamedPatch(n);
+                          setFileDialog(null);
+                        }}
+                      >
+                        {n}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <button
+              className="file-dialog-cancel"
+              data-testid="file-dialog-cancel"
+              onClick={() => setFileDialog(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {view === 'library' && <LibraryView client={library} />}
       <div className="app-body" style={view === 'rack' ? undefined : { display: 'none' }}>
         <ModuleLibrary modules={moduleLib} onAdd={(typeId) => void addModule(typeId)} />
@@ -638,9 +767,6 @@ export default function App() {
                   }}
                   onAttenOffset={(jack, atten, offset) => {
                     void engine.setAttenOffset(node.instance_id, jack, atten, offset).then(refresh);
-                  }}
-                  onParam={(param, value) => {
-                    void engine.setParam(node.instance_id, param, value).then(refresh);
                   }}
                 />
               ))}

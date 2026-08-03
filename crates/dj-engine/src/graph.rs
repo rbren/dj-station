@@ -217,7 +217,9 @@ impl Graph {
                     .downcast_ref::<AudioOutModule>()
                     .map(|m| m.channel_offset)
                     .unwrap_or(0);
-                for jack in 0..n_in {
+                // Only the audio jacks mix to master; the trailing
+                // channel_offset input jack is control, not audio.
+                for jack in 0..n_in.min(crate::builtin::AUDIO_OUT_CHANNELS) {
                     let ch = offset + jack;
                     if ch >= master.len() {
                         break;
