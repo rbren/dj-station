@@ -19,6 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::engine::{Engine, EngineConfig, MidiMappingInfo};
+use crate::gesture::GestureState;
 use crate::knob::KnobState;
 use crate::macros::{MacroConflict, MacroDef, MacroLibrary, MacroResolution};
 use crate::registry::ExtensionRegistry;
@@ -50,6 +51,10 @@ pub struct ModuleFile {
     /// LED feedback mappings on a MIDI node (input jacks -> note/CC out).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub midi_led_mappings: Vec<MidiMappingInfo>,
+    /// Gesture module state (PRD §7.3): mode selection, wheel layout, and
+    /// mappings, all of which round-trip through save/load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gesture: Option<GestureState>,
     /// Track path loaded into a Playback/Deck node (absolute;
     /// library-managed). Deck cues/loops/beatgrids are *not* stored here —
     /// they are track metadata in the library DB (PRD §7) and get
@@ -164,6 +169,11 @@ impl Engine {
                     params: info.params.clone(),
                     midi_mappings: info.midi_mappings.clone(),
                     midi_led_mappings: info.midi_led_mappings.clone(),
+                    gesture: info.gesture.as_ref().map(|g| GestureState {
+                        mode: g.active_mode().to_string(),
+                        wheels: *g.wheels(),
+                        mappings: self.gesture_mappings(&info.instance_id).unwrap_or_default(),
+                    }),
                     track: info.track_path.clone(),
                     sync_to: self.deck_sync_to_by_node(node_idx),
                     macro_version: None,
@@ -198,6 +208,7 @@ impl Engine {
                     params,
                     midi_mappings: Vec::new(),
                     midi_led_mappings: Vec::new(),
+                    gesture: None,
                     track: None,
                     sync_to: None,
                     macro_version: Some(mi.version),
@@ -389,6 +400,13 @@ impl Engine {
             }
             for m in &mf.midi_led_mappings {
                 engine.add_midi_led_mapping(instance_id, &m.kind, m.num, &m.name)?;
+            }
+            if let Some(g) = &mf.gesture {
+                engine.gesture_set_mode(instance_id, &g.mode)?;
+                engine.gesture_set_wheels(instance_id, g.wheels)?;
+                for m in &g.mappings {
+                    engine.restore_gesture_mapping(instance_id, m)?;
+                }
             }
             if let Some(track) = &mf.track {
                 if mf.ext == crate::deck::DECK_ID {

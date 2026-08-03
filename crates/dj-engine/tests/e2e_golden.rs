@@ -52,6 +52,15 @@ struct DeckSetupSpec {
     stems: Option<[String; 4]>,
 }
 
+/// A recorded gesture fixture (JSON pose trace, case-relative) fed through
+/// the deterministic mock pipeline (synthetic frames -> marker detector)
+/// into a Gesture node before rendering (M5).
+#[derive(Debug, Serialize, Deserialize)]
+struct GestureTraceSpec {
+    instance: String,
+    trace: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct EventsFile {
     seconds: f32,
@@ -61,6 +70,8 @@ struct EventsFile {
     tracks: Vec<TrackLoadSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     decks: Vec<DeckSetupSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    gestures: Vec<GestureTraceSpec>,
 }
 
 fn e2e_dir() -> PathBuf {
@@ -114,6 +125,10 @@ fn render_case(case: &str) -> PathBuf {
     }
     for ev in &events.midi {
         engine.inject_midi(&ev.instance, ev.frame, ev.data).unwrap();
+    }
+    for g in &events.gestures {
+        let trace = dj_engine::dj_gesture::PoseTrace::load(&case_dir.join(&g.trace)).unwrap();
+        engine.gesture_feed_trace(&g.instance, &trace, 0).unwrap();
     }
     let frames = (events.seconds * engine.config.sample_rate) as usize;
     let out = std::env::temp_dir().join(format!("dj-e2e-{case}.wav"));
@@ -197,6 +212,7 @@ fn regen_patches() {
                 midi: vec![],
                 tracks: vec![],
                 decks: vec![],
+                gestures: vec![],
             },
         );
     }
@@ -244,6 +260,7 @@ fn regen_patches() {
                 ],
                 tracks: vec![],
                 decks: vec![],
+                gestures: vec![],
             },
         );
     }
@@ -284,6 +301,7 @@ fn regen_patches() {
                 midi: vec![],
                 tracks: vec![],
                 decks: vec![],
+                gestures: vec![],
             },
         );
     }
@@ -336,6 +354,7 @@ fn regen_patches() {
                     file: "tone.wav".into(),
                 }],
                 decks: vec![],
+                gestures: vec![],
             },
         );
     }
@@ -394,6 +413,7 @@ fn regen_deck_patches() {
                     r#loop: Some((0.5, 1.5, true)),
                     stems: None,
                 }],
+                gestures: vec![],
             },
         );
     }
@@ -455,6 +475,7 @@ fn regen_deck_patches() {
                         stems: None,
                     },
                 ],
+                gestures: vec![],
             },
         );
     }
@@ -523,6 +544,7 @@ fn regen_stem_patches() {
                         "stem-other.wav".into(),
                     ]),
                 }],
+                gestures: vec![],
             },
         );
     }
@@ -593,6 +615,7 @@ fn regen_macro_patches() {
             midi: vec![],
             tracks: vec![],
             decks: vec![],
+            gestures: vec![],
         },
     );
 }
@@ -659,4 +682,62 @@ fn e2e_deck_crossfader_sync() {
         regen_deck_patches();
     }
     check_case("deck-crossfader-sync");
+}
+
+fn regen_gesture_patches() {
+    let patches = e2e_dir().join("patches");
+
+    // Case 9 (M5): Gesture(distance: L thumb<->index) -> VCA(cv) with
+    // Osc -> VCA -> Audio Out (stereo l/r), driven by the recorded pinch
+    // fixture: rendered amplitude tracks the pinch open/close.
+    {
+        let dir = patches.join("gesture-pinch-vca");
+        std::fs::create_dir_all(&dir).unwrap();
+        let trace = dj_engine::dj_gesture::fixtures::pinch_trace(30.0, 45, 0.04, 0.3);
+        trace.save(&dir.join("pinch.json")).unwrap();
+
+        let mut e = Engine::new(EngineConfig::default(), common::registry()).unwrap();
+        e.add_module("gest1", "builtin.gesture").unwrap();
+        e.add_module("osc1", "com.dj.oscillator").unwrap();
+        e.add_module("vca1", "com.dj.vca").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.add_gesture_mapping(
+            "gest1",
+            "pinch",
+            "landmark",
+            serde_json::json!({
+                "type": "distance",
+                "a": "L.thumb.tip", "b": "L.index.tip",
+                "min": 0.04, "max": 0.3,
+            }),
+        )
+        .unwrap();
+        e.connect("osc1", "audio", "vca1", "in").unwrap();
+        e.connect("gest1", "pinch", "vca1", "cv").unwrap();
+        e.connect("vca1", "out", "out1", "l").unwrap();
+        e.connect("vca1", "out", "out1", "r").unwrap();
+        e.save_patch(&dir.join("patch"), "e2e-gesture-pinch-vca")
+            .unwrap();
+        write_events(
+            &dir,
+            &EventsFile {
+                seconds: 1.5,
+                midi: vec![],
+                tracks: vec![],
+                decks: vec![],
+                gestures: vec![GestureTraceSpec {
+                    instance: "gest1".into(),
+                    trace: "pinch.json".into(),
+                }],
+            },
+        );
+    }
+}
+
+#[test]
+fn e2e_gesture_pinch_vca() {
+    if regen() {
+        regen_gesture_patches();
+    }
+    check_case("gesture-pinch-vca");
 }

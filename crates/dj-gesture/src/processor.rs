@@ -114,6 +114,22 @@ impl GestureProcessor {
         Ok(jack)
     }
 
+    /// Create a mapping at an explicit jack index (patch load: reproduces
+    /// saved jack assignments exactly, sparse slots included).
+    pub fn add_mapping_at(&mut self, jack: usize, def: MappingDef) -> Result<()> {
+        anyhow::ensure!(jack < MAX_MAPPINGS, "jack {jack} out of range");
+        anyhow::ensure!(self.slots[jack].is_none(), "jack {jack} already mapped");
+        anyhow::ensure!(
+            !self.mappings().iter().any(|(_, d)| d.name == def.name),
+            "duplicate gesture mapping name {:?}",
+            def.name
+        );
+        let eval = self.registry.get(&def.mode)?.create(&def.config)?;
+        self.slots[jack] = Some(Slot { def, eval });
+        self.values[jack] = 0.0;
+        Ok(())
+    }
+
     /// Remove a mapping by name; returns its jack index.
     pub fn remove_mapping(&mut self, name: &str) -> Option<usize> {
         let jack = self

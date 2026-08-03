@@ -62,6 +62,7 @@ impl ExtensionRegistry {
             crate::playback::PLAYBACK_ID => Some(crate::playback::playback_manifest()),
             crate::deck::DECK_ID => Some(crate::deck::deck_manifest()),
             crate::mixer::CROSSFADER_ID => Some(crate::mixer::crossfader_manifest()),
+            crate::gesture::GESTURE_ID => Some(crate::gesture::gesture_manifest()),
             _ => self.extensions.get(ext_id).map(|e| e.manifest.clone()),
         }
     }
@@ -79,6 +80,7 @@ impl ExtensionRegistry {
             crate::playback::playback_manifest(),
             crate::deck::deck_manifest(),
             crate::mixer::crossfader_manifest(),
+            crate::gesture::gesture_manifest(),
         ];
         out.extend(self.extensions.values().map(|e| e.manifest.clone()));
         out

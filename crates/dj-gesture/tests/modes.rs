@@ -88,11 +88,9 @@ fn presence_gate_decays_after_timeout() {
         .unwrap();
     let dt = 1.0 / 30.0;
     let with_hand = Detection {
-        hands: vec![trace_hand_to_hand(&fixtures::synth_hand_at(
-            'L',
-            Point { x: 0.5, y: 0.5 },
-            0.02,
-        ))],
+        hands: vec![fixtures::synth_hand_at('L', Point { x: 0.5, y: 0.5 }, 0.02)
+            .to_hand()
+            .unwrap()],
     };
     run_frame(&mut p, Some(&with_hand), dt);
     assert_eq!(p.value(jack), GATE_HIGH);
@@ -117,20 +115,6 @@ fn presence_gate_decays_after_timeout() {
     run_frame(&mut p, Some(&empty), dt);
     run_frame(&mut p, Some(&empty), dt);
     assert_eq!(p.value(jack), 0.0);
-}
-
-fn trace_hand_to_hand(th: &dj_gesture::TraceHand) -> dj_gesture::Hand {
-    let mut points = [Point { x: 0.0, y: 0.0 }; dj_gesture::N_LANDMARKS];
-    for (p, src) in points.iter_mut().zip(&th.points) {
-        *p = Point {
-            x: src[0],
-            y: src[1],
-        };
-    }
-    dj_gesture::Hand {
-        handedness: dj_gesture::Handedness::from_letter(th.hand.chars().next().unwrap()).unwrap(),
-        points,
-    }
 }
 
 /// Distance mapping tracks the scripted pinch fixture monotonically
@@ -205,10 +189,9 @@ fn learn_proposes_mapping_from_detection() {
 
     // Wheel mode: hand parked in wheel 1, zone 3.
     let det = Detection {
-        hands: vec![trace_hand_to_hand(&fixtures::centered_hand(
-            'R',
-            layout.zone_center(1, 3),
-        ))],
+        hands: vec![fixtures::centered_hand('R', layout.zone_center(1, 3))
+            .to_hand()
+            .unwrap()],
     };
     p.learn_begin();
     assert!(p.learn_take().is_none(), "nothing learned before a frame");
@@ -279,16 +262,12 @@ fn stub_third_mode_registers_without_core_changes() {
 
     let two_hands = Detection {
         hands: vec![
-            trace_hand_to_hand(&fixtures::synth_hand_at(
-                'L',
-                Point { x: 0.3, y: 0.5 },
-                0.02,
-            )),
-            trace_hand_to_hand(&fixtures::synth_hand_at(
-                'R',
-                Point { x: 0.7, y: 0.5 },
-                0.02,
-            )),
+            fixtures::synth_hand_at('L', Point { x: 0.3, y: 0.5 }, 0.02)
+                .to_hand()
+                .unwrap(),
+            fixtures::synth_hand_at('R', Point { x: 0.7, y: 0.5 }, 0.02)
+                .to_hand()
+                .unwrap(),
         ],
     };
     run_frame(&mut p, Some(&two_hands), 0.033);

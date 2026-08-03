@@ -99,6 +99,27 @@ fn build_stress_patch(engine: &mut Engine, voices: usize) {
     engine.connect("deckB", "audio_l", "xf1", "b_l").unwrap();
     engine.connect("xf1", "out_l", "out1", "l").unwrap();
 
+    // Gesture module (M5) active on the RT path: a distance mapping wired
+    // into voice 0's VCA, with a recorded pinch fixture fed through the
+    // detection pipeline (events cross the same lock-free ring live use
+    // takes).
+    engine.add_module("gest1", "builtin.gesture").unwrap();
+    engine
+        .add_gesture_mapping(
+            "gest1",
+            "pinch",
+            "landmark",
+            serde_json::json!({
+                "type": "distance",
+                "a": "L.thumb.tip", "b": "L.index.tip",
+                "min": 0.04, "max": 0.3,
+            }),
+        )
+        .unwrap();
+    engine.connect("gest1", "pinch", "vca0", "cv").unwrap();
+    let trace = dj_engine::dj_gesture::fixtures::pinch_trace(30.0, 45, 0.04, 0.3);
+    engine.gesture_feed_trace("gest1", &trace, 0).unwrap();
+
     // Hold a note so every voice is audible for the whole run.
     engine.inject_midi("midi1", 0, [0x90, 60, 100]).unwrap();
 }

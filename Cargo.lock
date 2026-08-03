@@ -614,6 +614,7 @@ dependencies = [
  "anyhow",
  "cpal",
  "dj-analysis",
+ "dj-gesture",
  "dj-library",
  "dj-module-sdk",
  "hound",

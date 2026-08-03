@@ -28,6 +28,24 @@ pub struct TraceHand {
     pub points: Vec<[f32; 2]>,
 }
 
+impl TraceHand {
+    /// Ground-truth [`Hand`] this trace entry describes.
+    pub fn to_hand(&self) -> Option<Hand> {
+        let handedness = Handedness::from_letter(self.hand.chars().next()?)?;
+        if self.points.len() != N_LANDMARKS {
+            return None;
+        }
+        let mut points = [Point { x: 0.0, y: 0.0 }; N_LANDMARKS];
+        for (p, src) in points.iter_mut().zip(&self.points) {
+            *p = Point {
+                x: src[0],
+                y: src[1],
+            };
+        }
+        Some(Hand { handedness, points })
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TraceFrame {
     #[serde(default)]
@@ -63,18 +81,7 @@ impl PoseTrace {
         let frame = self.frames.get(i)?;
         let mut hands = Vec::with_capacity(frame.hands.len());
         for th in &frame.hands {
-            let handedness = Handedness::from_letter(th.hand.chars().next()?)?;
-            if th.points.len() != N_LANDMARKS {
-                return None;
-            }
-            let mut points = [Point { x: 0.0, y: 0.0 }; N_LANDMARKS];
-            for (p, src) in points.iter_mut().zip(&th.points) {
-                *p = Point {
-                    x: src[0],
-                    y: src[1],
-                };
-            }
-            hands.push(Hand { handedness, points });
+            hands.push(th.to_hand()?);
         }
         Some(Detection { hands })
     }
