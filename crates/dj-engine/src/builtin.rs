@@ -11,6 +11,8 @@ pub const MIDI_ID: &str = "builtin.midi";
 pub const AUDIO_OUT_CHANNELS: usize = 2;
 const AUDIO_OUT_JACKS: [(&str, &str); AUDIO_OUT_CHANNELS] = [("l", "L"), ("r", "R")];
 pub const MAX_MIDI_JACKS: usize = 64;
+/// Input jacks on the MIDI module for LED/controller feedback (PRD §7.1).
+pub const MAX_MIDI_LED_JACKS: usize = 16;
 
 pub fn audio_out_manifest() -> Manifest {
     Manifest {
@@ -47,7 +49,17 @@ pub fn midi_manifest() -> Manifest {
         name: "MIDI".into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
-        inputs: vec![],
+        // Input jacks drive controller LEDs/feedback (one per LED mapping;
+        // named like output mappings). Fixed count so graph buffers are
+        // preallocated.
+        inputs: (0..MAX_MIDI_LED_JACKS)
+            .map(|i| JackDecl {
+                id: format!("led{i}"),
+                name: format!("LED {i}"),
+                default: 0.0,
+                knob: None,
+            })
+            .collect(),
         // Output jacks are dynamic (one per mapped control); the graph
         // preallocates MAX_MIDI_JACKS output buffers.
         outputs: (0..MAX_MIDI_JACKS)
@@ -113,6 +125,10 @@ pub struct MidiShared {
     /// Bitmask of jacks whose RT-side value must be zeroed (set when a slot
     /// is removed or reused so stale values don't leak into new mappings).
     pub reset_mask: AtomicU64,
+    /// LED feedback mappings (input jacks -> note/CC out messages).
+    pub led_mappings: [MappingCell; MAX_MIDI_LED_JACKS],
+    /// LED slots whose RT-side emit state must be reset (removed/reused).
+    pub led_reset_mask: AtomicU64,
 }
 
 impl Default for MidiShared {
@@ -122,23 +138,29 @@ impl Default for MidiShared {
             learned: AtomicU32::new(0),
             mappings: std::array::from_fn(|_| MappingCell::default()),
             reset_mask: AtomicU64::new(0),
+            led_mappings: std::array::from_fn(|_| MappingCell::default()),
+            led_reset_mask: AtomicU64::new(0),
         }
     }
 }
 
+fn claim_slot(cells: &[MappingCell], reset_mask: &AtomicU64, kind: u8, num: u8) -> Option<usize> {
+    for (i, cell) in cells.iter().enumerate() {
+        if !cell.active.load(Ordering::Acquire) {
+            cell.kind.store(kind, Ordering::Relaxed);
+            cell.num.store(num, Ordering::Relaxed);
+            // Reused slots may hold stale state from a prior mapping.
+            reset_mask.fetch_or(1 << i, Ordering::Release);
+            cell.active.store(true, Ordering::Release);
+            return Some(i);
+        }
+    }
+    None
+}
+
 impl MidiShared {
     pub fn add_mapping(&self, kind: u8, num: u8) -> Option<usize> {
-        for (i, cell) in self.mappings.iter().enumerate() {
-            if !cell.active.load(Ordering::Acquire) {
-                cell.kind.store(kind, Ordering::Relaxed);
-                cell.num.store(num, Ordering::Relaxed);
-                // Reused slots may hold a stale value from a prior mapping.
-                self.reset_mask.fetch_or(1 << i, Ordering::Release);
-                cell.active.store(true, Ordering::Release);
-                return Some(i);
-            }
-        }
-        None
+        claim_slot(&self.mappings, &self.reset_mask, kind, num)
     }
 
     pub fn remove_mapping(&self, jack: usize) {
@@ -146,6 +168,45 @@ impl MidiShared {
             self.mappings[jack].active.store(false, Ordering::Release);
             self.reset_mask.fetch_or(1 << jack, Ordering::Release);
         }
+    }
+
+    pub fn add_led_mapping(&self, kind: u8, num: u8) -> Option<usize> {
+        claim_slot(&self.led_mappings, &self.led_reset_mask, kind, num)
+    }
+
+    pub fn remove_led_mapping(&self, jack: usize) {
+        if jack < MAX_MIDI_LED_JACKS {
+            self.led_mappings[jack]
+                .active
+                .store(false, Ordering::Release);
+            self.led_reset_mask.fetch_or(1 << jack, Ordering::Release);
+        }
+    }
+}
+
+/// A MIDI message emitted by the engine toward a controller (LED feedback,
+/// PRD §7.1). Produced on the RT thread, drained on the control thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MidiOutEvent {
+    pub frame: u64,
+    pub data: [u8; 3],
+}
+
+/// Where engine-generated MIDI output goes. Implementations: the mock sink
+/// below (tests/headless), or a hardware output port (feature `midi-hw`).
+pub trait MidiOutSink {
+    fn send(&mut self, event: MidiOutEvent);
+}
+
+/// Records every emitted message; the virtual controller for tests.
+#[derive(Debug, Default)]
+pub struct MockMidiSink {
+    pub events: Vec<MidiOutEvent>,
+}
+
+impl MidiOutSink for MockMidiSink {
+    fn send(&mut self, event: MidiOutEvent) {
+        self.events.push(event);
     }
 }
 
@@ -157,15 +218,27 @@ pub struct MidiModule {
     shared: Arc<MidiShared>,
     values: [f32; MAX_MIDI_JACKS],
     frame: u64,
+    /// LED feedback output ring (RT -> control). Full ring drops events —
+    /// LED state tolerates loss (the next change re-syncs).
+    out_producer: rtrb::Producer<MidiOutEvent>,
+    /// Last emitted 7-bit value per LED slot; -1 = nothing emitted yet, so
+    /// the first processed block emits the initial state (controller sync).
+    led_last: [i16; MAX_MIDI_LED_JACKS],
 }
 
 impl MidiModule {
-    pub fn new(consumer: rtrb::Consumer<MidiEvent>, shared: Arc<MidiShared>) -> Self {
+    pub fn new(
+        consumer: rtrb::Consumer<MidiEvent>,
+        shared: Arc<MidiShared>,
+        out_producer: rtrb::Producer<MidiOutEvent>,
+    ) -> Self {
         MidiModule {
             consumer,
             shared,
             values: [0.0; MAX_MIDI_JACKS],
             frame: 0,
+            out_producer,
+            led_last: [-1; MAX_MIDI_LED_JACKS],
         }
     }
 
@@ -197,7 +270,7 @@ impl MidiModule {
 impl HostModule for MidiModule {
     fn process(
         &mut self,
-        _inputs: &[Vec<f32>],
+        inputs: &[Vec<f32>],
         outputs: &mut [Vec<f32>],
         _mask: u64,
         frames: usize,
@@ -208,6 +281,14 @@ impl HostModule for MidiModule {
             for (i, v) in self.values.iter_mut().enumerate() {
                 if reset & (1 << i) != 0 {
                     *v = 0.0;
+                }
+            }
+        }
+        let led_reset = self.shared.led_reset_mask.swap(0, Ordering::AcqRel);
+        if led_reset != 0 {
+            for (i, l) in self.led_last.iter_mut().enumerate() {
+                if led_reset & (1 << i) != 0 {
+                    *l = -1;
                 }
             }
         }
@@ -228,6 +309,42 @@ impl HostModule for MidiModule {
             }
             for (o, out) in outputs.iter_mut().enumerate().take(MAX_MIDI_JACKS) {
                 out[s] = self.values[o];
+            }
+        }
+
+        // LED feedback (PRD §7.1): evaluate each active LED mapping at
+        // block rate (last sample of the block) and emit a note/CC out
+        // message when the quantized 7-bit value changes. Signals use the
+        // 0..10 range: 0 -> 0, 10 -> 127 (notes gate at >= 1.0).
+        if frames > 0 {
+            let eval_frame = block_start + frames as u64 - 1;
+            for i in 0..MAX_MIDI_LED_JACKS {
+                let cell = &self.shared.led_mappings[i];
+                if !cell.active.load(Ordering::Acquire) {
+                    continue;
+                }
+                let Some(buf) = inputs.get(i) else { continue };
+                let v = buf[frames - 1];
+                let kind = cell.kind.load(Ordering::Relaxed);
+                let num = cell.num.load(Ordering::Relaxed);
+                let (q, data) = if kind == MAP_KIND_NOTE {
+                    if v >= 1.0 {
+                        let vel = (v * 12.7).clamp(1.0, 127.0).round() as u8;
+                        (vel as i16, [0x90, num, vel])
+                    } else {
+                        (0, [0x80, num, 0])
+                    }
+                } else {
+                    let q = (v * 12.7).clamp(0.0, 127.0).round() as u8;
+                    (q as i16, [0xB0, num, q])
+                };
+                if q != self.led_last[i] {
+                    self.led_last[i] = q;
+                    let _ = self.out_producer.push(MidiOutEvent {
+                        frame: eval_frame,
+                        data,
+                    });
+                }
             }
         }
         self.frame = block_start + frames as u64;

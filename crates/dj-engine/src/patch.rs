@@ -46,6 +46,9 @@ pub struct ModuleFile {
     pub params: BTreeMap<String, f32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub midi_mappings: Vec<MidiMappingInfo>,
+    /// LED feedback mappings on a MIDI node (input jacks -> note/CC out).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub midi_led_mappings: Vec<MidiMappingInfo>,
     /// Track path loaded into a Playback/Deck node (absolute;
     /// library-managed). Deck cues/loops/beatgrids are *not* stored here —
     /// they are track metadata in the library DB (PRD §7) and get
@@ -145,6 +148,7 @@ impl Engine {
                     knobs,
                     params: info.params.clone(),
                     midi_mappings: info.midi_mappings.clone(),
+                    midi_led_mappings: info.midi_led_mappings.clone(),
                     track: info.track_path.clone(),
                     sync_to: self.deck_sync_to_by_node(node_idx),
                 },
@@ -208,7 +212,7 @@ impl Engine {
             let from = &self.nodes[w.from_node];
             let to = &self.nodes[w.to_node];
             let from_jack = self.output_jack_name(w.from_node, w.from_jack);
-            let to_jack = to.manifest.inputs[w.to_jack].id.clone();
+            let to_jack = self.input_jack_name(w.to_node, w.to_jack);
             map.entry(from.instance_id.clone())
                 .or_default()
                 .push(WireEntry {
@@ -241,6 +245,9 @@ impl Engine {
             engine.add_module(instance_id, &mf.ext)?;
             for m in &mf.midi_mappings {
                 engine.add_midi_mapping(instance_id, &m.kind, m.num, &m.name)?;
+            }
+            for m in &mf.midi_led_mappings {
+                engine.add_midi_led_mapping(instance_id, &m.kind, m.num, &m.name)?;
             }
             if let Some(track) = &mf.track {
                 if mf.ext == crate::deck::DECK_ID {

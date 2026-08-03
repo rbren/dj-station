@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::builtin::{
-    AudioOutModule, MidiEvent, MidiModule, MidiShared, AUDIO_OUT_ID, MAP_KIND_CC, MAP_KIND_NOTE,
-    MIDI_ID,
+    AudioOutModule, MidiEvent, MidiModule, MidiOutEvent, MidiOutSink, MidiShared, AUDIO_OUT_ID,
+    MAP_KIND_CC, MAP_KIND_NOTE, MIDI_ID,
 };
 use crate::deck::{DeckCmd, DeckControl, DeckModule, DeckStatus, N_CUES};
 use crate::graph::{Graph, GraphNode, WireSpec};
@@ -84,6 +84,8 @@ pub struct NodeInfo {
     pub telemetry: Vec<Arc<JackSlot>>,
     pub midi_shared: Option<Arc<MidiShared>>,
     pub midi_mappings: Vec<MidiMappingInfo>,
+    /// LED feedback mappings (input jacks -> note/CC out; PRD §7.1).
+    pub midi_led_mappings: Vec<MidiMappingInfo>,
     /// Path of the track loaded into a Playback/Deck node (persisted in the
     /// patch).
     pub track_path: Option<String>,
@@ -171,6 +173,8 @@ pub struct Engine {
     cmd_tx: Arc<Mutex<rtrb::Producer<Command>>>,
     garbage_rx: rtrb::Consumer<Box<dyn HostModule>>,
     midi_producers: HashMap<usize, rtrb::Producer<MidiEvent>>,
+    /// LED feedback messages coming back from the RT thread, per MIDI node.
+    midi_out_consumers: HashMap<usize, rtrb::Consumer<MidiOutEvent>>,
     playback_producers: HashMap<usize, rtrb::Producer<Arc<TrackData>>>,
     /// Replaced tracks come back from the RT thread for off-RT drop.
     playback_garbage: HashMap<usize, rtrb::Consumer<Arc<TrackData>>>,
@@ -252,6 +256,7 @@ impl Engine {
             cmd_tx: Arc::new(Mutex::new(cmd_tx)),
             garbage_rx,
             midi_producers: HashMap::new(),
+            midi_out_consumers: HashMap::new(),
             playback_producers: HashMap::new(),
             playback_garbage: HashMap::new(),
             decks: HashMap::new(),
@@ -295,8 +300,14 @@ impl Engine {
     }
 
     fn jack_index(&self, node: usize, jack_id: &str) -> Result<usize> {
-        self.nodes[node]
-            .manifest
+        let info = &self.nodes[node];
+        // MIDI nodes expose named LED-feedback jacks.
+        if info.ext_id == MIDI_ID {
+            if let Some(m) = info.midi_led_mappings.iter().find(|m| m.name == jack_id) {
+                return Ok(m.jack);
+            }
+        }
+        info.manifest
             .inputs
             .iter()
             .position(|j| j.id == jack_id)
@@ -375,10 +386,12 @@ impl Engine {
         let mut midi_shared = None;
         let module: Box<dyn HostModule> = if ext_id == MIDI_ID {
             let (tx, rx) = rtrb::RingBuffer::new(4096);
+            let (out_tx, out_rx) = rtrb::RingBuffer::new(4096);
             let shared = Arc::new(MidiShared::default());
             midi_shared = Some(shared.clone());
             self.midi_producers.insert(self.nodes.len(), tx);
-            Box::new(MidiModule::new(rx, shared))
+            self.midi_out_consumers.insert(self.nodes.len(), out_rx);
+            Box::new(MidiModule::new(rx, shared, out_tx))
         } else if ext_id == PLAYBACK_ID {
             let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
             let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
@@ -445,6 +458,7 @@ impl Engine {
             telemetry,
             midi_shared,
             midi_mappings: Vec::new(),
+            midi_led_mappings: Vec::new(),
             track_path: None,
         };
 
@@ -527,6 +541,18 @@ impl Engine {
             }
         }
         info.manifest.outputs[jack].id.clone()
+    }
+
+    /// Resolve an input jack index to its persistent name (LED mapping
+    /// names on MIDI nodes, manifest ids elsewhere).
+    pub fn input_jack_name(&self, node: usize, jack: usize) -> String {
+        let info = &self.nodes[node];
+        if info.ext_id == MIDI_ID {
+            if let Some(m) = info.midi_led_mappings.iter().find(|m| m.jack == jack) {
+                return m.name.clone();
+            }
+        }
+        info.manifest.inputs[jack].id.clone()
     }
 
     /// Restore a full knob state (used by patch load).
@@ -759,6 +785,132 @@ impl Engine {
             shared.remove_mapping(jack);
         }
         Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // MIDI LED feedback (PRD §7.1)
+    // ------------------------------------------------------------------
+
+    /// Create an LED feedback mapping: a named input jack on a MIDI node
+    /// whose signal drives note/CC out messages toward the controller.
+    /// `kind` is "cc" | "note"; `num` the controller/note number.
+    pub fn add_midi_led_mapping(
+        &mut self,
+        instance_id: &str,
+        kind: &str,
+        num: u8,
+        name: &str,
+    ) -> Result<MidiMappingInfo> {
+        let node = self.node_idx(instance_id)?;
+        let kind_u8 = match kind {
+            "cc" => MAP_KIND_CC,
+            "note" => MAP_KIND_NOTE,
+            other => return Err(anyhow!("unknown mapping kind {other:?}")),
+        };
+        anyhow::ensure!(
+            !self.nodes[node]
+                .midi_led_mappings
+                .iter()
+                .any(|m| m.name == name),
+            "duplicate LED mapping name {name:?}"
+        );
+        let shared = self.nodes[node]
+            .midi_shared
+            .as_ref()
+            .ok_or_else(|| anyhow!("not a MIDI module"))?;
+        let jack = shared
+            .add_led_mapping(kind_u8, num)
+            .ok_or_else(|| anyhow!("LED mapping table full"))?;
+        let info = MidiMappingInfo {
+            name: name.to_string(),
+            kind: kind.to_string(),
+            num,
+            jack,
+        };
+        self.nodes[node].midi_led_mappings.push(info.clone());
+        Ok(info)
+    }
+
+    /// Remove a named LED mapping, dropping any wires targeting its jack.
+    pub fn remove_midi_led_mapping(&mut self, instance_id: &str, name: &str) -> Result<()> {
+        let node = self.node_idx(instance_id)?;
+        let pos = self.nodes[node]
+            .midi_led_mappings
+            .iter()
+            .position(|m| m.name == name)
+            .ok_or_else(|| anyhow!("no LED mapping {name:?} on {instance_id:?}"))?;
+        let jack = self.nodes[node].midi_led_mappings[pos].jack;
+        let doomed: Vec<WireSpec> = self
+            .wires
+            .iter()
+            .copied()
+            .filter(|w| w.to_node == node && w.to_jack == jack)
+            .collect();
+        if !doomed.is_empty() {
+            let core = self.core_mut()?;
+            for w in &doomed {
+                core.graph.remove_wire(*w);
+            }
+            self.wires
+                .retain(|w| !(w.to_node == node && w.to_jack == jack));
+        }
+        self.nodes[node].midi_led_mappings.remove(pos);
+        if let Some(shared) = self.nodes[node].midi_shared.as_ref() {
+            shared.remove_led_mapping(jack);
+        }
+        Ok(())
+    }
+
+    /// Drain LED feedback messages generated by a MIDI node since the last
+    /// call (works stopped or running; lock-free ring on the RT side).
+    pub fn drain_midi_out(&mut self, instance_id: &str) -> Result<Vec<MidiOutEvent>> {
+        let node = self.node_idx(instance_id)?;
+        let rx = self
+            .midi_out_consumers
+            .get_mut(&node)
+            .ok_or_else(|| anyhow!("{instance_id:?} is not a MIDI module"))?;
+        let mut out = Vec::new();
+        while let Ok(ev) = rx.pop() {
+            out.push(ev);
+        }
+        Ok(out)
+    }
+
+    /// Forward pending LED feedback messages to a sink (mock controller in
+    /// tests, hardware output port in the app). Returns messages forwarded.
+    pub fn pump_midi_out(
+        &mut self,
+        instance_id: &str,
+        sink: &mut dyn MidiOutSink,
+    ) -> Result<usize> {
+        let events = self.drain_midi_out(instance_id)?;
+        let n = events.len();
+        for ev in events {
+            sink.send(ev);
+        }
+        Ok(n)
+    }
+
+    /// Connect a hardware MIDI output port as the LED feedback sink helper
+    /// (feature `midi-hw`): returns a sink that forwards messages to the
+    /// port; call `pump_midi_out` with it from the control loop.
+    #[cfg(feature = "midi-hw")]
+    pub fn open_midi_hardware_sink(port_substring: &str) -> Result<HardwareMidiSink> {
+        let midi_out = midir::MidiOutput::new("dj-station")?;
+        let ports = midi_out.ports();
+        let port = ports
+            .iter()
+            .find(|p| {
+                midi_out
+                    .port_name(p)
+                    .map(|n| n.contains(port_substring))
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| anyhow!("no MIDI output port matching {port_substring:?}"))?;
+        let conn = midi_out
+            .connect(port, "dj-station-out")
+            .map_err(|e| anyhow!("midi out connect failed: {e}"))?;
+        Ok(HardwareMidiSink { conn })
     }
 
     /// Connect a hardware MIDI input port to a MIDI node (feature `midi-hw`).
@@ -1704,4 +1856,17 @@ impl Drop for Engine {
 pub struct WatcherHandle {
     rx: std::sync::mpsc::Receiver<String>,
     pub stop: Arc<AtomicBool>,
+}
+
+/// LED feedback sink backed by a hardware MIDI output port.
+#[cfg(feature = "midi-hw")]
+pub struct HardwareMidiSink {
+    conn: midir::MidiOutputConnection,
+}
+
+#[cfg(feature = "midi-hw")]
+impl MidiOutSink for HardwareMidiSink {
+    fn send(&mut self, event: MidiOutEvent) {
+        let _ = self.conn.send(&event.data);
+    }
 }

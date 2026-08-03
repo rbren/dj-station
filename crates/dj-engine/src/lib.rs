@@ -25,6 +25,7 @@ pub mod registry;
 pub mod telemetry;
 pub mod wasm_host;
 
+pub use builtin::{MidiOutEvent, MidiOutSink, MockMidiSink};
 pub use engine::{Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE};
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle};
