@@ -106,6 +106,10 @@ jobs:
       - name: Rust tests (release; includes E2E golden audio regression,
           M1 library/watch-folder/provider suites, Playback module tests)
         run: cargo test --workspace --release
+      # M3: keep the optional ONNX stem-separator path compiling. The smoke
+      # test skips itself unless DJ_STEMS_ONNX_MODEL points at a model.
+      - name: ONNX separator smoke (feature-gated; skips without a model)
+        run: cargo test -p dj-analysis --release --features onnx --test onnx_smoke
       - name: Frontend tests (vitest + jsdom)
         run: cd app && npm ci && npm test
       - name: Headless smoke via run.sh path

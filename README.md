@@ -128,10 +128,11 @@ crates/
                      playback.rs   Built-in Playback module (M1): plays a library
                                    track; play_gate/speed in, audio_l/r out; decode
                                    + SR conversion off the RT thread.
-                     deck.rs       DJ Deck module (M2): hot cues, loops, manual
+                     deck.rs       DJ Deck module (M2/M3): hot cues, loops, manual
                                    beatgrid, keylock (WSOLA), slip/reverse,
                                    beat-sync between decks; beat_clock/bar_clock/
-                                   phase/bpm outputs; RT-safe command rings.
+                                   phase/bpm outputs; RT-safe command rings; four
+                                   routable stem jacks with per-stem gain params.
                      mixer.rs      Crossfader module (M2): equal-power two-channel
                                    stereo crossfade.
   dj-library       Sound library (M1): SQLite DB (tracks, hashes, licenses,
@@ -139,6 +140,15 @@ crates/
                    acquisition provider framework (iTunes deep-link,
                    Freesound/Jamendo/Internet Archive download) with
                    per-store filters and unified fan-out search.
+  dj-analysis      Analysis pipeline (M3): pure-Rust BPM/auto-beatgrid
+                   (onset + comb-filter tempo) and key detection
+                   (chromagram + Krumhansl profiles); stem separation
+                   behind a StemSeparator trait (deterministic HPSS-style
+                   band separator always available; optional ONNX Runtime
+                   backend — CoreML EP on macOS, CPU EP elsewhere — loads
+                   a model file when configured); background worker that
+                   drains the library's analysis queue; stems cached as
+                   FLAC keyed by content hash.
   dj-cli           Headless harness: create/render/run/save/load patches,
                    inject virtual MIDI, print telemetry.
 extensions/        WASM extensions (each folder: manifest.json + dsp.wasm +
@@ -160,8 +170,9 @@ with 0.0 = C4 (261.626 Hz); gate high ≥ 1.0, low ≤ 0.0. Default block size
 
 ## Milestone status
 
-M0, M1, and M2 are implemented; see
+M0, M1, M2, and M3 are implemented; see
 [reports/M0_REPORT.md](reports/M0_REPORT.md),
-[reports/M1_REPORT.md](reports/M1_REPORT.md), and
-[reports/M2_REPORT.md](reports/M2_REPORT.md) for the
+[reports/M1_REPORT.md](reports/M1_REPORT.md),
+[reports/M2_REPORT.md](reports/M2_REPORT.md), and
+[reports/M3_REPORT.md](reports/M3_REPORT.md) for the
 acceptance-criteria → test mapping and known gaps.

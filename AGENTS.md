@@ -44,3 +44,11 @@ fails if it's missing.
   sync partner, and the app layer re-applies library metadata on
   deck_load/patch load. E2E deck cases carry grid/cue/loop state in the
   `decks` section of their `events.json` sidecar for the same reason.
+- Stems (M3) follow the same split: the FLAC stem cache under
+  `<data_dir>/stems/<content_hash>/` is app-layer state auto-loaded by
+  `apply_deck_metadata`; patches persist only the `stem_*` gain params.
+  E2E cases carry stem files in the sidecar's `decks[].stems`.
+- The ONNX separator is behind `dj-analysis --features onnx` and its smoke
+  test gates on `DJ_STEMS_ONNX_MODEL` (unset/empty ⇒ skip). The tested
+  default separator is the deterministic DSP `BandSeparator` — don't make
+  CI depend on model files.
