@@ -52,3 +52,23 @@ fails if it's missing.
   test gates on `DJ_STEMS_ONNX_MODEL` (unset/empty ⇒ skip). The tested
   default separator is the deterministic DSP `BandSeparator` — don't make
   CI depend on model files.
+- Macros (M4, PRD §6): definitions are canonical in the library DB
+  (`macros` table, JSON `MacroDef`); patches persist instances as
+  `ext = <macro id>` + `macro_version` references and embed the used
+  definitions under `macros/` as a lockfile for the version-mismatch
+  update-vs-fork flow (`PatchDoc::macro_conflicts` /
+  `resolve_macro_conflict`). Expanded internal nodes use `/`-prefixed
+  instance ids, so `/` is reserved in user instance ids and UI snapshots
+  filter internals via `Engine::snapshot`.
+- Native (dylib) modules (M4, PRD §5): `abi = "native-1"`, loaded by
+  `native_host.rs` via libloading through a versioned C vtable. They are
+  UNSANDBOXED trusted code (trust model documented in `native_host.rs`).
+  The sample `extensions/gain-native` is a standalone cargo workspace
+  (host-target cdylib; own `target/` so test-time rebuilds don't fight
+  the locked root target dir) built by
+  `scripts/build-native-extensions.sh`; conformance tests build it on
+  demand. CI lints it separately (it's outside both workspaces).
+- The M4 perf stress (`tests/perf_m4.rs`) honors `STRESS_SECONDS` like
+  `rt_safety.rs` (default 30 s; CI 600). The strict zero-deadline-miss
+  criterion is the open on-M4-hardware PRD checkbox; on shared hosts the
+  test tolerates ≤ 1 % CPU-time spikes, documented inline.

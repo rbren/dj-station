@@ -226,6 +226,8 @@ struct NodeSnapshot {
     params: BTreeMap<String, f32>,
     wired_inputs: Vec<String>,
     midi_mappings: Vec<MidiMappingSnapshot>,
+    /// LED feedback mappings (M4, PRD §7.1); each is also an input jack.
+    midi_led_mappings: Vec<MidiMappingSnapshot>,
 }
 
 #[tauri::command]
@@ -317,6 +319,15 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                     num: m.num,
                 })
                 .collect(),
+            midi_led_mappings: n
+                .midi_led_mappings
+                .iter()
+                .map(|m| MidiMappingSnapshot {
+                    name: m.name.clone(),
+                    kind: m.kind.clone(),
+                    num: m.num,
+                })
+                .collect(),
         })
         .collect();
     // Macro instances render like any other module panel, using their
@@ -354,6 +365,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
             params: mf.map(|m| m.params.clone()).unwrap_or_default(),
             wired_inputs: wired.get(iid.as_str()).cloned().unwrap_or_default(),
             midi_mappings: Vec::new(),
+            midi_led_mappings: Vec::new(),
         });
     }
     Ok(out)
@@ -528,6 +540,40 @@ fn remove_midi_mapping(state: State<AppState>, instance: String, name: String) -
             }
         }
         e.remove_midi_mapping(&instance, &name).map_err(err)
+    })
+}
+
+/// Add a MIDI LED feedback mapping (M4, PRD §7.1): the named input jack
+/// appears on the MIDI module and drives note/CC out messages back to the
+/// controller (hardware port when `DJ_MIDI_OUT_PORT` matches one).
+#[tauri::command]
+fn add_midi_led_mapping(
+    state: State<AppState>,
+    instance: String,
+    kind: String,
+    num: u8,
+    name: String,
+) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    record_edit(&state, &engine, &format!("led+:{instance}:{name}"));
+    engine
+        .add_midi_led_mapping(&instance, &kind, num, &name)
+        .map(|_| ())
+        .map_err(err)
+}
+
+/// Remove a MIDI LED mapping. The engine drops wires into its jack, which
+/// is a structural edit and needs the engine stopped.
+#[tauri::command]
+fn remove_midi_led_mapping(
+    state: State<AppState>,
+    instance: String,
+    name: String,
+) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    record_edit(&state, &engine, &format!("led-:{instance}:{name}"));
+    with_stopped(&mut engine, |e| {
+        e.remove_midi_led_mapping(&instance, &name).map_err(err)
     })
 }
 
@@ -1498,6 +1544,38 @@ fn main() {
                 std::thread::sleep(std::time::Duration::from_secs(15));
                 autosave_now(&handle.state::<AppState>());
             });
+            // M4 (PRD §7.1): LED feedback pump. When DJ_MIDI_OUT_PORT names
+            // a hardware MIDI output port, forward engine-generated note/CC
+            // out messages to it from a control-rate background thread
+            // (never the RT thread). Headless/CI: env unset ⇒ no thread.
+            let port = std::env::var("DJ_MIDI_OUT_PORT").unwrap_or_default();
+            if !port.is_empty() {
+                match Engine::open_midi_hardware_sink(&port) {
+                    Ok(mut sink) => {
+                        let handle = app.handle().clone();
+                        std::thread::spawn(move || {
+                            let state = handle.state::<AppState>();
+                            loop {
+                                if let Ok(mut engine) = state.engine.lock() {
+                                    let midis: Vec<String> = engine
+                                        .nodes
+                                        .iter()
+                                        .filter(|n| n.ext_id == dj_engine::builtin::MIDI_ID)
+                                        .map(|n| n.instance_id.clone())
+                                        .collect();
+                                    for m in midis {
+                                        let _ = engine.pump_midi_out(&m, &mut sink);
+                                    }
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(30));
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("[dj-midi] LED output port {port:?} unavailable: {e}")
+                    }
+                }
+            }
             // System menu: platform defaults (App/Edit/Window on macOS)
             // plus a Debug submenu exposing the web inspector.
             let devtools = MenuItemBuilder::with_id("toggle_devtools", "Toggle Developer Tools")
@@ -1551,6 +1629,8 @@ fn main() {
             inject_midi,
             add_midi_mapping,
             remove_midi_mapping,
+            add_midi_led_mapping,
+            remove_midi_led_mapping,
             undo,
             redo,
             end_edit,

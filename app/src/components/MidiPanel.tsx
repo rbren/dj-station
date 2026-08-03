@@ -36,13 +36,19 @@ function isTyping(target: EventTarget | null): boolean {
 export interface MidiPanelProps {
   instance: string;
   mappings: MidiMapping[];
+  /** LED feedback mappings (M4, PRD §7.1): input jacks driving note/CC out. */
+  ledMappings?: MidiMapping[];
   onAdd(kind: 'note' | 'cc', num: number, name: string): void;
   onRemove(name: string): void;
+  onAddLed?(kind: 'note' | 'cc', num: number, name: string): void;
+  onRemoveLed?(name: string): void;
   /** Inject a raw MIDI message (used by keyboard-key bindings). */
   onMidi(data: [number, number, number]): void;
 }
 
-export function MidiPanel({ instance, mappings, onAdd, onRemove, onMidi }: MidiPanelProps) {
+export function MidiPanel(props: MidiPanelProps) {
+  const { instance, mappings, onAdd, onRemove, onMidi } = props;
+  const ledMappings = props.ledMappings ?? [];
   const [kind, setKind] = useState<'note' | 'cc'>('note');
   const [num, setNum] = useState(60);
   const [keys, setKeys] = useState<Record<string, string>>(() => loadKeys(instance));
@@ -157,7 +163,42 @@ export function MidiPanel({ instance, mappings, onAdd, onRemove, onMidi }: MidiP
         <button type="button" data-testid="midi-add" onClick={add}>
           + map
         </button>
+        {props.onAddLed && (
+          <button
+            type="button"
+            data-testid="midi-add-led"
+            title="Add an LED feedback mapping: an input jack whose signal drives this note/CC back out to the controller"
+            onClick={() => {
+              const taken = new Set(ledMappings.map((m) => m.name.replace(/^led_/, '')));
+              props.onAddLed?.(kind, num, `led_${defaultName(kind, num, taken)}`);
+            }}
+          >
+            + LED
+          </button>
+        )}
       </div>
+      {ledMappings.length > 0 && (
+        <div className="midi-leds" data-testid={`midi-leds-${instance}`}>
+          <span className="midi-leds-title">LED out</span>
+          {ledMappings.map((m) => (
+            <div className="midi-mapping" key={m.name} data-testid={`midi-led-${m.name}`}>
+              <span className="midi-mapping-name">{m.name}</span>
+              <span className="midi-mapping-src">
+                {m.kind === 'note' ? `note ${m.num}` : `cc ${m.num}`}
+              </span>
+              <button
+                type="button"
+                className="midi-remove"
+                data-testid={`midi-led-remove-${m.name}`}
+                title="Remove LED mapping (and wires into its jack)"
+                onClick={() => props.onRemoveLed?.(m.name)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

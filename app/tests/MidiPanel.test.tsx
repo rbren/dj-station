@@ -116,4 +116,48 @@ describe('MidiPanel', () => {
     );
     expect(screen.getByTestId('midi-key-C4').textContent).toBe('q');
   });
+
+  it('adds an LED feedback mapping with a led_-prefixed name (M4)', () => {
+    const onAddLed = vi.fn();
+    render(
+      <MidiPanel
+        instance="midi1"
+        mappings={[]}
+        ledMappings={[]}
+        onAdd={noop}
+        onRemove={noop}
+        onAddLed={onAddLed}
+        onRemoveLed={noop}
+        onMidi={noop}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('midi-add-kind'), { target: { value: 'cc' } });
+    fireEvent.change(screen.getByTestId('midi-add-num'), { target: { value: '16' } });
+    fireEvent.click(screen.getByTestId('midi-add-led'));
+    expect(onAddLed).toHaveBeenCalledWith('cc', 16, 'led_cc16');
+  });
+
+  it('lists and removes LED mappings (M4)', () => {
+    const onRemoveLed = vi.fn();
+    render(
+      <MidiPanel
+        instance="midi1"
+        mappings={[]}
+        ledMappings={[{ name: 'led_cc16', kind: 'cc', num: 16 }]}
+        onAdd={noop}
+        onRemove={noop}
+        onAddLed={noop}
+        onRemoveLed={onRemoveLed}
+        onMidi={noop}
+      />,
+    );
+    expect(screen.getByTestId('midi-led-led_cc16')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('midi-led-remove-led_cc16'));
+    expect(onRemoveLed).toHaveBeenCalledWith('led_cc16');
+  });
+
+  it('hides the LED button without an onAddLed handler', () => {
+    render(<MidiPanel instance="midi1" mappings={[]} onAdd={noop} onRemove={noop} onMidi={noop} />);
+    expect(screen.queryByTestId('midi-add-led')).toBeNull();
+  });
 });

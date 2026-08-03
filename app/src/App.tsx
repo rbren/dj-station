@@ -593,6 +593,15 @@ export default function App() {
                         onRemove={(name) =>
                           void engine.removeMidiMapping(node.instance_id, name).then(refresh)
                         }
+                        ledMappings={node.midi_led_mappings}
+                        onAddLed={(kind, num, name) =>
+                          void engine
+                            .addMidiLedMapping(node.instance_id, kind, num, name)
+                            .then(refresh)
+                        }
+                        onRemoveLed={(name) =>
+                          void engine.removeMidiLedMapping(node.instance_id, name).then(refresh)
+                        }
                         onMidi={(data) => void engine.injectMidi(node.instance_id, 0, data)}
                       />
                     ) : undefined

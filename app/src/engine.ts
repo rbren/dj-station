@@ -26,6 +26,8 @@ export interface NodeSnapshot {
   params: Record<string, number>;
   wired_inputs: string[];
   midi_mappings: MidiMapping[];
+  /** LED feedback mappings (M4); each is also an input jack. */
+  midi_led_mappings: MidiMapping[];
 }
 
 export interface WireSnapshot {
@@ -158,6 +160,14 @@ export class EngineClient {
   }
   removeMidiMapping(instance: string, name: string) {
     return this.call<void>('remove_midi_mapping', { instance, name });
+  }
+  /** LED feedback (M4, PRD §7.1): the named input jack drives note/CC
+   *  out messages back to the controller. */
+  addMidiLedMapping(instance: string, kind: string, num: number, name: string) {
+    return this.call<void>('add_midi_led_mapping', { instance, kind, num, name });
+  }
+  removeMidiLedMapping(instance: string, name: string) {
+    return this.call<void>('remove_midi_led_mapping', { instance, name });
   }
   undo() {
     return this.call<boolean>('undo');
