@@ -4,8 +4,8 @@
 //! hosts the fixture provenance check and the throughput benchmark.
 
 use dj_gesture::{
-    fixtures, landmark, Detection, FrameSource, HandDetector, MarkerDetector, PoseTrace,
-    TraceFrameSource, WheelLayout,
+    fixtures, landmark, Detection, FrameSource, GestureProcessor, HandDetector, MappingDef,
+    MarkerDetector, PoseTrace, TraceFrameSource, WheelLayout,
 };
 use std::path::PathBuf;
 
@@ -109,22 +109,55 @@ fn empty_frame_detects_nothing() {
 fn pipeline_throughput_floor() {
     let trace = fixtures::demo_trace(30.0, &WheelLayout::default());
     let mut detector = MarkerDetector;
+    // Include mode evaluation in the per-frame cost: one mapping of each
+    // builtin kind (wheel zone, presence gate, pinch distance).
+    let mut p = GestureProcessor::default();
+    for (name, mode, config) in [
+        (
+            "zone",
+            "wheel",
+            serde_json::json!({ "wheel": 0, "zone": 3 }),
+        ),
+        (
+            "seen",
+            "landmark",
+            serde_json::json!({ "type": "presence", "point": "L.index.tip", "timeout": 0.2 }),
+        ),
+        (
+            "dist",
+            "landmark",
+            serde_json::json!({
+                "type": "distance",
+                "a": "L.thumb.tip", "b": "L.index.tip",
+                "min": 0.04, "max": 0.3,
+            }),
+        ),
+    ] {
+        p.add_mapping(MappingDef {
+            name: name.into(),
+            mode: mode.into(),
+            config,
+        })
+        .unwrap();
+    }
     // Warm-up pass.
     for i in 0..trace.frames.len() {
         let frame = TraceFrameSource::render(&trace, i).unwrap();
         detector.detect(&frame).unwrap();
     }
     let frames = 300;
+    let mut sink = 0.0f32;
     let start = std::time::Instant::now();
     for i in 0..frames {
         let frame = TraceFrameSource::render(&trace, i % trace.frames.len()).unwrap();
         let det = detector.detect(&frame).unwrap();
         assert_eq!(det.hands.len(), 2);
+        p.process(Some(&det), 1.0 / 30.0, |_, v| sink += v);
     }
     let fps = frames as f64 / start.elapsed().as_secs_f64();
     assert!(
         fps >= 120.0,
-        "pipeline throughput {fps:.0} fps below the 120 fps local floor"
+        "pipeline throughput {fps:.0} fps below the 120 fps local floor (sink {sink})"
     );
-    println!("pipeline throughput: {fps:.0} fps at 320x240");
+    println!("pipeline throughput: {fps:.0} fps at 320x240 (render + detect + mode eval)");
 }

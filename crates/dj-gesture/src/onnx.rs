@@ -75,9 +75,9 @@ impl OnnxHandDetector {
         // Read the input square side from the model (fall back to 224 for
         // dynamic shapes).
         let input_size = session
-            .inputs
+            .inputs()
             .first()
-            .and_then(|i| i.input_type.tensor_shape())
+            .and_then(|i| i.dtype().tensor_shape())
             .and_then(|shape| shape.last().copied())
             .filter(|&d| d > 0)
             .map(|d| d as usize)
@@ -133,17 +133,17 @@ impl HandDetector for OnnxHandDetector {
             "unexpected landmarks tensor length {}",
             landmarks.len()
         );
-        let score = outputs
-            .get(1)
-            .and_then(|o| o.try_extract_tensor::<f32>().ok())
+        let score = (outputs.len() > 1)
+            .then(|| outputs[1].try_extract_tensor::<f32>().ok())
+            .flatten()
             .and_then(|(_, d)| d.first().copied())
             .unwrap_or(1.0);
         if score < SCORE_THRESHOLD {
             return Ok(Detection::default());
         }
-        let handedness = outputs
-            .get(2)
-            .and_then(|o| o.try_extract_tensor::<f32>().ok())
+        let handedness = (outputs.len() > 2)
+            .then(|| outputs[2].try_extract_tensor::<f32>().ok())
+            .flatten()
             .and_then(|(_, d)| d.first().copied())
             .map(|v| {
                 if v > 0.5 {
