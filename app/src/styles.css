@@ -904,3 +904,43 @@ body {
   border-radius: 4px;
   cursor: pointer;
 }
+
+/* Collapse-to-macro (M4, PRD §6) */
+
+.module-panel-selected {
+  outline: 2px solid #e6b450;
+  outline-offset: 2px;
+}
+
+.collapse-macro-btn {
+  background: #e6b450;
+  color: #14181e;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.collapse-macro-form {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.collapse-macro-form input {
+  background: #14181e;
+  color: #dfe7ef;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.collapse-macro-form button {
+  background: transparent;
+  color: #9aa7b5;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+}

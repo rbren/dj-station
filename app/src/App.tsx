@@ -126,6 +126,9 @@ export default function App() {
   const [patchName, setPatchName] = useState('untitled');
   const [patchList, setPatchList] = useState<string[]>([]);
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
+  // Multi-select for collapse-to-macro (PRD §6): shift-click panel headers.
+  const [selected, setSelected] = useState<string[]>([]);
+  const [collapseName, setCollapseName] = useState<string | null>(null);
   const [positions, setPositions] = useState<Positions>(() => loadPositions());
   const [zoom, setZoom] = useState<number>(() => loadZoom());
   // Callback ref (state, not useRef) so the overlay re-renders once the
@@ -248,12 +251,33 @@ export default function App() {
     [nodes, positions, refresh, moveModule],
   );
 
+  const toggleSelected = useCallback((instance: string) => {
+    setSelected((prev) =>
+      prev.includes(instance) ? prev.filter((i) => i !== instance) : [...prev, instance],
+    );
+  }, []);
+
+  const collapseToMacro = useCallback(
+    async (name: string) => {
+      if (!name.trim() || selected.length === 0) return;
+      await engine.collapseMacro(selected, name.trim());
+      setSelected([]);
+      setCollapseName(null);
+      const modules = await engine.listModules();
+      if (modules) setModuleLib(modules);
+      await refresh();
+    },
+    [selected, refresh],
+  );
+
   // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z)
   // and rack zoom (cmd/ctrl +/-/0).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setPending(null);
+        setCollapseName(null);
+        setSelected([]);
         return;
       }
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -478,6 +502,39 @@ export default function App() {
               ? `engine connected (${backend ?? '?'}${backend === 'null' ? ' — SILENT' : ''})`
               : 'no engine (dev)'}
         </span>
+        {selected.length > 0 && collapseName === null && (
+          <button
+            className="collapse-macro-btn"
+            data-testid="collapse-macro-btn"
+            onClick={() => setCollapseName('')}
+          >
+            Collapse to Module ({selected.length})
+          </button>
+        )}
+        {collapseName !== null && (
+          <form
+            className="collapse-macro-form"
+            data-testid="collapse-macro-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void collapseToMacro(collapseName);
+            }}
+          >
+            <input
+              autoFocus
+              placeholder="macro name"
+              data-testid="collapse-macro-name"
+              value={collapseName}
+              onChange={(e) => setCollapseName(e.target.value)}
+            />
+            <button type="submit" data-testid="collapse-macro-confirm">
+              Create
+            </button>
+            <button type="button" onClick={() => setCollapseName(null)}>
+              Cancel
+            </button>
+          </form>
+        )}
         {pending && (
           <span className="wiring-hint" data-testid="wiring-hint">
             <span
@@ -544,6 +601,8 @@ export default function App() {
                   onMove={(x, y) => moveModule(node.instance_id, x, y)}
                   onRemove={() => void removeModule(node.instance_id)}
                   onEditEnd={() => void engine.endEdit()}
+                  selected={selected.includes(node.instance_id)}
+                  onSelectToggle={() => toggleSelected(node.instance_id)}
                   pendingSource={pending}
                   onJackClick={(kind, jack) => void onJackClick(node.instance_id, kind, jack)}
                   onKnobPosition={(jack, position) => {

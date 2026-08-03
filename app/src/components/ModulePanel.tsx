@@ -50,6 +50,9 @@ export interface ModulePanelProps {
   onEditEnd?(): void;
   /** Jack currently armed as a pending wire end, if any. */
   pendingSource?: (JackRef & { kind: 'input' | 'output' }) | null;
+  /** Multi-select for collapse-to-macro (PRD §6): shift-click toggles. */
+  selected?: boolean;
+  onSelectToggle?(): void;
   onJackClick?(kind: 'input' | 'output', jackId: string): void;
   onKnobPosition(jackId: string, position: number): void;
   onKnobConfig(jackId: string, config: KnobConfig): void;
@@ -111,8 +114,11 @@ export function ModulePanel(props: ModulePanelProps) {
 
   return (
     <div
-      className={`module-panel${position ? ' module-panel-placed' : ''}`}
+      className={`module-panel${position ? ' module-panel-placed' : ''}${
+        props.selected ? ' module-panel-selected' : ''
+      }`}
       data-testid={`module-${instanceId}`}
+      data-selected={props.selected ? 'true' : undefined}
       style={{
         ...(position ? { left: position.x, top: position.y } : undefined),
         ...(size ? { width: size.w, height: size.h } : undefined),
@@ -122,8 +128,14 @@ export function ModulePanel(props: ModulePanelProps) {
       <header
         className={`module-title${onMove ? ' module-title-draggable' : ''}`}
         data-testid={`module-header-${instanceId}`}
+        onClick={(e) => {
+          if (e.shiftKey) {
+            e.preventDefault();
+            props.onSelectToggle?.();
+          }
+        }}
         onMouseDown={(e) => {
-          if (!onMove || !position || e.button !== 0) return;
+          if (!onMove || !position || e.button !== 0 || e.shiftKey) return;
           e.preventDefault();
           drag.current = {
             startX: e.clientX,

@@ -35,6 +35,20 @@ export interface WireSnapshot {
   to_jack: string;
 }
 
+export interface MacroInfo {
+  id: string;
+  name: string;
+  version: number;
+}
+
+/** A macro whose patch-saved version disagrees with the library (PRD §6). */
+export interface MacroConflict {
+  macro_id: string;
+  name: string;
+  patch_version: number;
+  library_version: number;
+}
+
 export class EngineClient {
   private invoke: Invoke | null = null;
   private ready: Promise<void>;
@@ -103,8 +117,19 @@ export class EngineClient {
   savePatch(dir: string, name: string) {
     return this.call<void>('save_patch', { dir, name });
   }
-  loadPatch(dir: string) {
-    return this.call<void>('load_patch', { dir });
+  /** Loads a patch. A non-empty result is the list of macro version
+   *  conflicts (PRD §6): the engine was left untouched and the caller
+   *  should prompt update-vs-fork and retry with `resolutions`. */
+  loadPatch(dir: string, resolutions?: [string, 'update' | 'fork'][]) {
+    return this.call<MacroConflict[]>('load_patch', { dir, resolutions });
+  }
+  listMacros() {
+    return this.call<MacroInfo[]>('list_macros');
+  }
+  /** Collapse the selected modules into a new macro; returns the new
+   *  instance id. */
+  collapseMacro(selection: string[], name: string) {
+    return this.call<string>('collapse_macro', { selection, name });
   }
   savePatchAs(name: string) {
     return this.call<void>('save_patch_as', { name });

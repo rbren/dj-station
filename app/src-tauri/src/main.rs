@@ -5,8 +5,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use dj_engine::{
-    Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle, Manifest,
-    PatchDoc, UndoHistory,
+    Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle, MacroDef,
+    MacroInterface, MacroJack, MacroLibrary, MacroResolution, Manifest, PatchDoc, UndoHistory,
 };
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
@@ -79,6 +79,15 @@ fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> 
         engine.stop().map_err(err)?;
     }
     *engine = Engine::from_doc(doc, engine.registry.clone()).map_err(err)?;
+    // Undo snapshots embed only the macros they use; re-register the rest
+    // of the user library so instantiation stays available.
+    if let Ok(lib) = db_macro_library(&state.library) {
+        for def in lib.defs.into_values() {
+            if engine.macros.get(&def.id).is_none() {
+                engine.register_macro(def);
+            }
+        }
+    }
     let deck_instances: Vec<String> = engine
         .nodes
         .iter()
@@ -233,12 +242,20 @@ fn list_extensions(state: State<AppState>) -> CmdResult<Vec<Manifest>> {
 #[tauri::command]
 fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
     let engine = state.engine.lock().map_err(err)?;
-    let wires = engine.wire_specs().to_vec();
-    Ok(engine
+    // Macro-aware view: the snapshot document already collapses macro
+    // internals into their instances and rewrites wires to external jacks.
+    let doc = engine.snapshot("ui");
+    let mut wired: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for wf in doc.wires.values() {
+        for w in &wf.wires {
+            wired.entry(&w.to).or_default().push(w.to_jack.clone());
+        }
+    }
+    let mut out: Vec<NodeSnapshot> = engine
         .nodes
         .iter()
-        .enumerate()
-        .map(|(node_idx, n)| NodeSnapshot {
+        .filter(|n| !n.instance_id.contains('/')) // macro internals hidden
+        .map(|n| NodeSnapshot {
             instance_id: n.instance_id.clone(),
             type_id: n.ext_id.clone(),
             manifest: {
@@ -252,6 +269,18 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                         .map(|mm| dj_engine::manifest::OutputDecl {
                             id: mm.name.clone(),
                             name: mm.name.clone(),
+                        })
+                        .collect();
+                    // LED input jacks likewise (M4): one per LED mapping,
+                    // by mapping name, not the 16 preallocated slots.
+                    m.inputs = n
+                        .midi_led_mappings
+                        .iter()
+                        .map(|mm| dj_engine::manifest::JackDecl {
+                            id: mm.name.clone(),
+                            name: mm.name.clone(),
+                            default: 0.0,
+                            knob: None,
                         })
                         .collect();
                 }
@@ -275,11 +304,10 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                 })
                 .collect(),
             params: n.params.clone(),
-            wired_inputs: wires
-                .iter()
-                .filter(|w| w.to_node == node_idx)
-                .filter_map(|w| n.manifest.inputs.get(w.to_jack).map(|d| d.id.clone()))
-                .collect(),
+            wired_inputs: wired
+                .get(n.instance_id.as_str())
+                .cloned()
+                .unwrap_or_default(),
             midi_mappings: n
                 .midi_mappings
                 .iter()
@@ -290,29 +318,77 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                 })
                 .collect(),
         })
-        .collect())
+        .collect();
+    // Macro instances render like any other module panel, using their
+    // synthesized external manifest and promoted knob/param state.
+    for (iid, mi) in engine.macro_instances() {
+        if iid.contains('/') {
+            continue;
+        }
+        let Some(manifest) = engine.macro_manifest(&mi.macro_id) else {
+            continue;
+        };
+        let mf = doc.modules.get(iid);
+        out.push(NodeSnapshot {
+            instance_id: iid.clone(),
+            type_id: mi.macro_id.clone(),
+            manifest,
+            knobs: mf
+                .map(|m| {
+                    m.knobs
+                        .iter()
+                        .map(|(id, k)| {
+                            (
+                                id.clone(),
+                                KnobSnapshot {
+                                    position: k.position,
+                                    atten: k.atten,
+                                    offset: k.offset,
+                                    config: k.config.clone(),
+                                },
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            params: mf.map(|m| m.params.clone()).unwrap_or_default(),
+            wired_inputs: wired.get(iid.as_str()).cloned().unwrap_or_default(),
+            midi_mappings: Vec::new(),
+        });
+    }
+    Ok(out)
 }
 
-/// All module types that can be added to the rack (built-ins + extensions).
+/// All module types that can be added to the rack (built-ins + extensions
+/// + user-library macros, PRD §6).
 #[tauri::command]
 fn list_modules(state: State<AppState>) -> CmdResult<Vec<Manifest>> {
     let engine = state.engine.lock().map_err(err)?;
-    Ok(engine.registry.all_manifests())
+    let mut manifests = engine.registry.all_manifests();
+    for def in engine.macros.list() {
+        if let Some(m) = engine.macro_manifest(&def.id) {
+            manifests.push(m);
+        }
+    }
+    Ok(manifests)
 }
 
 #[tauri::command]
 fn engine_wires(state: State<AppState>) -> CmdResult<Vec<WireSnapshot>> {
     let engine = state.engine.lock().map_err(err)?;
-    Ok(engine
-        .wire_specs()
+    // Snapshot wires are macro-aware: internal wires are hidden and
+    // boundary wires appear at the instance's promoted external jacks.
+    let doc = engine.snapshot("ui");
+    Ok(doc
+        .wires
         .iter()
-        .map(|w| WireSnapshot {
-            from_instance: engine.nodes[w.from_node].instance_id.clone(),
-            from_jack: engine.output_jack_name(w.from_node, w.from_jack),
-            to_instance: engine.nodes[w.to_node].instance_id.clone(),
-            to_jack: engine.nodes[w.to_node].manifest.inputs[w.to_jack]
-                .id
-                .clone(),
+        .flat_map(|(src, wf)| {
+            wf.wires.iter().map(|w| WireSnapshot {
+                from_instance: src.clone(),
+                from_jack: w.from_jack.clone(),
+                to_instance: w.to.clone(),
+                to_jack: w.to_jack.clone(),
+            })
         })
         .collect())
 }
@@ -644,9 +720,285 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<()> {
     Ok(())
 }
 
+#[derive(Serialize)]
+struct MacroConflictInfo {
+    macro_id: String,
+    name: String,
+    patch_version: u32,
+    library_version: u32,
+}
+
+/// Macro definitions stored in the user library DB, as an engine-side
+/// `MacroLibrary`.
+fn db_macro_library(library: &Library) -> CmdResult<MacroLibrary> {
+    let mut lib = MacroLibrary::default();
+    for r in library.macros().map_err(err)? {
+        match serde_json::from_str::<MacroDef>(&r.definition) {
+            Ok(def) => lib.register(def),
+            Err(e) => eprintln!("[dj-macros] bad stored definition for {}: {e}", r.id),
+        }
+    }
+    Ok(lib)
+}
+
+fn persist_macro(library: &Library, def: &MacroDef) -> CmdResult<()> {
+    library
+        .save_macro(&dj_library::MacroRecord {
+            id: def.id.clone(),
+            name: def.name.clone(),
+            version: def.version as i64,
+            definition: serde_json::to_string(def).map_err(err)?,
+        })
+        .map_err(err)
+}
+
+/// Load a patch, resolving macro version mismatches (PRD §6). When the
+/// patch's embedded macro definitions disagree with the library and no
+/// `resolutions` decide them yet, the engine is left untouched and the
+/// conflicts are returned so the UI can prompt (update vs fork) and call
+/// again. `resolutions` entries are `(macro_id, "update" | "fork")`.
 #[tauri::command]
-fn load_patch(state: State<AppState>, dir: String) -> CmdResult<()> {
-    load_patch_dir(&state, &PathBuf::from(dir))
+fn load_patch(
+    state: State<AppState>,
+    dir: String,
+    resolutions: Option<Vec<(String, String)>>,
+) -> CmdResult<Vec<MacroConflictInfo>> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    let mut doc = PatchDoc::read(Path::new(&dir)).map_err(err)?;
+    let mut lib = db_macro_library(&state.library)?;
+    for (macro_id, action) in resolutions.unwrap_or_default() {
+        let resolution = match action.as_str() {
+            "update" => MacroResolution::UpdateToLibrary,
+            "fork" => {
+                let mut new_id = format!("{macro_id}-fork");
+                let mut n = 2;
+                while lib.get(&new_id).is_some() || doc.macros.contains_key(&new_id) {
+                    new_id = format!("{macro_id}-fork-{n}");
+                    n += 1;
+                }
+                MacroResolution::Fork { new_id }
+            }
+            other => return Err(format!("unknown macro resolution {other:?}")),
+        };
+        doc.resolve_macro_conflict(&macro_id, &resolution, &mut lib)
+            .map_err(err)?;
+        if let MacroResolution::Fork { new_id } = &resolution {
+            if let Some(def) = lib.get(new_id) {
+                persist_macro(&state.library, def)?;
+            }
+        }
+    }
+    let conflicts = doc.macro_conflicts(&lib);
+    if !conflicts.is_empty() {
+        return Ok(conflicts
+            .into_iter()
+            .map(|c| MacroConflictInfo {
+                name: doc
+                    .macros
+                    .get(&c.macro_id)
+                    .map(|d| d.name.clone())
+                    .unwrap_or_else(|| c.macro_id.clone()),
+                macro_id: c.macro_id,
+                patch_version: c.patch_version,
+                library_version: c.library_version,
+            })
+            .collect());
+    }
+    record_edit(&state, &engine, &format!("load:{dir}"));
+    engine.stop().map_err(err)?;
+    let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
+    *engine = Engine::from_doc_with_macros(&doc, registry, lib).map_err(err)?;
+    // Decks: re-apply library-stored DJ metadata (cues/loops/beatgrids)
+    // for every loaded deck track (PRD §7 — metadata survives across
+    // patches via the library DB, not the patch files).
+    let deck_instances: Vec<String> = engine
+        .nodes
+        .iter()
+        .filter(|n| n.ext_id == "builtin.deck")
+        .map(|n| n.instance_id.clone())
+        .collect();
+    for instance in deck_instances {
+        apply_deck_metadata(&state, &mut engine, &instance)?;
+    }
+    Ok(Vec::new())
+}
+
+#[derive(Serialize)]
+struct MacroInfo {
+    id: String,
+    name: String,
+    version: u32,
+}
+
+/// Macros available for instantiation (user library, PRD §6).
+#[tauri::command]
+fn list_macros(state: State<AppState>) -> CmdResult<Vec<MacroInfo>> {
+    let engine = state.engine.lock().map_err(err)?;
+    Ok(engine
+        .macros
+        .list()
+        .into_iter()
+        .map(|d| MacroInfo {
+            id: d.id.clone(),
+            name: d.name.clone(),
+            version: d.version,
+        })
+        .collect())
+}
+
+/// Auto-derived macro interface for a rack selection: boundary wires are
+/// promoted (required for a valid collapse); every other input jack of a
+/// selected module that isn't wired inside the selection is promoted too,
+/// so instances keep their knobs. External ids prefer the bare jack id and
+/// fall back to `<node>_<jack>` on collision.
+fn auto_interface(engine: &Engine, selection: &[String]) -> MacroInterface {
+    let sel: std::collections::BTreeSet<&str> = selection.iter().map(|s| s.as_str()).collect();
+    let doc = engine.snapshot("collapse");
+    let mut interface = MacroInterface::default();
+    let mut in_ids = std::collections::BTreeSet::new();
+    let mut out_ids = std::collections::BTreeSet::new();
+    let mut internally_wired = std::collections::BTreeSet::new();
+
+    let promote_in = |interface: &mut MacroInterface,
+                      ids: &mut std::collections::BTreeSet<String>,
+                      node: &str,
+                      jack: &str| {
+        if interface
+            .inputs
+            .iter()
+            .any(|j| j.node == node && j.jack == jack)
+        {
+            return;
+        }
+        let id = if ids.insert(jack.to_string()) {
+            jack.to_string()
+        } else {
+            let id = format!("{node}_{jack}");
+            ids.insert(id.clone());
+            id
+        };
+        interface.inputs.push(MacroJack {
+            id,
+            node: node.to_string(),
+            jack: jack.to_string(),
+        });
+    };
+    let promote_out = |interface: &mut MacroInterface,
+                       ids: &mut std::collections::BTreeSet<String>,
+                       node: &str,
+                       jack: &str| {
+        if interface
+            .outputs
+            .iter()
+            .any(|j| j.node == node && j.jack == jack)
+        {
+            return;
+        }
+        let id = if ids.insert(jack.to_string()) {
+            jack.to_string()
+        } else {
+            let id = format!("{node}_{jack}");
+            ids.insert(id.clone());
+            id
+        };
+        interface.outputs.push(MacroJack {
+            id,
+            node: node.to_string(),
+            jack: jack.to_string(),
+        });
+    };
+
+    // Boundary wires first — these promotions are mandatory.
+    for (src, wf) in &doc.wires {
+        for w in &wf.wires {
+            let src_in = sel.contains(src.as_str());
+            let dst_in = sel.contains(w.to.as_str());
+            if src_in && dst_in {
+                internally_wired.insert((w.to.clone(), w.to_jack.clone()));
+            } else if dst_in {
+                promote_in(&mut interface, &mut in_ids, &w.to, &w.to_jack);
+            } else if src_in {
+                promote_out(&mut interface, &mut out_ids, src, &w.from_jack);
+            }
+        }
+    }
+    // Remaining jacks of the selected modules (macro instances included —
+    // macros nest, so a selected macro's external jacks promote the same
+    // way as a plain module's).
+    for id in selection {
+        let (inputs, outputs): (Vec<String>, Vec<String>) =
+            if let Some(n) = engine.nodes.iter().find(|n| &n.instance_id == id) {
+                (
+                    n.manifest.inputs.iter().map(|j| j.id.clone()).collect(),
+                    n.manifest.outputs.iter().map(|o| o.id.clone()).collect(),
+                )
+            } else if let Some(m) = engine
+                .macro_instances()
+                .get(id)
+                .and_then(|mi| engine.macro_manifest(&mi.macro_id))
+            {
+                (
+                    m.inputs.iter().map(|j| j.id.clone()).collect(),
+                    m.outputs.iter().map(|o| o.id.clone()).collect(),
+                )
+            } else {
+                continue;
+            };
+        for jack in inputs {
+            if !internally_wired.contains(&(id.clone(), jack.clone())) {
+                promote_in(&mut interface, &mut in_ids, id, &jack);
+            }
+        }
+        for jack in outputs {
+            promote_out(&mut interface, &mut out_ids, id, &jack);
+        }
+    }
+    interface
+}
+
+/// Collapse the selected rack modules into a new macro (PRD §6). Returns
+/// the new instance's id; the definition lands in the user library DB.
+#[tauri::command]
+fn collapse_macro(
+    state: State<AppState>,
+    selection: Vec<String>,
+    name: String,
+) -> CmdResult<String> {
+    if selection.is_empty() {
+        return Err("empty selection".into());
+    }
+    let mut engine = state.engine.lock().map_err(err)?;
+    record_edit(&state, &engine, "collapse_macro");
+    let slug: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    let mut macro_id = format!("macro.{slug}");
+    let mut n = 2;
+    while engine.macros.get(&macro_id).is_some() {
+        macro_id = format!("macro.{slug}-{n}");
+        n += 1;
+    }
+    let taken: std::collections::BTreeSet<String> = engine
+        .nodes
+        .iter()
+        .map(|nd| nd.instance_id.clone())
+        .collect();
+    let mut instance = slug.clone();
+    let mut k = 2;
+    while taken.contains(&instance) {
+        instance = format!("{slug}-{k}");
+        k += 1;
+    }
+    let interface = auto_interface(&engine, &selection);
+    let sel_refs: Vec<&str> = selection.iter().map(|s| s.as_str()).collect();
+    let def = with_stopped(&mut engine, |e| {
+        e.collapse_to_macro(&sel_refs, &instance, &macro_id, &name, interface)
+            .map_err(err)
+    })?;
+    persist_macro(&state.library, &def)?;
+    Ok(instance)
 }
 
 #[tauri::command]
@@ -1103,13 +1455,22 @@ fn extension_dirs() -> Vec<PathBuf> {
 fn main() {
     let registry =
         ExtensionRegistry::discover(&extension_dirs()).expect("extension discovery failed");
-    let engine =
+    let mut engine =
         Engine::new(EngineConfig::default(), registry).expect("engine construction failed");
 
     // Library under the single user data dir (PRD §3); watch folders +
     // provider hub (keyed providers enabled via env, see README).
     let library =
         Arc::new(Library::open(&dj_library::default_data_dir()).expect("library open failed"));
+    // User-library macros are instantiable from the start (PRD §6).
+    match db_macro_library(&library) {
+        Ok(lib) => {
+            for def in lib.defs.into_values() {
+                engine.register_macro(def);
+            }
+        }
+        Err(e) => eprintln!("[dj-macros] loading macro library failed: {e}"),
+    }
     let watcher =
         dj_library::start_watcher(library.clone(), dj_library::watch::DEFAULT_POLL_INTERVAL);
     let hub = AcquisitionHub::from_env();
@@ -1185,6 +1546,8 @@ fn main() {
             load_patch_by_name,
             current_patch,
             load_patch,
+            list_macros,
+            collapse_macro,
             inject_midi,
             add_midi_mapping,
             remove_midi_mapping,
