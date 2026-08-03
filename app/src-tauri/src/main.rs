@@ -1131,6 +1131,26 @@ fn import_track(state: State<AppState>, path: String) -> CmdResult<Track> {
         .map_err(err)
 }
 
+#[derive(Serialize)]
+struct RekordboxImportSummary {
+    imported: usize,
+    duplicates: usize,
+}
+
+/// Import a rekordbox XML export (M4, PRD §8.1): tracks, beatgrids, hot
+/// cues, and loops land in the library DB; existing tracks (by path) skip.
+#[tauri::command]
+fn import_rekordbox(state: State<AppState>, path: String) -> CmdResult<RekordboxImportSummary> {
+    let report = state
+        .library
+        .import_rekordbox_xml(Path::new(&path))
+        .map_err(err)?;
+    Ok(RekordboxImportSummary {
+        imported: report.imported.len(),
+        duplicates: report.duplicates.len(),
+    })
+}
+
 #[tauri::command]
 fn download_track(state: State<AppState>, result: TrackResult) -> CmdResult<Track> {
     state
@@ -1641,6 +1661,7 @@ fn main() {
             providers,
             search_provider,
             import_track,
+            import_rekordbox,
             download_track,
             open_store_page,
             open_external,

@@ -90,6 +90,8 @@ export interface LibraryClientApi {
     filters: Record<string, string>,
   ): Promise<TrackResult[] | null>;
   importTrack(path: string): Promise<Track | null>;
+  /** Import a rekordbox XML export (M4): tracks/beatgrids/cues/loops. */
+  importRekordbox(path: string): Promise<{ imported: number; duplicates: number } | null>;
   downloadTrack(result: TrackResult): Promise<Track | null>;
   openStorePage(result: TrackResult): Promise<string | null>;
   /** Open a web URL in the system's default browser (never the webview). */
@@ -139,6 +141,9 @@ export class LibraryClient implements LibraryClientApi {
   }
   importTrack(path: string) {
     return this.call<Track>('import_track', { path });
+  }
+  importRekordbox(path: string) {
+    return this.call<{ imported: number; duplicates: number }>('import_rekordbox', { path });
   }
   downloadTrack(result: TrackResult) {
     return this.call<Track>('download_track', { result });

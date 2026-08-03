@@ -149,6 +149,7 @@ function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi
         Promise.resolve(RESULT_BY_PROVIDER[provider] ?? []),
       ),
     importTrack: vi.fn().mockResolvedValue(LOCAL_TRACK),
+    importRekordbox: vi.fn().mockResolvedValue({ imported: 0, duplicates: 0 }),
     downloadTrack: vi.fn().mockResolvedValue({
       ...LOCAL_TRACK,
       id: 2,
