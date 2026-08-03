@@ -1,0 +1,22 @@
+[package]
+name = "dj-gesture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "dj-station gesture control pipeline: frame sources, hand-landmark detection, extensible mode system (PRD §7.3, milestone M5)"
+
+[features]
+# ONNX-Runtime-backed hand landmark detection (MediaPipe-Hands-class
+# models). Off by default: the tested path is the deterministic marker
+# detector on synthetic frames; this feature only adds the runtime plumbing
+# (model load, per-platform execution provider). See src/onnx.rs.
+onnx = ["dep:ort"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+ort = { version = "=2.0.0-rc.13", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
