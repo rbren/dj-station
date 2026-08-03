@@ -66,6 +66,16 @@ export interface ProviderInfo {
   filters: FilterSpec[];
 }
 
+/** Analysis queue snapshot (M3): background worker progress. */
+export interface AnalysisQueue {
+  /** Track id currently being analyzed, if any. */
+  current: number | null;
+  /** Track ids still waiting, in queue order. */
+  queued: number[];
+  /** Track counts by analysis status (queued/analyzing/done/failed). */
+  counts: Record<string, number>;
+}
+
 /** What LibraryView needs; the Tauri-backed client below implements it and
  *  tests substitute a mock. */
 export interface LibraryClientApi {
@@ -85,6 +95,10 @@ export interface LibraryClientApi {
   /** Open a web URL in the system's default browser (never the webview). */
   openExternal(url: string): Promise<void | null>;
   playbackLoad(instance: string, trackId: number): Promise<void | null>;
+  /** Background analysis queue snapshot (M3). */
+  analysisStatus(): Promise<AnalysisQueue | null>;
+  /** Queue (or re-run) analysis for a track. */
+  analyzeTrack(trackId: number): Promise<void | null>;
 }
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -143,6 +157,12 @@ export class LibraryClient implements LibraryClientApi {
   }
   playbackLoad(instance: string, trackId: number) {
     return this.call<void>('playback_load', { instance, trackId });
+  }
+  analysisStatus() {
+    return this.call<AnalysisQueue>('analysis_status');
+  }
+  analyzeTrack(trackId: number) {
+    return this.call<void>('analyze_track', { trackId });
   }
 }
 

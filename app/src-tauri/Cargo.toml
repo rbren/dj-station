@@ -22,6 +22,7 @@ anyhow = "1"
 open = "5"
 dj-engine = { path = "../../crates/dj-engine" }
 dj-library = { path = "../../crates/dj-library" }
+dj-analysis = { path = "../../crates/dj-analysis" }
 
 [features]
 # custom-protocol embeds frontendDist (app/dist) into the binary and serves

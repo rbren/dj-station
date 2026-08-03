@@ -159,6 +159,8 @@ function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi
     openStorePage: vi.fn().mockResolvedValue(ITUNES_RESULT.deep_link_url),
     openExternal: vi.fn().mockResolvedValue(undefined),
     playbackLoad: vi.fn().mockResolvedValue(undefined),
+    analysisStatus: vi.fn().mockResolvedValue({ current: null, queued: [], counts: {} }),
+    analyzeTrack: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -310,5 +312,52 @@ describe('LibraryView', () => {
         'https://music.apple.com/us/album/x?i=1440764401',
       ),
     );
+  });
+
+  it('shows BPM, key, and analysis status per track once analysis lands', async () => {
+    const analyzed: Track = {
+      ...LOCAL_TRACK,
+      analysis_status: 'done',
+      bpm: 128.3,
+      musical_key: 'Am',
+    };
+    const client = mockClient({ tracks: vi.fn().mockResolvedValue([analyzed]) });
+    render(<LibraryView client={client} />);
+    await waitFor(() => expect(screen.getByTestId('track-bpm').textContent).toBe('128.3'));
+    expect(screen.getByTestId('track-key').textContent).toBe('Am');
+    expect(screen.getByTestId('analysis-status').textContent).toBe('done');
+  });
+
+  it('re-run button queues analysis for an analyzed track', async () => {
+    const analyzed: Track = { ...LOCAL_TRACK, analysis_status: 'done', bpm: 120, musical_key: 'C' };
+    const client = mockClient({ tracks: vi.fn().mockResolvedValue([analyzed]) });
+    render(<LibraryView client={client} />);
+    const btn = await screen.findByTestId('analyze-button');
+    fireEvent.click(btn);
+    await waitFor(() => expect(client.analyzeTrack).toHaveBeenCalledWith(LOCAL_TRACK.id));
+    await waitFor(() =>
+      expect(screen.getByTestId('library-status').textContent).toContain('Queued analysis'),
+    );
+  });
+
+  it('shows batch queue progress while the worker is busy and hides it when idle', async () => {
+    const client = mockClient({
+      analysisStatus: vi.fn().mockResolvedValue({
+        current: 1,
+        queued: [2, 3],
+        counts: { done: 5, queued: 2, analyzing: 1 },
+      }),
+    });
+    render(<LibraryView client={client} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('analysis-progress').textContent).toContain('Analyzing 3 tracks'),
+    );
+    expect(screen.getByTestId('analysis-progress').textContent).toContain('(5/8 done');
+
+    // No pending work -> no banner.
+    const idle = mockClient();
+    render(<LibraryView client={idle} />);
+    await waitFor(() => expect(idle.analysisStatus).toHaveBeenCalled());
+    expect(screen.queryAllByTestId('analysis-progress')).toHaveLength(1); // only the busy one
   });
 });

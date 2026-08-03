@@ -13,6 +13,14 @@ import { WaveformView } from './WaveformView';
 const WAVEFORM_BUCKETS = 800;
 const POLL_MS = 100;
 
+/** Stem gain params on the deck module, UI order (M3). */
+const STEMS = [
+  { param: 'stem_vocals', label: 'Voc' },
+  { param: 'stem_drums', label: 'Drm' },
+  { param: 'stem_bass', label: 'Bas' },
+  { param: 'stem_other', label: 'Oth' },
+] as const;
+
 export interface DeckPanelProps {
   instanceId: string;
   handle: ModuleHandle;
@@ -83,6 +91,25 @@ export function DeckPanel(props: DeckPanelProps) {
 
   const paramOn = (id: string) => props.handle.paramValue(id) >= 0.5;
   const toggleParam = (id: string) => props.handle.setParam(id, paramOn(id) ? 0 : 1);
+
+  // Stem gains mirror the module params locally so sliders re-render
+  // immediately (the handle itself isn't reactive).
+  const [stemGains, setStemGains] = useState<number[]>(() =>
+    STEMS.map((s) => props.handle.paramValue(s.param)),
+  );
+  const preMute = useRef<number[]>([1, 1, 1, 1]);
+  const setStemGain = (idx: number, value: number) => {
+    props.handle.setParam(STEMS[idx].param, value);
+    setStemGains((prev) => prev.map((g, i) => (i === idx ? value : g)));
+  };
+  const toggleStemMute = (idx: number) => {
+    if (stemGains[idx] > 0) {
+      preMute.current[idx] = stemGains[idx];
+      setStemGain(idx, 0);
+    } else {
+      setStemGain(idx, preMute.current[idx] || 1);
+    }
+  };
 
   return (
     <div className="deck-panel" data-testid={`deck-${instanceId}`}>
@@ -303,6 +330,42 @@ export function DeckPanel(props: DeckPanelProps) {
         >
           Anchor
         </button>
+      </div>
+
+      <div className="deck-row deck-stems" data-testid="deck-stems">
+        {status?.stems_loaded ? (
+          STEMS.map((s, idx) => (
+            <label key={s.param} className="deck-stem" data-testid={`deck-stem-${s.param}`}>
+              <button
+                data-testid={`deck-stem-mute-${s.param}`}
+                className={stemGains[idx] > 0 ? 'deck-btn' : 'deck-btn muted'}
+                title={`${stemGains[idx] > 0 ? 'mute' : 'unmute'} ${s.param.replace('stem_', '')}`}
+                onClick={() => toggleStemMute(idx)}
+              >
+                {s.label}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={stemGains[idx]}
+                data-testid={`deck-stem-gain-${s.param}`}
+                onChange={(e) => setStemGain(idx, Number(e.target.value))}
+              />
+            </label>
+          ))
+        ) : (
+          <button
+            data-testid="deck-stems-load"
+            className="deck-btn"
+            disabled={!status?.track}
+            title="load cached stems for this track (available after analysis)"
+            onClick={() => void api.loadStems(instanceId).then(poll)}
+          >
+            Stems
+          </button>
+        )}
       </div>
     </div>
   );

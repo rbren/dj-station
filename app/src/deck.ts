@@ -16,6 +16,8 @@ export interface DeckStatus {
   loop_end_secs: number | null;
   loop_enabled: boolean;
   sync_to: string | null;
+  /** Stems loaded for the current track (M3): stem gain params are live. */
+  stems_loaded: boolean;
 }
 
 export interface SavedLoop {
@@ -44,6 +46,10 @@ export interface DeckApi {
   nudgeBeatgrid(instance: string, delta: number): Promise<void | null>;
   anchorHere(instance: string): Promise<void | null>;
   sync(instance: string, master: string | null): Promise<void | null>;
+  /** Load cached stems for the deck's track; resolves false when none
+   *  are cached yet (M3). */
+  loadStems(instance: string): Promise<boolean | null>;
+  clearStems(instance: string): Promise<void | null>;
 }
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -117,6 +123,12 @@ export class DeckClient implements DeckApi {
   }
   sync(instance: string, master: string | null) {
     return this.call<void>('deck_sync', { instance, master });
+  }
+  loadStems(instance: string) {
+    return this.call<boolean>('deck_load_stems', { instance });
+  }
+  clearStems(instance: string) {
+    return this.call<void>('deck_clear_stems', { instance });
   }
 }
 

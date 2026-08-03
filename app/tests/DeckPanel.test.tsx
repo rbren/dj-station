@@ -24,6 +24,7 @@ function makeStatus(over: Partial<DeckStatus> = {}): DeckStatus {
     loop_end_secs: 12,
     loop_enabled: false,
     sync_to: null,
+    stems_loaded: false,
     ...over,
   };
 }
@@ -46,6 +47,8 @@ function makeApi(status: DeckStatus): DeckApi {
     nudgeBeatgrid: vi.fn().mockResolvedValue(null),
     anchorHere: vi.fn().mockResolvedValue(null),
     sync: vi.fn().mockResolvedValue(null),
+    loadStems: vi.fn().mockResolvedValue(true),
+    clearStems: vi.fn().mockResolvedValue(null),
   };
 }
 
@@ -201,5 +204,41 @@ describe('DeckPanel', () => {
     expect(setParam).toHaveBeenCalledWith('slip', 0);
     fireEvent.click(screen.getByTestId('deck-reverse'));
     expect(setParam).toHaveBeenCalledWith('reverse', 1);
+  });
+
+  it('offers a stems-load button until stems are loaded', async () => {
+    const api = makeApi(makeStatus({ stems_loaded: false }));
+    renderPanel(api);
+    await waitFor(() => expect(api.status).toHaveBeenCalled());
+    const btn = screen.getByTestId('deck-stems-load');
+    expect(screen.queryByTestId('deck-stem-gain-stem_vocals')).toBeNull();
+    fireEvent.click(btn);
+    await waitFor(() => expect(api.loadStems).toHaveBeenCalledWith('deckA'));
+  });
+
+  it('stem sliders and mute buttons drive the stem gain params', async () => {
+    const setParam = vi.fn();
+    const handle: ModuleHandle = {
+      ...HANDLE,
+      setParam,
+      paramValue: () => 1, // all stem gains start at unity
+    };
+    const api = makeApi(makeStatus({ stems_loaded: true }));
+    render(<DeckPanel instanceId="deckA" handle={handle} api={api} pollMs={100000} />);
+    await waitFor(() => expect(screen.getByTestId('deck-stem-gain-stem_vocals')).toBeTruthy());
+    expect(screen.queryByTestId('deck-stems-load')).toBeNull();
+
+    // Slider sets a fractional gain.
+    fireEvent.change(screen.getByTestId('deck-stem-gain-stem_drums'), {
+      target: { value: '0.5' },
+    });
+    expect(setParam).toHaveBeenCalledWith('stem_drums', 0.5);
+
+    // Mute toggles to 0, unmute restores the pre-mute gain.
+    fireEvent.click(screen.getByTestId('deck-stem-mute-stem_vocals'));
+    expect(setParam).toHaveBeenCalledWith('stem_vocals', 0);
+    expect(screen.getByTestId('deck-stem-mute-stem_vocals').classList.contains('muted')).toBe(true);
+    fireEvent.click(screen.getByTestId('deck-stem-mute-stem_vocals'));
+    expect(setParam).toHaveBeenLastCalledWith('stem_vocals', 1);
   });
 });

@@ -4,7 +4,9 @@
 // straight into the library, DeepLink providers open the store page.
 
 import { useCallback, useEffect, useState } from 'react';
-import type { LibraryClientApi, ProviderInfo, Track, TrackResult } from '../library';
+import type { AnalysisQueue, LibraryClientApi, ProviderInfo, Track, TrackResult } from '../library';
+
+const ANALYSIS_POLL_MS = 2000;
 
 function formatDuration(secs: number | null): string {
   if (secs == null) return '—';
@@ -45,6 +47,7 @@ export function LibraryView({ client }: LibraryViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [queue, setQueue] = useState<AnalysisQueue | null>(null);
 
   const refreshTracks = useCallback(
     async (text: string) => {
@@ -60,6 +63,41 @@ export function LibraryView({ client }: LibraryViewProps) {
       if (available) setProviders(available);
     })();
   }, [client, refreshTracks]);
+
+  // Background analysis progress: poll the queue; refresh track rows
+  // whenever work is in flight so BPM/key appear as they land.
+  useEffect(() => {
+    let active = false;
+    const tick = async () => {
+      const q = await client.analysisStatus();
+      if (q) {
+        setQueue(q);
+        const wasActive = active;
+        active = q.current !== null || q.queued.length > 0;
+        if (active || wasActive) await refreshTracks('');
+      }
+    };
+    const initial = setTimeout(() => void tick(), 0);
+    const timer = setInterval(() => void tick(), ANALYSIS_POLL_MS);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(timer);
+    };
+  }, [client, refreshTracks]);
+
+  const analyze = useCallback(
+    async (t: Track) => {
+      await client.analyzeTrack(t.id);
+      setStatus(`Queued analysis for "${t.title}"`);
+      await refreshTracks('');
+    },
+    [client, refreshTracks],
+  );
+
+  const pending = queue ? queue.queued.length + (queue.current !== null ? 1 : 0) : 0;
+  const analyzed = queue?.counts['done'] ?? 0;
+  const failed = queue?.counts['failed'] ?? 0;
+  const total = queue ? Object.values(queue.counts).reduce((a, b) => a + b, 0) : 0;
 
   const active = providers.find((p) => p.id === tab) ?? null;
 
@@ -234,6 +272,12 @@ export function LibraryView({ client }: LibraryViewProps) {
       {tab === 'local' && (
         <div className="library-tracks">
           <h2>Library</h2>
+          {pending > 0 && (
+            <p className="analysis-progress" data-testid="analysis-progress">
+              Analyzing {pending} track{pending === 1 ? '' : 's'}… ({analyzed}/{total} done
+              {failed > 0 ? `, ${failed} failed` : ''})
+            </p>
+          )}
           {tracks.length === 0 ? (
             <p className="library-empty" data-testid="library-empty">
               No tracks yet — search a store tab, or drop files into a watch folder.
@@ -245,6 +289,8 @@ export function LibraryView({ client }: LibraryViewProps) {
                   <th>Title</th>
                   <th>Artist</th>
                   <th>Length</th>
+                  <th>BPM</th>
+                  <th>Key</th>
                   <th>Source</th>
                   <th>License</th>
                   <th>Analysis</th>
@@ -256,13 +302,32 @@ export function LibraryView({ client }: LibraryViewProps) {
                     <td>{t.title}</td>
                     <td>{t.artist}</td>
                     <td>{formatDuration(t.duration_secs)}</td>
+                    <td data-testid="track-bpm">{t.bpm != null ? t.bpm.toFixed(1) : '—'}</td>
+                    <td data-testid="track-key">{t.musical_key ?? '—'}</td>
                     <td>
                       <SourceTag source={t.source} />
                     </td>
                     <td>
                       <LicenseTag kind={t.license.kind} />
                     </td>
-                    <td>{t.analysis_status}</td>
+                    <td>
+                      <span
+                        className={`tag tag-analysis tag-analysis-${t.analysis_status}`}
+                        data-testid="analysis-status"
+                      >
+                        {t.analysis_status}
+                      </span>
+                      {(t.analysis_status === 'done' || t.analysis_status === 'failed') && (
+                        <button
+                          className="analyze-button"
+                          data-testid="analyze-button"
+                          title="re-run analysis (cached stems are reused)"
+                          onClick={() => void analyze(t)}
+                        >
+                          ↻
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

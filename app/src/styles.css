@@ -793,3 +793,51 @@ body {
 .deck-saved-loop {
   border-color: #7a5fd4;
 }
+
+/* ------------------------------------------------------------------ */
+/* M3: stems + analysis                                                */
+/* ------------------------------------------------------------------ */
+
+.deck-stem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.deck-stem input[type='range'] {
+  width: 56px;
+  accent-color: #3f7fbf;
+}
+
+.deck-btn.muted {
+  color: #5a636e;
+  border-color: #3a2a2a;
+  background: #1a1214;
+}
+
+.analysis-progress {
+  font-size: 0.78rem;
+  color: #e6b450;
+}
+
+.tag-analysis-done {
+  color: #4fd47a;
+}
+
+.tag-analysis-failed {
+  color: #d46a4f;
+}
+
+.tag-analysis-queued,
+.tag-analysis-analyzing {
+  color: #e6b450;
+}
+
+.analyze-button {
+  margin-left: 6px;
+  background: transparent;
+  color: #9aa7b5;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  cursor: pointer;
+}

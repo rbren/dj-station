@@ -23,6 +23,9 @@ struct AppState {
     hub: AcquisitionHub,
     /// Watch-folder scanner; kept alive for the app's lifetime.
     _watcher: dj_library::WatchHandle,
+    /// Background analysis worker (M3): drains the library queue so
+    /// BPM/key/beatgrid/stems land in the DB with no user action.
+    analysis: dj_analysis::AnalysisWorker,
 }
 
 /// Record the pre-edit snapshot for an undoable edit. Failures to lock the
@@ -689,7 +692,79 @@ fn apply_deck_metadata(state: &AppState, engine: &mut Engine, instance: &str) ->
             .deck_set_loop(instance, l.start_secs, l.end_secs)
             .map_err(err)?;
     }
+    // Cached stems (M3, keyed by content hash) auto-load with the track.
+    // Best-effort: a missing/failed stem cache must not break deck load.
+    let dir = dj_analysis::stems_dir(state.library.data_dir(), &track.content_hash);
+    if dj_analysis::stems_cached(&dir) {
+        if let Err(e) = engine.deck_load_stems(instance, &dj_analysis::stem_paths(&dir)) {
+            eprintln!("[dj-analysis] loading stems for {instance}: {e:#}");
+        }
+    }
     Ok(())
+}
+
+/// Analysis queue snapshot for the Library view (M3).
+#[derive(Serialize)]
+struct AnalysisQueueSnapshot {
+    /// Track currently being analyzed, if any.
+    current: Option<i64>,
+    /// Track ids still waiting (queue order).
+    queued: Vec<i64>,
+    /// Track counts by analysis status.
+    counts: BTreeMap<String, usize>,
+}
+
+#[tauri::command]
+fn analysis_status(state: State<AppState>) -> CmdResult<AnalysisQueueSnapshot> {
+    let current = state.analysis.current_track();
+    let queued: Vec<i64> = state
+        .library
+        .analysis_queue()
+        .map_err(err)?
+        .into_iter()
+        .map(|t| t.id)
+        .filter(|id| Some(*id) != current)
+        .collect();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for t in state.library.tracks().map_err(err)? {
+        *counts.entry(t.analysis_status).or_default() += 1;
+    }
+    Ok(AnalysisQueueSnapshot {
+        current,
+        queued,
+        counts,
+    })
+}
+
+/// Queue (or re-queue) analysis for a track; the background worker picks
+/// it up. Stems already cached for the same content are reused.
+#[tauri::command]
+fn analyze_track(state: State<AppState>, track_id: i64) -> CmdResult<()> {
+    state.library.requeue_analysis(track_id).map_err(err)
+}
+
+/// Load the cached stems for the deck's current track (e.g. after
+/// analysis finished while the track was already loaded).
+#[tauri::command]
+fn deck_load_stems(state: State<AppState>, instance: String) -> CmdResult<bool> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    let Some(track) = deck_library_track(&state, &engine, &instance) else {
+        return Ok(false);
+    };
+    let dir = dj_analysis::stems_dir(state.library.data_dir(), &track.content_hash);
+    if !dj_analysis::stems_cached(&dir) {
+        return Ok(false);
+    }
+    engine
+        .deck_load_stems(&instance, &dj_analysis::stem_paths(&dir))
+        .map_err(err)?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn deck_clear_stems(state: State<AppState>, instance: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    engine.deck_clear_stems(&instance).map_err(err)
 }
 
 /// Write the deck's current beatgrid through to the library.
@@ -899,6 +974,13 @@ fn main() {
     let watcher =
         dj_library::start_watcher(library.clone(), dj_library::watch::DEFAULT_POLL_INTERVAL);
     let hub = AcquisitionHub::from_env();
+    // M3: background analysis worker. Defaults to the DSP stem separator;
+    // an ONNX model can be swapped in via the `onnx` feature of
+    // dj-analysis (CoreML EP on macOS, CPU EP elsewhere).
+    let analysis = dj_analysis::start_worker(
+        library.clone(),
+        dj_analysis::AnalysisSettings::default(),
+    );
 
     tauri::Builder::default()
         .manage(AppState {
@@ -907,6 +989,7 @@ fn main() {
             library,
             hub,
             _watcher: watcher,
+            analysis,
         })
         .setup(|app| {
             // System menu: platform defaults (App/Edit/Window on macOS)
@@ -981,6 +1064,10 @@ fn main() {
             deck_nudge_beatgrid,
             deck_anchor_here,
             deck_sync,
+            analysis_status,
+            analyze_track,
+            deck_load_stems,
+            deck_clear_stems,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
