@@ -71,7 +71,6 @@ export function WireOverlay({
   // While a wire end is armed, the free end tracks the mouse.
   useLayoutEffect(() => {
     if (!pending || !container) {
-      setCursor(null);
       return;
     }
     const onMove = (e: MouseEvent) => {
@@ -79,7 +78,10 @@ export function WireOverlay({
       setCursor({ x: e.clientX - origin.left, y: e.clientY - origin.top });
     };
     window.addEventListener('mousemove', onMove);
-    return () => window.removeEventListener('mousemove', onMove);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      setCursor(null);
+    };
   }, [pending, container]);
 
   const pendingStart =
