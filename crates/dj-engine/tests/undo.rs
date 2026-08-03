@@ -32,10 +32,7 @@ fn snapshot_restores_modules_wires_knobs_and_params() {
     let restored = Engine::from_doc(&before, registry()).unwrap();
     assert_eq!(restored.snapshot("t"), before);
     assert_eq!(restored.knob_state("osc1", "pitch").unwrap().position, 0.25);
-    assert!(restored
-        .nodes
-        .iter()
-        .all(|n| n.instance_id != "osc2"));
+    assert!(restored.nodes.iter().all(|n| n.instance_id != "osc2"));
 }
 
 #[test]

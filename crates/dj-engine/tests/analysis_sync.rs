@@ -73,8 +73,8 @@ fn auto_beatgrids_drive_deck_sync_within_1ms() {
     e.add_module("deckA", "builtin.deck").unwrap();
     e.add_module("deckB", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("deckA", "beat_clock", "out1", "ch1").unwrap();
-    e.connect("deckB", "beat_clock", "out1", "ch2").unwrap();
+    e.connect("deckA", "beat_clock", "out1", "l").unwrap();
+    e.connect("deckB", "beat_clock", "out1", "r").unwrap();
     e.deck_load("deckA", &wav_a).unwrap();
     e.deck_load("deckB", &wav_b).unwrap();
     e.deck_set_beatgrid("deckA", ga.bpm, ga.anchor_secs)

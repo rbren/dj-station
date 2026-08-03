@@ -123,7 +123,7 @@ fn stem_amps(signal: &[f32]) -> [f64; 4] {
 fn muting_each_stem_removes_its_energy_and_only_its_energy() {
     let fx = fixture();
     let mut e = deck_engine(1);
-    e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("deck1", "audio_l", "out1", "l").unwrap();
     load_and_play(&mut e, &fx);
 
     let full = stem_amps(&render(&mut e)[0]);
@@ -161,9 +161,13 @@ fn muting_each_stem_removes_its_energy_and_only_its_energy() {
 fn stem_jacks_are_independently_routable() {
     let fx = fixture();
     let mut e = deck_engine(4);
+    // Audio Output is stereo (l/r + channel_offset), so route the four
+    // stems through two audio_out modules at offsets 0 and 2.
+    e.add_module("out2", "builtin.audio_out").unwrap();
+    e.set_param("out2", "channel_offset", 2.0).unwrap();
     for (k, jack) in STEM_JACKS.iter().enumerate() {
-        e.connect("deck1", jack, "out1", &format!("ch{}", k + 1))
-            .unwrap();
+        let (out, ch) = (["out1", "out2"][k / 2], ["l", "r"][k % 2]);
+        e.connect("deck1", jack, out, ch).unwrap();
     }
     load_and_play(&mut e, &fx);
     // Give drums a distinct gain so the jack is provably post-gain.
@@ -205,7 +209,7 @@ fn stem_jacks_are_independently_routable() {
 fn stem_gains_scale_continuously_and_round_trip_through_patch() {
     let fx = fixture();
     let mut e = deck_engine(1);
-    e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("deck1", "audio_l", "out1", "l").unwrap();
     load_and_play(&mut e, &fx);
 
     let gains = [0.25f32, 0.5, 0.75, 1.0];
@@ -215,7 +219,7 @@ fn stem_gains_scale_continuously_and_round_trip_through_patch() {
     let full = {
         // Reference render at unity gains from a fresh engine.
         let mut e0 = deck_engine(1);
-        e0.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+        e0.connect("deck1", "audio_l", "out1", "l").unwrap();
         load_and_play(&mut e0, &fx);
         stem_amps(&render(&mut e0)[0])
     };
@@ -265,7 +269,7 @@ fn stem_gains_scale_continuously_and_round_trip_through_patch() {
 fn clearing_stems_reverts_to_the_original_mix() {
     let fx = fixture();
     let mut e = deck_engine(1);
-    e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+    e.connect("deck1", "audio_l", "out1", "l").unwrap();
     load_and_play(&mut e, &fx);
     e.set_param("deck1", "stem_bass", 0.0).unwrap();
     assert!(e.deck_status("deck1").unwrap().stems_loaded);
@@ -289,7 +293,7 @@ fn stems_track_keylock_and_loops_like_the_mix() {
     // amplitudes (WSOLA inherently smears tones, identically in both).
     let fx = fixture();
     let setup = |e: &mut Engine| {
-        e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
+        e.connect("deck1", "audio_l", "out1", "l").unwrap();
         e.deck_load("deck1", &fx.mix).unwrap();
         e.set_knob_position("deck1", "play_gate", 1.0).unwrap();
         e.set_param("deck1", "keylock", 1.0).unwrap();

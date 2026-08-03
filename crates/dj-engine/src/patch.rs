@@ -194,7 +194,10 @@ impl Engine {
 
     /// Build a fresh engine from an in-memory patch document.
     pub fn from_doc(doc: &PatchDoc, registry: ExtensionRegistry) -> Result<Engine> {
-        anyhow::ensure!(doc.header.format == PATCH_FORMAT, "unsupported patch format");
+        anyhow::ensure!(
+            doc.header.format == PATCH_FORMAT,
+            "unsupported patch format"
+        );
         let config = EngineConfig {
             sample_rate: doc.header.sample_rate,
             block_size: doc.header.block_size,

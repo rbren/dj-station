@@ -362,7 +362,7 @@ fn regen_deck_patches() {
     let patches = e2e_dir().join("patches");
 
     // Case 5 (M2): one deck, keylock on at +8 %, active loop, manual
-    // beatgrid. ch1 = deck audio, ch2 = beat_clock.
+    // beatgrid. l = deck audio, r = beat_clock.
     {
         let dir = patches.join("deck-loop-keylock");
         std::fs::create_dir_all(&dir).unwrap();
@@ -465,7 +465,7 @@ fn regen_stem_patches() {
 
     // Case 7 (M3): deck with stems loaded — bass muted, drums at half
     // gain — plus the drums stem jack routed out separately.
-    // ch1 = deck mix (gain-weighted stem sum), ch2 = stem_drums jack.
+    // l = deck mix (gain-weighted stem sum), r = stem_drums jack.
     {
         let dir = patches.join("deck-stems-gains");
         std::fs::create_dir_all(&dir).unwrap();
@@ -495,8 +495,8 @@ fn regen_stem_patches() {
         let mut e = Engine::new(EngineConfig::default(), common::registry()).unwrap();
         e.add_module("deck1", "builtin.deck").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
-        e.connect("deck1", "audio_l", "out1", "ch1").unwrap();
-        e.connect("deck1", "stem_drums", "out1", "ch2").unwrap();
+        e.connect("deck1", "audio_l", "out1", "l").unwrap();
+        e.connect("deck1", "stem_drums", "out1", "r").unwrap();
         e.set_knob_position("deck1", "play_gate", 1.0).unwrap();
         e.set_param("deck1", "stem_drums", 0.5).unwrap();
         e.set_param("deck1", "stem_bass", 0.0).unwrap();

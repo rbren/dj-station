@@ -3,12 +3,12 @@
     {
       "from_jack": "audio_l",
       "to": "out1",
-      "to_jack": "ch1"
+      "to_jack": "l"
     },
     {
       "from_jack": "stem_drums",
       "to": "out1",
-      "to_jack": "ch2"
+      "to_jack": "r"
     }
   ]
 }
