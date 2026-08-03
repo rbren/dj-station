@@ -106,6 +106,25 @@ export class EngineClient {
   loadPatch(dir: string) {
     return this.call<void>('load_patch', { dir });
   }
+  savePatchAs(name: string) {
+    return this.call<void>('save_patch_as', { name });
+  }
+  listPatches() {
+    return this.call<string[]>('list_patches');
+  }
+  loadPatchByName(name: string) {
+    return this.call<void>('load_patch_by_name', { name });
+  }
+  currentPatch() {
+    return this.call<string>('current_patch');
+  }
+  removeModule(instance: string) {
+    return this.call<void>('remove_module', { instance });
+  }
+  /** End of an edit gesture (pointer-up): next edit gets its own undo step. */
+  endEdit() {
+    return this.call<void>('end_edit');
+  }
   injectMidi(instance: string, frame: number, data: [number, number, number]) {
     return this.call<void>('inject_midi', { instance, frame, data });
   }

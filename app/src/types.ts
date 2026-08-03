@@ -64,5 +64,7 @@ export interface ModuleHandle {
   paramValue(id: string): ParamValue;
   setParam(id: string, v: ParamValue): void;
   signalTap(jackId: string): JackTelemetry;
+  /** End of an edit gesture (drag release) — undo step boundary. */
+  endEdit?(): void;
   size: { w: number; h: number };
 }

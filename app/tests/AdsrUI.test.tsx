@@ -10,14 +10,19 @@ import AdsrUI from '../../extensions/adsr/ui-src/AdsrUI';
 function mockHandle(initial: Record<string, number>) {
   const params = { ...initial };
   const calls: Array<[string, number]> = [];
+  const endEdits = { count: 0 };
   return {
     params,
     calls,
+    endEdits,
     handle: {
       paramValue: (id: string) => params[id],
       setParam: (id: string, v: number) => {
         params[id] = v;
         calls.push([id, v]);
+      },
+      endEdit: () => {
+        endEdits.count += 1;
       },
     },
   };
@@ -135,5 +140,17 @@ describe('AdsrUI', () => {
     const second = mockHandle({ ...INITIAL, attack: 2.0 });
     rerender(<AdsrUI handle={second.handle} />);
     expect(screen.getByTestId('adsr-readout').textContent).toContain('A 2.000s');
+  });
+
+  it('signals endEdit once per completed drag gesture', () => {
+    const { handle, endEdits } = mockHandle(INITIAL);
+    render(<AdsrUI handle={handle} />);
+    drag(screen.getByTestId('adsr-handle-attack'), 50, 0);
+    expect(endEdits.count).toBe(1);
+    drag(screen.getByTestId('adsr-handle-release'), 30, 0);
+    expect(endEdits.count).toBe(2);
+    // A stray mouseup without a drag does not fire endEdit.
+    fireEvent.mouseUp(window);
+    expect(endEdits.count).toBe(2);
   });
 });

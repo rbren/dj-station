@@ -104,3 +104,46 @@ fn new_edit_clears_the_redo_stack() {
     assert!(!h.can_redo());
     assert!(h.redo(e.snapshot("t")).is_none());
 }
+
+#[test]
+fn end_gesture_splits_same_knob_edits_into_separate_undo_steps() {
+    let mut e = demo_engine();
+    let mut h = UndoHistory::new();
+
+    // First drag gesture: two rapid records coalesce into one step.
+    h.record("knob:osc1:pitch", e.snapshot("t"));
+    e.set_knob_position("osc1", "pitch", 0.5).unwrap();
+    h.record("knob:osc1:pitch", e.snapshot("t"));
+    e.set_knob_position("osc1", "pitch", 0.6).unwrap();
+    h.end_gesture(); // pointer-up
+
+    // Second gesture on the same knob, well within the time window.
+    h.record("knob:osc1:pitch", e.snapshot("t"));
+    e.set_knob_position("osc1", "pitch", 0.9).unwrap();
+
+    // First undo -> back to end of the first gesture (0.6), not 0.25.
+    let doc = h.undo(e.snapshot("t")).unwrap();
+    e = Engine::from_doc(&doc, registry()).unwrap();
+    assert_eq!(e.knob_state("osc1", "pitch").unwrap().position, 0.6);
+
+    // Second undo -> back to the original position.
+    let doc = h.undo(e.snapshot("t")).unwrap();
+    e = Engine::from_doc(&doc, registry()).unwrap();
+    assert_eq!(e.knob_state("osc1", "pitch").unwrap().position, 0.25);
+}
+
+#[test]
+fn remove_module_drops_node_and_all_touching_wires() {
+    let e = demo_engine();
+    let mut doc = e.snapshot("t");
+    assert!(doc.remove_module("vca1"));
+    assert!(!doc.remove_module("vca1")); // already gone
+
+    let rebuilt = Engine::from_doc(&doc, registry()).unwrap();
+    assert!(rebuilt.nodes.iter().all(|n| n.instance_id != "vca1"));
+    // Both the osc1->vca1 and vca1->out1 wires are gone.
+    assert!(rebuilt.wire_specs().is_empty());
+    // Still renders (silence) without panicking.
+    let mut rebuilt = rebuilt;
+    rebuilt.render_offline(4_800).unwrap();
+}

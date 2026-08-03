@@ -40,6 +40,8 @@ export interface KnobProps {
   config: KnobConfig;
   position: number;
   onPosition(position: number): void;
+  /** End of an interaction gesture (drag release / toggle / momentary up). */
+  onRelease?(): void;
   onConfigChange?(config: KnobConfig): void;
   wired?: boolean;
   atten?: number;
@@ -48,7 +50,7 @@ export interface KnobProps {
 }
 
 export function Knob(props: KnobProps) {
-  const { label, config, position, onPosition, onConfigChange, wired } = props;
+  const { label, config, position, onPosition, onRelease, onConfigChange, wired } = props;
   const [menuOpen, setMenuOpen] = useState(false);
   const drag = useRef<{ startY: number; startPos: number } | null>(null);
 
@@ -61,8 +63,11 @@ export function Knob(props: KnobProps) {
     [onPosition],
   );
   const onUp = useCallback(() => {
-    drag.current = null;
-  }, []);
+    if (drag.current) {
+      drag.current = null;
+      onRelease?.();
+    }
+  }, [onRelease]);
   useEffect(() => {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -116,9 +121,15 @@ export function Knob(props: KnobProps) {
           onMouseDown={(e) => {
             if (e.button === 0) onPosition(1);
           }}
-          onMouseUp={() => onPosition(0)}
+          onMouseUp={() => {
+            onPosition(0);
+            onRelease?.();
+          }}
           onMouseLeave={() => {
-            if (on) onPosition(0);
+            if (on) {
+              onPosition(0);
+              onRelease?.();
+            }
           }}
           onContextMenu={openMenu}
         />
@@ -138,7 +149,10 @@ export function Knob(props: KnobProps) {
           aria-label={label}
           title={`${label}: ${value.toFixed(2)}`}
           className={`knob-toggle${on ? ' knob-toggle-on' : ''}`}
-          onClick={() => onPosition(on ? 0 : 1)}
+          onClick={() => {
+            onPosition(on ? 0 : 1);
+            onRelease?.();
+          }}
           onContextMenu={openMenu}
         />
         {menu}

@@ -41,21 +41,57 @@ function jackCenter(
   return { x: r.left + r.width / 2 - origin.left, y: r.top + r.height / 2 - origin.top };
 }
 
+export interface PendingEnd {
+  instance: string;
+  jack: string;
+  kind: 'input' | 'output';
+  color: number;
+}
+
 export function WireOverlay({
   wires,
   container,
   colors,
+  pending,
   layoutKey,
 }: {
   wires: WireSnapshot[];
   container: HTMLElement | null;
   /** Wire key → WIRE_COLORS index. */
   colors?: Record<string, number>;
+  /** Armed wire end: a preview cable follows the cursor from this jack. */
+  pending?: PendingEnd | null;
   /** Any string that changes when jack positions may have moved
    *  (e.g. serialized module positions) to trigger a re-measure. */
   layoutKey?: string;
 }) {
   const [cables, setCables] = useState<Cable[]>([]);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+
+  // While a wire end is armed, the free end tracks the mouse.
+  useLayoutEffect(() => {
+    if (!pending || !container) {
+      setCursor(null);
+      return;
+    }
+    const onMove = (e: MouseEvent) => {
+      const origin = container.getBoundingClientRect();
+      setCursor({ x: e.clientX - origin.left, y: e.clientY - origin.top });
+    };
+    window.addEventListener('mousemove', onMove);
+    return () => window.removeEventListener('mousemove', onMove);
+  }, [pending, container]);
+
+  const pendingStart =
+    pending && container
+      ? jackCenter(
+          container,
+          container.getBoundingClientRect(),
+          pending.instance,
+          pending.kind,
+          pending.jack,
+        )
+      : null;
 
   useLayoutEffect(() => {
     if (!container) return;
@@ -117,6 +153,17 @@ export function WireOverlay({
           style={{ stroke: WIRE_COLORS[(colors?.[c.key] ?? 0) % WIRE_COLORS.length] }}
         />
       ))}
+      {pending && pendingStart && (
+        <line
+          data-testid="pending-cable"
+          x1={pendingStart.x}
+          y1={pendingStart.y}
+          x2={cursor?.x ?? pendingStart.x}
+          y2={cursor?.y ?? pendingStart.y}
+          className="wire-cable wire-cable-pending"
+          style={{ stroke: WIRE_COLORS[pending.color % WIRE_COLORS.length] }}
+        />
+      )}
     </svg>
   );
 }

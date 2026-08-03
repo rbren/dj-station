@@ -31,6 +31,10 @@ pub struct PatchHeader {
     pub master_channels: usize,
     pub name: String,
     pub sample_rate: f32,
+    /// Engine version that wrote the patch (informational; the `format`
+    /// field is what gates compatibility).
+    #[serde(default)]
+    pub version: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +97,29 @@ fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
     Ok(true)
 }
 
+impl PatchDoc {
+    /// Remove a module instance and every wire touching it. Returns false
+    /// when the instance does not exist. (Node removal is done at the
+    /// document level and rebuilt via `from_doc` — the RT graph never
+    /// re-indexes live.)
+    pub fn remove_module(&mut self, instance: &str) -> bool {
+        if self.modules.remove(instance).is_none() {
+            return false;
+        }
+        self.wires.remove(instance);
+        for wf in self.wires.values_mut() {
+            wf.wires.retain(|w| w.to != instance);
+        }
+        self.wires.retain(|_, wf| !wf.wires.is_empty());
+        for m in self.modules.values_mut() {
+            if m.sync_to.as_deref() == Some(instance) {
+                m.sync_to = None;
+            }
+        }
+        true
+    }
+}
+
 impl Engine {
     /// Capture the full patch state as an in-memory document (the same
     /// content `save_patch` writes to disk).
@@ -103,6 +130,7 @@ impl Engine {
             master_channels: self.config.master_channels,
             name: name.into(),
             sample_rate: self.config.sample_rate,
+            version: env!("CARGO_PKG_VERSION").into(),
         };
         let mut modules = BTreeMap::new();
         for (node_idx, info) in self.nodes.iter().enumerate() {

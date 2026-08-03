@@ -50,6 +50,15 @@ impl UndoHistory {
         }
     }
 
+    /// Mark the end of an edit gesture (e.g. pointer-up after a knob drag).
+    /// The next record starts a fresh undo step even if it re-edits the
+    /// same key within the coalescing window — without this, repeatedly
+    /// adjusting one knob would collapse into a single undo step.
+    pub fn end_gesture(&mut self) {
+        self.last_key = None;
+        self.last_at = None;
+    }
+
     /// Pop the last snapshot, exchanging it for `current` on the redo stack.
     pub fn undo(&mut self, current: PatchDoc) -> Option<PatchDoc> {
         // A snapshot identical to the current state would be a visible no-op;

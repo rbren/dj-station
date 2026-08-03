@@ -46,6 +46,22 @@ describe('Knob', () => {
     expect(onPosition.mock.lastCall![0]).toBeCloseTo(1.0, 5);
   });
 
+  it('fires onRelease once when a drag gesture ends', () => {
+    const onRelease = vi.fn();
+    render(
+      <Knob label="cv" config={LINEAR} position={0.5} onPosition={() => {}} onRelease={onRelease} />,
+    );
+    const dial = screen.getByRole('slider', { name: 'cv' });
+    fireEvent.mouseDown(dial, { clientY: 100 });
+    fireEvent.mouseMove(window, { clientY: 50 });
+    expect(onRelease).not.toHaveBeenCalled();
+    fireEvent.mouseUp(window);
+    expect(onRelease).toHaveBeenCalledTimes(1);
+    // Stray mouseups without a drag don't re-fire.
+    fireEvent.mouseUp(window);
+    expect(onRelease).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the value only in the hover tooltip, not inline', () => {
     render(<Knob label="cv" config={LINEAR} position={0.5} onPosition={() => {}} />);
     const dial = screen.getByRole('slider', { name: 'cv' });

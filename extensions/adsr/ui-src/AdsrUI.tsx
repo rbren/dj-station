@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 interface ModuleHandle {
   paramValue(id: string): number;
   setParam(id: string, v: number): void;
+  endEdit?(): void;
 }
 
 const W = 360;
@@ -116,8 +117,11 @@ export default function AdsrUI({ handle }: { handle: ModuleHandle }) {
   );
 
   const onUp = useCallback(() => {
-    drag.current = null;
-  }, []);
+    if (drag.current) {
+      drag.current = null;
+      handle.endEdit?.();
+    }
+  }, [handle]);
 
   useEffect(() => {
     window.addEventListener("mousemove", onMove);

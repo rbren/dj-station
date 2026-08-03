@@ -56,12 +56,21 @@ body {
   padding: 2rem;
 }
 
+/* Panels occupy whole grid cells: explicit width/height are set inline
+   (rounded up to the 48px grid); the content wrapper keeps its natural
+   size so measurement never feeds back. */
 .module-panel {
   background: #1d2026;
   border: 1px solid #2a2e35;
   border-radius: 8px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.module-panel-content {
   padding: 10px;
-  min-width: 180px;
+  width: max-content;
+  min-width: 170px;
 }
 
 .module-title {
@@ -571,6 +580,60 @@ body {
   margin-right: 6px;
   vertical-align: middle;
   border: 1px solid rgba(0, 0, 0, 0.4);
+}
+
+.wire-cable-pending {
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+.module-remove {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #565e6b;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.module-remove:hover {
+  color: #e05c5c;
+  background: #2a2e35;
+}
+
+.patch-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.patch-name {
+  background: #14171c;
+  border: 1px solid #2a2e35;
+  border-radius: 4px;
+  color: #cdd3de;
+  padding: 3px 8px;
+  width: 130px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.patch-save,
+.patch-load {
+  background: #23262c;
+  border: 1px solid #2a2e35;
+  border-radius: 4px;
+  color: #cdd3de;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.patch-save:hover {
+  border-color: #454c58;
 }
 
 .midi-panel {

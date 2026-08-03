@@ -21,11 +21,47 @@ struct AppState {
     history: Mutex<UndoHistory>,
     library: Arc<Library>,
     hub: AcquisitionHub,
+    /// Name of the patch currently being edited (used by save/autosave).
+    patch_name: Mutex<String>,
+    /// Last autosaved document, to skip disk writes when nothing changed.
+    last_autosave: Mutex<Option<PatchDoc>>,
     /// Watch-folder scanner; kept alive for the app's lifetime.
     _watcher: dj_library::WatchHandle,
     /// Background analysis worker (M3): drains the library queue so
     /// BPM/key/beatgrid/stems land in the DB with no user action.
     analysis: dj_analysis::AnalysisWorker,
+}
+
+/// Named patches live under the single user data dir (PRD §3).
+fn patches_dir() -> PathBuf {
+    dj_library::default_data_dir().join("patches")
+}
+
+/// Crash-recovery autosave location (outside the named patches).
+fn autosave_dir() -> PathBuf {
+    dj_library::default_data_dir().join("autosave")
+}
+
+/// Autosave the current patch if it changed since the last autosave.
+/// Called from the periodic autosave thread and on window close.
+fn autosave_now(state: &AppState) {
+    let Ok(engine) = state.engine.lock() else {
+        return;
+    };
+    let Ok(name) = state.patch_name.lock().map(|n| n.clone()) else {
+        return;
+    };
+    let doc = engine.snapshot(&name);
+    let Ok(mut last) = state.last_autosave.lock() else {
+        return;
+    };
+    if last.as_ref() == Some(&doc) {
+        return;
+    }
+    match engine.save_patch(&autosave_dir(), &name) {
+        Ok(()) => *last = Some(doc),
+        Err(e) => eprintln!("[dj-audio] autosave failed: {e:#}"),
+    }
 }
 
 /// Record the pre-edit snapshot for an undoable edit. Failures to lock the
@@ -77,6 +113,26 @@ fn undo(state: State<AppState>) -> CmdResult<bool> {
         Some(doc) => restore_doc(&state, &mut engine, &doc).map(|()| true),
         None => Ok(false),
     }
+}
+
+/// Remove a module and all wires touching it (undoable).
+#[tauri::command]
+fn remove_module(state: State<AppState>, instance: String) -> CmdResult<()> {
+    let mut engine = state.engine.lock().map_err(err)?;
+    record_edit(&state, &engine, &format!("remove:{instance}"));
+    let mut doc = engine.snapshot("edit");
+    if !doc.remove_module(&instance) {
+        return Err(format!("no such module instance: {instance}"));
+    }
+    restore_doc(&state, &mut engine, &doc)
+}
+
+/// Mark the end of an edit gesture (pointer-up after a knob/segment drag)
+/// so the next edit of the same control is a separate undo step.
+#[tauri::command]
+fn end_edit(state: State<AppState>) -> CmdResult<()> {
+    state.history.lock().map_err(err)?.end_gesture();
+    Ok(())
 }
 
 /// Redo the last undone edit. Returns false when there is nothing to redo.
@@ -401,10 +457,31 @@ fn remove_midi_mapping(state: State<AppState>, instance: String, name: String) -
 
 #[tauri::command]
 fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    if !engine.nodes.is_empty() {
-        return Ok(());
+    {
+        let engine = state.engine.lock().map_err(err)?;
+        if !engine.nodes.is_empty() {
+            return Ok(());
+        }
     }
+    // Crash/quit recovery: restore the autosaved patch when one exists.
+    let autosave = autosave_dir();
+    if autosave.join("patch.json").is_file() {
+        match load_patch_dir(&state, &autosave) {
+            Ok(()) => {
+                if let Some(name) = std::fs::read_to_string(autosave.join("patch.json"))
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                    .and_then(|v| v["name"].as_str().map(str::to_string))
+                {
+                    *state.patch_name.lock().map_err(err)? = name;
+                }
+                eprintln!("[dj-audio] restored autosaved patch");
+                return Ok(());
+            }
+            Err(e) => eprintln!("[dj-audio] autosave restore failed ({e}); loading demo patch"),
+        }
+    }
+    let mut engine = state.engine.lock().map_err(err)?;
     engine.add_module("midi1", "builtin.midi").map_err(err)?;
     engine
         .add_module("osc1", "com.dj.oscillator")
@@ -492,13 +569,66 @@ fn save_patch(state: State<AppState>, dir: String, name: String) -> CmdResult<()
     engine.save_patch(&PathBuf::from(dir), &name).map_err(err)
 }
 
+/// Patch names double as directory names under `patches_dir()`; keep them
+/// to a safe filename alphabet (no separators or traversal).
+fn valid_patch_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+}
+
 #[tauri::command]
-fn load_patch(state: State<AppState>, dir: String) -> CmdResult<()> {
+fn save_patch_as(state: State<AppState>, name: String) -> CmdResult<()> {
+    let name = name.trim().to_string();
+    if !valid_patch_name(&name) {
+        return Err(format!("invalid patch name: {name:?}"));
+    }
+    let engine = state.engine.lock().map_err(err)?;
+    engine
+        .save_patch(&patches_dir().join(&name), &name)
+        .map_err(err)?;
+    *state.patch_name.lock().map_err(err)? = name;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_patches() -> CmdResult<Vec<String>> {
+    let mut names = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(patches_dir()) {
+        for entry in entries.flatten() {
+            if entry.path().join("patch.json").is_file() {
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+#[tauri::command]
+fn load_patch_by_name(state: State<AppState>, name: String) -> CmdResult<()> {
+    if !valid_patch_name(&name) {
+        return Err(format!("invalid patch name: {name:?}"));
+    }
+    load_patch_dir(&state, &patches_dir().join(&name))?;
+    *state.patch_name.lock().map_err(err)? = name;
+    Ok(())
+}
+
+#[tauri::command]
+fn current_patch(state: State<AppState>) -> CmdResult<String> {
+    Ok(state.patch_name.lock().map_err(err)?.clone())
+}
+
+fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<()> {
     let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("load:{dir}"));
+    record_edit(state, &engine, &format!("load:{}", dir.display()));
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
-    *engine = Engine::load_patch(&PathBuf::from(dir), registry).map_err(err)?;
+    *engine = Engine::load_patch(dir, registry).map_err(err)?;
     // Decks: re-apply library-stored DJ metadata (cues/loops/beatgrids)
     // for every loaded deck track (PRD §7 — metadata survives across
     // patches via the library DB, not the patch files).
@@ -509,9 +639,14 @@ fn load_patch(state: State<AppState>, dir: String) -> CmdResult<()> {
         .map(|n| n.instance_id.clone())
         .collect();
     for instance in deck_instances {
-        apply_deck_metadata(&state, &mut engine, &instance)?;
+        apply_deck_metadata(state, &mut engine, &instance)?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn load_patch(state: State<AppState>, dir: String) -> CmdResult<()> {
+    load_patch_dir(&state, &PathBuf::from(dir))
 }
 
 #[tauri::command]
@@ -990,10 +1125,18 @@ fn main() {
             history: Mutex::new(UndoHistory::new()),
             library,
             hub,
+            patch_name: Mutex::new("untitled".into()),
+            last_autosave: Mutex::new(None),
             _watcher: watcher,
             analysis,
         })
         .setup(|app| {
+            // Periodic crash-recovery autosave (skips unchanged states).
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(15));
+                autosave_now(&handle.state::<AppState>());
+            });
             // System menu: platform defaults (App/Edit/Window on macOS)
             // plus a Debug submenu exposing the web inspector.
             let devtools = MenuItemBuilder::with_id("toggle_devtools", "Toggle Developer Tools")
@@ -1004,6 +1147,11 @@ fn main() {
             menu.append(&debug)?;
             app.set_menu(menu)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                autosave_now(&window.state::<AppState>());
+            }
         })
         .on_menu_event(|app, event| {
             if event.id().as_ref() == "toggle_devtools" {
@@ -1022,6 +1170,7 @@ fn main() {
             engine_nodes,
             engine_wires,
             add_module,
+            remove_module,
             connect_wire,
             disconnect_wire,
             load_demo_patch,
@@ -1031,12 +1180,17 @@ fn main() {
             set_param,
             tap,
             save_patch,
+            save_patch_as,
+            list_patches,
+            load_patch_by_name,
+            current_patch,
             load_patch,
             inject_midi,
             add_midi_mapping,
             remove_midi_mapping,
             undo,
             redo,
+            end_edit,
             engine_start,
             engine_stop,
             library_tracks,

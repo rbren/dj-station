@@ -39,6 +39,30 @@ function defaultPosition(index: number): { x: number; y: number } {
   return { x: (index % 3) * GRID * 10, y: Math.floor(index / 3) * GRID * 8 };
 }
 
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Rack rect for a module at `pos`, measured from its rendered panel
+ *  (offset sizes ignore the zoom transform). Falls back to a nominal
+ *  4×2-cell footprint for panels not yet in the DOM. */
+function moduleRect(instance: string, pos: { x: number; y: number }): Rect {
+  const el = document.querySelector<HTMLElement>(`[data-testid="module-${instance}"]`);
+  return {
+    x: pos.x,
+    y: pos.y,
+    w: el?.offsetWidth || GRID * 4,
+    h: el?.offsetHeight || GRID * 2,
+  };
+}
+
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
 const ZOOM_KEY = 'dj-rack-zoom';
 const ZOOM_STEP = 1.2;
 const ZOOM_MIN = 0.4;
@@ -99,6 +123,8 @@ export default function App() {
   const [wireColors, setWireColors] = useState<Record<string, number>>(() =>
     loadJson(WIRE_COLORS_KEY, {}),
   );
+  const [patchName, setPatchName] = useState('untitled');
+  const [patchList, setPatchList] = useState<string[]>([]);
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   const [positions, setPositions] = useState<Positions>(() => loadPositions());
   const [zoom, setZoom] = useState<number>(() => loadZoom());
@@ -119,17 +145,28 @@ export default function App() {
     });
   }, []);
 
-  const moveModule = useCallback((instance: string, x: number, y: number) => {
-    setPositions((prev) => {
-      const next = { ...prev, [instance]: { x, y } };
-      try {
-        localStorage.setItem(POSITIONS_KEY, JSON.stringify(next));
-      } catch {
-        // persistence is best-effort
-      }
-      return next;
-    });
-  }, []);
+  const moveModule = useCallback(
+    (instance: string, x: number, y: number) => {
+      setPositions((prev) => {
+        // Reject moves that would overlap another module: the dragged
+        // panel simply stops against its neighbours.
+        const rect = moduleRect(instance, { x, y });
+        for (const [i, node] of nodes.entries()) {
+          if (node.instance_id === instance) continue;
+          const otherPos = prev[node.instance_id] ?? defaultPosition(i);
+          if (rectsOverlap(rect, moduleRect(node.instance_id, otherPos))) return prev;
+        }
+        const next = { ...prev, [instance]: { x, y } };
+        try {
+          localStorage.setItem(POSITIONS_KEY, JSON.stringify(next));
+        } catch {
+          // persistence is best-effort
+        }
+        return next;
+      });
+    },
+    [nodes],
+  );
 
   const refresh = useCallback(async () => {
     const snapshot = await engine.nodes();
@@ -147,9 +184,28 @@ export default function App() {
       setBackend(await engine.start());
       const modules = await engine.listModules();
       if (modules) setModuleLib(modules);
+      const current = await engine.currentPatch();
+      if (current) setPatchName(current);
+      setPatchList((await engine.listPatches()) ?? []);
       await refresh();
     })();
   }, [refresh]);
+
+  const savePatch = useCallback(async () => {
+    const name = patchName.trim() || 'untitled';
+    await engine.savePatchAs(name);
+    setPatchName(name);
+    setPatchList((await engine.listPatches()) ?? []);
+  }, [patchName]);
+
+  const loadNamedPatch = useCallback(
+    async (name: string) => {
+      await engine.loadPatchByName(name);
+      setPatchName(name);
+      await refresh();
+    },
+    [refresh],
+  );
 
   useEffect(() => {
     if (!connected) return;
@@ -172,10 +228,24 @@ export default function App() {
       const taken = new Set(nodes.map((n) => n.instance_id));
       const instance = nextInstanceId(typeId, taken);
       await engine.addModule(instance, typeId);
-      if (at) moveModule(instance, at.x, at.y);
+      if (at) {
+        // Nudge the drop point down one grid row at a time until it does
+        // not overlap an existing module.
+        let y = at.y;
+        for (let tries = 0; tries < 200; tries++) {
+          const rect = moduleRect(instance, { x: at.x, y });
+          const collides = nodes.some((node, i) => {
+            const pos = positions[node.instance_id] ?? defaultPosition(i);
+            return rectsOverlap(rect, moduleRect(node.instance_id, pos));
+          });
+          if (!collides) break;
+          y += GRID;
+        }
+        moveModule(instance, at.x, y);
+      }
       await refresh();
     },
-    [nodes, refresh, moveModule],
+    [nodes, positions, refresh, moveModule],
   );
 
   // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z)
@@ -186,7 +256,14 @@ export default function App() {
         setPending(null);
         return;
       }
-      if (!(e.metaKey || e.ctrlKey) || isEditableTarget(e.target)) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      // cmd/ctrl+S saves even while the patch-name input has focus.
+      if (e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        void savePatch();
+        return;
+      }
+      if (isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
       if (key === 'z') {
         e.preventDefault();
@@ -207,7 +284,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [refresh, changeZoom]);
+  }, [refresh, changeZoom, savePatch]);
 
   // Drop a module dragged out of the library at the pointer position,
   // snapped to the rack grid (in unzoomed rack coordinates).
@@ -302,9 +379,30 @@ export default function App() {
           display: 0,
           is_fast: false,
         },
+      endEdit: () => void engine.endEdit(),
       size: { w: 360, h: 200 },
     }),
     [telemetry, refresh],
+  );
+
+  const removeModule = useCallback(
+    async (instance: string) => {
+      await engine.removeModule(instance);
+      setPositions((prev) => {
+        if (!(instance in prev)) return prev;
+        const next = { ...prev };
+        delete next[instance];
+        try {
+          localStorage.setItem(POSITIONS_KEY, JSON.stringify(next));
+        } catch {
+          // persistence is best-effort
+        }
+        return next;
+      });
+      setPending((p) => (p?.instance === instance ? null : p));
+      await refresh();
+    },
+    [refresh],
   );
 
   const handles = useMemo(
@@ -346,6 +444,33 @@ export default function App() {
             Library
           </button>
         </nav>
+        <span className="patch-controls">
+          <input
+            className="patch-name"
+            data-testid="patch-name"
+            value={patchName}
+            onChange={(e) => setPatchName(e.target.value)}
+            title="Patch name"
+          />
+          <button className="patch-save" data-testid="patch-save" onClick={() => void savePatch()}>
+            Save
+          </button>
+          <select
+            className="patch-load"
+            data-testid="patch-load"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) void loadNamedPatch(e.target.value);
+            }}
+          >
+            <option value="">load…</option>
+            {patchList.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </span>
         <span className="engine-status" data-testid="engine-status">
           {connected === null
             ? 'connecting…'
@@ -376,6 +501,12 @@ export default function App() {
             data-testid="rack-area"
             onDragOver={onRackDragOver}
             onDrop={onRackDrop}
+            onClick={(e) => {
+              // Clicking the rack background abandons a pending wire.
+              if (pending && !(e.target as HTMLElement).closest?.('.module-panel')) {
+                setPending(null);
+              }
+            }}
           >
             <div
               className="rack"
@@ -411,6 +542,8 @@ export default function App() {
                   }
                   position={positions[node.instance_id] ?? defaultPosition(i)}
                   onMove={(x, y) => moveModule(node.instance_id, x, y)}
+                  onRemove={() => void removeModule(node.instance_id)}
+                  onEditEnd={() => void engine.endEdit()}
                   pendingSource={pending}
                   onJackClick={(kind, jack) => void onJackClick(node.instance_id, kind, jack)}
                   onKnobPosition={(jack, position) => {
@@ -437,6 +570,7 @@ export default function App() {
               wires={wires}
               container={rackEl}
               colors={wireColors}
+              pending={pending}
               layoutKey={`${JSON.stringify(positions)}@${zoom}`}
             />
           </div>

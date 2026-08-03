@@ -150,3 +150,24 @@ fn wires_and_midi_mappings_roundtrip() {
         "reloaded patch should produce audio, peak={peak}"
     );
 }
+
+#[test]
+fn saved_patch_records_engine_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut engine = common::default_engine();
+    common::build_demo_patch(&mut engine);
+    engine.save_patch(dir.path(), "test").unwrap();
+
+    let header: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("patch.json")).unwrap())
+            .unwrap();
+    assert_eq!(header["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(header["format"], "djpatch-1");
+
+    // And it round-trips through load → snapshot.
+    let reloaded = Engine::load_patch(dir.path(), common::registry()).unwrap();
+    assert_eq!(
+        reloaded.snapshot("test").header.version,
+        env!("CARGO_PKG_VERSION")
+    );
+}

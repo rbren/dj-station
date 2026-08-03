@@ -27,6 +27,12 @@ const fakeEngine = {
   addModule: vi.fn(async () => {}),
   undo: vi.fn(async () => true),
   redo: vi.fn(async () => true),
+  currentPatch: vi.fn(async () => null),
+  listPatches: vi.fn(async () => []),
+  savePatchAs: vi.fn(async () => {}),
+  loadPatchByName: vi.fn(async () => {}),
+  removeModule: vi.fn(async () => {}),
+  endEdit: vi.fn(async () => {}),
 };
 
 vi.mock('../src/engine', () => ({
@@ -150,10 +156,12 @@ describe('drag module from library onto rack', () => {
     await waitFor(() =>
       expect(fakeEngine.addModule).toHaveBeenCalledWith('oscillat1', 'com.dj.oscillator'),
     );
-    // 100px/60px snapped to the 48px grid (jsdom rects are at 0,0).
+    // 100px/60px snapped to the 48px grid (jsdom rects are at 0,0), then
+    // nudged down one row: (96,48) overlaps osc1's nominal footprint at
+    // its default slot (0,0).
     await waitFor(() => {
       const positions = JSON.parse(localStorage.getItem('dj-rack-positions') ?? '{}');
-      expect(positions.oscillat1).toEqual({ x: 96, y: 48 });
+      expect(positions.oscillat1).toEqual({ x: 96, y: 96 });
     });
   });
 });

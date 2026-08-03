@@ -3,10 +3,10 @@
 // in hover tooltips, wired inputs drop their knob, and jack clicks drive
 // the wiring flow.
 
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import AdsrUI from '../../extensions/adsr/ui-src/AdsrUI';
-import { ModulePanel } from '../src/components/ModulePanel';
+import { ModulePanel, snapUpToGrid } from '../src/components/ModulePanel';
 import type { Manifest, ModuleHandle } from '../src/types';
 
 const OSC_MANIFEST: Manifest = {
@@ -182,5 +182,51 @@ describe('ModulePanel', () => {
     });
     fireEvent.mouseMove(window, { clientX: 0, clientY: 0 });
     expect(onMove).toHaveBeenLastCalledWith(0, 0);
+  });
+});
+
+describe('grid-conforming panel size', () => {
+  it('snapUpToGrid rounds content sizes up to whole 48px cells', () => {
+    expect(snapUpToGrid(1)).toBe(48);
+    expect(snapUpToGrid(48)).toBe(48);
+    expect(snapUpToGrid(49)).toBe(96);
+    expect(snapUpToGrid(205)).toBe(240);
+  });
+
+  const observers: Array<() => void> = [];
+  class FakeRO {
+    constructor(cb: () => void) {
+      observers.push(cb);
+    }
+    observe() {}
+    disconnect() {}
+  }
+
+  afterEach(() => {
+    observers.length = 0;
+    // @ts-expect-error test polyfill cleanup
+    delete globalThis.ResizeObserver;
+  });
+
+  it('sets panel width/height to grid multiples of the measured content', () => {
+    // jsdom has no ResizeObserver; install a stub so the measure effect runs.
+    (globalThis as Record<string, unknown>).ResizeObserver = FakeRO;
+    const { container } = render(<ModulePanel {...baseProps} />);
+    const content = container.querySelector('.module-panel-content') as HTMLElement;
+    Object.defineProperty(content, 'offsetWidth', { configurable: true, value: 205 });
+    Object.defineProperty(content, 'offsetHeight', { configurable: true, value: 150 });
+    act(() => observers.forEach((cb) => cb()));
+    const panel = screen.getByTestId('module-osc1');
+    expect(panel.style.width).toBe(`${snapUpToGrid(205 + 2)}px`); // 240
+    expect(panel.style.height).toBe(`${snapUpToGrid(150 + 2)}px`); // 192
+  });
+
+  it('renders a delete button only when onRemove is provided', () => {
+    const { rerender } = render(<ModulePanel {...baseProps} />);
+    expect(screen.queryByTestId('module-remove-osc1')).toBeNull();
+    const onRemove = vi.fn();
+    rerender(<ModulePanel {...baseProps} onRemove={onRemove} />);
+    fireEvent.click(screen.getByTestId('module-remove-osc1'));
+    expect(onRemove).toHaveBeenCalledTimes(1);
   });
 });

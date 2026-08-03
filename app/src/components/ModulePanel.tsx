@@ -5,7 +5,14 @@
 // engine's param state. Clicking an output jack then an input jack makes a
 // wire; clicking a wired input removes its wire.
 
-import { useCallback, useEffect, useRef, type ComponentType, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import type { JackTelemetry, KnobConfig, KnobState, Manifest, ModuleHandle } from '../types';
 import { Jack } from './Jack';
 import { Knob } from './Knob';
@@ -19,6 +26,9 @@ export interface JackRef {
 export const GRID = 48;
 
 export const snap = (v: number) => Math.max(0, Math.round(v / GRID) * GRID);
+
+/** Panels occupy whole grid cells: round a content size up to the grid. */
+export const snapUpToGrid = (px: number) => Math.max(GRID, Math.ceil(px / GRID) * GRID);
 
 export interface ModulePanelProps {
   instanceId: string;
@@ -34,6 +44,10 @@ export interface ModulePanelProps {
    *  header becomes a drag handle snapping to the coarse GRID. */
   position?: { x: number; y: number };
   onMove?(x: number, y: number): void;
+  /** Delete this module instance (renders a ✕ button in the corner). */
+  onRemove?(): void;
+  /** Called on pointer-up after knob/param drags (undo gesture boundary). */
+  onEditEnd?(): void;
   /** Jack currently armed as a pending wire end, if any. */
   pendingSource?: (JackRef & { kind: 'input' | 'output' }) | null;
   onJackClick?(kind: 'input' | 'output', jackId: string): void;
@@ -73,12 +87,38 @@ export function ModulePanel(props: ModulePanelProps) {
     };
   }, [onDragMove, onDragEnd]);
 
+  // Panels occupy whole grid cells: measure the natural content size
+  // (offsetWidth/Height — unaffected by the rack's zoom transform) and
+  // round the panel up to grid multiples.
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      if (!w || !h) return;
+      // +2 for the panel's own 1px border on each side.
+      const snapped = { w: snapUpToGrid(w + 2), h: snapUpToGrid(h + 2) };
+      setSize((prev) => (prev && prev.w === snapped.w && prev.h === snapped.h ? prev : snapped));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <div
       className={`module-panel${position ? ' module-panel-placed' : ''}`}
       data-testid={`module-${instanceId}`}
-      style={position ? { left: position.x, top: position.y } : undefined}
+      style={{
+        ...(position ? { left: position.x, top: position.y } : undefined),
+        ...(size ? { width: size.w, height: size.h } : undefined),
+      }}
     >
+      <div className="module-panel-content" ref={contentRef}>
       <header
         className={`module-title${onMove ? ' module-title-draggable' : ''}`}
         data-testid={`module-header-${instanceId}`}
@@ -95,6 +135,17 @@ export function ModulePanel(props: ModulePanelProps) {
       >
         {manifest.name}
         <span className="module-instance">{instanceId}</span>
+        {props.onRemove && (
+          <button
+            className="module-remove"
+            data-testid={`module-remove-${instanceId}`}
+            title="Delete module"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => props.onRemove?.()}
+          >
+            ✕
+          </button>
+        )}
       </header>
       {CustomUI && (
         <div className="module-custom-ui">
@@ -117,6 +168,7 @@ export function ModulePanel(props: ModulePanelProps) {
                   config={config}
                   position={position}
                   onPosition={(pos) => props.onParam?.(p.id, min + pos * (max - min))}
+                  onRelease={props.onEditEnd}
                 />
                 <span className="param-name">{p.id}</span>
               </div>
@@ -156,6 +208,7 @@ export function ModulePanel(props: ModulePanelProps) {
                 onPosition={(p) => props.onKnobPosition(input.id, p)}
                 onConfigChange={(c) => props.onKnobConfig(input.id, c)}
                 onAttenOffset={(a, o) => props.onAttenOffset(input.id, a, o)}
+                onRelease={props.onEditEnd}
               />
             </div>
           );
@@ -177,6 +230,7 @@ export function ModulePanel(props: ModulePanelProps) {
             onClick={() => props.onJackClick?.('output', output.id)}
           />
         ))}
+      </div>
       </div>
     </div>
   );

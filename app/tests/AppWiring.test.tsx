@@ -48,6 +48,12 @@ const fakeEngine = {
   setKnobPosition: vi.fn(async () => {}),
   setKnobConfig: vi.fn(async () => {}),
   setAttenOffset: vi.fn(async () => {}),
+  currentPatch: vi.fn(async () => null),
+  listPatches: vi.fn(async () => []),
+  savePatchAs: vi.fn(async () => {}),
+  loadPatchByName: vi.fn(async () => {}),
+  removeModule: vi.fn(async () => {}),
+  endEdit: vi.fn(async () => {}),
 };
 
 vi.mock('../src/engine', () => ({
