@@ -121,7 +121,7 @@ fn led_messages_flow_into_a_mock_sink() {
 fn led_mappings_and_wiring_roundtrip_through_patch_save_load() {
     let dir = tempfile::tempdir().unwrap();
     {
-        let mut e = led_engine("cc", 7);
+        let e = led_engine("cc", 7);
         e.save_patch(dir.path(), "led-patch").unwrap();
     }
     let mut e = dj_engine::Engine::load_patch(dir.path(), common::registry()).unwrap();
