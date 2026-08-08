@@ -1,0 +1,36 @@
+{
+  "id": "com.dj.granular",
+  "name": "Granular",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Effects",
+  "inputs": [
+    { "id": "in_l", "name": "In L", "default": 0.0 },
+    { "id": "in_r", "name": "In R", "default": 0.0 },
+    { "id": "density", "name": "Density", "default": 20.0,
+      "knob": { "style": "continuous", "min": 0.1, "max": 150.0, "curve": "exp" } },
+    { "id": "size", "name": "Grain Size", "default": 0.08,
+      "knob": { "style": "continuous", "min": 0.005, "max": 0.5, "curve": "exp" } },
+    { "id": "position", "name": "Position", "default": 0.25,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "pitch", "name": "Pitch", "default": 0.0,
+      "knob": { "style": "continuous", "min": -2.0, "max": 2.0, "curve": "linear" } },
+    { "id": "texture", "name": "Texture", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "spread", "name": "Spread", "default": 0.3,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "feedback", "name": "Feedback", "default": 0.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 0.95, "curve": "linear" } },
+    { "id": "freeze", "name": "Freeze", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "trig", "name": "Trig", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mix", "name": "Mix", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out_l", "name": "Out L" },
+    { "id": "out_r", "name": "Out R" }
+  ],
+  "latency_samples": 0
+}
