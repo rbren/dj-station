@@ -207,6 +207,9 @@ fn beat_clock_lands_on_beatgrid_and_drives_adsr_envelopes() {
     e.set_knob_value("adsr1", "decay", 0.05).unwrap();
     e.set_knob_value("adsr1", "sustain", 0.5).unwrap();
     e.set_knob_value("adsr1", "release", 0.05).unwrap();
+    // Wired inputs add to the knob baseline; zero the VCA's cv knob so the
+    // envelope alone sets the gain.
+    e.set_knob_value("vca1", "cv", 0.0).unwrap();
 
     e.deck_load("deck1", &tone).unwrap();
     e.deck_set_beatgrid("deck1", 120.0, 0.25).unwrap();

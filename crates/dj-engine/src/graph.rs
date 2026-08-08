@@ -191,9 +191,13 @@ impl Graph {
                             dst[s] += src_buf[s];
                         }
                     }
+                    // Wired inputs blend with the manual knob: the knob's
+                    // mapped value is the baseline and the incoming signal
+                    // adds on top, scaled by the attenuverter (+ offset for
+                    // asymmetric spreads).
                     let dst = &mut self.in_bufs[node][jack];
                     for x in dst.iter_mut().take(frames) {
-                        *x = *x * rt.atten + rt.offset;
+                        *x = rt.unwired_value + *x * rt.atten + rt.offset;
                     }
                 }
                 self.analyzers[node][jack].update(&self.in_bufs[node][jack][..frames]);

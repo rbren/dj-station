@@ -2,8 +2,9 @@
 //!
 //! Every input jack is simultaneously a wire jack and a knob target.
 //! - Unwired: the knob position maps through the config to a constant value.
-//! - Wired: the knob acts as attenuverter (`atten` in [-1, 1]) plus `offset`
-//!   applied to the incoming signal: `effective = signal * atten + offset`.
+//! - Wired: the knob keeps setting the baseline; the incoming signal adds on
+//!   top, scaled by the attenuverter (`atten` in [-1, 1]) plus `offset`:
+//!   `effective = knob_value + signal * atten + offset`.
 //!
 //! Knob config is data, not code. Per-patch overrides are stored in the patch.
 
@@ -191,6 +192,18 @@ impl JackRt {
 /// Find the knob position that maps (approximately) to `value` — used to
 /// initialize knobs from manifest defaults.
 pub fn position_for_value(config: &KnobConfig, value: f32) -> f32 {
+    // Continuous linear maps invert exactly. This matters now that wired
+    // inputs add the knob baseline to the signal: a default of 0 must invert
+    // to a position that maps back to exactly 0, not to a binary-search
+    // epsilon away from it.
+    if matches!(config.curve, Curve::Linear)
+        && matches!(config.style, KnobStyle::Continuous | KnobStyle::Wire)
+    {
+        if config.max == config.min {
+            return 0.0;
+        }
+        return ((value - config.min) / (config.max - config.min)).clamp(0.0, 1.0);
+    }
     // Binary search over the monotone map; good enough for initialization.
     let (mut lo, mut hi) = (0.0f32, 1.0f32);
     let increasing = config.map(1.0) >= config.map(0.0);

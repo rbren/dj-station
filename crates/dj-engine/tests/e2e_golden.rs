@@ -64,6 +64,9 @@ fn regen_patches() {
         e.set_knob_value("adsr1", "decay", 0.1).unwrap();
         e.set_knob_value("adsr1", "sustain", 0.6).unwrap();
         e.set_knob_value("adsr1", "release", 0.15).unwrap();
+        // Wired inputs add to the knob baseline; zero the cv knob so the
+        // envelope alone shapes the gain.
+        e.set_knob_value("vca1", "cv", 0.0).unwrap();
         e.save_patch(&dir.join("patch"), "e2e-midi-adsr-envelope")
             .unwrap();
         write_events(
@@ -407,7 +410,9 @@ fn regen_macro_patches() {
     e.add_module("lfo1", "com.dj.oscillator").unwrap();
     e.set_knob_position("lfo1", "pitch", 0.1).unwrap();
     e.connect("lfo1", "audio", "tone2", "level").unwrap();
-    e.set_knob_atten_offset("tone2", "level", 0.2, 3.0).unwrap();
+    // The level knob (position 0.3 -> 3.0) is the baseline now that wired
+    // inputs blend with the knob; the LFO adds ±0.2 of its swing on top.
+    e.set_knob_atten_offset("tone2", "level", 0.2, 0.0).unwrap();
     e.save_patch(&dir.join("patch"), "e2e-macro-tone-collapse")
         .unwrap();
     write_events(
@@ -515,6 +520,9 @@ fn regen_gesture_patches() {
         e.connect("gest1", "pinch", "vca1", "cv").unwrap();
         e.connect("vca1", "out", "out1", "l").unwrap();
         e.connect("vca1", "out", "out1", "r").unwrap();
+        // Wired inputs add to the knob baseline; zero the cv knob so the
+        // pinch alone drives the amplitude.
+        e.set_knob_value("vca1", "cv", 0.0).unwrap();
         e.save_patch(&dir.join("patch"), "e2e-gesture-pinch-vca")
             .unwrap();
         write_events(
