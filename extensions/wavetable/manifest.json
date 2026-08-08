@@ -1,0 +1,25 @@
+{
+  "id": "com.dj.wavetable",
+  "name": "Wavetable",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Sources",
+  "inputs": [
+    { "id": "pitch", "name": "Pitch (1V/oct)", "default": 0.0,
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
+    { "id": "fine", "name": "Fine (semitones)", "default": 0.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "pos", "name": "Table Position", "default": 0.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "fm", "name": "FM (thru-zero)", "default": 0.0,
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
+    { "id": "fm_index", "name": "FM Index", "default": 0.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 4.0, "curve": "linear" } },
+    { "id": "sync", "name": "Sync", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "audio", "name": "Audio" }
+  ],
+  "latency_samples": 0
+}
