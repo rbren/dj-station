@@ -353,3 +353,51 @@ fn step_seq_glide_slews_the_cv_between_steps() {
     );
     assert!((at(0.9) - 2.0).abs() < 1e-3, "post-glide {}", at(0.9));
 }
+
+// ---------------------------------------------------------------------------
+// Trigger sequencer
+// ---------------------------------------------------------------------------
+
+#[test]
+fn trig_seq_reads_the_pattern_bitmask_lsb_first() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("trg", "com.dj.trig_seq").unwrap();
+    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 0.25 s per step
+    e.connect("clk", "clock", "trg", "clock").unwrap();
+    set_stepped(&mut e, "trg", "len1", 4.0);
+    e.set_knob_value("trg", "pat1", 9.0).unwrap(); // steps 1 and 4
+    probe(&mut e, 0, "trg", "trig1");
+    let out = e.render_offline((2.1 * SR) as usize).unwrap();
+    assert_edges_near(
+        &rising_edges(&out[0]),
+        &[0.0, 0.75, 1.0, 1.75, 2.0],
+        2,
+        "trig1 pattern 0b1001",
+    );
+}
+
+#[test]
+fn trig_seq_tracks_run_at_independent_lengths() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("trg", "com.dj.trig_seq").unwrap();
+    e.set_knob_value("clk", "bpm", 240.0).unwrap();
+    // x2 of 240 BPM = one step every 0.125 s.
+    e.connect("clk", "mul2", "trg", "clock").unwrap();
+    // Both tracks fire on their own step 1 only, but wrap at 4 and 3 steps.
+    e.set_knob_value("trg", "pat1", 1.0).unwrap();
+    set_stepped(&mut e, "trg", "len1", 4.0);
+    e.set_knob_value("trg", "pat2", 1.0).unwrap();
+    set_stepped(&mut e, "trg", "len2", 3.0);
+    probe(&mut e, 0, "trg", "trig1");
+    probe(&mut e, 1, "trg", "trig2");
+    let out = e.render_offline((1.6 * SR) as usize).unwrap();
+    assert_edges_near(&rising_edges(&out[0]), &[0.0, 0.5, 1.0, 1.5], 2, "len 4");
+    assert_edges_near(
+        &rising_edges(&out[1]),
+        &[0.0, 0.375, 0.75, 1.125, 1.5],
+        2,
+        "len 3",
+    );
+}

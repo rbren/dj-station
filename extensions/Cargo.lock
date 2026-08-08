@@ -31,6 +31,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-trig-seq"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-vca"
 version = "0.1.0"
 dependencies = [
