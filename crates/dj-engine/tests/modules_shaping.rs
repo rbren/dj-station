@@ -603,6 +603,165 @@ fn lfo_shifted_output_lags_by_the_phase_knob() {
 }
 
 // ---------------------------------------------------------------------------
+// com.dj.sample_hold
+// ---------------------------------------------------------------------------
+
+/// A clock LFO (pulse, `rate` Hz, unipolar) driving a Sample & Hold.
+/// Left channel is the S&H output, right channel the clock's own bipolar
+/// signal or the patched source, depending on `source`.
+fn sample_hold_patch(e: &mut Engine, rate: f32) {
+    e.add_module("clk", "com.dj.lfo").unwrap();
+    e.add_module("sh1", "com.dj.sample_hold").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.set_knob_position("clk", "shape", SHAPE_PULSE).unwrap();
+    e.set_knob_value("clk", "rate", rate).unwrap();
+    e.connect("clk", "uni", "sh1", "trig").unwrap();
+    e.connect("sh1", "out", "out1", "l").unwrap();
+}
+
+/// Runs of identical samples in a signal.
+fn runs(x: &[f32]) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut run = 1usize;
+    for i in 1..x.len() {
+        if x[i] == x[i - 1] {
+            run += 1;
+        } else {
+            out.push(run);
+            run = 1;
+        }
+    }
+    out.push(run);
+    out
+}
+
+#[test]
+fn sample_hold_normals_its_own_noise() {
+    let mut e = mono_engine();
+    sample_hold_patch(&mut e, 10.0);
+    let out = e.render_offline(SR as usize).unwrap().pop().unwrap();
+
+    // One fresh random value per clock (9 or 10 edges land inside 1 s).
+    let steps = runs(&out);
+    assert!(
+        (10..=11).contains(&steps.len()),
+        "{} held segments in 1 s",
+        steps.len()
+    );
+    for &r in &steps[1..steps.len() - 1] {
+        assert!((4790..=4810).contains(&r), "hold length {r}");
+    }
+    let values: Vec<f32> = out.chunks(4800).map(|c| c[100]).collect();
+    assert!(values.iter().all(|v| v.abs() <= 5.0), "noise out of range");
+    assert!(
+        values.windows(2).all(|w| w[0] != w[1]),
+        "held values repeat: {values:?}"
+    );
+
+    // Deterministic: the same patch renders the same sequence.
+    let mut e2 = mono_engine();
+    sample_hold_patch(&mut e2, 10.0);
+    let again = e2.render_offline(SR as usize).unwrap().pop().unwrap();
+    assert_eq!(out, again, "noise is not deterministic");
+}
+
+#[test]
+fn sample_hold_noise_output_is_white_and_full_scale() {
+    let mut e = mono_engine();
+    e.add_module("sh1", "com.dj.sample_hold").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("sh1", "noise", "out1", "l").unwrap();
+    let out = e.render_offline(SR as usize).unwrap().pop().unwrap();
+    let mean = out.iter().sum::<f32>() / out.len() as f32;
+    assert!(mean.abs() < 0.05, "noise mean {mean}");
+    // Uniform white noise over ±5 V has an RMS of 5/sqrt(3).
+    let expected = 5.0 / 3.0f32.sqrt();
+    assert!(
+        (rms(&out) - expected).abs() < 0.1,
+        "noise rms {}",
+        rms(&out)
+    );
+    assert!(peak(&out) > 4.9 && peak(&out) <= 5.0, "noise peak");
+}
+
+#[test]
+fn sample_hold_samples_a_patched_source() {
+    let mut e = stereo_engine();
+    sample_hold_patch(&mut e, 8.0);
+    e.add_module("saw", "com.dj.lfo").unwrap();
+    e.set_knob_position("saw", "shape", SHAPE_SAW_UP).unwrap();
+    e.set_knob_value("saw", "rate", 1.0).unwrap();
+    e.connect("saw", "bi", "sh1", "in").unwrap();
+    e.connect("saw", "bi", "out1", "r").unwrap();
+    let out = e.render_offline(SR as usize).unwrap();
+
+    // Each held value is the ramp at the instant of the clock edge, and
+    // the staircase climbs with it.
+    let mut prev = f32::MIN;
+    let mut checked = 0;
+    for step in 1..8 {
+        let at = step * 6000;
+        let held = out[0][at + 10];
+        let source = out[1][at + 1];
+        assert!(
+            (held - source).abs() < 0.02,
+            "step {step}: held {held} vs source {source}"
+        );
+        assert!(held > prev, "staircase not climbing at step {step}");
+        prev = held;
+        checked += 1;
+    }
+    assert_eq!(checked, 7);
+    // The normalled noise must not leak once `in` is patched.
+    assert!(runs(&out[0]).len() < 12, "output is not a clean staircase");
+}
+
+#[test]
+fn sample_hold_track_and_hold_mode() {
+    let mut e = stereo_engine();
+    sample_hold_patch(&mut e, 4.0);
+    e.add_module("saw", "com.dj.lfo").unwrap();
+    e.set_knob_position("saw", "shape", SHAPE_SAW_UP).unwrap();
+    e.set_knob_value("saw", "rate", 1.0).unwrap();
+    e.connect("saw", "bi", "sh1", "in").unwrap();
+    e.connect("saw", "bi", "out1", "r").unwrap();
+    e.set_knob_position("sh1", "mode", 1.0).unwrap(); // track & hold
+    let out = e.render_offline(SR as usize).unwrap();
+
+    // Clock high for the first half of each 250 ms window: tracking.
+    for i in [2000usize, 5000, 14000] {
+        assert!(
+            (out[0][i] - out[1][i]).abs() < 1e-5,
+            "not tracking at {i}: {} vs {}",
+            out[0][i],
+            out[1][i]
+        );
+    }
+    // Clock low for the second half: frozen.
+    for start in [7000usize, 19000] {
+        let held = out[0][start];
+        for (i, &v) in out[0].iter().enumerate().skip(start).take(4000) {
+            assert!((v - held).abs() < 1e-6, "not holding at {i}");
+        }
+    }
+}
+
+#[test]
+fn sample_hold_slew_glides_between_steps() {
+    let mut e = mono_engine();
+    sample_hold_patch(&mut e, 4.0);
+    e.set_knob_value("sh1", "slew", 0.05).unwrap();
+    let out = e.render_offline(SR as usize).unwrap().pop().unwrap();
+    let max_step = out
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0f32, f32::max);
+    // A one-pole lag of 50 ms can move at most step/2400 per sample.
+    assert!(max_step < 0.01, "slew still jumps by {max_step} V");
+    assert!(peak(tail(&out)) > 0.5, "slewed output collapsed to nothing");
+}
+
+// ---------------------------------------------------------------------------
 // com.dj.function
 // ---------------------------------------------------------------------------
 
