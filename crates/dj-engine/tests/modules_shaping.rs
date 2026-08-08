@@ -169,3 +169,104 @@ fn filter_stays_finite_under_extreme_drive_and_modulation() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// com.dj.vca_dual
+// ---------------------------------------------------------------------------
+
+/// Osc (sine, C4) -> vca_dual ch1 -> out, with the given CV and response.
+fn render_vca(cv: f32, exponential: bool) -> Vec<f32> {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("v1", "com.dj.vca_dual").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "v1", "in1").unwrap();
+    e.connect("v1", "out1", "out1", "l").unwrap();
+    e.set_knob_value("v1", "cv1", cv).unwrap();
+    e.set_knob_position("v1", "resp1", if exponential { 1.0 } else { 0.0 })
+        .unwrap();
+    e.render_offline((0.2 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap()
+}
+
+#[test]
+fn vca_dual_linear_response_scales_amplitude() {
+    assert!((peak(&render_vca(10.0, false)) - 5.0).abs() < 0.01);
+    assert!((peak(&render_vca(5.0, false)) - 2.5).abs() < 0.01);
+    assert!(peak(&render_vca(0.0, false)) < 1e-6);
+}
+
+#[test]
+fn vca_dual_exponential_response_is_below_linear_and_closes_fully() {
+    let lin = peak(&render_vca(5.0, false));
+    let exp = peak(&render_vca(5.0, true));
+    assert!(exp < lin * 0.3 && exp > 0.05, "exp {exp} vs lin {lin}");
+    // Both tapers still reach unity at the top and silence at the bottom.
+    assert!((peak(&render_vca(10.0, true)) - 5.0).abs() < 0.01);
+    assert!(peak(&render_vca(0.0, true)) < 1e-6);
+}
+
+#[test]
+fn vca_dual_is_dc_coupled_and_offsets() {
+    let mut e = mono_engine();
+    // v0 is used as a pure DC source via its channel-1 offset.
+    e.add_module("v0", "com.dj.vca_dual").unwrap();
+    e.add_module("v1", "com.dj.vca_dual").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("v0", "out1", "v1", "in1").unwrap();
+    e.connect("v1", "out1", "out1", "l").unwrap();
+    e.set_knob_value("v0", "offset1", 4.0).unwrap();
+    e.set_knob_value("v1", "cv1", 5.0).unwrap(); // linear: gain 0.5
+    e.set_knob_value("v1", "offset1", -1.0).unwrap();
+    let out = e
+        .render_offline((1.0 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+    // 4 V * 0.5 - 1 V = 1 V, and it must not droop over a full second.
+    for &v in tail(&out) {
+        assert!((v - 1.0).abs() < 1e-3, "dc output {v}");
+    }
+}
+
+#[test]
+fn vca_dual_channel_two_normals_the_mix_bus() {
+    // In 2 unpatched: Out 2 carries channel 1 as well.
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("v1", "com.dj.vca_dual").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "v1", "in1").unwrap();
+    e.connect("v1", "out2", "out1", "l").unwrap();
+    e.set_knob_value("v1", "cv1", 5.0).unwrap();
+    let normalled = e
+        .render_offline((0.2 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert!(
+        (peak(&normalled) - 2.5).abs() < 0.01,
+        "normalled mix missing"
+    );
+
+    // In 2 patched (to a silent source): the normalling breaks.
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("silent", "com.dj.vca_dual").unwrap();
+    e.add_module("v1", "com.dj.vca_dual").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "v1", "in1").unwrap();
+    e.connect("silent", "out1", "v1", "in2").unwrap();
+    e.connect("v1", "out2", "out1", "l").unwrap();
+    let split = e
+        .render_offline((0.2 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert!(
+        peak(&split) < 1e-6,
+        "normalling not broken by a patched In 2"
+    );
+}
