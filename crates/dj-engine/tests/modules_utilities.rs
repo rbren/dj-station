@@ -176,8 +176,7 @@ fn attenuverter_scales_audio_sample_accurately() {
 
     let out = e.render_offline((0.05 * SR) as usize).unwrap();
     let mut peak = 0.0f32;
-    for i in 0..out[0].len() {
-        let src = out[0][i];
+    for (i, &src) in out[0].iter().enumerate() {
         peak = peak.max(src.abs());
         assert!(
             (out[1][i] - 0.25 * src).abs() < 1e-4,

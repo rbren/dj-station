@@ -1,0 +1,56 @@
+{
+  "ext": "com.dj.logic",
+  "knobs": {
+    "a": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "b": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "c": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cmp_in": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "g2t_in": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "threshold": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "trig_ms": {
+      "position": 0.6666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "win_high": {
+      "position": 0.75,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "win_in": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "win_low": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

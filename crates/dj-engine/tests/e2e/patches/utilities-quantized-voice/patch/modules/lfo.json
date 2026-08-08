@@ -1,0 +1,26 @@
+{
+  "ext": "com.dj.oscillator",
+  "knobs": {
+    "fm": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pitch": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "sync": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "waveform": {
+      "position": 0.33333334,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

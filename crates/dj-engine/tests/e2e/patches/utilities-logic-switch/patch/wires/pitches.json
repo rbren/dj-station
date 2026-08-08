@@ -1,0 +1,24 @@
+{
+  "wires": [
+    {
+      "from_jack": "out1",
+      "to": "sw",
+      "to_jack": "i1"
+    },
+    {
+      "from_jack": "out2",
+      "to": "sw",
+      "to_jack": "i2"
+    },
+    {
+      "from_jack": "out3",
+      "to": "sw",
+      "to_jack": "i3"
+    },
+    {
+      "from_jack": "out4",
+      "to": "sw",
+      "to_jack": "i4"
+    }
+  ]
+}
