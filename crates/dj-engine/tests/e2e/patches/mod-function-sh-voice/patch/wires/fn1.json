@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "flt1",
+      "to_jack": "cutoff_cv"
+    },
+    {
+      "from_jack": "out",
+      "to": "vca1",
+      "to_jack": "cv1"
+    }
+  ]
+}

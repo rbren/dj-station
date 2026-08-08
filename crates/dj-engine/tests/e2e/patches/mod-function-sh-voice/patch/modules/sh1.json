@@ -1,0 +1,26 @@
+{
+  "ext": "com.dj.sample_hold",
+  "knobs": {
+    "in": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mode": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "slew": {
+      "position": 0.06324555,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "trig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

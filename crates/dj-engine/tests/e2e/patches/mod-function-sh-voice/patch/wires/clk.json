@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "uni",
+      "to": "fn1",
+      "to_jack": "trig"
+    },
+    {
+      "from_jack": "uni",
+      "to": "sh1",
+      "to_jack": "trig"
+    }
+  ]
+}
