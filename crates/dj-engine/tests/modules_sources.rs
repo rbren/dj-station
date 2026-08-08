@@ -245,3 +245,83 @@ fn vco_hard_sync_locks_to_the_master() {
         "sync energy at 150 Hz: locked {locked}, free-running {free}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Wavetable
+// ---------------------------------------------------------------------------
+
+/// Knob position for table `t` of the eight-table set.
+fn table_pos(t: usize) -> f32 {
+    t as f32 / 7.0
+}
+
+#[test]
+fn wavetable_position_morphs_sine_to_saw() {
+    let f0 = 220.0;
+    let harmonics = |pos: f32| -> [f32; 4] {
+        let mut e = source_patch("com.dj.wavetable", "audio");
+        e.set_knob_value("src", "pitch", pitch_of(f0)).unwrap();
+        e.set_knob_value("src", "pos", pos).unwrap();
+        let out = render(&mut e, 0.5);
+        let body = &out[4_800..];
+        [
+            amp_at(body, f0),
+            amp_at(body, 2.0 * f0),
+            amp_at(body, 3.0 * f0),
+            peak(body),
+        ]
+    };
+
+    // Table 0 is a pure sine: peak ±5, nothing above the fundamental.
+    let sine = harmonics(table_pos(0));
+    assert!((sine[0] - 5.0).abs() < 0.05, "sine fundamental {}", sine[0]);
+    assert!(
+        sine[1] < 0.005 && sine[2] < 0.005,
+        "sine has harmonics: {sine:?}"
+    );
+    assert!((sine[3] - 5.0).abs() < 0.05, "sine peak {}", sine[3]);
+
+    // Table 5 is a full saw: harmonic h at 1/h of the fundamental.
+    let saw = harmonics(table_pos(5));
+    assert!(
+        (saw[1] / saw[0] - 0.5).abs() < 0.05 && (saw[2] / saw[0] - 1.0 / 3.0).abs() < 0.05,
+        "saw harmonics {saw:?}"
+    );
+
+    // Halfway between tables 0 and 1 (sine, sine + 2nd) the crossfade gives
+    // half of table 1's second harmonic.
+    let two = harmonics(table_pos(1));
+    let mid = harmonics(0.5 * table_pos(1));
+    assert!(two[1] > 0.5, "table 1 second harmonic {}", two[1]);
+    assert!(
+        (mid[1] - 0.5 * two[1]).abs() < 0.05 * two[1],
+        "morph is not a linear crossfade: {} vs {}",
+        mid[1],
+        two[1]
+    );
+}
+
+#[test]
+fn wavetable_mipmaps_stay_clean_at_high_pitch() {
+    for f0 in [3_111.0f32, 5_000.0] {
+        let mut e = source_patch("com.dj.wavetable", "audio");
+        e.set_knob_value("src", "pitch", pitch_of(f0)).unwrap();
+        e.set_knob_value("src", "pos", table_pos(5)).unwrap();
+        let out = render(&mut e, 0.5);
+        let body = &out[4_800..];
+        let fund = amp_at(body, f0);
+        assert!(fund > 1.0, "{f0} Hz: fundamental {fund}");
+        for h in 2..=30u32 {
+            let f = f0 * h as f32;
+            if f <= SR / 2.0 {
+                continue;
+            }
+            let a = amp_at(body, fold(f));
+            assert!(
+                a < fund * 0.002,
+                "{f0} Hz: alias of harmonic {h} at {} Hz: {a} (fundamental {fund})",
+                fold(f)
+            );
+        }
+    }
+}
