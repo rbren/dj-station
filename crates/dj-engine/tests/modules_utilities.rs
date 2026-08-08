@@ -592,3 +592,121 @@ fn logic_gate_to_trigger_emits_a_fixed_width_pulse() {
     let high = out[0].iter().filter(|&&v| v >= 1.0).count();
     assert_eq!(high, (0.020 * SR) as usize, "pulse width at 20 ms");
 }
+
+// ---------------------------------------------------------------------------
+// Sequential switch
+// ---------------------------------------------------------------------------
+
+/// Feed one clock pulse (a short high followed by a short low) and return
+/// the tail sample of every master channel.
+fn clock_once(e: &mut Engine, id: &str) -> Vec<f32> {
+    e.set_knob_value(id, "clock", 10.0).unwrap();
+    let tail = render_tail(e, 0.002);
+    e.set_knob_value(id, "clock", 0.0).unwrap();
+    e.render_offline(64).unwrap();
+    tail
+}
+
+/// A sequential switch with `in` at 7 V and inputs 1..8 at 1..8 V.
+fn seq_switch_engine(channels: usize) -> Engine {
+    let mut e = probe_engine(channels);
+    e.add_module("sw", "com.dj.seq_switch").unwrap();
+    e.set_knob_value("sw", "in", 7.0).unwrap();
+    for i in 1..=8 {
+        e.set_knob_value("sw", &format!("i{i}"), i as f32).unwrap();
+    }
+    e
+}
+
+#[test]
+fn seq_switch_clock_advances_both_directions() {
+    let mut e = seq_switch_engine(10);
+    // Channels 0..7: the 1-to-8 outputs. Channel 8: the 8-to-1 output.
+    for step in 0..8 {
+        probe(&mut e, "sw", &format!("o{}", step + 1), step);
+    }
+    probe(&mut e, "sw", "out", 8);
+
+    for step in 0..8 {
+        let tail = if step == 0 {
+            render_tail(&mut e, 0.002)
+        } else {
+            clock_once(&mut e, "sw")
+        };
+        for (out, v) in tail.iter().take(8).enumerate() {
+            let want = if out == step { 7.0 } else { 0.0 };
+            assert_near(*v, want, &format!("step {step}: 1-to-8 out {out}"));
+        }
+        assert_near(tail[8], (step + 1) as f32, &format!("step {step}: 8-to-1"));
+    }
+
+    // Wraps back to step 1 after the eighth step.
+    let tail = clock_once(&mut e, "sw");
+    assert_near(tail[0], 7.0, "wrapped to step 1");
+    assert_near(tail[8], 1.0, "wrapped to input 1");
+}
+
+#[test]
+fn seq_switch_step_count_reset_and_mutes() {
+    let mut e = seq_switch_engine(2);
+    probe(&mut e, "sw", "out", 0);
+    probe(&mut e, "sw", "step_cv", 1);
+
+    // Four steps: 1, 2, 3, 4, then back to 1.
+    e.set_knob_position("sw", "steps", 2.0 / 6.0).unwrap();
+    // The selected input's index (its knob is set to `index` volts).
+    let index = |v: f32| v.round() as i32;
+    let mut seen = vec![index(render_tail(&mut e, 0.002)[0])];
+    for _ in 0..4 {
+        seen.push(index(clock_once(&mut e, "sw")[0]));
+    }
+    assert_eq!(seen, vec![1, 2, 3, 4, 1], "4-step cycle");
+
+    // Reset returns to the first step.
+    clock_once(&mut e, "sw");
+    e.set_knob_value("sw", "reset", 10.0).unwrap();
+    let tail = render_tail(&mut e, 0.002);
+    assert_near(tail[0], 1.0, "reset returns to step 1");
+    // Step CV reports the centre of the step's address cell.
+    assert_near(tail[1], 10.0 * 0.5 / 4.0, "step CV for step 1 of 4");
+    e.set_knob_value("sw", "reset", 0.0).unwrap();
+    e.render_offline(64).unwrap();
+
+    // Muting step 2 makes the clock skip it.
+    e.set_knob_value("sw", "m2", 10.0).unwrap();
+    let seen: Vec<i32> = (0..4).map(|_| index(clock_once(&mut e, "sw")[0])).collect();
+    assert_eq!(seen, vec![3, 4, 1, 3], "muted step 2 is skipped");
+}
+
+#[test]
+fn seq_switch_cv_addresses_steps_directly() {
+    let mut e = seq_switch_engine(2);
+    add_dc(&mut e, "addr", 0.0);
+    e.connect("addr", "out1", "sw", "cv").unwrap();
+    probe(&mut e, "sw", "out", 0);
+    probe(&mut e, "sw", "step_cv", 1);
+
+    // 0..10 V spans the eight steps: each cell is 1.25 V wide.
+    for step in 0..8 {
+        let volts = (step as f32 + 0.5) * 10.0 / 8.0;
+        e.set_knob_value("addr", "offset1", volts).unwrap();
+        let tail = render_tail(&mut e, 0.002);
+        assert_near(
+            tail[0],
+            (step + 1) as f32,
+            &format!("{volts} V addresses step {step}"),
+        );
+        // step_cv is the inverse mapping: it addresses the same step.
+        assert_near(tail[1], volts, "step CV round-trips the address");
+    }
+
+    // While addressed, the clock is ignored.
+    let tail = clock_once(&mut e, "sw");
+    assert_near(tail[0], 8.0, "clock ignored while CV-addressed");
+
+    // The step count divides the CV range: with 2 steps, 6 V is step 2.
+    e.set_knob_position("sw", "steps", 0.0).unwrap();
+    e.set_knob_value("addr", "offset1", 6.0).unwrap();
+    let tail = render_tail(&mut e, 0.002);
+    assert_near(tail[0], 2.0, "6 V of a 2-step range addresses step 2");
+}
