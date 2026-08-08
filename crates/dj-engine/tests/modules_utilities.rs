@@ -678,6 +678,27 @@ fn seq_switch_step_count_reset_and_mutes() {
 }
 
 #[test]
+fn seq_switch_position_survives_a_hot_reload() {
+    let mut e = seq_switch_engine(2);
+    probe(&mut e, "sw", "out", 0);
+    render_tail(&mut e, 0.002);
+    clock_once(&mut e, "sw");
+    let before = clock_once(&mut e, "sw")[0];
+    assert_eq!(before.round() as i32, 3, "clocked to step 3");
+
+    // save_state -> fresh instance -> load_state (PRD §5.4).
+    assert_eq!(e.reload_extension("com.dj.seq_switch").unwrap(), 1);
+    let after = render_tail(&mut e, 0.002)[0];
+    assert_eq!(after.round() as i32, 3, "step position survived the swap");
+    let next = clock_once(&mut e, "sw")[0];
+    assert_eq!(
+        next.round() as i32,
+        4,
+        "clocking resumes from the same step"
+    );
+}
+
+#[test]
 fn seq_switch_cv_addresses_steps_directly() {
     let mut e = seq_switch_engine(2);
     add_dc(&mut e, "addr", 0.0);
