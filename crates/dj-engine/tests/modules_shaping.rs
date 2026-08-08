@@ -148,6 +148,39 @@ fn filter_self_oscillates_as_a_clean_sine() {
 }
 
 #[test]
+fn filter_every_topology_sings_at_full_resonance() {
+    for (topo, name) in [(0.0f32, "svf"), (0.5, "ladder"), (1.0, "ota")] {
+        for cutoff in [-2.0f32, 0.0, 2.0] {
+            let mut e = mono_engine();
+            e.add_module("f1", "com.dj.filter").unwrap();
+            e.add_module("out1", "builtin.audio_out").unwrap();
+            e.connect("f1", "lp", "out1", "l").unwrap();
+            e.set_knob_position("f1", "topology", topo).unwrap();
+            e.set_knob_value("f1", "cutoff", cutoff).unwrap();
+            e.set_knob_value("f1", "res", 1.0).unwrap();
+            let out = e
+                .render_offline((3.0 * SR) as usize)
+                .unwrap()
+                .pop()
+                .unwrap();
+            let steady = &out[out.len() * 2 / 3..];
+            let expected = 261.626 * 2.0f32.powf(cutoff);
+            let hz = zero_cross_hz(steady);
+            let amp = peak(steady);
+            println!("{name} @ {expected:.0} Hz: {hz:.1} Hz, {amp:.2} V");
+            assert!(
+                (hz - expected).abs() / expected < 0.05,
+                "{name} @ {expected} Hz: self-oscillates at {hz} Hz"
+            );
+            assert!(
+                (1.0..10.0).contains(&amp),
+                "{name} @ {expected} Hz: self-oscillation amplitude {amp}"
+            );
+        }
+    }
+}
+
+#[test]
 fn filter_stays_finite_under_extreme_drive_and_modulation() {
     let mut e = mono_engine();
     e.add_module("osc1", "com.dj.oscillator").unwrap();

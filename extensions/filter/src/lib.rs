@@ -6,22 +6,26 @@
 //!   same two integrators simultaneously, so the four output jacks are
 //!   always live.
 //! * `topology = 1` — **Ladder**: four cascaded one-pole TPT stages with a
-//!   zero-delay global feedback path and saturating integrator states
-//!   (transistor-ladder flavour). The LP/BP/HP/notch jacks are the classic
-//!   Oberheim-style weighted sums of the stage taps.
-//! * `topology = 2` — **OTA**: the SVF core with a saturating resonance
-//!   state, which squashes the resonant peak as it gets loud the way an
-//!   OTA/diode-limited filter does.
+//!   zero-delay global feedback path and a saturating input stage
+//!   (transistor-ladder flavour), including the usual passband loss at
+//!   high resonance, half compensated. The LP/BP/HP/notch jacks are the
+//!   classic Oberheim-style weighted sums of the stage taps.
+//! * `topology = 2` — **OTA**: the SVF core with a soft-clipped input and
+//!   resonance that squashes as the level rises, the way an OTA/diode
+//!   limited filter folds its resonant peak back down.
 //!
 //! Cutoff is exponential (1 V/oct, 0 = C4) from the `cutoff` knob plus the
 //! `cutoff_cv` jack. Resonance runs from gently damped up to
-//! self-oscillation: at the top of the range the damping term goes slightly
-//! negative and a Van-der-Pol style amplitude term (`NL_DAMP`) brings the
-//! loop back to unity gain, so with no input the filter sings a clean ~5 V
-//! sine at the cutoff frequency instead of blowing up or dying out.
+//! self-oscillation. Every topology limits its own oscillation with an
+//! amplitude-dependent feedback term rather than by clipping: the loop
+//! gain is pulled back to exactly unity a few volts up, so with no input
+//! the filter sings a clean sine (≈5.8 V SVF, 3.5 V ladder, 2.6 V OTA) at
+//! the cutoff frequency, at the same level whatever the cutoff. Nothing
+//! saturates the integrator states themselves — that would bleed energy
+//! out of the loop every sample and strangle the oscillation.
 //!
 //! `drive` is a pre-gain into the core. In SVF mode it is transparent
-//! (linear); in ladder/OTA mode it pushes the saturating stages.
+//! (linear); in ladder/OTA mode it pushes the saturating input stage.
 
 use dj_module_sdk::{export_module, pitch_to_hz, InitCtx, Module, ProcessIo};
 
@@ -46,9 +50,16 @@ const DAMP_SLOPE: f32 = 2.05;
 /// at 5 V when the linear term sits at its most negative (-0.05).
 const NL_DAMP: f32 = 0.05;
 /// Ladder feedback at full resonance (self-oscillates just above 4).
-const LADDER_K: f32 = 4.15;
-/// Soft-saturation knee for the nonlinear topologies, in volts.
-const SAT_LEVEL: f32 = 6.0;
+const LADDER_K: f32 = 4.5;
+/// Amplitude-dependent ladder feedback, as [`NL_DAMP`] is for the SVF.
+const LADDER_NL: f32 = 0.3;
+/// Soft-saturation knee of the OTA input stage, in volts.
+const SAT_LEVEL: f32 = 10.0;
+/// How hard the OTA squashes its resonance as the level rises.
+const OTA_SQUASH: f32 = 0.2;
+/// Soft-saturation knee of the ladder's input stage, in volts. Well above
+/// the nominal ±5 so it only bites when driven or resonating hard.
+const LADDER_SAT: f32 = 24.0;
 /// Belt-and-braces output clamp; the nonlinearities keep things far below.
 const OUT_CLAMP: f32 = 15.0;
 
@@ -61,6 +72,11 @@ fn sat(x: f32) -> f32 {
     SAT_LEVEL * (x / SAT_LEVEL).tanh()
 }
 
+#[inline]
+fn ladder_sat(x: f32) -> f32 {
+    LADDER_SAT * (x / LADDER_SAT).tanh()
+}
+
 pub struct Filter {
     sample_rate: f32,
     max_hz: f32,
@@ -69,8 +85,10 @@ pub struct Filter {
     ic2: f32,
     /// Previous bandpass value, used by the amplitude-dependent damping.
     bp_prev: f32,
-    /// Ladder one-pole states.
+    /// Ladder one-pole states and its previous output, used by the
+    /// amplitude-dependent feedback.
     l: [f32; 4],
+    ladder_prev: f32,
 }
 
 impl Filter {
@@ -81,17 +99,26 @@ impl Filter {
         (linear + NL_DAMP * bpn * bpn).clamp(-0.5, DAMP_MAX)
     }
 
-    /// Cytomic-form ZDF state-variable filter. `saturate` swaps in the OTA
-    /// flavour by soft-clipping the resonance state.
+    /// Cytomic-form ZDF state-variable filter. `ota` swaps in the OTA
+    /// flavour: a soft-clipped input stage plus resonance that squashes as
+    /// the level rises, the way an OTA's limited headroom folds the
+    /// resonant peak back down. The integrator states themselves stay
+    /// linear — saturating them would bleed energy out of the loop every
+    /// sample and strangle the self-oscillation.
     #[inline]
-    fn svf(&mut self, x: f32, g: f32, k: f32, saturate: bool) -> [f32; 4] {
+    fn svf(&mut self, x: f32, g: f32, k: f32, ota: bool) -> [f32; 4] {
+        let (x, k) = if ota {
+            let level = self.bp_prev * 0.2;
+            (sat(x), k + OTA_SQUASH * level * level)
+        } else {
+            (x, k)
+        };
         let a1 = 1.0 / (1.0 + g * (g + k));
         let a2 = g * a1;
         let a3 = g * a2;
-        let ic1 = if saturate { sat(self.ic1) } else { self.ic1 };
         let v3 = x - self.ic2;
-        let bp = a1 * ic1 + a2 * v3;
-        let lp = self.ic2 + a2 * ic1 + a3 * v3;
+        let bp = a1 * self.ic1 + a2 * v3;
+        let lp = self.ic2 + a2 * self.ic1 + a3 * v3;
         self.ic1 = 2.0 * bp - self.ic1;
         self.ic2 = 2.0 * lp - self.ic2;
         self.bp_prev = bp;
@@ -99,24 +126,30 @@ impl Filter {
         [lp, bp, hp, hp + lp]
     }
 
-    /// Four one-pole TPT stages with ZDF global feedback and saturated
-    /// states. Outputs are the Oberheim stage-tap mixes.
+    /// Four one-pole TPT stages with ZDF global feedback, a saturating
+    /// input stage and amplitude-dependent feedback. Outputs are the
+    /// Oberheim stage-tap mixes.
+    ///
+    /// The feedback threshold of this discretization is exactly 4, so the
+    /// resonance term is pulled back by the square of the output level:
+    /// the loop settles at unity gain a few volts up instead of running
+    /// into the saturator, which keeps the self-oscillation sinusoidal and
+    /// its amplitude independent of cutoff.
     #[inline]
-    fn ladder(&mut self, x: f32, g: f32, k: f32) -> [f32; 4] {
+    fn ladder(&mut self, x: f32, g: f32, k_base: f32) -> [f32; 4] {
         let big_g = g / (1.0 + g);
         let one_minus = 1.0 - big_g;
-        let s: [f32; 4] = [
-            sat(self.l[0]),
-            sat(self.l[1]),
-            sat(self.l[2]),
-            sat(self.l[3]),
-        ];
+        let level = self.ladder_prev * 0.2;
+        let k = (k_base - LADDER_NL * level * level).max(0.0);
+        // Feedback eats the passband; put half of it back.
+        let x = x * (1.0 + 0.5 * k);
+        let s = self.l;
         let g2 = big_g * big_g;
         let g4 = g2 * g2;
         let state_sum = one_minus * (g2 * big_g * s[0] + g2 * s[1] + big_g * s[2] + s[3]);
         // Solve the feedback loop: y4 = G^4 * (x - k*y4) + state_sum.
         let y4_zdf = (g4 * x + state_sum) / (1.0 + k * g4);
-        let u = x - k * y4_zdf;
+        let u = ladder_sat(x - k * y4_zdf);
 
         let v0 = big_g * (u - s[0]);
         let y1 = s[0] + v0;
@@ -131,7 +164,7 @@ impl Filter {
         let y4 = s[3] + v3;
         self.l[3] = y4 + v3;
 
-        self.bp_prev = y2 - y4;
+        self.ladder_prev = y4;
         let lp = y4;
         let bp = 4.0 * (y2 - 2.0 * y3 + y4);
         let hp = u - 4.0 * y1 + 6.0 * y2 - 4.0 * y3 + y4;
@@ -152,6 +185,7 @@ impl Module for Filter {
             ic2: 0.0,
             bp_prev: 0.0,
             l: [0.0; 4],
+            ladder_prev: 0.0,
         }
     }
 
@@ -202,6 +236,7 @@ impl Module for Filter {
             self.ic2 = 0.0;
             self.bp_prev = 0.0;
             self.l = [0.0; 4];
+            self.ladder_prev = 0.0;
         }
     }
 }
