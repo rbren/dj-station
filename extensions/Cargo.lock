@@ -24,6 +24,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-compressor"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-delay"
 version = "0.1.0"
 dependencies = [
