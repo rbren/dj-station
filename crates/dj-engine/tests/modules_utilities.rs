@@ -270,3 +270,185 @@ fn mult_split_routes_the_input_to_the_selected_output() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Quantizer
+// ---------------------------------------------------------------------------
+
+/// Scale index -> semitone degrees, mirroring the module's table.
+const SCALE_DEGREES: [&[i32]; 10] = [
+    &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    &[0, 2, 4, 5, 7, 9, 11],
+    &[0, 2, 3, 5, 7, 8, 10],
+    &[0, 2, 3, 5, 7, 8, 11],
+    &[0, 2, 4, 7, 9],
+    &[0, 3, 5, 7, 10],
+    &[0, 3, 5, 6, 7, 10],
+    &[0, 2, 3, 5, 7, 9, 10],
+    &[0, 2, 4, 5, 7, 9, 10],
+    &[0, 2, 4, 6, 8, 10],
+];
+
+/// Rising edges of a gate signal.
+fn rising_edges(signal: &[f32]) -> Vec<usize> {
+    let mut edges = Vec::new();
+    let mut prev = 0.0f32;
+    for (i, &v) in signal.iter().enumerate() {
+        if v >= 1.0 && prev < 1.0 {
+            edges.push(i);
+        }
+        prev = v;
+    }
+    edges
+}
+
+#[test]
+fn quantizer_snaps_a_sweep_to_every_scale() {
+    // A slow saw sweeps the quantizer across ±5 octaves.
+    let mut e = probe_engine(2);
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("q", "com.dj.quantizer").unwrap();
+    e.set_knob_position("osc1", "waveform", 1.0 / 3.0).unwrap(); // saw
+    e.set_knob_value("osc1", "pitch", -5.0).unwrap(); // ~8 Hz sweep
+    e.connect("osc1", "audio", "q", "in").unwrap();
+    probe(&mut e, "q", "out", 0);
+
+    for (scale, degrees) in SCALE_DEGREES.iter().enumerate() {
+        e.set_knob_position("q", "scale", scale as f32 / 9.0)
+            .unwrap();
+        let out = e.render_offline((0.3 * SR) as usize).unwrap();
+        let mut seen = std::collections::BTreeSet::new();
+        for (i, &v) in out[0].iter().enumerate() {
+            let semi = v * 12.0;
+            let rounded = semi.round();
+            assert!(
+                (semi - rounded).abs() < 1e-3,
+                "scale {scale} sample {i}: {semi} semitones is not an integer"
+            );
+            let pc = rounded.rem_euclid(12.0) as i32;
+            assert!(
+                degrees.contains(&pc),
+                "scale {scale} sample {i}: pitch class {pc} is not in the scale"
+            );
+            seen.insert(pc);
+        }
+        assert_eq!(
+            seen.len(),
+            degrees.len(),
+            "scale {scale}: sweep should visit every degree, saw {seen:?}"
+        );
+    }
+}
+
+#[test]
+fn quantizer_root_and_transpose_shift_the_grid() {
+    let mut e = probe_engine(2);
+    e.add_module("q", "com.dj.quantizer").unwrap();
+    probe(&mut e, "q", "out", 0);
+    // Major scale, input a little above the root: snaps to the root.
+    e.set_knob_position("q", "scale", 1.0 / 9.0).unwrap();
+    e.set_knob_value("q", "in", 0.2 / 12.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 0.0, "C major snaps 0.2 semitones to C4");
+
+    // Same input, root D: C natural is not in D major, so it snaps to C#.
+    e.set_knob_position("q", "root", 2.0 / 11.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 1.0 / 12.0, "D major snaps 0.2 semitones to C#4");
+
+    // Transposition is exact: +5 semitones and -1 octave.
+    e.set_knob_position("q", "root", 0.0).unwrap();
+    e.set_knob_position("q", "semitones", 5.0 / 12.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 5.0 / 12.0, "+5 semitones");
+    e.set_knob_position("q", "octaves", 3.0 / 8.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 5.0 / 12.0 - 1.0, "+5 semitones, -1 octave");
+}
+
+#[test]
+fn quantizer_triggers_on_every_note_change() {
+    let mut e = probe_engine(2);
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("scale", "com.dj.attenuverter").unwrap();
+    e.add_module("q", "com.dj.quantizer").unwrap();
+    e.set_knob_position("osc1", "waveform", 1.0 / 3.0).unwrap(); // saw
+    e.set_knob_value("osc1", "pitch", -5.0).unwrap(); // ~8 Hz sweep
+                                                      // Sweep two octaves, slowly enough that notes outlast a 5 ms pulse.
+    e.connect("osc1", "audio", "scale", "in1").unwrap();
+    e.set_knob_value("scale", "atten1", 0.2).unwrap();
+    e.connect("scale", "out1", "q", "in").unwrap();
+    e.set_knob_position("q", "scale", 4.0 / 9.0).unwrap(); // pentatonic major
+    probe(&mut e, "q", "out", 0);
+    probe(&mut e, "q", "trig", 1);
+
+    let out = e.render_offline((0.3 * SR) as usize).unwrap();
+    let (pitch, trig) = (&out[0], &out[1]);
+
+    let mut changes = 0;
+    for i in 1..pitch.len() {
+        if pitch[i] != pitch[i - 1] {
+            changes += 1;
+        }
+    }
+    assert!(
+        changes > 20,
+        "sweep should change note often, got {changes}"
+    );
+
+    let edges = rising_edges(trig);
+    // One pulse per change, plus the pulse for the very first note.
+    assert_eq!(edges.len(), changes + 1, "one trigger per note change");
+    assert!(
+        trig.iter().all(|&v| v == 0.0 || v == 10.0),
+        "trigger must be 0 or 10 V"
+    );
+
+    // Pulses are a few ms of 10 V (5 ms at 48 kHz = 240 samples).
+    let width = (0.005 * SR) as usize;
+    for &start in edges.iter().take(edges.len() - 1) {
+        let high = trig[start..(start + width).min(trig.len())]
+            .iter()
+            .filter(|&&v| v >= 1.0)
+            .count();
+        assert_eq!(high, width.min(trig.len() - start), "pulse too short");
+    }
+}
+
+#[test]
+fn quantizer_hysteresis_ignores_a_wobble_on_a_note_boundary() {
+    // Sit exactly on the boundary between C4 and C#4 (0.5 semitones) with a
+    // ±0.04 semitone wobble on top: without hysteresis this would chatter
+    // twice per oscillator cycle.
+    let mut e = probe_engine(2);
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("wob", "com.dj.attenuverter").unwrap();
+    e.add_module("q", "com.dj.quantizer").unwrap();
+    e.connect("osc1", "audio", "wob", "in1").unwrap();
+    // ±5 V * 0.000667 = ±0.0033 units = ±0.04 semitones.
+    e.set_knob_value("wob", "atten1", 0.04 / 12.0 / 5.0)
+        .unwrap();
+    e.set_knob_value("wob", "offset1", 0.5 / 12.0).unwrap();
+    e.connect("wob", "out1", "q", "in").unwrap();
+    probe(&mut e, "q", "out", 0);
+    probe(&mut e, "q", "trig", 1);
+
+    let out = e.render_offline((0.2 * SR) as usize).unwrap();
+    assert!(
+        out[0].iter().all(|&v| v == out[0][0]),
+        "quantizer chattered across the note boundary"
+    );
+    assert_eq!(
+        rising_edges(&out[1]).len(),
+        1,
+        "only the initial note should trigger"
+    );
+
+    // A wobble wider than the dead band does move the note.
+    e.set_knob_value("wob", "atten1", 0.4 / 12.0 / 5.0).unwrap();
+    let out = e.render_offline((0.2 * SR) as usize).unwrap();
+    assert!(
+        out[0].iter().any(|&v| v != out[0][0]),
+        "a ±0.4 semitone wobble should cross the boundary"
+    );
+}
