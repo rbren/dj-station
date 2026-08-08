@@ -1,0 +1,46 @@
+{
+  "ext": "com.dj.vca_dual",
+  "knobs": {
+    "cv1": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv2": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in1": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset1": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset2": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "resp1": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "resp2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}
