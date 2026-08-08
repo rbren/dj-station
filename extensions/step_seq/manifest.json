@@ -1,0 +1,625 @@
+{
+  "id": "com.dj.step_seq",
+  "name": "Step Sequencer",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Clock & Sequencing",
+  "inputs": [
+    {
+      "id": "clock",
+      "name": "Clock",
+      "default": 0.0,
+      "knob": {
+        "style": "button",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "reset",
+      "name": "Reset",
+      "default": 0.0,
+      "knob": {
+        "style": "button",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "length",
+      "name": "Length",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 16.0,
+        "curve": "linear",
+        "steps": 16
+      }
+    },
+    {
+      "id": "dir",
+      "name": "Direction",
+      "default": 0.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 3.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "glide",
+      "name": "Glide",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 2.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv1",
+      "name": "CV 1",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv2",
+      "name": "CV 2",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv3",
+      "name": "CV 3",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv4",
+      "name": "CV 4",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv5",
+      "name": "CV 5",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv6",
+      "name": "CV 6",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv7",
+      "name": "CV 7",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv8",
+      "name": "CV 8",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv9",
+      "name": "CV 9",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv10",
+      "name": "CV 10",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv11",
+      "name": "CV 11",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv12",
+      "name": "CV 12",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv13",
+      "name": "CV 13",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv14",
+      "name": "CV 14",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv15",
+      "name": "CV 15",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "cv16",
+      "name": "CV 16",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": -5.0,
+        "max": 5.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate1",
+      "name": "Gate 1",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate2",
+      "name": "Gate 2",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate3",
+      "name": "Gate 3",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate4",
+      "name": "Gate 4",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate5",
+      "name": "Gate 5",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate6",
+      "name": "Gate 6",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate7",
+      "name": "Gate 7",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate8",
+      "name": "Gate 8",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate9",
+      "name": "Gate 9",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate10",
+      "name": "Gate 10",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate11",
+      "name": "Gate 11",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate12",
+      "name": "Gate 12",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate13",
+      "name": "Gate 13",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate14",
+      "name": "Gate 14",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate15",
+      "name": "Gate 15",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "gate16",
+      "name": "Gate 16",
+      "default": 10.0,
+      "knob": {
+        "style": "switch",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "ratchet1",
+      "name": "Ratchet 1",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet2",
+      "name": "Ratchet 2",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet3",
+      "name": "Ratchet 3",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet4",
+      "name": "Ratchet 4",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet5",
+      "name": "Ratchet 5",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet6",
+      "name": "Ratchet 6",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet7",
+      "name": "Ratchet 7",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet8",
+      "name": "Ratchet 8",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet9",
+      "name": "Ratchet 9",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet10",
+      "name": "Ratchet 10",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet11",
+      "name": "Ratchet 11",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet12",
+      "name": "Ratchet 12",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet13",
+      "name": "Ratchet 13",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet14",
+      "name": "Ratchet 14",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet15",
+      "name": "Ratchet 15",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    },
+    {
+      "id": "ratchet16",
+      "name": "Ratchet 16",
+      "default": 1.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 4.0,
+        "curve": "linear",
+        "steps": 4
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "id": "cv",
+      "name": "CV"
+    },
+    {
+      "id": "gate",
+      "name": "Gate"
+    },
+    {
+      "id": "eos",
+      "name": "End of Seq"
+    }
+  ],
+  "latency_samples": 0
+}

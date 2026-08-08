@@ -217,3 +217,139 @@ fn clock_run_gate_stops_and_reset_rephases() {
     sig.extend_from_slice(&b[0]);
     assert_edges_near(&rising_edges(&sig), &[0.0, 0.5], 1, "clock after reset");
 }
+
+// ---------------------------------------------------------------------------
+// Step sequencer
+// ---------------------------------------------------------------------------
+
+/// Clock + step sequencer, `cv` on master L and `gate` on master R.
+fn step_seq_patch(bpm: f32, length: f32, dir: f32) -> Engine {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("seq", "com.dj.step_seq").unwrap();
+    e.set_knob_value("clk", "bpm", bpm).unwrap();
+    e.connect("clk", "clock", "seq", "clock").unwrap();
+    set_stepped(&mut e, "seq", "length", length);
+    set_stepped(&mut e, "seq", "dir", dir);
+    for (i, v) in [1.0f32, 2.0, 3.0, 4.0].iter().enumerate() {
+        e.set_knob_value("seq", &format!("cv{}", i + 1), *v)
+            .unwrap();
+    }
+    probe(&mut e, 0, "seq", "cv");
+    probe(&mut e, 1, "seq", "gate");
+    e
+}
+
+/// CV value sampled just before each gate edge's step boundary.
+fn cv_at_edges(cv: &[f32], edges: &[usize]) -> Vec<f32> {
+    edges.iter().map(|&i| cv[i + 16]).collect()
+}
+
+#[test]
+fn step_seq_walks_forward_with_gates_on_every_clock() {
+    // 240 BPM: one step every 0.25 s.
+    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    let out = e.render_offline((1.1 * SR) as usize).unwrap();
+    let edges = rising_edges(&out[1]);
+    assert_edges_near(&edges, &[0.0, 0.25, 0.5, 0.75, 1.0], 2, "seq gate");
+    let cvs = cv_at_edges(&out[0], &edges);
+    for (i, (&got, &want)) in cvs.iter().zip(&[1.0f32, 2.0, 3.0, 4.0, 1.0]).enumerate() {
+        assert!((got - want).abs() < 1e-3, "step {i}: cv {got} != {want}");
+    }
+    // Gate is high for half the step (the first step still uses the 20 ms
+    // fallback interval — no two clock edges have been seen yet).
+    for &run in &high_runs(&out[1])[1..4] {
+        let expect = 0.5 * 0.25 * SR;
+        assert!(
+            (run as f32 - expect).abs() < 0.1 * expect,
+            "gate width {run} != ~{expect}"
+        );
+    }
+}
+
+#[test]
+fn step_seq_direction_modes_change_the_step_order() {
+    let mut rev = step_seq_patch(240.0, 4.0, 1.0);
+    let out = rev.render_offline((1.1 * SR) as usize).unwrap();
+    let cvs = cv_at_edges(&out[0], &rising_edges(&out[1]));
+    let want = [4.0f32, 3.0, 2.0, 1.0, 4.0];
+    for (i, (&got, &w)) in cvs.iter().zip(&want).enumerate() {
+        assert!((got - w).abs() < 1e-3, "reverse step {i}: {got} != {w}");
+    }
+
+    let mut pp = step_seq_patch(240.0, 4.0, 2.0);
+    let out = pp.render_offline((1.7 * SR) as usize).unwrap();
+    let cvs = cv_at_edges(&out[0], &rising_edges(&out[1]));
+    let want = [1.0f32, 2.0, 3.0, 4.0, 3.0, 2.0, 1.0];
+    for (i, (&got, &w)) in cvs.iter().zip(&want).enumerate() {
+        assert!((got - w).abs() < 1e-3, "ping-pong step {i}: {got} != {w}");
+    }
+
+    // Random: deterministic (fixed seed) but not the forward order.
+    let mut rnd = step_seq_patch(240.0, 4.0, 3.0);
+    let a = rnd.render_offline((2.1 * SR) as usize).unwrap();
+    let a_cvs = cv_at_edges(&a[0], &rising_edges(&a[1]));
+    let mut rnd2 = step_seq_patch(240.0, 4.0, 3.0);
+    let b = rnd2.render_offline((2.1 * SR) as usize).unwrap();
+    let b_cvs = cv_at_edges(&b[0], &rising_edges(&b[1]));
+    assert_eq!(a_cvs, b_cvs, "random mode is not deterministic");
+    assert!(
+        a_cvs.iter().skip(1).any(|v| *v != 2.0),
+        "random mode walked forward: {a_cvs:?}"
+    );
+    assert!(
+        a_cvs.iter().all(|v| (1.0..=4.0).contains(v)),
+        "random mode left the active length: {a_cvs:?}"
+    );
+}
+
+#[test]
+fn step_seq_gate_off_and_ratchets_shape_the_gate_stream() {
+    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    e.set_knob_position("seq", "gate2", 0.0).unwrap(); // step 2 silent
+    set_stepped(&mut e, "seq", "ratchet3", 4.0); // step 3 ratcheted x4
+    let out = e.render_offline((1.05 * SR) as usize).unwrap();
+    let edges = rising_edges(&out[1]);
+    // step1, (step2 muted), step3 x4, step4, step1
+    assert_edges_near(
+        &edges,
+        &[
+            0.0, 0.5, 0.5625, 0.625, 0.6875, // 4 ratchets inside step 3
+            0.75, 1.0,
+        ],
+        2,
+        "ratcheted gates",
+    );
+}
+
+#[test]
+fn step_seq_end_of_sequence_fires_once_per_lap() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("seq", "com.dj.step_seq").unwrap();
+    e.set_knob_value("clk", "bpm", 240.0).unwrap();
+    e.connect("clk", "clock", "seq", "clock").unwrap();
+    set_stepped(&mut e, "seq", "length", 4.0);
+    probe(&mut e, 0, "seq", "eos");
+    probe(&mut e, 1, "seq", "gate");
+    let out = e.render_offline((2.3 * SR) as usize).unwrap();
+    // Steps at 0, 0.25, ...; the lap restarts on the 5th and 9th clock.
+    assert_edges_near(&rising_edges(&out[0]), &[1.0, 2.0], 2, "eos");
+}
+
+#[test]
+fn step_seq_glide_slews_the_cv_between_steps() {
+    let mut e = step_seq_patch(120.0, 2.0, 0.0); // 0.5 s per step, cv 1 -> 2
+    e.set_knob_value("seq", "glide", 0.25).unwrap();
+    let out = e.render_offline((1.2 * SR) as usize).unwrap();
+    let cv = &out[0];
+    let at = |t: f32| cv[(t * SR) as usize];
+    // Step 2 starts at 0.5 s and glides 1 V -> 2 V over 0.25 s.
+    assert!((at(0.49) - 1.0).abs() < 1e-3, "pre-glide {}", at(0.49));
+    assert!(
+        (at(0.625) - 1.5).abs() < 0.05,
+        "mid-glide {} != ~1.5",
+        at(0.625)
+    );
+    assert!((at(0.9) - 2.0).abs() < 1e-3, "post-glide {}", at(0.9));
+}
