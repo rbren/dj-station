@@ -21,6 +21,10 @@ fn mono_engine() -> Engine {
     .unwrap()
 }
 
+fn stereo_engine() -> Engine {
+    Engine::new(EngineConfig::default(), common::registry()).unwrap()
+}
+
 fn rms(x: &[f32]) -> f32 {
     (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()
 }
@@ -418,4 +422,182 @@ fn vca_dual_channel_two_normals_the_mix_bus() {
         peak(&split) < 1e-6,
         "normalling not broken by a patched In 2"
     );
+}
+
+// ---------------------------------------------------------------------------
+// com.dj.lfo
+// ---------------------------------------------------------------------------
+
+const SHAPE_SINE: f32 = 0.0;
+const SHAPE_SAW_UP: f32 = 2.0 / 6.0;
+const SHAPE_PULSE: f32 = 4.0 / 6.0;
+const SHAPE_SH: f32 = 5.0 / 6.0;
+
+/// A free-running LFO rendered on the master (bipolar out).
+fn render_lfo(shape: f32, rate: f32, secs: f32) -> Vec<f32> {
+    let mut e = mono_engine();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("lfo1", "bi", "out1", "l").unwrap();
+    e.set_knob_position("lfo1", "shape", shape).unwrap();
+    e.set_knob_value("lfo1", "rate", rate).unwrap();
+    e.render_offline((secs * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap()
+}
+
+#[test]
+fn lfo_runs_from_sub_hertz_to_audio_rate() {
+    for rate in [0.5f32, 5.0, 200.0, 2000.0] {
+        let out = render_lfo(SHAPE_SINE, rate, 4.0 / rate.min(20.0));
+        let hz = zero_cross_hz(&out);
+        assert!(
+            (hz - rate).abs() / rate < 0.03,
+            "asked {rate} Hz, measured {hz} Hz"
+        );
+        assert!((peak(&out) - 5.0).abs() < 0.2, "amplitude {}", peak(&out));
+    }
+}
+
+#[test]
+fn lfo_unipolar_output_tracks_bipolar() {
+    let mut e = stereo_engine();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("lfo1", "bi", "out1", "l").unwrap();
+    e.connect("lfo1", "uni", "out1", "r").unwrap();
+    e.set_knob_value("lfo1", "rate", 20.0).unwrap();
+    let out = e.render_offline((0.5 * SR) as usize).unwrap();
+    for (b, u) in out[0].iter().zip(&out[1]) {
+        assert!((u - (b + 5.0)).abs() < 1e-5, "uni {u} vs bi {b}");
+        assert!((-0.001..=10.001).contains(u), "unipolar out of range: {u}");
+    }
+}
+
+#[test]
+fn lfo_saw_is_antialiased_at_audio_rate() {
+    // Same alias probe as the waveshaper: at 6.9 kHz the harmonics near
+    // multiples of the sample rate fold down into the boxcar's passband.
+    let out = render_lfo(SHAPE_SAW_UP, 6900.0, 0.3);
+    let hz = zero_cross_hz(&out);
+    let naive: Vec<f32> = (0..out.len())
+        .map(|i| {
+            let p = (hz * i as f32 / SR).fract();
+            5.0 * (2.0 * p - 1.0)
+        })
+        .collect();
+    let aliased = low_band_rms(&naive);
+    let clean = low_band_rms(&out);
+    assert!(aliased > 0.05, "reference has no alias energy ({aliased})");
+    assert!(
+        clean < aliased * 0.3,
+        "PolyBLEP alias floor {clean} vs naive {aliased}"
+    );
+}
+
+#[test]
+fn lfo_syncs_to_a_clock_with_multiplier_and_divider() {
+    // clk is a 4 Hz pulse LFO (unipolar, so a clean 0/10 gate).
+    for (ratio_pos, expected) in [(5.0 / 8.0, 8.0f32), (3.0 / 8.0, 2.0)] {
+        let mut e = mono_engine();
+        e.add_module("clk", "com.dj.lfo").unwrap();
+        e.add_module("lfo1", "com.dj.lfo").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.set_knob_position("clk", "shape", SHAPE_PULSE).unwrap();
+        e.set_knob_value("clk", "rate", 4.0).unwrap();
+        e.connect("clk", "uni", "lfo1", "clock").unwrap();
+        e.connect("lfo1", "bi", "out1", "l").unwrap();
+        e.set_knob_position("lfo1", "shape", SHAPE_SAW_UP).unwrap();
+        e.set_knob_value("lfo1", "rate", 2.0).unwrap(); // ignored while synced
+        e.set_knob_position("lfo1", "ratio", ratio_pos).unwrap();
+        let out = e
+            .render_offline((3.0 * SR) as usize)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let hz = zero_cross_hz(tail(&out));
+        assert!(
+            (hz - expected).abs() / expected < 0.05,
+            "ratio {ratio_pos}: expected {expected} Hz, got {hz} Hz"
+        );
+    }
+}
+
+#[test]
+fn lfo_reset_restarts_the_cycle() {
+    let mut e = mono_engine();
+    e.add_module("clk", "com.dj.lfo").unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.set_knob_position("clk", "shape", SHAPE_PULSE).unwrap();
+    e.set_knob_value("clk", "rate", 10.0).unwrap();
+    e.connect("clk", "uni", "lfo1", "reset").unwrap();
+    e.connect("lfo1", "bi", "out1", "l").unwrap();
+    e.set_knob_position("lfo1", "shape", SHAPE_SAW_UP).unwrap();
+    e.set_knob_value("lfo1", "rate", 3.0).unwrap();
+    let out = e
+        .render_offline((2.0 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+    // Restarted every 100 ms, a 3 Hz ramp only ever climbs 30 % of its
+    // -5..+5 V travel: it sweeps -5 V to -2 V, mean -3.5 V, where a
+    // free-running one would average 0 V and spend 40 % of its time above
+    // -1 V. (The odd sample right at a reset reads 0 V: the PolyBLEP
+    // correction straddles the jump.)
+    let steady = tail(&out);
+    let mean = steady.iter().sum::<f32>() / steady.len() as f32;
+    assert!(
+        (mean + 3.5).abs() < 0.3,
+        "mean {mean} V — resets not landing"
+    );
+    let high = steady.iter().filter(|&&v| v > -1.0).count();
+    assert!(
+        (high as f32) < 0.01 * steady.len() as f32,
+        "{high} samples climbed past -1 V despite resets"
+    );
+}
+
+#[test]
+fn lfo_sample_and_hold_shape_is_stepped() {
+    let out = render_lfo(SHAPE_SH, 10.0, 1.0);
+    let mut changes = 0;
+    let mut run = 1usize;
+    let mut runs = Vec::new();
+    for i in 1..out.len() {
+        if out[i] != out[i - 1] {
+            changes += 1;
+            runs.push(run);
+            run = 1;
+        } else {
+            run += 1;
+        }
+    }
+    // One step per 10 Hz cycle over a second (the tenth lands on the very
+    // last frame, so 9 or 10 transitions are both correct).
+    assert!((9..=10).contains(&changes), "{changes} steps in 1 s");
+    for &r in &runs[1..] {
+        assert!((4790..=4810).contains(&r), "step length {r}");
+    }
+    assert!(peak(&out) > 0.5, "stepped random is stuck at zero");
+}
+
+#[test]
+fn lfo_shifted_output_lags_by_the_phase_knob() {
+    let mut e = stereo_engine();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("lfo1", "bi", "out1", "l").unwrap();
+    e.connect("lfo1", "shifted", "out1", "r").unwrap();
+    e.set_knob_value("lfo1", "rate", 5.0).unwrap();
+    e.set_knob_value("lfo1", "phase", 0.25).unwrap();
+    let out = e.render_offline((1.0 * SR) as usize).unwrap();
+    let lag = (0.25 * SR / 5.0) as usize; // quarter cycle at 5 Hz
+    for i in (SR as usize / 2)..out[0].len() {
+        assert!(
+            (out[1][i] - out[0][i - lag]).abs() < 0.02,
+            "shifted output does not lag by a quarter cycle at {i}"
+        );
+    }
 }
