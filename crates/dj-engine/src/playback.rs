@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use crate::graph::SIGNAL_MAX;
 use crate::knob::{Curve, KnobConfig, KnobStyle};
-use crate::manifest::{JackDecl, Manifest, OutputDecl};
+use crate::manifest::{categories, JackDecl, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 
 pub const PLAYBACK_ID: &str = "builtin.playback";
@@ -31,6 +31,7 @@ pub fn playback_manifest() -> Manifest {
         name: "Playback".into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
+        category: categories::DJ.into(),
         inputs: vec![
             JackDecl {
                 id: "play_gate".into(),

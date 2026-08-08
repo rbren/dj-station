@@ -3,6 +3,7 @@
   "name": "VCA",
   "version": "0.1.0",
   "abi": "wasm-1",
+  "category": "Shaping",
   "inputs": [
     { "id": "in", "name": "In", "default": 0.0 },
     { "id": "cv", "name": "Gain / CV", "default": 10.0,

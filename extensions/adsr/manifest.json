@@ -3,6 +3,7 @@
   "name": "ADSR",
   "version": "0.1.0",
   "abi": "wasm-1",
+  "category": "Modulation",
   "inputs": [
     { "id": "gate", "name": "Gate", "default": 0.0,
       "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },

@@ -1334,6 +1334,7 @@ impl Engine {
             name: def.name.clone(),
             version: def.version.to_string(),
             abi: "macro-1".into(),
+            category: crate::manifest::categories::MACROS.into(),
             inputs: def
                 .interface
                 .inputs

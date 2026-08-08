@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 use crate::graph::SIGNAL_MAX;
 use crate::knob::{Curve, KnobConfig, KnobStyle};
-use crate::manifest::{JackDecl, Manifest, OutputDecl, ParamDecl};
+use crate::manifest::{categories, JackDecl, Manifest, OutputDecl, ParamDecl};
 use crate::module_host::HostModule;
 use crate::playback::TrackData;
 
@@ -238,6 +238,7 @@ pub fn deck_manifest() -> Manifest {
         name: "DJ Deck".into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
+        category: categories::DJ.into(),
         inputs,
         outputs,
         params,

@@ -71,8 +71,9 @@ impl ExtensionRegistry {
         self.extensions.get(ext_id)
     }
 
-    /// Manifests of every module type that can be instantiated: built-ins
-    /// first, then discovered extensions (sorted by id).
+    /// Manifests of every module type that can be instantiated (built-ins
+    /// plus discovered extensions), grouped by category in display order
+    /// and alphabetical by name within a category.
     pub fn all_manifests(&self) -> Vec<Manifest> {
         let mut out = vec![
             builtin::audio_out_manifest(),
@@ -83,6 +84,12 @@ impl ExtensionRegistry {
             crate::gesture::gesture_manifest(),
         ];
         out.extend(self.extensions.values().map(|e| e.manifest.clone()));
+        out.sort_by(|a, b| {
+            crate::manifest::categories::rank(&a.category)
+                .cmp(&crate::manifest::categories::rank(&b.category))
+                .then_with(|| a.category.cmp(&b.category))
+                .then_with(|| a.name.cmp(&b.name))
+        });
         out
     }
 }

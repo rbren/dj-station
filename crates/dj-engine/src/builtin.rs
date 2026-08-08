@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::knob::{Curve, KnobConfig, KnobStyle};
-use crate::manifest::{JackDecl, Manifest, OutputDecl};
+use crate::manifest::{categories, JackDecl, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 
 pub const AUDIO_OUT_ID: &str = "builtin.audio_out";
@@ -21,6 +21,7 @@ pub fn audio_out_manifest() -> Manifest {
         name: "Audio Output".into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
+        category: categories::ANALYSIS.into(),
         inputs: AUDIO_OUT_JACKS
             .iter()
             .map(|(id, name)| JackDecl {
@@ -55,6 +56,7 @@ pub fn midi_manifest() -> Manifest {
         name: "MIDI".into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
+        category: categories::ANALYSIS.into(),
         // Input jacks drive controller LEDs/feedback (one per LED mapping;
         // named like output mappings). Fixed count so graph buffers are
         // preallocated.

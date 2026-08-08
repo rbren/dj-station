@@ -3,6 +3,7 @@
   "name": "Gain (Native)",
   "version": "0.1.0",
   "abi": "native-1",
+  "category": "Utilities",
   "inputs": [
     { "id": "in", "name": "In", "default": 0.0 },
     { "id": "gain", "name": "Gain / CV", "default": 10.0,

@@ -10,7 +10,7 @@
 //! computed by the control-side [`dj_gesture::GestureProcessor`], which
 //! emits the falling edge as an ordinary event.
 
-use crate::manifest::{Manifest, OutputDecl};
+use crate::manifest::{categories, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +26,7 @@ pub fn gesture_manifest() -> Manifest {
         name: "Gesture".into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
+        category: categories::ANALYSIS.into(),
         inputs: vec![],
         // Output jacks are dynamic (one per mapping); the graph
         // preallocates MAX_GESTURE_JACKS output buffers.

@@ -3,6 +3,7 @@
   "name": "Oscillator",
   "version": "0.1.0",
   "abi": "wasm-1",
+  "category": "Sources",
   "inputs": [
     { "id": "pitch", "name": "Pitch", "default": 0.0,
       "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },

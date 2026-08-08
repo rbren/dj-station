@@ -44,6 +44,8 @@ export interface Manifest {
   name: string;
   version: string;
   abi: string;
+  /** Library grouping ("Sources", "Shaping", ...). */
+  category?: string;
   inputs: JackDecl[];
   outputs: OutputDecl[];
   params: ParamDecl[];

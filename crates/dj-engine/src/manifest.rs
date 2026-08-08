@@ -12,6 +12,9 @@ pub struct Manifest {
     pub version: String,
     /// "wasm-1" | "native-1"
     pub abi: String,
+    /// Library grouping shown in the UI; see [`categories`].
+    #[serde(default = "default_category")]
+    pub category: String,
     #[serde(default)]
     pub inputs: Vec<JackDecl>,
     #[serde(default)]
@@ -56,6 +59,34 @@ pub struct ParamDecl {
 
 fn default_param_type() -> String {
     "float".into()
+}
+
+/// Canonical library categories, in display order. A manifest may name any
+/// string; unknown ones sort last under their own heading.
+pub mod categories {
+    pub const SOURCES: &str = "Sources";
+    pub const SHAPING: &str = "Shaping";
+    pub const MODULATION: &str = "Modulation";
+    pub const UTILITIES: &str = "Utilities";
+    pub const SEQUENCING: &str = "Clock & Sequencing";
+    pub const EFFECTS: &str = "Effects";
+    pub const ANALYSIS: &str = "Analysis & I/O";
+    pub const DJ: &str = "DJ";
+    pub const MACROS: &str = "Macros";
+
+    pub const ORDER: [&str; 9] = [
+        SOURCES, SHAPING, MODULATION, UTILITIES, SEQUENCING, EFFECTS, ANALYSIS, DJ, MACROS,
+    ];
+
+    /// Position of `name` in [`ORDER`]; unknown categories sort after all
+    /// known ones.
+    pub fn rank(name: &str) -> usize {
+        ORDER.iter().position(|c| *c == name).unwrap_or(ORDER.len())
+    }
+}
+
+fn default_category() -> String {
+    categories::UTILITIES.into()
 }
 
 impl ParamDecl {

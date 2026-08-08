@@ -10,7 +10,7 @@
 //! across the sweep, and each side reaches exactly 1.0 at its end stop.
 
 use crate::knob::{Curve, KnobConfig, KnobStyle};
-use crate::manifest::{JackDecl, Manifest, OutputDecl};
+use crate::manifest::{categories, JackDecl, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 
 pub const CROSSFADER_ID: &str = "builtin.crossfader";
@@ -33,6 +33,7 @@ pub fn crossfader_manifest() -> Manifest {
         name: "Crossfader".into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
+        category: categories::DJ.into(),
         inputs: vec![
             audio_in("a_l", "A Left"),
             audio_in("a_r", "A Right"),
