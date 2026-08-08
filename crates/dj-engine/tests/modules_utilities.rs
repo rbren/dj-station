@@ -192,3 +192,81 @@ fn attenuverter_scales_audio_sample_accurately() {
     }
     assert!(peak > 4.9, "expected a ±5 source, got {peak}");
 }
+
+// ---------------------------------------------------------------------------
+// Mult / merge / split
+// ---------------------------------------------------------------------------
+
+/// A DC source: an attenuverter channel with nothing patched in, so its
+/// output is just the channel offset.
+fn add_dc(e: &mut Engine, id: &str, volts: f32) {
+    e.add_module(id, "com.dj.attenuverter").unwrap();
+    e.set_knob_value(id, "offset1", volts).unwrap();
+}
+
+#[test]
+fn mult_banks_chain_until_the_second_input_is_patched() {
+    let mut e = probe_engine(6);
+    add_dc(&mut e, "dc_a", 3.0);
+    add_dc(&mut e, "dc_b", -2.0);
+    e.add_module("mult", "com.dj.mult").unwrap();
+    e.connect("dc_a", "out1", "mult", "a_in").unwrap();
+    probe(&mut e, "mult", "a1", 0);
+    probe(&mut e, "mult", "a4", 1);
+    probe(&mut e, "mult", "b1", 2);
+    probe(&mut e, "mult", "b4", 3);
+
+    // Bank B unpatched: normalled from bank A, so all eight outs carry A.
+    let tail = render_tail(&mut e, 0.01);
+    for (i, v) in tail.iter().take(4).enumerate() {
+        assert_near(*v, 3.0, &format!("normalled mult out {i}"));
+    }
+
+    // Patching B breaks the normal; bank A is unaffected.
+    e.connect("dc_b", "out1", "mult", "b_in").unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 3.0, "bank A out 1");
+    assert_near(tail[1], 3.0, "bank A out 4");
+    assert_near(tail[2], -2.0, "bank B out 1");
+    assert_near(tail[3], -2.0, "bank B out 4");
+}
+
+#[test]
+fn mult_merge_sums_only_patched_inputs() {
+    let mut e = probe_engine(2);
+    add_dc(&mut e, "dc_a", 3.0);
+    add_dc(&mut e, "dc_b", 4.0);
+    e.add_module("mult", "com.dj.mult").unwrap();
+    e.connect("dc_a", "out1", "mult", "merge1").unwrap();
+    e.connect("dc_b", "out1", "mult", "merge2").unwrap();
+    probe(&mut e, "mult", "merge", 0);
+
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 7.0, "merge of two patched inputs");
+
+    // An unpatched merge jack contributes nothing, whatever its knob says.
+    e.set_knob_value("mult", "merge3", 5.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 7.0, "unpatched merge jack stays out of the sum");
+}
+
+#[test]
+fn mult_split_routes_the_input_to_the_selected_output() {
+    let mut e = probe_engine(4);
+    add_dc(&mut e, "dc_a", 6.0);
+    e.add_module("mult", "com.dj.mult").unwrap();
+    e.connect("dc_a", "out1", "mult", "split_in").unwrap();
+    for way in 0..4 {
+        probe(&mut e, "mult", &format!("s{}", way + 1), way);
+    }
+
+    for sel in 0..4 {
+        e.set_knob_position("mult", "split_sel", sel as f32 / 3.0)
+            .unwrap();
+        let tail = render_tail(&mut e, 0.01);
+        for (way, v) in tail.iter().enumerate() {
+            let want = if way == sel { 6.0 } else { 0.0 };
+            assert_near(*v, want, &format!("split sel {sel} out {way}"));
+        }
+    }
+}
