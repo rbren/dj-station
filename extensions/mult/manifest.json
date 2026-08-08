@@ -1,0 +1,35 @@
+{
+  "id": "com.dj.mult",
+  "name": "Mult / Merge / Split",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Utilities",
+  "inputs": [
+    { "id": "a_in", "name": "Mult A In", "default": 0.0 },
+    { "id": "b_in", "name": "Mult B In (norm A)", "default": 0.0 },
+    { "id": "merge1", "name": "Merge 1", "default": 0.0 },
+    { "id": "merge2", "name": "Merge 2", "default": 0.0 },
+    { "id": "merge3", "name": "Merge 3", "default": 0.0 },
+    { "id": "merge4", "name": "Merge 4", "default": 0.0 },
+    { "id": "split_in", "name": "Split In", "default": 0.0 },
+    { "id": "split_sel", "name": "Split Select", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 3.0, "curve": "linear", "steps": 4 } }
+  ],
+  "outputs": [
+    { "id": "a1", "name": "A 1" },
+    { "id": "a2", "name": "A 2" },
+    { "id": "a3", "name": "A 3" },
+    { "id": "a4", "name": "A 4" },
+    { "id": "b1", "name": "B 1" },
+    { "id": "b2", "name": "B 2" },
+    { "id": "b3", "name": "B 3" },
+    { "id": "b4", "name": "B 4" },
+    { "id": "merge", "name": "Merge Out" },
+    { "id": "s1", "name": "Split 1" },
+    { "id": "s2", "name": "Split 2" },
+    { "id": "s3", "name": "Split 3" },
+    { "id": "s4", "name": "Split 4" }
+  ],
+  "params": [],
+  "latency_samples": 0
+}

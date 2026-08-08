@@ -1,0 +1,42 @@
+{
+  "id": "com.dj.logic",
+  "name": "Logic & Comparator",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Utilities",
+  "inputs": [
+    { "id": "a", "name": "Gate A", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "b", "name": "Gate B", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "c", "name": "Gate C (opt)", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "cmp_in", "name": "Comparator In", "default": 0.0 },
+    { "id": "threshold", "name": "Threshold", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "win_in", "name": "Window In", "default": 0.0 },
+    { "id": "win_low", "name": "Window Low", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "win_high", "name": "Window High", "default": 5.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "g2t_in", "name": "Gate to Trig In", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "trig_ms", "name": "Trig Width (ms)", "default": 5.0,
+      "knob": { "style": "continuous", "min": 0.1, "max": 100.0, "curve": "exp" } }
+  ],
+  "outputs": [
+    { "id": "and", "name": "AND" },
+    { "id": "nand", "name": "NAND" },
+    { "id": "or", "name": "OR" },
+    { "id": "nor", "name": "NOR" },
+    { "id": "xor", "name": "XOR" },
+    { "id": "xnor", "name": "XNOR" },
+    { "id": "not_a", "name": "NOT A" },
+    { "id": "not_b", "name": "NOT B" },
+    { "id": "cmp", "name": "Comparator" },
+    { "id": "window", "name": "Window" },
+    { "id": "trig", "name": "Trigger" }
+  ],
+  "params": [],
+  "latency_samples": 0
+}
