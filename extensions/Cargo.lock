@@ -10,7 +10,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-compressor"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-delay"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-granular"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-modfx"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-oscillator"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-resonator"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-reverb"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-scope"
 version = "0.1.0"
 dependencies = [
  "dj-module-sdk",

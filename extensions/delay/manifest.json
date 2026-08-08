@@ -1,0 +1,32 @@
+{
+  "id": "com.dj.delay",
+  "name": "Delay",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Effects",
+  "inputs": [
+    { "id": "in_l", "name": "In L", "default": 0.0 },
+    { "id": "in_r", "name": "In R", "default": 0.0 },
+    { "id": "time", "name": "Time", "default": 0.25,
+      "knob": { "style": "continuous", "min": 0.002, "max": 4.0, "curve": "exp" } },
+    { "id": "clock", "name": "Clock", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "div", "name": "Division", "default": 6.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 8.0, "curve": "linear", "steps": 9 } },
+    { "id": "feedback", "name": "Feedback", "default": 0.4,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "lowpass", "name": "Damp LP", "default": 8000.0,
+      "knob": { "style": "continuous", "min": 200.0, "max": 18000.0, "curve": "exp" } },
+    { "id": "highpass", "name": "Damp HP", "default": 60.0,
+      "knob": { "style": "continuous", "min": 20.0, "max": 2000.0, "curve": "exp" } },
+    { "id": "mix", "name": "Mix", "default": 0.35,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "pingpong", "name": "Ping-Pong", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 1.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out_l", "name": "Out L" },
+    { "id": "out_r", "name": "Out R" }
+  ],
+  "latency_samples": 0
+}
