@@ -401,3 +401,65 @@ fn trig_seq_tracks_run_at_independent_lengths() {
         "len 3",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Euclidean generator
+// ---------------------------------------------------------------------------
+
+#[test]
+fn euclid_generates_bjorklund_patterns_with_rotation() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("euc", "com.dj.euclid").unwrap();
+    e.set_knob_value("clk", "bpm", 150.0).unwrap();
+    // x4 of 150 BPM = one step every 0.1 s.
+    e.connect("clk", "mul4", "euc", "clock").unwrap();
+    // E(3,8) = x..x..x. on channel 1; the same rotated left by 1 on ch 2.
+    set_stepped(&mut e, "euc", "steps1", 8.0);
+    set_stepped(&mut e, "euc", "fill1", 3.0);
+    set_stepped(&mut e, "euc", "steps2", 8.0);
+    set_stepped(&mut e, "euc", "fill2", 3.0);
+    set_stepped(&mut e, "euc", "rot2", 1.0);
+    probe(&mut e, 0, "euc", "ch1");
+    probe(&mut e, 1, "euc", "ch2");
+    let out = e.render_offline((1.65 * SR) as usize).unwrap();
+    assert_edges_near(
+        &rising_edges(&out[0]),
+        &[0.0, 0.3, 0.6, 0.8, 1.1, 1.4, 1.6],
+        2,
+        "E(3,8)",
+    );
+    assert_edges_near(
+        &rising_edges(&out[1]),
+        &[0.2, 0.5, 0.7, 1.0, 1.3, 1.5],
+        2,
+        "E(3,8) rotated",
+    );
+}
+
+#[test]
+fn euclid_or_output_merges_the_channels() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("euc", "com.dj.euclid").unwrap();
+    e.set_knob_value("clk", "bpm", 150.0).unwrap();
+    e.connect("clk", "mul4", "euc", "clock").unwrap();
+    for (ch, (steps, fill)) in [(4.0f32, 1.0f32), (4.0, 2.0)].iter().enumerate() {
+        set_stepped(&mut e, "euc", &format!("steps{}", ch + 1), *steps);
+        set_stepped(&mut e, "euc", &format!("fill{}", ch + 1), *fill);
+    }
+    // Channels 3 and 4 silent.
+    set_stepped(&mut e, "euc", "fill3", 0.0);
+    set_stepped(&mut e, "euc", "fill4", 0.0);
+    probe(&mut e, 0, "euc", "or");
+    probe(&mut e, 1, "euc", "ch2");
+    let out = e.render_offline((0.85 * SR) as usize).unwrap();
+    // E(1,4) = x... and E(2,4) = x.x. -> union fires on steps 1 and 3.
+    assert_edges_near(&rising_edges(&out[0]), &[0.0, 0.2, 0.4, 0.6, 0.8], 2, "or");
+    assert_edges_near(
+        &rising_edges(&out[1]),
+        &[0.0, 0.2, 0.4, 0.6, 0.8],
+        2,
+        "E(2,4)",
+    );
+}

@@ -1,0 +1,198 @@
+{
+  "id": "com.dj.euclid",
+  "name": "Euclidean",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Clock & Sequencing",
+  "inputs": [
+    {
+      "id": "clock",
+      "name": "Clock",
+      "default": 0.0,
+      "knob": {
+        "style": "button",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "reset",
+      "name": "Reset",
+      "default": 0.0,
+      "knob": {
+        "style": "button",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "steps1",
+      "name": "Steps 1",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 32.0,
+        "curve": "linear",
+        "steps": 32
+      }
+    },
+    {
+      "id": "fill1",
+      "name": "Fill 1",
+      "default": 4.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 32.0,
+        "curve": "linear",
+        "steps": 33
+      }
+    },
+    {
+      "id": "rot1",
+      "name": "Rotate 1",
+      "default": 0.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 31.0,
+        "curve": "linear",
+        "steps": 32
+      }
+    },
+    {
+      "id": "steps2",
+      "name": "Steps 2",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 32.0,
+        "curve": "linear",
+        "steps": 32
+      }
+    },
+    {
+      "id": "fill2",
+      "name": "Fill 2",
+      "default": 7.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 32.0,
+        "curve": "linear",
+        "steps": 33
+      }
+    },
+    {
+      "id": "rot2",
+      "name": "Rotate 2",
+      "default": 0.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 31.0,
+        "curve": "linear",
+        "steps": 32
+      }
+    },
+    {
+      "id": "steps3",
+      "name": "Steps 3",
+      "default": 8.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 32.0,
+        "curve": "linear",
+        "steps": 32
+      }
+    },
+    {
+      "id": "fill3",
+      "name": "Fill 3",
+      "default": 3.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 32.0,
+        "curve": "linear",
+        "steps": 33
+      }
+    },
+    {
+      "id": "rot3",
+      "name": "Rotate 3",
+      "default": 0.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 31.0,
+        "curve": "linear",
+        "steps": 32
+      }
+    },
+    {
+      "id": "steps4",
+      "name": "Steps 4",
+      "default": 12.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 32.0,
+        "curve": "linear",
+        "steps": 32
+      }
+    },
+    {
+      "id": "fill4",
+      "name": "Fill 4",
+      "default": 5.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 32.0,
+        "curve": "linear",
+        "steps": 33
+      }
+    },
+    {
+      "id": "rot4",
+      "name": "Rotate 4",
+      "default": 0.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 31.0,
+        "curve": "linear",
+        "steps": 32
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "id": "ch1",
+      "name": "Ch 1"
+    },
+    {
+      "id": "ch2",
+      "name": "Ch 2"
+    },
+    {
+      "id": "ch3",
+      "name": "Ch 3"
+    },
+    {
+      "id": "ch4",
+      "name": "Ch 4"
+    },
+    {
+      "id": "or",
+      "name": "Or"
+    }
+  ],
+  "latency_samples": 0
+}
