@@ -808,3 +808,119 @@ fn resonator_stays_bounded_with_minimum_damping() {
         assert!(peak < 9.0, "mode {mode}: level runaway ({peak})");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Scope (analysis)
+// ---------------------------------------------------------------------------
+
+/// Osc -> scope, with every measurement output wired to a VCA input so the
+/// test can read it back through jack telemetry.
+fn scope_patch(pitch: f32, waveform: f32, level: f32) -> Engine {
+    let mut e = stereo_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("scope", "com.dj.scope").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "scope", "in").unwrap();
+    e.connect("scope", "thru", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "pitch", pitch).unwrap();
+    e.set_knob_value("osc1", "waveform", waveform).unwrap();
+    e.set_knob_value("vca1", "cv", 10.0 * level).unwrap();
+    for (i, jack) in ["pitch", "hz", "peak", "rms", "trig"].iter().enumerate() {
+        let probe = format!("probe{i}");
+        e.add_module(&probe, "com.dj.vca").unwrap();
+        e.connect("scope", jack, &probe, "in").unwrap();
+    }
+    e
+}
+
+/// Read a scope output through its probe VCA's input telemetry.
+fn probe(e: &Engine, index: usize) -> f32 {
+    e.tap(&format!("probe{index}"), "in").unwrap().instantaneous
+}
+
+#[test]
+fn scope_passes_audio_through_unchanged() {
+    let mut e = scope_patch(0.0, 1.0, 1.0); // saw, full level
+    let out = e.render_offline((0.2 * SR) as usize).unwrap();
+    let mut plain = stereo_engine();
+    plain.add_module("osc1", "com.dj.oscillator").unwrap();
+    plain.add_module("out1", "builtin.audio_out").unwrap();
+    plain.connect("osc1", "audio", "out1", "l").unwrap();
+    plain.set_knob_value("osc1", "waveform", 1.0).unwrap();
+    let reference = plain.render_offline((0.2 * SR) as usize).unwrap();
+    let diff = out[0]
+        .iter()
+        .zip(&reference[0])
+        .fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+    assert!(diff < 1e-6, "scope altered the signal: {diff}");
+}
+
+#[test]
+fn scope_detects_frequency_and_pitch() {
+    for (pitch, hz) in [(0.0f32, 261.6f32), (-1.0, 130.8), (1.0, 523.3)] {
+        for waveform in [0.0f32, 1.0, 2.0, 3.0] {
+            let mut e = scope_patch(pitch, waveform, 1.0);
+            e.render_offline((0.3 * SR) as usize).unwrap();
+            let detected_pitch = probe(&e, 0);
+            let detected_hz = probe(&e, 1) * 100.0;
+            assert!(
+                (detected_hz - hz).abs() < 0.02 * hz,
+                "waveform {waveform}: detected {detected_hz:.1} Hz, expected {hz:.1}"
+            );
+            assert!(
+                (detected_pitch - pitch).abs() < 0.05,
+                "waveform {waveform}: detected pitch {detected_pitch:.3}, expected {pitch}"
+            );
+        }
+    }
+}
+
+#[test]
+fn scope_reports_peak_and_rms_levels() {
+    let mut e = scope_patch(0.0, 0.0, 1.0); // sine at ±5 V
+    e.render_offline((0.4 * SR) as usize).unwrap();
+    let peak = probe(&e, 2);
+    let level_rms = probe(&e, 3);
+    assert!((peak - 5.0).abs() < 0.2, "peak {peak:.3} V != 5");
+    assert!(
+        (level_rms - 3.535).abs() < 0.2,
+        "rms {level_rms:.3} V != 3.54 (5/sqrt(2))"
+    );
+
+    // Half amplitude halves both readings.
+    let mut e = scope_patch(0.0, 0.0, 0.5);
+    e.render_offline((0.4 * SR) as usize).unwrap();
+    assert!((probe(&e, 2) - 2.5).abs() < 0.15, "peak at half level");
+    assert!((probe(&e, 3) - 1.77).abs() < 0.15, "rms at half level");
+
+    // Silence: levels fall away and `hz` reports "unvoiced".
+    let mut e = scope_patch(0.0, 0.0, 0.0);
+    e.render_offline((0.5 * SR) as usize).unwrap();
+    assert!(probe(&e, 2) < 1e-3, "peak on silence");
+    assert!(probe(&e, 1) < 1e-6, "hz should be 0 on silence");
+}
+
+#[test]
+fn scope_trigger_fires_once_per_period() {
+    let mut e = scope_patch(0.0, 0.0, 1.0);
+    e.add_module("out2", "builtin.audio_out").unwrap();
+    e.connect("scope", "trig", "out2", "r").unwrap();
+    let out = e.render_offline((0.5 * SR) as usize).unwrap();
+    let trig = &out[1][(0.1 * SR) as usize..];
+    let pulses = trig
+        .windows(2)
+        .filter(|w| w[0] < 5.0 && w[1] >= 5.0)
+        .count();
+    let rate = pulses as f32 * SR / trig.len() as f32;
+    assert!(
+        (rate - 261.6).abs() < 10.0,
+        "sync pulses at {rate:.1} Hz, expected one per 261.6 Hz period"
+    );
+    let high = trig.iter().fold(0.0f32, |m, &x| m.max(x));
+    assert!(
+        (high - 10.0).abs() < 1e-6,
+        "trigger not a 10 V gate: {high}"
+    );
+}
