@@ -452,3 +452,143 @@ fn quantizer_hysteresis_ignores_a_wobble_on_a_note_boundary() {
         "a ±0.4 semitone wobble should cross the boundary"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Logic & comparator
+// ---------------------------------------------------------------------------
+
+#[test]
+fn logic_boolean_outputs_follow_their_truth_tables() {
+    let mut e = probe_engine(8);
+    e.add_module("lg", "com.dj.logic").unwrap();
+    let jacks = ["and", "or", "xor", "nand", "nor", "xnor", "not_a", "not_b"];
+    for (ch, jack) in jacks.iter().enumerate() {
+        probe(&mut e, "lg", jack, ch);
+    }
+
+    for (a, b) in [(false, false), (true, false), (false, true), (true, true)] {
+        e.set_knob_value("lg", "a", if a { 10.0 } else { 0.0 })
+            .unwrap();
+        e.set_knob_value("lg", "b", if b { 10.0 } else { 0.0 })
+            .unwrap();
+        let tail = render_tail(&mut e, 0.005);
+        let want = [
+            a && b,
+            a || b,
+            a ^ b,
+            !(a && b),
+            !(a || b),
+            !(a ^ b),
+            !a,
+            !b,
+        ];
+        for (ch, jack) in jacks.iter().enumerate() {
+            let expected = if want[ch] { 10.0 } else { 0.0 };
+            assert_near(tail[ch], expected, &format!("{jack} for a={a} b={b}"));
+        }
+    }
+}
+
+#[test]
+fn logic_third_input_joins_only_when_patched() {
+    let mut e = probe_engine(4);
+    add_dc(&mut e, "low", 0.0);
+    e.add_module("lg", "com.dj.logic").unwrap();
+    e.set_knob_value("lg", "a", 10.0).unwrap();
+    e.set_knob_value("lg", "b", 10.0).unwrap();
+    probe(&mut e, "lg", "and", 0);
+    probe(&mut e, "lg", "xor", 1);
+
+    let tail = render_tail(&mut e, 0.005);
+    assert_near(tail[0], 10.0, "AND of two highs with C unpatched");
+    assert_near(tail[1], 0.0, "XOR of two highs with C unpatched");
+
+    // Patching a low gate into C pulls AND down: C is now part of the logic.
+    e.connect("low", "out1", "lg", "c").unwrap();
+    let tail = render_tail(&mut e, 0.005);
+    assert_near(tail[0], 0.0, "AND with a patched low C");
+}
+
+#[test]
+fn logic_comparator_and_window_track_their_thresholds() {
+    let mut e = probe_engine(4);
+    e.add_module("lg", "com.dj.logic").unwrap();
+    probe(&mut e, "lg", "cmp", 0);
+    probe(&mut e, "lg", "window", 1);
+
+    e.set_knob_value("lg", "cmp_in", 3.0).unwrap();
+    e.set_knob_value("lg", "threshold", 2.0).unwrap();
+    e.set_knob_value("lg", "win_in", 3.0).unwrap();
+    e.set_knob_value("lg", "win_low", 1.0).unwrap();
+    e.set_knob_value("lg", "win_high", 5.0).unwrap();
+    let tail = render_tail(&mut e, 0.005);
+    assert_near(tail[0], 10.0, "comparator above threshold");
+    assert_near(tail[1], 10.0, "window inside bounds");
+
+    e.set_knob_value("lg", "threshold", 4.0).unwrap();
+    e.set_knob_value("lg", "win_in", 7.0).unwrap();
+    let tail = render_tail(&mut e, 0.005);
+    assert_near(tail[0], 0.0, "comparator below threshold");
+    assert_near(tail[1], 0.0, "window above the high bound");
+
+    e.set_knob_value("lg", "win_in", 0.5).unwrap();
+    let tail = render_tail(&mut e, 0.005);
+    assert_near(tail[1], 0.0, "window below the low bound");
+}
+
+#[test]
+fn logic_comparator_makes_one_clean_edge_per_crossing() {
+    // A sine through the comparator at 0 V: exactly one edge per half cycle.
+    let mut e = probe_engine(2);
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("lg", "com.dj.logic").unwrap();
+    e.set_knob_value("osc1", "pitch", -3.0).unwrap(); // ~32.7 Hz
+    e.connect("osc1", "audio", "lg", "cmp_in").unwrap();
+    probe(&mut e, "lg", "cmp", 0);
+
+    let seconds = 1.0;
+    let out = e.render_offline((seconds * SR) as usize).unwrap();
+    let cycles = 261.626 / 8.0 * seconds;
+    let edges = rising_edges(&out[0]);
+    assert!(
+        (edges.len() as f32 - cycles).abs() <= 1.0,
+        "expected ~{cycles} comparator edges, got {}",
+        edges.len()
+    );
+    assert!(
+        out[0].iter().all(|&v| v == 0.0 || v == 10.0),
+        "comparator must be 0 or 10 V"
+    );
+}
+
+#[test]
+fn logic_gate_to_trigger_emits_a_fixed_width_pulse() {
+    let mut e = probe_engine(2);
+    e.add_module("lg", "com.dj.logic").unwrap();
+    probe(&mut e, "lg", "trig", 0);
+    e.set_knob_value("lg", "trig_ms", 5.0).unwrap();
+
+    // Rising edge: one 5 ms pulse, however long the gate stays high.
+    e.set_knob_value("lg", "g2t_in", 10.0).unwrap();
+    let out = e.render_offline((0.1 * SR) as usize).unwrap();
+    let high = out[0].iter().filter(|&&v| v >= 1.0).count();
+    let expected = (0.005 * SR) as usize;
+    assert_eq!(high, expected, "pulse width at 5 ms");
+    assert_eq!(rising_edges(&out[0]), vec![0], "one pulse per rising edge");
+
+    // Still high: no new pulse.
+    let out = e.render_offline((0.1 * SR) as usize).unwrap();
+    assert!(
+        out[0].iter().all(|&v| v == 0.0),
+        "a held gate must not retrigger"
+    );
+
+    // Falling then rising again, with a different width.
+    e.set_knob_value("lg", "g2t_in", 0.0).unwrap();
+    e.render_offline(64).unwrap();
+    e.set_knob_value("lg", "trig_ms", 20.0).unwrap();
+    e.set_knob_value("lg", "g2t_in", 10.0).unwrap();
+    let out = e.render_offline((0.1 * SR) as usize).unwrap();
+    let high = out[0].iter().filter(|&&v| v >= 1.0).count();
+    assert_eq!(high, (0.020 * SR) as usize, "pulse width at 20 ms");
+}
