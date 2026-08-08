@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "pink",
+      "to": "vca1",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "random",
+      "to": "drum1",
+      "to_jack": "hat_tune"
+    }
+  ]
+}

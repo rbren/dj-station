@@ -1,0 +1,131 @@
+{
+  "seconds": 0.5,
+  "midi": [
+    {
+      "instance": "midi1",
+      "frame": 480,
+      "data": [
+        144,
+        42,
+        100
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 1440,
+      "data": [
+        128,
+        42,
+        0
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 6480,
+      "data": [
+        144,
+        42,
+        100
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 7440,
+      "data": [
+        128,
+        42,
+        0
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 12480,
+      "data": [
+        144,
+        42,
+        100
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 13440,
+      "data": [
+        128,
+        42,
+        0
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 18480,
+      "data": [
+        144,
+        42,
+        100
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 19440,
+      "data": [
+        128,
+        42,
+        0
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 480,
+      "data": [
+        144,
+        36,
+        100
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 2399,
+      "data": [
+        128,
+        36,
+        0
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 12000,
+      "data": [
+        144,
+        38,
+        100
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 13920,
+      "data": [
+        128,
+        38,
+        0
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 18000,
+      "data": [
+        144,
+        36,
+        100
+      ]
+    },
+    {
+      "instance": "midi1",
+      "frame": 19920,
+      "data": [
+        128,
+        36,
+        0
+      ]
+    }
+  ]
+}

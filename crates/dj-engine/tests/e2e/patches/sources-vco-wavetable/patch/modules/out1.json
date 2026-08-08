@@ -1,0 +1,21 @@
+{
+  "ext": "builtin.audio_out",
+  "knobs": {
+    "channel_offset": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "l": {
+      "position": 4.5474735e-13,
+      "atten": 0.45,
+      "offset": 0.0
+    },
+    "r": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}
