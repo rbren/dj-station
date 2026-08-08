@@ -1,192 +1,19 @@
-//! E2E audio regression tests (PRD §10.1).
+//! E2E audio regression tests (PRD §10.1) for the core M0–M5 cases.
 //!
-//! Each case under `tests/e2e/patches/<case>/` is a serialized patch
-//! (directory-tree format, §12.3) plus an `events.json` sidecar describing
-//! render length and virtual MIDI injection. The harness loads the patch,
-//! renders it offline to a WAV, and compares against the committed golden
-//! in `tests/e2e/goldens/<case>.wav`.
-//!
-//! The render pipeline is deterministic on a given platform, so comparison
-//! is sample-exact within a tiny epsilon (1e-6) that absorbs cross-platform
-//! libm differences.
-//!
-//! Regenerating goldens intentionally: `./scripts/regen-goldens.sh`
-//! (sets REGEN_GOLDENS=1, which rebuilds the patch dirs *and* goldens).
+//! The harness lives in `tests/common/e2e.rs`; see its docs for the case
+//! layout and the regeneration flow (`./scripts/regen-goldens.sh`).
+//! Module-specific cases live in their own `tests/e2e_*.rs` files.
 
 mod common;
 
+use common::e2e::{
+    check_case, regen, write_case_tone, write_events, DeckSetupSpec, EventsFile, GestureTraceSpec,
+    MidiEventSpec, TrackLoadSpec,
+};
 use dj_engine::{Engine, EngineConfig};
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-
-#[derive(Debug, Serialize, Deserialize)]
-struct MidiEventSpec {
-    instance: String,
-    frame: u64,
-    data: [u8; 3],
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct TrackLoadSpec {
-    instance: String,
-    /// Audio file, relative to the case directory (keeps patches portable).
-    file: String,
-}
-
-/// Deck DJ metadata applied after load. In the app this comes from the
-/// library DB (track metadata, PRD §7); E2E cases carry it in the sidecar
-/// so the committed patches stay self-contained.
-#[derive(Debug, Serialize, Deserialize)]
-struct DeckSetupSpec {
-    instance: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    grid: Option<(f64, f64)>, // (bpm, anchor_secs)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    cues: Vec<(usize, f64)>, // (slot, position_secs)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    r#loop: Option<(f64, f64, bool)>, // (start, end, enabled)
-    /// Stem files (vocals/drums/bass/other), case-relative. Like grids and
-    /// cues, stems come from the app layer (library stem cache) rather
-    /// than the patch, so E2E cases carry them in the sidecar (M3).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    stems: Option<[String; 4]>,
-}
-
-/// A recorded gesture fixture (JSON pose trace, case-relative) fed through
-/// the deterministic mock pipeline (synthetic frames -> marker detector)
-/// into a Gesture node before rendering (M5).
-#[derive(Debug, Serialize, Deserialize)]
-struct GestureTraceSpec {
-    instance: String,
-    trace: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct EventsFile {
-    seconds: f32,
-    #[serde(default)]
-    midi: Vec<MidiEventSpec>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    tracks: Vec<TrackLoadSpec>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    decks: Vec<DeckSetupSpec>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    gestures: Vec<GestureTraceSpec>,
-}
-
-fn e2e_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/e2e")
-}
-
-fn regen() -> bool {
-    std::env::var("REGEN_GOLDENS")
-        .map(|v| v == "1")
-        .unwrap_or(false)
-}
-
-fn render_case(case: &str) -> PathBuf {
-    let case_dir = e2e_dir().join("patches").join(case);
-    let events: EventsFile =
-        serde_json::from_str(&std::fs::read_to_string(case_dir.join("events.json")).unwrap())
-            .unwrap();
-    let mut engine = Engine::load_patch(&case_dir.join("patch"), common::registry()).unwrap();
-    for t in &events.tracks {
-        let ext = engine
-            .nodes
-            .iter()
-            .find(|n| n.instance_id == t.instance)
-            .map(|n| n.ext_id.clone())
-            .unwrap_or_default();
-        if ext == "builtin.deck" {
-            engine
-                .deck_load(&t.instance, &case_dir.join(&t.file))
-                .unwrap();
-        } else {
-            engine
-                .playback_load(&t.instance, &case_dir.join(&t.file))
-                .unwrap();
-        }
-    }
-    for d in &events.decks {
-        if let Some((bpm, anchor)) = d.grid {
-            engine.deck_set_beatgrid(&d.instance, bpm, anchor).unwrap();
-        }
-        for &(slot, pos) in &d.cues {
-            engine.deck_set_cue(&d.instance, slot, Some(pos)).unwrap();
-        }
-        if let Some((start, end, enabled)) = d.r#loop {
-            engine.deck_set_loop(&d.instance, start, end).unwrap();
-            engine.deck_loop_enable(&d.instance, enabled).unwrap();
-        }
-        if let Some(stems) = &d.stems {
-            let paths: [PathBuf; 4] = std::array::from_fn(|i| case_dir.join(&stems[i]));
-            engine.deck_load_stems(&d.instance, &paths).unwrap();
-        }
-    }
-    for ev in &events.midi {
-        engine.inject_midi(&ev.instance, ev.frame, ev.data).unwrap();
-    }
-    for g in &events.gestures {
-        let trace = dj_engine::dj_gesture::PoseTrace::load(&case_dir.join(&g.trace)).unwrap();
-        engine.gesture_feed_trace(&g.instance, &trace, 0).unwrap();
-    }
-    let frames = (events.seconds * engine.config.sample_rate) as usize;
-    let out = std::env::temp_dir().join(format!("dj-e2e-{case}.wav"));
-    engine.render_offline_wav(frames, &out).unwrap();
-    out
-}
-
-fn read_wav(path: &Path) -> (hound::WavSpec, Vec<f32>) {
-    let mut reader = hound::WavReader::open(path)
-        .unwrap_or_else(|e| panic!("cannot open {}: {e}", path.display()));
-    let spec = reader.spec();
-    let samples: Vec<f32> = reader.samples::<f32>().map(|s| s.unwrap()).collect();
-    (spec, samples)
-}
-
-fn check_case(case: &str) {
-    let golden_path = e2e_dir().join("goldens").join(format!("{case}.wav"));
-    let rendered_path = render_case(case);
-    if regen() {
-        std::fs::create_dir_all(golden_path.parent().unwrap()).unwrap();
-        std::fs::copy(&rendered_path, &golden_path).unwrap();
-        println!("regenerated golden {}", golden_path.display());
-        return;
-    }
-    let (gspec, golden) = read_wav(&golden_path);
-    let (rspec, rendered) = read_wav(&rendered_path);
-    assert_eq!(gspec, rspec, "{case}: WAV spec changed");
-    assert_eq!(golden.len(), rendered.len(), "{case}: length changed");
-    let mut max_diff = 0.0f32;
-    let mut max_at = 0usize;
-    for (i, (&g, &r)) in golden.iter().zip(&rendered).enumerate() {
-        let d = (g - r).abs();
-        if d > max_diff {
-            max_diff = d;
-            max_at = i;
-        }
-    }
-    assert!(
-        max_diff <= 1e-6,
-        "{case}: rendered audio deviates from golden (max diff {max_diff} at sample {max_at}).\n\
-         If this change is intentional, run ./scripts/regen-goldens.sh and review the diff."
-    );
-    let _ = std::fs::remove_file(&rendered_path);
-}
-
-// ---------------------------------------------------------------------------
-// Case construction (only used with REGEN_GOLDENS=1 to build the committed
-// patch directories; the sidecar events.json files are written too).
-// ---------------------------------------------------------------------------
-
-fn write_events(case_dir: &Path, events: &EventsFile) {
-    let mut s = serde_json::to_string_pretty(events).unwrap();
-    s.push('\n');
-    std::fs::write(case_dir.join("events.json"), s).unwrap();
-}
 
 fn regen_patches() {
-    let patches = e2e_dir().join("patches");
+    let patches = common::e2e::e2e_dir().join("patches");
 
     // Case 1: Osc (sine, C4) -> VCA (half gain via cv knob) -> Audio Out.
     {
@@ -209,10 +36,7 @@ fn regen_patches() {
             &dir,
             &EventsFile {
                 seconds: 0.5,
-                midi: vec![],
-                tracks: vec![],
-                decks: vec![],
-                gestures: vec![],
+                ..EventsFile::default()
             },
         );
     }
@@ -258,9 +82,7 @@ fn regen_patches() {
                         data: [0x80, 60, 0],
                     },
                 ],
-                tracks: vec![],
-                decks: vec![],
-                gestures: vec![],
+                ..EventsFile::default()
             },
         );
     }
@@ -298,10 +120,7 @@ fn regen_patches() {
             &dir,
             &EventsFile {
                 seconds: 0.5,
-                midi: vec![],
-                tracks: vec![],
-                decks: vec![],
-                gestures: vec![],
+                ..EventsFile::default()
             },
         );
     }
@@ -360,25 +179,8 @@ fn regen_patches() {
     }
 }
 
-// Deterministic 16-bit mono tone, committed next to a deck case.
-fn write_case_tone(path: &Path, freq: f64, seconds: f64) {
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: 48_000,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-    let mut w = hound::WavWriter::create(path, spec).unwrap();
-    for i in 0..(seconds * 48_000.0) as u64 {
-        let t = i as f64 / 48_000.0;
-        let x = (2.0 * std::f64::consts::PI * freq * t).sin() * 0.5;
-        w.write_sample((x * i16::MAX as f64) as i16).unwrap();
-    }
-    w.finalize().unwrap();
-}
-
 fn regen_deck_patches() {
-    let patches = e2e_dir().join("patches");
+    let patches = common::e2e::e2e_dir().join("patches");
 
     // Case 5 (M2): one deck, keylock on at +8 %, active loop, manual
     // beatgrid. l = deck audio, r = beat_clock.
@@ -482,7 +284,7 @@ fn regen_deck_patches() {
 }
 
 fn regen_stem_patches() {
-    let patches = e2e_dir().join("patches");
+    let patches = common::e2e::e2e_dir().join("patches");
 
     // Case 7 (M3): deck with stems loaded — bass muted, drums at half
     // gain — plus the drums stem jack routed out separately.
@@ -555,7 +357,7 @@ fn regen_stem_patches() {
 /// and instantiating it twice at different levels, plus an FM wire into a
 /// promoted input across the macro boundary.
 fn regen_macro_patches() {
-    let patches = e2e_dir().join("patches");
+    let patches = common::e2e::e2e_dir().join("patches");
     let dir = patches.join("macro-tone-collapse");
     std::fs::create_dir_all(&dir).unwrap();
     let config = EngineConfig {
@@ -612,10 +414,7 @@ fn regen_macro_patches() {
         &dir,
         &EventsFile {
             seconds: 0.5,
-            midi: vec![],
-            tracks: vec![],
-            decks: vec![],
-            gestures: vec![],
+            ..EventsFile::default()
         },
     );
 }
@@ -685,7 +484,7 @@ fn e2e_deck_crossfader_sync() {
 }
 
 fn regen_gesture_patches() {
-    let patches = e2e_dir().join("patches");
+    let patches = common::e2e::e2e_dir().join("patches");
 
     // Case 9 (M5): Gesture(distance: L thumb<->index) -> VCA(cv) with
     // Osc -> VCA -> Audio Out (stereo l/r), driven by the recorded pinch
@@ -722,13 +521,11 @@ fn regen_gesture_patches() {
             &dir,
             &EventsFile {
                 seconds: 1.5,
-                midi: vec![],
-                tracks: vec![],
-                decks: vec![],
                 gestures: vec![GestureTraceSpec {
                     instance: "gest1".into(),
                     trace: "pinch.json".into(),
                 }],
+                ..EventsFile::default()
             },
         );
     }

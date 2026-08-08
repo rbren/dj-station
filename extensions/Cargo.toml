@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["oscillator", "vca", "adsr"]
+# Every extension folder is a member; new modules need no edit here.
+# `gain-native` is a standalone workspace (host-target cdylib, own target/).
+members = ["*"]
+exclude = ["gain-native", "target"]
 
 [workspace.dependencies]
 dj-module-sdk = { path = "../crates/dj-module-sdk" }

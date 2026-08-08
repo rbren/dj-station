@@ -1,6 +1,8 @@
 //! Shared helpers for dj-engine integration tests.
 #![allow(dead_code)]
 
+pub mod e2e;
+
 use dj_engine::{Engine, EngineConfig, ExtensionRegistry};
 use std::path::PathBuf;
 use std::sync::Once;

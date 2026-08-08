@@ -11,18 +11,22 @@ export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128"
 cargo build --release --target wasm32-unknown-unknown \
   --manifest-path extensions/Cargo.toml || exit 1
 
-# Plain "libname:folder" pairs — macOS ships bash 3.2, which has no
-# associative arrays (declare -A).
+# Every extension folder with a Cargo.toml maps to <folder>/dsp.wasm; the
+# artifact name is the package name with dashes turned into underscores.
 TARGET=extensions/target/wasm32-unknown-unknown/release
-for pair in dj_ext_oscillator:oscillator dj_ext_vca:vca dj_ext_adsr:adsr; do
-  lib="${pair%%:*}"
-  folder="${pair#*:}"
+for cargo_toml in extensions/*/Cargo.toml; do
+  folder="$(dirname "$cargo_toml")"
+  name="$(basename "$folder")"
+  # gain-native is a separate workspace built by build-native-extensions.sh.
+  [ "$name" = "gain-native" ] && continue
+  pkg="$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$cargo_toml" | head -1)"
+  lib="$(echo "$pkg" | tr '-' '_')"
   src="$TARGET/${lib}.wasm"
-  dst="extensions/${folder}/dsp.wasm"
+  dst="${folder}/dsp.wasm"
   if [ ! -f "$src" ]; then
     echo "missing $src" >&2
     exit 1
   fi
   cp "$src" "$dst"
-  echo "built ${folder}/dsp.wasm ($(wc -c < "$dst" | tr -d ' ') bytes)"
+  echo "built ${name}/dsp.wasm ($(wc -c < "$dst" | tr -d ' ') bytes)"
 done
