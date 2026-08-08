@@ -176,8 +176,7 @@ fn attenuverter_scales_audio_sample_accurately() {
 
     let out = e.render_offline((0.05 * SR) as usize).unwrap();
     let mut peak = 0.0f32;
-    for i in 0..out[0].len() {
-        let src = out[0][i];
+    for (i, &src) in out[0].iter().enumerate() {
         peak = peak.max(src.abs());
         assert!(
             (out[1][i] - 0.25 * src).abs() < 1e-4,
@@ -676,6 +675,27 @@ fn seq_switch_step_count_reset_and_mutes() {
     e.set_knob_value("sw", "m2", 10.0).unwrap();
     let seen: Vec<i32> = (0..4).map(|_| index(clock_once(&mut e, "sw")[0])).collect();
     assert_eq!(seen, vec![3, 4, 1, 3], "muted step 2 is skipped");
+}
+
+#[test]
+fn seq_switch_position_survives_a_hot_reload() {
+    let mut e = seq_switch_engine(2);
+    probe(&mut e, "sw", "out", 0);
+    render_tail(&mut e, 0.002);
+    clock_once(&mut e, "sw");
+    let before = clock_once(&mut e, "sw")[0];
+    assert_eq!(before.round() as i32, 3, "clocked to step 3");
+
+    // save_state -> fresh instance -> load_state (PRD §5.4).
+    assert_eq!(e.reload_extension("com.dj.seq_switch").unwrap(), 1);
+    let after = render_tail(&mut e, 0.002)[0];
+    assert_eq!(after.round() as i32, 3, "step position survived the swap");
+    let next = clock_once(&mut e, "sw")[0];
+    assert_eq!(
+        next.round() as i32,
+        4,
+        "clocking resumes from the same step"
+    );
 }
 
 #[test]
