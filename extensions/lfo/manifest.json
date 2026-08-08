@@ -1,0 +1,31 @@
+{
+  "id": "com.dj.lfo",
+  "name": "LFO",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Modulation",
+  "inputs": [
+    { "id": "rate", "name": "Rate", "default": 2.0,
+      "knob": { "style": "continuous", "min": 0.01, "max": 2000.0, "curve": "exp" } },
+    { "id": "rate_cv", "name": "Rate CV", "default": 0.0,
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
+    { "id": "shape", "name": "Shape", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 6.0, "curve": "linear", "steps": 7 } },
+    { "id": "pw", "name": "Pulse Width", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.02, "max": 0.98, "curve": "linear" } },
+    { "id": "clock", "name": "Clock", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "ratio", "name": "Mult / Div", "default": 4.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 8.0, "curve": "linear", "steps": 9 } },
+    { "id": "reset", "name": "Reset", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "phase", "name": "Phase", "default": 0.25,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "bi", "name": "Bipolar" },
+    { "id": "uni", "name": "Unipolar" },
+    { "id": "shifted", "name": "Phase Shifted" }
+  ],
+  "latency_samples": 0
+}

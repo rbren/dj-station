@@ -17,6 +17,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-filter"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-function"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-lfo"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-logic"
 version = "0.1.0"
 dependencies = [
@@ -66,7 +87,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-vca-dual"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-vco"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-waveshaper"
 version = "0.1.0"
 dependencies = [
  "dj-module-sdk",

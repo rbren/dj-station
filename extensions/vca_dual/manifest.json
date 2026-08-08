@@ -1,0 +1,28 @@
+{
+  "id": "com.dj.vca_dual",
+  "name": "Dual VCA",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Shaping",
+  "inputs": [
+    { "id": "in1", "name": "In 1", "default": 0.0 },
+    { "id": "cv1", "name": "Level / CV 1", "default": 10.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "resp1", "name": "Response 1", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 1.0, "curve": "linear", "steps": 2 } },
+    { "id": "offset1", "name": "Offset 1", "default": 0.0,
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
+    { "id": "in2", "name": "In 2", "default": 0.0 },
+    { "id": "cv2", "name": "Level / CV 2", "default": 10.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "resp2", "name": "Response 2", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 1.0, "curve": "linear", "steps": 2 } },
+    { "id": "offset2", "name": "Offset 2", "default": 0.0,
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out1", "name": "Out 1" },
+    { "id": "out2", "name": "Out 2 / Mix" }
+  ],
+  "latency_samples": 0
+}
