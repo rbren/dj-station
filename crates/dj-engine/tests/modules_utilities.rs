@@ -119,3 +119,76 @@ fn mixer_cancels_a_signal_against_its_inverse() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Attenuverter / offset
+// ---------------------------------------------------------------------------
+
+#[test]
+fn attenuverter_channels_apply_exact_gain_and_offset() {
+    let mut e = probe_engine(10);
+    e.add_module("att", "com.dj.attenuverter").unwrap();
+    for ch in 0..5 {
+        probe(&mut e, "att", &format!("out{}", ch + 1), ch);
+    }
+
+    // Ch 1: unity. Ch 2: inverted unity. Ch 3: attenuator centred (muted)
+    // with a pure offset. Ch 4: half gain plus offset. Ch 5: untouched, to
+    // pin the shipped defaults (atten = +1, offset = 0).
+    for ch in 1..=5 {
+        e.set_knob_value("att", &format!("in{ch}"), 5.0).unwrap();
+    }
+    e.set_knob_value("att", "atten1", 1.0).unwrap();
+    e.set_knob_value("att", "atten2", -1.0).unwrap();
+    e.set_knob_value("att", "atten3", 0.0).unwrap();
+    e.set_knob_value("att", "offset3", 2.5).unwrap();
+    e.set_knob_value("att", "atten4", 0.5).unwrap();
+    e.set_knob_value("att", "offset4", -4.0).unwrap();
+
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 5.0, "unity channel");
+    assert_near(tail[1], -5.0, "inverted channel");
+    assert_near(tail[2], 2.5, "muted channel passes offset only");
+    assert_near(tail[3], -1.5, "half gain plus offset");
+    assert_near(tail[4], 5.0, "default channel is unity with no offset");
+
+    // Offsets span the full ±10 V and the output clamps at the rails.
+    e.set_knob_value("att", "offset1", 10.0).unwrap();
+    e.set_knob_value("att", "offset2", -10.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 10.0, "5 V + 10 V offset clamps at the rail");
+    assert_near(tail[1], -10.0, "-5 V - 10 V offset clamps at the rail");
+}
+
+#[test]
+fn attenuverter_scales_audio_sample_accurately() {
+    let mut e = probe_engine(4);
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("att", "com.dj.attenuverter").unwrap();
+    e.connect("osc1", "audio", "att", "in1").unwrap();
+    e.connect("osc1", "audio", "att", "in2").unwrap();
+    e.set_knob_value("att", "atten1", 0.25).unwrap();
+    e.set_knob_value("att", "atten2", -0.25).unwrap();
+    e.set_knob_value("att", "offset2", 1.0).unwrap();
+    probe(&mut e, "osc1", "audio", 0);
+    probe(&mut e, "att", "out1", 1);
+    probe(&mut e, "att", "out2", 2);
+
+    let out = e.render_offline((0.05 * SR) as usize).unwrap();
+    let mut peak = 0.0f32;
+    for i in 0..out[0].len() {
+        let src = out[0][i];
+        peak = peak.max(src.abs());
+        assert!(
+            (out[1][i] - 0.25 * src).abs() < 1e-4,
+            "sample {i}: {} != 0.25 * {src}",
+            out[1][i]
+        );
+        assert!(
+            (out[2][i] - (-0.25 * src + 1.0)).abs() < 1e-4,
+            "sample {i}: {} != -0.25 * {src} + 1",
+            out[2][i]
+        );
+    }
+    assert!(peak > 4.9, "expected a ±5 source, got {peak}");
+}

@@ -1,0 +1,68 @@
+{
+  "id": "com.dj.attenuverter",
+  "name": "Attenuverter / Offset",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Utilities",
+  "inputs": [
+    { "id": "in1", "name": "In 1", "default": 0.0 },
+    { "id": "atten1", "name": "Atten 1", "default": 1.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "offset1", "name": "Offset 1", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in2", "name": "In 2", "default": 0.0 },
+    { "id": "atten2", "name": "Atten 2", "default": 1.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "offset2", "name": "Offset 2", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in3", "name": "In 3", "default": 0.0 },
+    { "id": "atten3", "name": "Atten 3", "default": 1.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "offset3", "name": "Offset 3", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in4", "name": "In 4", "default": 0.0 },
+    { "id": "atten4", "name": "Atten 4", "default": 1.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "offset4", "name": "Offset 4", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in5", "name": "In 5", "default": 0.0 },
+    { "id": "atten5", "name": "Atten 5", "default": 1.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "offset5", "name": "Offset 5", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in6", "name": "In 6", "default": 0.0 },
+    { "id": "atten6", "name": "Atten 6", "default": 1.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "offset6", "name": "Offset 6", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in7", "name": "In 7", "default": 0.0 },
+    { "id": "atten7", "name": "Atten 7", "default": 1.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "offset7", "name": "Offset 7", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in8", "name": "In 8", "default": 0.0 },
+    { "id": "atten8", "name": "Atten 8", "default": 1.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "offset8", "name": "Offset 8", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out1", "name": "Out 1" },
+    { "id": "out2", "name": "Out 2" },
+    { "id": "out3", "name": "Out 3" },
+    { "id": "out4", "name": "Out 4" },
+    { "id": "out5", "name": "Out 5" },
+    { "id": "out6", "name": "Out 6" },
+    { "id": "out7", "name": "Out 7" },
+    { "id": "out8", "name": "Out 8" }
+  ],
+  "params": [],
+  "latency_samples": 0
+}
