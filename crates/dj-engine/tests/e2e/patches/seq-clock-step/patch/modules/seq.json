@@ -1,0 +1,271 @@
+{
+  "ext": "com.dj.step_seq",
+  "knobs": {
+    "clock": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv1": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv10": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv11": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv12": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv13": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv14": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv15": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv16": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv2": {
+      "position": 0.525,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv3": {
+      "position": 0.55832994,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv4": {
+      "position": 0.54166996,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv5": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv6": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv7": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv8": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cv9": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "dir": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate1": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate10": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate11": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate12": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate13": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate14": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate15": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate16": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate2": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate3": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate4": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate5": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate6": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate7": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate8": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate9": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "glide": {
+      "position": 0.024999999,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "length": {
+      "position": 0.2,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet1": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet10": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet11": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet12": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet13": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet14": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet15": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet16": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet3": {
+      "position": 0.33333334,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet4": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet5": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet6": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet7": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet8": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratchet9": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

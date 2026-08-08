@@ -1,0 +1,36 @@
+{
+  "ext": "com.dj.turing",
+  "knobs": {
+    "clock": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "length": {
+      "position": 0.46666667,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "prob": {
+      "position": 0.62,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "range": {
+      "position": 0.19999999,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "root": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "scale": {
+      "position": 0.5555556,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

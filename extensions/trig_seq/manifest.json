@@ -1,0 +1,250 @@
+{
+  "id": "com.dj.trig_seq",
+  "name": "Trigger Sequencer",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Clock & Sequencing",
+  "inputs": [
+    {
+      "id": "clock",
+      "name": "Clock",
+      "default": 0.0,
+      "knob": {
+        "style": "button",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "reset",
+      "name": "Reset",
+      "default": 0.0,
+      "knob": {
+        "style": "button",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "pat1",
+      "name": "Pattern 1",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "pat2",
+      "name": "Pattern 2",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "pat3",
+      "name": "Pattern 3",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "pat4",
+      "name": "Pattern 4",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "pat5",
+      "name": "Pattern 5",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "pat6",
+      "name": "Pattern 6",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "pat7",
+      "name": "Pattern 7",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "pat8",
+      "name": "Pattern 8",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "len1",
+      "name": "Length 1",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 16.0,
+        "curve": "linear",
+        "steps": 16
+      }
+    },
+    {
+      "id": "len2",
+      "name": "Length 2",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 16.0,
+        "curve": "linear",
+        "steps": 16
+      }
+    },
+    {
+      "id": "len3",
+      "name": "Length 3",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 16.0,
+        "curve": "linear",
+        "steps": 16
+      }
+    },
+    {
+      "id": "len4",
+      "name": "Length 4",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 16.0,
+        "curve": "linear",
+        "steps": 16
+      }
+    },
+    {
+      "id": "len5",
+      "name": "Length 5",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 16.0,
+        "curve": "linear",
+        "steps": 16
+      }
+    },
+    {
+      "id": "len6",
+      "name": "Length 6",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 16.0,
+        "curve": "linear",
+        "steps": 16
+      }
+    },
+    {
+      "id": "len7",
+      "name": "Length 7",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 16.0,
+        "curve": "linear",
+        "steps": 16
+      }
+    },
+    {
+      "id": "len8",
+      "name": "Length 8",
+      "default": 16.0,
+      "knob": {
+        "style": "stepped",
+        "min": 1.0,
+        "max": 16.0,
+        "curve": "linear",
+        "steps": 16
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "id": "trig1",
+      "name": "Trig 1"
+    },
+    {
+      "id": "trig2",
+      "name": "Trig 2"
+    },
+    {
+      "id": "trig3",
+      "name": "Trig 3"
+    },
+    {
+      "id": "trig4",
+      "name": "Trig 4"
+    },
+    {
+      "id": "trig5",
+      "name": "Trig 5"
+    },
+    {
+      "id": "trig6",
+      "name": "Trig 6"
+    },
+    {
+      "id": "trig7",
+      "name": "Trig 7"
+    },
+    {
+      "id": "trig8",
+      "name": "Trig 8"
+    }
+  ],
+  "latency_samples": 0
+}

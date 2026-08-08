@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "trig1",
+      "to": "adsr2",
+      "to_jack": "gate"
+    }
+  ]
+}

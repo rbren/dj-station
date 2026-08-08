@@ -1,0 +1,8 @@
+{
+  "block_size": 128,
+  "format": "djpatch-1",
+  "master_channels": 1,
+  "name": "e2e-seq-clock-step",
+  "sample_rate": 48000.0,
+  "version": "0.1.0"
+}

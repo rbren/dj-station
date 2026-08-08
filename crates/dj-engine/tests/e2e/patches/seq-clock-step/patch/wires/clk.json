@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "bar",
+      "to": "seq",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "clock",
+      "to": "seq",
+      "to_jack": "clock"
+    }
+  ]
+}

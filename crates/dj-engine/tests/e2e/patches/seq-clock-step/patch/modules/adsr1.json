@@ -1,0 +1,36 @@
+{
+  "ext": "com.dj.adsr",
+  "knobs": {
+    "attack": {
+      "position": 0.00090009,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "decay": {
+      "position": 0.01180236,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "release": {
+      "position": 0.00490049,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "retrig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "sustain": {
+      "position": 0.34999996,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

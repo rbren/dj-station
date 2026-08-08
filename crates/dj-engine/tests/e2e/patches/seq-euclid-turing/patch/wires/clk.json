@@ -1,0 +1,29 @@
+{
+  "wires": [
+    {
+      "from_jack": "bar",
+      "to": "euc",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "bar",
+      "to": "trg",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "mul4",
+      "to": "euc",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "mul4",
+      "to": "trg",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "mul4",
+      "to": "trn",
+      "to_jack": "clock"
+    }
+  ]
+}

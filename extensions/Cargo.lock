@@ -17,6 +17,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-clock"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-delay"
 version = "0.1.0"
 dependencies = [
@@ -25,6 +32,13 @@ dependencies = [
 
 [[package]]
 name = "dj-ext-drum"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-euclid"
 version = "0.1.0"
 dependencies = [
  "dj-module-sdk",
@@ -116,6 +130,27 @@ dependencies = [
 
 [[package]]
 name = "dj-ext-seq-switch"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-step-seq"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-trig-seq"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-turing"
 version = "0.1.0"
 dependencies = [
  "dj-module-sdk",
