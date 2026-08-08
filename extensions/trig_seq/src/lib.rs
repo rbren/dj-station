@@ -130,16 +130,18 @@ impl Module for TrigSeq {
     }
 
     fn save_state(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(TRACKS + 9);
+        let mut out = Vec::with_capacity(TRACKS + 17);
         out.extend_from_slice(&self.step);
         out.push(self.armed as u8 | ((self.seen_clock as u8) << 1));
         out.extend_from_slice(&self.interval.to_le_bytes());
         out.extend_from_slice(&self.since_clock.to_le_bytes());
+        out.extend_from_slice(&self.last_clock.to_le_bytes());
+        out.extend_from_slice(&self.last_reset.to_le_bytes());
         out
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
-        if bytes.len() < TRACKS + 9 {
+        if bytes.len() < TRACKS + 17 {
             return;
         }
         self.step.copy_from_slice(&bytes[0..TRACKS]);
@@ -151,6 +153,8 @@ impl Module for TrigSeq {
         self.interval =
             f32::from_le_bytes(bytes[TRACKS + 1..TRACKS + 5].try_into().unwrap()).max(2.0);
         self.since_clock = f32::from_le_bytes(bytes[TRACKS + 5..TRACKS + 9].try_into().unwrap());
+        self.last_clock = f32::from_le_bytes(bytes[TRACKS + 9..TRACKS + 13].try_into().unwrap());
+        self.last_reset = f32::from_le_bytes(bytes[TRACKS + 13..TRACKS + 17].try_into().unwrap());
     }
 }
 
