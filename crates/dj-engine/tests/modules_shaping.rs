@@ -601,3 +601,209 @@ fn lfo_shifted_output_lags_by_the_phase_knob() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// com.dj.function
+// ---------------------------------------------------------------------------
+
+/// MIDI note gate -> `jack` of a Function module -> master. The note runs
+/// from `on_t` to `off_t` seconds.
+fn render_function_gate(jack: &str, rise: f32, fall: f32, on_t: f32, off_t: f32) -> Vec<f32> {
+    let mut e = mono_engine();
+    e.add_module("midi1", "builtin.midi").unwrap();
+    e.add_module("fn1", "com.dj.function").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.add_midi_mapping("midi1", "note", 60, "pad_1").unwrap();
+    e.connect("midi1", "pad_1", "fn1", jack).unwrap();
+    e.connect("fn1", "out", "out1", "l").unwrap();
+    e.set_knob_value("fn1", "rise", rise).unwrap();
+    e.set_knob_value("fn1", "fall", fall).unwrap();
+    e.inject_midi("midi1", (on_t * SR) as u64, [0x90, 60, 100])
+        .unwrap();
+    e.inject_midi("midi1", (off_t * SR) as u64, [0x80, 60, 0])
+        .unwrap();
+    e.render_offline(SR as usize).unwrap().pop().unwrap()
+}
+
+#[test]
+fn function_trigger_makes_an_attack_decay_shape() {
+    let out = render_function_gate("trig", 0.05, 0.1, 0.1, 0.15);
+    let at = |t: f32| out[(t * SR) as usize];
+    assert!(at(0.099) < 0.01, "not idle before the trigger");
+    assert!(at(0.125) > 4.0 && at(0.125) < 6.0, "mid-rise {}", at(0.125));
+    assert!(at(0.151) > 9.8, "peak {}", at(0.151));
+    // A trigger ignores the gate's release: the fall runs to completion.
+    assert!((at(0.2) - 5.0).abs() < 0.3, "mid-fall {}", at(0.2));
+    assert!(at(0.26) < 0.01, "did not return to zero: {}", at(0.26));
+}
+
+#[test]
+fn function_gate_sustains_at_the_top() {
+    let out = render_function_gate("gate", 0.05, 0.1, 0.1, 0.5);
+    let at = |t: f32| out[(t * SR) as usize];
+    assert!(at(0.16) > 9.99 && at(0.45) > 9.99, "gate did not sustain");
+    assert!((at(0.55) - 5.0).abs() < 0.3, "mid-fall {}", at(0.55));
+    assert!(at(0.61) < 0.01, "did not return to zero: {}", at(0.61));
+}
+
+#[test]
+fn function_cycle_is_an_lfo_with_a_matching_eor_square() {
+    let mut e = stereo_engine();
+    e.add_module("fn1", "com.dj.function").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("fn1", "out", "out1", "l").unwrap();
+    e.connect("fn1", "eor", "out1", "r").unwrap();
+    e.set_knob_value("fn1", "rise", 0.02).unwrap();
+    e.set_knob_value("fn1", "fall", 0.03).unwrap();
+    e.set_knob_position("fn1", "cycle", 1.0).unwrap();
+    let out = e.render_offline(SR as usize).unwrap();
+
+    // 20 ms up + 30 ms down = 20 Hz.
+    let centered: Vec<f32> = out[0].iter().map(|v| v - 5.0).collect();
+    let hz = zero_cross_hz(&centered);
+    assert!((hz - 20.0).abs() < 0.5, "cycling at {hz} Hz");
+    assert!(out[0].iter().all(|&v| (-0.01..=10.01).contains(&v)));
+
+    // EOR is high for the fall: 30 of every 50 ms.
+    let duty = out[1].iter().filter(|&&v| v > 5.0).count() as f32 / out[1].len() as f32;
+    assert!((duty - 0.6).abs() < 0.02, "EOR duty {duty}");
+}
+
+#[test]
+fn function_eoc_triggers_a_second_function() {
+    let mut e = stereo_engine();
+    e.add_module("fn1", "com.dj.function").unwrap();
+    e.add_module("fn2", "com.dj.function").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("fn1", "eoc", "out1", "l").unwrap();
+    e.connect("fn1", "eoc", "fn2", "trig").unwrap();
+    e.connect("fn2", "out", "out1", "r").unwrap();
+    e.set_knob_value("fn1", "rise", 0.04).unwrap();
+    e.set_knob_value("fn1", "fall", 0.06).unwrap();
+    e.set_knob_position("fn1", "cycle", 1.0).unwrap();
+    e.set_knob_value("fn2", "rise", 0.005).unwrap();
+    e.set_knob_value("fn2", "fall", 0.005).unwrap();
+    let out = e.render_offline(SR as usize).unwrap();
+
+    // One 2 ms trigger per 100 ms cycle.
+    let mut pulses = 0;
+    let mut width = 0usize;
+    let mut run = 0usize;
+    for i in 1..out[0].len() {
+        if out[0][i] > 5.0 && out[0][i - 1] <= 5.0 {
+            pulses += 1;
+            run = 1;
+        } else if out[0][i] > 5.0 {
+            run += 1;
+        } else if run > 0 {
+            width = run;
+            run = 0;
+        }
+    }
+    // Ten 100 ms cycles per second; the tenth end-of-cycle lands one sample
+    // past the render, so nine or ten pulses are both right.
+    assert!((9..=10).contains(&pulses), "{pulses} EOC pulses per second");
+    assert_eq!(width, (0.002 * SR) as usize, "EOC pulse width");
+
+    // The chained function answers every one of them.
+    let hits = out[1]
+        .windows(2)
+        .filter(|w| w[0] <= 9.9 && w[1] > 9.9)
+        .count();
+    assert_eq!(hits, pulses, "chained function did not fire on every EOC");
+}
+
+#[test]
+fn function_slews_at_the_configured_rate() {
+    // A 2 Hz bipolar square steps ±5 V; rise 0.1 s / fall 0.2 s means the
+    // output may only travel 10 V per 0.1 s up and 10 V per 0.2 s down.
+    let mut e = mono_engine();
+    e.add_module("sq", "com.dj.lfo").unwrap();
+    e.add_module("fn1", "com.dj.function").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.set_knob_position("sq", "shape", SHAPE_PULSE).unwrap();
+    e.set_knob_value("sq", "rate", 2.0).unwrap();
+    e.connect("sq", "bi", "fn1", "in").unwrap();
+    e.connect("fn1", "out", "out1", "l").unwrap();
+    e.set_knob_value("fn1", "rise", 0.1).unwrap();
+    e.set_knob_value("fn1", "fall", 0.2).unwrap();
+    let out = e
+        .render_offline((2.0 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    let up = 10.0 / (0.1 * SR);
+    let down = 10.0 / (0.2 * SR);
+    let mut max_up = 0.0f32;
+    let mut max_down = 0.0f32;
+    for w in tail(&out).windows(2) {
+        let d = w[1] - w[0];
+        max_up = max_up.max(d);
+        max_down = max_down.max(-d);
+    }
+    assert!(
+        (max_up - up).abs() < up * 0.02,
+        "rise slope {max_up} vs {up}"
+    );
+    assert!(
+        (max_down - down).abs() < down * 0.02,
+        "fall slope {max_down} vs {down}"
+    );
+    assert!(peak(&out) <= 5.01, "slew overshoots the input");
+}
+
+#[test]
+fn function_follows_an_audio_envelope() {
+    // Fast rise, slow fall on a raw audio signal: the output snaps to each
+    // positive peak and decays between them — an envelope follower with no
+    // extra mode switch.
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("fn1", "com.dj.function").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "fn1", "in").unwrap();
+    e.connect("fn1", "out", "out1", "l").unwrap();
+    e.set_knob_value("fn1", "rise", 0.001).unwrap();
+    e.set_knob_value("fn1", "fall", 0.05).unwrap();
+    let out = e
+        .render_offline((0.5 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let steady = tail(&out);
+    let lo = steady.iter().fold(f32::MAX, |m, &v| m.min(v));
+    let hi = steady.iter().fold(f32::MIN, |m, &v| m.max(v));
+    assert!(hi <= 5.01 && hi > 4.9, "envelope top {hi}");
+    assert!(lo > 3.5, "envelope dips to {lo} — not following the peaks");
+}
+
+#[test]
+fn function_curve_bends_the_rise() {
+    let quarter = |curve: f32| {
+        let mut e = mono_engine();
+        e.add_module("fn1", "com.dj.function").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.connect("fn1", "out", "out1", "l").unwrap();
+        e.set_knob_value("fn1", "rise", 0.1).unwrap();
+        e.set_knob_value("fn1", "fall", 0.1).unwrap();
+        e.set_knob_value("fn1", "curve", curve).unwrap();
+        e.set_knob_position("fn1", "cycle", 1.0).unwrap();
+        let out = e
+            .render_offline((0.5 * SR) as usize)
+            .unwrap()
+            .pop()
+            .unwrap();
+        out[(0.025 * SR) as usize] // a quarter of the way up the first rise
+    };
+    let (fast, lin, slow) = (quarter(1.0), quarter(0.0), quarter(-1.0));
+    assert!((lin - 2.5).abs() < 0.2, "linear quarter point {lin}");
+    assert!(
+        fast > lin + 2.0,
+        "positive curve is not fast-starting: {fast}"
+    );
+    assert!(
+        slow < lin - 2.0,
+        "negative curve is not slow-starting: {slow}"
+    );
+}

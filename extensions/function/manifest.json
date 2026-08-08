@@ -1,0 +1,28 @@
+{
+  "id": "com.dj.function",
+  "name": "Function",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Modulation",
+  "inputs": [
+    { "id": "in", "name": "In", "default": 0.0 },
+    { "id": "trig", "name": "Trigger", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "gate", "name": "Gate", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "rise", "name": "Rise", "default": 0.05,
+      "knob": { "style": "continuous", "min": 0.0005, "max": 10.0, "curve": "exp" } },
+    { "id": "fall", "name": "Fall", "default": 0.2,
+      "knob": { "style": "continuous", "min": 0.0005, "max": 10.0, "curve": "exp" } },
+    { "id": "curve", "name": "Curve", "default": 0.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "cycle", "name": "Cycle", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 1.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Out" },
+    { "id": "eor", "name": "EOR" },
+    { "id": "eoc", "name": "EOC" }
+  ],
+  "latency_samples": 0
+}
