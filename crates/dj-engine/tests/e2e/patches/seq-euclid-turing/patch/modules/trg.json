@@ -1,0 +1,96 @@
+{
+  "ext": "com.dj.trig_seq",
+  "knobs": {
+    "clock": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "len1": {
+      "position": 0.46666667,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "len2": {
+      "position": 0.9666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "len3": {
+      "position": 0.9666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "len4": {
+      "position": 0.9666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "len5": {
+      "position": 0.9666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "len6": {
+      "position": 0.9666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "len7": {
+      "position": 0.9666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "len8": {
+      "position": 0.9666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pat1": {
+      "position": 0.06666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pat2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pat3": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pat4": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pat5": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pat6": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pat7": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pat8": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

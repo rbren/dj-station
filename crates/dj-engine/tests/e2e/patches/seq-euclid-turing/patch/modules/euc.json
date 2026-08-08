@@ -1,0 +1,76 @@
+{
+  "ext": "com.dj.euclid",
+  "knobs": {
+    "clock": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "fill1": {
+      "position": 0.15625,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "fill2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "fill3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "fill4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rot1": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rot2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rot3": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rot4": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "steps1": {
+      "position": 0.22580644,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "steps2": {
+      "position": 0.4677419,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "steps3": {
+      "position": 0.2096774,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "steps4": {
+      "position": 0.33870965,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

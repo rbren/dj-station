@@ -463,3 +463,140 @@ fn euclid_or_output_merges_the_channels() {
         "E(2,4)",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Random CV (Turing machine)
+// ---------------------------------------------------------------------------
+
+/// Sample the CV output once per clock step (steps last `step_secs`).
+fn sample_per_step(cv: &[f32], step_secs: f32, count: usize) -> Vec<f32> {
+    (0..count)
+        .map(|i| cv[((i as f32 + 0.5) * step_secs * SR) as usize])
+        .collect()
+}
+
+fn turing_engine(prob_pos: f32, length: f32) -> Engine {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("trn", "com.dj.turing").unwrap();
+    e.set_knob_value("clk", "bpm", 150.0).unwrap();
+    // x4 of 150 BPM = one clock every 0.1 s.
+    e.connect("clk", "mul4", "trn", "clock").unwrap();
+    e.set_knob_position("trn", "prob", prob_pos).unwrap();
+    set_stepped(&mut e, "trn", "length", length);
+    probe(&mut e, 0, "trn", "cv");
+    probe(&mut e, 1, "trn", "quant");
+    e
+}
+
+#[test]
+fn turing_centre_probability_locks_the_loop() {
+    let mut e = turing_engine(0.5, 8.0);
+    let out = e.render_offline((2.5 * SR) as usize).unwrap();
+    let vals = sample_per_step(&out[0], 0.1, 24);
+    for i in 0..16 {
+        assert_eq!(
+            vals[i],
+            vals[i + 8],
+            "locked loop changed between step {i} and {}",
+            i + 8
+        );
+    }
+    assert!(
+        vals[..8].iter().any(|v| *v != vals[0]),
+        "locked loop is a constant: {:?}",
+        &vals[..8]
+    );
+}
+
+#[test]
+fn turing_full_cw_inverts_the_loop_each_pass() {
+    let mut e = turing_engine(1.0, 8.0);
+    let out = e.render_offline((2.5 * SR) as usize).unwrap();
+    let vals = sample_per_step(&out[0], 0.1, 24);
+    // Always flipping gives a 2N-long loop: pass 3 repeats pass 1.
+    for i in 0..8 {
+        assert_eq!(vals[i], vals[i + 16], "period is not 2 * length at {i}");
+        assert_ne!(vals[i], vals[i + 8], "pass 2 was not inverted at {i}");
+    }
+}
+
+#[test]
+fn turing_full_ccw_keeps_randomizing_and_stays_deterministic() {
+    let mut e = turing_engine(0.0, 8.0);
+    let out = e.render_offline((2.5 * SR) as usize).unwrap();
+    let vals = sample_per_step(&out[0], 0.1, 24);
+    assert!(
+        (0..16).any(|i| vals[i] != vals[i + 8]),
+        "fully random knob produced a locked loop"
+    );
+    let mut again = turing_engine(0.0, 8.0);
+    let out2 = again.render_offline((2.5 * SR) as usize).unwrap();
+    assert_eq!(
+        vals,
+        sample_per_step(&out2[0], 0.1, 24),
+        "PRNG is not deterministic"
+    );
+}
+
+#[test]
+fn turing_quantizer_snaps_to_the_selected_scale() {
+    let mut e = turing_engine(0.0, 16.0);
+    e.set_knob_value("trn", "range", 4.0).unwrap();
+    set_stepped(&mut e, "trn", "scale", 1.0); // major
+    set_stepped(&mut e, "trn", "root", 2.0); // D
+    let out = e.render_offline((2.5 * SR) as usize).unwrap();
+    let raw = sample_per_step(&out[0], 0.1, 24);
+    let quant = sample_per_step(&out[1], 0.1, 24);
+    const MAJOR: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
+    for (r, q) in raw.iter().zip(&quant) {
+        let semis = (q * 12.0).round() as i32;
+        assert!(
+            ((semis as f32 / 12.0) - q).abs() < 1e-4,
+            "quantized value {q} is not a semitone"
+        );
+        let pc = (semis - 2).rem_euclid(12);
+        assert!(
+            MAJOR.contains(&pc),
+            "quantized {q} (pc {pc}) is outside D major"
+        );
+        // Major scale: at most a whole-tone gap, so the snap never moves
+        // more than one semitone plus the initial rounding.
+        assert!(
+            (q - r).abs() <= 1.5 / 12.0 + 1e-4,
+            "quantized {q} moved too far from raw {r}"
+        );
+    }
+    assert!(
+        quant.iter().any(|q| *q != quant[0]),
+        "quantized output never moved"
+    );
+}
+
+#[test]
+fn turing_bit_outputs_follow_the_register() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("trn", "com.dj.turing").unwrap();
+    e.set_knob_value("clk", "bpm", 150.0).unwrap();
+    e.connect("clk", "mul4", "trn", "clock").unwrap();
+    e.set_knob_position("trn", "prob", 0.5).unwrap();
+    set_stepped(&mut e, "trn", "length", 4.0);
+    probe(&mut e, 0, "trn", "bit1");
+    probe(&mut e, 1, "trn", "bit2");
+    let out = e.render_offline((2.5 * SR) as usize).unwrap();
+    let bit1 = sample_per_step(&out[0], 0.1, 24);
+    let bit2 = sample_per_step(&out[1], 0.1, 24);
+    assert!(
+        bit1.iter().all(|v| *v == 0.0 || *v == 10.0),
+        "bit gate is not a 0/10 gate"
+    );
+    // Bit 2 is bit 1 delayed by one clock (the register shifts left).
+    for i in 0..20 {
+        assert_eq!(bit2[i + 1], bit1[i], "bit2 is not bit1 delayed at {i}");
+    }
+    // A locked 4-bit loop repeats every 4 clocks.
+    for i in 0..16 {
+        assert_eq!(bit1[i], bit1[i + 4], "4-step loop broke at {i}");
+    }
+}
