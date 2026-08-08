@@ -1,0 +1,40 @@
+{
+  "id": "com.dj.drum",
+  "name": "Drum Voice",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Sources",
+  "inputs": [
+    { "id": "kick_trig", "name": "Kick Trig", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "kick_tune", "name": "Kick Tune", "default": 0.0,
+      "knob": { "style": "continuous", "min": -1.5, "max": 1.5, "curve": "linear" } },
+    { "id": "kick_decay", "name": "Kick Decay", "default": 0.45,
+      "knob": { "style": "continuous", "min": 0.05, "max": 2.0, "curve": "exp" } },
+    { "id": "kick_tone", "name": "Kick Click", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "snare_trig", "name": "Snare Trig", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "snare_tune", "name": "Snare Tune", "default": 0.0,
+      "knob": { "style": "continuous", "min": -1.5, "max": 1.5, "curve": "linear" } },
+    { "id": "snare_decay", "name": "Snare Decay", "default": 0.25,
+      "knob": { "style": "continuous", "min": 0.03, "max": 1.5, "curve": "exp" } },
+    { "id": "snare_tone", "name": "Snare Snappy", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "hat_trig", "name": "Hat Trig", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "hat_tune", "name": "Hat Tune", "default": 0.0,
+      "knob": { "style": "continuous", "min": -1.5, "max": 1.5, "curve": "linear" } },
+    { "id": "hat_decay", "name": "Hat Decay", "default": 0.08,
+      "knob": { "style": "continuous", "min": 0.01, "max": 1.0, "curve": "exp" } },
+    { "id": "hat_tone", "name": "Hat Tone", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "kick", "name": "Kick" },
+    { "id": "snare", "name": "Snare" },
+    { "id": "hat", "name": "Hat" },
+    { "id": "mix", "name": "Mix" }
+  ],
+  "latency_samples": 0
+}

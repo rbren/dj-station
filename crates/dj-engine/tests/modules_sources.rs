@@ -325,3 +325,225 @@ fn wavetable_mipmaps_stay_clean_at_high_pitch() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Noise
+// ---------------------------------------------------------------------------
+
+/// Mean power in a band, sampled at 48 log-spaced probe frequencies.
+fn band_power(x: &[f32], lo: f32, hi: f32) -> f32 {
+    let probes = 48;
+    let mut acc = 0.0f32;
+    for i in 0..probes {
+        let t = (i as f32 + 0.5) / probes as f32;
+        let a = amp_at(x, lo * (hi / lo).powf(t));
+        acc += a * a;
+    }
+    acc / probes as f32
+}
+
+/// Average spectral slope in dB per octave between two bands five octaves
+/// apart.
+fn slope_db_per_octave(x: &[f32]) -> f32 {
+    let low = band_power(x, 100.0, 200.0);
+    let high = band_power(x, 3_200.0, 6_400.0);
+    10.0 * (high / low).log10() / 5.0
+}
+
+#[test]
+fn noise_colours_have_expected_spectral_slopes() {
+    for (jack, expected) in [
+        ("white", 0.0f32),
+        ("pink", -3.0),
+        ("red", -6.0),
+        ("blue", 6.0),
+    ] {
+        let mut e = source_patch("com.dj.noise", jack);
+        let out = render(&mut e, 2.0);
+        let body = &out[9_600..];
+        let slope = slope_db_per_octave(body);
+        assert!(
+            (slope - expected).abs() < 0.6,
+            "{jack}: {slope:.2} dB/oct, expected {expected}"
+        );
+        let level = rms(body);
+        assert!(
+            level > 1.0 && level < 3.5,
+            "{jack}: RMS {level} outside the useful audio range"
+        );
+        assert!(peak(body) < 10.0, "{jack}: peak {} exceeds ±10", peak(body));
+    }
+}
+
+#[test]
+fn noise_random_holds_between_steps() {
+    // Free-running: the rate knob sets the step rate when nothing is
+    // patched into the clock.
+    let mut e = source_patch("com.dj.noise", "random");
+    e.set_knob_value("src", "rate", 10.0).unwrap();
+    let out = render(&mut e, 2.0);
+    let steps = out.windows(2).filter(|w| w[0] != w[1]).count();
+    assert!((steps as i32 - 20).abs() <= 1, "free-run steps: {steps}");
+    assert!(peak(&out) <= 5.0, "random exceeds ±5: {}", peak(&out));
+    // Values must actually move around, not sit on one level.
+    assert!(rms(&out) > 1.0, "random is stuck: rms {}", rms(&out));
+
+    // Clocked: an external gate takes over from the internal rate.
+    let mut e = mono_engine();
+    e.add_module("clk", "com.dj.vco").unwrap();
+    e.add_module("src", "com.dj.noise").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("clk", "pulse", "src", "clock").unwrap();
+    e.connect("src", "random", "out1", "l").unwrap();
+    e.set_knob_value("clk", "pitch", pitch_of(40.0)).unwrap();
+    e.set_knob_value("src", "rate", 10.0).unwrap();
+    let out = render(&mut e, 1.0);
+    let steps = out.windows(2).filter(|w| w[0] != w[1]).count();
+    assert!((steps as i32 - 40).abs() <= 2, "clocked steps: {steps}");
+}
+
+#[test]
+fn noise_is_deterministic_across_instances() {
+    let a = render(&mut source_patch("com.dj.noise", "white"), 0.1);
+    let b = render(&mut source_patch("com.dj.noise", "white"), 0.1);
+    assert_eq!(a, b, "noise must render identically from a fixed seed");
+    assert!(rms(&a) > 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// Drum voice
+// ---------------------------------------------------------------------------
+
+/// MIDI note 36/38/42 (kick/snare/hat) -> the drum module's trigger jacks,
+/// with `out_jack` patched to the master bus.
+fn drum_patch(out_jack: &str) -> Engine {
+    let mut e = mono_engine();
+    e.add_module("midi1", "builtin.midi").unwrap();
+    e.add_module("drum", "com.dj.drum").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    for (note, name, jack) in [
+        (36u8, "k", "kick_trig"),
+        (38, "s", "snare_trig"),
+        (42, "h", "hat_trig"),
+    ] {
+        e.add_midi_mapping("midi1", "note", note, name).unwrap();
+        e.connect("midi1", name, "drum", jack).unwrap();
+    }
+    e.connect("drum", out_jack, "out1", "l").unwrap();
+    e
+}
+
+/// Fire `note` at 0.1 s and release it 40 ms later.
+fn hit(engine: &mut Engine, note: u8) {
+    engine
+        .inject_midi("midi1", 4_800, [0x90, note, 100])
+        .unwrap();
+    engine.inject_midi("midi1", 6_720, [0x80, note, 0]).unwrap();
+}
+
+#[test]
+fn drum_kick_sweeps_pitch_and_decays() {
+    let mut e = drum_patch("kick");
+    e.set_knob_value("drum", "kick_decay", 0.3).unwrap();
+    e.set_knob_value("drum", "kick_tone", 0.0).unwrap();
+    hit(&mut e, 36);
+    let out = render(&mut e, 0.6);
+
+    assert!(peak(&out[..4_800]) < 1e-9, "kick sounds before its trigger");
+    let attack = peak(&out[4_800..5_280]);
+    assert!(
+        attack > 3.5 && attack < 5.5,
+        "kick attack peak {attack} out of range"
+    );
+
+    // The pitch envelope starts the sine well above the tuned frequency and
+    // settles onto it (52 Hz) within a few tens of ms.
+    let early = zero_cross_rate(&out[4_800..5_040]);
+    let late = zero_cross_rate(&out[9_600..24_000]);
+    assert!(early > 3.0 * late, "no pitch sweep: {early} -> {late}");
+    assert!((late - 52.0).abs() < 5.0, "kick settles at {late} Hz");
+
+    // -60 dB by the end of the decay time (0.3 s after the trigger).
+    let tail = peak(&out[(4_800 + (0.3 * SR) as usize)..]);
+    assert!(tail < 0.05 * attack, "kick still at {tail} after its decay");
+}
+
+#[test]
+fn drum_snare_balances_body_and_noise() {
+    // (tuned-body amplitude, noise-band level, attack peak)
+    let measure = |tone: f32| -> (f32, f32, f32) {
+        let mut e = drum_patch("snare");
+        e.set_knob_value("drum", "snare_tone", tone).unwrap();
+        e.set_knob_value("drum", "snare_decay", 0.25).unwrap();
+        hit(&mut e, 38);
+        let out = render(&mut e, 0.5);
+        let body = &out[4_800..9_600];
+        (
+            amp_at(body, 185.0),
+            band_power(body, 1_000.0, 6_000.0).sqrt(),
+            peak(&out[4_800..5_280]),
+        )
+    };
+    let (tonal_body, tonal_noise, tonal_peak) = measure(0.0);
+    let (snappy_body, snappy_noise, snappy_peak) = measure(1.0);
+
+    assert!(
+        tonal_body > 0.2 && tonal_body > 6.0 * snappy_body,
+        "body-only snare: fundamental {tonal_body} vs snappy {snappy_body}"
+    );
+    assert!(
+        tonal_peak > 2.0 && tonal_peak < 6.0 && snappy_peak > 2.0 && snappy_peak < 6.0,
+        "snare levels: body {tonal_peak}, snappy {snappy_peak}"
+    );
+    assert!(
+        snappy_noise > 4.0 * tonal_noise,
+        "snappy snare noise band {snappy_noise} vs body-only {tonal_noise}"
+    );
+}
+
+#[test]
+fn drum_hat_is_high_passed_and_short() {
+    let mut e = drum_patch("hat");
+    e.set_knob_value("drum", "hat_decay", 0.06).unwrap();
+    hit(&mut e, 42);
+    let out = render(&mut e, 0.4);
+    let body = &out[4_800..7_200];
+
+    let low = band_power(body, 200.0, 800.0);
+    let high = band_power(body, 6_000.0, 12_000.0);
+    assert!(
+        high > 100.0 * low,
+        "hat is not high-passed: low {low}, high {high}"
+    );
+
+    let attack = peak(&out[4_800..5_280]);
+    assert!(attack > 1.0, "hat attack {attack} too quiet");
+    let tail = peak(&out[(4_800 + (0.06 * SR) as usize)..]);
+    assert!(tail < 0.05 * attack, "hat still at {tail} after its decay");
+}
+
+#[test]
+fn drum_mix_sums_the_three_voices() {
+    let render_jack = |jack: &str| -> Vec<f32> {
+        let mut e = drum_patch(jack);
+        for note in [36u8, 38, 42] {
+            hit(&mut e, note);
+        }
+        render(&mut e, 0.3)
+    };
+    let kick = render_jack("kick");
+    let snare = render_jack("snare");
+    let hat = render_jack("hat");
+    let mix = render_jack("mix");
+
+    let mut worst = 0.0f32;
+    for i in 0..mix.len() {
+        worst = worst.max((mix[i] - 0.6 * (kick[i] + snare[i] + hat[i])).abs());
+    }
+    assert!(worst < 1e-5, "mix is not the -4.4 dB voice sum: {worst}");
+    assert!(
+        peak(&mix) > 2.0 && peak(&mix) < 10.0,
+        "mix peak {}",
+        peak(&mix)
+    );
+}

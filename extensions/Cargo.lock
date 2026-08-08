@@ -24,6 +24,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-drum"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-filter"
 version = "0.1.0"
 dependencies = [
@@ -67,6 +74,13 @@ dependencies = [
 
 [[package]]
 name = "dj-ext-mult"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-noise"
 version = "0.1.0"
 dependencies = [
  "dj-module-sdk",
