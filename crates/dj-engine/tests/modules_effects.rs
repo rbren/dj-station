@@ -541,3 +541,126 @@ fn compressor_attack_follows_the_time_constant() {
         "gr at one attack constant is {frac:.2} of final, expected ~0.63"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Granular
+// ---------------------------------------------------------------------------
+
+/// Osc -> granular -> stereo out, wet only unless `mix` says otherwise.
+fn granular_patch(density: f32, size: f32, pitch: f32, mix: f32) -> Engine {
+    let mut e = stereo_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("gran", "com.dj.granular").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "gran", "in_l").unwrap();
+    e.connect("osc1", "audio", "gran", "in_r").unwrap();
+    e.connect("gran", "out_l", "out1", "l").unwrap();
+    e.connect("gran", "out_r", "out1", "r").unwrap();
+    e.set_knob_value("gran", "density", density).unwrap();
+    e.set_knob_value("gran", "size", size).unwrap();
+    e.set_knob_value("gran", "pitch", pitch).unwrap();
+    e.set_knob_value("gran", "mix", mix).unwrap();
+    e.set_knob_value("gran", "spread", 0.0).unwrap();
+    e
+}
+
+/// Zero crossings per second (a cheap fundamental estimate for tones).
+fn zero_cross_hz(signal: &[f32]) -> f32 {
+    let crossings = signal
+        .windows(2)
+        .filter(|w| w[0] <= 0.0 && w[1] > 0.0)
+        .count();
+    crossings as f32 * SR / signal.len() as f32
+}
+
+/// Fundamental of the loudest `win`-second window — measuring the whole
+/// signal would count silent gaps between sparse grains as low frequency.
+fn dominant_hz(signal: &[f32], win: f32) -> f32 {
+    let chunk = (win * SR) as usize;
+    signal
+        .chunks(chunk)
+        .filter(|c| c.len() == chunk)
+        .max_by(|a, b| rms(a).partial_cmp(&rms(b)).unwrap())
+        .map(zero_cross_hz)
+        .unwrap_or(0.0)
+}
+
+#[test]
+fn granular_grains_are_windowed_and_bounded() {
+    let mut e = granular_patch(30.0, 0.05, 0.0, 1.0);
+    let out = e.render_offline((1.5 * SR) as usize).unwrap();
+    assert_finite(&out[0], "granular");
+    let body = &out[0][(0.5 * SR) as usize..];
+    assert!(rms(body) > 0.3, "granular output is silent: {}", rms(body));
+    // Windowed grains never step: the largest sample-to-sample jump stays
+    // in the same ballpark as the source tone's own slope (~0.17 V).
+    let jump = body
+        .windows(2)
+        .fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+    assert!(jump < 1.0, "grain discontinuity (click) of {jump} V");
+}
+
+#[test]
+fn granular_pitch_transposes_grains() {
+    // Sparse, non-overlapping grains so the measured pitch is one grain's.
+    for (pitch, expected) in [(0.0f32, 261.6f32), (1.0, 523.25), (-1.0, 130.8)] {
+        let mut e = granular_patch(2.0, 0.3, pitch, 1.0);
+        let out = e.render_offline((3.0 * SR) as usize).unwrap();
+        assert_finite(&out[0], "granular pitch");
+        let hz = dominant_hz(&out[0][(1.0 * SR) as usize..], 0.2);
+        assert!(
+            (hz - expected).abs() < 0.05 * expected,
+            "pitch {pitch}: grains read {hz:.1} Hz, expected ~{expected:.1}"
+        );
+    }
+}
+
+#[test]
+fn granular_freeze_keeps_playing_without_input() {
+    let mut e = stereo_engine();
+    add_blip_source(&mut e);
+    e.add_module("gran", "com.dj.granular").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("vca1", "out", "gran", "in_l").unwrap();
+    e.connect("vca1", "out", "gran", "in_r").unwrap();
+    e.connect("gran", "out_l", "out1", "l").unwrap();
+    e.connect("gran", "out_r", "out1", "r").unwrap();
+    e.set_knob_value("gran", "density", 25.0).unwrap();
+    e.set_knob_value("gran", "size", 0.1).unwrap();
+    e.set_knob_value("gran", "position", 0.05).unwrap();
+    e.set_knob_value("gran", "mix", 1.0).unwrap();
+    // Fill the buffer with a tone, then freeze once the source is silent.
+    blip_at(&mut e, 0.05, 0.6);
+    e.process_blocks((0.9 * SR) as usize / 512).unwrap();
+    e.set_knob_position("gran", "freeze", 1.0).unwrap();
+    let out = e.render_offline((1.0 * SR) as usize).unwrap();
+    assert_finite(&out[0], "granular freeze");
+    let level = rms(&out[0][(0.3 * SR) as usize..]);
+    assert!(level > 0.2, "frozen buffer stopped playing: {level}");
+}
+
+#[test]
+fn granular_mix_and_density_extremes_are_sane() {
+    // mix = 0 is a bit-exact dry path.
+    let mut dry = granular_patch(30.0, 0.05, 0.0, 0.0);
+    let out = dry.render_offline((0.3 * SR) as usize).unwrap();
+    let mut plain = stereo_engine();
+    plain.add_module("osc1", "com.dj.oscillator").unwrap();
+    plain.add_module("out1", "builtin.audio_out").unwrap();
+    plain.connect("osc1", "audio", "out1", "l").unwrap();
+    let reference = plain.render_offline((0.3 * SR) as usize).unwrap();
+    let diff = out[0]
+        .iter()
+        .zip(&reference[0])
+        .fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+    assert!(diff < 1e-6, "mix=0 is not a clean dry path: {diff}");
+
+    // Maximum density with long grains keeps the pool bounded.
+    let mut dense = granular_patch(150.0, 0.5, 0.0, 1.0);
+    dense.set_knob_value("gran", "spread", 1.0).unwrap();
+    dense.set_knob_value("gran", "feedback", 0.9).unwrap();
+    let out = dense.render_offline((2.0 * SR) as usize).unwrap();
+    assert_finite(&out[0], "granular dense");
+    let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    assert!(peak < 9.0, "dense granular exceeded the ceiling: {peak}");
+}
