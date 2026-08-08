@@ -325,3 +325,87 @@ fn wavetable_mipmaps_stay_clean_at_high_pitch() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Noise
+// ---------------------------------------------------------------------------
+
+/// Mean power in a band, sampled at 48 log-spaced probe frequencies.
+fn band_power(x: &[f32], lo: f32, hi: f32) -> f32 {
+    let probes = 48;
+    let mut acc = 0.0f32;
+    for i in 0..probes {
+        let t = (i as f32 + 0.5) / probes as f32;
+        let a = amp_at(x, lo * (hi / lo).powf(t));
+        acc += a * a;
+    }
+    acc / probes as f32
+}
+
+/// Average spectral slope in dB per octave between two bands five octaves
+/// apart.
+fn slope_db_per_octave(x: &[f32]) -> f32 {
+    let low = band_power(x, 100.0, 200.0);
+    let high = band_power(x, 3_200.0, 6_400.0);
+    10.0 * (high / low).log10() / 5.0
+}
+
+#[test]
+fn noise_colours_have_expected_spectral_slopes() {
+    for (jack, expected) in [
+        ("white", 0.0f32),
+        ("pink", -3.0),
+        ("red", -6.0),
+        ("blue", 6.0),
+    ] {
+        let mut e = source_patch("com.dj.noise", jack);
+        let out = render(&mut e, 2.0);
+        let body = &out[9_600..];
+        let slope = slope_db_per_octave(body);
+        assert!(
+            (slope - expected).abs() < 0.6,
+            "{jack}: {slope:.2} dB/oct, expected {expected}"
+        );
+        let level = rms(body);
+        assert!(
+            level > 1.0 && level < 3.5,
+            "{jack}: RMS {level} outside the useful audio range"
+        );
+        assert!(peak(body) < 10.0, "{jack}: peak {} exceeds ±10", peak(body));
+    }
+}
+
+#[test]
+fn noise_random_holds_between_steps() {
+    // Free-running: the rate knob sets the step rate when nothing is
+    // patched into the clock.
+    let mut e = source_patch("com.dj.noise", "random");
+    e.set_knob_value("src", "rate", 10.0).unwrap();
+    let out = render(&mut e, 2.0);
+    let steps = out.windows(2).filter(|w| w[0] != w[1]).count();
+    assert!((steps as i32 - 20).abs() <= 1, "free-run steps: {steps}");
+    assert!(peak(&out) <= 5.0, "random exceeds ±5: {}", peak(&out));
+    // Values must actually move around, not sit on one level.
+    assert!(rms(&out) > 1.0, "random is stuck: rms {}", rms(&out));
+
+    // Clocked: an external gate takes over from the internal rate.
+    let mut e = mono_engine();
+    e.add_module("clk", "com.dj.vco").unwrap();
+    e.add_module("src", "com.dj.noise").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("clk", "pulse", "src", "clock").unwrap();
+    e.connect("src", "random", "out1", "l").unwrap();
+    e.set_knob_value("clk", "pitch", pitch_of(40.0)).unwrap();
+    e.set_knob_value("src", "rate", 10.0).unwrap();
+    let out = render(&mut e, 1.0);
+    let steps = out.windows(2).filter(|w| w[0] != w[1]).count();
+    assert!((steps as i32 - 40).abs() <= 2, "clocked steps: {steps}");
+}
+
+#[test]
+fn noise_is_deterministic_across_instances() {
+    let a = render(&mut source_patch("com.dj.noise", "white"), 0.1);
+    let b = render(&mut source_patch("com.dj.noise", "white"), 0.1);
+    assert_eq!(a, b, "noise must render identically from a fixed seed");
+    assert!(rms(&a) > 1.0);
+}

@@ -1,0 +1,21 @@
+{
+  "id": "com.dj.noise",
+  "name": "Noise",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Sources",
+  "inputs": [
+    { "id": "clock", "name": "Clock", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "rate", "name": "Rate (Hz)", "default": 4.0,
+      "knob": { "style": "continuous", "min": 0.05, "max": 50.0, "curve": "exp" } }
+  ],
+  "outputs": [
+    { "id": "white", "name": "White" },
+    { "id": "pink", "name": "Pink" },
+    { "id": "red", "name": "Red" },
+    { "id": "blue", "name": "Blue" },
+    { "id": "random", "name": "Random" }
+  ],
+  "latency_samples": 0
+}
