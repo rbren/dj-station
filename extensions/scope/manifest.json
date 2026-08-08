@@ -1,0 +1,23 @@
+{
+  "id": "com.dj.scope",
+  "name": "Scope",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Analysis & I/O",
+  "inputs": [
+    { "id": "in", "name": "In", "default": 0.0 },
+    { "id": "hysteresis", "name": "Hysteresis", "default": 0.15,
+      "knob": { "style": "continuous", "min": 0.02, "max": 0.6, "curve": "linear" } },
+    { "id": "window", "name": "Window", "default": 0.05,
+      "knob": { "style": "continuous", "min": 0.005, "max": 0.5, "curve": "exp" } }
+  ],
+  "outputs": [
+    { "id": "thru", "name": "Thru" },
+    { "id": "pitch", "name": "Pitch (1V/oct)" },
+    { "id": "hz", "name": "Freq (V per 100 Hz)" },
+    { "id": "peak", "name": "Peak" },
+    { "id": "rms", "name": "RMS" },
+    { "id": "trig", "name": "Sync Trig" }
+  ],
+  "latency_samples": 0
+}

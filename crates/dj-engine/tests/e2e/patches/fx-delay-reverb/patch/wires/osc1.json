@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio",
+      "to": "dly",
+      "to_jack": "in_l"
+    },
+    {
+      "from_jack": "audio",
+      "to": "dly",
+      "to_jack": "in_r"
+    }
+  ]
+}

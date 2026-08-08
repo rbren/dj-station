@@ -1,0 +1,33 @@
+{
+  "id": "com.dj.resonator",
+  "name": "Resonator",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Effects",
+  "inputs": [
+    { "id": "in", "name": "Exciter In", "default": 0.0 },
+    { "id": "trig", "name": "Trig", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "pitch", "name": "Pitch", "default": 0.0,
+      "knob": { "style": "continuous", "min": -3.0, "max": 3.0, "curve": "linear" } },
+    { "id": "structure", "name": "Structure", "default": 0.3,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "brightness", "name": "Brightness", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "damping", "name": "Damping", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "position", "name": "Position", "default": 0.3,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "mode", "name": "Mode", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 1.0, "curve": "linear", "steps": 2 } },
+    { "id": "voices", "name": "Strings", "default": 2.0,
+      "knob": { "style": "stepped", "min": 1.0, "max": 4.0, "curve": "linear", "steps": 4 } },
+    { "id": "mix", "name": "Mix", "default": 1.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out_l", "name": "Out L (odd)" },
+    { "id": "out_r", "name": "Out R (even)" }
+  ],
+  "latency_samples": 0
+}
