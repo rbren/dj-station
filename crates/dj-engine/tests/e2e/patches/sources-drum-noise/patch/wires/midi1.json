@@ -1,0 +1,19 @@
+{
+  "wires": [
+    {
+      "from_jack": "hat",
+      "to": "drum1",
+      "to_jack": "hat_trig"
+    },
+    {
+      "from_jack": "kick",
+      "to": "drum1",
+      "to_jack": "kick_trig"
+    },
+    {
+      "from_jack": "snare",
+      "to": "drum1",
+      "to_jack": "snare_trig"
+    }
+  ]
+}

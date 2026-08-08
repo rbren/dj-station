@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "tri",
+      "to": "vco1",
+      "to_jack": "pwm"
+    },
+    {
+      "from_jack": "tri",
+      "to": "wt1",
+      "to_jack": "pos"
+    }
+  ]
+}
