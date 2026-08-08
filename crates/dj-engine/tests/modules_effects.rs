@@ -573,6 +573,27 @@ fn zero_cross_hz(signal: &[f32]) -> f32 {
     crossings as f32 * SR / signal.len() as f32
 }
 
+/// Fundamental of `signal` by autocorrelation, searched between `min_hz`
+/// and `max_hz` — robust where zero crossings are fooled by harmonics.
+fn autocorr_hz(signal: &[f32], min_hz: f32, max_hz: f32) -> f32 {
+    let mean = signal.iter().sum::<f32>() / signal.len() as f32;
+    let x: Vec<f32> = signal.iter().map(|v| v - mean).collect();
+    let min_lag = (SR / max_hz) as usize;
+    let max_lag = ((SR / min_hz) as usize).min(x.len() / 2);
+    let mut best = (min_lag, f32::MIN);
+    for lag in min_lag..max_lag {
+        let r: f32 = x[..x.len() - lag]
+            .iter()
+            .zip(&x[lag..])
+            .map(|(a, b)| a * b)
+            .sum();
+        if r > best.1 {
+            best = (lag, r);
+        }
+    }
+    SR / best.0 as f32
+}
+
 /// Fundamental of the loudest `win`-second window — measuring the whole
 /// signal would count silent gaps between sparse grains as low frequency.
 fn dominant_hz(signal: &[f32], win: f32) -> f32 {
@@ -663,4 +684,127 @@ fn granular_mix_and_density_extremes_are_sane() {
     assert_finite(&out[0], "granular dense");
     let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
     assert!(peak < 9.0, "dense granular exceeded the ceiling: {peak}");
+}
+
+// ---------------------------------------------------------------------------
+// Resonator
+// ---------------------------------------------------------------------------
+
+/// Resonator with its internal exciter, triggered by MIDI-gated pulses.
+/// `mode`: 0 modal, 1 Karplus-Strong strings.
+fn resonator_patch(mode: f32, pitch: f32) -> Engine {
+    let mut e = stereo_engine();
+    e.add_module("midi1", "builtin.midi").unwrap();
+    e.add_module("res", "com.dj.resonator").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.add_midi_mapping("midi1", "note", 60, "pad_1").unwrap();
+    e.connect("midi1", "pad_1", "res", "trig").unwrap();
+    e.connect("res", "out_l", "out1", "l").unwrap();
+    e.connect("res", "out_r", "out1", "r").unwrap();
+    e.set_knob_value("res", "mode", mode).unwrap();
+    e.set_knob_value("res", "pitch", pitch).unwrap();
+    e.set_knob_value("res", "damping", 0.35).unwrap(); // ~1.8 s decay
+    e.set_knob_value("res", "structure", 0.0).unwrap();
+    e.set_knob_value("res", "brightness", 0.5).unwrap();
+    e
+}
+
+fn trig_at(e: &mut Engine, t: f32) {
+    e.inject_midi("midi1", (t * SR) as u64, [0x90, 60, 100])
+        .unwrap();
+    e.inject_midi("midi1", ((t + 0.005) * SR) as u64, [0x80, 60, 0])
+        .unwrap();
+}
+
+#[test]
+fn resonator_modal_rings_at_the_patched_pitch() {
+    // Trigger the internal exciter; the modal bank should ring at C4 and
+    // decay away rather than sustain forever.
+    let mut e = resonator_patch(0.0, 0.0);
+    trig_at(&mut e, 0.05);
+    let out = e.render_offline((2.0 * SR) as usize).unwrap();
+    assert_finite(&out[0], "modal resonator");
+    let sum: Vec<f32> = out[0].iter().zip(&out[1]).map(|(a, b)| a + b).collect();
+    let hz = dominant_hz(&sum[(0.1 * SR) as usize..], 0.1);
+    assert!(
+        (hz - 261.6).abs() < 15.0,
+        "modal fundamental {hz:.1} Hz, expected ~261.6"
+    );
+    let early = rms(&sum[(0.1 * SR) as usize..(0.3 * SR) as usize]);
+    let late = rms(&sum[(1.5 * SR) as usize..]);
+    assert!(early > 0.05, "modal bank did not ring: {early}");
+    assert!(
+        late < 0.5 * early,
+        "modal ring never decays: {late}/{early}"
+    );
+    // Odd/even partials are split across the outputs.
+    let diff = rms(&out[0]
+        .iter()
+        .zip(&out[1])
+        .map(|(a, b)| a - b)
+        .collect::<Vec<_>>());
+    assert!(diff > 1e-3, "modal outputs are identical: {diff}");
+}
+
+#[test]
+fn resonator_string_mode_tracks_1v_oct() {
+    for (pitch, expected) in [(0.0f32, 261.6f32), (-1.0, 130.8)] {
+        let mut e = resonator_patch(1.0, pitch);
+        e.set_knob_value("res", "voices", 1.0).unwrap();
+        e.set_knob_value("res", "brightness", 0.8).unwrap();
+        trig_at(&mut e, 0.05);
+        let out = e.render_offline((1.0 * SR) as usize).unwrap();
+        assert_finite(&out[0], "string resonator");
+        // Measure once the loop filter has settled the pluck (the initial
+        // burst is still broadband, so autocorrelation over harmonics).
+        let hz = autocorr_hz(
+            &out[0][(0.3 * SR) as usize..(0.5 * SR) as usize],
+            60.0,
+            900.0,
+        );
+        assert!(
+            (hz - expected).abs() < 0.05 * expected,
+            "string at pitch {pitch} rang at {hz:.1} Hz, expected ~{expected:.1}"
+        );
+    }
+}
+
+#[test]
+fn resonator_external_exciter_replaces_the_internal_one() {
+    // Patched exciter: the resonator sings without any trigger.
+    let mut e = stereo_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("res", "com.dj.resonator").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "res", "in").unwrap();
+    e.connect("res", "out_l", "out1", "l").unwrap();
+    e.connect("res", "out_r", "out1", "r").unwrap();
+    e.set_knob_value("osc1", "pitch", -2.0).unwrap();
+    e.set_knob_value("res", "damping", 0.6).unwrap();
+    let out = e.render_offline((0.6 * SR) as usize).unwrap();
+    assert_finite(&out[0], "excited resonator");
+    let level = rms(&out[0][(0.3 * SR) as usize..]);
+    assert!(level > 0.05, "external exciter produced nothing: {level}");
+
+    // Without a wire, an untriggered resonator is silent.
+    let mut quiet = resonator_patch(0.0, 0.0);
+    let out = quiet.render_offline((0.3 * SR) as usize).unwrap();
+    let level = rms(&out[0]);
+    assert!(level < 1e-6, "untriggered resonator is not silent: {level}");
+}
+
+#[test]
+fn resonator_stays_bounded_with_minimum_damping() {
+    for mode in [0.0f32, 1.0] {
+        let mut e = resonator_patch(mode, 0.0);
+        e.set_knob_value("res", "damping", 0.0).unwrap(); // longest decay
+        e.set_knob_value("res", "voices", 4.0).unwrap();
+        for i in 0..8 {
+            trig_at(&mut e, 0.05 + i as f32 * 0.2);
+        }
+        let out = e.render_offline((3.0 * SR) as usize).unwrap();
+        assert_finite(&out[0], "resonator sustain");
+        let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+        assert!(peak < 9.0, "mode {mode}: level runaway ({peak})");
+    }
 }
