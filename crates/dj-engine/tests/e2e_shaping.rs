@@ -44,9 +44,10 @@ fn regen_shaping_chain() {
     e.set_knob_value("flt1", "res", 0.6).unwrap();
     e.set_knob_value("flt1", "drive", 1.5).unwrap();
 
-    // Channel 1 through the VCA at unity; In 2 is unpatched, so Out 2
-    // carries the mix bus.
+    // Channel 1 through the VCA well below unity (the resonant ladder is
+    // loud); In 2 is unpatched, so Out 2 carries the mix bus.
     e.connect("flt1", "lp", "vca1", "in1").unwrap();
+    e.set_knob_value("vca1", "cv1", 2.5).unwrap();
     e.connect("vca1", "out2", "out1", "l").unwrap();
 
     e.save_patch(&dir.join("patch"), "e2e-shaping-fold-ladder")
