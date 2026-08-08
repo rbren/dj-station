@@ -1,0 +1,28 @@
+{
+  "id": "com.dj.vco",
+  "name": "VCO",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Sources",
+  "inputs": [
+    { "id": "pitch", "name": "Pitch (1V/oct)", "default": 0.0,
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
+    { "id": "fine", "name": "Fine (semitones)", "default": 0.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "fm", "name": "FM (thru-zero)", "default": 0.0,
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
+    { "id": "fm_index", "name": "FM Index", "default": 0.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 4.0, "curve": "linear" } },
+    { "id": "pwm", "name": "Pulse Width", "default": 0.0,
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
+    { "id": "sync", "name": "Sync", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "saw", "name": "Saw" },
+    { "id": "tri", "name": "Tri" },
+    { "id": "sine", "name": "Sine" },
+    { "id": "pulse", "name": "Pulse" }
+  ],
+  "latency_samples": 8
+}
