@@ -417,3 +417,127 @@ fn modfx_through_zero_flanger_nulls() {
         .collect::<Vec<_>>());
     assert!(diff > 0.5, "through-zero matched the plain flanger: {diff}");
 }
+
+// ---------------------------------------------------------------------------
+// Compressor
+// ---------------------------------------------------------------------------
+
+/// Peak level of `signal` in dBFS (5 V = 0 dBFS, PRD §4).
+fn peak_dbfs(signal: &[f32]) -> f32 {
+    let peak = signal.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    20.0 * (peak / 5.0).max(1e-9).log10()
+}
+
+/// Osc -> VCA(`level`, 0..1) -> compressor -> out L; `gr` on out R.
+fn compressor_patch(level: f32) -> Engine {
+    let mut e = stereo_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("comp", "com.dj.compressor").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "comp", "in_l").unwrap();
+    e.connect("comp", "out_l", "out1", "l").unwrap();
+    e.connect("comp", "gr", "out1", "r").unwrap();
+    e.set_knob_value("vca1", "cv", 10.0 * level).unwrap();
+    e.set_knob_value("comp", "attack", 0.002).unwrap();
+    e.set_knob_value("comp", "release", 0.3).unwrap();
+    e.set_knob_value("comp", "knee", 0.0).unwrap();
+    e
+}
+
+#[test]
+fn compressor_applies_the_static_curve() {
+    // 0 dBFS in, threshold -12 dB, 4:1, hard knee => -9 dBFS out.
+    let mut e = compressor_patch(1.0);
+    e.set_knob_value("comp", "threshold", -12.0).unwrap();
+    e.set_knob_value("comp", "ratio", 4.0).unwrap();
+    let out = e.render_offline((1.0 * SR) as usize).unwrap();
+    assert_finite(&out[0], "compressor");
+    let settled = &out[0][(0.6 * SR) as usize..];
+    let db = peak_dbfs(settled);
+    assert!((db + 9.0).abs() < 1.0, "compressed peak {db:.2} dBFS != -9");
+    // The gain-reduction CV reports the same 9 dB at 0.5 V/dB.
+    let gr = out[1][(0.9 * SR) as usize..].iter().sum::<f32>()
+        / out[1][(0.9 * SR) as usize..].len() as f32;
+    assert!((gr - 4.5).abs() < 0.5, "gr CV {gr:.2} V != 4.5 V (9 dB)");
+}
+
+#[test]
+fn compressor_passes_signals_below_threshold() {
+    let mut e = compressor_patch(0.1); // -20 dBFS
+    e.set_knob_value("comp", "threshold", -12.0).unwrap();
+    e.set_knob_value("comp", "ratio", 8.0).unwrap();
+    let out = e.render_offline((0.5 * SR) as usize).unwrap();
+    let db = peak_dbfs(&out[0][(0.3 * SR) as usize..]);
+    assert!(
+        (db + 20.0).abs() < 0.2,
+        "below threshold changed: {db} dBFS"
+    );
+    let gr = out[1][(0.4 * SR) as usize..]
+        .iter()
+        .fold(0.0f32, |m, &x| m.max(x));
+    assert!(gr < 0.05, "gain reduction below threshold: {gr} V");
+}
+
+#[test]
+fn compressor_sidechain_replaces_the_internal_detector() {
+    let mut e = compressor_patch(0.2); // -14 dBFS programme
+    e.set_knob_value("comp", "threshold", -20.0).unwrap();
+    e.set_knob_value("comp", "ratio", 8.0).unwrap();
+    let quiet = e.render_offline((0.5 * SR) as usize).unwrap();
+    // Internal detector: -14 dBFS is 6 dB over threshold => -19.25 dBFS out.
+    let unducked = peak_dbfs(&quiet[0][(0.3 * SR) as usize..]);
+    assert!(
+        (unducked + 19.25).abs() < 1.0,
+        "internal detector output {unducked:.2} dBFS != -19.25"
+    );
+
+    // Same patch, but a full-scale tone drives the sidechain.
+    let mut e = compressor_patch(0.2);
+    e.set_knob_value("comp", "threshold", -20.0).unwrap();
+    e.set_knob_value("comp", "ratio", 8.0).unwrap();
+    e.add_module("osc2", "com.dj.oscillator").unwrap();
+    e.set_knob_value("osc2", "pitch", -1.0).unwrap();
+    e.connect("osc2", "audio", "comp", "sidechain").unwrap();
+    let out = e.render_offline((0.5 * SR) as usize).unwrap();
+    let ducked = peak_dbfs(&out[0][(0.3 * SR) as usize..]);
+    // The sidechain (0 dBFS, 20 dB over threshold, 8:1) takes over the
+    // detector completely: 17.5 dB of reduction on the -14 dBFS programme.
+    assert!(
+        (ducked + 31.5).abs() < 1.0,
+        "sidechained output {ducked:.2} dBFS != -31.5 (was {unducked:.2})"
+    );
+}
+
+#[test]
+fn compressor_attack_follows_the_time_constant() {
+    let mut e = stereo_engine();
+    add_blip_source(&mut e);
+    e.add_module("comp", "com.dj.compressor").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("vca1", "out", "comp", "in_l").unwrap();
+    e.connect("comp", "out_l", "out1", "l").unwrap();
+    e.connect("comp", "gr", "out1", "r").unwrap();
+    e.set_knob_value("comp", "threshold", -20.0).unwrap();
+    e.set_knob_value("comp", "ratio", 8.0).unwrap();
+    e.set_knob_value("comp", "attack", 0.05).unwrap();
+    e.set_knob_value("comp", "release", 0.3).unwrap();
+    e.set_knob_value("comp", "knee", 0.0).unwrap();
+    blip_at(&mut e, 0.20, 0.6);
+
+    let out = e.render_offline((0.9 * SR) as usize).unwrap();
+    let gr = &out[1];
+    let final_gr = gr[(0.75 * SR) as usize];
+    assert!(
+        final_gr > 5.0,
+        "no gain reduction on a loud tone: {final_gr}"
+    );
+    // One time constant after onset the reduction is ~63 % of the final.
+    let at_tau = gr[((0.20 + 0.05) * SR) as usize];
+    let frac = at_tau / final_gr;
+    assert!(
+        (frac - 0.63).abs() < 0.15,
+        "gr at one attack constant is {frac:.2} of final, expected ~0.63"
+    );
+}

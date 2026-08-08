@@ -1,0 +1,30 @@
+{
+  "id": "com.dj.compressor",
+  "name": "Compressor",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Effects",
+  "inputs": [
+    { "id": "in_l", "name": "In L", "default": 0.0 },
+    { "id": "in_r", "name": "In R", "default": 0.0 },
+    { "id": "sidechain", "name": "Sidechain", "default": 0.0 },
+    { "id": "threshold", "name": "Threshold", "default": -18.0,
+      "knob": { "style": "continuous", "min": -60.0, "max": 0.0, "curve": "linear" } },
+    { "id": "ratio", "name": "Ratio", "default": 4.0,
+      "knob": { "style": "continuous", "min": 1.0, "max": 20.0, "curve": "exp" } },
+    { "id": "attack", "name": "Attack", "default": 0.01,
+      "knob": { "style": "continuous", "min": 0.0002, "max": 0.2, "curve": "exp" } },
+    { "id": "release", "name": "Release", "default": 0.15,
+      "knob": { "style": "continuous", "min": 0.005, "max": 2.0, "curve": "exp" } },
+    { "id": "knee", "name": "Knee", "default": 6.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 24.0, "curve": "linear" } },
+    { "id": "makeup", "name": "Makeup", "default": 0.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 24.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out_l", "name": "Out L" },
+    { "id": "out_r", "name": "Out R" },
+    { "id": "gr", "name": "Gain Reduction" }
+  ],
+  "latency_samples": 0
+}
