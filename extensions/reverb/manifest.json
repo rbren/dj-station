@@ -1,0 +1,28 @@
+{
+  "id": "com.dj.reverb",
+  "name": "Reverb",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Effects",
+  "inputs": [
+    { "id": "in_l", "name": "In L", "default": 0.0 },
+    { "id": "in_r", "name": "In R", "default": 0.0 },
+    { "id": "size", "name": "Size", "default": 0.7,
+      "knob": { "style": "continuous", "min": 0.2, "max": 1.2, "curve": "linear" } },
+    { "id": "decay", "name": "Decay", "default": 0.7,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "damping", "name": "Damping", "default": 0.4,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "diffusion", "name": "Diffusion", "default": 0.7,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "freeze", "name": "Freeze", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "mix", "name": "Mix", "default": 0.35,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out_l", "name": "Out L" },
+    { "id": "out_r", "name": "Out R" }
+  ],
+  "latency_samples": 0
+}

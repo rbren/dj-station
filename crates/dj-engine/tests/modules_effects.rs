@@ -210,3 +210,91 @@ fn delay_follows_a_patched_clock() {
         "clocked echo at {t:.3}s, expected {expected:.3}s"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Reverb
+// ---------------------------------------------------------------------------
+
+/// Blip -> reverb -> stereo out, with the wet/dry and tank knobs applied.
+fn reverb_patch(decay: f32, mix: f32, freeze: f32) -> Engine {
+    let mut e = stereo_engine();
+    add_blip_source(&mut e);
+    e.add_module("rev", "com.dj.reverb").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("vca1", "out", "rev", "in_l").unwrap();
+    e.connect("vca1", "out", "rev", "in_r").unwrap();
+    e.connect("rev", "out_l", "out1", "l").unwrap();
+    e.connect("rev", "out_r", "out1", "r").unwrap();
+    e.set_knob_value("rev", "decay", decay).unwrap();
+    e.set_knob_value("rev", "mix", mix).unwrap();
+    e.set_knob_position("rev", "freeze", freeze).unwrap();
+    e
+}
+
+#[test]
+fn reverb_tail_decays_and_is_stereo() {
+    let mut e = reverb_patch(0.6, 1.0, 0.0);
+    blip_at(&mut e, 0.05, 0.05);
+    let out = e.render_offline((2.0 * SR) as usize).unwrap();
+    assert_finite(&out[0], "reverb L");
+    assert_finite(&out[1], "reverb R");
+
+    let seg = |ch: usize, a: f32, b: f32| rms(&out[ch][(a * SR) as usize..(b * SR) as usize]);
+    let early = seg(0, 0.15, 0.35);
+    let mid = seg(0, 0.6, 0.8);
+    let late = seg(0, 1.6, 1.8);
+    assert!(early > 1e-3, "no reverb tail: {early}");
+    assert!(mid < early, "tail not decaying: {mid} vs {early}");
+    assert!(late < mid, "tail not decaying: {late} vs {mid}");
+    // The two output taps are decorrelated, not a copy of each other.
+    let a = &out[0][(0.2 * SR) as usize..(0.6 * SR) as usize];
+    let b = &out[1][(0.2 * SR) as usize..(0.6 * SR) as usize];
+    let diff = a
+        .iter()
+        .zip(b)
+        .map(|(x, y)| (x - y) * (x - y))
+        .sum::<f32>()
+        .sqrt();
+    assert!(diff > 1e-2, "reverb outputs are identical, expected stereo");
+}
+
+#[test]
+fn reverb_dry_path_is_unity_at_zero_mix() {
+    let mut e = reverb_patch(0.6, 0.0, 0.0);
+    blip_at(&mut e, 0.05, 0.1);
+    let out = e.render_offline((0.5 * SR) as usize).unwrap();
+    let tail = rms(&out[0][(0.3 * SR) as usize..]);
+    let body = rms(&out[0][(0.07 * SR) as usize..(0.14 * SR) as usize]);
+    assert!(body > 1.0, "dry signal missing at mix=0: {body}");
+    assert!(tail < 1e-4, "wet leaked at mix=0: {tail}");
+}
+
+#[test]
+fn reverb_freeze_holds_the_tail_and_mutes_the_input() {
+    let mut e = reverb_patch(0.5, 1.0, 0.0);
+    blip_at(&mut e, 0.05, 0.2);
+    // A second blip lands well after the freeze; it must not enter the tank.
+    blip_at(&mut e, 1.6, 0.3);
+    // Freeze once the first blip has filled the tank. `out` starts here.
+    e.process_blocks((0.6 * SR) as usize / 512).unwrap();
+    e.set_knob_position("rev", "freeze", 1.0).unwrap();
+    let out = e.render_offline((3.0 * SR) as usize).unwrap();
+    assert_finite(&out[0], "reverb freeze");
+    let seg = |a: f32, b: f32| rms(&out[0][(a * SR) as usize..(b * SR) as usize]);
+    let first = seg(0.1, 0.5);
+    let last = seg(2.4, 2.9);
+    assert!(last > 1e-3, "frozen tail died out: {last}");
+    assert!(
+        last > 0.2 * first,
+        "frozen tail decayed too far: {last} vs {first}"
+    );
+    // Windows before/during the muted second blip stay in the same ballpark.
+    let before = seg(0.7, 0.95);
+    let during = seg(1.05, 1.3);
+    assert!(
+        during < 2.0 * before,
+        "input leaked into the frozen tank: {during} vs {before}"
+    );
+    let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    assert!(peak < 12.5, "frozen tank exceeded the ceiling: {peak}");
+}
