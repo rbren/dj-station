@@ -1,0 +1,171 @@
+//! Behaviour tests for the Shaping / Modulation module batch
+//! (`com.dj.filter`, `com.dj.vca_dual`, `com.dj.waveshaper`, `com.dj.lfo`,
+//! `com.dj.function`, `com.dj.sample_hold`).
+//!
+//! Each test renders a tiny patch offline and asserts on the samples.
+
+mod common;
+
+use dj_engine::{Engine, EngineConfig};
+
+const SR: f32 = 48_000.0;
+
+fn mono_engine() -> Engine {
+    Engine::new(
+        EngineConfig {
+            master_channels: 1,
+            ..EngineConfig::default()
+        },
+        common::registry(),
+    )
+    .unwrap()
+}
+
+fn rms(x: &[f32]) -> f32 {
+    (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()
+}
+
+fn peak(x: &[f32]) -> f32 {
+    x.iter().fold(0.0f32, |m, v| m.max(v.abs()))
+}
+
+/// Fundamental frequency estimate from zero crossings (positive-going).
+fn zero_cross_hz(x: &[f32]) -> f32 {
+    let mut first = None;
+    let mut last = 0usize;
+    let mut count = 0usize;
+    for i in 1..x.len() {
+        if x[i - 1] <= 0.0 && x[i] > 0.0 {
+            if first.is_none() {
+                first = Some(i);
+            }
+            last = i;
+            count += 1;
+        }
+    }
+    match first {
+        Some(f) if count > 1 => (count - 1) as f32 * SR / (last - f) as f32,
+        _ => 0.0,
+    }
+}
+
+/// Steady-state tail of a render (skips the first 40 %).
+fn tail(x: &[f32]) -> &[f32] {
+    &x[x.len() * 2 / 5..]
+}
+
+// ---------------------------------------------------------------------------
+// com.dj.filter
+// ---------------------------------------------------------------------------
+
+/// Osc (sine at `pitch`) -> filter -> out, rendered for `secs`.
+fn render_filter(topology: f32, cutoff: f32, res: f32, pitch: f32, out_jack: &str) -> Vec<f32> {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("f1", "com.dj.filter").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "f1", "in").unwrap();
+    e.connect("f1", out_jack, "out1", "l").unwrap();
+    e.set_knob_value("osc1", "pitch", pitch).unwrap();
+    e.set_knob_position("f1", "topology", topology).unwrap();
+    e.set_knob_value("f1", "cutoff", cutoff).unwrap();
+    e.set_knob_value("f1", "res", res).unwrap();
+    e.render_offline((0.4 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap()
+}
+
+#[test]
+fn filter_lowpass_passes_below_and_rejects_above_cutoff() {
+    // 4 octaves below cutoff: essentially unity gain.
+    let pass = render_filter(0.0, 2.0, 0.1, -2.0, "lp");
+    assert!(
+        (rms(tail(&pass)) - 5.0 / std::f32::consts::SQRT_2).abs() < 0.4,
+        "passband rms {}",
+        rms(tail(&pass))
+    );
+
+    // 3 octaves above cutoff: a 2-pole SVF gives ~-36 dB.
+    let stop = render_filter(0.0, 0.0, 0.1, 3.0, "lp");
+    let g = rms(tail(&stop)) / (5.0 / std::f32::consts::SQRT_2);
+    assert!(g < 0.05 && g > 0.002, "stopband gain {g}");
+}
+
+#[test]
+fn filter_ladder_is_steeper_than_svf() {
+    let svf = rms(tail(&render_filter(0.0, 0.0, 0.1, 3.0, "lp")));
+    let ladder = rms(tail(&render_filter(0.5, 0.0, 0.1, 3.0, "lp")));
+    assert!(
+        ladder < svf * 0.25,
+        "4-pole ladder {ladder} not steeper than 2-pole svf {svf}"
+    );
+}
+
+#[test]
+fn filter_highpass_rejects_below_cutoff() {
+    let stop = render_filter(0.0, 2.0, 0.1, -1.0, "hp");
+    let g = rms(tail(&stop)) / (5.0 / std::f32::consts::SQRT_2);
+    assert!(g < 0.05, "hp stopband gain {g}");
+
+    let pass = render_filter(0.0, -2.0, 0.1, 2.0, "hp");
+    let g = rms(tail(&pass)) / (5.0 / std::f32::consts::SQRT_2);
+    assert!(g > 0.9, "hp passband gain {g}");
+}
+
+#[test]
+fn filter_self_oscillates_as_a_clean_sine() {
+    let mut e = mono_engine();
+    e.add_module("f1", "com.dj.filter").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("f1", "bp", "out1", "l").unwrap();
+    e.set_knob_value("f1", "cutoff", 0.0).unwrap(); // C4 = 261.6 Hz
+    e.set_knob_value("f1", "res", 1.0).unwrap();
+    let out = e
+        .render_offline((2.0 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let steady = &out[out.len() / 2..];
+
+    let hz = zero_cross_hz(steady);
+    assert!(
+        (hz - 261.6).abs() / 261.6 < 0.02,
+        "self-oscillation at {hz} Hz"
+    );
+    let p = peak(steady);
+    assert!((2.0..8.0).contains(&p), "self-oscillation amplitude {p}");
+    // A clean sine has crest factor sqrt(2); clipping or folding lowers it.
+    let crest = p / rms(steady);
+    assert!(
+        (crest - std::f32::consts::SQRT_2).abs() < 0.06,
+        "crest factor {crest} — self-oscillation is not sinusoidal"
+    );
+}
+
+#[test]
+fn filter_stays_finite_under_extreme_drive_and_modulation() {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("lfo_osc", "com.dj.oscillator").unwrap();
+    e.add_module("f1", "com.dj.filter").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "f1", "in").unwrap();
+    e.connect("lfo_osc", "audio", "f1", "cutoff_cv").unwrap();
+    e.connect("f1", "lp", "out1", "l").unwrap();
+    e.set_knob_value("lfo_osc", "pitch", -3.0).unwrap();
+    e.set_knob_value("f1", "res", 1.0).unwrap();
+    e.set_knob_value("f1", "drive", 10.0).unwrap();
+    for topo in [0.0f32, 0.5, 1.0] {
+        e.set_knob_position("f1", "topology", topo).unwrap();
+        let out = e
+            .render_offline((0.3 * SR) as usize)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(
+            out.iter().all(|v| v.is_finite() && v.abs() <= 15.0),
+            "topology {topo}: unstable output"
+        );
+    }
+}
