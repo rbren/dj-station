@@ -298,3 +298,122 @@ fn reverb_freeze_holds_the_tail_and_mutes_the_input() {
     let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
     assert!(peak < 12.5, "frozen tank exceeded the ceiling: {peak}");
 }
+
+// ---------------------------------------------------------------------------
+// Modulation FX
+// ---------------------------------------------------------------------------
+
+/// Sine -> modfx -> stereo out. `mode`: 0 chorus, 1 flanger, 2 phaser.
+fn modfx_patch(mode: f32, depth: f32, feedback: f32, mix: f32) -> Engine {
+    let mut e = stereo_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("fx", "com.dj.modfx").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "fx", "in_l").unwrap();
+    e.connect("osc1", "audio", "fx", "in_r").unwrap();
+    e.connect("fx", "out_l", "out1", "l").unwrap();
+    e.connect("fx", "out_r", "out1", "r").unwrap();
+    e.set_knob_value("fx", "mode", mode).unwrap();
+    e.set_knob_value("fx", "rate", 2.0).unwrap();
+    e.set_knob_value("fx", "depth", depth).unwrap();
+    e.set_knob_value("fx", "feedback", feedback).unwrap();
+    e.set_knob_value("fx", "mix", mix).unwrap();
+    e
+}
+
+/// Spread of the 10 ms peak envelope over `signal`, relative to its mean:
+/// 0 for a steady tone, large when the effect sweeps comb notches.
+fn envelope_swing(signal: &[f32]) -> f32 {
+    let env = envelope(signal, 0.01);
+    let body = &env[10..env.len() - 1];
+    let mean = body.iter().sum::<f32>() / body.len() as f32;
+    let min = body.iter().fold(f32::MAX, |m, &x| m.min(x));
+    let max = body.iter().fold(0.0f32, |m, &x| m.max(x));
+    (max - min) / mean.max(1e-9)
+}
+
+#[test]
+fn modfx_all_modes_sweep_and_stay_bounded() {
+    // A steady sine through each mode picks up sweeping comb/notch
+    // amplitude modulation; the raw oscillator does not.
+    let mut plain = stereo_engine();
+    plain.add_module("osc1", "com.dj.oscillator").unwrap();
+    plain.add_module("out1", "builtin.audio_out").unwrap();
+    plain.connect("osc1", "audio", "out1", "l").unwrap();
+    let dry = plain.render_offline((1.5 * SR) as usize).unwrap();
+    assert!(envelope_swing(&dry[0]) < 0.05, "dry tone is not steady");
+
+    for (mode, name, fb) in [
+        (0.0, "chorus", 0.3),
+        (1.0, "flanger", 0.8),
+        (2.0, "phaser", 0.6),
+    ] {
+        let mut e = modfx_patch(mode, 0.8, fb, 0.5);
+        let out = e.render_offline((1.5 * SR) as usize).unwrap();
+        assert_finite(&out[0], name);
+        let swing = envelope_swing(&out[0]);
+        assert!(swing > 0.2, "{name}: no modulation (swing {swing})");
+        let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+        assert!(peak < 10.0, "{name}: level runaway ({peak})");
+    }
+}
+
+#[test]
+fn modfx_spread_decorrelates_the_channels() {
+    let mut e = modfx_patch(0.0, 0.9, 0.0, 0.5);
+    e.set_knob_value("fx", "spread", 1.0).unwrap();
+    let out = e.render_offline((1.0 * SR) as usize).unwrap();
+    let (l, r) = (
+        &out[0][(0.2 * SR) as usize..],
+        &out[1][(0.2 * SR) as usize..],
+    );
+    let diff = rms(&l.iter().zip(r).map(|(a, b)| a - b).collect::<Vec<_>>());
+    assert!(diff > 0.1, "spread produced identical channels: {diff}");
+
+    let mut mono = modfx_patch(0.0, 0.9, 0.0, 0.5);
+    mono.set_knob_value("fx", "spread", 0.0).unwrap();
+    let out = mono.render_offline((1.0 * SR) as usize).unwrap();
+    let (l, r) = (
+        &out[0][(0.2 * SR) as usize..],
+        &out[1][(0.2 * SR) as usize..],
+    );
+    let diff = rms(&l.iter().zip(r).map(|(a, b)| a - b).collect::<Vec<_>>());
+    assert!(
+        diff < 1e-6,
+        "no spread should keep the channels equal: {diff}"
+    );
+}
+
+#[test]
+fn modfx_through_zero_flanger_nulls() {
+    // Through-zero: the dry path is delayed by the sweep centre and the wet
+    // path inverted, so the two cancel each time the sweep crosses zero.
+    let mut e = modfx_patch(1.0, 1.0, 0.0, 0.5);
+    e.set_knob_value("fx", "rate", 1.0).unwrap();
+    e.set_knob_position("fx", "through_zero", 1.0).unwrap();
+    let out = e.render_offline((1.5 * SR) as usize).unwrap();
+    assert_finite(&out[0], "through-zero flanger");
+    // 1 ms windows: the null is deep but brief (the sweep crosses zero at
+    // ~700 samples/s), so a longer window would smear it.
+    let env = envelope(&out[0], 0.001);
+    let body = &env[200..];
+    let min = body.iter().fold(f32::MAX, |m, &x| m.min(x));
+    let max = body.iter().fold(0.0f32, |m, &x| m.max(x));
+    assert!(max > 1.0, "through-zero flanger has no peaks: {max}");
+    assert!(
+        min < 0.05 * max,
+        "no through-zero null: min {min} max {max}"
+    );
+
+    // The through-zero path (delayed dry, inverted wet) is audibly its own
+    // effect, not the same signal as the ordinary flanger.
+    let mut plain = modfx_patch(1.0, 1.0, 0.0, 0.5);
+    plain.set_knob_value("fx", "rate", 1.0).unwrap();
+    let plain_out = plain.render_offline((1.5 * SR) as usize).unwrap();
+    let diff = rms(&out[0]
+        .iter()
+        .zip(&plain_out[0])
+        .map(|(a, b)| a - b)
+        .collect::<Vec<_>>());
+    assert!(diff > 0.5, "through-zero matched the plain flanger: {diff}");
+}

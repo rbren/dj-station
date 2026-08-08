@@ -1,0 +1,30 @@
+{
+  "id": "com.dj.modfx",
+  "name": "Modulation FX",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Effects",
+  "inputs": [
+    { "id": "in_l", "name": "In L", "default": 0.0 },
+    { "id": "in_r", "name": "In R", "default": 0.0 },
+    { "id": "mode", "name": "Mode", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 2.0, "curve": "linear", "steps": 3 } },
+    { "id": "rate", "name": "Rate", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.02, "max": 10.0, "curve": "exp" } },
+    { "id": "depth", "name": "Depth", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "feedback", "name": "Feedback", "default": 0.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "spread", "name": "Spread", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "through_zero", "name": "Through Zero", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 1.0, "curve": "linear" } },
+    { "id": "mix", "name": "Mix", "default": 0.5,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out_l", "name": "Out L" },
+    { "id": "out_r", "name": "Out R" }
+  ],
+  "latency_samples": 0
+}
