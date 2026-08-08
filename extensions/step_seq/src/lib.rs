@@ -267,7 +267,7 @@ impl Module for StepSeq {
     }
 
     fn save_state(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(32);
+        let mut out = Vec::with_capacity(36);
         out.extend_from_slice(&(self.step as u16).to_le_bytes());
         out.extend_from_slice(&(self.rand_count as u16).to_le_bytes());
         out.extend_from_slice(&self.rng.to_le_bytes());
@@ -279,11 +279,13 @@ impl Module for StepSeq {
         out.extend_from_slice(&self.cv_target.to_le_bytes());
         out.extend_from_slice(&self.interval.to_le_bytes());
         out.extend_from_slice(&self.step_pos.to_le_bytes());
+        out.extend_from_slice(&self.last_clock.to_le_bytes());
+        out.extend_from_slice(&self.last_reset.to_le_bytes());
         out
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
-        if bytes.len() < 28 {
+        if bytes.len() < 36 {
             return;
         }
         self.step = u16::from_le_bytes(bytes[0..2].try_into().unwrap()) as usize % STEPS;
@@ -298,6 +300,8 @@ impl Module for StepSeq {
         self.cv_target = f32::from_le_bytes(bytes[16..20].try_into().unwrap());
         self.interval = f32::from_le_bytes(bytes[20..24].try_into().unwrap()).max(2.0);
         self.step_pos = f32::from_le_bytes(bytes[24..28].try_into().unwrap());
+        self.last_clock = f32::from_le_bytes(bytes[28..32].try_into().unwrap());
+        self.last_reset = f32::from_le_bytes(bytes[32..36].try_into().unwrap());
     }
 }
 

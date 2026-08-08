@@ -338,6 +338,36 @@ fn step_seq_end_of_sequence_fires_once_per_lap() {
 }
 
 #[test]
+fn step_seq_state_survives_a_hot_reload() {
+    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    // Stop 2 ms into the 4th clock pulse, i.e. mid gate and mid clock high.
+    let a = e.render_offline((0.752 * SR) as usize).unwrap();
+    assert_eq!(e.reload_extension("com.dj.step_seq").unwrap(), 1);
+    let b = e.render_offline((0.6 * SR) as usize).unwrap();
+
+    let mut cv = a[0].clone();
+    cv.extend_from_slice(&b[0]);
+    let mut gate = a[1].clone();
+    gate.extend_from_slice(&b[1]);
+    let edges = rising_edges(&gate);
+    // The reload neither restarts the sequence nor fabricates a clock edge.
+    assert_edges_near(
+        &edges,
+        &[0.0, 0.25, 0.5, 0.75, 1.0, 1.25],
+        2,
+        "gates across a hot reload",
+    );
+    let cvs = cv_at_edges(&cv, &edges);
+    for (i, (&got, &w)) in cvs
+        .iter()
+        .zip(&[1.0f32, 2.0, 3.0, 4.0, 1.0, 2.0])
+        .enumerate()
+    {
+        assert!((got - w).abs() < 1e-3, "step {i}: cv {got} != {w}");
+    }
+}
+
+#[test]
 fn step_seq_glide_slews_the_cv_between_steps() {
     let mut e = step_seq_patch(120.0, 2.0, 0.0); // 0.5 s per step, cv 1 -> 2
     e.set_knob_value("seq", "glide", 0.25).unwrap();
