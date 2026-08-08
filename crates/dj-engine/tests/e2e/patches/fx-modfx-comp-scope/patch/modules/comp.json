@@ -1,0 +1,51 @@
+{
+  "ext": "com.dj.compressor",
+  "knobs": {
+    "attack": {
+      "position": 0.46598,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in_l": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in_r": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "knee": {
+      "position": 0.25,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "makeup": {
+      "position": 0.25,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratio": {
+      "position": 0.598104,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "release": {
+      "position": 0.5304302,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "sidechain": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "threshold": {
+      "position": 0.6999999,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

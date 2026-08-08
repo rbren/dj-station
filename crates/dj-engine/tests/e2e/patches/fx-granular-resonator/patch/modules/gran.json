@@ -1,0 +1,66 @@
+{
+  "ext": "com.dj.granular",
+  "knobs": {
+    "density": {
+      "position": 0.7494153,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "feedback": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "freeze": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in_l": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in_r": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mix": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pitch": {
+      "position": 0.625,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "position": {
+      "position": 0.099999994,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "size": {
+      "position": 0.5395906,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "spread": {
+      "position": 0.6,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "texture": {
+      "position": 0.39999998,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "trig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

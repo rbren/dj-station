@@ -1,0 +1,56 @@
+{
+  "ext": "com.dj.delay",
+  "knobs": {
+    "clock": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "div": {
+      "position": 0.6875,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "feedback": {
+      "position": 0.54999995,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "highpass": {
+      "position": 0.23856062,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in_l": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in_r": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lowpass": {
+      "position": 0.66574645,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mix": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pingpong": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "time": {
+      "position": 0.54403627,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

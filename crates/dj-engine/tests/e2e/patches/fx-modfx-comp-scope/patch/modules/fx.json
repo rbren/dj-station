@@ -1,0 +1,51 @@
+{
+  "ext": "com.dj.modfx",
+  "knobs": {
+    "depth": {
+      "position": 0.6999999,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "feedback": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in_l": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in_r": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mix": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mode": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rate": {
+      "position": 0.80626726,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "spread": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "through_zero": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}
