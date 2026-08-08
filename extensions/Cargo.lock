@@ -108,6 +108,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-sample-hold"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-seq-switch"
 version = "0.1.0"
 dependencies = [
