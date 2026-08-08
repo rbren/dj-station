@@ -15,6 +15,32 @@ pub const MAX_MIDI_JACKS: usize = 64;
 /// Input jacks on the MIDI module for LED/controller feedback (PRD §7.1).
 pub const MAX_MIDI_LED_JACKS: usize = 16;
 
+/// Voices of the built-in polyphonic note allocator. Each voice owns a
+/// pitch/gate/velocity jack trio placed after the mapping jacks, so mapping
+/// slot indices (stored in patches) keep their meaning.
+pub const MIDI_POLY_VOICES: usize = 4;
+
+/// Fixed output jacks that follow the per-voice trios: channel-wide
+/// controls and transport, in this order.
+const MIDI_GLOBAL_OUTS: [(&str, &str); 7] = [
+    ("mod", "Mod Wheel"),
+    ("bend", "Pitch Bend"),
+    ("pressure", "Aftertouch"),
+    ("sustain", "Sustain Pedal"),
+    ("clock", "Clock (24 ppqn)"),
+    ("beat", "Beat"),
+    ("transport", "Transport Run"),
+];
+
+/// Width of the clock/beat trigger pulses, in samples (~1 ms at 48 kHz).
+const CLOCK_PULSE_SAMPLES: u32 = 48;
+
+/// First output index of the polyphonic voice jacks.
+pub const POLY_OUT_BASE: usize = MAX_MIDI_JACKS;
+/// First output index of the channel-wide jacks.
+pub const GLOBAL_OUT_BASE: usize = POLY_OUT_BASE + MIDI_POLY_VOICES * 3;
+pub const TOTAL_MIDI_OUTS: usize = GLOBAL_OUT_BASE + MIDI_GLOBAL_OUTS.len();
+
 pub fn audio_out_manifest() -> Manifest {
     Manifest {
         id: AUDIO_OUT_ID.into(),
@@ -68,13 +94,27 @@ pub fn midi_manifest() -> Manifest {
                 knob: None,
             })
             .collect(),
-        // Output jacks are dynamic (one per mapped control); the graph
-        // preallocates MAX_MIDI_JACKS output buffers.
+        // Outputs are, in order: MAX_MIDI_JACKS dynamic mapping slots (one
+        // per learned control), then MIDI_POLY_VOICES pitch/gate/velocity
+        // trios from the note allocator, then the channel-wide and
+        // transport jacks. Fixed layout so patched slot indices are stable.
         outputs: (0..MAX_MIDI_JACKS)
             .map(|i| OutputDecl {
                 id: format!("map{i}"),
                 name: format!("Mapping {i}"),
             })
+            .chain((0..MIDI_POLY_VOICES).flat_map(|v| {
+                [("pitch", "Pitch"), ("gate", "Gate"), ("vel", "Velocity")]
+                    .into_iter()
+                    .map(move |(id, name)| OutputDecl {
+                        id: format!("v{}_{id}", v + 1),
+                        name: format!("Voice {} {name}", v + 1),
+                    })
+            }))
+            .chain(MIDI_GLOBAL_OUTS.iter().map(|(id, name)| OutputDecl {
+                id: (*id).into(),
+                name: (*name).into(),
+            }))
             .collect(),
         params: vec![],
         ui: None,
@@ -220,13 +260,46 @@ impl MidiOutSink for MockMidiSink {
     }
 }
 
+/// One voice of the polyphonic note allocator.
+#[derive(Clone, Copy, Default)]
+struct Voice {
+    /// MIDI note currently held, if any.
+    note: Option<u8>,
+    pitch: f32,
+    velocity: f32,
+    gate: f32,
+    /// Allocation counter at note-on; the oldest voice is stolen first.
+    age: u64,
+    /// Held by the sustain pedal after its note-off.
+    sustained: bool,
+}
+
 /// The RT-side MIDI module: consumes injected/hardware events from an SPSC
 /// ring and renders mapped controls as output signals scaled to [-10, +10].
 /// Notes emit gate-style 10.0 (on) / 0.0 (off); CC maps 0..127 -> -10..+10.
+///
+/// Alongside the learned mappings it runs a fixed polyphonic note allocator
+/// (PRD §7.1 "MIDI to CV"): note-ons claim a free voice (stealing the oldest
+/// when all are busy) and drive that voice's pitch (1 V/oct, 0 = C4 = note
+/// 60), gate and velocity jacks, while mod wheel, pitch bend, aftertouch,
+/// sustain and the transport/clock messages drive the channel-wide jacks.
 pub struct MidiModule {
     consumer: rtrb::Consumer<MidiEvent>,
     shared: Arc<MidiShared>,
     values: [f32; MAX_MIDI_JACKS],
+    voices: [Voice; MIDI_POLY_VOICES],
+    /// Monotonic note-on counter driving voice stealing.
+    voice_clock: u64,
+    mod_wheel: f32,
+    bend: f32,
+    pressure: f32,
+    sustain: bool,
+    /// Remaining samples of the current clock/beat trigger pulse.
+    clock_pulse: u32,
+    beat_pulse: u32,
+    /// 24-ppqn tick counter, reset by START/CONTINUE and SONG POSITION.
+    clock_ticks: u32,
+    transport: f32,
     frame: u64,
     /// LED feedback output ring (RT -> control). Full ring drops events —
     /// LED state tolerates loss (the next change re-syncs).
@@ -246,13 +319,126 @@ impl MidiModule {
             consumer,
             shared,
             values: [0.0; MAX_MIDI_JACKS],
+            voices: [Voice::default(); MIDI_POLY_VOICES],
+            voice_clock: 0,
+            mod_wheel: 0.0,
+            bend: 0.0,
+            pressure: 0.0,
+            sustain: false,
+            clock_pulse: 0,
+            beat_pulse: 0,
+            clock_ticks: 0,
+            transport: 0.0,
             frame: 0,
             out_producer,
             led_last: [-1; MAX_MIDI_LED_JACKS],
         }
     }
 
+    /// Claim a voice for `note`: reuse the one already holding it, else a
+    /// free voice, else steal the oldest.
+    fn note_on(&mut self, note: u8, velocity: u8) {
+        self.voice_clock += 1;
+        let slot = self
+            .voices
+            .iter()
+            .position(|v| v.note == Some(note))
+            .or_else(|| self.voices.iter().position(|v| v.note.is_none()))
+            .unwrap_or_else(|| {
+                let mut oldest = 0;
+                for i in 1..MIDI_POLY_VOICES {
+                    if self.voices[i].age < self.voices[oldest].age {
+                        oldest = i;
+                    }
+                }
+                oldest
+            });
+        self.voices[slot] = Voice {
+            note: Some(note),
+            // 1 V/oct with note 60 (C4) at 0.0, matching `pitch_to_hz`.
+            pitch: (note as f32 - 60.0) / 12.0,
+            velocity: velocity as f32 / 127.0 * 10.0,
+            gate: 10.0,
+            age: self.voice_clock,
+            sustained: false,
+        };
+    }
+
+    fn note_off(&mut self, note: u8) {
+        let sustain = self.sustain;
+        for v in self.voices.iter_mut() {
+            if v.note == Some(note) {
+                if sustain {
+                    v.sustained = true;
+                } else {
+                    v.note = None;
+                    v.gate = 0.0;
+                }
+            }
+        }
+    }
+
+    /// Poly/channel handling that runs regardless of learned mappings.
+    fn apply_voice_event(&mut self, data: [u8; 3]) {
+        match data[0] & 0xF0 {
+            0x90 if data[2] > 0 => self.note_on(data[1], data[2]),
+            0x90 | 0x80 => self.note_off(data[1]),
+            0xA0 => {
+                let level = data[2] as f32 / 127.0 * 10.0;
+                for v in self.voices.iter_mut() {
+                    if v.note == Some(data[1]) {
+                        v.velocity = level;
+                    }
+                }
+            }
+            0xD0 => self.pressure = data[1] as f32 / 127.0 * 10.0,
+            0xE0 => {
+                // 14-bit, centred: -5..+5 (a ±2 semitone bend at 0.5 V/oct
+                // scaling is left to the patch's attenuverter).
+                let raw = ((data[2] as i32) << 7 | data[1] as i32) - 8192;
+                self.bend = raw as f32 / 8192.0 * 5.0;
+            }
+            0xB0 => match data[1] {
+                1 => self.mod_wheel = data[2] as f32 / 127.0 * 10.0,
+                64 => {
+                    self.sustain = data[2] >= 64;
+                    if !self.sustain {
+                        for v in self.voices.iter_mut() {
+                            if v.sustained {
+                                v.sustained = false;
+                                v.note = None;
+                                v.gate = 0.0;
+                            }
+                        }
+                    }
+                }
+                // All notes off / all sound off.
+                120 | 123 => {
+                    self.voices = [Voice::default(); MIDI_POLY_VOICES];
+                }
+                _ => {}
+            },
+            _ => match data[0] {
+                0xF8 => {
+                    self.clock_pulse = CLOCK_PULSE_SAMPLES;
+                    if self.clock_ticks.is_multiple_of(24) {
+                        self.beat_pulse = CLOCK_PULSE_SAMPLES;
+                    }
+                    self.clock_ticks = self.clock_ticks.wrapping_add(1);
+                }
+                0xFA => {
+                    self.clock_ticks = 0;
+                    self.transport = 10.0;
+                }
+                0xFB => self.transport = 10.0,
+                0xFC => self.transport = 0.0,
+                _ => {}
+            },
+        }
+    }
+
     fn apply_event(&mut self, data: [u8; 3]) {
+        self.apply_voice_event(data);
         let status = data[0] & 0xF0;
         let (kind, num, value) = match status {
             0x90 if data[2] > 0 => (MAP_KIND_NOTE, data[1], 10.0),
@@ -320,6 +506,44 @@ impl HostModule for MidiModule {
             for (o, out) in outputs.iter_mut().enumerate().take(MAX_MIDI_JACKS) {
                 out[s] = self.values[o];
             }
+            for (v, voice) in self.voices.iter().enumerate() {
+                let base = POLY_OUT_BASE + v * 3;
+                if let Some(out) = outputs.get_mut(base) {
+                    out[s] = voice.pitch;
+                }
+                if let Some(out) = outputs.get_mut(base + 1) {
+                    out[s] = voice.gate;
+                }
+                if let Some(out) = outputs.get_mut(base + 2) {
+                    out[s] = voice.velocity;
+                }
+            }
+            let clock = if self.clock_pulse > 0 {
+                self.clock_pulse -= 1;
+                10.0
+            } else {
+                0.0
+            };
+            let beat = if self.beat_pulse > 0 {
+                self.beat_pulse -= 1;
+                10.0
+            } else {
+                0.0
+            };
+            let globals = [
+                self.mod_wheel,
+                self.bend,
+                self.pressure,
+                if self.sustain { 10.0 } else { 0.0 },
+                clock,
+                beat,
+                self.transport,
+            ];
+            for (g, value) in globals.iter().enumerate() {
+                if let Some(out) = outputs.get_mut(GLOBAL_OUT_BASE + g) {
+                    out[s] = *value;
+                }
+            }
         }
 
         // LED feedback (PRD §7.1): evaluate each active LED mapping at
@@ -361,17 +585,42 @@ impl HostModule for MidiModule {
     }
 
     fn save_state(&mut self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(MAX_MIDI_JACKS * 4);
+        // Mapping values, then per-voice pitch/gate/velocity, then the
+        // channel-wide values — so held notes survive a hot reload.
+        let mut bytes = Vec::with_capacity((MAX_MIDI_JACKS + MIDI_POLY_VOICES * 3 + 3) * 4);
         for v in &self.values {
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in &self.voices {
+            bytes.extend_from_slice(&v.pitch.to_le_bytes());
+            bytes.extend_from_slice(&v.gate.to_le_bytes());
+            bytes.extend_from_slice(&v.velocity.to_le_bytes());
+        }
+        for v in [self.mod_wheel, self.bend, self.pressure] {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
         bytes
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
-        for (i, chunk) in bytes.chunks_exact(4).enumerate().take(MAX_MIDI_JACKS) {
-            self.values[i] = f32::from_le_bytes(chunk.try_into().unwrap());
+        let mut words = bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes(c.try_into().unwrap()));
+        for (i, w) in words.by_ref().take(MAX_MIDI_JACKS).enumerate() {
+            self.values[i] = w;
         }
+        for v in self.voices.iter_mut() {
+            let (Some(pitch), Some(gate), Some(vel)) = (words.next(), words.next(), words.next())
+            else {
+                return;
+            };
+            v.pitch = pitch;
+            v.gate = gate;
+            v.velocity = vel;
+        }
+        self.mod_wheel = words.next().unwrap_or(self.mod_wheel);
+        self.bend = words.next().unwrap_or(self.bend);
+        self.pressure = words.next().unwrap_or(self.pressure);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
