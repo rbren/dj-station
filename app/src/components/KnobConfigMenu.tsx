@@ -1,29 +1,73 @@
 // Right-click editor for per-patch knob config overrides (PRD §7.2):
 // style, endpoints and curve are data, not code. When the jack is wired
-// this menu also hosts the attenuverter/offset controls.
+// this menu also hosts the wire spread — the value range the incoming
+// signal can swing the knob's baseline through.
+//
+// Rendered in a portal at the cursor: module panels clip their content, so
+// an in-flow menu would be cut off at the panel edge.
 
+import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import type { CurveName, KnobConfig, KnobStyle } from '../types';
+import { attenOffsetForSpread, spreadRange } from './Knob';
 
 export function KnobConfigMenu({
   config,
+  at,
   onChange,
   onClose,
   wired,
+  position,
   atten,
   offset,
   onAttenOffset,
 }: {
   config: KnobConfig;
+  /** Viewport coordinates to anchor the menu at (the right-click point). */
+  at?: { x: number; y: number };
   onChange(config: KnobConfig): void;
   onClose(): void;
   wired?: boolean;
+  /** Knob position: the spread is shown as absolute values around it. */
+  position?: number;
   atten?: number;
   offset?: number;
   onAttenOffset?(atten: number, offset: number): void;
 }) {
   const curveName = typeof config.curve === 'string' ? config.curve : 'custom';
-  return (
-    <div className="knob-config-menu" role="dialog" aria-label="Knob configuration">
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    // Capture phase so a click that also lands on another control still
+    // closes this menu first.
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const spread = spreadRange(config, position ?? 0, atten ?? 1, offset ?? 0);
+  const setSpread = (min: number, max: number) => {
+    const next = attenOffsetForSpread(config, position ?? 0, min, max);
+    onAttenOffset?.(next.atten, next.offset);
+  };
+
+  const menu = (
+    <div
+      ref={ref}
+      className="knob-config-menu"
+      role="dialog"
+      aria-label="Knob configuration"
+      style={at ? { position: 'fixed', left: at.x, top: at.y } : undefined}
+    >
       <label>
         Style
         <select
@@ -84,26 +128,25 @@ export function KnobConfigMenu({
       </label>
       {wired && onAttenOffset && (
         <>
+          <div className="knob-config-section">Wire spread</div>
           <label>
-            Atten
+            Spread min
             <input
               type="number"
-              aria-label="knob atten"
-              min={-1}
-              max={1}
-              step={0.01}
-              value={atten ?? 1}
-              onChange={(e) => onAttenOffset(Number(e.target.value), offset ?? 0)}
+              aria-label="wire spread min"
+              step={0.1}
+              value={Number(spread.min.toFixed(4))}
+              onChange={(e) => setSpread(Number(e.target.value), spread.max)}
             />
           </label>
           <label>
-            Offset
+            Spread max
             <input
               type="number"
-              aria-label="knob offset"
+              aria-label="wire spread max"
               step={0.1}
-              value={offset ?? 0}
-              onChange={(e) => onAttenOffset(atten ?? 1, Number(e.target.value))}
+              value={Number(spread.max.toFixed(4))}
+              onChange={(e) => setSpread(spread.min, Number(e.target.value))}
             />
           </label>
         </>
@@ -111,4 +154,6 @@ export function KnobConfigMenu({
       <button onClick={onClose}>Close</button>
     </div>
   );
+
+  return at && typeof document !== 'undefined' ? createPortal(menu, document.body) : menu;
 }

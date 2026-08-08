@@ -201,6 +201,24 @@ body {
   transform-origin: 50% 13px;
 }
 
+/* Wire spread: the value range an incoming signal can swing the knob's
+   baseline through, drawn as an arc outside the dial. */
+.knob-spread {
+  position: absolute;
+  inset: 0;
+  width: 44px;
+  height: 44px;
+  pointer-events: none;
+}
+
+.knob-spread path {
+  fill: none;
+  stroke: #e6b450;
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+
 .param-name {
   font-size: 0.7rem;
   color: #8a93a2;
@@ -208,7 +226,7 @@ body {
 
 .knob-config-menu {
   position: absolute;
-  z-index: 10;
+  z-index: 100;
   top: 40px;
   left: 0;
   background: #23272e;
@@ -226,6 +244,16 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 6px;
+}
+
+.knob-config-section {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid #3c424c;
+  color: #8a93a2;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .knob-toggle {

@@ -1,14 +1,23 @@
 // Data-driven knob (PRD §7.2): what renders is determined by the config
 // style — a dial (continuous/stepped), a toggle (switch/button), or nothing
 // at all ('wire': the input is a plain jack). Values are not printed inline;
-// they appear in the hover tooltip. Right-click opens the config editor
-// (which also hosts attenuverter/offset when the jack is wired).
+// they appear in the hover tooltip. Right-click opens the config editor.
+//
+// Wiring an input does not take the knob away: the knob sets the baseline
+// value and the incoming signal adds on top, scaled by the wire amount
+// (attenuverter). Drag sets the baseline; cmd/ctrl-drag sets the wire
+// amount, drawn as a spread arc around the knob's notch.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KnobConfig } from '../types';
 import { KnobConfigMenu } from './KnobConfigMenu';
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/** Nominal peak of a patch signal (modules output ±5 V full scale); the
+ *  wire amount is expressed against it, so atten = 1 means the wire can
+ *  swing the value by ±5. */
+export const WIRE_SIGNAL_REF = 5;
 
 export function mapPosition(config: KnobConfig, position: number): number {
   let p = clamp01(position);
@@ -50,6 +59,46 @@ export function positionForValue(config: KnobConfig, value: number): number {
   return (lo + hi) / 2;
 }
 
+/** Value range a wired input can reach: the knob baseline plus the wire's
+ *  swing (`signal * atten + offset` for a ±WIRE_SIGNAL_REF signal). */
+export function spreadRange(
+  config: KnobConfig,
+  position: number,
+  atten: number,
+  offset: number,
+): { min: number; max: number } {
+  const center = mapPosition(config, position) + offset;
+  const half = WIRE_SIGNAL_REF * Math.abs(atten);
+  return { min: center - half, max: center + half };
+}
+
+/** Inverse of `spreadRange`: the atten/offset that put the wire's swing
+ *  between `min` and `max` around the current baseline. */
+export function attenOffsetForSpread(
+  config: KnobConfig,
+  position: number,
+  min: number,
+  max: number,
+): { atten: number; offset: number } {
+  const base = mapPosition(config, position);
+  return {
+    atten: Math.max(-1, Math.min(1, (max - min) / (2 * WIRE_SIGNAL_REF))),
+    offset: (min + max) / 2 - base,
+  };
+}
+
+const angleFor = (position: number) => -135 + clamp01(position) * 270;
+
+/** SVG arc along the dial's sweep between two knob positions. */
+function arcPath(fromPos: number, toPos: number, cx: number, cy: number, r: number): string {
+  const a0 = (angleFor(fromPos) * Math.PI) / 180;
+  const a1 = (angleFor(toPos) * Math.PI) / 180;
+  const pt = (a: number) =>
+    `${(cx + r * Math.sin(a)).toFixed(2)},${(cy - r * Math.cos(a)).toFixed(2)}`;
+  const large = Math.abs(a1 - a0) > Math.PI ? 1 : 0;
+  return `M ${pt(a0)} A ${r} ${r} 0 ${large} 1 ${pt(a1)}`;
+}
+
 export interface KnobProps {
   label: string;
   config: KnobConfig;
@@ -66,16 +115,29 @@ export interface KnobProps {
 
 export function Knob(props: KnobProps) {
   const { label, config, position, onPosition, onRelease, onConfigChange, wired } = props;
-  const [menuOpen, setMenuOpen] = useState(false);
-  const drag = useRef<{ startY: number; startPos: number } | null>(null);
+  const { onAttenOffset } = props;
+  const atten = props.atten ?? 1;
+  const offset = props.offset ?? 0;
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const drag = useRef<{
+    startY: number;
+    startPos: number;
+    startAtten: number;
+    wire: boolean;
+  } | null>(null);
 
   const onMove = useCallback(
     (e: MouseEvent) => {
       const d = drag.current;
       if (!d) return;
-      onPosition(clamp01(d.startPos + (d.startY - e.clientY) / 150));
+      const delta = (d.startY - e.clientY) / 150;
+      if (d.wire) {
+        onAttenOffset?.(Math.max(-1, Math.min(1, d.startAtten + delta)), offset);
+      } else {
+        onPosition(clamp01(d.startPos + delta));
+      }
     },
-    [onPosition],
+    [onPosition, onAttenOffset, offset],
   );
   const onUp = useCallback(() => {
     if (drag.current) {
@@ -93,27 +155,29 @@ export function Knob(props: KnobProps) {
   }, [onMove, onUp]);
 
   const value = mapPosition(config, position);
-  const angle = -135 + clamp01(position) * 270;
+  const angle = angleFor(position);
   const openMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (onConfigChange) setMenuOpen(true);
+    if (onConfigChange) setMenuAt({ x: e.clientX, y: e.clientY });
   };
-  const menu = menuOpen && onConfigChange && (
+  const menu = menuAt && onConfigChange && (
     <KnobConfigMenu
       config={config}
+      at={menuAt}
       onChange={(c) => onConfigChange(c)}
-      onClose={() => setMenuOpen(false)}
+      onClose={() => setMenuAt(null)}
       wired={wired}
+      position={position}
       atten={props.atten}
       offset={props.offset}
-      onAttenOffset={props.onAttenOffset}
+      onAttenOffset={onAttenOffset}
     />
   );
 
-  // A wired jack's own knob is superseded by the incoming signal
-  // (attenuverter/offset live in the right-click menu); 'wire' style means
-  // "no knob at all". Both render only the config affordance.
-  if (config.style === 'wire' || wired) {
+  // 'wire' style means "no knob at all" — the input is a plain jack, so only
+  // the config affordance renders. A wired jack keeps its knob: the knob is
+  // the baseline the incoming signal adds to.
+  if (config.style === 'wire') {
     return (
       <div className="knob knob-wire" data-testid={`knob-${label}`} onContextMenu={openMenu}>
         {menu}
@@ -175,8 +239,27 @@ export function Knob(props: KnobProps) {
     );
   }
 
+  const spread = wired ? spreadRange(config, position, atten, offset) : null;
+  const tooltip = spread
+    ? `${label}: ${value.toFixed(2)} (wire ${spread.min.toFixed(2)}…${spread.max.toFixed(2)})`
+    : `${label}: ${value.toFixed(2)}`;
+
   return (
     <div className="knob" data-testid={`knob-${label}`}>
+      {spread && (
+        <svg className="knob-spread" viewBox="0 0 44 44" aria-hidden="true">
+          <path
+            data-testid={`knob-spread-${label}`}
+            d={arcPath(
+              positionForValue(config, spread.min),
+              positionForValue(config, spread.max),
+              22,
+              22,
+              20,
+            )}
+          />
+        </svg>
+      )}
       <div
         className="knob-dial"
         role="slider"
@@ -184,11 +267,13 @@ export function Knob(props: KnobProps) {
         aria-valuemin={config.min}
         aria-valuemax={config.max}
         aria-valuenow={value}
-        title={`${label}: ${value.toFixed(2)}`}
+        title={tooltip}
         tabIndex={0}
         onMouseDown={(e) => {
           e.preventDefault();
-          drag.current = { startY: e.clientY, startPos: position };
+          // cmd/ctrl-drag retargets the gesture at the wire amount.
+          const wire = !!wired && (e.metaKey || e.ctrlKey) && !!onAttenOffset;
+          drag.current = { startY: e.clientY, startPos: position, startAtten: atten, wire };
         }}
         onContextMenu={openMenu}
       >

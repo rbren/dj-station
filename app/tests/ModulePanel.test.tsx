@@ -99,12 +99,15 @@ describe('ModulePanel', () => {
     expect(dial.getAttribute('aria-valuenow')).toBe('2');
   });
 
-  it('a wired input keeps its jack but loses its knob dial', () => {
+  it('a wired input keeps its knob and gains a spread arc', () => {
     render(<ModulePanel {...baseProps} wired={{ pitch: true }} />);
     expect(screen.getByTestId('jack-input-pitch')).toBeTruthy();
-    expect(screen.queryByRole('slider', { name: 'pitch' })).toBeNull();
-    // Unwired inputs keep theirs.
+    // The knob is the baseline the incoming signal adds to, so it stays.
+    expect(screen.getByRole('slider', { name: 'pitch' })).toBeTruthy();
+    expect(screen.getByTestId('knob-spread-pitch')).toBeTruthy();
+    // Unwired inputs have no spread to show.
     expect(screen.getByRole('slider', { name: 'fm' })).toBeTruthy();
+    expect(screen.queryByTestId('knob-spread-fm')).toBeNull();
   });
 
   it('renders formerly-special inputs (waveform) as ordinary jack + knob rows', () => {

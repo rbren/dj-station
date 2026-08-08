@@ -164,30 +164,86 @@ describe('Knob', () => {
     expect(onPosition).toHaveBeenLastCalledWith(0);
   });
 
-  it('wired: no dial; attenuverter + offset live in the right-click menu', () => {
+  it('wired: the dial stays and drag still sets the baseline', () => {
+    const onPosition = vi.fn();
+    render(
+      <Knob
+        label="fm"
+        config={LINEAR}
+        position={0.5}
+        onPosition={onPosition}
+        onAttenOffset={() => {}}
+        wired={true}
+        atten={0.4}
+        offset={0}
+      />,
+    );
+    const dial = screen.getByRole('slider', { name: 'fm' });
+    fireEvent.mouseDown(dial, { clientY: 100 });
+    fireEvent.mouseMove(window, { clientY: 70 }); // +0.2
+    fireEvent.mouseUp(window);
+    expect(onPosition.mock.lastCall![0]).toBeCloseTo(0.7, 5);
+    // The spread arc shows how far the wire can push the value.
+    expect(screen.getByTestId('knob-spread-fm')).toBeTruthy();
+    expect(dial.getAttribute('title')).toBe('fm: 5.00 (wire 3.00…7.00)');
+  });
+
+  it('wired: cmd-drag sets the wire amount instead of the baseline', () => {
+    const onPosition = vi.fn();
     const onAttenOffset = vi.fn();
     render(
       <Knob
         label="fm"
         config={LINEAR}
-        position={0}
+        position={0.5}
+        onPosition={onPosition}
+        onAttenOffset={onAttenOffset}
+        wired={true}
+        atten={0.2}
+        offset={0}
+      />,
+    );
+    const dial = screen.getByRole('slider', { name: 'fm' });
+    fireEvent.mouseDown(dial, { clientY: 100, metaKey: true });
+    fireEvent.mouseMove(window, { clientY: 70 }); // +0.2
+    fireEvent.mouseUp(window);
+    expect(onPosition).not.toHaveBeenCalled();
+    expect(onAttenOffset.mock.lastCall![0]).toBeCloseTo(0.4, 5);
+  });
+
+  it('unwired: no spread arc, plain value tooltip', () => {
+    render(<Knob label="fm" config={LINEAR} position={0.5} onPosition={() => {}} />);
+    expect(screen.queryByTestId('knob-spread-fm')).toBeNull();
+    expect(screen.getByRole('slider', { name: 'fm' }).getAttribute('title')).toBe('fm: 5.00');
+  });
+
+  it('wired: spread min/max are editable in the right-click menu', () => {
+    const onAttenOffset = vi.fn();
+    render(
+      <Knob
+        label="fm"
+        config={LINEAR}
+        position={0.5}
         onPosition={() => {}}
         onConfigChange={() => {}}
         onAttenOffset={onAttenOffset}
         wired={true}
-        atten={1}
+        atten={0.4}
         offset={0}
       />,
     );
-    expect(screen.queryByRole('slider', { name: 'fm' })).toBeNull();
-    fireEvent.contextMenu(screen.getByTestId('knob-fm'));
-    fireEvent.change(screen.getByLabelText('knob atten'), { target: { value: '-0.5' } });
-    expect(onAttenOffset).toHaveBeenCalledWith(-0.5, 0);
-    fireEvent.change(screen.getByLabelText('knob offset'), { target: { value: '2' } });
-    expect(onAttenOffset).toHaveBeenCalledWith(1, 2);
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'fm' }));
+    // Baseline 5, atten 0.4 => the wire swings ±2.
+    expect((screen.getByLabelText('wire spread min') as HTMLInputElement).value).toBe('3');
+    expect((screen.getByLabelText('wire spread max') as HTMLInputElement).value).toBe('7');
+    // Widening the top end to 10 gives a 3..10 spread: atten 0.7, centre 6.5.
+    fireEvent.change(screen.getByLabelText('wire spread max'), { target: { value: '10' } });
+    const [atten, offset] = onAttenOffset.mock.lastCall!;
+    expect(atten).toBeCloseTo(0.7, 5);
+    expect(offset).toBeCloseTo(1.5, 5);
   });
 
-  it('unwired: menu has no attenuverter controls', () => {
+  it('unwired: menu has no wire spread controls', () => {
     render(
       <Knob
         label="fm"
@@ -200,6 +256,44 @@ describe('Knob', () => {
       />,
     );
     fireEvent.contextMenu(screen.getByRole('slider', { name: 'fm' }));
-    expect(screen.queryByLabelText('knob atten')).toBeNull();
+    expect(screen.queryByLabelText('wire spread min')).toBeNull();
+  });
+
+  it('config menu closes on an outside click', () => {
+    render(
+      <Knob
+        label="fm"
+        config={LINEAR}
+        position={0}
+        onPosition={() => {}}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'fm' }));
+    expect(screen.getByRole('dialog', { name: 'Knob configuration' })).toBeTruthy();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('dialog', { name: 'Knob configuration' })).toBeNull();
+  });
+
+  it('config menu renders outside the panel, anchored at the cursor', () => {
+    const { container } = render(
+      <Knob
+        label="fm"
+        config={LINEAR}
+        position={0}
+        onPosition={() => {}}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'fm' }), {
+      clientX: 120,
+      clientY: 240,
+    });
+    const menu = screen.getByRole('dialog', { name: 'Knob configuration' }) as HTMLElement;
+    // Portalled to the body, so a clipping module panel can't cut it off.
+    expect(container.contains(menu)).toBe(false);
+    expect(menu.style.position).toBe('fixed');
+    expect(menu.style.left).toBe('120px');
+    expect(menu.style.top).toBe('240px');
   });
 });
