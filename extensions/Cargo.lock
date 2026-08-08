@@ -66,6 +66,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-granular"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-lfo"
 version = "0.1.0"
 dependencies = [
