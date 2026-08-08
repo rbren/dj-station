@@ -38,5 +38,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-waveshaper"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-module-sdk"
 version = "0.1.0"

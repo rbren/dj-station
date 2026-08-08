@@ -171,6 +171,155 @@ fn filter_stays_finite_under_extreme_drive_and_modulation() {
 }
 
 // ---------------------------------------------------------------------------
+// com.dj.waveshaper
+// ---------------------------------------------------------------------------
+
+/// Osc (sine at `pitch`) -> waveshaper -> out. Also returns the raw
+/// oscillator signal (same phase evolution) for reference measurements.
+fn render_shaper(mode: f32, drive: f32, pitch: f32, secs: f32) -> (Vec<f32>, Vec<f32>) {
+    let frames = (secs * SR) as usize;
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("w1", "com.dj.waveshaper").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "w1", "in").unwrap();
+    e.connect("w1", "out", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "pitch", pitch).unwrap();
+    e.set_knob_position("w1", "mode", mode).unwrap();
+    e.set_knob_value("w1", "drive", drive).unwrap();
+    let shaped = e.render_offline(frames).unwrap().pop().unwrap();
+
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "pitch", pitch).unwrap();
+    let raw = e.render_offline(frames).unwrap().pop().unwrap();
+    (shaped, raw)
+}
+
+/// Energy left after a 48-sample boxcar (a 1 kHz-ish lowpass with a null
+/// comb): for a >6 kHz input this is essentially the alias floor.
+fn low_band_rms(x: &[f32]) -> f32 {
+    let w = 48;
+    let filtered: Vec<f32> = x
+        .windows(w)
+        .map(|c| c.iter().sum::<f32>() / w as f32)
+        .collect();
+    rms(tail(&filtered))
+}
+
+#[test]
+fn waveshaper_saturator_soft_clips() {
+    let (soft, raw) = render_shaper(1.0 / 3.0, 2.0, 0.0, 0.2);
+    // Normalized so full scale stays at 5 V, but the waveform is fattened.
+    assert!((peak(&soft) - 5.0).abs() < 0.15, "peak {}", peak(&soft));
+    assert!(rms(tail(&soft)) > rms(tail(&raw)) * 1.15, "no compression");
+
+    // Hard drive pushes it towards a square: crest factor collapses to 1.
+    let (hard, _) = render_shaper(1.0 / 3.0, 10.0, 0.0, 0.2);
+    let crest = peak(&hard) / rms(tail(&hard));
+    assert!(crest < 1.2, "crest factor {crest} — not squared up");
+}
+
+#[test]
+fn waveshaper_folder_folds_repeatedly() {
+    let (folded, raw) = render_shaper(0.0, 8.0, 0.0, 0.2);
+    let in_hz = zero_cross_hz(tail(&raw));
+    let out_hz = zero_cross_hz(tail(&folded));
+    // Every fold adds a pair of zero crossings per cycle.
+    assert!(
+        out_hz > in_hz * 5.0,
+        "folder zero-crossing rate {out_hz} vs input {in_hz}"
+    );
+    assert!(
+        peak(&folded) <= 5.05,
+        "folder overshoots: {}",
+        peak(&folded)
+    );
+}
+
+#[test]
+fn waveshaper_folder_antialiases() {
+    // 6.9 kHz: the 7th harmonic lands at 48.3 kHz and aliases to ~300 Hz,
+    // right in the passband of the boxcar below.
+    let pitch = (6900.0f32 / 261.626).log2();
+    let drive = 5.0f32;
+    let (folded, raw) = render_shaper(0.0, drive, pitch, 0.3);
+
+    // Same nonlinearity, evaluated naively sample by sample.
+    let a = std::f32::consts::FRAC_PI_2 * (1.0 + drive);
+    let naive: Vec<f32> = raw.iter().map(|x| 5.0 * (a * x / 5.0).sin()).collect();
+
+    let aliased = low_band_rms(&naive);
+    let clean = low_band_rms(&folded);
+    assert!(aliased > 0.05, "reference has no alias energy ({aliased})");
+    assert!(
+        clean < aliased * 0.5,
+        "ADAA alias floor {clean} vs naive {aliased}"
+    );
+}
+
+#[test]
+fn waveshaper_bitcrusher_quantizes() {
+    let (crushed, _) = render_shaper(2.0 / 3.0, 10.0, 0.0, 0.1);
+    // 1 bit at full amount: only -5, 0 and +5 V survive.
+    for &v in &crushed {
+        let q = v / 5.0;
+        assert!(
+            (q - q.round()).abs() < 1e-4 && q.abs() <= 1.0,
+            "unquantized sample {v}"
+        );
+    }
+    let distinct = crushed
+        .iter()
+        .map(|v| (v / 5.0).round() as i32)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(distinct.len(), 3, "expected 3 levels, got {distinct:?}");
+}
+
+#[test]
+fn waveshaper_rate_reducer_holds() {
+    let (held, _) = render_shaper(1.0, 10.0, 0.0, 0.1);
+    let mut runs = Vec::new();
+    let mut run = 1usize;
+    for i in 1..held.len() {
+        if held[i] == held[i - 1] {
+            run += 1;
+        } else {
+            runs.push(run);
+            run = 1;
+        }
+    }
+    // Full amount holds every 128 samples.
+    let interior = &runs[1..runs.len() - 1];
+    assert!(!interior.is_empty(), "no held steps");
+    assert!(
+        interior.iter().all(|&r| r == 128),
+        "hold lengths not 128: {:?}",
+        &interior[..interior.len().min(8)]
+    );
+}
+
+#[test]
+fn waveshaper_bias_keeps_silence_silent() {
+    for mode in [0.0f32, 1.0 / 3.0, 2.0 / 3.0, 1.0] {
+        let mut e = mono_engine();
+        e.add_module("w1", "com.dj.waveshaper").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.connect("w1", "out", "out1", "l").unwrap();
+        e.set_knob_position("w1", "mode", mode).unwrap();
+        e.set_knob_value("w1", "bias", 3.0).unwrap();
+        let out = e.render_offline(4800).unwrap().pop().unwrap();
+        assert!(
+            peak(tail(&out)) < 1e-4,
+            "mode {mode}: bias leaks DC ({})",
+            peak(tail(&out))
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // com.dj.vca_dual
 // ---------------------------------------------------------------------------
 

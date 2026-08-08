@@ -1,0 +1,22 @@
+{
+  "id": "com.dj.waveshaper",
+  "name": "Waveshaper",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Shaping",
+  "inputs": [
+    { "id": "in", "name": "In", "default": 0.0 },
+    { "id": "mode", "name": "Mode", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 3.0, "curve": "linear", "steps": 4 } },
+    { "id": "drive", "name": "Drive / Amount", "default": 3.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "bias", "name": "Symmetry", "default": 0.0,
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
+    { "id": "level", "name": "Level", "default": 1.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 2.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Out" }
+  ],
+  "latency_samples": 0
+}
