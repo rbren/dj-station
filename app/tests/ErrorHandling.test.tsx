@@ -1,0 +1,169 @@
+// Regression cover for the hard UI crash: a jack whose telemetry `display`
+// arrived as `null` (serde_json's rendering of a non-finite f32) threw
+// `TypeError: null is not an object` out of render and blanked the app.
+// Bad numbers must degrade to a placeholder, and anything that still throws
+// must be caught and shown instead of killing the tree.
+
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ErrorBanner } from '../src/components/ErrorBanner';
+import { ErrorBoundary } from '../src/components/ErrorBoundary';
+import { Jack } from '../src/components/Jack';
+import { ModulePanel } from '../src/components/ModulePanel';
+import { clearErrors, reportError } from '../src/errors';
+import { fixed, safeNumber } from '../src/format';
+import type { JackTelemetry, Manifest, ModuleHandle } from '../src/types';
+
+/** Telemetry as it actually arrives when the engine emits NaN/Inf. */
+const nullDisplay = { instantaneous: 0, rms_100ms: null, display: null, is_fast: true };
+
+const MANIFEST: Manifest = {
+  id: 'com.dj.mixer',
+  name: 'Mixer',
+  version: '0.1.0',
+  abi: 'wasm-1',
+  inputs: [
+    { id: 'ch1', name: 'Ch1', knob: { style: 'continuous', min: 0, max: 1, curve: 'linear' } },
+  ],
+  outputs: [{ id: 'audio', name: 'Audio' }],
+  params: [],
+};
+
+const noop = () => {};
+
+const HANDLE: ModuleHandle = {
+  paramValue: () => 0.5,
+  setParam: noop,
+  signalTap: () => ({ instantaneous: 0, rms_100ms: 0, display: 0, is_fast: false }),
+  size: { w: 300, h: 150 },
+};
+
+beforeEach(() => clearErrors());
+
+describe('format helpers', () => {
+  it('treats null/undefined/NaN/Infinity as unusable', () => {
+    for (const bad of [null, undefined, NaN, Infinity, -Infinity, 'x', {}]) {
+      expect(safeNumber(bad)).toBe(0);
+      expect(fixed(bad)).toBe('—');
+    }
+  });
+
+  it('formats real numbers normally', () => {
+    expect(safeNumber(2.5)).toBe(2.5);
+    expect(fixed(2.5)).toBe('2.50');
+    expect(fixed(2.5, 1)).toBe('2.5');
+    expect(fixed(0)).toBe('0.00');
+  });
+});
+
+describe('Jack with malformed telemetry', () => {
+  it('renders a placeholder instead of throwing on a null display', () => {
+    expect(() =>
+      render(
+        <Jack
+          instance="mixer1"
+          id="ch1"
+          kind="input"
+          telemetry={nullDisplay as unknown as JackTelemetry}
+        />,
+      ),
+    ).not.toThrow();
+    expect(screen.getByTestId('jack-input-ch1').getAttribute('title')).toBe('ch1: — (rms)');
+  });
+
+  it('keeps the glow at its floor rather than NaN opacity', () => {
+    render(
+      <Jack
+        instance="mixer1"
+        id="ch1"
+        kind="input"
+        telemetry={{ instantaneous: 0, rms_100ms: 0, display: NaN, is_fast: false }}
+      />,
+    );
+    expect(screen.getByTestId('jack-glow-ch1').style.opacity).toBe('0.15');
+  });
+
+  it('renders a whole panel whose telemetry is all nulls', () => {
+    render(
+      <ModulePanel
+        instanceId="mixer1"
+        manifest={MANIFEST}
+        knobs={{}}
+        wired={{}}
+        handle={HANDLE}
+        telemetry={
+          { ch1: nullDisplay, 'out:audio': nullDisplay } as unknown as Record<string, JackTelemetry>
+        }
+        onKnobPosition={noop}
+        onKnobConfig={noop}
+        onAttenOffset={noop}
+      />,
+    );
+    expect(screen.getByTestId('jack-input-ch1').getAttribute('title')).toBe('ch1: — (rms)');
+    expect(screen.getByTestId('jack-output-audio').getAttribute('title')).toBe('audio: — (rms)');
+  });
+});
+
+describe('ErrorBoundary', () => {
+  function Boom(): never {
+    throw new TypeError("null is not an object (evaluating 'o.display.toFixed')");
+  }
+
+  it('shows the failure instead of unmounting the tree', () => {
+    // React logs the caught error; keep the test output readable.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(
+      <div>
+        <span data-testid="sibling">still here</span>
+        <ErrorBoundary context="mixer1">
+          <Boom />
+        </ErrorBoundary>
+      </div>,
+    );
+    expect(screen.getByTestId('sibling')).toBeTruthy();
+    expect(screen.getByTestId('error-boundary-mixer1').textContent).toContain(
+      'null is not an object',
+    );
+    spy.mockRestore();
+  });
+
+  it('reports caught errors to the banner', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(
+      <div>
+        <ErrorBanner />
+        <ErrorBoundary context="mixer1">
+          <Boom />
+        </ErrorBoundary>
+      </div>,
+    );
+    const banner = screen.getByTestId('error-banner');
+    expect(banner.textContent).toContain('mixer1');
+    expect(banner.textContent).toContain('null is not an object');
+    spy.mockRestore();
+  });
+});
+
+describe('ErrorBanner', () => {
+  it('renders nothing when there are no errors', () => {
+    render(<ErrorBanner />);
+    expect(screen.queryByTestId('error-banner')).toBeNull();
+  });
+
+  it('shows reported errors and collapses duplicates', () => {
+    render(<ErrorBanner />);
+    act(() => {
+      reportError('engine.tap', new Error('no such jack'));
+      reportError('engine.tap', new Error('no such jack'));
+    });
+    expect(screen.getAllByText('no such jack')).toHaveLength(1);
+    expect(screen.getByTestId('error-banner').textContent).toContain('engine.tap');
+  });
+
+  it('dismisses an error', () => {
+    render(<ErrorBanner />);
+    act(() => reportError('engine.start', new Error('audio device busy')));
+    fireEvent.click(screen.getByTitle('Dismiss'));
+    expect(screen.queryByTestId('error-banner')).toBeNull();
+  });
+});

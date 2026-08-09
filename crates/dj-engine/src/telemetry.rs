@@ -32,12 +32,26 @@ pub struct JackTelemetry {
     pub is_fast: bool,
 }
 
+/// Telemetry is serialized to the UI as JSON, and `serde_json` has no
+/// literal for NaN/±Inf — it writes `null`, which the front end then reads
+/// as a missing number. Publishing is the one choke point every jack and
+/// master tap goes through, so non-finite values are scrubbed here.
+fn finite(x: f32) -> f32 {
+    if x.is_finite() {
+        x
+    } else {
+        0.0
+    }
+}
+
 impl JackSlot {
     fn publish(&self, t: JackTelemetry) {
         self.inst
-            .store(t.instantaneous.to_bits(), Ordering::Relaxed);
-        self.rms.store(t.rms_100ms.to_bits(), Ordering::Relaxed);
-        self.display.store(t.display.to_bits(), Ordering::Relaxed);
+            .store(finite(t.instantaneous).to_bits(), Ordering::Relaxed);
+        self.rms
+            .store(finite(t.rms_100ms).to_bits(), Ordering::Relaxed);
+        self.display
+            .store(finite(t.display).to_bits(), Ordering::Relaxed);
         self.fast.store(t.is_fast, Ordering::Relaxed);
     }
 
@@ -126,6 +140,10 @@ impl JackAnalyzer {
         let mut zc = 0u32;
         let mut prev = self.last_sample - mean;
         for &x in &buf[..n] {
+            // A module that blows up (or a denormal-ridden feedback loop)
+            // must not poison the window forever: treat non-finite samples
+            // as silence for measurement purposes.
+            let x = if x.is_finite() { x } else { 0.0 };
             sq += (x as f64) * (x as f64);
             sum += x as f64;
             let d = x - mean;
@@ -136,7 +154,11 @@ impl JackAnalyzer {
             }
             prev = d;
         }
-        self.last_sample = buf[n - 1];
+        self.last_sample = if buf[n - 1].is_finite() {
+            buf[n - 1]
+        } else {
+            0.0
+        };
 
         // Rotate ring.
         self.total_sq -= self.sq_ring[self.pos];
@@ -152,6 +174,10 @@ impl JackAnalyzer {
         self.total_zc += zc;
         self.total_n += n as u64;
         self.pos = (self.pos + 1) % self.sq_ring.len();
+        // Subtracting the aged-out block from a running total cancels to a
+        // tiny negative when a loud window drains to silence; `sqrt` of that
+        // is NaN, which reaches the UI as JSON `null`.
+        self.total_sq = self.total_sq.max(0.0);
 
         let rms = (self.total_sq / self.total_n.max(1) as f64).sqrt() as f32;
         // Crossings happen twice per cycle.

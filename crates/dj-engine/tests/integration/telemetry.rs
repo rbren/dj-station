@@ -65,6 +65,38 @@ fn gate_reports_instantaneous_value() {
     assert!((t.display - 10.0).abs() < 1e-4, "display {t:?}");
 }
 
+/// A loud signal that goes exactly silent must not publish NaN. The sliding
+/// window keeps a running sum of squares; when the loud blocks age out the
+/// float cancellation can leave the total a hair below zero, and `sqrt` of
+/// that is NaN. NaN reaches the UI as JSON `null` (serde_json has no NaN
+/// literal), which crashes the front end.
+#[test]
+fn telemetry_stays_finite_when_a_loud_signal_goes_silent() {
+    let mut engine = crate::common::default_engine();
+    engine.add_module("osc1", "com.dj.oscillator").unwrap();
+    engine.add_module("mx", "com.dj.mixer").unwrap();
+    engine.add_module("vca1", "com.dj.vca").unwrap();
+    engine.connect("osc1", "audio", "mx", "in1").unwrap();
+    engine.connect("mx", "out", "vca1", "in").unwrap();
+
+    // Loud for long enough to fill the 100 ms window...
+    engine.set_knob_value("mx", "lvl1", 1.0).unwrap();
+    engine.render_offline((0.3 * SR) as usize).unwrap();
+    // ...then exactly silent, and drain the window in small steps.
+    engine.set_knob_value("mx", "lvl1", 0.0).unwrap();
+    for step in 0..40 {
+        engine.render_offline((0.005 * SR) as usize).unwrap();
+        let t = engine.tap("vca1", "in").unwrap();
+        assert!(
+            t.instantaneous.is_finite()
+                && t.rms_100ms.is_finite()
+                && t.display.is_finite()
+                && t.rms_100ms >= 0.0,
+            "non-finite telemetry at step {step}: {t:?}"
+        );
+    }
+}
+
 /// Master bus telemetry is exposed too (used by the UI for output metering).
 #[test]
 fn master_tap_reports_output_level() {

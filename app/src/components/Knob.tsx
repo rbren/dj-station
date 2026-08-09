@@ -9,6 +9,7 @@
 // amount, drawn as a spread arc around the knob's notch.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fixed } from '../format';
 import type { KnobConfig } from '../types';
 import { KnobConfigMenu } from './KnobConfigMenu';
 
@@ -226,7 +227,7 @@ export function Knob(props: KnobProps) {
           role="switch"
           aria-checked={on}
           aria-label={label}
-          title={`${label}: ${value.toFixed(2)}`}
+          title={`${label}: ${fixed(value)}`}
           className={`knob-toggle${on ? ' knob-toggle-on' : ''}`}
           onClick={() => {
             onPosition(on ? 0 : 1);
@@ -241,8 +242,8 @@ export function Knob(props: KnobProps) {
 
   const spread = wired ? spreadRange(config, position, atten, offset) : null;
   const tooltip = spread
-    ? `${label}: ${value.toFixed(2)} (wire ${spread.min.toFixed(2)}…${spread.max.toFixed(2)})`
-    : `${label}: ${value.toFixed(2)}`;
+    ? `${label}: ${fixed(value)} (wire ${fixed(spread.min)}…${fixed(spread.max)})`
+    : `${label}: ${fixed(value)}`;
 
   return (
     <div className="knob" data-testid={`knob-${label}`}>

@@ -6,6 +6,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { deck as defaultDeck, type DeckApi, type DeckStatus, type SavedLoop } from '../deck';
+import { fixed, safeNumber } from '../format';
 import type { Track } from '../library';
 import type { ModuleHandle } from '../types';
 import { WaveformView } from './WaveformView';
@@ -35,8 +36,9 @@ export interface DeckPanelProps {
 }
 
 function fmtTime(secs: number): string {
-  const m = Math.floor(secs / 60);
-  const s = secs - m * 60;
+  const total = safeNumber(secs);
+  const m = Math.floor(total / 60);
+  const s = total - m * 60;
   return `${m}:${s.toFixed(1).padStart(4, '0')}`;
 }
 
@@ -136,9 +138,9 @@ export function DeckPanel(props: DeckPanelProps) {
         </span>
         <span className="deck-bpm" data-testid="deck-bpm">
           {status?.effective_bpm
-            ? `${status.effective_bpm.toFixed(1)} BPM`
+            ? `${fixed(status.effective_bpm, 1)} BPM`
             : status?.grid_bpm
-              ? `${status.grid_bpm.toFixed(1)} BPM`
+              ? `${fixed(status.grid_bpm, 1)} BPM`
               : 'no grid'}
         </span>
       </div>

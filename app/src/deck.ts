@@ -2,6 +2,8 @@
 // deck_* commands; falls back to nulls outside Tauri so the UI stays
 // testable headless (tests inject a mock client).
 
+import { IpcClient } from './ipc';
+
 export interface DeckStatus {
   track: string | null;
   duration_secs: number;
@@ -52,30 +54,7 @@ export interface DeckApi {
   clearStems(instance: string): Promise<void | null>;
 }
 
-type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-async function tauriInvoke(): Promise<Invoke | null> {
-  if (!('__TAURI_INTERNALS__' in window)) return null;
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke as Invoke;
-}
-
-export class DeckClient implements DeckApi {
-  private invoke: Invoke | null = null;
-  private ready: Promise<void>;
-
-  constructor() {
-    this.ready = tauriInvoke().then((inv) => {
-      this.invoke = inv;
-    });
-  }
-
-  private async call<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
-    await this.ready;
-    if (!this.invoke) return null;
-    return (await this.invoke(cmd, args)) as T;
-  }
-
+export class DeckClient extends IpcClient implements DeckApi {
   load(instance: string, trackId: number) {
     return this.call<void>('deck_load', { instance, trackId });
   }

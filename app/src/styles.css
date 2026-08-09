@@ -1184,3 +1184,77 @@ body {
   color: #c96a6a;
   cursor: pointer;
 }
+
+/* --- Error surfaces -------------------------------------------------- */
+
+.error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  background: #2c1c1c;
+  border-bottom: 1px solid #5a2b2b;
+  font-size: 0.8rem;
+}
+
+.error-banner-list {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.error-banner-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.1rem 0;
+}
+
+.error-context {
+  color: #ff9d9d;
+  font-family: ui-monospace, monospace;
+  flex: none;
+}
+
+.error-message {
+  flex: 1;
+  color: #e6d2d2;
+  word-break: break-word;
+}
+
+.error-dismiss,
+.error-clear {
+  background: none;
+  border: none;
+  color: #c96a6a;
+  cursor: pointer;
+  flex: none;
+}
+
+.error-card,
+.module-panel-error {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid #5a2b2b;
+  border-radius: 6px;
+  background: #241a1a;
+  color: #e6d2d2;
+  font-size: 0.8rem;
+  max-width: 320px;
+}
+
+.error-card-message {
+  font-family: ui-monospace, monospace;
+  color: #ff9d9d;
+  word-break: break-word;
+}
+
+.module-error-actions {
+  display: flex;
+  gap: 0.4rem;
+}

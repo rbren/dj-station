@@ -9,6 +9,9 @@ import { engine, onMenuAction, type NodeSnapshot, type WireSnapshot } from './en
 import { mapPosition, positionForValue } from './components/Knob';
 import { library, type Track } from './library';
 import { DeckCustomUI, DeckUIContext } from './components/DeckPanel';
+import { ErrorBanner } from './components/ErrorBanner';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
 import { GesturePanel } from './components/GesturePanel';
 import { MidiPanel } from './components/MidiPanel';
@@ -63,6 +66,12 @@ function moduleRect(instance: string, pos: { x: number; y: number }): Rect {
 
 function rectsOverlap(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/** Absolute rack placement, matching how ModulePanel positions itself — used
+ *  by the fallback card that stands in for a panel that failed to render. */
+function panelStyle(pos: { x: number; y: number }): React.CSSProperties {
+  return { left: pos.x, top: pos.y };
 }
 
 const ZOOM_KEY = 'dj-rack-zoom';
@@ -223,15 +232,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    (async () => {
-      await engine.loadDemoPatch();
-      setBackend(await engine.start());
-      const modules = await engine.listModules();
-      if (modules) setModuleLib(modules);
-      const current = await engine.currentPatch();
-      if (current) setPatchName(current);
-      setPatchList((await engine.listPatches()) ?? []);
-      await refresh();
+    void (async () => {
+      try {
+        await engine.loadDemoPatch();
+        setBackend(await engine.start());
+        const modules = await engine.listModules();
+        if (modules) setModuleLib(modules);
+        const current = await engine.currentPatch();
+        if (current) setPatchName(current);
+        setPatchList((await engine.listPatches()) ?? []);
+        await refresh();
+      } catch (err) {
+        // Startup problems land in the banner; the shell still renders.
+        reportError('startup', err);
+      }
     })();
   }, [refresh]);
 
@@ -277,16 +291,23 @@ export default function App() {
 
   useEffect(() => {
     if (!connected) return;
-    const timer = setInterval(async () => {
-      const next: Record<string, Record<string, JackTelemetry>> = {};
-      for (const node of nodes) {
-        next[node.instance_id] = {};
-        for (const input of node.manifest.inputs) {
-          const t = await engine.tap(node.instance_id, input.id);
-          if (t) next[node.instance_id][input.id] = t;
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          const next: Record<string, Record<string, JackTelemetry>> = {};
+          for (const node of nodes) {
+            next[node.instance_id] = {};
+            for (const input of node.manifest.inputs) {
+              const t = await engine.tap(node.instance_id, input.id);
+              if (t) next[node.instance_id][input.id] = t;
+            }
+          }
+          setTelemetry(next);
+        } catch (err) {
+          // A broken meter must never stop the rack from rendering.
+          reportError('telemetry', err);
         }
-      }
-      setTelemetry(next);
+      })();
     }, 100);
     return () => clearInterval(timer);
   }, [connected, nodes]);
@@ -614,6 +635,7 @@ export default function App() {
           </span>
         )}
       </header>
+      <ErrorBanner />
       {fileDialog && (
         <div
           className="file-dialog-backdrop"
@@ -701,74 +723,94 @@ export default function App() {
               style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}
             >
               {nodes.map((node, i) => (
-                <ModulePanel
+                <ErrorBoundary
                   key={node.instance_id}
-                  instanceId={node.instance_id}
-                  manifest={node.manifest}
-                  knobs={node.knobs}
-                  wired={Object.fromEntries(node.wired_inputs.map((j) => [j, true]))}
-                  telemetry={telemetry[node.instance_id]}
-                  handle={handles.get(node.instance_id)!}
-                  customUI={CUSTOM_UIS[node.type_id as keyof typeof CUSTOM_UIS]}
-                  extra={
-                    node.type_id === 'builtin.midi' ? (
-                      <MidiPanel
-                        instance={node.instance_id}
-                        mappings={node.midi_mappings}
-                        onAdd={(kind, num, name) =>
-                          void engine
-                            .addMidiMapping(node.instance_id, kind, num, name)
-                            .then(refresh)
-                        }
-                        onRemove={(name) =>
-                          void engine.removeMidiMapping(node.instance_id, name).then(refresh)
-                        }
-                        ledMappings={node.midi_led_mappings}
-                        onAddLed={(kind, num, name) =>
-                          void engine
-                            .addMidiLedMapping(node.instance_id, kind, num, name)
-                            .then(refresh)
-                        }
-                        onRemoveLed={(name) =>
-                          void engine.removeMidiLedMapping(node.instance_id, name).then(refresh)
-                        }
-                        onMidi={(data) => void engine.injectMidi(node.instance_id, 0, data)}
-                      />
-                    ) : node.type_id === 'builtin.gesture' ? (
-                      <GesturePanel
-                        instance={node.instance_id}
-                        api={{
-                          status: (i) => engine.gestureStatus(i),
-                          setMode: (i, m) => engine.gestureSetMode(i, m),
-                          addMapping: (i, n, m, c) => engine.gestureAddMapping(i, n, m, c),
-                          removeMapping: (i, n) => engine.gestureRemoveMapping(i, n),
-                          learnBegin: (i) => engine.gestureLearnBegin(i),
-                          learnPoll: (i, n) => engine.gestureLearnPoll(i, n),
-                          feedStart: (i, src) => engine.gestureFeedStart(i, src),
-                          feedStop: (i) => engine.gestureFeedStop(i),
-                        }}
-                        onChanged={() => void refresh()}
-                      />
-                    ) : undefined
-                  }
-                  position={positions[node.instance_id] ?? defaultPosition(i)}
-                  onMove={(x, y) => moveModule(node.instance_id, x, y)}
-                  onRemove={() => void removeModule(node.instance_id)}
-                  onEditEnd={() => void engine.endEdit()}
-                  selected={selected.includes(node.instance_id)}
-                  onSelectToggle={() => toggleSelected(node.instance_id)}
-                  pendingSource={pending}
-                  onJackClick={(kind, jack) => void onJackClick(node.instance_id, kind, jack)}
-                  onKnobPosition={(jack, position) => {
-                    void engine.setKnobPosition(node.instance_id, jack, position).then(refresh);
-                  }}
-                  onKnobConfig={(jack, config: KnobConfig) => {
-                    void engine.setKnobConfig(node.instance_id, jack, config).then(refresh);
-                  }}
-                  onAttenOffset={(jack, atten, offset) => {
-                    void engine.setAttenOffset(node.instance_id, jack, atten, offset).then(refresh);
-                  }}
-                />
+                  context={`module ${node.instance_id}`}
+                  fallback={(message, retry) => (
+                    <div
+                      className="module-panel module-panel-placed module-panel-error"
+                      data-testid={`module-error-${node.instance_id}`}
+                      style={panelStyle(positions[node.instance_id] ?? defaultPosition(i))}
+                    >
+                      <strong>{node.instance_id}</strong>
+                      <code className="error-card-message">{message}</code>
+                      <div className="module-error-actions">
+                        <button onClick={retry}>Retry</button>
+                        <button onClick={() => void removeModule(node.instance_id)}>Remove</button>
+                      </div>
+                    </div>
+                  )}
+                >
+                  <ModulePanel
+                    instanceId={node.instance_id}
+                    manifest={node.manifest}
+                    knobs={node.knobs}
+                    wired={Object.fromEntries(node.wired_inputs.map((j) => [j, true]))}
+                    telemetry={telemetry[node.instance_id]}
+                    handle={handles.get(node.instance_id)!}
+                    customUI={CUSTOM_UIS[node.type_id as keyof typeof CUSTOM_UIS]}
+                    extra={
+                      node.type_id === 'builtin.midi' ? (
+                        <MidiPanel
+                          instance={node.instance_id}
+                          mappings={node.midi_mappings}
+                          onAdd={(kind, num, name) =>
+                            void engine
+                              .addMidiMapping(node.instance_id, kind, num, name)
+                              .then(refresh)
+                          }
+                          onRemove={(name) =>
+                            void engine.removeMidiMapping(node.instance_id, name).then(refresh)
+                          }
+                          ledMappings={node.midi_led_mappings}
+                          onAddLed={(kind, num, name) =>
+                            void engine
+                              .addMidiLedMapping(node.instance_id, kind, num, name)
+                              .then(refresh)
+                          }
+                          onRemoveLed={(name) =>
+                            void engine.removeMidiLedMapping(node.instance_id, name).then(refresh)
+                          }
+                          onMidi={(data) => void engine.injectMidi(node.instance_id, 0, data)}
+                        />
+                      ) : node.type_id === 'builtin.gesture' ? (
+                        <GesturePanel
+                          instance={node.instance_id}
+                          api={{
+                            status: (i) => engine.gestureStatus(i),
+                            setMode: (i, m) => engine.gestureSetMode(i, m),
+                            addMapping: (i, n, m, c) => engine.gestureAddMapping(i, n, m, c),
+                            removeMapping: (i, n) => engine.gestureRemoveMapping(i, n),
+                            learnBegin: (i) => engine.gestureLearnBegin(i),
+                            learnPoll: (i, n) => engine.gestureLearnPoll(i, n),
+                            feedStart: (i, src) => engine.gestureFeedStart(i, src),
+                            feedStop: (i) => engine.gestureFeedStop(i),
+                          }}
+                          onChanged={() => void refresh()}
+                        />
+                      ) : undefined
+                    }
+                    position={positions[node.instance_id] ?? defaultPosition(i)}
+                    onMove={(x, y) => moveModule(node.instance_id, x, y)}
+                    onRemove={() => void removeModule(node.instance_id)}
+                    onEditEnd={() => void engine.endEdit()}
+                    selected={selected.includes(node.instance_id)}
+                    onSelectToggle={() => toggleSelected(node.instance_id)}
+                    pendingSource={pending}
+                    onJackClick={(kind, jack) => void onJackClick(node.instance_id, kind, jack)}
+                    onKnobPosition={(jack, position) => {
+                      void engine.setKnobPosition(node.instance_id, jack, position).then(refresh);
+                    }}
+                    onKnobConfig={(jack, config: KnobConfig) => {
+                      void engine.setKnobConfig(node.instance_id, jack, config).then(refresh);
+                    }}
+                    onAttenOffset={(jack, atten, offset) => {
+                      void engine
+                        .setAttenOffset(node.instance_id, jack, atten, offset)
+                        .then(refresh);
+                    }}
+                  />
+                </ErrorBoundary>
               ))}
               {nodes.length === 0 && (
                 <p className="rack-empty">

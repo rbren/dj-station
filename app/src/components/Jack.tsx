@@ -2,6 +2,7 @@
 // The signal value is not printed inline — it lives in the hover tooltip
 // and in the glow. Clicking jacks is how wires are made (output → input).
 
+import { fixed, safeNumber } from '../format';
 import type { JackTelemetry } from '../types';
 
 export function Jack({
@@ -21,9 +22,11 @@ export function Jack({
   selected?: boolean;
   onClick?(): void;
 }) {
-  const level = telemetry ? Math.min(1, Math.abs(telemetry.display) / 10) : 0;
+  // `display` is typed number but crosses IPC as JSON, where a non-finite
+  // f32 becomes `null` — read it defensively.
+  const level = telemetry ? Math.min(1, Math.abs(safeNumber(telemetry.display)) / 10) : 0;
   const tooltip = telemetry
-    ? `${id}: ${telemetry.display.toFixed(2)}${telemetry.is_fast ? ' (rms)' : ''}`
+    ? `${id}: ${fixed(telemetry.display)}${telemetry.is_fast ? ' (rms)' : ''}`
     : id;
   return (
     <button

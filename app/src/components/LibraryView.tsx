@@ -4,12 +4,13 @@
 // straight into the library, DeepLink providers open the store page.
 
 import { useCallback, useEffect, useState } from 'react';
+import { fixed } from '../format';
 import type { AnalysisQueue, LibraryClientApi, ProviderInfo, Track, TrackResult } from '../library';
 
 const ANALYSIS_POLL_MS = 2000;
 
 function formatDuration(secs: number | null): string {
-  if (secs == null) return '—';
+  if (secs == null || !Number.isFinite(secs)) return '—';
   const m = Math.floor(secs / 60);
   const s = Math.round(secs % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
@@ -302,7 +303,7 @@ export function LibraryView({ client }: LibraryViewProps) {
                     <td>{t.title}</td>
                     <td>{t.artist}</td>
                     <td>{formatDuration(t.duration_secs)}</td>
-                    <td data-testid="track-bpm">{t.bpm != null ? t.bpm.toFixed(1) : '—'}</td>
+                    <td data-testid="track-bpm">{fixed(t.bpm, 1)}</td>
                     <td data-testid="track-key">{t.musical_key ?? '—'}</td>
                     <td>
                       <SourceTag source={t.source} />

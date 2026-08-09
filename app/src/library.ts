@@ -2,6 +2,8 @@
 // crates/dj-library types; falls back to nulls outside Tauri so the UI
 // stays testable headless (tests inject a mock client).
 
+import { IpcClient } from './ipc';
+
 export interface LicenseInfo {
   kind: string;
   name: string;
@@ -103,30 +105,7 @@ export interface LibraryClientApi {
   analyzeTrack(trackId: number): Promise<void | null>;
 }
 
-type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-async function tauriInvoke(): Promise<Invoke | null> {
-  if (!('__TAURI_INTERNALS__' in window)) return null;
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke as Invoke;
-}
-
-export class LibraryClient implements LibraryClientApi {
-  private invoke: Invoke | null = null;
-  private ready: Promise<void>;
-
-  constructor() {
-    this.ready = tauriInvoke().then((inv) => {
-      this.invoke = inv;
-    });
-  }
-
-  private async call<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
-    await this.ready;
-    if (!this.invoke) return null;
-    return (await this.invoke(cmd, args)) as T;
-  }
-
+export class LibraryClient extends IpcClient implements LibraryClientApi {
   tracks() {
     return this.call<Track[]>('library_tracks');
   }
@@ -158,7 +137,7 @@ export class LibraryClient implements LibraryClientApi {
       window.open(url, '_blank', 'noopener,noreferrer');
       return null;
     }
-    return (await this.invoke('open_external', { url })) as void;
+    return this.call<void>('open_external', { url });
   }
   playbackLoad(instance: string, trackId: number) {
     return this.call<void>('playback_load', { instance, trackId });

@@ -2,15 +2,8 @@
 // running outside Tauri (vite dev server / tests), so the UI stays testable
 // headless.
 
+import { IpcClient } from './ipc';
 import type { JackTelemetry, KnobConfig, Manifest } from './types';
-
-type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-async function tauriInvoke(): Promise<Invoke | null> {
-  if (!('__TAURI_INTERNALS__' in window)) return null;
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke as Invoke;
-}
 
 /** Subscribe to native File-menu actions ("saved" | "save-as" | "open").
  *  Also listens for `dj-menu` DOM CustomEvents so tests / the dev browser
@@ -122,22 +115,7 @@ export interface MacroConflict {
   library_version: number;
 }
 
-export class EngineClient {
-  private invoke: Invoke | null = null;
-  private ready: Promise<void>;
-
-  constructor() {
-    this.ready = tauriInvoke().then((inv) => {
-      this.invoke = inv;
-    });
-  }
-
-  private async call<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
-    await this.ready;
-    if (!this.invoke) return null;
-    return (await this.invoke(cmd, args)) as T;
-  }
-
+export class EngineClient extends IpcClient {
   listExtensions() {
     return this.call<Manifest[]>('list_extensions');
   }
