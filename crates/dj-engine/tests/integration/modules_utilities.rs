@@ -6,8 +6,6 @@
 //! `builtin.audio_out` nodes (two channels each, placed with the
 //! `channel_offset` input).
 
-mod common;
-
 use dj_engine::{Engine, EngineConfig};
 
 const SR: f32 = 48_000.0;
@@ -21,7 +19,7 @@ fn probe_engine(channels: usize) -> Engine {
             master_channels: channels,
             ..EngineConfig::default()
         },
-        common::registry(),
+        crate::common::registry(),
     )
     .unwrap();
     for k in 0..channels.div_ceil(2) {

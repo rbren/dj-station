@@ -3,8 +3,6 @@
 //! alignment) with **no manual grid adjustment** — the grids applied to
 //! both decks come straight out of `dj_analysis::analyze_audio`.
 
-mod common;
-
 use dj_analysis::testset::synth_labeled_track;
 use dj_engine::{Engine, EngineConfig};
 use std::path::Path;
@@ -69,7 +67,7 @@ fn auto_beatgrids_drive_deck_sync_within_1ms() {
     write_wav(&wav_a, &ta.audio);
     write_wav(&wav_b, &tb.audio);
 
-    let mut e = Engine::new(EngineConfig::default(), common::registry()).unwrap();
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
     e.add_module("deckA", "builtin.deck").unwrap();
     e.add_module("deckB", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();

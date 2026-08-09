@@ -2,15 +2,13 @@
 //! across a stop → edit → restart cycle (the flow the GUI uses when adding
 //! modules/wires while audio is running).
 
-mod common;
-
 use dj_engine::KnobStyle;
 
 const SR: f32 = 48_000.0;
 
 #[test]
 fn disconnect_removes_the_wire_and_restores_the_knob_value() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("vca1", "com.dj.vca").unwrap();
     engine.connect("osc1", "audio", "vca1", "in").unwrap();
@@ -42,7 +40,7 @@ fn disconnect_removes_the_wire_and_restores_the_knob_value() {
 
 #[test]
 fn structural_edits_work_across_stop_start_cycles() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
     engine.connect("osc1", "audio", "out1", "l").unwrap();
@@ -69,7 +67,7 @@ fn structural_edits_work_across_stop_start_cycles() {
 
 #[test]
 fn wire_knob_style_roundtrips_like_any_other_config() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("vca1", "com.dj.vca").unwrap();
     let cfg = dj_engine::KnobConfig {
         style: KnobStyle::Wire,
@@ -90,7 +88,7 @@ fn wire_knob_style_roundtrips_like_any_other_config() {
 
 #[test]
 fn midi_mapping_remove_drops_wires_frees_the_slot_and_roundtrips() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("midi1", "builtin.midi").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
     engine.add_midi_mapping("midi1", "note", 60, "C4").unwrap();
@@ -122,7 +120,7 @@ fn midi_mapping_remove_drops_wires_frees_the_slot_and_roundtrips() {
     // Post-removal mapping state round-trips through patch save/load.
     let dir = tempfile::tempdir().unwrap();
     engine.save_patch(dir.path(), "t").unwrap();
-    let reloaded = dj_engine::Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let reloaded = dj_engine::Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
     let midi = reloaded
         .nodes
         .iter()

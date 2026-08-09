@@ -2,8 +2,6 @@
 //! macro via API; instantiate it twice; edit internals; both instances
 //! reflect the change; version-mismatch prompt logic covered by tests.
 
-mod common;
-
 use dj_engine::{
     Engine, EngineConfig, MacroInterface, MacroJack, MacroParam, MacroResolution, PatchDoc,
 };
@@ -15,7 +13,7 @@ fn mono_engine() -> Engine {
         master_channels: 1,
         ..EngineConfig::default()
     };
-    Engine::new(config, common::registry()).unwrap()
+    Engine::new(config, crate::common::registry()).unwrap()
 }
 
 /// Osc -> VCA -> Audio Out; returns the engine (osc+vca are the collapse
@@ -212,7 +210,7 @@ fn macro_patches_roundtrip_save_load_byte_stable() {
         "internal nodes must not leak into the patch"
     );
 
-    let mut loaded = Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let mut loaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
     assert!(loaded.macro_instances().contains_key("tone1"));
     assert_eq!(render(&mut loaded, 0.25), golden);
 
@@ -278,7 +276,7 @@ fn version_mismatch_prompt_logic_update_and_fork() {
         .unwrap();
     assert!(doc_up.macro_conflicts(&lib).is_empty());
     let mut updated =
-        Engine::from_doc_with_macros(&doc_up, common::registry(), lib.clone()).unwrap();
+        Engine::from_doc_with_macros(&doc_up, crate::common::registry(), lib.clone()).unwrap();
     assert_eq!(updated.macro_instances()["tone1"].version, 2);
     let updated_sound = render(&mut updated, 0.25);
     assert_ne!(updated_sound, v1_sound, "update must adopt v2 internals");
@@ -300,7 +298,7 @@ fn version_mismatch_prompt_logic_update_and_fork() {
     assert_eq!(lib.get("macro.tone").unwrap().version, 2);
     assert_eq!(doc_fork.modules["tone1"].ext, "macro.tone-fork");
     let mut forked =
-        Engine::from_doc_with_macros(&doc_fork, common::registry(), lib.clone()).unwrap();
+        Engine::from_doc_with_macros(&doc_fork, crate::common::registry(), lib.clone()).unwrap();
     assert_eq!(
         forked.macro_instances()["tone1"].macro_id,
         "macro.tone-fork"
@@ -392,7 +390,7 @@ fn macros_nest_arbitrarily() {
     assert_ne!(edited, flat, "inner edit must propagate");
 
     // And a nested-macro patch round-trips.
-    let mut loaded = Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let mut loaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
     assert_eq!(render(&mut loaded, 0.25), edited);
 }
 

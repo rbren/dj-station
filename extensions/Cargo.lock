@@ -129,6 +129,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-resonator"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-reverb"
 version = "0.1.0"
 dependencies = [
@@ -137,6 +144,13 @@ dependencies = [
 
 [[package]]
 name = "dj-ext-sample-hold"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-scope"
 version = "0.1.0"
 dependencies = [
  "dj-module-sdk",

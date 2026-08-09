@@ -2,14 +2,12 @@
 //! exposed via the telemetry API (`Engine::tap`) and match expected values
 //! for known test signals.
 
-mod common;
-
 const SR: f32 = 48_000.0;
 
 /// A slow (DC) signal displays its instantaneous value.
 #[test]
 fn dc_signal_reports_instantaneous_value() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("vca1", "com.dj.vca").unwrap();
     // Unwired cv knob: linear 0..10, position 0.5 -> constant 5.0.
     engine.set_knob_position("vca1", "cv", 0.5).unwrap();
@@ -27,7 +25,7 @@ fn dc_signal_reports_instantaneous_value() {
 /// A fast signal (audio-rate sine) displays 100 ms RMS = amplitude / sqrt(2).
 #[test]
 fn sine_reports_windowed_rms() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("vca1", "com.dj.vca").unwrap();
     engine.connect("osc1", "audio", "vca1", "in").unwrap();
@@ -50,7 +48,7 @@ fn sine_reports_windowed_rms() {
 /// A gate (slow square driven by MIDI) displays instantaneous value.
 #[test]
 fn gate_reports_instantaneous_value() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("midi1", "builtin.midi").unwrap();
     engine.add_module("adsr1", "com.dj.adsr").unwrap();
     engine
@@ -70,7 +68,7 @@ fn gate_reports_instantaneous_value() {
 /// Master bus telemetry is exposed too (used by the UI for output metering).
 #[test]
 fn master_tap_reports_output_level() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
     engine.connect("osc1", "audio", "out1", "l").unwrap();

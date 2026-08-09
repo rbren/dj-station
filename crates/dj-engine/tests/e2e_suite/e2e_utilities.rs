@@ -9,9 +9,7 @@
 //!
 //! The shared harness lives in `tests/common/e2e.rs`.
 
-mod common;
-
-use common::e2e::{check_case, regen, write_events, EventsFile};
+use crate::common::e2e::{check_case, regen, write_events, EventsFile};
 use dj_engine::{Engine, EngineConfig};
 
 fn mono_engine() -> Engine {
@@ -20,13 +18,13 @@ fn mono_engine() -> Engine {
             master_channels: 1,
             ..EngineConfig::default()
         },
-        common::registry(),
+        crate::common::registry(),
     )
     .unwrap()
 }
 
 fn regen_quantized_voice() {
-    let dir = common::e2e::case_dir("utilities-quantized-voice");
+    let dir = crate::common::e2e::case_dir("utilities-quantized-voice");
     let mut e = mono_engine();
     e.add_module("lfo", "com.dj.oscillator").unwrap();
     e.add_module("att", "com.dj.attenuverter").unwrap();
@@ -58,7 +56,7 @@ fn regen_quantized_voice() {
 }
 
 fn regen_logic_switch() {
-    let dir = common::e2e::case_dir("utilities-logic-switch");
+    let dir = crate::common::e2e::case_dir("utilities-logic-switch");
     let mut e = mono_engine();
     e.add_module("clk", "com.dj.oscillator").unwrap();
     e.add_module("mult", "com.dj.mult").unwrap();

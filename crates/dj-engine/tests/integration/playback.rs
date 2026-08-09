@@ -4,8 +4,6 @@
 //! - output routed through a VCA attenuates correctly,
 //! - track + gate state persist through patch save/load.
 
-mod common;
-
 use dj_engine::{Engine, EngineConfig};
 use std::path::{Path, PathBuf};
 
@@ -42,7 +40,7 @@ fn playback_engine(track: &Path) -> Engine {
         master_channels: 1,
         ..EngineConfig::default()
     };
-    let mut e = Engine::new(config, common::registry()).unwrap();
+    let mut e = Engine::new(config, crate::common::registry()).unwrap();
     e.add_module("play1", "builtin.playback").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("play1", "audio_l", "out1", "l").unwrap();
@@ -56,7 +54,7 @@ fn playback_engine(track: &Path) -> Engine {
 /// (the deck) must be instantiable from it like any other module.
 #[test]
 fn playback_is_listed_in_all_manifests() {
-    let registry = common::registry();
+    let registry = crate::common::registry();
     let ids: Vec<String> = registry
         .all_manifests()
         .iter()
@@ -103,7 +101,7 @@ fn stereo_file_routes_left_and_right() {
     let source = write_wav(&wav, 330.0, 0.25, 2);
 
     let config = EngineConfig::default(); // stereo master
-    let mut e = Engine::new(config, common::registry()).unwrap();
+    let mut e = Engine::new(config, crate::common::registry()).unwrap();
     e.add_module("play1", "builtin.playback").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("play1", "audio_l", "out1", "l").unwrap();
@@ -179,7 +177,7 @@ fn output_through_vca_attenuates_correctly() {
         master_channels: 1,
         ..EngineConfig::default()
     };
-    let mut e = Engine::new(config, common::registry()).unwrap();
+    let mut e = Engine::new(config, crate::common::registry()).unwrap();
     e.add_module("play1", "builtin.playback").unwrap();
     e.add_module("vca1", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
@@ -213,7 +211,7 @@ fn gate_low_is_silent_and_pause_resumes() {
         master_channels: 1,
         ..EngineConfig::default()
     };
-    let mut e = Engine::new(config, common::registry()).unwrap();
+    let mut e = Engine::new(config, crate::common::registry()).unwrap();
     e.add_module("play1", "builtin.playback").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("play1", "audio_l", "out1", "l").unwrap();
@@ -266,7 +264,7 @@ fn track_and_state_persist_through_patch_save_load() {
     drop(e);
 
     // Reload: the track reference is restored and renders identically.
-    let mut e2 = Engine::load_patch(&patch_dir, common::registry()).unwrap();
+    let mut e2 = Engine::load_patch(&patch_dir, crate::common::registry()).unwrap();
     assert_eq!(
         e2.playback_track("play1").unwrap().as_deref(),
         Some(wav.to_string_lossy().as_ref())

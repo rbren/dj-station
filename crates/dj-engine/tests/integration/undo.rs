@@ -1,13 +1,11 @@
 //! Undo/redo: PatchDoc snapshots restore full engine state, and
 //! UndoHistory coalesces rapid same-key edits (e.g. knob drags).
 
-mod common;
-
-use common::registry;
+use crate::common::registry;
 use dj_engine::{Engine, UndoHistory};
 
 fn demo_engine() -> Engine {
-    let mut e = common::default_engine();
+    let mut e = crate::common::default_engine();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("vca1", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();

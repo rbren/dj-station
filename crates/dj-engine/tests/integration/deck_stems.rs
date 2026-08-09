@@ -6,8 +6,6 @@
 //!   save/load,
 //! - clearing stems reverts to the original mix.
 
-mod common;
-
 use dj_engine::{Engine, EngineConfig};
 use std::path::Path;
 
@@ -93,7 +91,7 @@ fn deck_engine(channels: usize) -> Engine {
         master_channels: channels,
         ..EngineConfig::default()
     };
-    let mut e = Engine::new(config, common::registry()).unwrap();
+    let mut e = Engine::new(config, crate::common::registry()).unwrap();
     e.add_module("deck1", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e
@@ -236,7 +234,7 @@ fn stem_gains_scale_continuously_and_round_trip_through_patch() {
     // Save / load: stem gains are ordinary params and must round-trip.
     let dir = tempfile::tempdir().unwrap();
     e.save_patch(dir.path(), "stems-test").unwrap();
-    let mut re = Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let mut re = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
     let node = re
         .nodes
         .iter()

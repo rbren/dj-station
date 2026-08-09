@@ -6,8 +6,6 @@
 //! - keylock holds pitch within ±10 cents at ±8 % tempo,
 //! - hot cues, loops, slip mode, reverse, and patch persistence.
 
-mod common;
-
 use dj_engine::{Engine, EngineConfig};
 use std::path::{Path, PathBuf};
 
@@ -100,7 +98,7 @@ fn mono_engine() -> Engine {
         master_channels: 1,
         ..EngineConfig::default()
     };
-    Engine::new(config, common::registry()).unwrap()
+    Engine::new(config, crate::common::registry()).unwrap()
 }
 
 fn play(e: &mut Engine, deck: &str) {
@@ -191,7 +189,7 @@ fn beat_clock_lands_on_beatgrid_and_drives_adsr_envelopes() {
     write_tone(&tone, 440.0, 5.0);
 
     let config = EngineConfig::default(); // stereo master
-    let mut e = Engine::new(config, common::registry()).unwrap();
+    let mut e = Engine::new(config, crate::common::registry()).unwrap();
     e.add_module("deck1", "builtin.deck").unwrap();
     e.add_module("adsr1", "com.dj.adsr").unwrap();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
@@ -339,7 +337,7 @@ fn syncing_deck_b_to_deck_a_aligns_phase_within_1ms_over_60s() {
     write_tone(&track_b, 330.0, 70.0);
 
     let config = EngineConfig::default(); // stereo master
-    let mut e = Engine::new(config, common::registry()).unwrap();
+    let mut e = Engine::new(config, crate::common::registry()).unwrap();
     e.add_module("deckA", "builtin.deck").unwrap();
     e.add_module("deckB", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
@@ -617,7 +615,7 @@ fn deck_track_sync_and_params_persist_through_patch_save_load() {
         e.save_patch(&patch_dir, "deck-persist").unwrap();
     }
 
-    let e2 = Engine::load_patch(&patch_dir, common::registry()).unwrap();
+    let e2 = Engine::load_patch(&patch_dir, crate::common::registry()).unwrap();
     assert_eq!(
         e2.deck_track("deckA").unwrap().as_deref(),
         Some(track_a.to_string_lossy().as_ref())

@@ -4,8 +4,6 @@
 //!
 //! Each test renders a tiny patch offline and asserts on the samples.
 
-mod common;
-
 use dj_engine::{Engine, EngineConfig};
 
 const SR: f32 = 48_000.0;
@@ -16,13 +14,13 @@ fn mono_engine() -> Engine {
             master_channels: 1,
             ..EngineConfig::default()
         },
-        common::registry(),
+        crate::common::registry(),
     )
     .unwrap()
 }
 
 fn stereo_engine() -> Engine {
-    Engine::new(EngineConfig::default(), common::registry()).unwrap()
+    Engine::new(EngineConfig::default(), crate::common::registry()).unwrap()
 }
 
 fn rms(x: &[f32]) -> f32 {

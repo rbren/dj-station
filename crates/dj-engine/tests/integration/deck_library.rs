@@ -7,8 +7,6 @@
 //! write-through on set, re-apply on load — is exactly what the Tauri
 //! shell's deck IPC commands do.
 
-mod common;
-
 use dj_engine::{Engine, EngineConfig};
 use dj_library::{ImportOptions, Library};
 use std::path::Path;
@@ -37,7 +35,7 @@ fn mono_deck_engine() -> Engine {
         master_channels: 1,
         ..EngineConfig::default()
     };
-    let mut e = Engine::new(config, common::registry()).unwrap();
+    let mut e = Engine::new(config, crate::common::registry()).unwrap();
     e.add_module("deck1", "builtin.deck").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("deck1", "audio_l", "out1", "l").unwrap();

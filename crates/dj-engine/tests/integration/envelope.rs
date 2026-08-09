@@ -2,8 +2,6 @@
 //! `Osc -> VCA -> Audio Out`, driven by virtual MIDI and rendered offline,
 //! produces audio whose amplitude envelope matches the configured ADSR.
 
-mod common;
-
 const SR: f32 = 48_000.0;
 
 /// Expected normalized envelope (0..1) at time t (seconds since note-on),
@@ -36,8 +34,8 @@ fn midi_adsr_vca_envelope_matches() {
     let note_off_t = 0.6f32;
     let render_t = 1.2f32;
 
-    let mut engine = common::default_engine();
-    common::build_demo_patch(&mut engine);
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
     engine.set_knob_value("adsr1", "attack", a).unwrap();
     engine.set_knob_value("adsr1", "decay", d).unwrap();
     engine.set_knob_value("adsr1", "sustain", s).unwrap();
@@ -57,7 +55,7 @@ fn midi_adsr_vca_envelope_matches() {
     // Amplitude envelope via 10 ms window peaks. Oscillator amplitude is 5,
     // VCA gain = env/10, so peak = 5 * env_normalized.
     let window = (0.010 * SR) as usize;
-    let peaks = common::window_peaks(audio, window);
+    let peaks = crate::common::window_peaks(audio, window);
 
     let segment_edges = [
         note_on_t,

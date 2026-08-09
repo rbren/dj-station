@@ -2,9 +2,7 @@
 //! (PRD §10.1). The harness lives in `tests/common/e2e.rs`; these two cases
 //! belong to this file and are regenerated only from here.
 
-mod common;
-
-use common::e2e::{check_case, regen, write_events, EventsFile};
+use crate::common::e2e::{check_case, regen, write_events, EventsFile};
 use dj_engine::{Engine, EngineConfig};
 
 fn mono_engine() -> Engine {
@@ -13,7 +11,7 @@ fn mono_engine() -> Engine {
             master_channels: 1,
             ..EngineConfig::default()
         },
-        common::registry(),
+        crate::common::registry(),
     )
     .unwrap()
 }
@@ -21,7 +19,7 @@ fn mono_engine() -> Engine {
 /// A full west-coast-ish shaping chain: saw -> wavefolder -> resonant
 /// ladder filter -> dual VCA (with the channel-2 mix normalling in use).
 fn regen_shaping_chain() {
-    let dir = common::e2e::case_dir("shaping-fold-ladder");
+    let dir = crate::common::e2e::case_dir("shaping-fold-ladder");
     let mut e = mono_engine();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("ws1", "com.dj.waveshaper").unwrap();
@@ -59,7 +57,7 @@ fn regen_shaping_chain() {
 /// envelope on the VCA and clocks a Sample & Hold whose random voltage
 /// steps the oscillator's pitch. The filter tracks the same envelope.
 fn regen_modulation_voice() {
-    let dir = common::e2e::case_dir("mod-function-sh-voice");
+    let dir = crate::common::e2e::case_dir("mod-function-sh-voice");
     let mut e = mono_engine();
     e.add_module("clk", "com.dj.lfo").unwrap();
     e.add_module("sh1", "com.dj.sample_hold").unwrap();

@@ -2,8 +2,6 @@
 //! Drum. Each case renders a short patch offline and asserts on the samples
 //! (frequency, spectrum, envelope timing, alias rejection).
 
-mod common;
-
 use dj_engine::{Engine, EngineConfig};
 
 const SR: f32 = 48_000.0;
@@ -14,7 +12,7 @@ fn mono_engine() -> Engine {
             master_channels: 1,
             ..EngineConfig::default()
         },
-        common::registry(),
+        crate::common::registry(),
     )
     .unwrap()
 }

@@ -2,8 +2,6 @@
 //! messages toward the controller. No hardware here, so the tests use the
 //! engine's message generation + the mock/virtual MIDI output sink.
 
-mod common;
-
 use dj_engine::{MidiOutEvent, MockMidiSink};
 
 const SR: f32 = 48_000.0;
@@ -12,7 +10,7 @@ const SR: f32 = 48_000.0;
 /// into one of its LED input jacks — virtual injection drives the control,
 /// the LED mapping turns the signal back into out-messages.
 fn led_engine(led_kind: &str, led_num: u8) -> dj_engine::Engine {
-    let mut e = common::default_engine();
+    let mut e = crate::common::default_engine();
     e.add_module("midi1", "builtin.midi").unwrap();
     e.add_midi_mapping("midi1", "cc", 1, "fader").unwrap();
     e.add_midi_led_mapping("midi1", led_kind, led_num, "led_a")
@@ -124,7 +122,7 @@ fn led_mappings_and_wiring_roundtrip_through_patch_save_load() {
         let e = led_engine("cc", 7);
         e.save_patch(dir.path(), "led-patch").unwrap();
     }
-    let mut e = dj_engine::Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let mut e = dj_engine::Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
 
     // Mapping restored with its name and wiring intact: driving the fader
     // still emits LED messages.

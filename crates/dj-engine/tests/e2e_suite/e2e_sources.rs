@@ -10,9 +10,7 @@
 //! The harness lives in `tests/common/e2e.rs`; regenerate with
 //! `REGEN_GOLDENS=1 cargo test -p dj-engine --release --test e2e_sources`.
 
-mod common;
-
-use common::e2e::{case_dir, check_case, regen, write_events, EventsFile, MidiEventSpec};
+use crate::common::e2e::{case_dir, check_case, regen, write_events, EventsFile, MidiEventSpec};
 use dj_engine::{Engine, EngineConfig};
 
 const SR: f32 = 48_000.0;
@@ -23,7 +21,7 @@ fn mono_engine() -> Engine {
             master_channels: 1,
             ..EngineConfig::default()
         },
-        common::registry(),
+        crate::common::registry(),
     )
     .unwrap()
 }

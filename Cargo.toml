@@ -23,7 +23,13 @@ anyhow = "1"
 thiserror = "2"
 
 [profile.release]
-lto = "thin"
+# No LTO here on purpose. This profile covers dj-cli and the test binaries
+# only — the shipping Tauri app is a separate workspace with its own profile.
+# Every test target statically links wasmtime, so thin LTO cost minutes of
+# link time across the suite while buying nothing measurable: the DSP hot path
+# is wasmtime-JIT'd code, not cross-crate Rust. Measured on the stress suite,
+# thin LTO vs. off is 7.1x / 9.9x vs. 7.1x / 10.2x realtime — noise.
+lto = "off"
 
 # Fast-but-optimized profile for wasm extensions
 [profile.wasm-release]

@@ -4,8 +4,6 @@
 //! patch directory format, the learn flow works via app commands, and a
 //! stub third mode registers with zero module-core changes.
 
-mod common;
-
 use dj_engine::dj_gesture::{
     fixtures, Detection, GestureMode, MappingEval, ModeCtx, Point, WheelLayout, GATE_HIGH,
     ZONES_PER_WHEEL,
@@ -39,7 +37,7 @@ fn pinch_hand() -> Detection {
 /// graph as §4 gates (high 10 / low 0) readable at wired inputs.
 #[test]
 fn wheel_zones_gate_exactly_one_output_in_graph() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("gest1", "builtin.gesture").unwrap();
     let layout = *engine.gesture("gest1").unwrap().wheels();
     // 18 mappings, each wired into its own VCA cv input so the gate is
@@ -82,7 +80,7 @@ fn wheel_zones_gate_exactly_one_output_in_graph() {
 /// through the RT graph.
 #[test]
 fn presence_gate_decays_after_timeout_in_graph() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("gest1", "builtin.gesture").unwrap();
     engine.add_module("vca1", "com.dj.vca").unwrap();
     engine
@@ -123,7 +121,7 @@ fn pinch_distance_tracks_amplitude_in_render() {
         master_channels: 1,
         ..EngineConfig::default()
     };
-    let mut engine = Engine::new(config, common::registry()).unwrap();
+    let mut engine = Engine::new(config, crate::common::registry()).unwrap();
     engine.add_module("gest1", "builtin.gesture").unwrap();
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("vca1", "com.dj.vca").unwrap();
@@ -155,7 +153,7 @@ fn pinch_distance_tracks_amplitude_in_render() {
     // fall back, tracking the pinch (tolerance: one window either side
     // of the scripted turnaround for smoothing lag).
     let window = (engine.config.sample_rate / trace.fps) as usize;
-    let peaks = common::window_peaks(&out[0], window);
+    let peaks = crate::common::window_peaks(&out[0], window);
     let peak_at = (0..peaks.len())
         .max_by(|&a, &b| peaks[a].total_cmp(&peaks[b]))
         .unwrap();
@@ -191,7 +189,7 @@ fn gesture_state_round_trips_through_patch() {
     let dir = tempfile::tempdir().unwrap();
     let patch_dir = dir.path().join("patch");
     {
-        let mut engine = common::default_engine();
+        let mut engine = crate::common::default_engine();
         engine.add_module("gest1", "builtin.gesture").unwrap();
         engine.add_module("vca1", "com.dj.vca").unwrap();
         engine.gesture_set_mode("gest1", "landmark").unwrap();
@@ -235,7 +233,7 @@ fn gesture_state_round_trips_through_patch() {
         engine.save_patch(&patch_dir, "gesture-rt").unwrap();
     }
 
-    let mut engine = Engine::load_patch(&patch_dir, common::registry()).unwrap();
+    let mut engine = Engine::load_patch(&patch_dir, crate::common::registry()).unwrap();
     let g = engine.gesture("gest1").unwrap();
     assert_eq!(g.active_mode(), "landmark");
     assert_eq!(g.wheels().wheels[0].cx, 0.31);
@@ -289,7 +287,7 @@ fn gesture_state_round_trips_through_patch() {
 /// a zone, poll — the mapping materializes as a wired-up jack.
 #[test]
 fn learn_flow_creates_mapping_from_detection() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("gest1", "builtin.gesture").unwrap();
     let layout = *engine.gesture("gest1").unwrap().wheels();
 
@@ -320,7 +318,7 @@ fn learn_flow_creates_mapping_from_detection() {
 /// Removing a mapping drops its wires and zeroes the RT value.
 #[test]
 fn remove_mapping_drops_wires_and_zeroes_value() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("gest1", "builtin.gesture").unwrap();
     engine.add_module("vca1", "com.dj.vca").unwrap();
     let layout = *engine.gesture("gest1").unwrap().wheels();
@@ -386,7 +384,7 @@ impl GestureMode for SpreadMode {
 
 #[test]
 fn stub_third_mode_registers_against_engine_without_core_changes() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("gest1", "builtin.gesture").unwrap();
     assert_eq!(
         engine.gesture("gest1").unwrap().mode_ids(),
@@ -426,7 +424,7 @@ fn stub_third_mode_registers_against_engine_without_core_changes() {
 /// Frame drops hold the last value for continuous mappings (graph-level).
 #[test]
 fn frame_drops_hold_continuous_values() {
-    let mut engine = common::default_engine();
+    let mut engine = crate::common::default_engine();
     engine.add_module("gest1", "builtin.gesture").unwrap();
     engine.add_module("vca1", "com.dj.vca").unwrap();
     engine

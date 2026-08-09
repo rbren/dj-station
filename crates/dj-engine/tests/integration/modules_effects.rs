@@ -3,8 +3,6 @@
 //!
 //! Each test renders a short patch offline and asserts on the samples.
 
-mod common;
-
 use dj_engine::{Engine, EngineConfig};
 
 const SR: f32 = 48_000.0;
@@ -14,7 +12,7 @@ fn stereo_engine() -> Engine {
         master_channels: 2,
         ..EngineConfig::default()
     };
-    Engine::new(config, common::registry()).unwrap()
+    Engine::new(config, crate::common::registry()).unwrap()
 }
 
 /// MIDI -> ADSR -> VCA gated sine "blip" source, wired to nothing yet.
@@ -46,7 +44,7 @@ fn blip_at(e: &mut Engine, on: f32, len: f32) {
 
 /// Peak level per `win` seconds.
 fn envelope(signal: &[f32], win: f32) -> Vec<f32> {
-    common::window_peaks(signal, (win * SR) as usize)
+    crate::common::window_peaks(signal, (win * SR) as usize)
 }
 
 /// Time (seconds) of the loudest window at or after `from`.

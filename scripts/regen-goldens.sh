@@ -8,6 +8,6 @@
 #
 set -u
 cd "$(dirname "$0")/.."
-REGEN_GOLDENS=1 cargo test -p dj-engine --test e2e_golden -- --test-threads=1 || exit 1
+REGEN_GOLDENS=1 cargo test -p dj-engine --test e2e_suite -- --test-threads=1 || exit 1
 echo
 echo "Goldens regenerated. Review with: git status crates/dj-engine/tests/e2e"

@@ -13,7 +13,7 @@
 //! Test files own their cases: a `#[test]` calls its own `regen_*` builder
 //! when [`regen`] is true (set by `./scripts/regen-goldens.sh`), then
 //! `check_case`. Keeping the harness here lets new modules add cases in
-//! their own `tests/e2e_*.rs` file instead of one shared file.
+//! their own `tests/e2e_suite/e2e_*.rs` module instead of one shared file.
 #![allow(dead_code)]
 
 use dj_engine::Engine;

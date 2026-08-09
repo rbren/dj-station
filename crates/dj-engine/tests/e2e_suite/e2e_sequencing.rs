@@ -4,9 +4,7 @@
 //! and a euclidean/turing/trigger-sequencer rhythm patch. See
 //! `tests/common/e2e.rs` for the harness and the regeneration flow.
 
-mod common;
-
-use common::e2e::{check_case, regen, write_events, EventsFile};
+use crate::common::e2e::{check_case, regen, write_events, EventsFile};
 use dj_engine::{Engine, EngineConfig};
 
 /// Put a stepped knob exactly on a detent (`set_knob_value`'s inverse
@@ -32,14 +30,14 @@ fn mono_engine() -> Engine {
             master_channels: 1,
             ..EngineConfig::default()
         },
-        common::registry(),
+        crate::common::registry(),
     )
     .unwrap()
 }
 
 /// Clock -> step sequencer -> (osc pitch, ADSR gate) -> VCA -> out.
 fn regen_clock_step_seq() {
-    let dir = common::e2e::case_dir("seq-clock-step");
+    let dir = crate::common::e2e::case_dir("seq-clock-step");
     let mut e = mono_engine();
     e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("seq", "com.dj.step_seq").unwrap();
@@ -81,7 +79,7 @@ fn regen_clock_step_seq() {
 
 /// Clock x4 -> euclidean + turing + trigger sequencer, two voices.
 fn regen_euclid_turing() {
-    let dir = common::e2e::case_dir("seq-euclid-turing");
+    let dir = crate::common::e2e::case_dir("seq-euclid-turing");
     let mut e = mono_engine();
     e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("euc", "com.dj.euclid").unwrap();

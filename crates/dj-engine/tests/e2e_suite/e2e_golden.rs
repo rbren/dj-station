@@ -4,16 +4,14 @@
 //! layout and the regeneration flow (`./scripts/regen-goldens.sh`).
 //! Module-specific cases live in their own `tests/e2e_*.rs` files.
 
-mod common;
-
-use common::e2e::{
+use crate::common::e2e::{
     check_case, regen, write_case_tone, write_events, DeckSetupSpec, EventsFile, GestureTraceSpec,
     MidiEventSpec, TrackLoadSpec,
 };
 use dj_engine::{Engine, EngineConfig};
 
 fn regen_patches() {
-    let patches = common::e2e::e2e_dir().join("patches");
+    let patches = crate::common::e2e::e2e_dir().join("patches");
 
     // Case 1: Osc (sine, C4) -> VCA (half gain via cv knob) -> Audio Out.
     {
@@ -23,7 +21,7 @@ fn regen_patches() {
             master_channels: 1,
             ..EngineConfig::default()
         };
-        let mut e = Engine::new(config, common::registry()).unwrap();
+        let mut e = Engine::new(config, crate::common::registry()).unwrap();
         e.add_module("osc1", "com.dj.oscillator").unwrap();
         e.add_module("vca1", "com.dj.vca").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
@@ -49,7 +47,7 @@ fn regen_patches() {
             master_channels: 1,
             ..EngineConfig::default()
         };
-        let mut e = Engine::new(config, common::registry()).unwrap();
+        let mut e = Engine::new(config, crate::common::registry()).unwrap();
         e.add_module("midi1", "builtin.midi").unwrap();
         e.add_module("osc1", "com.dj.oscillator").unwrap();
         e.add_module("adsr1", "com.dj.adsr").unwrap();
@@ -100,7 +98,7 @@ fn regen_patches() {
             master_channels: 1,
             ..EngineConfig::default()
         };
-        let mut e = Engine::new(config, common::registry()).unwrap();
+        let mut e = Engine::new(config, crate::common::registry()).unwrap();
         e.add_module("osc1", "com.dj.oscillator").unwrap();
         e.add_module("osc2", "com.dj.oscillator").unwrap();
         e.add_module("osc3", "com.dj.oscillator").unwrap();
@@ -153,7 +151,7 @@ fn regen_patches() {
             master_channels: 1,
             ..EngineConfig::default()
         };
-        let mut e = Engine::new(config, common::registry()).unwrap();
+        let mut e = Engine::new(config, crate::common::registry()).unwrap();
         e.add_module("play1", "builtin.playback").unwrap();
         e.add_module("vca1", "com.dj.vca").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
@@ -183,7 +181,7 @@ fn regen_patches() {
 }
 
 fn regen_deck_patches() {
-    let patches = common::e2e::e2e_dir().join("patches");
+    let patches = crate::common::e2e::e2e_dir().join("patches");
 
     // Case 5 (M2): one deck, keylock on at +8 %, active loop, manual
     // beatgrid. l = deck audio, r = beat_clock.
@@ -192,7 +190,7 @@ fn regen_deck_patches() {
         std::fs::create_dir_all(&dir).unwrap();
         write_case_tone(&dir.join("tone.wav"), 220.0, 3.0);
 
-        let mut e = Engine::new(EngineConfig::default(), common::registry()).unwrap();
+        let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
         e.add_module("deck1", "builtin.deck").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
         e.connect("deck1", "audio_l", "out1", "l").unwrap();
@@ -235,7 +233,7 @@ fn regen_deck_patches() {
             master_channels: 1,
             ..EngineConfig::default()
         };
-        let mut e = Engine::new(config, common::registry()).unwrap();
+        let mut e = Engine::new(config, crate::common::registry()).unwrap();
         e.add_module("deckA", "builtin.deck").unwrap();
         e.add_module("deckB", "builtin.deck").unwrap();
         e.add_module("xf1", "builtin.crossfader").unwrap();
@@ -287,7 +285,7 @@ fn regen_deck_patches() {
 }
 
 fn regen_stem_patches() {
-    let patches = common::e2e::e2e_dir().join("patches");
+    let patches = crate::common::e2e::e2e_dir().join("patches");
 
     // Case 7 (M3): deck with stems loaded — bass muted, drums at half
     // gain — plus the drums stem jack routed out separately.
@@ -318,7 +316,7 @@ fn regen_stem_patches() {
         }
         w.finalize().unwrap();
 
-        let mut e = Engine::new(EngineConfig::default(), common::registry()).unwrap();
+        let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
         e.add_module("deck1", "builtin.deck").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
         e.connect("deck1", "audio_l", "out1", "l").unwrap();
@@ -360,14 +358,14 @@ fn regen_stem_patches() {
 /// and instantiating it twice at different levels, plus an FM wire into a
 /// promoted input across the macro boundary.
 fn regen_macro_patches() {
-    let patches = common::e2e::e2e_dir().join("patches");
+    let patches = crate::common::e2e::e2e_dir().join("patches");
     let dir = patches.join("macro-tone-collapse");
     std::fs::create_dir_all(&dir).unwrap();
     let config = EngineConfig {
         master_channels: 1,
         ..EngineConfig::default()
     };
-    let mut e = Engine::new(config, common::registry()).unwrap();
+    let mut e = Engine::new(config, crate::common::registry()).unwrap();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("vca1", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
@@ -489,7 +487,7 @@ fn e2e_deck_crossfader_sync() {
 }
 
 fn regen_gesture_patches() {
-    let patches = common::e2e::e2e_dir().join("patches");
+    let patches = crate::common::e2e::e2e_dir().join("patches");
 
     // Case 9 (M5): Gesture(distance: L thumb<->index) -> VCA(cv) with
     // Osc -> VCA -> Audio Out (stereo l/r), driven by the recorded pinch
@@ -500,7 +498,7 @@ fn regen_gesture_patches() {
         let trace = dj_engine::dj_gesture::fixtures::pinch_trace(30.0, 45, 0.04, 0.3);
         trace.save(&dir.join("pinch.json")).unwrap();
 
-        let mut e = Engine::new(EngineConfig::default(), common::registry()).unwrap();
+        let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
         e.add_module("gest1", "builtin.gesture").unwrap();
         e.add_module("osc1", "com.dj.oscillator").unwrap();
         e.add_module("vca1", "com.dj.vca").unwrap();

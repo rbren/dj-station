@@ -2,8 +2,6 @@
 //! allocation with stealing, velocity, pitch bend / mod wheel / sustain,
 //! and the transport + clock outputs.
 
-mod common;
-
 use dj_engine::{Engine, EngineConfig};
 
 const SR: f32 = 48_000.0;
@@ -15,7 +13,7 @@ fn poly_engine(jacks: &[&str]) -> Engine {
         master_channels: jacks.len(),
         ..EngineConfig::default()
     };
-    let mut engine = Engine::new(config, common::registry()).unwrap();
+    let mut engine = Engine::new(config, crate::common::registry()).unwrap();
     engine.add_module("midi1", "builtin.midi").unwrap();
     for (i, jack) in jacks.iter().enumerate() {
         let out = format!("out{i}");

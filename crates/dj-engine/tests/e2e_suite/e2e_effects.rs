@@ -5,9 +5,7 @@
 //! it against `tests/e2e/goldens/<case>.wav`. Regenerate with
 //! `REGEN_GOLDENS=1 cargo test -p dj-engine --release --test e2e_effects`.
 
-mod common;
-
-use common::e2e::{check_case, regen, write_events, EventsFile};
+use crate::common::e2e::{check_case, regen, write_events, EventsFile};
 use dj_engine::{Engine, EngineConfig};
 
 fn mono_engine() -> Engine {
@@ -15,12 +13,12 @@ fn mono_engine() -> Engine {
         master_channels: 1,
         ..EngineConfig::default()
     };
-    Engine::new(config, common::registry()).unwrap()
+    Engine::new(config, crate::common::registry()).unwrap()
 }
 
 /// Saw -> delay (ping-pong, filtered feedback) -> reverb -> out.
 fn regen_delay_reverb() {
-    let dir = common::e2e::case_dir("fx-delay-reverb");
+    let dir = crate::common::e2e::case_dir("fx-delay-reverb");
     let mut e = mono_engine();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("dly", "com.dj.delay").unwrap();
@@ -49,7 +47,7 @@ fn regen_delay_reverb() {
 
 /// Sine -> modulation FX (chorus) -> compressor -> scope thru -> out.
 fn regen_modfx_comp_scope() {
-    let dir = common::e2e::case_dir("fx-modfx-comp-scope");
+    let dir = crate::common::e2e::case_dir("fx-modfx-comp-scope");
     let mut e = mono_engine();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("fx", "com.dj.modfx").unwrap();
@@ -80,7 +78,7 @@ fn regen_modfx_comp_scope() {
 
 /// Square -> granular -> resonator (modal, externally excited) -> out.
 fn regen_granular_resonator() {
-    let dir = common::e2e::case_dir("fx-granular-resonator");
+    let dir = crate::common::e2e::case_dir("fx-granular-resonator");
     let mut e = mono_engine();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("gran", "com.dj.granular").unwrap();

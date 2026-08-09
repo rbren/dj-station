@@ -5,8 +5,6 @@
 //!   a diff touching exactly one file.
 //! - ADSR params round-trip through patch save/load.
 
-mod common;
-
 use dj_engine::{Curve, Engine, KnobConfig, KnobStyle};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -36,8 +34,8 @@ fn snapshot(dir: &Path) -> BTreeMap<String, String> {
 #[test]
 fn knob_config_persists_and_reloads_identically() {
     let dir = tempfile::tempdir().unwrap();
-    let mut engine = common::default_engine();
-    common::build_demo_patch(&mut engine);
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
 
     // Right-click style knob reconfiguration: stepped, custom endpoints, exp.
     let custom = KnobConfig {
@@ -56,7 +54,7 @@ fn knob_config_persists_and_reloads_identically() {
         .unwrap();
     engine.save_patch(dir.path(), "test").unwrap();
 
-    let reloaded = Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
     let knob = reloaded.knob_state("osc1", "pitch").unwrap();
     assert_eq!(knob.config.as_ref(), Some(&custom));
     assert!((knob.position - 0.6).abs() < 1e-6);
@@ -73,8 +71,8 @@ fn knob_config_persists_and_reloads_identically() {
 #[test]
 fn moving_one_knob_touches_exactly_one_file() {
     let dir = tempfile::tempdir().unwrap();
-    let mut engine = common::default_engine();
-    common::build_demo_patch(&mut engine);
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
     engine.save_patch(dir.path(), "test").unwrap();
     let before = snapshot(dir.path());
 
@@ -102,15 +100,15 @@ fn moving_one_knob_touches_exactly_one_file() {
 #[test]
 fn adsr_params_roundtrip_through_save_load() {
     let dir = tempfile::tempdir().unwrap();
-    let mut engine = common::default_engine();
-    common::build_demo_patch(&mut engine);
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
     engine.set_knob_value("adsr1", "attack", 0.033).unwrap();
     engine.set_knob_value("adsr1", "decay", 0.21).unwrap();
     engine.set_knob_value("adsr1", "sustain", 0.42).unwrap();
     engine.set_knob_value("adsr1", "release", 1.5).unwrap();
     engine.save_patch(dir.path(), "test").unwrap();
 
-    let reloaded = Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
     // A/D/S/R are ordinary input knobs; their mapped values round-trip.
     let knob_value = |jack: &str| {
         let node = reloaded
@@ -140,11 +138,11 @@ fn adsr_params_roundtrip_through_save_load() {
 #[test]
 fn wires_and_midi_mappings_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
-    let mut engine = common::default_engine();
-    common::build_demo_patch(&mut engine);
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
     engine.save_patch(dir.path(), "test").unwrap();
 
-    let mut reloaded = Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let mut reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
     assert_eq!(reloaded.wire_specs().len(), 5);
     let midi = reloaded
         .nodes
@@ -169,8 +167,8 @@ fn wires_and_midi_mappings_roundtrip() {
 #[test]
 fn saved_patch_records_engine_version() {
     let dir = tempfile::tempdir().unwrap();
-    let mut engine = common::default_engine();
-    common::build_demo_patch(&mut engine);
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
     engine.save_patch(dir.path(), "test").unwrap();
 
     let header: serde_json::Value =
@@ -180,7 +178,7 @@ fn saved_patch_records_engine_version() {
     assert_eq!(header["format"], "djpatch-1");
 
     // And it round-trips through load → snapshot.
-    let reloaded = Engine::load_patch(dir.path(), common::registry()).unwrap();
+    let reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
     assert_eq!(
         reloaded.snapshot("test").header.version,
         env!("CARGO_PKG_VERSION")

@@ -5,8 +5,17 @@ on:
   push:
   pull_request:
 
+# A new push to the same ref makes the in-flight run obsolete; don't spend
+# runner minutes finishing it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  # Nothing here is reused across runs, and incremental artifacts are large
+  # and slow to cache.
+  CARGO_INCREMENTAL: 0
 
 jobs:
   build:
@@ -19,6 +28,10 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
+          # Shared key across build/lint/test: the three jobs compile the same
+          # ~370 workspace dependencies, so they share one dependency cache
+          # instead of each warming a private copy.
+          shared-key: rust-ci
           workspaces: |
             .
             extensions
@@ -53,6 +66,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
+          shared-key: rust-ci
           workspaces: |
             .
             extensions
@@ -80,9 +94,6 @@ jobs:
     name: Test (cargo test --workspace + frontend tests)
     runs-on: ubuntu-latest
     env:
-      # Full 10-minute-equivalent offline stress run (PRD M0 acceptance;
-      # rendered faster than realtime, see tests/rt_safety.rs).
-      STRESS_SECONDS: "600"
       # M1 acquisition providers: the authoritative tests run against local
       # mock HTTP servers and need no keys. These optional secrets (empty on
       # forks) additionally enable the real-network Freesound/Jamendo smoke
@@ -97,6 +108,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
+          shared-key: rust-ci
           workspaces: |
             .
             extensions
@@ -109,7 +121,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: Rust tests (release; includes E2E golden audio regression,
           M1 library/watch-folder/provider suites, Playback module tests)
-        run: cargo test --workspace --release
+        run: |
+          cargo test --workspace --release --exclude dj-engine
+          cargo test -p dj-engine --release \
+            --test integration --test e2e_suite --test hot_reload
       # M3: keep the optional ONNX stem-separator path compiling. The smoke
       # test skips itself unless DJ_STEMS_ONNX_MODEL points at a model.
       - name: ONNX separator smoke (feature-gated; skips without a model)
@@ -119,11 +134,46 @@ jobs:
       # model (empty-string env counts as unset).
       - name: ONNX hand detector smoke (feature-gated; skips without a model)
         run: cargo test -p dj-gesture --release --features onnx --test onnx_smoke
-      - name: Frontend tests (vitest + jsdom)
-        run: cd app && npm ci && npm test
       - name: Headless smoke via run.sh path
         run: |
           ./scripts/build-extensions.sh
           cargo build --release -p dj-cli
           ./target/release/dj-cli demo /tmp/dj-demo --extensions extensions
           ./target/release/dj-cli render /tmp/dj-demo /tmp/dj-demo.wav --seconds 2 --extensions extensions
+
+  stress:
+    name: Realtime stress (rt_safety + perf_m4, 600s equivalent)
+    runs-on: ubuntu-latest
+    env:
+      # Full 10-minute-equivalent offline stress run (PRD M0 acceptance;
+      # rendered faster than realtime, see tests/rt_safety.rs). These two
+      # suites are deliberately their own job: they want a quiet machine and
+      # would otherwise serialize behind the rest of the Rust suite.
+      STRESS_SECONDS: "600"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-ci
+          workspaces: |
+            .
+            extensions
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Stress tests
+        run: cargo test -p dj-engine --release --test rt_safety --test perf_m4
+
+  frontend:
+    name: Frontend tests (vitest + jsdom)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: cd app && npm ci && npm test

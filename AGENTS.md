@@ -2,12 +2,24 @@
 
 ## Test discipline — be tactical
 
-The full release test suite takes 15+ minutes. Do NOT use it as an iteration
-loop.
+The full release test suite is a few minutes warm (it was 20+ before the
+test targets were consolidated — see below; keep it that way). Do NOT use it
+as an iteration loop.
 
 - While developing, run only the tests affected by your change, scoped
-  tightly: `cargo test -p <crate> --release --test <file>` or a single test
-  name filter. Never `cargo test --workspace` mid-iteration.
+  tightly: `cargo test -p <crate> --release --test <target>` or, better, a
+  single test name filter (`--test integration <name>`). Never
+  `cargo test --workspace` mid-iteration.
+- dj-engine test targets are declared explicitly in its `Cargo.toml`
+  (`autotests = false`), because every test binary statically links wasmtime
+  and costs a ~18 MB link. A new suite is a new file under
+  `tests/integration/` plus one `mod` line in `tests/integration/main.rs` —
+  do NOT add a new top-level `tests/*.rs`, that recreates the 20-minute
+  build. New golden-audio cases go in `tests/e2e_suite/` the same way. Only
+  `rt_safety`, `perf_m4`, and `hot_reload` are standalone targets, for
+  reasons documented at the top of `tests/integration/main.rs`.
+- Suite files live below the target root, so they refer to helpers as
+  `crate::common::...` and carry no `mod common;` of their own.
 - The `rt_safety` stress test honors `STRESS_SECONDS`; use
   `STRESS_SECONDS=10` locally. CI runs the full 600 s version.
 - Stick to one build profile (`--release`) for test runs so the `target/`
@@ -31,7 +43,7 @@ fails if it's missing.
 ## Conventions
 
 - Every new module/engine feature ships with a serialized-patch E2E golden
-  audio case (see `crates/dj-engine/tests/e2e_golden.rs`). Existing goldens
+  audio case (see `crates/dj-engine/tests/e2e_suite/`). Existing goldens
   stay byte-identical unless intentionally regenerated and documented.
 - RT thread: zero allocations/locks. Heavy work happens off the RT thread
   with lock-free handoff (see `crates/dj-engine/src/playback.rs`).
@@ -110,4 +122,5 @@ fails if it's missing.
 - `rt_safety.rs`'s realtime stress can flake when run in parallel with
   the rest of the workspace on a loaded 4-core host (proc-deadline
   assert); it passes standalone — rerun
-  `cargo test --release --test rt_safety` before assuming a regression.
+  `cargo test -p dj-engine --release --test rt_safety` before assuming a
+  regression.

@@ -7,8 +7,6 @@
 //! implements the exact same DSP as the WASM VCA, so the two backends are
 //! additionally asserted to produce *identical* audio.
 
-mod common;
-
 use dj_engine::module_host::HostModule;
 use dj_engine::native_host::NativeRuntime;
 use dj_engine::{Engine, EngineConfig, ExtensionRegistry};
@@ -21,8 +19,8 @@ const WASM_GAIN: (&str, &str, &str) = ("com.dj.vca", "in", "cv");
 const NATIVE_GAIN: (&str, &str, &str) = ("com.dj.gain_native", "in", "gain");
 
 fn registry() -> ExtensionRegistry {
-    common::ensure_native_extensions_built();
-    common::registry()
+    crate::common::ensure_native_extensions_built();
+    crate::common::registry()
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +185,7 @@ fn native_params_apply_through_the_engine() {
 
 #[test]
 fn native_state_roundtrips_across_the_c_abi() {
-    common::ensure_native_extensions_built();
+    crate::common::ensure_native_extensions_built();
     let reg = registry();
     let path = reg.extension(NATIVE_GAIN.0).unwrap().dsp_path.clone();
     let rt = NativeRuntime::new();
