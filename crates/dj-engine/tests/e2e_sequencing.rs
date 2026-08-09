@@ -69,6 +69,9 @@ fn regen_clock_step_seq() {
     e.set_knob_value("adsr1", "release", 0.05).unwrap();
     e.connect("osc1", "audio", "vca1", "in").unwrap();
     e.connect("adsr1", "env", "vca1", "cv").unwrap();
+    // Wired inputs add to the knob baseline; close the gain knob so the
+    // envelope alone opens the VCA.
+    e.set_knob_value("vca1", "cv", 0.0).unwrap();
     e.connect("vca1", "out", "out1", "l").unwrap();
 
     e.save_patch(&dir.join("patch"), "e2e-seq-clock-step")
@@ -120,6 +123,9 @@ fn regen_euclid_turing() {
     e.set_knob_value("adsr1", "release", 0.04).unwrap();
     e.connect("osc1", "audio", "vca1", "in").unwrap();
     e.connect("adsr1", "env", "vca1", "cv").unwrap();
+    // Wired inputs add to the knob baseline; close the gain knob so the
+    // envelope alone opens the VCA.
+    e.set_knob_value("vca1", "cv", 0.0).unwrap();
     e.connect("vca1", "out", "out1", "l").unwrap();
 
     // Bass: trigger track 1 (0b0001000100010001, 8 steps long) on a square
@@ -135,6 +141,7 @@ fn regen_euclid_turing() {
     e.set_knob_value("adsr2", "release", 0.02).unwrap();
     e.connect("osc2", "audio", "vca2", "in").unwrap();
     e.connect("adsr2", "env", "vca2", "cv").unwrap();
+    e.set_knob_value("vca2", "cv", 0.0).unwrap();
     e.connect("vca2", "out", "out1", "l").unwrap();
 
     e.save_patch(&dir.join("patch"), "e2e-seq-euclid-turing")

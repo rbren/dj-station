@@ -59,6 +59,7 @@ fn wheel_zones_gate_exactly_one_output_in_graph() {
             let vca = format!("vca_{name}");
             engine.add_module(&vca, "com.dj.vca").unwrap();
             engine.connect("gest1", &name, &vca, "cv").unwrap();
+            engine.set_knob_value(&vca, "cv", 0.0).unwrap();
             names.push((name, vca, wheel, zone));
         }
     }
@@ -93,6 +94,7 @@ fn presence_gate_decays_after_timeout_in_graph() {
         )
         .unwrap();
     engine.connect("gest1", "idx", "vca1", "cv").unwrap();
+    engine.set_knob_value("vca1", "cv", 0.0).unwrap();
 
     let det = pinch_hand();
     engine.gesture_feed("gest1", 0, Some(&det), FPS_DT).unwrap();
@@ -140,6 +142,7 @@ fn pinch_distance_tracks_amplitude_in_render() {
         .unwrap();
     engine.connect("osc1", "audio", "vca1", "in").unwrap();
     engine.connect("gest1", "pinch", "vca1", "cv").unwrap();
+    engine.set_knob_value("vca1", "cv", 0.0).unwrap();
     engine.connect("vca1", "out", "out1", "l").unwrap();
 
     let trace = fixtures::pinch_trace(30.0, 45, 0.04, 0.3);
@@ -228,6 +231,7 @@ fn gesture_state_round_trips_through_patch() {
         // reload must keep "dist" on jack 2.
         engine.remove_gesture_mapping("gest1", "seen").unwrap();
         engine.connect("gest1", "dist", "vca1", "cv").unwrap();
+        engine.set_knob_value("vca1", "cv", 0.0).unwrap();
         engine.save_patch(&patch_dir, "gesture-rt").unwrap();
     }
 
@@ -305,6 +309,7 @@ fn learn_flow_creates_mapping_from_detection() {
     // The new jack is immediately wireable and live.
     engine.add_module("vca1", "com.dj.vca").unwrap();
     engine.connect("gest1", "pad", "vca1", "cv").unwrap();
+    engine.set_knob_value("vca1", "cv", 0.0).unwrap();
     engine
         .gesture_feed("gest1", 0, Some(&hand_in(&layout, 0, 5)), FPS_DT)
         .unwrap();
@@ -328,6 +333,7 @@ fn remove_mapping_drops_wires_and_zeroes_value() {
         )
         .unwrap();
     engine.connect("gest1", "pad", "vca1", "cv").unwrap();
+    engine.set_knob_value("vca1", "cv", 0.0).unwrap();
     engine
         .gesture_feed("gest1", 0, Some(&hand_in(&layout, 0, 0)), FPS_DT)
         .unwrap();
@@ -406,6 +412,7 @@ fn stub_third_mode_registers_against_engine_without_core_changes() {
 
     engine.add_module("vca1", "com.dj.vca").unwrap();
     engine.connect("gest1", "spread1", "vca1", "cv").unwrap();
+    engine.set_knob_value("vca1", "cv", 0.0).unwrap();
     engine
         .gesture_feed("gest1", 0, Some(&pinch_hand()), FPS_DT)
         .unwrap();
@@ -435,6 +442,7 @@ fn frame_drops_hold_continuous_values() {
         )
         .unwrap();
     engine.connect("gest1", "dist", "vca1", "cv").unwrap();
+    engine.set_knob_value("vca1", "cv", 0.0).unwrap();
     engine
         .gesture_feed("gest1", 0, Some(&pinch_hand()), FPS_DT)
         .unwrap();

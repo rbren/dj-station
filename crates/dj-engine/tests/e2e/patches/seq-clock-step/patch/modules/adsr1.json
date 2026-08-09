@@ -2,7 +2,7 @@
   "ext": "com.dj.adsr",
   "knobs": {
     "attack": {
-      "position": 0.00090009,
+      "position": 0.00090009003,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -17,7 +17,7 @@
       "offset": 0.0
     },
     "release": {
-      "position": 0.00490049,
+      "position": 0.0049004904,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -27,7 +27,7 @@
       "offset": 0.0
     },
     "sustain": {
-      "position": 0.34999996,
+      "position": 0.35,
       "atten": 1.0,
       "offset": 0.0
     }

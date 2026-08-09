@@ -95,6 +95,9 @@ fn regen_modulation_voice() {
 
     e.connect("flt1", "lp", "vca1", "in1").unwrap();
     e.connect("fn1", "out", "vca1", "cv1").unwrap();
+    // Wired inputs add to the knob baseline; close the level knob so the
+    // envelope alone opens the VCA.
+    e.set_knob_value("vca1", "cv1", 0.0).unwrap();
     e.set_knob_position("vca1", "resp1", 1.0).unwrap(); // exponential VCA
     e.connect("vca1", "out1", "out1", "l").unwrap();
 

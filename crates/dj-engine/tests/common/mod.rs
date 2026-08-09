@@ -68,6 +68,9 @@ pub fn build_demo_patch(engine: &mut Engine) {
     engine.connect("midi1", "pad_1", "adsr1", "gate").unwrap();
     engine.connect("osc1", "audio", "vca1", "in").unwrap();
     engine.connect("adsr1", "env", "vca1", "cv").unwrap();
+    // A wired input adds to its knob baseline, so close the gain knob and
+    // let the envelope alone open the VCA.
+    engine.set_knob_value("vca1", "cv", 0.0).unwrap();
     engine.connect("vca1", "out", "out1", "l").unwrap();
     engine.connect("vca1", "out", "out1", "r").unwrap();
 }

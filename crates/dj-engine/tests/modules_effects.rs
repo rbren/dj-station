@@ -28,6 +28,9 @@ fn add_blip_source(e: &mut Engine) {
     e.connect("midi1", "pad_1", "adsr1", "gate").unwrap();
     e.connect("osc1", "audio", "vca1", "in").unwrap();
     e.connect("adsr1", "env", "vca1", "cv").unwrap();
+    // A wired input adds to its knob baseline; close the gain knob so the
+    // envelope alone opens the VCA and the source really is a blip.
+    e.set_knob_value("vca1", "cv", 0.0).unwrap();
     e.set_knob_value("adsr1", "attack", 0.002).unwrap();
     e.set_knob_value("adsr1", "decay", 0.01).unwrap();
     e.set_knob_value("adsr1", "sustain", 1.0).unwrap();
