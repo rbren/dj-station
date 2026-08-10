@@ -451,29 +451,9 @@ fn connect_wire(
         &format!("wire+:{from_instance}:{from_jack}->{to_instance}:{to_jack}"),
     );
     with_stopped(&mut engine, |e| {
-        connect_as_wire(e, &from_instance, &from_jack, &to_instance, &to_jack)
+        e.connect(&from_instance, &from_jack, &to_instance, &to_jack)
+            .map_err(err)
     })
-}
-
-/// Connect a wire and switch the destination input's knob to the plain
-/// "wire" style so the panel shows a jack instead of a knob.
-fn connect_as_wire(
-    e: &mut Engine,
-    from_instance: &str,
-    from_jack: &str,
-    to_instance: &str,
-    to_jack: &str,
-) -> CmdResult<()> {
-    e.connect(from_instance, from_jack, to_instance, to_jack)
-        .map_err(err)?;
-    let mut cfg = e
-        .knob_state(to_instance, to_jack)
-        .ok()
-        .and_then(|k| k.config)
-        .unwrap_or_default();
-    cfg.style = KnobStyle::Wire;
-    e.set_knob_config(to_instance, to_jack, Some(cfg))
-        .map_err(err)
 }
 
 #[tauri::command]
@@ -493,8 +473,9 @@ fn disconnect_wire(
     with_stopped(&mut engine, |e| {
         e.disconnect(&from_instance, &from_jack, &to_instance, &to_jack)
             .map_err(err)?;
-        // Undo the automatic wire-style override so the knob comes back
-        // (only when it is still set to wire — respect manual choices).
+        // Legacy patches from before wired-input blending saved an automatic
+        // wire-style override; undo it so the knob comes back (only when it
+        // is still set to wire — respect manual choices).
         if let Ok(k) = e.knob_state(&to_instance, &to_jack) {
             if k.config
                 .as_ref()
@@ -873,11 +854,16 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     engine
         .add_midi_mapping("midi1", "note", 60, "C4")
         .map_err(err)?;
-    connect_as_wire(&mut engine, "midi1", "C4", "adsr1", "gate")?;
-    connect_as_wire(&mut engine, "osc1", "audio", "vca1", "in")?;
-    connect_as_wire(&mut engine, "adsr1", "env", "vca1", "cv")?;
-    connect_as_wire(&mut engine, "vca1", "out", "out1", "l")?;
-    connect_as_wire(&mut engine, "vca1", "out", "out1", "r")?;
+    engine
+        .connect("midi1", "C4", "adsr1", "gate")
+        .map_err(err)?;
+    engine.connect("osc1", "audio", "vca1", "in").map_err(err)?;
+    engine.connect("adsr1", "env", "vca1", "cv").map_err(err)?;
+    engine.connect("vca1", "out", "out1", "l").map_err(err)?;
+    engine.connect("vca1", "out", "out1", "r").map_err(err)?;
+    // The wired envelope adds to the cv knob baseline; close the knob so
+    // the envelope alone sets the level (default 10 would drone).
+    engine.set_knob_value("vca1", "cv", 0.0).map_err(err)?;
     // Building the demo patch is startup state, not an undoable edit.
     state.history.lock().map_err(err)?.clear();
     eprintln!(

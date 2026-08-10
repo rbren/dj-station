@@ -1,6 +1,6 @@
 // Manifest-driven auto-generated panels: every input is a single-label
 // jack + knob row (no special-cased params), values only appear in hover
-// tooltips, wired inputs drop their knob, and jack clicks drive the
+// tooltips, wired inputs keep their knob (baseline + spread), and jack clicks drive the
 // wiring flow.
 
 import { act, fireEvent, render, screen } from '@testing-library/react';
