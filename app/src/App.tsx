@@ -20,7 +20,7 @@ import { LibraryView } from './components/LibraryView';
 import { GesturePanel } from './components/GesturePanel';
 import { MidiPanel } from './components/MidiPanel';
 import { MODULE_DRAG_TYPE, ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
-import { GRID, ModulePanel, type JackRef } from './components/ModulePanel';
+import { GRID, ModulePanel, snap, type JackRef } from './components/ModulePanel';
 import { TooltipLayer } from './components/TooltipLayer';
 import { WIRE_COLORS, WireOverlay } from './components/WireOverlay';
 import type { JackTelemetry, KnobConfig, Manifest, ModuleHandle } from './types';
@@ -174,21 +174,67 @@ export default function App() {
   const moveModule = useCallback(
     (instance: string, x: number, y: number) => {
       setPositions((prev) => {
-        const overlapsOthers = (pos: { x: number; y: number }) => {
-          const rect = moduleRect(instance, pos);
-          return nodes.some((node, i) => {
-            if (node.instance_id === instance) return false;
-            const otherPos = prev[node.instance_id] ?? defaultPosition(i);
-            return rectsOverlap(rect, moduleRect(node.instance_id, otherPos));
-          });
-        };
-        // Reject moves that would overlap another module — the dragged
-        // panel stops against its neighbours — but always allow escaping
-        // when the module is already overlapping (bad legacy placement).
+        const otherRects: Rect[] = [];
+        for (const [i, node] of nodes.entries()) {
+          if (node.instance_id === instance) continue;
+          const otherPos = prev[node.instance_id] ?? defaultPosition(i);
+          otherRects.push(moduleRect(node.instance_id, otherPos));
+        }
+        const rectAt = (pos: { x: number; y: number }) => moduleRect(instance, pos);
+        const overlapsAny = (pos: { x: number; y: number }) =>
+          otherRects.some((r) => rectsOverlap(rectAt(pos), r));
+
         const selfIdx = nodes.findIndex((n) => n.instance_id === instance);
         const currentPos = prev[instance] ?? defaultPosition(Math.max(selfIdx, 0));
-        if (overlapsOthers({ x, y }) && !overlapsOthers(currentPos)) return prev;
-        const next = { ...prev, [instance]: { x, y } };
+
+        // Modules never overlap: when the requested spot is occupied, push
+        // the dragged panel out to the nearest free grid spot along the
+        // drag's dominant axis. Near-side pushes make the panel stop
+        // against its neighbour; once the pointer crosses the neighbour's
+        // midpoint the far-side push wins and the panel jumps over it.
+        const resolve = (requested: { x: number; y: number }) => {
+          const rect = rectAt(requested);
+          const hits = otherRects.filter((r) => rectsOverlap(rect, r));
+          const horizFirst =
+            Math.abs(requested.x - currentPos.x) >= Math.abs(requested.y - currentPos.y);
+          for (const axis of horizFirst ? (['x', 'y'] as const) : (['y', 'x'] as const)) {
+            let best: { x: number; y: number } | null = null;
+            let bestDist = Infinity;
+            for (const r of hits) {
+              const cands =
+                axis === 'x'
+                  ? [
+                      { x: snap(r.x + r.w), y: requested.y },
+                      { x: snap(r.x - rect.w), y: requested.y },
+                    ]
+                  : [
+                      { x: requested.x, y: snap(r.y + r.h) },
+                      { x: requested.x, y: snap(r.y - rect.h) },
+                    ];
+              for (const c of cands) {
+                if (overlapsAny(c)) continue;
+                const dist = Math.abs(c.x - requested.x) + Math.abs(c.y - requested.y);
+                if (dist < bestDist) {
+                  best = c;
+                  bestDist = dist;
+                }
+              }
+            }
+            if (best) return best;
+          }
+          return null;
+        };
+
+        let target = { x, y };
+        if (overlapsAny(target)) {
+          const resolved = resolve(target);
+          if (resolved) target = resolved;
+          // No free spot nearby: hold position, but always allow escaping
+          // when the module is already overlapping (bad legacy placement).
+          else if (!overlapsAny(currentPos)) return prev;
+        }
+        if (target.x === currentPos.x && target.y === currentPos.y) return prev;
+        const next = { ...prev, [instance]: target };
         saveJson(POSITIONS_KEY, next);
         return next;
       });

@@ -201,29 +201,42 @@ describe('overlap-free module placement', () => {
     Object.defineProperty(el, 'offsetHeight', { configurable: true, value: h });
   };
 
-  it('rejects drags that would overlap another module', async () => {
+  it('drags into a neighbour stop against it, deep drags jump over it', async () => {
+    // osc1 sits mid-rack so there is free space on both sides of it.
+    localStorage.setItem(
+      'dj-rack-positions',
+      JSON.stringify({ osc1: { x: 480, y: 0 }, vca1: { x: 960, y: 0 } }),
+    );
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
 
-    // osc1 defaults to (0,0), vca1 to (480,0); give both real footprints.
     setSize(screen.getByTestId('module-osc1'), 192, 96);
     setSize(screen.getByTestId('module-vca1'), 192, 96);
 
     const header = screen.getByTestId('module-header-vca1');
     const panel = screen.getByTestId('module-vca1');
 
-    // Drag vca1 onto osc1 (0,0): the move is rejected, position unchanged.
-    fireEvent.mouseDown(header, { button: 0, clientX: 480, clientY: 0 });
-    fireEvent.mouseMove(window, { clientX: 0, clientY: 0 });
+    // Shallow drag left into osc1 (480..672): vca1 never overlaps, it is
+    // pushed back to rest against osc1's right edge (672).
+    fireEvent.mouseDown(header, { button: 0, clientX: 960, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: 624, clientY: 0 });
     fireEvent.mouseUp(window);
-    expect(panel.style.left).toBe('480px');
+    await waitFor(() => expect(panel.style.left).toBe('672px'));
+    expect(panel.style.top).toBe('0px');
+
+    // Deep drag past osc1's midpoint: vca1 jumps over to its far side (288).
+    fireEvent.mouseDown(header, { button: 0, clientX: 672, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: 336, clientY: 0 });
+    fireEvent.mouseUp(window);
+    await waitFor(() => expect(panel.style.left).toBe('288px'));
     expect(panel.style.top).toBe('0px');
 
     // Dragging to a free spot below osc1 works.
-    fireEvent.mouseDown(header, { button: 0, clientX: 480, clientY: 0 });
+    fireEvent.mouseDown(header, { button: 0, clientX: 288, clientY: 0 });
     fireEvent.mouseMove(window, { clientX: 480, clientY: 192 });
     fireEvent.mouseUp(window);
     await waitFor(() => expect(panel.style.top).toBe('192px'));
+    expect(panel.style.left).toBe('480px');
   });
 
   it('a module stuck on top of another can always be dragged away', async () => {
