@@ -349,15 +349,10 @@ export default function App() {
     const timer = setInterval(() => {
       void (async () => {
         try {
-          const next: Record<string, Record<string, JackTelemetry>> = {};
-          for (const node of nodes) {
-            next[node.instance_id] = {};
-            for (const input of node.manifest.inputs) {
-              const t = await engine.tap(node.instance_id, input.id);
-              if (t) next[node.instance_id][input.id] = t;
-            }
-          }
-          setTelemetry(next);
+          // One batched IPC round-trip per tick for the whole rack; the
+          // backend acquires the engine lock once and taps every jack.
+          const next = await engine.tapAll();
+          if (next) setTelemetry(next);
         } catch (err) {
           // A broken meter must never stop the rack from rendering.
           reportError('telemetry', err);
@@ -365,7 +360,7 @@ export default function App() {
       })();
     }, 100);
     return () => clearInterval(timer);
-  }, [connected, nodes]);
+  }, [connected]);
 
   const addModule = useCallback(
     async (typeId: string, at?: { x: number; y: number }) => {

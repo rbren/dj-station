@@ -55,6 +55,7 @@ const fakeEngine = {
   nodes: vi.fn(async () => state.nodes),
   wires: vi.fn(async () => state.wires),
   tap: vi.fn(async () => null),
+  tapAll: vi.fn(async () => ({})),
   addModule: vi.fn(async () => {}),
   collapseMacro: vi.fn(async () => 'my-tone'),
   setParam: vi.fn(async () => {}),

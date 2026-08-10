@@ -168,6 +168,14 @@ export class EngineClient extends IpcClient {
     // just mean "no meter update this tick".
     return this.call<JackTelemetry>('tap', { instance, jack }, { quiet: true });
   }
+  /** Batched telemetry for the whole rack: one IPC round-trip returning
+   *  { instance_id -> { jack_id -> JackTelemetry } }. Quiet for the same
+   *  reason as `tap`. */
+  tapAll() {
+    return this.call<Record<string, Record<string, JackTelemetry>>>('tap_all', undefined, {
+      quiet: true,
+    });
+  }
   savePatch(dir: string, name: string) {
     return this.call<void>('save_patch', { dir, name });
   }

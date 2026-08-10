@@ -931,6 +931,48 @@ fn tap(state: State<AppState>, instance: String, jack: String) -> CmdResult<Jack
     engine.tap(&instance, &jack).map_err(err)
 }
 
+/// Batched telemetry for the UI's 100 ms poll: one lock acquisition and one
+/// IPC round-trip for the whole rack instead of one `tap` per jack. Keys
+/// mirror the `engine_nodes` snapshot the UI renders from: macro internals
+/// are hidden, MIDI nodes expose their LED-mapping jacks by name, and macro
+/// instances expose their external input jacks.
+#[tauri::command]
+fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String, JackTelemetry>>> {
+    let engine = state.engine.lock().map_err(err)?;
+    let mut out: BTreeMap<String, BTreeMap<String, JackTelemetry>> = BTreeMap::new();
+    for n in &engine.nodes {
+        if n.instance_id.contains('/') {
+            continue; // macro internals hidden, as in engine_nodes
+        }
+        let jacks = out.entry(n.instance_id.clone()).or_default();
+        if n.is_midi() {
+            for m in &n.midi_led_mappings {
+                if let Some(slot) = n.telemetry.get(m.jack) {
+                    jacks.insert(m.name.clone(), slot.read());
+                }
+            }
+        } else {
+            for (i, decl) in n.manifest.inputs.iter().enumerate() {
+                if let Some(slot) = n.telemetry.get(i) {
+                    jacks.insert(decl.id.clone(), slot.read());
+                }
+            }
+        }
+    }
+    for (iid, mi) in engine.macro_instances() {
+        if iid.contains('/') {
+            continue;
+        }
+        let jacks = out.entry(iid.clone()).or_default();
+        for (ext_jack, node, jack) in &mi.inputs {
+            if let Ok(t) = engine.tap(node, jack) {
+                jacks.insert(ext_jack.clone(), t);
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 fn save_patch(state: State<AppState>, dir: String, name: String) -> CmdResult<()> {
     let engine = state.engine.lock().map_err(err)?;
@@ -1922,6 +1964,7 @@ fn main() {
             set_knob_atten_offset,
             set_param,
             tap,
+            tap_all,
             save_patch,
             save_patch_as,
             list_patches,
