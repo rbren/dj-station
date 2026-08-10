@@ -135,3 +135,18 @@ fails if it's missing.
   `app/tests/KnobMath.test.ts` pins the TS knob curve math to
   `knob.rs`; if either side's mapping changes, update both plus that
   table.
+- Module layout (post-refactor): `engine.rs` keeps core types,
+  construction, graph editing, knobs and telemetry; feature-area
+  `impl Engine` blocks live under `src/engine/` (`midi`, `gesture_api`,
+  `macros_api`, `lifecycle`, `deck_api`, `hot_reload` — each is
+  `use super::*;` + one impl block). Likewise `deck.rs` is the deck's
+  control plane; the RT-thread `DeckModule` lives in `deck/rt.rs`
+  (re-exported). Put new methods in the matching submodule, not back in
+  the parent file.
+- Tauri shell undo discipline: commands lock the engine ONLY via
+  `patch_edit(&state, EditKey::...)` (records the pre-edit snapshot;
+  undoable) or `engine_lock(state)` (explicitly not undoable: queries,
+  taps, backend start/stop, DJ controls canonical in the library DB).
+  Raw `state.engine.lock()` in a command body is a review smell. Undo
+  coalescing keys are the `EditKey` enum's `Display` strings — keep
+  them stable.
