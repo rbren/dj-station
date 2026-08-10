@@ -222,7 +222,9 @@ fn remove_module(state: State<AppState>, instance: String) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::Remove(&instance))?;
     let mut doc = engine.snapshot("edit");
     if !doc.remove_module(&instance) {
-        return Err(format!("no such module instance: {instance}"));
+        return Err(CmdError::not_found(format!(
+            "no such module instance: {instance}"
+        )));
     }
     restore_doc(&state, &mut engine, &doc)
 }
@@ -249,10 +251,59 @@ fn redo(state: State<AppState>) -> CmdResult<bool> {
     }
 }
 
-type CmdResult<T> = Result<T, String>;
+type CmdResult<T> = Result<T, CmdError>;
 
-fn err<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+/// Structured IPC error. `kind` is machine-readable so the frontend can
+/// react programmatically (suppress, restyle, retry); `message` is the
+/// human-readable detail for the error banner.
+#[derive(Clone, Serialize)]
+struct CmdError {
+    kind: ErrorKind,
+    message: String,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ErrorKind {
+    /// The request referenced something that no longer exists — often a
+    /// benign race against undo/reload; polling callers can ignore it.
+    NotFound,
+    /// The caller sent something unusable (bad patch name, empty
+    /// selection); fix the input and retry.
+    InvalidInput,
+    /// Everything else: engine faults, IO, poisoned locks. Engine errors
+    /// stay here until the engine crate grows typed errors — do NOT
+    /// classify by sniffing message strings.
+    Internal,
+}
+
+impl std::fmt::Display for CmdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl CmdError {
+    fn not_found(message: impl Into<String>) -> Self {
+        CmdError {
+            kind: ErrorKind::NotFound,
+            message: message.into(),
+        }
+    }
+    fn invalid(message: impl Into<String>) -> Self {
+        CmdError {
+            kind: ErrorKind::InvalidInput,
+            message: message.into(),
+        }
+    }
+}
+
+/// Default conversion for `map_err(err)`: kind `internal`.
+fn err<E: std::fmt::Display>(e: E) -> CmdError {
+    CmdError {
+        kind: ErrorKind::Internal,
+        message: e.to_string(),
+    }
 }
 
 #[derive(Serialize)]
@@ -813,7 +864,7 @@ fn gesture_feed_start(
         *engine.gesture(&instance).map_err(err)?.wheels()
     };
     let trace = gesture_fixture(&source, &wheels)
-        .ok_or_else(|| format!("unknown gesture fixture {source:?}"))?;
+        .ok_or_else(|| CmdError::not_found(format!("unknown gesture fixture {source:?}")))?;
     let mut feeds = state.gesture_feeds.lock().map_err(err)?;
     if let Some(old) = feeds.remove(&instance) {
         old.stop.store(true, Ordering::Relaxed);
@@ -1043,7 +1094,7 @@ fn valid_patch_name(name: &str) -> bool {
 fn save_patch_as(state: State<AppState>, name: String) -> CmdResult<()> {
     let name = name.trim().to_string();
     if !valid_patch_name(&name) {
-        return Err(format!("invalid patch name: {name:?}"));
+        return Err(CmdError::invalid(format!("invalid patch name: {name:?}")));
     }
     let engine = engine_lock(&state)?;
     engine
@@ -1070,7 +1121,7 @@ fn list_patches() -> CmdResult<Vec<String>> {
 #[tauri::command]
 fn load_patch_by_name(state: State<AppState>, name: String) -> CmdResult<()> {
     if !valid_patch_name(&name) {
-        return Err(format!("invalid patch name: {name:?}"));
+        return Err(CmdError::invalid(format!("invalid patch name: {name:?}")));
     }
     load_patch_dir(&state, &patches_dir().join(&name))?;
     *state.patch_name.lock().map_err(err)? = name;
@@ -1160,7 +1211,11 @@ fn load_patch(
                 }
                 MacroResolution::Fork { new_id }
             }
-            other => return Err(format!("unknown macro resolution {other:?}")),
+            other => {
+                return Err(CmdError::invalid(format!(
+                    "unknown macro resolution {other:?}"
+                )))
+            }
         };
         doc.resolve_macro_conflict(&macro_id, &resolution, &mut lib)
             .map_err(err)?;
@@ -1347,7 +1402,7 @@ fn collapse_macro(
     name: String,
 ) -> CmdResult<String> {
     if selection.is_empty() {
-        return Err("empty selection".into());
+        return Err(CmdError::invalid("empty selection"));
     }
     let mut engine = patch_edit(&state, EditKey::CollapseMacro)?;
     let slug: String = name
@@ -1512,7 +1567,9 @@ fn open_store_page(state: State<AppState>, result: TrackResult) -> CmdResult<Str
 #[tauri::command]
 fn open_external(url: String) -> CmdResult<()> {
     if !url.starts_with("https://") && !url.starts_with("http://") {
-        return Err(format!("refusing to open non-http(s) URL: {url}"));
+        return Err(CmdError::invalid(format!(
+            "refusing to open non-http(s) URL: {url}"
+        )));
     }
     open::that_detached(&url).map_err(err)
 }
@@ -1758,10 +1815,10 @@ fn deck_save_loop(state: State<AppState>, instance: String, name: String) -> Cmd
     let engine = engine_lock(&state)?;
     let status = engine.deck_status(&instance).map_err(err)?;
     let (Some(start), Some(end)) = (status.loop_start_secs, status.loop_end_secs) else {
-        return Err("no loop region set".into());
+        return Err(CmdError::invalid("no loop region set"));
     };
-    let track =
-        deck_library_track(&state, &engine, &instance).ok_or("deck track is not in the library")?;
+    let track = deck_library_track(&state, &engine, &instance)
+        .ok_or_else(|| CmdError::not_found("deck track is not in the library"))?;
     state
         .library
         .add_track_loop(track.id, &name, start, end)

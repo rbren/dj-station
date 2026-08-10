@@ -13,7 +13,7 @@ export function ErrorBanner() {
     <div className="error-banner" data-testid="error-banner" role="alert">
       <ul className="error-banner-list">
         {errors.map((e) => (
-          <li key={e.id} data-testid={`error-item-${e.id}`}>
+          <li key={e.id} data-testid={`error-item-${e.id}`} data-kind={e.kind ?? 'unknown'}>
             <span className="error-context">{e.context}</span>
             <span className="error-message">{e.message}</span>
             <button

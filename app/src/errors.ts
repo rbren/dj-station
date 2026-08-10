@@ -7,6 +7,27 @@ export interface AppError {
   /** Where it came from — an IPC command name, a component, 'window'. */
   context: string;
   message: string;
+  /** Machine-readable kind for backend (IPC) errors; see `CmdError` in
+   *  the Tauri shell. Non-IPC errors have no kind. */
+  kind?: ErrorKind;
+}
+
+/** Mirrors `ErrorKind` in app/src-tauri/src/main.rs. */
+export type ErrorKind = 'not_found' | 'invalid_input' | 'internal';
+
+/** Structured error payload rejected by Tauri commands. */
+export interface CmdError {
+  kind: ErrorKind;
+  message: string;
+}
+
+export function isCmdError(err: unknown): err is CmdError {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    typeof (err as CmdError).message === 'string' &&
+    typeof (err as CmdError).kind === 'string'
+  );
 }
 
 type Listener = (errors: AppError[]) => void;
@@ -18,6 +39,7 @@ let nextId = 1;
 const listeners = new Set<Listener>();
 
 export function errorMessage(err: unknown): string {
+  if (isCmdError(err)) return err.message;
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   try {
@@ -29,10 +51,11 @@ export function errorMessage(err: unknown): string {
 
 export function reportError(context: string, err: unknown): void {
   const message = errorMessage(err);
+  const kind = isCmdError(err) ? err.kind : undefined;
   const last = errors[errors.length - 1];
   // Polling loops fail every tick; collapse repeats instead of flooding.
   if (last && last.context === context && last.message === message) return;
-  errors = [...errors, { id: nextId++, context, message }].slice(-MAX_ERRORS);
+  errors = [...errors, { id: nextId++, context, message, kind }].slice(-MAX_ERRORS);
   for (const l of listeners) l(errors);
 }
 

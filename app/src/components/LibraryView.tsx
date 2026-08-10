@@ -4,6 +4,7 @@
 // straight into the library, DeepLink providers open the store page.
 
 import { useCallback, useEffect, useState } from 'react';
+import { errorMessage } from '../errors';
 import { fixed } from '../format';
 import type { AnalysisQueue, LibraryClientApi, ProviderInfo, Track, TrackResult } from '../library';
 
@@ -118,7 +119,7 @@ export function LibraryView({ client }: LibraryViewProps) {
       const remote = await client.searchProvider(active.id, query, selected);
       if (remote) setResults(remote);
     } catch (e) {
-      setError(`${active.name}: ${String(e)}`);
+      setError(`${active.name}: ${errorMessage(e)}`);
       setResults([]);
     }
   }, [active, client, filters, query, refreshTracks]);

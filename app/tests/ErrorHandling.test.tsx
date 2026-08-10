@@ -166,4 +166,19 @@ describe('ErrorBanner', () => {
     fireEvent.click(screen.getByText('✕'));
     expect(screen.queryByTestId('error-banner')).toBeNull();
   });
+
+  it('carries the structured kind from backend CmdError payloads', () => {
+    render(<ErrorBanner />);
+    act(() => {
+      // Shape a Tauri command rejects with (CmdError in the shell).
+      reportError('remove_module', { kind: 'not_found', message: 'no such module instance: osc9' });
+      reportError('window', new Error('plain frontend error'));
+    });
+    const items = screen
+      .getByTestId('error-banner')
+      .querySelectorAll<HTMLElement>('[data-testid^="error-item-"]');
+    expect(items[0].dataset.kind).toBe('not_found');
+    expect(items[0].textContent).toContain('no such module instance: osc9');
+    expect(items[1].dataset.kind).toBe('unknown');
+  });
 });
