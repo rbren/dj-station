@@ -98,7 +98,7 @@ const LAYOUTS: Record<string, LayoutFactory> = {
 
   'com.dj.lfo': () => ({
     groups: [
-      { title: 'rate', inputs: ['rate', { jack: 'rate_cv', label: 'cv' }, 'phase'] },
+      { title: 'rate', inputs: ['rate', 'phase'] },
       { title: 'shape', inputs: ['shape', 'pw'] },
       { title: 'sync', inputs: ['clock', 'ratio', 'reset'] },
     ],
@@ -122,8 +122,8 @@ const LAYOUTS: Record<string, LayoutFactory> = {
   'com.dj.filter': () => ({
     groups: [
       { title: 'audio', inputs: ['in'] },
-      { title: 'cutoff', inputs: ['cutoff', { jack: 'cutoff_cv', label: 'cv' }] },
-      { title: 'resonance', inputs: ['res', { jack: 'res_cv', label: 'cv' }] },
+      { title: 'cutoff', inputs: ['cutoff'] },
+      { title: 'resonance', inputs: ['res'] },
       { title: 'drive', inputs: ['drive', { jack: 'topology', label: 'topo' }] },
     ],
   }),
@@ -157,8 +157,8 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
-  // A real-mixer look: one strip per channel — input jack on top, CV
-  // below it, level fader at the bottom — plus a master strip.
+  // A real-mixer look: one strip per channel — input jack on top, level
+  // fader below it — plus a master strip.
   'com.dj.mixer': () => ({
     groups: [
       ...[1, 2, 3, 4, 5, 6].map((ch) => ({
@@ -166,7 +166,6 @@ const LAYOUTS: Record<string, LayoutFactory> = {
         kind: 'column' as const,
         inputs: [
           { jack: `in${ch}`, label: 'in' },
-          { jack: `cv${ch}`, label: 'cv' },
           { jack: `lvl${ch}`, control: 'fader' as const, hideLabel: true },
         ],
       })),
@@ -195,7 +194,7 @@ const LAYOUTS: Record<string, LayoutFactory> = {
 
   'com.dj.clock': () => ({
     groups: [
-      { title: 'tempo', inputs: ['bpm', 'cv', 'swing', 'beats'] },
+      { title: 'tempo', inputs: ['bpm', 'swing', 'beats'] },
       { title: 'transport', inputs: ['run', 'reset'] },
     ],
     outputGroups: [

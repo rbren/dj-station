@@ -14,8 +14,8 @@
 //!   resonance that squashes as the level rises, the way an OTA/diode
 //!   limited filter folds its resonant peak back down.
 //!
-//! Cutoff is exponential (1 V/oct, 0 = C4) from the `cutoff` knob plus the
-//! `cutoff_cv` jack. Resonance runs from gently damped up to
+//! Cutoff is exponential (1 V/oct, 0 = C4) from the `cutoff` jack — a wire
+//! adds to the knob baseline. Resonance runs from gently damped up to
 //! self-oscillation. Every topology limits its own oscillation with an
 //! amplitude-dependent feedback term rather than by clipping: the loop
 //! gain is pulled back to exactly unity a few volts up, so with no input
@@ -31,11 +31,9 @@ use dj_module_sdk::{export_module, pitch_to_hz, InitCtx, Module, ProcessIo};
 
 const IN_SIGNAL: usize = 0;
 const IN_CUTOFF: usize = 1;
-const IN_CUTOFF_CV: usize = 2;
-const IN_RES: usize = 3;
-const IN_RES_CV: usize = 4;
-const IN_DRIVE: usize = 5;
-const IN_TOPOLOGY: usize = 6;
+const IN_RES: usize = 2;
+const IN_DRIVE: usize = 3;
+const IN_TOPOLOGY: usize = 4;
 
 const OUT_LP: usize = 0;
 const OUT_BP: usize = 1;
@@ -174,7 +172,7 @@ impl Filter {
 }
 
 impl Module for Filter {
-    const N_INPUTS: usize = 7;
+    const N_INPUTS: usize = 5;
     const N_OUTPUTS: usize = 4;
 
     fn new(ctx: &InitCtx) -> Self {
@@ -196,11 +194,11 @@ impl Module for Filter {
             let drive = io.inputs[IN_DRIVE][s].clamp(0.0, 20.0);
             let x = io.inputs[IN_SIGNAL][s] * drive;
 
-            let pitch = io.inputs[IN_CUTOFF][s] + io.inputs[IN_CUTOFF_CV][s];
+            let pitch = io.inputs[IN_CUTOFF][s];
             let fc = pitch_to_hz(pitch.clamp(-12.0, 12.0)).clamp(MIN_HZ, self.max_hz);
             let g = (core::f32::consts::PI * fc / self.sample_rate).tan();
 
-            let res = (io.inputs[IN_RES][s] + 0.1 * io.inputs[IN_RES_CV][s]).clamp(0.0, 1.0);
+            let res = io.inputs[IN_RES][s].clamp(0.0, 1.0);
 
             let ladder_k = LADDER_K * res;
             let svf_k = self.damping(res);

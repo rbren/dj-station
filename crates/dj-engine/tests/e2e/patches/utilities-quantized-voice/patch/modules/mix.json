@@ -1,63 +1,33 @@
 {
   "ext": "com.dj.mixer",
   "knobs": {
-    "cv1": {
-      "position": 1.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "cv2": {
-      "position": 1.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "cv3": {
-      "position": 1.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "cv4": {
-      "position": 1.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "cv5": {
-      "position": 1.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "cv6": {
-      "position": 1.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
     "in1": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "in2": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "in3": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "in4": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "in5": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "in6": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },

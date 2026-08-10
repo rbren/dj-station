@@ -186,7 +186,7 @@ fn filter_stays_finite_under_extreme_drive_and_modulation() {
     e.add_module("f1", "com.dj.filter").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("osc1", "audio", "f1", "in").unwrap();
-    e.connect("lfo_osc", "audio", "f1", "cutoff_cv").unwrap();
+    e.connect("lfo_osc", "audio", "f1", "cutoff").unwrap();
     e.connect("f1", "lp", "out1", "l").unwrap();
     e.set_knob_value("lfo_osc", "pitch", -3.0).unwrap();
     e.set_knob_value("f1", "res", 1.0).unwrap();

@@ -87,8 +87,8 @@ fn regen_modulation_voice() {
     e.set_knob_position("flt1", "topology", 1.0).unwrap(); // OTA
     e.set_knob_value("flt1", "cutoff", 0.5).unwrap();
     e.set_knob_value("flt1", "res", 0.55).unwrap();
-    e.connect("fn1", "out", "flt1", "cutoff_cv").unwrap();
-    e.set_knob_atten_offset("flt1", "cutoff_cv", 0.25, 0.0)
+    e.connect("fn1", "out", "flt1", "cutoff").unwrap();
+    e.set_knob_atten_offset("flt1", "cutoff", 0.25, 0.0)
         .unwrap();
 
     e.connect("flt1", "lp", "vca1", "in1").unwrap();

@@ -173,12 +173,22 @@ fn clock_pulse_width_is_five_ms_and_clamped_when_fast() {
         assert_eq!(run, nominal, "clock pulse width");
     }
 
-    // At 300 BPM the x4 interval is 50 ms, so 5 ms still fits; push the CV
-    // up 3 octaves (2400 BPM) and the pulse must clamp to 45 % of 6.25 ms.
+    // At 300 BPM the x4 interval is 50 ms, so 5 ms still fits; at 2400 BPM
+    // (bpm knob reconfigured past its stock 300 max, as the config menu
+    // allows) the pulse must clamp to 45 % of the 6.25 ms interval.
     let mut e = probe_engine();
     e.add_module("clk", "com.dj.clock").unwrap();
-    e.set_knob_value("clk", "bpm", 300.0).unwrap();
-    e.set_knob_value("clk", "cv", 3.0).unwrap();
+    e.set_knob_config(
+        "clk",
+        "bpm",
+        Some(dj_engine::KnobConfig {
+            min: 20.0,
+            max: 3000.0,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+    e.set_knob_value("clk", "bpm", 2400.0).unwrap();
     probe(&mut e, 0, "clk", "mul4");
     let out = e.render_offline((0.5 * SR) as usize).unwrap();
     let interval = 60.0 / 2400.0 / 4.0 * SR;

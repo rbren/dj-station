@@ -3,7 +3,7 @@
     {
       "from_jack": "out",
       "to": "flt1",
-      "to_jack": "cutoff_cv"
+      "to_jack": "cutoff"
     },
     {
       "from_jack": "out",

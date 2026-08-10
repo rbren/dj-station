@@ -1,7 +1,7 @@
 //! Clock / transport: one master phase in beats, nine phase-locked pulse
 //! outputs.
 //!
-//! Inputs: `bpm`, `cv` (BPM CV), `run`, `reset`, `swing`, `beats` (beats per
+//! Inputs: `bpm`, `run`, `reset`, `swing`, `beats` (beats per
 //! bar). Outputs: `clock` (one pulse per beat), `div2`/`div4`/`div8`/`div16`
 //! (every 2/4/8/16 beats), `mul2`/`mul3`/`mul4` (2/3/4 pulses per beat) and
 //! `bar` (one pulse every `beats` beats).
@@ -36,17 +36,16 @@
 //! Every output emits a fixed 5 ms high (10.0), shortened to at most 45 % of
 //! that stream's own pulse interval so fast multiplications at high tempo
 //! still produce distinct triggers (`mul4` at 300 BPM has a 50 ms interval
-//! and a 5 ms pulse; pushed to 2400 BPM by CV the pulse shrinks with the
-//! interval instead of sticking high).
+//! and a 5 ms pulse; pushed to 2400 BPM by a wire into `bpm` the pulse
+//! shrinks with the interval instead of sticking high).
 
 use dj_module_sdk::{export_module, InitCtx, Module, ProcessIo};
 
 const IN_BPM: usize = 0;
-const IN_CV: usize = 1;
-const IN_RUN: usize = 2;
-const IN_RESET: usize = 3;
-const IN_SWING: usize = 4;
-const IN_BEATS: usize = 5;
+const IN_RUN: usize = 1;
+const IN_RESET: usize = 2;
+const IN_SWING: usize = 3;
+const IN_BEATS: usize = 4;
 
 const N_STREAMS: usize = 9;
 /// Pulses per beat per output; the bar stream (index 8) is variable.
@@ -86,7 +85,7 @@ pub struct Clock {
 }
 
 impl Module for Clock {
-    const N_INPUTS: usize = 6;
+    const N_INPUTS: usize = 5;
     const N_OUTPUTS: usize = N_STREAMS;
 
     fn new(ctx: &InitCtx) -> Self {
@@ -106,9 +105,7 @@ impl Module for Clock {
         }
         // Tempo-domain controls are sampled once per block; run/reset are
         // read per sample so edges stay sample-accurate.
-        let bpm = io.inputs[IN_BPM][0].clamp(1.0, 3000.0) as f64;
-        let cv = io.inputs[IN_CV][0].clamp(-5.0, 5.0) as f64;
-        let bpm_eff = (bpm * (2.0f64).powf(cv)).clamp(1.0, 3000.0);
+        let bpm_eff = io.inputs[IN_BPM][0].clamp(1.0, 3000.0) as f64;
         let swing = io.inputs[IN_SWING][0].clamp(0.0, 1.0) as f64;
         let beats = io.inputs[IN_BEATS][0].round().clamp(1.0, 16.0) as f64;
         let inc = bpm_eff / 60.0 / self.sample_rate as f64;

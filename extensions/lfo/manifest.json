@@ -7,8 +7,6 @@
   "inputs": [
     { "id": "rate", "name": "Rate", "default": 2.0,
       "knob": { "style": "continuous", "min": 0.01, "max": 2000.0, "curve": "exp" } },
-    { "id": "rate_cv", "name": "Rate CV", "default": 0.0,
-      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
     { "id": "shape", "name": "Shape", "default": 0.0,
       "knob": { "style": "stepped", "min": 0.0, "max": 6.0, "curve": "linear", "steps": 7 } },
     { "id": "pw", "name": "Pulse Width", "default": 0.5,

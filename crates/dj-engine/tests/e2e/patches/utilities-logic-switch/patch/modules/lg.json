@@ -17,7 +17,7 @@
       "offset": 0.0
     },
     "cmp_in": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -42,7 +42,7 @@
       "offset": 0.0
     },
     "win_in": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },

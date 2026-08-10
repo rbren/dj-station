@@ -56,7 +56,7 @@ fn assert_near(actual: f32, expected: f32, what: &str) {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn mixer_sums_channels_with_attenuverters_and_cv() {
+fn mixer_sums_channels_with_attenuverters() {
     let mut e = probe_engine(2);
     e.add_module("mx", "com.dj.mixer").unwrap();
     probe(&mut e, "mx", "out", 0);
@@ -71,10 +71,11 @@ fn mixer_sums_channels_with_attenuverters_and_cv() {
     assert_near(tail[0], 3.0 - 2.0, "mixer sum");
     assert_near(tail[1], -(3.0 - 2.0), "mixer inverted sum");
 
-    // A channel's CV input scales that channel only (10 V = unity).
-    e.set_knob_value("mx", "cv1", 5.0).unwrap();
+    // Level CV rides the lvl jack directly: a wire adds to the fader
+    // baseline (half strength here via the attenuverter).
+    e.set_knob_value("mx", "lvl1", 0.5).unwrap();
     let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 1.5 - 2.0, "mixer sum with cv1 at half");
+    assert_near(tail[0], 1.5 - 2.0, "mixer sum with lvl1 at half");
 
     // Master scales the whole sum.
     e.set_knob_value("mx", "master", 2.0).unwrap();

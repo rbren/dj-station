@@ -374,7 +374,8 @@ body {
    baseline through, drawn as an arc outside the dial. */
 .knob-spread {
   position: absolute;
-  inset: 0;
+  /* 44px arc box centered on the 32px knob. */
+  inset: -6px;
   width: 44px;
   height: 44px;
   pointer-events: none;

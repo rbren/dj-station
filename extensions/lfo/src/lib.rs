@@ -6,8 +6,8 @@
 //! PolyBLEP/PolyBLAMP corrected, so the LFO stays clean when it is pushed
 //! into the audio band and used as an oscillator.
 //!
-//! Rate is the `rate` knob multiplied by `2^rate_cv`, i.e. the CV input is
-//! 1 V/oct. With a wire in `clock`, the rate instead locks to the measured
+//! Rate comes straight from the `rate` jack (a wire adds to the knob
+//! baseline). With a wire in `clock`, the rate instead locks to the measured
 //! clock period times the `ratio` selector (/8 /4 /3 /2 x1 x2 x3 x4 x8) and
 //! the phase realigns on the appropriate clock edge. `reset` restarts the
 //! cycle from phase 0.
@@ -23,13 +23,12 @@
 use dj_module_sdk::{export_module, InitCtx, Module, ProcessIo};
 
 const IN_RATE: usize = 0;
-const IN_RATE_CV: usize = 1;
-const IN_SHAPE: usize = 2;
-const IN_PW: usize = 3;
-const IN_CLOCK: usize = 4;
-const IN_RATIO: usize = 5;
-const IN_RESET: usize = 6;
-const IN_PHASE: usize = 7;
+const IN_SHAPE: usize = 1;
+const IN_PW: usize = 2;
+const IN_CLOCK: usize = 3;
+const IN_RATIO: usize = 4;
+const IN_RESET: usize = 5;
+const IN_PHASE: usize = 6;
 
 const OUT_BI: usize = 0;
 const OUT_UNI: usize = 1;
@@ -148,7 +147,7 @@ impl Lfo {
 }
 
 impl Module for Lfo {
-    const N_INPUTS: usize = 8;
+    const N_INPUTS: usize = 7;
     const N_OUTPUTS: usize = 3;
 
     fn new(ctx: &InitCtx) -> Self {
@@ -212,7 +211,6 @@ impl Module for Lfo {
                 ratio * self.sample_rate / self.period
             } else {
                 io.inputs[IN_RATE][s].clamp(0.001, 20_000.0)
-                    * (2.0f32).powf(io.inputs[IN_RATE_CV][s].clamp(-10.0, 10.0))
             };
             let dt = (freq / self.sample_rate).clamp(1e-9, 0.45);
 

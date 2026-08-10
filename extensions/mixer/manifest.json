@@ -8,38 +8,26 @@
     { "id": "in1", "name": "In 1", "default": 0.0 },
     { "id": "lvl1", "name": "Level 1", "default": 0.0,
       "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
-    { "id": "cv1", "name": "CV 1", "default": 10.0,
-      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in2", "name": "In 2", "default": 0.0 },
     { "id": "lvl2", "name": "Level 2", "default": 0.0,
       "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
-    { "id": "cv2", "name": "CV 2", "default": 10.0,
-      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in3", "name": "In 3", "default": 0.0 },
     { "id": "lvl3", "name": "Level 3", "default": 0.0,
       "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
-    { "id": "cv3", "name": "CV 3", "default": 10.0,
-      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in4", "name": "In 4", "default": 0.0 },
     { "id": "lvl4", "name": "Level 4", "default": 0.0,
       "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
-    { "id": "cv4", "name": "CV 4", "default": 10.0,
-      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in5", "name": "In 5", "default": 0.0 },
     { "id": "lvl5", "name": "Level 5", "default": 0.0,
       "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
-    { "id": "cv5", "name": "CV 5", "default": 10.0,
-      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in6", "name": "In 6", "default": 0.0 },
     { "id": "lvl6", "name": "Level 6", "default": 0.0,
       "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
-    { "id": "cv6", "name": "CV 6", "default": 10.0,
-      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "master", "name": "Master", "default": 10.0,
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } }

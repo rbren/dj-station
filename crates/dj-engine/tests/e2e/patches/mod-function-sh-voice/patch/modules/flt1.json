@@ -3,11 +3,6 @@
   "knobs": {
     "cutoff": {
       "position": 0.5416667,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "cutoff_cv": {
-      "position": 0.5,
       "atten": 0.25,
       "offset": 0.0
     },
@@ -23,11 +18,6 @@
     },
     "res": {
       "position": 0.55,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "res_cv": {
-      "position": 0.5,
       "atten": 1.0,
       "offset": 0.0
     },
