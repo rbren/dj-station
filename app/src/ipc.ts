@@ -25,14 +25,21 @@ export class IpcClient {
 
   /** Invoke a command, reporting failures instead of rejecting. A backend
    *  error (bad jack id, poisoned mutex, …) surfaces in the error banner and
-   *  yields `null`, which callers already handle as "no data". */
-  protected async call<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
+   *  yields `null`, which callers already handle as "no data". Pass
+   *  `quiet: true` for polling commands whose failures are expected races
+   *  (e.g. tapping a node the user just undid away) and must not flood the
+   *  banner. */
+  protected async call<T>(
+    cmd: string,
+    args?: Record<string, unknown>,
+    opts?: { quiet?: boolean },
+  ): Promise<T | null> {
     try {
       await this.ready;
       if (!this.invoke) return null;
       return (await this.invoke(cmd, args)) as T;
     } catch (err) {
-      reportError(cmd, err);
+      if (!opts?.quiet) reportError(cmd, err);
       return null;
     }
   }

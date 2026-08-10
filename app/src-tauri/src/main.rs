@@ -850,6 +850,10 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
                 {
                     *state.patch_name.lock().map_err(err)? = name;
                 }
+                // The startup restore is not an edit: without this, undoing
+                // past the session's first change restores the pre-load
+                // EMPTY engine (blank rack, telemetry "no node" spam).
+                state.history.lock().map_err(err)?.clear();
                 eprintln!("[dj-audio] restored autosaved patch");
                 return Ok(());
             }
@@ -874,6 +878,8 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     connect_as_wire(&mut engine, "adsr1", "env", "vca1", "cv")?;
     connect_as_wire(&mut engine, "vca1", "out", "out1", "l")?;
     connect_as_wire(&mut engine, "vca1", "out", "out1", "r")?;
+    // Building the demo patch is startup state, not an undoable edit.
+    state.history.lock().map_err(err)?.clear();
     eprintln!(
         "[dj-audio] demo patch loaded: MIDI(note 60) -> ADSR(gate) -> VCA(cv), \
          Osc -> VCA -> Out. NOTE: the VCA is gated by MIDI note 60 — without a \

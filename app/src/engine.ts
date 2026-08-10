@@ -163,7 +163,10 @@ export class EngineClient extends IpcClient {
     return this.call<void>('set_param', { instance, param, value });
   }
   tap(instance: string, jack: string) {
-    return this.call<JackTelemetry>('tap', { instance, jack });
+    // Quiet: the 100ms telemetry poll races structural edits (undo/redo,
+    // module removal, patch load), so "no node" failures are expected and
+    // just mean "no meter update this tick".
+    return this.call<JackTelemetry>('tap', { instance, jack }, { quiet: true });
   }
   savePatch(dir: string, name: string) {
     return this.call<void>('save_patch', { dir, name });
