@@ -112,15 +112,21 @@ export interface KnobProps {
   atten?: number;
   offset?: number;
   onAttenOffset?(atten: number, offset: number): void;
+  /** Layout-chosen control look: default dial, or a slider ('fader'
+   *  vertical / 'hfader' horizontal) for mixer-style channels. */
+  appearance?: 'fader' | 'hfader';
 }
 
 export function Knob(props: KnobProps) {
-  const { label, config, position, onPosition, onRelease, onConfigChange, wired } = props;
+  const { label, config, position, onPosition, onRelease, onConfigChange, wired, appearance } =
+    props;
   const { onAttenOffset } = props;
   const atten = props.atten ?? 1;
   const offset = props.offset ?? 0;
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const horizontal = appearance === 'hfader';
   const drag = useRef<{
+    startX: number;
     startY: number;
     startPos: number;
     startAtten: number;
@@ -131,14 +137,14 @@ export function Knob(props: KnobProps) {
     (e: MouseEvent) => {
       const d = drag.current;
       if (!d) return;
-      const delta = (d.startY - e.clientY) / 150;
+      const delta = horizontal ? (e.clientX - d.startX) / 90 : (d.startY - e.clientY) / 150;
       if (d.wire) {
         onAttenOffset?.(Math.max(-1, Math.min(1, d.startAtten + delta)), offset);
       } else {
         onPosition(clamp01(d.startPos + delta));
       }
     },
-    [onPosition, onAttenOffset, offset],
+    [onPosition, onAttenOffset, offset, horizontal],
   );
   const onUp = useCallback(() => {
     if (drag.current) {
@@ -240,6 +246,50 @@ export function Knob(props: KnobProps) {
     );
   }
 
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // cmd/ctrl-drag retargets the gesture at the wire amount.
+    const wire = !!wired && (e.metaKey || e.ctrlKey) && !!onAttenOffset;
+    drag.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startPos: position,
+      startAtten: atten,
+      wire,
+    };
+  };
+
+  if (appearance === 'fader' || appearance === 'hfader') {
+    const pct = clamp01(position) * 100;
+    return (
+      <div
+        className={`knob knob-fader-box${horizontal ? ' knob-hfader-box' : ''}`}
+        data-testid={`knob-${label}`}
+      >
+        <div
+          className={horizontal ? 'fader fader-h' : 'fader fader-v'}
+          role="slider"
+          aria-label={label}
+          aria-valuemin={config.min}
+          aria-valuemax={config.max}
+          aria-valuenow={value}
+          aria-orientation={horizontal ? 'horizontal' : 'vertical'}
+          data-tip={`${label}: ${fixed(value)}`}
+          tabIndex={0}
+          onMouseDown={startDrag}
+          onContextMenu={openMenu}
+        >
+          <div className="fader-track" />
+          <div
+            className="fader-cap"
+            style={horizontal ? { left: `${pct}%` } : { bottom: `${pct}%` }}
+          />
+        </div>
+        {menu}
+      </div>
+    );
+  }
+
   const spread = wired ? spreadRange(config, position, atten, offset) : null;
   const tooltip = spread
     ? `${label}: ${fixed(value)} (wire ${fixed(spread.min)}…${fixed(spread.max)})`
@@ -270,12 +320,7 @@ export function Knob(props: KnobProps) {
         aria-valuenow={value}
         data-tip={tooltip}
         tabIndex={0}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          // cmd/ctrl-drag retargets the gesture at the wire amount.
-          const wire = !!wired && (e.metaKey || e.ctrlKey) && !!onAttenOffset;
-          drag.current = { startY: e.clientY, startPos: position, startAtten: atten, wire };
-        }}
+        onMouseDown={startDrag}
         onContextMenu={openMenu}
       >
         <div className="knob-pointer" style={{ transform: `rotate(${angle}deg)` }} />

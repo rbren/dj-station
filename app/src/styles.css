@@ -58,68 +58,142 @@ body {
 
 /* Panels occupy whole grid cells: explicit width/height are set inline
    (rounded up to the 48px grid); the content wrapper keeps its natural
-   size so measurement never feeds back. */
+   size so measurement never feeds back. Each panel carries an --accent
+   custom property from its library category. */
 .module-panel {
-  background: #1d2026;
+  --accent: #8a93a2;
+  background: linear-gradient(180deg, #22262e 0%, #1b1e24 14%, #191c21 100%);
   border: 1px solid #2a2e35;
+  border-top: 2px solid color-mix(in srgb, var(--accent) 55%, #2a2e35);
   border-radius: 8px;
   box-sizing: border-box;
   overflow: hidden;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .module-panel-content {
-  padding: 10px;
+  padding: 8px 10px 10px;
   width: max-content;
-  min-width: 170px;
+  min-width: 140px;
 }
 
 .module-title {
   font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 8px;
+  margin: -8px -10px 8px;
+  padding: 6px 10px 5px;
+  border-bottom: 1px solid #262b33;
+  background: rgba(0, 0, 0, 0.18);
+  color: color-mix(in srgb, var(--accent) 60%, #e6e6e6);
 }
 
 .module-instance {
-  color: #8a93a2;
+  color: #6b7482;
   font-weight: 400;
-  font-size: 0.8rem;
+  font-size: 0.68rem;
 }
 
-/* Fixed two-column row (jack | control) so every input lines up with the
-   same footprint regardless of control style or label length. */
-.module-row {
-  display: grid;
-  grid-template-columns: 112px 44px;
-  gap: 10px;
+/* --- Input cells: wire jack stacked directly on the control ---------- */
+
+/* Groups flow left-to-right and wrap; 'break' groups start a new line. */
+.module-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px 10px;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px 5px 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.input-group-break {
+  flex-basis: 100%;
+}
+
+.input-group-title {
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6f7987;
+  white-space: nowrap;
+}
+
+.input-group-cells {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.input-group-column .input-group-cells {
+  flex-direction: column;
   align-items: center;
-  margin: 4px 0;
+}
+
+.input-group-grid .input-group-cells {
+  display: grid;
+  justify-items: center;
+}
+
+/* The cell itself: jack on top, control under it, tiny label at the
+   bottom. Kept narrow so jack-heavy modules stay compact. */
+.input-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 40px;
+}
+
+.input-cell-label {
+  font-size: 0.6rem;
+  line-height: 1.1;
+  color: #96a0af;
+  max-width: 40px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-cell-hfader {
+  width: auto;
 }
 
 .jack {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.8rem;
-  width: 112px;
+  font-size: 0.72rem;
   min-width: 0;
 }
 
 .jack-name {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
+  color: #96a0af;
 }
 
 /* Hardware-style panel socket: metal ring around a dark bore. The bore
    holds the activation glow, and the socket is the wire anchor point. */
 .jack-socket {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: radial-gradient(
     circle,
@@ -169,24 +243,27 @@ body {
   border-radius: 4px;
 }
 
-/* Every control style renders inside the same 44x44 box so switching
-   styles never shifts the panel layout. */
+/* Every dial/toggle control renders inside the same 32x32 box so
+   switching styles never shifts the panel layout. */
 .knob {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
   flex: none;
   position: relative;
 }
 
 .knob-dial {
-  width: 34px;
-  height: 34px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  background: #2a2e35;
+  background: radial-gradient(circle at 35% 30%, #3a4049, #262a31 70%);
   border: 2px solid #3c424c;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   position: relative;
   cursor: ns-resize;
 }
@@ -196,9 +273,101 @@ body {
   left: 50%;
   top: 2px;
   width: 2px;
+  height: 9px;
+  background: var(--accent, #62d0ff);
+  border-radius: 1px;
+  transform-origin: 50% 9px;
+}
+
+/* Fader controls (layout appearance 'fader' / 'hfader'). */
+.knob-fader-box {
+  width: 32px;
+  height: 72px;
+}
+
+.knob-hfader-box {
+  width: 96px;
+  height: 32px;
+}
+
+.fader {
+  position: relative;
+  cursor: ns-resize;
+}
+
+.fader-v {
+  width: 24px;
+  height: 68px;
+}
+
+.fader-h {
+  width: 92px;
+  height: 24px;
+  cursor: ew-resize;
+}
+
+.fader-track {
+  position: absolute;
+  background: #0d1014;
+  border: 1px solid #2a2e35;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.fader-v .fader-track {
+  left: 50%;
+  top: 2px;
+  bottom: 2px;
+  width: 4px;
+  transform: translateX(-50%);
+}
+
+.fader-h .fader-track {
+  top: 50%;
+  left: 2px;
+  right: 2px;
+  height: 4px;
+  transform: translateY(-50%);
+}
+
+.fader-cap {
+  position: absolute;
+  background: linear-gradient(180deg, #4a515c, #2e333b);
+  border: 1px solid #1a1d22;
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.fader-v .fader-cap {
+  left: 50%;
+  width: 22px;
   height: 12px;
-  background: #62d0ff;
-  transform-origin: 50% 13px;
+  transform: translate(-50%, 50%);
+}
+
+.fader-h .fader-cap {
+  top: 50%;
+  width: 12px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+}
+
+.fader-cap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  background: var(--accent, #62d0ff);
+}
+
+.fader-v .fader-cap::after {
+  width: 100%;
+  height: 2px;
+}
+
+.fader-h .fader-cap::after {
+  width: 2px;
+  height: 100%;
 }
 
 /* Wire spread: the value range an incoming signal can swing the knob's
@@ -273,21 +442,23 @@ body {
 }
 
 .knob-toggle {
-  width: 34px;
-  height: 20px;
-  border-radius: 10px;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
   background: #2a2e35;
   border: 2px solid #3c424c;
   cursor: pointer;
 }
 
 .knob-toggle-on {
-  background: #62d0ff;
+  background: var(--accent, #62d0ff);
 }
 
+/* Wire-style / wired inputs keep the cell footprint but only a small
+   config affordance. */
 .knob-wire {
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 10px;
 }
 
 .knob-momentary {
@@ -321,6 +492,112 @@ body {
   font-size: 0.75rem;
   color: #8a93a2;
   padding: 4px 0;
+}
+
+/* --- Trigger Sequencer step grid ---------------------------------- */
+
+.trigseq-ui {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.trigseq-track {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.trigseq-track-label {
+  width: 12px;
+  font-size: 0.6rem;
+  color: #6f7987;
+  text-align: right;
+}
+
+.trigseq-cell {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid #343b45;
+  background: #14171c;
+  cursor: pointer;
+  padding: 0;
+}
+
+.trigseq-cell.beat {
+  border-color: #454c58;
+}
+
+.trigseq-cell.on {
+  background: var(--accent, #62d0ff);
+  border-color: color-mix(in srgb, var(--accent, #62d0ff) 70%, #fff);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--accent, #62d0ff) 60%, transparent);
+}
+
+.trigseq-cell.beyond {
+  opacity: 0.3;
+}
+
+/* --- Euclidean rings ------------------------------------------------ */
+
+.euclid-ui {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.euclid-circle {
+  fill: none;
+  stroke: #2c333d;
+  stroke-width: 1;
+}
+
+.euclid-dot {
+  fill: #414a56;
+}
+
+.euclid-dot.on {
+  fill: var(--accent, #5fb6d4);
+}
+
+.euclid-count {
+  fill: #6f7987;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- LFO shape preview / Waveshaper transfer curve ----------------- */
+
+.lfo-ui,
+.shaper-ui {
+  margin-bottom: 8px;
+}
+
+.lfo-bg,
+.shaper-bg {
+  fill: #14161a;
+  rx: 4;
+}
+
+.lfo-axis,
+.shaper-axis {
+  stroke: #262c35;
+  stroke-width: 1;
+}
+
+.lfo-wave,
+.shaper-curve {
+  stroke: var(--accent, #62d0ff);
+  stroke-width: 1.6;
+}
+
+.lfo-readout,
+.shaper-mode {
+  font-size: 0.65rem;
+  color: #8a93a2;
+  padding: 2px 0 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -618,25 +895,46 @@ body {
 }
 
 /* Outputs live in a dashed box on a lighter shade of the panel gray
-   (convention: anything inside the dashed box is a source). */
+   (convention: anything inside the dashed box is a source). Output
+   groups get a small caption and flow left-to-right. */
 .module-outputs {
   border: 1px dashed #454c58;
   border-radius: 6px;
   background: #262a31;
   margin-top: 8px;
-  padding: 6px 8px;
+  padding: 4px 8px 5px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 14px;
+}
+
+.output-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.output-group-title {
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6f7987;
+  white-space: nowrap;
+}
+
+.output-group-jacks {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
+  gap: 3px 10px;
 }
 
-/* Condensed input layout for jack-heavy modules (e.g. the DJ deck):
-   two input columns per row instead of one long column. */
-.module-inputs-condensed {
+.output-group-grid {
   display: grid;
-  grid-template-columns: repeat(2, auto);
-  column-gap: 14px;
+  column-gap: 10px;
+  row-gap: 3px;
 }
 
 .module-outputs .jack {

@@ -5,6 +5,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AdsrUI from '../../extensions/adsr/ui-src/AdsrUI';
+import EuclidUI from '../../extensions/euclid/ui-src/EuclidUI';
+import LfoUI from '../../extensions/lfo/ui-src/LfoUI';
+import TrigSeqUI from '../../extensions/trig_seq/ui-src/TrigSeqUI';
+import WaveshaperUI from '../../extensions/waveshaper/ui-src/WaveshaperUI';
 import { engine, onMenuAction, type NodeSnapshot, type WireSnapshot } from './engine';
 import { mapPosition, positionForValue } from './components/Knob';
 import { library, type Track } from './library';
@@ -24,6 +28,10 @@ import type { JackTelemetry, KnobConfig, Manifest, ModuleHandle } from './types'
 /** Module types with a host-registered custom UI (PRD §5.3). */
 const CUSTOM_UIS = {
   'com.dj.adsr': AdsrUI,
+  'com.dj.euclid': EuclidUI,
+  'com.dj.lfo': LfoUI,
+  'com.dj.trig_seq': TrigSeqUI,
+  'com.dj.waveshaper': WaveshaperUI,
   'builtin.deck': DeckCustomUI,
 } as const;
 

@@ -1,0 +1,75 @@
+// One input as a tight vertical cell: wire jack on top, control (knob /
+// fader / toggle) directly under it, label at the bottom. Cells are the
+// unit that panel layouts (panelLayouts.ts) group into rows, columns and
+// grids. The label can be hidden and the control swapped for a fader or
+// suppressed entirely ('jack') by the layout.
+
+import type { JackTelemetry, KnobConfig, KnobState } from '../types';
+import type { CellSpec } from './panelLayouts';
+import { Jack } from './Jack';
+import { Knob } from './Knob';
+
+const DEFAULT_KNOB: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'linear' };
+
+export interface InputCellProps {
+  instance: string;
+  cell: CellSpec;
+  manifestKnob?: KnobConfig | null;
+  state?: KnobState;
+  wired: boolean;
+  telemetry?: JackTelemetry;
+  selected: boolean;
+  /** Outline color while armed — the pending wire's cable color. */
+  selectedColor?: string;
+  onJackClick?(shift: boolean): void;
+  onKnobPosition(position: number): void;
+  onKnobConfig(config: KnobConfig): void;
+  onAttenOffset(atten: number, offset: number): void;
+  onEditEnd?(): void;
+}
+
+export function InputCell(props: InputCellProps) {
+  const { cell, state, wired } = props;
+  const config = state?.config ?? props.manifestKnob ?? DEFAULT_KNOB;
+  const control = cell.control ?? 'auto';
+  const label = cell.label ?? cell.jack;
+  const appearance = control === 'fader' ? 'fader' : control === 'hfader' ? 'hfader' : undefined;
+  return (
+    <div
+      className={`input-cell${appearance ? ` input-cell-${appearance}` : ''}`}
+      data-testid={`input-cell-${cell.jack}`}
+    >
+      <Jack
+        instance={props.instance}
+        id={cell.jack}
+        kind="input"
+        telemetry={props.telemetry}
+        wired={wired}
+        selected={props.selected}
+        selectedColor={props.selectedColor}
+        onClick={props.onJackClick}
+        showLabel={false}
+      />
+      {control !== 'jack' && (
+        <Knob
+          label={cell.jack}
+          config={config}
+          appearance={appearance}
+          position={state?.position ?? 0}
+          wired={wired}
+          atten={state?.atten}
+          offset={state?.offset}
+          onPosition={props.onKnobPosition}
+          onConfigChange={props.onKnobConfig}
+          onAttenOffset={props.onAttenOffset}
+          onRelease={props.onEditEnd}
+        />
+      )}
+      {!cell.hideLabel && (
+        <span className="input-cell-label" title={cell.jack}>
+          {label}
+        </span>
+      )}
+    </div>
+  );
+}

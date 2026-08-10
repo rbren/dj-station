@@ -1,23 +1,37 @@
-// Manifest-driven auto-generated module panel (PRD §7.1): every input is a
-// jack + knob; a wired jack blends with its knob baseline (drag sets the
-// baseline, cmd-drag the wire amount). Numeric params get their own knobs —
-// for modules with a custom UI (e.g. ADSR) both stay in sync through the
-// engine's param state. Clicking an output jack then an input jack makes a
-// wire; clicking a wired input picks its cable up to move it, and
-// shift+click unplugs a jack's most recent wire.
+// Manifest-driven module panel (PRD §7.1): every input renders as a tight
+// InputCell (wire jack stacked on its control), arranged by the module's
+// declarative layout (panelLayouts.ts) into titled groups, columns and
+// grids. A wired jack blends with its knob baseline (drag sets the
+// baseline, cmd-drag the wire amount). Clicking an output jack then an
+// input jack makes a wire; clicking a wired input picks its cable up to
+// move it, and shift+click unplugs a jack's most recent wire.
 
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentType,
   type ReactNode,
 } from 'react';
 import type { JackTelemetry, KnobConfig, KnobState, Manifest, ModuleHandle } from '../types';
+import { InputCell } from './InputCell';
 import { Jack } from './Jack';
-import { Knob } from './Knob';
+import { resolveLayout } from './panelLayouts';
 import { WIRE_COLORS } from './WireOverlay';
+
+/** Panel accent hue per library category (border + title tint). */
+const CATEGORY_ACCENTS: Record<string, string> = {
+  Sources: '#e0876a',
+  Shaping: '#d4b45f',
+  Modulation: '#8f7fe0',
+  'Clock & Sequencing': '#5fb6d4',
+  Effects: '#c96a9e',
+  Utilities: '#7fae8b',
+  DJ: '#62d0ff',
+  'Analysis & I/O': '#9aa7b5',
+};
 
 export interface JackRef {
   instance: string;
@@ -61,8 +75,6 @@ export interface ModulePanelProps {
   onAttenOffset(jackId: string, atten: number, offset: number): void;
 }
 
-const DEFAULT_KNOB: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'linear' };
-
 export function ModulePanel(props: ModulePanelProps) {
   const { manifest, instanceId, knobs, wired, telemetry, pendingSource, position, onMove } = props;
   const pendingColor =
@@ -70,6 +82,8 @@ export function ModulePanel(props: ModulePanelProps) {
       ? WIRE_COLORS[pendingSource.color % WIRE_COLORS.length]
       : undefined;
   const CustomUI = props.customUI;
+  const layout = useMemo(() => resolveLayout(manifest), [manifest]);
+  const accent = CATEGORY_ACCENTS[manifest.category ?? ''] ?? '#8a93a2';
   const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(
     null,
   );
@@ -125,6 +139,7 @@ export function ModulePanel(props: ModulePanelProps) {
       style={{
         ...(position ? { left: position.x, top: position.y } : undefined),
         ...(size ? { width: size.w, height: size.h } : undefined),
+        ['--accent' as string]: accent,
       }}
     >
       <div className="module-panel-content" ref={contentRef}>
@@ -168,63 +183,88 @@ export function ModulePanel(props: ModulePanelProps) {
           </div>
         )}
         {props.extra}
-        <div
-          className={`module-inputs${manifest.inputs.length > 8 ? ' module-inputs-condensed' : ''}`}
-        >
-          {manifest.inputs.map((input) => {
-            const state = knobs[input.id];
-            const config = state?.config ?? input.knob ?? DEFAULT_KNOB;
-            const isWired = wired[input.id] ?? false;
-            return (
-              <div className="module-row" key={input.id}>
-                <Jack
-                  instance={instanceId}
-                  id={input.id}
-                  kind="input"
-                  telemetry={telemetry?.[input.id]}
-                  wired={isWired}
-                  selected={
-                    pendingSource?.kind === 'input' &&
-                    pendingSource.instance === instanceId &&
-                    pendingSource.jack === input.id
+        {layout.groups.length > 0 && (
+          <div className="module-inputs">
+            {layout.groups.map((group, gi) => (
+              <div
+                key={group.title ?? gi}
+                className={`input-group input-group-${group.kind ?? 'row'}${
+                  group.break ? ' input-group-break' : ''
+                }`}
+              >
+                {group.title && <span className="input-group-title">{group.title}</span>}
+                <div
+                  className="input-group-cells"
+                  style={
+                    group.kind === 'grid' && group.columns
+                      ? { gridTemplateColumns: `repeat(${group.columns}, max-content)` }
+                      : undefined
                   }
-                  selectedColor={pendingColor}
-                  onClick={(shift) => props.onJackClick?.('input', input.id, shift)}
-                />
-                <Knob
-                  label={input.id}
-                  config={config}
-                  position={state?.position ?? 0}
-                  wired={isWired}
-                  atten={state?.atten}
-                  offset={state?.offset}
-                  onPosition={(p) => props.onKnobPosition(input.id, p)}
-                  onConfigChange={(c) => props.onKnobConfig(input.id, c)}
-                  onAttenOffset={(a, o) => props.onAttenOffset(input.id, a, o)}
-                  onRelease={props.onEditEnd}
-                />
+                >
+                  {group.cells.map((cell) => {
+                    const decl = manifest.inputs.find((i) => i.id === cell.jack);
+                    return (
+                      <InputCell
+                        key={cell.jack}
+                        instance={instanceId}
+                        cell={cell}
+                        manifestKnob={decl?.knob}
+                        state={knobs[cell.jack]}
+                        wired={wired[cell.jack] ?? false}
+                        telemetry={telemetry?.[cell.jack]}
+                        selected={
+                          pendingSource?.kind === 'input' &&
+                          pendingSource.instance === instanceId &&
+                          pendingSource.jack === cell.jack
+                        }
+                        selectedColor={pendingColor}
+                        onJackClick={(shift) => props.onJackClick?.('input', cell.jack, shift)}
+                        onKnobPosition={(p) => props.onKnobPosition(cell.jack, p)}
+                        onKnobConfig={(c) => props.onKnobConfig(cell.jack, c)}
+                        onAttenOffset={(a, o) => props.onAttenOffset(cell.jack, a, o)}
+                        onEditEnd={props.onEditEnd}
+                      />
+                    );
+                  })}
+                </div>
               </div>
-            );
-          })}
-        </div>
-        <div className="module-outputs">
-          {manifest.outputs.map((output) => (
-            <Jack
-              key={output.id}
-              instance={instanceId}
-              id={output.id}
-              kind="output"
-              telemetry={telemetry?.[`out:${output.id}`]}
-              selected={
-                pendingSource?.kind === 'output' &&
-                pendingSource.instance === instanceId &&
-                pendingSource.jack === output.id
-              }
-              selectedColor={pendingColor}
-              onClick={(shift) => props.onJackClick?.('output', output.id, shift)}
-            />
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
+        {layout.outputGroups.length > 0 && (
+          <div className="module-outputs">
+            {layout.outputGroups.map((group, gi) => (
+              <div key={group.title ?? gi} className="output-group">
+                {group.title && <span className="output-group-title">{group.title}</span>}
+                <div
+                  className={`output-group-jacks${group.columns ? ' output-group-grid' : ''}`}
+                  style={
+                    group.columns
+                      ? { gridTemplateColumns: `repeat(${group.columns}, max-content)` }
+                      : undefined
+                  }
+                >
+                  {group.outputs.map((id) => (
+                    <Jack
+                      key={id}
+                      instance={instanceId}
+                      id={id}
+                      kind="output"
+                      telemetry={telemetry?.[`out:${id}`]}
+                      selected={
+                        pendingSource?.kind === 'output' &&
+                        pendingSource.instance === instanceId &&
+                        pendingSource.jack === id
+                      }
+                      selectedColor={pendingColor}
+                      onClick={(shift) => props.onJackClick?.('output', id, shift)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
