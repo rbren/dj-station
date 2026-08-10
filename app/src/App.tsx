@@ -17,6 +17,7 @@ import { GesturePanel } from './components/GesturePanel';
 import { MidiPanel } from './components/MidiPanel';
 import { MODULE_DRAG_TYPE, ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
 import { GRID, ModulePanel, type JackRef } from './components/ModulePanel';
+import { TooltipLayer } from './components/TooltipLayer';
 import { WIRE_COLORS, WireOverlay } from './components/WireOverlay';
 import type { JackTelemetry, KnobConfig, Manifest, ModuleHandle } from './types';
 
@@ -425,7 +426,26 @@ export default function App() {
   );
 
   const onJackClick = useCallback(
-    async (instance: string, kind: 'input' | 'output', jack: string) => {
+    async (instance: string, kind: 'input' | 'output', jack: string, shift = false) => {
+      // Shift+click unplugs the jack's most recent wire (LIFO — the wires
+      // snapshot preserves connection order). Outputs fan out to many
+      // wires, so repeated shift+clicks peel them off newest-first.
+      if (shift) {
+        const attached = wires.filter((w) =>
+          kind === 'input'
+            ? w.to_instance === instance && w.to_jack === jack
+            : w.from_instance === instance && w.from_jack === jack,
+        );
+        const last = attached[attached.length - 1];
+        if (last) {
+          await engine.disconnectWire(
+            { instance: last.from_instance, jack: last.from_jack },
+            { instance: last.to_instance, jack: last.to_jack },
+          );
+          await refresh();
+        }
+        return;
+      }
       if (pending) {
         // Re-clicking the armed jack cycles through the 8 cable colors.
         if (pending.instance === instance && pending.kind === kind && pending.jack === jack) {
@@ -453,22 +473,39 @@ export default function App() {
         setPending({ instance, jack, kind, color: pending.color });
         return;
       }
-      // No pending wire: clicking a wired input unplugs it; anything else
-      // arms a new wire (starting from an output or a free input).
+      // No pending wire: clicking a wired input picks its cable up — the
+      // wire detaches but stays armed from its source output in its own
+      // color, so it can be dropped on another input to move it (or
+      // abandoned with Esc / a background click to remove it). Anything
+      // else arms a new wire (starting from an output or a free input).
       if (kind === 'input') {
         const existing = wires.find((w) => w.to_instance === instance && w.to_jack === jack);
         if (existing) {
+          const key = `${existing.from_instance}:${existing.from_jack}->${instance}:${jack}`;
+          const color = wireColors[key] ?? loadJson(LAST_WIRE_COLOR_KEY, 0);
           await engine.disconnectWire(
             { instance: existing.from_instance, jack: existing.from_jack },
             { instance, jack },
           );
+          setWireColors((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            saveJson(WIRE_COLORS_KEY, next);
+            return next;
+          });
+          setPending({
+            instance: existing.from_instance,
+            jack: existing.from_jack,
+            kind: 'output',
+            color,
+          });
           await refresh();
           return;
         }
       }
       setPending({ instance, jack, kind, color: loadJson(LAST_WIRE_COLOR_KEY, 0) });
     },
-    [pending, wires, refresh],
+    [pending, wires, wireColors, refresh],
   );
 
   const makeHandle = useCallback(
@@ -557,6 +594,7 @@ export default function App() {
 
   return (
     <main className="app">
+      <TooltipLayer />
       <header className="app-header">
         <h1>dj-station</h1>
         <nav className="app-tabs">
@@ -578,7 +616,7 @@ export default function App() {
         <span
           className="patch-title"
           data-testid="patch-title"
-          title="Current patch (File menu to save/load)"
+          data-tip="Current patch (File menu to save/load)"
         >
           {patchName}
         </span>
@@ -797,7 +835,9 @@ export default function App() {
                     selected={selected.includes(node.instance_id)}
                     onSelectToggle={() => toggleSelected(node.instance_id)}
                     pendingSource={pending}
-                    onJackClick={(kind, jack) => void onJackClick(node.instance_id, kind, jack)}
+                    onJackClick={(kind, jack, shift) =>
+                      void onJackClick(node.instance_id, kind, jack, shift)
+                    }
                     onKnobPosition={(jack, position) => {
                       void engine.setKnobPosition(node.instance_id, jack, position).then(refresh);
                     }}

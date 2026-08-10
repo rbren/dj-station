@@ -76,8 +76,8 @@ describe('ModulePanel', () => {
         }}
       />,
     );
-    expect(screen.getByTestId('jack-input-pitch').getAttribute('title')).toBe('pitch: 2.00');
-    expect(screen.getByTestId('jack-input-fm').getAttribute('title')).toBe('fm: 3.54 (rms)');
+    expect(screen.getByTestId('jack-input-pitch').getAttribute('data-tip')).toBe('pitch: 2.00');
+    expect(screen.getByTestId('jack-input-fm').getAttribute('data-tip')).toBe('fm: 3.54 (rms)');
   });
 
   it('uses saved knob state and per-patch config overrides', () => {
@@ -129,9 +129,9 @@ describe('ModulePanel', () => {
     const onJackClick = vi.fn();
     render(<ModulePanel {...baseProps} onJackClick={onJackClick} />);
     fireEvent.click(screen.getByTestId('jack-output-audio'));
-    expect(onJackClick).toHaveBeenCalledWith('output', 'audio');
+    expect(onJackClick).toHaveBeenCalledWith('output', 'audio', false);
     fireEvent.click(screen.getByTestId('jack-input-fm'));
-    expect(onJackClick).toHaveBeenCalledWith('input', 'fm');
+    expect(onJackClick).toHaveBeenCalledWith('input', 'fm', false);
   });
 
   it('marks the pending wire source jack as selected', () => {

@@ -12,6 +12,7 @@ export function Jack({
   telemetry,
   wired,
   selected,
+  selectedColor,
   onClick,
 }: {
   instance: string;
@@ -20,7 +21,9 @@ export function Jack({
   telemetry?: JackTelemetry;
   wired?: boolean;
   selected?: boolean;
-  onClick?(): void;
+  /** Outline color while armed — the pending wire's cable color. */
+  selectedColor?: string;
+  onClick?(shift: boolean): void;
 }) {
   // `display` is typed number but crosses IPC as JSON, where a non-finite
   // f32 becomes `null` — read it defensively.
@@ -33,8 +36,9 @@ export function Jack({
       type="button"
       className={`jack jack-${kind}${wired ? ' jack-wired' : ''}${selected ? ' jack-selected' : ''}`}
       data-testid={`jack-${kind}-${id}`}
-      title={tooltip}
-      onClick={onClick}
+      data-tip={tooltip}
+      style={selected && selectedColor ? { outlineColor: selectedColor } : undefined}
+      onClick={(e) => onClick?.(e.shiftKey)}
     >
       {/* The socket is the wire anchor point (data-jack), styled like a
           hardware panel jack: metal ring around a dark bore. */}

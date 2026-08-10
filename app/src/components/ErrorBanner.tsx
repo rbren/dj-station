@@ -19,7 +19,7 @@ export function ErrorBanner() {
             <button
               className="error-dismiss"
               data-testid={`error-dismiss-${e.id}`}
-              title="Dismiss"
+              data-tip="Dismiss"
               onClick={() => dismissError(e.id)}
             >
               ✕

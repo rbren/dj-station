@@ -210,7 +210,7 @@ export function DeckPanel(props: DeckPanelProps) {
             key={slot}
             data-testid={`deck-cue-${slot + 1}`}
             className={at !== null && at !== undefined ? 'deck-cue set' : 'deck-cue'}
-            title={
+            data-tip={
               at !== null && at !== undefined
                 ? `cue ${slot + 1} @ ${fmtTime(at)} (right-click clears)`
                 : `set cue ${slot + 1} at playhead`
@@ -231,7 +231,7 @@ export function DeckPanel(props: DeckPanelProps) {
           data-testid="deck-loop-in"
           className="deck-btn"
           onClick={() => setLoopIn(pos)}
-          title="mark loop in at playhead"
+          data-tip="mark loop in at playhead"
         >
           In
         </button>
@@ -247,7 +247,7 @@ export function DeckPanel(props: DeckPanelProps) {
                 .then(poll);
             }
           }}
-          title="set loop out at playhead and engage"
+          data-tip="set loop out at playhead and engage"
         >
           Out
         </button>
@@ -291,7 +291,7 @@ export function DeckPanel(props: DeckPanelProps) {
             key={l.id}
             data-testid={`deck-saved-loop-${l.id}`}
             className="deck-btn deck-saved-loop"
-            title={`${l.name}: ${fmtTime(l.start_secs)} – ${fmtTime(l.end_secs)}`}
+            data-tip={`${l.name}: ${fmtTime(l.start_secs)} – ${fmtTime(l.end_secs)}`}
             onClick={() => void api.setLoop(instanceId, l.start_secs, l.end_secs).then(poll)}
           >
             {l.name || `${fmtTime(l.start_secs)}`}
@@ -304,7 +304,7 @@ export function DeckPanel(props: DeckPanelProps) {
           data-testid="deck-tap"
           className="deck-btn"
           onClick={() => void api.tapTempo(instanceId).then(poll)}
-          title="tap on the beat while the track plays"
+          data-tip="tap on the beat while the track plays"
         >
           Tap
         </button>
@@ -312,7 +312,7 @@ export function DeckPanel(props: DeckPanelProps) {
           data-testid="deck-nudge-back"
           className="deck-btn"
           onClick={() => void api.nudgeBeatgrid(instanceId, -0.01).then(poll)}
-          title="shift grid 10 ms earlier"
+          data-tip="shift grid 10 ms earlier"
         >
           ‹ grid
         </button>
@@ -320,7 +320,7 @@ export function DeckPanel(props: DeckPanelProps) {
           data-testid="deck-nudge-fwd"
           className="deck-btn"
           onClick={() => void api.nudgeBeatgrid(instanceId, 0.01).then(poll)}
-          title="shift grid 10 ms later"
+          data-tip="shift grid 10 ms later"
         >
           grid ›
         </button>
@@ -328,7 +328,7 @@ export function DeckPanel(props: DeckPanelProps) {
           data-testid="deck-anchor"
           className="deck-btn"
           onClick={() => void api.anchorHere(instanceId).then(poll)}
-          title="anchor the grid at the playhead"
+          data-tip="anchor the grid at the playhead"
         >
           Anchor
         </button>
@@ -341,7 +341,7 @@ export function DeckPanel(props: DeckPanelProps) {
               <button
                 data-testid={`deck-stem-mute-${s.param}`}
                 className={stemGains[idx] > 0 ? 'deck-btn' : 'deck-btn muted'}
-                title={`${stemGains[idx] > 0 ? 'mute' : 'unmute'} ${s.param.replace('stem_', '')}`}
+                data-tip={`${stemGains[idx] > 0 ? 'mute' : 'unmute'} ${s.param.replace('stem_', '')}`}
                 onClick={() => toggleStemMute(idx)}
               >
                 {s.label}
@@ -362,7 +362,7 @@ export function DeckPanel(props: DeckPanelProps) {
             data-testid="deck-stems-load"
             className="deck-btn"
             disabled={!status?.track}
-            title="load cached stems for this track (available after analysis)"
+            data-tip="load cached stems for this track (available after analysis)"
             onClick={() => void api.loadStems(instanceId).then(poll)}
           >
             Stems

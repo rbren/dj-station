@@ -1,6 +1,7 @@
 // App-level wiring flow against a mocked engine bridge: click an output
-// jack then an input jack to connect, click a wired input to disconnect,
-// and add modules from the library sidebar.
+// jack then an input jack to connect, click a wired input to pick the
+// cable up (move or abandon it), shift+click to unplug, and add modules
+// from the library sidebar.
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -117,6 +118,21 @@ describe('App wiring flow', () => {
     expect(fakeEngine.connectWire).not.toHaveBeenCalled();
   });
 
+  it('the armed jack outline takes the cable color and follows cycling', async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+    const jack = screen.getByTestId('jack-output-audio');
+    expect(jack.style.outlineColor).toBe('');
+    fireEvent.click(jack);
+    const first = jack.style.outlineColor;
+    expect(first).toBeTruthy();
+    fireEvent.click(jack); // cycle to the next cable color
+    expect(jack.style.outlineColor).toBeTruthy();
+    expect(jack.style.outlineColor).not.toBe(first);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(jack.style.outlineColor).toBe('');
+  });
+
   it('input-first wiring: click an input jack, then an output jack', async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
@@ -150,11 +166,12 @@ describe('App wiring flow', () => {
     expect(swatch.style.background).toBeTruthy();
   });
 
-  it('clicking a wired input with nothing pending disconnects it', async () => {
+  it('clicking a wired input picks the cable up, armed from its source', async () => {
     state.nodes = [node('osc1', OSC), node('vca1', VCA, ['in'])];
     state.wires = [
       { from_instance: 'osc1', from_jack: 'audio', to_instance: 'vca1', to_jack: 'in' },
     ];
+    localStorage.setItem('dj-wire-colors', JSON.stringify({ 'osc1:audio->vca1:in': 3 }));
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
     fireEvent.click(screen.getByTestId('jack-input-in'));
@@ -164,6 +181,79 @@ describe('App wiring flow', () => {
         { instance: 'vca1', jack: 'in' },
       ),
     );
+    // The cable is now armed from the source output, keeping its color.
+    expect(screen.getByTestId('wiring-hint').textContent).toContain('osc1:audio');
+    expect(screen.getByTestId('wire-color-swatch').style.background).toBeTruthy();
+
+    // Dropping it on another input moves the wire — and its color.
+    fireEvent.click(screen.getByTestId('jack-input-cv'));
+    await waitFor(() =>
+      expect(fakeEngine.connectWire).toHaveBeenCalledWith(
+        { instance: 'osc1', jack: 'audio' },
+        { instance: 'vca1', jack: 'cv' },
+      ),
+    );
+    expect(JSON.parse(localStorage.getItem('dj-wire-colors') ?? '{}')['osc1:audio->vca1:cv']).toBe(
+      3,
+    );
+  });
+
+  it('a picked-up cable is removed by abandoning it (escape)', async () => {
+    state.nodes = [node('osc1', OSC), node('vca1', VCA, ['in'])];
+    state.wires = [
+      { from_instance: 'osc1', from_jack: 'audio', to_instance: 'vca1', to_jack: 'in' },
+    ];
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('jack-input-in'));
+    await waitFor(() => expect(fakeEngine.disconnectWire).toHaveBeenCalled());
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('wiring-hint')).toBeNull();
+    expect(fakeEngine.connectWire).not.toHaveBeenCalled();
+  });
+
+  it('shift+click on a wired input unplugs it without arming', async () => {
+    state.nodes = [node('osc1', OSC), node('vca1', VCA, ['in'])];
+    state.wires = [
+      { from_instance: 'osc1', from_jack: 'audio', to_instance: 'vca1', to_jack: 'in' },
+    ];
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('jack-input-in'), { shiftKey: true });
+    await waitFor(() =>
+      expect(fakeEngine.disconnectWire).toHaveBeenCalledWith(
+        { instance: 'osc1', jack: 'audio' },
+        { instance: 'vca1', jack: 'in' },
+      ),
+    );
+    expect(screen.queryByTestId('wiring-hint')).toBeNull();
+  });
+
+  it('shift+click on an output jack unplugs its most recent wire (LIFO)', async () => {
+    state.nodes = [node('osc1', OSC), node('vca1', VCA, ['in', 'cv'])];
+    state.wires = [
+      { from_instance: 'osc1', from_jack: 'audio', to_instance: 'vca1', to_jack: 'in' },
+      { from_instance: 'osc1', from_jack: 'audio', to_instance: 'vca1', to_jack: 'cv' },
+    ];
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('jack-output-audio'), { shiftKey: true });
+    await waitFor(() =>
+      expect(fakeEngine.disconnectWire).toHaveBeenCalledWith(
+        { instance: 'osc1', jack: 'audio' },
+        { instance: 'vca1', jack: 'cv' },
+      ),
+    );
+    // Shift+click never arms a wire.
+    expect(screen.queryByTestId('wiring-hint')).toBeNull();
+  });
+
+  it('shift+click on an unwired jack does nothing', async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('jack-output-audio'), { shiftKey: true });
+    expect(fakeEngine.disconnectWire).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('wiring-hint')).toBeNull();
   });
 
   it('adding a module from the library generates a fresh instance id', async () => {

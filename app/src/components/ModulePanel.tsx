@@ -1,9 +1,10 @@
 // Manifest-driven auto-generated module panel (PRD §7.1): every input is a
-// jack + knob; wiring a jack supersedes its knob (attenuverter/offset live
-// in the right-click config menu). Numeric params get their own knobs —
+// jack + knob; a wired jack blends with its knob baseline (drag sets the
+// baseline, cmd-drag the wire amount). Numeric params get their own knobs —
 // for modules with a custom UI (e.g. ADSR) both stay in sync through the
 // engine's param state. Clicking an output jack then an input jack makes a
-// wire; clicking a wired input removes its wire.
+// wire; clicking a wired input picks its cable up to move it, and
+// shift+click unplugs a jack's most recent wire.
 
 import {
   useCallback,
@@ -16,6 +17,7 @@ import {
 import type { JackTelemetry, KnobConfig, KnobState, Manifest, ModuleHandle } from '../types';
 import { Jack } from './Jack';
 import { Knob } from './Knob';
+import { WIRE_COLORS } from './WireOverlay';
 
 export interface JackRef {
   instance: string;
@@ -49,11 +51,11 @@ export interface ModulePanelProps {
   /** Called on pointer-up after knob/param drags (undo gesture boundary). */
   onEditEnd?(): void;
   /** Jack currently armed as a pending wire end, if any. */
-  pendingSource?: (JackRef & { kind: 'input' | 'output' }) | null;
+  pendingSource?: (JackRef & { kind: 'input' | 'output'; color?: number }) | null;
   /** Multi-select for collapse-to-macro (PRD §6): shift-click toggles. */
   selected?: boolean;
   onSelectToggle?(): void;
-  onJackClick?(kind: 'input' | 'output', jackId: string): void;
+  onJackClick?(kind: 'input' | 'output', jackId: string, shift?: boolean): void;
   onKnobPosition(jackId: string, position: number): void;
   onKnobConfig(jackId: string, config: KnobConfig): void;
   onAttenOffset(jackId: string, atten: number, offset: number): void;
@@ -63,6 +65,10 @@ const DEFAULT_KNOB: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 
 
 export function ModulePanel(props: ModulePanelProps) {
   const { manifest, instanceId, knobs, wired, telemetry, pendingSource, position, onMove } = props;
+  const pendingColor =
+    pendingSource?.color !== undefined
+      ? WIRE_COLORS[pendingSource.color % WIRE_COLORS.length]
+      : undefined;
   const CustomUI = props.customUI;
   const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(
     null,
@@ -148,7 +154,7 @@ export function ModulePanel(props: ModulePanelProps) {
             <button
               className="module-remove"
               data-testid={`module-remove-${instanceId}`}
-              title="Delete module"
+              data-tip="Delete module"
               onMouseDown={(e) => e.stopPropagation()}
               onClick={() => props.onRemove?.()}
             >
@@ -182,7 +188,8 @@ export function ModulePanel(props: ModulePanelProps) {
                     pendingSource.instance === instanceId &&
                     pendingSource.jack === input.id
                   }
-                  onClick={() => props.onJackClick?.('input', input.id)}
+                  selectedColor={pendingColor}
+                  onClick={(shift) => props.onJackClick?.('input', input.id, shift)}
                 />
                 <Knob
                   label={input.id}
@@ -213,7 +220,8 @@ export function ModulePanel(props: ModulePanelProps) {
                 pendingSource.instance === instanceId &&
                 pendingSource.jack === output.id
               }
-              onClick={() => props.onJackClick?.('output', output.id)}
+              selectedColor={pendingColor}
+              onClick={(shift) => props.onJackClick?.('output', output.id, shift)}
             />
           ))}
         </div>

@@ -300,7 +300,7 @@ export function GesturePanel({ instance, api, onChanged, pollMs = 100 }: Gesture
               type="button"
               className="gesture-remove"
               data-testid={`gesture-remove-${m.name}`}
-              title="Remove mapping (and its wires)"
+              data-tip="Remove mapping (and its wires)"
               onClick={() => void api.removeMapping(instance, m.name).then(() => onChanged())}
             >
               ×

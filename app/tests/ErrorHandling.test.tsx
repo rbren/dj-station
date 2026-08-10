@@ -68,7 +68,7 @@ describe('Jack with malformed telemetry', () => {
         />,
       ),
     ).not.toThrow();
-    expect(screen.getByTestId('jack-input-ch1').getAttribute('title')).toBe('ch1: — (rms)');
+    expect(screen.getByTestId('jack-input-ch1').getAttribute('data-tip')).toBe('ch1: — (rms)');
   });
 
   it('keeps the glow at its floor rather than NaN opacity', () => {
@@ -99,8 +99,8 @@ describe('Jack with malformed telemetry', () => {
         onAttenOffset={noop}
       />,
     );
-    expect(screen.getByTestId('jack-input-ch1').getAttribute('title')).toBe('ch1: — (rms)');
-    expect(screen.getByTestId('jack-output-audio').getAttribute('title')).toBe('audio: — (rms)');
+    expect(screen.getByTestId('jack-input-ch1').getAttribute('data-tip')).toBe('ch1: — (rms)');
+    expect(screen.getByTestId('jack-output-audio').getAttribute('data-tip')).toBe('audio: — (rms)');
   });
 });
 
@@ -163,7 +163,7 @@ describe('ErrorBanner', () => {
   it('dismisses an error', () => {
     render(<ErrorBanner />);
     act(() => reportError('engine.start', new Error('audio device busy')));
-    fireEvent.click(screen.getByTitle('Dismiss'));
+    fireEvent.click(screen.getByText('✕'));
     expect(screen.queryByTestId('error-banner')).toBeNull();
   });
 });

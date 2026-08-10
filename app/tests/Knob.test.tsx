@@ -71,7 +71,7 @@ describe('Knob', () => {
   it('shows the value only in the hover tooltip, not inline', () => {
     render(<Knob label="cv" config={LINEAR} position={0.5} onPosition={() => {}} />);
     const dial = screen.getByRole('slider', { name: 'cv' });
-    expect(dial.getAttribute('title')).toBe('cv: 5.00');
+    expect(dial.getAttribute('data-tip')).toBe('cv: 5.00');
     expect(screen.queryByText('5.00')).toBeNull();
   });
 
@@ -185,7 +185,7 @@ describe('Knob', () => {
     expect(onPosition.mock.lastCall![0]).toBeCloseTo(0.7, 5);
     // The spread arc shows how far the wire can push the value.
     expect(screen.getByTestId('knob-spread-fm')).toBeTruthy();
-    expect(dial.getAttribute('title')).toBe('fm: 5.00 (wire 3.00…7.00)');
+    expect(dial.getAttribute('data-tip')).toBe('fm: 5.00 (wire 3.00…7.00)');
   });
 
   it('wired: cmd-drag sets the wire amount instead of the baseline', () => {
@@ -214,7 +214,7 @@ describe('Knob', () => {
   it('unwired: no spread arc, plain value tooltip', () => {
     render(<Knob label="fm" config={LINEAR} position={0.5} onPosition={() => {}} />);
     expect(screen.queryByTestId('knob-spread-fm')).toBeNull();
-    expect(screen.getByRole('slider', { name: 'fm' }).getAttribute('title')).toBe('fm: 5.00');
+    expect(screen.getByRole('slider', { name: 'fm' }).getAttribute('data-tip')).toBe('fm: 5.00');
   });
 
   it('wired: spread min/max are editable in the right-click menu', () => {

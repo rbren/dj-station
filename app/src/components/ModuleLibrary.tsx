@@ -63,7 +63,7 @@ function LibraryEntry({ m, onAdd }: { m: Manifest; onAdd(typeId: string): void }
     <button
       className="library-entry"
       data-testid={`library-add-${m.id}`}
-      title={`${m.id} v${m.version}`}
+      data-tip={`${m.id} v${m.version}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(MODULE_DRAG_TYPE, m.id);

@@ -322,7 +322,7 @@ export function LibraryView({ client }: LibraryViewProps) {
                         <button
                           className="analyze-button"
                           data-testid="analyze-button"
-                          title="re-run analysis (cached stems are reused)"
+                          data-tip="re-run analysis (cached stems are reused)"
                           onClick={() => void analyze(t)}
                         >
                           ↻

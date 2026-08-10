@@ -196,7 +196,7 @@ export function Knob(props: KnobProps) {
           type="button"
           aria-pressed={on}
           aria-label={label}
-          title={`${label}: hold for on`}
+          data-tip={`${label}: hold for on`}
           className={`knob-toggle knob-momentary${on ? ' knob-toggle-on' : ''}`}
           onMouseDown={(e) => {
             if (e.button === 0) onPosition(1);
@@ -227,7 +227,7 @@ export function Knob(props: KnobProps) {
           role="switch"
           aria-checked={on}
           aria-label={label}
-          title={`${label}: ${fixed(value)}`}
+          data-tip={`${label}: ${fixed(value)}`}
           className={`knob-toggle${on ? ' knob-toggle-on' : ''}`}
           onClick={() => {
             onPosition(on ? 0 : 1);
@@ -268,7 +268,7 @@ export function Knob(props: KnobProps) {
         aria-valuemin={config.min}
         aria-valuemax={config.max}
         aria-valuenow={value}
-        title={tooltip}
+        data-tip={tooltip}
         tabIndex={0}
         onMouseDown={(e) => {
           e.preventDefault();

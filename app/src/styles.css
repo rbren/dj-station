@@ -246,6 +246,22 @@ body {
   gap: 6px;
 }
 
+/* Global tooltip layer (data-tip attributes; see TooltipLayer.tsx). */
+.tooltip {
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 200;
+  pointer-events: none;
+  background: #16181d;
+  color: #c8ccd4;
+  border: 1px solid #3c424c;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
 .knob-config-section {
   margin-top: 2px;
   padding-top: 6px;

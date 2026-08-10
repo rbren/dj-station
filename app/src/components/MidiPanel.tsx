@@ -125,7 +125,7 @@ export function MidiPanel(props: MidiPanelProps) {
               type="button"
               className={`midi-key${captureFor === m.name ? ' midi-key-capture' : ''}`}
               data-testid={`midi-key-${m.name}`}
-              title="Bind a computer-keyboard key: hold to send note on"
+              data-tip="Bind a computer-keyboard key: hold to send note on"
               onClick={() => setCaptureFor(captureFor === m.name ? null : m.name)}
             >
               {captureFor === m.name ? 'press a key…' : (keys[m.name] ?? 'set key')}
@@ -135,7 +135,7 @@ export function MidiPanel(props: MidiPanelProps) {
             type="button"
             className="midi-remove"
             data-testid={`midi-remove-${m.name}`}
-            title="Remove mapping (and its wires)"
+            data-tip="Remove mapping (and its wires)"
             onClick={() => onRemove(m.name)}
           >
             ×
@@ -167,7 +167,7 @@ export function MidiPanel(props: MidiPanelProps) {
           <button
             type="button"
             data-testid="midi-add-led"
-            title="Add an LED feedback mapping: an input jack whose signal drives this note/CC back out to the controller"
+            data-tip="Add an LED feedback mapping: an input jack whose signal drives this note/CC back out to the controller"
             onClick={() => {
               const taken = new Set(ledMappings.map((m) => m.name.replace(/^led_/, '')));
               props.onAddLed?.(kind, num, `led_${defaultName(kind, num, taken)}`);
@@ -190,7 +190,7 @@ export function MidiPanel(props: MidiPanelProps) {
                 type="button"
                 className="midi-remove"
                 data-testid={`midi-led-remove-${m.name}`}
-                title="Remove LED mapping (and wires into its jack)"
+                data-tip="Remove LED mapping (and wires into its jack)"
                 onClick={() => props.onRemoveLed?.(m.name)}
               >
                 ×
