@@ -124,3 +124,14 @@ fails if it's missing.
   assert); it passes standalone — rerun
   `cargo test -p dj-engine --release --test rt_safety` before assuming a
   regression.
+- Frontend rack state lives in `app/src/rackStore.ts` (hand-rolled
+  external store read via `useSyncExternalStore`, no zustand), provided
+  through `RackStoreContext`; each `RackModule` subscribes to its own
+  node/position/selection/telemetry slice. Telemetry polls one batched
+  `tap_all` IPC command (read-only, mirrors `engine_nodes` keys —
+  macro internals hidden, MIDI LED / macro external jacks by name) every
+  100 ms — never per-jack `tap` in a loop. App-level tests that mock
+  `../src/engine` need `tapAll: vi.fn(async () => ({}))` next to `tap`.
+  `app/tests/KnobMath.test.ts` pins the TS knob curve math to
+  `knob.rs`; if either side's mapping changes, update both plus that
+  table.
