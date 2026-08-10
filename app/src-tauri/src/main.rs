@@ -5,8 +5,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use dj_engine::{
-    Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle, MacroDef,
-    MacroInterface, MacroJack, MacroLibrary, MacroResolution, Manifest, PatchDoc, UndoHistory,
+    Backend, Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle,
+    MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroResolution, Manifest, MidiMapKind,
+    PatchDoc, UndoHistory,
 };
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
@@ -84,7 +85,7 @@ fn record_edit(state: &State<AppState>, engine: &Engine, key: &str) {
 
 /// Rebuild the engine from a snapshot, preserving the running backend.
 fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> CmdResult<()> {
-    let backend = engine.backend_name();
+    let backend = engine.backend();
     if backend.is_some() {
         engine.stop().map_err(err)?;
     }
@@ -101,20 +102,20 @@ fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> 
     let deck_instances: Vec<String> = engine
         .nodes
         .iter()
-        .filter(|n| n.ext_id == "builtin.deck")
+        .filter(|n| n.is_deck())
         .map(|n| n.instance_id.clone())
         .collect();
     for instance in deck_instances {
         apply_deck_metadata(state, engine, &instance)?;
     }
     match backend {
-        Some("cpal") => {
+        Some(Backend::Cpal) => {
             if let Err(e) = engine.start_cpal() {
                 eprintln!("[dj-audio] WARNING: cpal restart after undo/redo failed ({e})");
                 engine.start_null_realtime().map_err(err)?;
             }
         }
-        Some(_) => engine.start_null_realtime().map_err(err)?,
+        Some(other) => engine.start_backend(other).map_err(err)?,
         None => {}
     }
     Ok(())
@@ -197,13 +198,13 @@ fn with_stopped<T>(
     engine: &mut Engine,
     f: impl FnOnce(&mut Engine) -> CmdResult<T>,
 ) -> CmdResult<T> {
-    let backend = engine.backend_name();
+    let backend = engine.backend();
     if backend.is_some() {
         engine.stop().map_err(err)?;
     }
     let result = f(engine);
     match backend {
-        Some("cpal") => {
+        Some(Backend::Cpal) => {
             if let Err(e) = engine.start_cpal() {
                 // A downgrade here means audio dies after a graph edit even
                 // though the UI still shows "engine connected".
@@ -214,7 +215,7 @@ fn with_stopped<T>(
                 engine.start_null_realtime().map_err(err)?;
             }
         }
-        Some(_) => engine.start_null_realtime().map_err(err)?,
+        Some(other) => engine.start_backend(other).map_err(err)?,
         None => {}
     }
     result
@@ -223,7 +224,7 @@ fn with_stopped<T>(
 #[derive(Serialize)]
 struct MidiMappingSnapshot {
     name: String,
-    kind: String,
+    kind: MidiMapKind,
     num: u8,
 }
 
@@ -274,7 +275,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                 let mut m = n.manifest.clone();
                 // MIDI output jacks are dynamic: show only mapped controls
                 // (by mapping name), not the 64 preallocated slots.
-                if n.ext_id == dj_engine::builtin::MIDI_ID {
+                if n.is_midi() {
                     m.outputs = n
                         .midi_mappings
                         .iter()
@@ -337,7 +338,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                 .iter()
                 .map(|m| MidiMappingSnapshot {
                     name: m.name.clone(),
-                    kind: m.kind.clone(),
+                    kind: m.kind,
                     num: m.num,
                 })
                 .collect(),
@@ -346,7 +347,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                 .iter()
                 .map(|m| MidiMappingSnapshot {
                     name: m.name.clone(),
-                    kind: m.kind.clone(),
+                    kind: m.kind,
                     num: m.num,
                 })
                 .collect(),
@@ -495,14 +496,14 @@ fn disconnect_wire(
 fn add_midi_mapping(
     state: State<AppState>,
     instance: String,
-    kind: String,
+    kind: MidiMapKind,
     num: u8,
     name: String,
 ) -> CmdResult<()> {
     let mut engine = state.engine.lock().map_err(err)?;
     record_edit(&state, &engine, &format!("midi+:{instance}:{name}"));
     engine
-        .add_midi_mapping(&instance, &kind, num, &name)
+        .add_midi_mapping(&instance, kind, num, &name)
         .map(|_| ())
         .map_err(err)
 }
@@ -553,14 +554,14 @@ fn remove_midi_mapping(state: State<AppState>, instance: String, name: String) -
 fn add_midi_led_mapping(
     state: State<AppState>,
     instance: String,
-    kind: String,
+    kind: MidiMapKind,
     num: u8,
     name: String,
 ) -> CmdResult<()> {
     let mut engine = state.engine.lock().map_err(err)?;
     record_edit(&state, &engine, &format!("led+:{instance}:{name}"));
     engine
-        .add_midi_led_mapping(&instance, &kind, num, &name)
+        .add_midi_led_mapping(&instance, kind, num, &name)
         .map(|_| ())
         .map_err(err)
 }
@@ -852,7 +853,7 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
         .add_module("out1", "builtin.audio_out")
         .map_err(err)?;
     engine
-        .add_midi_mapping("midi1", "note", 60, "C4")
+        .add_midi_mapping("midi1", MidiMapKind::Note, 60, "C4")
         .map_err(err)?;
     engine
         .connect("midi1", "C4", "adsr1", "gate")
@@ -1002,7 +1003,7 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<()> {
     let deck_instances: Vec<String> = engine
         .nodes
         .iter()
-        .filter(|n| n.ext_id == "builtin.deck")
+        .filter(|n| n.is_deck())
         .map(|n| n.instance_id.clone())
         .collect();
     for instance in deck_instances {
@@ -1105,7 +1106,7 @@ fn load_patch(
     let deck_instances: Vec<String> = engine
         .nodes
         .iter()
-        .filter(|n| n.ext_id == "builtin.deck")
+        .filter(|n| n.is_deck())
         .map(|n| n.instance_id.clone())
         .collect();
     for instance in deck_instances {
@@ -1826,7 +1827,7 @@ fn main() {
                                     let midis: Vec<String> = engine
                                         .nodes
                                         .iter()
-                                        .filter(|n| n.ext_id == dj_engine::builtin::MIDI_ID)
+                                        .filter(|n| n.is_midi())
                                         .map(|n| n.instance_id.clone())
                                         .collect();
                                     for m in midis {

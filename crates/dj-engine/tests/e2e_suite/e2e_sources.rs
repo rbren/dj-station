@@ -11,7 +11,7 @@
 //! `REGEN_GOLDENS=1 cargo test -p dj-engine --release --test e2e_sources`.
 
 use crate::common::e2e::{case_dir, check_case, regen, write_events, EventsFile, MidiEventSpec};
-use dj_engine::{Engine, EngineConfig};
+use dj_engine::{Engine, EngineConfig, MidiMapKind};
 
 const SR: f32 = 48_000.0;
 
@@ -69,7 +69,8 @@ fn regen_drum_noise() {
         (38, "snare", "snare_trig"),
         (42, "hat", "hat_trig"),
     ] {
-        e.add_midi_mapping("midi1", "note", note, name).unwrap();
+        e.add_midi_mapping("midi1", MidiMapKind::Note, note, name)
+            .unwrap();
         e.connect("midi1", name, "drum1", jack).unwrap();
     }
     e.set_knob_value("drum1", "kick_decay", 0.35).unwrap();

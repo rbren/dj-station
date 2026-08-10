@@ -56,14 +56,9 @@ impl ExtensionRegistry {
 
     /// Manifest for an extension or built-in module.
     pub fn manifest(&self, ext_id: &str) -> Option<Manifest> {
-        match ext_id {
-            builtin::AUDIO_OUT_ID => Some(builtin::audio_out_manifest()),
-            builtin::MIDI_ID => Some(builtin::midi_manifest()),
-            crate::playback::PLAYBACK_ID => Some(crate::playback::playback_manifest()),
-            crate::deck::DECK_ID => Some(crate::deck::deck_manifest()),
-            crate::mixer::CROSSFADER_ID => Some(crate::mixer::crossfader_manifest()),
-            crate::gesture::GESTURE_ID => Some(crate::gesture::gesture_manifest()),
-            _ => self.extensions.get(ext_id).map(|e| e.manifest.clone()),
+        match builtin::BuiltinKind::from_ext_id(ext_id) {
+            Some(kind) => Some(kind.manifest()),
+            None => self.extensions.get(ext_id).map(|e| e.manifest.clone()),
         }
     }
 

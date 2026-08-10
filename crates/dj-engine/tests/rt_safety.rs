@@ -17,7 +17,7 @@
 
 mod common;
 
-use dj_engine::{Engine, EngineConfig};
+use dj_engine::{Engine, EngineConfig, MidiMapKind};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -63,7 +63,7 @@ fn build_stress_patch(engine: &mut Engine, voices: usize) {
     engine.add_module("adsr1", "com.dj.adsr").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
     engine
-        .add_midi_mapping("midi1", "note", 60, "pad_1")
+        .add_midi_mapping("midi1", MidiMapKind::Note, 60, "pad_1")
         .unwrap();
     engine.connect("midi1", "pad_1", "adsr1", "gate").unwrap();
     for v in 0..voices {

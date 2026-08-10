@@ -2,7 +2,7 @@
 //! across a stop → edit → restart cycle (the flow the GUI uses when adding
 //! modules/wires while audio is running).
 
-use dj_engine::KnobStyle;
+use dj_engine::{KnobStyle, MidiMapKind};
 
 const SR: f32 = 48_000.0;
 
@@ -48,10 +48,10 @@ fn structural_edits_work_across_stop_start_cycles() {
     // Run realtime (null backend), then stop: the graph must come back so
     // edits can continue — this is what GUI add-module/wiring relies on.
     engine.start_null_realtime().unwrap();
-    assert_eq!(engine.backend_name(), Some("null"));
+    assert_eq!(engine.backend(), Some(dj_engine::Backend::Null));
     std::thread::sleep(std::time::Duration::from_millis(30));
     engine.stop().unwrap();
-    assert_eq!(engine.backend_name(), None);
+    assert_eq!(engine.backend(), None);
 
     engine.add_module("vca1", "com.dj.vca").unwrap();
     engine.disconnect("osc1", "audio", "out1", "l").unwrap();
@@ -91,8 +91,12 @@ fn midi_mapping_remove_drops_wires_frees_the_slot_and_roundtrips() {
     let mut engine = crate::common::default_engine();
     engine.add_module("midi1", "builtin.midi").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
-    engine.add_midi_mapping("midi1", "note", 60, "C4").unwrap();
-    engine.add_midi_mapping("midi1", "cc", 7, "cc7").unwrap();
+    engine
+        .add_midi_mapping("midi1", MidiMapKind::Note, 60, "C4")
+        .unwrap();
+    engine
+        .add_midi_mapping("midi1", MidiMapKind::Cc, 7, "cc7")
+        .unwrap();
     engine.connect("midi1", "C4", "out1", "l").unwrap();
     assert_eq!(engine.wire_specs().len(), 1);
 
@@ -109,7 +113,9 @@ fn midi_mapping_remove_drops_wires_frees_the_slot_and_roundtrips() {
     assert!(engine.tap("out1", "l").unwrap().display.abs() < 1e-3);
 
     // The freed slot is reusable without leaking the old note's value.
-    engine.add_midi_mapping("midi1", "note", 64, "E4").unwrap();
+    engine
+        .add_midi_mapping("midi1", MidiMapKind::Note, 64, "E4")
+        .unwrap();
     engine.connect("midi1", "E4", "out1", "l").unwrap();
     engine.render_offline((0.2 * SR) as usize).unwrap();
     assert!(

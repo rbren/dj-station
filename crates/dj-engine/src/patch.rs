@@ -396,10 +396,10 @@ impl Engine {
         for (instance_id, mf) in &doc.modules {
             engine.add_module(instance_id, &mf.ext)?;
             for m in &mf.midi_mappings {
-                engine.add_midi_mapping(instance_id, &m.kind, m.num, &m.name)?;
+                engine.add_midi_mapping(instance_id, m.kind, m.num, &m.name)?;
             }
             for m in &mf.midi_led_mappings {
-                engine.add_midi_led_mapping(instance_id, &m.kind, m.num, &m.name)?;
+                engine.add_midi_led_mapping(instance_id, m.kind, m.num, &m.name)?;
             }
             if let Some(g) = &mf.gesture {
                 engine.gesture_set_mode(instance_id, &g.mode)?;
@@ -409,7 +409,9 @@ impl Engine {
                 }
             }
             if let Some(track) = &mf.track {
-                if mf.ext == crate::deck::DECK_ID {
+                if crate::builtin::BuiltinKind::from_ext_id(&mf.ext)
+                    == Some(crate::builtin::BuiltinKind::Deck)
+                {
                     engine.deck_load(instance_id, Path::new(track))?;
                 } else {
                     engine.playback_load(instance_id, Path::new(track))?;

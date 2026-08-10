@@ -9,6 +9,55 @@ use crate::module_host::HostModule;
 
 pub const AUDIO_OUT_ID: &str = "builtin.audio_out";
 pub const MIDI_ID: &str = "builtin.midi";
+
+/// The built-in (non-extension) module types, resolved once from an
+/// `ext_id` instead of scattering `ext_id == SOME_ID` string chains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinKind {
+    AudioOut,
+    Midi,
+    Gesture,
+    Playback,
+    Deck,
+    Crossfader,
+}
+
+impl BuiltinKind {
+    pub fn from_ext_id(ext_id: &str) -> Option<Self> {
+        match ext_id {
+            AUDIO_OUT_ID => Some(BuiltinKind::AudioOut),
+            MIDI_ID => Some(BuiltinKind::Midi),
+            crate::gesture::GESTURE_ID => Some(BuiltinKind::Gesture),
+            crate::playback::PLAYBACK_ID => Some(BuiltinKind::Playback),
+            crate::deck::DECK_ID => Some(BuiltinKind::Deck),
+            crate::mixer::CROSSFADER_ID => Some(BuiltinKind::Crossfader),
+            _ => None,
+        }
+    }
+
+    pub fn ext_id(self) -> &'static str {
+        match self {
+            BuiltinKind::AudioOut => AUDIO_OUT_ID,
+            BuiltinKind::Midi => MIDI_ID,
+            BuiltinKind::Gesture => crate::gesture::GESTURE_ID,
+            BuiltinKind::Playback => crate::playback::PLAYBACK_ID,
+            BuiltinKind::Deck => crate::deck::DECK_ID,
+            BuiltinKind::Crossfader => crate::mixer::CROSSFADER_ID,
+        }
+    }
+
+    pub fn manifest(self) -> Manifest {
+        match self {
+            BuiltinKind::AudioOut => audio_out_manifest(),
+            BuiltinKind::Midi => midi_manifest(),
+            BuiltinKind::Gesture => crate::gesture::gesture_manifest(),
+            BuiltinKind::Playback => crate::playback::playback_manifest(),
+            BuiltinKind::Deck => crate::deck::deck_manifest(),
+            BuiltinKind::Crossfader => crate::mixer::crossfader_manifest(),
+        }
+    }
+}
+
 pub const AUDIO_OUT_CHANNELS: usize = 2;
 const AUDIO_OUT_JACKS: [(&str, &str); AUDIO_OUT_CHANNELS] = [("l", "L"), ("r", "R")];
 pub const MAX_MIDI_JACKS: usize = 64;
@@ -150,6 +199,33 @@ impl HostModule for AudioOutModule {
 
 pub const MAP_KIND_CC: u8 = 0;
 pub const MAP_KIND_NOTE: u8 = 1;
+
+/// Kind of MIDI control a mapping listens for. Serializes as `"cc"` /
+/// `"note"` — the exact strings patches have always stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MidiMapKind {
+    Cc,
+    Note,
+}
+
+impl MidiMapKind {
+    /// RT-side atomic encoding (`MappingCell.kind`).
+    pub fn as_u8(self) -> u8 {
+        match self {
+            MidiMapKind::Cc => MAP_KIND_CC,
+            MidiMapKind::Note => MAP_KIND_NOTE,
+        }
+    }
+
+    pub fn from_u8(raw: u8) -> Option<Self> {
+        match raw {
+            MAP_KIND_CC => Some(MidiMapKind::Cc),
+            MAP_KIND_NOTE => Some(MidiMapKind::Note),
+            _ => None,
+        }
+    }
+}
 
 /// A raw MIDI event with a sample timestamp (engine frame clock).
 #[derive(Debug, Clone, Copy)]

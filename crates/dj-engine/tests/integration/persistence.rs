@@ -5,7 +5,7 @@
 //!   a diff touching exactly one file.
 //! - ADSR params round-trip through patch save/load.
 
-use dj_engine::{Curve, Engine, KnobConfig, KnobStyle};
+use dj_engine::{Curve, Engine, KnobConfig, KnobStyle, MidiMapKind};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -151,7 +151,7 @@ fn wires_and_midi_mappings_roundtrip() {
         .unwrap();
     assert_eq!(midi.midi_mappings.len(), 1);
     assert_eq!(midi.midi_mappings[0].name, "pad_1");
-    assert_eq!(midi.midi_mappings[0].kind, "note");
+    assert_eq!(midi.midi_mappings[0].kind, MidiMapKind::Note);
     assert_eq!(midi.midi_mappings[0].num, 60);
 
     // The reloaded patch is playable: inject a note and confirm output.

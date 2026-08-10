@@ -8,7 +8,7 @@ use crate::common::e2e::{
     check_case, regen, write_case_tone, write_events, DeckSetupSpec, EventsFile, GestureTraceSpec,
     MidiEventSpec, TrackLoadSpec,
 };
-use dj_engine::{Engine, EngineConfig};
+use dj_engine::{Engine, EngineConfig, MidiMapKind};
 
 fn regen_patches() {
     let patches = crate::common::e2e::e2e_dir().join("patches");
@@ -53,7 +53,8 @@ fn regen_patches() {
         e.add_module("adsr1", "com.dj.adsr").unwrap();
         e.add_module("vca1", "com.dj.vca").unwrap();
         e.add_module("out1", "builtin.audio_out").unwrap();
-        e.add_midi_mapping("midi1", "note", 60, "pad_1").unwrap();
+        e.add_midi_mapping("midi1", MidiMapKind::Note, 60, "pad_1")
+            .unwrap();
         e.connect("midi1", "pad_1", "adsr1", "gate").unwrap();
         e.connect("osc1", "audio", "vca1", "in").unwrap();
         e.connect("adsr1", "env", "vca1", "cv").unwrap();

@@ -3,7 +3,7 @@
 
 pub mod e2e;
 
-use dj_engine::{Engine, EngineConfig, ExtensionRegistry};
+use dj_engine::{Engine, EngineConfig, ExtensionRegistry, MidiMapKind};
 use std::path::PathBuf;
 use std::sync::Once;
 
@@ -63,7 +63,7 @@ pub fn build_demo_patch(engine: &mut Engine) {
     engine.add_module("vca1", "com.dj.vca").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
     engine
-        .add_midi_mapping("midi1", "note", 60, "pad_1")
+        .add_midi_mapping("midi1", MidiMapKind::Note, 60, "pad_1")
         .unwrap();
     engine.connect("midi1", "pad_1", "adsr1", "gate").unwrap();
     engine.connect("osc1", "audio", "vca1", "in").unwrap();

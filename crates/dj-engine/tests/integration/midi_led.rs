@@ -2,17 +2,18 @@
 //! messages toward the controller. No hardware here, so the tests use the
 //! engine's message generation + the mock/virtual MIDI output sink.
 
-use dj_engine::{MidiOutEvent, MockMidiSink};
+use dj_engine::{MidiMapKind, MidiOutEvent, MockMidiSink};
 
 const SR: f32 = 48_000.0;
 
 /// Patch under test: a CC-mapped output jack on the MIDI node wired back
 /// into one of its LED input jacks — virtual injection drives the control,
 /// the LED mapping turns the signal back into out-messages.
-fn led_engine(led_kind: &str, led_num: u8) -> dj_engine::Engine {
+fn led_engine(led_kind: MidiMapKind, led_num: u8) -> dj_engine::Engine {
     let mut e = crate::common::default_engine();
     e.add_module("midi1", "builtin.midi").unwrap();
-    e.add_midi_mapping("midi1", "cc", 1, "fader").unwrap();
+    e.add_midi_mapping("midi1", MidiMapKind::Cc, 1, "fader")
+        .unwrap();
     e.add_midi_led_mapping("midi1", led_kind, led_num, "led_a")
         .unwrap();
     e.connect("midi1", "fader", "midi1", "led_a").unwrap();
@@ -21,7 +22,7 @@ fn led_engine(led_kind: &str, led_num: u8) -> dj_engine::Engine {
 
 #[test]
 fn cc_led_emits_on_change_only() {
-    let mut e = led_engine("cc", 7);
+    let mut e = led_engine(MidiMapKind::Cc, 7);
 
     // Initial state sync: exactly one CC 7 = 0 message (value starts at 0,
     // which maps CC 0..127 -> -10 -> clamped to 0... the *wire* carries the
@@ -63,7 +64,7 @@ fn cc_led_emits_on_change_only() {
 
 #[test]
 fn note_led_emits_gate_on_and_off() {
-    let mut e = led_engine("note", 36);
+    let mut e = led_engine(MidiMapKind::Note, 36);
 
     // Initial state: gate low -> one note-off.
     e.process_blocks(10).unwrap();
@@ -96,7 +97,7 @@ fn note_led_emits_gate_on_and_off() {
 
 #[test]
 fn led_messages_flow_into_a_mock_sink() {
-    let mut e = led_engine("cc", 20);
+    let mut e = led_engine(MidiMapKind::Cc, 20);
     let mut sink = MockMidiSink::default();
     e.process_blocks(10).unwrap();
     let frame = e.current_frame();
@@ -119,7 +120,7 @@ fn led_messages_flow_into_a_mock_sink() {
 fn led_mappings_and_wiring_roundtrip_through_patch_save_load() {
     let dir = tempfile::tempdir().unwrap();
     {
-        let e = led_engine("cc", 7);
+        let e = led_engine(MidiMapKind::Cc, 7);
         e.save_patch(dir.path(), "led-patch").unwrap();
     }
     let mut e = dj_engine::Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
@@ -135,7 +136,7 @@ fn led_mappings_and_wiring_roundtrip_through_patch_save_load() {
         .clone();
     assert_eq!(info.len(), 1);
     assert_eq!(info[0].name, "led_a");
-    assert_eq!(info[0].kind, "cc");
+    assert_eq!(info[0].kind, MidiMapKind::Cc);
     assert_eq!(info[0].num, 7);
 
     e.process_blocks(10).unwrap();
@@ -159,7 +160,7 @@ fn led_mappings_and_wiring_roundtrip_through_patch_save_load() {
 
 #[test]
 fn removing_a_led_mapping_stops_emission_and_drops_wires() {
-    let mut e = led_engine("cc", 7);
+    let mut e = led_engine(MidiMapKind::Cc, 7);
     e.process_blocks(10).unwrap();
     e.drain_midi_out("midi1").unwrap();
 
@@ -171,7 +172,8 @@ fn removing_a_led_mapping_stops_emission_and_drops_wires() {
     assert!(e.drain_midi_out("midi1").unwrap().is_empty());
 
     // The slot is reusable and re-syncs from scratch.
-    e.add_midi_led_mapping("midi1", "cc", 8, "led_b").unwrap();
+    e.add_midi_led_mapping("midi1", MidiMapKind::Cc, 8, "led_b")
+        .unwrap();
     e.connect("midi1", "fader", "midi1", "led_b").unwrap();
     e.process_blocks(10).unwrap();
     let events = e.drain_midi_out("midi1").unwrap();
@@ -184,7 +186,7 @@ fn removing_a_led_mapping_stops_emission_and_drops_wires() {
 
 #[test]
 fn led_emission_works_while_running_realtime() {
-    let mut e = led_engine("cc", 7);
+    let mut e = led_engine(MidiMapKind::Cc, 7);
     e.start_null_realtime().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(100));
     let frame = (0.05 * SR) as u64;

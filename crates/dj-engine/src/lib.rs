@@ -27,11 +27,11 @@ pub mod registry;
 pub mod telemetry;
 pub mod wasm_host;
 
-pub use builtin::{MidiOutEvent, MidiOutSink, MockMidiSink};
+pub use builtin::{MidiMapKind, MidiOutEvent, MidiOutSink, MockMidiSink};
 /// Re-exported so embedders (Tauri shell, tests) use one consistent
 /// gesture API without a separate dependency.
 pub use dj_gesture;
-pub use engine::{Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE};
+pub use engine::{Backend, Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE};
 pub use gesture::{GestureMappingInfo, GestureState, GESTURE_ID};
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle};

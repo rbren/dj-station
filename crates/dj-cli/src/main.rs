@@ -7,7 +7,7 @@
 //!   list-extensions [--extensions DIR]
 
 use anyhow::{Context, Result};
-use dj_engine::{Engine, EngineConfig, ExtensionRegistry};
+use dj_engine::{Engine, EngineConfig, ExtensionRegistry, MidiMapKind};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -65,7 +65,7 @@ fn demo(args: &[String]) -> Result<()> {
     engine.add_module("adsr1", "com.dj.adsr")?;
     engine.add_module("vca1", "com.dj.vca")?;
     engine.add_module("out1", "builtin.audio_out")?;
-    engine.add_midi_mapping("midi1", "note", 60, "pad_1")?;
+    engine.add_midi_mapping("midi1", MidiMapKind::Note, 60, "pad_1")?;
     engine.connect("midi1", "pad_1", "adsr1", "gate")?;
     engine.connect("osc1", "audio", "vca1", "in")?;
     engine.connect("adsr1", "env", "vca1", "cv")?;

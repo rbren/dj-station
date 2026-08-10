@@ -2,7 +2,7 @@
 //! Drum. Each case renders a short patch offline and asserts on the samples
 //! (frequency, spectrum, envelope timing, alias rejection).
 
-use dj_engine::{Engine, EngineConfig};
+use dj_engine::{Engine, EngineConfig, MidiMapKind};
 
 const SR: f32 = 48_000.0;
 
@@ -424,7 +424,8 @@ fn drum_patch(out_jack: &str) -> Engine {
         (38, "s", "snare_trig"),
         (42, "h", "hat_trig"),
     ] {
-        e.add_midi_mapping("midi1", "note", note, name).unwrap();
+        e.add_midi_mapping("midi1", MidiMapKind::Note, note, name)
+            .unwrap();
         e.connect("midi1", name, "drum", jack).unwrap();
     }
     e.connect("drum", out_jack, "out1", "l").unwrap();

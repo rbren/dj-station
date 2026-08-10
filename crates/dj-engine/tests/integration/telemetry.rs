@@ -52,7 +52,7 @@ fn gate_reports_instantaneous_value() {
     engine.add_module("midi1", "builtin.midi").unwrap();
     engine.add_module("adsr1", "com.dj.adsr").unwrap();
     engine
-        .add_midi_mapping("midi1", "note", 60, "pad_1")
+        .add_midi_mapping("midi1", dj_engine::MidiMapKind::Note, 60, "pad_1")
         .unwrap();
     engine.connect("midi1", "pad_1", "adsr1", "gate").unwrap();
 

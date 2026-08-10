@@ -17,7 +17,7 @@
 
 mod common;
 
-use dj_engine::{Engine, EngineConfig};
+use dj_engine::{Engine, EngineConfig, MidiMapKind};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -82,7 +82,7 @@ fn build_prd_stress_patch(engine: &mut Engine) {
     engine.add_module("midi1", "builtin.midi").unwrap();
     engine.add_module("out1", "builtin.audio_out").unwrap();
     engine
-        .add_midi_mapping("midi1", "note", 60, "pad_1")
+        .add_midi_mapping("midi1", MidiMapKind::Note, 60, "pad_1")
         .unwrap();
 
     // 4 stem-playing decks.

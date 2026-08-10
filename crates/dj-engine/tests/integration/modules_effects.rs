@@ -3,7 +3,7 @@
 //!
 //! Each test renders a short patch offline and asserts on the samples.
 
-use dj_engine::{Engine, EngineConfig};
+use dj_engine::{Engine, EngineConfig, MidiMapKind};
 
 const SR: f32 = 48_000.0;
 
@@ -22,7 +22,8 @@ fn add_blip_source(e: &mut Engine) {
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("adsr1", "com.dj.adsr").unwrap();
     e.add_module("vca1", "com.dj.vca").unwrap();
-    e.add_midi_mapping("midi1", "note", 60, "pad_1").unwrap();
+    e.add_midi_mapping("midi1", MidiMapKind::Note, 60, "pad_1")
+        .unwrap();
     e.connect("midi1", "pad_1", "adsr1", "gate").unwrap();
     e.connect("osc1", "audio", "vca1", "in").unwrap();
     e.connect("adsr1", "env", "vca1", "cv").unwrap();
@@ -698,7 +699,8 @@ fn resonator_patch(mode: f32, pitch: f32) -> Engine {
     e.add_module("midi1", "builtin.midi").unwrap();
     e.add_module("res", "com.dj.resonator").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.add_midi_mapping("midi1", "note", 60, "pad_1").unwrap();
+    e.add_midi_mapping("midi1", MidiMapKind::Note, 60, "pad_1")
+        .unwrap();
     e.connect("midi1", "pad_1", "res", "trig").unwrap();
     e.connect("res", "out_l", "out1", "l").unwrap();
     e.connect("res", "out_r", "out1", "r").unwrap();

@@ -9,24 +9,34 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::builtin::{
-    AudioOutModule, MidiEvent, MidiModule, MidiOutEvent, MidiOutSink, MidiShared, AUDIO_OUT_ID,
-    MAP_KIND_CC, MAP_KIND_NOTE, MIDI_ID,
+    AudioOutModule, BuiltinKind, MidiEvent, MidiMapKind, MidiModule, MidiOutEvent, MidiOutSink,
+    MidiShared,
 };
 use crate::deck::{DeckCmd, DeckControl, DeckModule, DeckStatus, N_CUES};
-use crate::gesture::{GestureEvent, GestureMappingInfo, GestureRtModule, GESTURE_ID};
+use crate::gesture::{GestureEvent, GestureMappingInfo, GestureRtModule};
 use crate::graph::{Graph, GraphNode, WireSpec};
 use crate::knob::{position_for_value, JackRt, KnobConfig, KnobState};
 use crate::macros::{MacroDef, MacroInstance, MacroInterface, MacroLibrary};
 use crate::manifest::Manifest;
 use crate::mixer::CrossfaderModule;
 use crate::module_host::HostModule;
-use crate::playback::{decode_file, PlaybackModule, TrackData, PLAYBACK_ID};
+use crate::playback::{decode_file, PlaybackModule, TrackData};
 use crate::registry::ExtensionRegistry;
 use crate::telemetry::{JackAnalyzer, JackSlot, JackTelemetry};
 use crate::wasm_host::WasmRuntime;
 
 pub const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
 pub const DEFAULT_BLOCK_SIZE: usize = 128;
+
+/// Audio backend driving the RT thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    /// Wall-clock-paced silent backend (tests, headless, cpal fallback).
+    Null,
+    /// Real audio output via cpal.
+    #[cfg(feature = "cpal-backend")]
+    Cpal,
+}
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -67,8 +77,7 @@ pub enum Command {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MidiMappingInfo {
     pub name: String,
-    /// "cc" | "note"
-    pub kind: String,
+    pub kind: MidiMapKind,
     pub num: u8,
     /// Output jack index on the MIDI node.
     pub jack: usize,
@@ -93,6 +102,21 @@ pub struct NodeInfo {
     /// Path of the track loaded into a Playback/Deck node (persisted in the
     /// patch).
     pub track_path: Option<String>,
+}
+
+impl NodeInfo {
+    /// Which built-in this node is, if it isn't an extension module.
+    pub fn builtin_kind(&self) -> Option<crate::builtin::BuiltinKind> {
+        crate::builtin::BuiltinKind::from_ext_id(&self.ext_id)
+    }
+
+    pub fn is_midi(&self) -> bool {
+        self.builtin_kind() == Some(crate::builtin::BuiltinKind::Midi)
+    }
+
+    pub fn is_deck(&self) -> bool {
+        self.builtin_kind() == Some(crate::builtin::BuiltinKind::Deck)
+    }
 }
 
 /// RT-side core: graph + queues + counters. Lives on whichever thread the
@@ -300,13 +324,23 @@ impl Engine {
         !matches!(self.state, EngineState::Stopped(_))
     }
 
-    /// Name of the currently running backend, if any.
-    pub fn backend_name(&self) -> Option<&'static str> {
+    /// The currently running backend, if any.
+    pub fn backend(&self) -> Option<Backend> {
         match self.state {
-            EngineState::Running { .. } => Some("null"),
+            EngineState::Running { .. } => Some(Backend::Null),
             #[cfg(feature = "cpal-backend")]
-            EngineState::RunningCpal { .. } => Some("cpal"),
+            EngineState::RunningCpal { .. } => Some(Backend::Cpal),
             _ => None,
+        }
+    }
+
+    /// Start the given backend (used to restore the pre-edit backend after
+    /// a stop/mutate/restart cycle).
+    pub fn start_backend(&mut self, backend: Backend) -> Result<()> {
+        match backend {
+            Backend::Null => self.start_null_realtime(),
+            #[cfg(feature = "cpal-backend")]
+            Backend::Cpal => self.start_cpal(),
         }
     }
 
@@ -320,7 +354,7 @@ impl Engine {
     fn jack_index(&self, node: usize, jack_id: &str) -> Result<usize> {
         let info = &self.nodes[node];
         // MIDI nodes expose named LED-feedback jacks.
-        if info.ext_id == MIDI_ID {
+        if info.is_midi() {
             if let Some(m) = info.midi_led_mappings.iter().find(|m| m.name == jack_id) {
                 return Ok(m.jack);
             }
@@ -376,7 +410,7 @@ impl Engine {
     fn out_jack_index(&self, node: usize, jack_id: &str) -> Result<usize> {
         let info = &self.nodes[node];
         // MIDI nodes expose named mapping jacks.
-        if info.ext_id == MIDI_ID {
+        if info.is_midi() {
             if let Some(m) = info.midi_mappings.iter().find(|m| m.name == jack_id) {
                 return Ok(m.jack);
             }
@@ -396,13 +430,16 @@ impl Engine {
 
     /// Instantiate a module for a node (initial add or hot reload).
     fn instantiate(&self, ext_id: &str, manifest: &Manifest) -> Result<Box<dyn HostModule>> {
-        match ext_id {
-            AUDIO_OUT_ID => Ok(Box::new(AudioOutModule { channel_offset: 0 })),
-            crate::mixer::CROSSFADER_ID => Ok(Box::new(CrossfaderModule)),
-            MIDI_ID | GESTURE_ID | PLAYBACK_ID | crate::deck::DECK_ID => {
-                Err(anyhow!("{ext_id} modules are created via add_module"))
-            }
-            _ => {
+        match BuiltinKind::from_ext_id(ext_id) {
+            Some(BuiltinKind::AudioOut) => Ok(Box::new(AudioOutModule { channel_offset: 0 })),
+            Some(BuiltinKind::Crossfader) => Ok(Box::new(CrossfaderModule)),
+            Some(
+                BuiltinKind::Midi
+                | BuiltinKind::Gesture
+                | BuiltinKind::Playback
+                | BuiltinKind::Deck,
+            ) => Err(anyhow!("{ext_id} modules are created via add_module")),
+            None => {
                 let ext = self
                     .registry
                     .extension(ext_id)
@@ -462,41 +499,45 @@ impl Engine {
 
         let mut midi_shared = None;
         let mut gesture = None;
-        let module: Box<dyn HostModule> = if ext_id == MIDI_ID {
-            let (tx, rx) = rtrb::RingBuffer::new(4096);
-            let (out_tx, out_rx) = rtrb::RingBuffer::new(4096);
-            let shared = Arc::new(MidiShared::default());
-            midi_shared = Some(shared.clone());
-            self.midi_producers.insert(self.nodes.len(), tx);
-            self.midi_out_consumers.insert(self.nodes.len(), out_rx);
-            Box::new(MidiModule::new(rx, shared, out_tx))
-        } else if ext_id == GESTURE_ID {
-            let (tx, rx) = rtrb::RingBuffer::new(GESTURE_QUEUE_CAP);
-            self.gesture_producers.insert(self.nodes.len(), tx);
-            gesture = Some(dj_gesture::GestureProcessor::default());
-            Box::new(GestureRtModule::new(rx))
-        } else if ext_id == PLAYBACK_ID {
-            let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
-            let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
-            self.playback_producers.insert(self.nodes.len(), tx);
-            self.playback_garbage.insert(self.nodes.len(), garbage_rx);
-            Box::new(PlaybackModule::new(rx, garbage_tx, self.config.sample_rate))
-        } else if ext_id == crate::deck::DECK_ID {
-            let (tx, rx) = rtrb::RingBuffer::new(DECK_QUEUE_CAP);
-            let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(DECK_QUEUE_CAP);
-            let shared = Arc::new(crate::deck::DeckShared::default());
-            self.decks.insert(
-                self.nodes.len(),
-                DeckControl::new(tx, garbage_rx, shared.clone()),
-            );
-            Box::new(DeckModule::new(
-                rx,
-                garbage_tx,
-                shared,
-                self.config.sample_rate,
-            ))
-        } else {
-            self.instantiate(ext_id, &manifest)?
+        let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
+            Some(BuiltinKind::Midi) => {
+                let (tx, rx) = rtrb::RingBuffer::new(4096);
+                let (out_tx, out_rx) = rtrb::RingBuffer::new(4096);
+                let shared = Arc::new(MidiShared::default());
+                midi_shared = Some(shared.clone());
+                self.midi_producers.insert(self.nodes.len(), tx);
+                self.midi_out_consumers.insert(self.nodes.len(), out_rx);
+                Box::new(MidiModule::new(rx, shared, out_tx))
+            }
+            Some(BuiltinKind::Gesture) => {
+                let (tx, rx) = rtrb::RingBuffer::new(GESTURE_QUEUE_CAP);
+                self.gesture_producers.insert(self.nodes.len(), tx);
+                gesture = Some(dj_gesture::GestureProcessor::default());
+                Box::new(GestureRtModule::new(rx))
+            }
+            Some(BuiltinKind::Playback) => {
+                let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                self.playback_producers.insert(self.nodes.len(), tx);
+                self.playback_garbage.insert(self.nodes.len(), garbage_rx);
+                Box::new(PlaybackModule::new(rx, garbage_tx, self.config.sample_rate))
+            }
+            Some(BuiltinKind::Deck) => {
+                let (tx, rx) = rtrb::RingBuffer::new(DECK_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(DECK_QUEUE_CAP);
+                let shared = Arc::new(crate::deck::DeckShared::default());
+                self.decks.insert(
+                    self.nodes.len(),
+                    DeckControl::new(tx, garbage_rx, shared.clone()),
+                );
+                Box::new(DeckModule::new(
+                    rx,
+                    garbage_tx,
+                    shared,
+                    self.config.sample_rate,
+                ))
+            }
+            _ => self.instantiate(ext_id, &manifest)?,
         };
 
         // Initialize knobs from manifest defaults.
@@ -550,7 +591,7 @@ impl Engine {
             module,
             n_in: manifest.inputs.len(),
             n_out: manifest.outputs.len(),
-            audio_out: ext_id == AUDIO_OUT_ID,
+            audio_out: BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::AudioOut),
         };
         let core = self.core_mut()?;
         let idx = core.graph.add_node(node, jack_rt, analyzers);
@@ -623,7 +664,7 @@ impl Engine {
     /// Resolve an output jack index to its persistent name.
     pub fn output_jack_name(&self, node: usize, jack: usize) -> String {
         let info = &self.nodes[node];
-        if info.ext_id == MIDI_ID {
+        if info.is_midi() {
             if let Some(m) = info.midi_mappings.iter().find(|m| m.jack == jack) {
                 return m.name.clone();
             }
@@ -640,7 +681,7 @@ impl Engine {
     /// names on MIDI nodes, manifest ids elsewhere).
     pub fn input_jack_name(&self, node: usize, jack: usize) -> String {
         let info = &self.nodes[node];
-        if info.ext_id == MIDI_ID {
+        if info.is_midi() {
             if let Some(m) = info.midi_led_mappings.iter().find(|m| m.jack == jack) {
                 return m.name.clone();
             }
@@ -813,7 +854,8 @@ impl Engine {
         if encoded == 0 {
             return Ok(None);
         }
-        let kind = ((encoded >> 8) & 0xFF) as u8;
+        let kind = MidiMapKind::from_u8(((encoded >> 8) & 0xFF) as u8)
+            .ok_or_else(|| anyhow!("corrupt learned mapping encoding {encoded:#x}"))?;
         let num = (encoded & 0xFF) as u8;
         Ok(Some(self.add_midi_mapping_raw(node, kind, num, name)?))
     }
@@ -822,23 +864,18 @@ impl Engine {
     pub fn add_midi_mapping(
         &mut self,
         instance_id: &str,
-        kind: &str,
+        kind: MidiMapKind,
         num: u8,
         name: &str,
     ) -> Result<MidiMappingInfo> {
         let node = self.node_idx(instance_id)?;
-        let kind = match kind {
-            "cc" => MAP_KIND_CC,
-            "note" => MAP_KIND_NOTE,
-            other => return Err(anyhow!("unknown mapping kind {other:?}")),
-        };
         self.add_midi_mapping_raw(node, kind, num, name)
     }
 
     fn add_midi_mapping_raw(
         &mut self,
         node: usize,
-        kind: u8,
+        kind: MidiMapKind,
         num: u8,
         name: &str,
     ) -> Result<MidiMappingInfo> {
@@ -847,11 +884,11 @@ impl Engine {
             .as_ref()
             .ok_or_else(|| anyhow!("not a MIDI module"))?;
         let jack = shared
-            .add_mapping(kind, num)
+            .add_mapping(kind.as_u8(), num)
             .ok_or_else(|| anyhow!("mapping table full"))?;
         let info = MidiMappingInfo {
             name: name.to_string(),
-            kind: if kind == MAP_KIND_CC { "cc" } else { "note" }.to_string(),
+            kind,
             num,
             jack,
         };
@@ -897,20 +934,15 @@ impl Engine {
 
     /// Create an LED feedback mapping: a named input jack on a MIDI node
     /// whose signal drives note/CC out messages toward the controller.
-    /// `kind` is "cc" | "note"; `num` the controller/note number.
+    /// `num` is the controller/note number.
     pub fn add_midi_led_mapping(
         &mut self,
         instance_id: &str,
-        kind: &str,
+        kind: MidiMapKind,
         num: u8,
         name: &str,
     ) -> Result<MidiMappingInfo> {
         let node = self.node_idx(instance_id)?;
-        let kind_u8 = match kind {
-            "cc" => MAP_KIND_CC,
-            "note" => MAP_KIND_NOTE,
-            other => return Err(anyhow!("unknown mapping kind {other:?}")),
-        };
         anyhow::ensure!(
             !self.nodes[node]
                 .midi_led_mappings
@@ -923,11 +955,11 @@ impl Engine {
             .as_ref()
             .ok_or_else(|| anyhow!("not a MIDI module"))?;
         let jack = shared
-            .add_led_mapping(kind_u8, num)
+            .add_led_mapping(kind.as_u8(), num)
             .ok_or_else(|| anyhow!("LED mapping table full"))?;
         let info = MidiMappingInfo {
             name: name.to_string(),
-            kind: kind.to_string(),
+            kind,
             num,
             jack,
         };
@@ -1413,10 +1445,10 @@ impl Engine {
                 self.add_plain_module(&full, &mf.ext)?;
             }
             for m in &mf.midi_mappings {
-                self.add_midi_mapping(&full, &m.kind, m.num, &m.name)?;
+                self.add_midi_mapping(&full, m.kind, m.num, &m.name)?;
             }
             for m in &mf.midi_led_mappings {
-                self.add_midi_led_mapping(&full, &m.kind, m.num, &m.name)?;
+                self.add_midi_led_mapping(&full, m.kind, m.num, &m.name)?;
             }
             if let Some(g) = &mf.gesture {
                 self.gesture_set_mode(&full, &g.mode)?;
@@ -1426,7 +1458,7 @@ impl Engine {
                 }
             }
             if let Some(track) = &mf.track {
-                if mf.ext == crate::deck::DECK_ID {
+                if BuiltinKind::from_ext_id(&mf.ext) == Some(BuiltinKind::Deck) {
                     self.deck_load(&full, std::path::Path::new(track))?;
                 } else {
                     self.playback_load(&full, std::path::Path::new(track))?;

@@ -4,7 +4,7 @@
 //!
 //! Each test renders a tiny patch offline and asserts on the samples.
 
-use dj_engine::{Engine, EngineConfig};
+use dj_engine::{Engine, EngineConfig, MidiMapKind};
 
 const SR: f32 = 48_000.0;
 
@@ -803,7 +803,8 @@ fn render_function_gate(jack: &str, rise: f32, fall: f32, on_t: f32, off_t: f32)
     e.add_module("midi1", "builtin.midi").unwrap();
     e.add_module("fn1", "com.dj.function").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.add_midi_mapping("midi1", "note", 60, "pad_1").unwrap();
+    e.add_midi_mapping("midi1", MidiMapKind::Note, 60, "pad_1")
+        .unwrap();
     e.connect("midi1", "pad_1", "fn1", jack).unwrap();
     e.connect("fn1", "out", "out1", "l").unwrap();
     e.set_knob_value("fn1", "rise", rise).unwrap();
