@@ -108,10 +108,23 @@ fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> 
     for instance in deck_instances {
         apply_deck_metadata(state, engine, &instance)?;
     }
+    restart_backend(engine, backend, "undo/redo")?;
+    Ok(())
+}
+
+/// Restart the backend that was running before a stop/mutate cycle. A cpal
+/// failure downgrades to the null backend (with a warning) instead of
+/// erroring: audio dying beats the whole edit failing.
+fn restart_backend(engine: &mut Engine, backend: Option<Backend>, what: &str) -> CmdResult<()> {
     match backend {
         Some(Backend::Cpal) => {
             if let Err(e) = engine.start_cpal() {
-                eprintln!("[dj-audio] WARNING: cpal restart after undo/redo failed ({e})");
+                // A downgrade here means audio dies after the edit even
+                // though the UI still shows "engine connected".
+                eprintln!(
+                    "[dj-audio] WARNING: cpal restart after {what} failed ({e}); \
+                     falling back to the silent null backend"
+                );
                 engine.start_null_realtime().map_err(err)?;
             }
         }
@@ -203,21 +216,7 @@ fn with_stopped<T>(
         engine.stop().map_err(err)?;
     }
     let result = f(engine);
-    match backend {
-        Some(Backend::Cpal) => {
-            if let Err(e) = engine.start_cpal() {
-                // A downgrade here means audio dies after a graph edit even
-                // though the UI still shows "engine connected".
-                eprintln!(
-                    "[dj-audio] WARNING: cpal restart after graph edit failed ({e}); \
-                     falling back to the silent null backend"
-                );
-                engine.start_null_realtime().map_err(err)?;
-            }
-        }
-        Some(other) => engine.start_backend(other).map_err(err)?,
-        None => {}
-    }
+    restart_backend(engine, backend, "graph edit")?;
     result
 }
 
