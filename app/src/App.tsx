@@ -2,86 +2,38 @@
 // under Tauri), renders manifest-driven panels with live jack telemetry,
 // a module library sidebar for adding modules, and click-to-wire jacks
 // with an SVG cable overlay.
+//
+// Rack state (nodes, wires, telemetry, positions, selection, pending wire)
+// lives in an external store (rackStore.ts); App subscribes to the slices
+// it renders and each RackModule subscribes to its own, so telemetry ticks
+// and knob drags re-render only the affected panels.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import AdsrUI from '../../extensions/adsr/ui-src/AdsrUI';
-import EuclidUI from '../../extensions/euclid/ui-src/EuclidUI';
-import LfoUI from '../../extensions/lfo/ui-src/LfoUI';
-import TrigSeqUI from '../../extensions/trig_seq/ui-src/TrigSeqUI';
-import WaveshaperUI from '../../extensions/waveshaper/ui-src/WaveshaperUI';
-import { engine, onMenuAction, type NodeSnapshot, type WireSnapshot } from './engine';
-import { mapPosition, positionForValue } from './components/Knob';
+import { engine, onMenuAction } from './engine';
 import { library, type Track } from './library';
-import { DeckCustomUI, DeckUIContext } from './components/DeckPanel';
+import { DeckUIContext } from './components/DeckPanel';
 import { ErrorBanner } from './components/ErrorBanner';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
-import { GesturePanel } from './components/GesturePanel';
-import { MidiPanel } from './components/MidiPanel';
 import { MODULE_DRAG_TYPE, ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
-import { GRID, ModulePanel, snap, type JackRef } from './components/ModulePanel';
+import { GRID, snap } from './components/ModulePanel';
+import { RackModule } from './components/RackModule';
 import { TooltipLayer } from './components/TooltipLayer';
 import { WIRE_COLORS, WireOverlay } from './components/WireOverlay';
-import type { JackTelemetry, KnobConfig, Manifest, ModuleHandle } from './types';
+import { defaultPosition, moduleRect, rectsOverlap, type Rect } from './rackLayout';
+import {
+  createRackStore,
+  loadJson,
+  POSITIONS_KEY,
+  RackStoreContext,
+  saveJson,
+  useStoreSelector,
+  type PendingWire,
+  type Positions,
+} from './rackStore';
+import type { Manifest } from './types';
 
-/** Module types with a host-registered custom UI (PRD §5.3). */
-const CUSTOM_UIS = {
-  'com.dj.adsr': AdsrUI,
-  'com.dj.euclid': EuclidUI,
-  'com.dj.lfo': LfoUI,
-  'com.dj.trig_seq': TrigSeqUI,
-  'com.dj.waveshaper': WaveshaperUI,
-  'builtin.deck': DeckCustomUI,
-} as const;
-
-type Positions = Record<string, { x: number; y: number }>;
-
-const POSITIONS_KEY = 'dj-rack-positions';
-
-function loadPositions(): Positions {
-  try {
-    return JSON.parse(localStorage.getItem(POSITIONS_KEY) ?? '{}');
-  } catch {
-    return {};
-  }
-}
-
-/** Default slot for modules without a saved position: 3 columns of
- *  grid-aligned cells below/right of existing modules. */
-function defaultPosition(index: number): { x: number; y: number } {
-  return { x: (index % 3) * GRID * 10, y: Math.floor(index / 3) * GRID * 8 };
-}
-
-interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-/** Rack rect for a module at `pos`, measured from its rendered panel
- *  (offset sizes ignore the zoom transform). Falls back to a nominal
- *  4×2-cell footprint for panels not yet in the DOM. */
-function moduleRect(instance: string, pos: { x: number; y: number }): Rect {
-  const el = document.querySelector<HTMLElement>(`[data-testid="module-${instance}"]`);
-  return {
-    x: pos.x,
-    y: pos.y,
-    w: el?.offsetWidth || GRID * 4,
-    h: el?.offsetHeight || GRID * 2,
-  };
-}
-
-function rectsOverlap(a: Rect, b: Rect): boolean {
-  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-}
-
-/** Absolute rack placement, matching how ModulePanel positions itself — used
- *  by the fallback card that stands in for a panel that failed to render. */
-function panelStyle(pos: { x: number; y: number }): React.CSSProperties {
-  return { left: pos.x, top: pos.y };
-}
+export type { PendingWire };
 
 const ZOOM_KEY = 'dj-rack-zoom';
 const ZOOM_STEP = 1.2;
@@ -97,29 +49,6 @@ const WIRE_COLORS_KEY = 'dj-wire-colors';
 const LAST_WIRE_COLOR_KEY = 'dj-wire-last-color';
 const NUM_WIRE_COLORS = WIRE_COLORS.length;
 
-/** A jack armed as one end of a wire, with the selected cable color. */
-export interface PendingWire extends JackRef {
-  kind: 'input' | 'output';
-  color: number;
-}
-
-function loadJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveJson(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // persistence is best-effort
-  }
-}
-
 /** True when a shortcut keydown should be left to a form control. */
 function isEditableTarget(t: EventTarget | null): boolean {
   return (
@@ -132,14 +61,17 @@ function isEditableTarget(t: EventTarget | null): boolean {
 }
 
 export default function App() {
-  const [nodes, setNodes] = useState<NodeSnapshot[]>([]);
-  const [wires, setWires] = useState<WireSnapshot[]>([]);
+  const [store] = useState(createRackStore);
+  const nodes = useStoreSelector(store, (s) => s.nodes);
+  const wires = useStoreSelector(store, (s) => s.wires);
+  const positions = useStoreSelector(store, (s) => s.positions);
+  const selected = useStoreSelector(store, (s) => s.selected);
+  const pending = useStoreSelector(store, (s) => s.pending);
+
   const [moduleLib, setModuleLib] = useState<Manifest[]>([]);
-  const [telemetry, setTelemetry] = useState<Record<string, Record<string, JackTelemetry>>>({});
   const [connected, setConnected] = useState<boolean | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
   const [view, setView] = useState<'rack' | 'library'>('rack');
-  const [pending, setPending] = useState<PendingWire | null>(null);
   const [wireColors, setWireColors] = useState<Record<string, number>>(() =>
     loadJson(WIRE_COLORS_KEY, {}),
   );
@@ -149,14 +81,22 @@ export default function App() {
   const [fileDialog, setFileDialog] = useState<null | 'save-as' | 'open'>(null);
   const [saveAsName, setSaveAsName] = useState('untitled');
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
-  // Multi-select for collapse-to-macro (PRD §6): shift-click panel headers.
-  const [selected, setSelected] = useState<string[]>([]);
   const [collapseName, setCollapseName] = useState<string | null>(null);
-  const [positions, setPositions] = useState<Positions>(() => loadPositions());
   const [zoom, setZoom] = useState<number>(() => loadZoom());
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
+
+  const setPositions = useCallback(
+    (updater: (prev: Positions) => Positions) => {
+      const prev = store.getState().positions;
+      const next = updater(prev);
+      if (next !== prev) store.set({ positions: next });
+    },
+    [store],
+  );
+
+  const setPending = useCallback((pending: PendingWire | null) => store.set({ pending }), [store]);
 
   const changeZoom = useCallback((direction: 1 | -1 | 0) => {
     setZoom((prev) => {
@@ -173,6 +113,7 @@ export default function App() {
 
   const moveModule = useCallback(
     (instance: string, x: number, y: number) => {
+      const nodes = store.getState().nodes;
       setPositions((prev) => {
         const otherRects: Rect[] = [];
         for (const [i, node] of nodes.entries()) {
@@ -239,7 +180,7 @@ export default function App() {
         return next;
       });
     },
-    [nodes],
+    [store, setPositions],
   );
 
   // Post-render placement pass: with real panel sizes in the DOM, nudge any
@@ -274,17 +215,17 @@ export default function App() {
       });
     }, 0);
     return () => clearTimeout(timer);
-  }, [nodes]);
+  }, [nodes, setPositions]);
 
   const refresh = useCallback(async () => {
     const snapshot = await engine.nodes();
     setConnected(snapshot !== null);
-    if (snapshot) setNodes(snapshot);
+    if (snapshot) store.setNodes(snapshot);
     const wireList = await engine.wires();
-    if (wireList) setWires(wireList);
+    if (wireList) store.set({ wires: wireList });
     const tracks = await library.tracks();
     if (tracks) setLibraryTracks(tracks);
-  }, []);
+  }, [store]);
 
   useEffect(() => {
     void (async () => {
@@ -352,7 +293,7 @@ export default function App() {
           // One batched IPC round-trip per tick for the whole rack; the
           // backend acquires the engine lock once and taps every jack.
           const next = await engine.tapAll();
-          if (next) setTelemetry(next);
+          if (next) store.setTelemetry(next);
         } catch (err) {
           // A broken meter must never stop the rack from rendering.
           reportError('telemetry', err);
@@ -360,10 +301,11 @@ export default function App() {
       })();
     }, 100);
     return () => clearInterval(timer);
-  }, [connected]);
+  }, [connected, store]);
 
   const addModule = useCallback(
     async (typeId: string, at?: { x: number; y: number }) => {
+      const { nodes, positions } = store.getState();
       const taken = new Set(nodes.map((n) => n.instance_id));
       const instance = nextInstanceId(typeId, taken);
       await engine.addModule(instance, typeId);
@@ -384,26 +326,33 @@ export default function App() {
       }
       await refresh();
     },
-    [nodes, positions, refresh, moveModule],
+    [store, refresh, moveModule],
   );
 
-  const toggleSelected = useCallback((instance: string) => {
-    setSelected((prev) =>
-      prev.includes(instance) ? prev.filter((i) => i !== instance) : [...prev, instance],
-    );
-  }, []);
+  const toggleSelected = useCallback(
+    (instance: string) => {
+      const prev = store.getState().selected;
+      store.set({
+        selected: prev.includes(instance)
+          ? prev.filter((i) => i !== instance)
+          : [...prev, instance],
+      });
+    },
+    [store],
+  );
 
   const collapseToMacro = useCallback(
     async (name: string) => {
+      const selected = store.getState().selected;
       if (!name.trim() || selected.length === 0) return;
       await engine.collapseMacro(selected, name.trim());
-      setSelected([]);
+      store.set({ selected: [] });
       setCollapseName(null);
       const modules = await engine.listModules();
       if (modules) setModuleLib(modules);
       await refresh();
     },
-    [selected, refresh],
+    [store, refresh],
   );
 
   // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z)
@@ -411,9 +360,8 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setPending(null);
+        store.set({ pending: null, selected: [] });
         setCollapseName(null);
-        setSelected([]);
         return;
       }
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -444,7 +392,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [refresh, changeZoom, savePatch]);
+  }, [store, refresh, changeZoom, savePatch]);
 
   // Drop a module dragged out of the library at the pointer position,
   // snapped to the rack grid (in unzoomed rack coordinates).
@@ -476,6 +424,7 @@ export default function App() {
 
   const onJackClick = useCallback(
     async (instance: string, kind: 'input' | 'output', jack: string, shift = false) => {
+      const { wires, pending } = store.getState();
       // Shift+click unplugs the jack's most recent wire (LIFO — the wires
       // snapshot preserves connection order). Outputs fan out to many
       // wires, so repeated shift+clicks peel them off newest-first.
@@ -554,52 +503,7 @@ export default function App() {
       }
       setPending({ instance, jack, kind, color: loadJson(LAST_WIRE_COLOR_KEY, 0) });
     },
-    [pending, wires, wireColors, refresh],
-  );
-
-  const makeHandle = useCallback(
-    (node: NodeSnapshot): ModuleHandle => {
-      // Custom UIs address inputs and params uniformly through the handle;
-      // input ids resolve to their knob (mapped through the knob config).
-      const inputKnobConfig = (id: string): KnobConfig | null => {
-        const input = node.manifest.inputs.find((i) => i.id === id);
-        if (!input) return null;
-        return (
-          node.knobs[id]?.config ??
-          input.knob ?? { style: 'continuous', min: 0, max: 10, curve: 'linear' }
-        );
-      };
-      return {
-        paramValue: (id) => {
-          const cfg = inputKnobConfig(id);
-          if (cfg) return mapPosition(cfg, node.knobs[id]?.position ?? 0);
-          const live = node.params[id];
-          if (typeof live === 'number') return live;
-          const p = node.manifest.params.find((p) => p.id === id);
-          return typeof p?.default === 'number' ? p.default : 0;
-        },
-        setParam: (id, v) => {
-          const cfg = inputKnobConfig(id);
-          if (cfg) {
-            void engine
-              .setKnobPosition(node.instance_id, id, positionForValue(cfg, v))
-              .then(refresh);
-          } else {
-            void engine.setParam(node.instance_id, id, v).then(refresh);
-          }
-        },
-        signalTap: (jackId) =>
-          telemetry[node.instance_id]?.[jackId] ?? {
-            instantaneous: 0,
-            rms_100ms: 0,
-            display: 0,
-            is_fast: false,
-          },
-        endEdit: () => void engine.endEdit(),
-        size: { w: 360, h: 200 },
-      };
-    },
-    [telemetry, refresh],
+    [store, wireColors, refresh, setPending],
   );
 
   const removeModule = useCallback(
@@ -609,22 +513,14 @@ export default function App() {
         if (!(instance in prev)) return prev;
         const next = { ...prev };
         delete next[instance];
-        try {
-          localStorage.setItem(POSITIONS_KEY, JSON.stringify(next));
-        } catch {
-          // persistence is best-effort
-        }
+        saveJson(POSITIONS_KEY, next);
         return next;
       });
-      setPending((p) => (p?.instance === instance ? null : p));
+      const pending = store.getState().pending;
+      if (pending?.instance === instance) setPending(null);
       await refresh();
     },
-    [refresh],
-  );
-
-  const handles = useMemo(
-    () => new Map(nodes.map((n) => [n.instance_id, makeHandle(n)])),
-    [nodes, makeHandle],
+    [store, setPositions, setPending, refresh],
   );
 
   // Shared state for DeckPanel custom UIs (track list, sync candidates,
@@ -790,132 +686,58 @@ export default function App() {
       {view === 'library' && <LibraryView client={library} />}
       <div className="app-body" style={view === 'rack' ? undefined : { display: 'none' }}>
         <ModuleLibrary modules={moduleLib} onAdd={(typeId) => void addModule(typeId)} />
-        <DeckUIContext.Provider value={deckUI}>
-          <div
-            className="rack-area"
-            ref={setRackEl}
-            data-testid="rack-area"
-            onDragOver={onRackDragOver}
-            onDrop={onRackDrop}
-            onClick={(e) => {
-              // Clicking the rack background abandons a pending wire.
-              if (pending && !(e.target as HTMLElement).closest?.('.module-panel')) {
-                setPending(null);
-              }
-            }}
-          >
+        <RackStoreContext.Provider value={store}>
+          <DeckUIContext.Provider value={deckUI}>
             <div
-              className="rack"
-              data-testid="rack"
-              style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}
+              className="rack-area"
+              ref={setRackEl}
+              data-testid="rack-area"
+              onDragOver={onRackDragOver}
+              onDrop={onRackDrop}
+              onClick={(e) => {
+                // Clicking the rack background abandons a pending wire.
+                if (
+                  store.getState().pending &&
+                  !(e.target as HTMLElement).closest?.('.module-panel')
+                ) {
+                  setPending(null);
+                }
+              }}
             >
-              {nodes.map((node, i) => (
-                <ErrorBoundary
-                  key={node.instance_id}
-                  context={`module ${node.instance_id}`}
-                  fallback={(message, retry) => (
-                    <div
-                      className="module-panel module-panel-placed module-panel-error"
-                      data-testid={`module-error-${node.instance_id}`}
-                      style={panelStyle(positions[node.instance_id] ?? defaultPosition(i))}
-                    >
-                      <strong>{node.instance_id}</strong>
-                      <code className="error-card-message">{message}</code>
-                      <div className="module-error-actions">
-                        <button onClick={retry}>Retry</button>
-                        <button onClick={() => void removeModule(node.instance_id)}>Remove</button>
-                      </div>
-                    </div>
-                  )}
-                >
-                  <ModulePanel
+              <div
+                className="rack"
+                data-testid="rack"
+                style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}
+              >
+                {nodes.map((node, i) => (
+                  <RackModule
+                    key={node.instance_id}
                     instanceId={node.instance_id}
-                    manifest={node.manifest}
-                    knobs={node.knobs}
-                    wired={Object.fromEntries(node.wired_inputs.map((j) => [j, true]))}
-                    telemetry={telemetry[node.instance_id]}
-                    handle={handles.get(node.instance_id)!}
-                    customUI={CUSTOM_UIS[node.type_id as keyof typeof CUSTOM_UIS]}
-                    extra={
-                      node.type_id === 'builtin.midi' ? (
-                        <MidiPanel
-                          instance={node.instance_id}
-                          mappings={node.midi_mappings}
-                          onAdd={(kind, num, name) =>
-                            void engine
-                              .addMidiMapping(node.instance_id, kind, num, name)
-                              .then(refresh)
-                          }
-                          onRemove={(name) =>
-                            void engine.removeMidiMapping(node.instance_id, name).then(refresh)
-                          }
-                          ledMappings={node.midi_led_mappings}
-                          onAddLed={(kind, num, name) =>
-                            void engine
-                              .addMidiLedMapping(node.instance_id, kind, num, name)
-                              .then(refresh)
-                          }
-                          onRemoveLed={(name) =>
-                            void engine.removeMidiLedMapping(node.instance_id, name).then(refresh)
-                          }
-                          onMidi={(data) => void engine.injectMidi(node.instance_id, 0, data)}
-                        />
-                      ) : node.type_id === 'builtin.gesture' ? (
-                        <GesturePanel
-                          instance={node.instance_id}
-                          api={{
-                            status: (i) => engine.gestureStatus(i),
-                            setMode: (i, m) => engine.gestureSetMode(i, m),
-                            addMapping: (i, n, m, c) => engine.gestureAddMapping(i, n, m, c),
-                            removeMapping: (i, n) => engine.gestureRemoveMapping(i, n),
-                            learnBegin: (i) => engine.gestureLearnBegin(i),
-                            learnPoll: (i, n) => engine.gestureLearnPoll(i, n),
-                            feedStart: (i, src) => engine.gestureFeedStart(i, src),
-                            feedStop: (i) => engine.gestureFeedStop(i),
-                          }}
-                          onChanged={() => void refresh()}
-                        />
-                      ) : undefined
-                    }
-                    position={positions[node.instance_id] ?? defaultPosition(i)}
-                    onMove={(x, y) => moveModule(node.instance_id, x, y)}
-                    onRemove={() => void removeModule(node.instance_id)}
-                    onEditEnd={() => void engine.endEdit()}
-                    selected={selected.includes(node.instance_id)}
-                    onSelectToggle={() => toggleSelected(node.instance_id)}
-                    pendingSource={pending}
-                    onJackClick={(kind, jack, shift) =>
-                      void onJackClick(node.instance_id, kind, jack, shift)
-                    }
-                    onKnobPosition={(jack, position) => {
-                      void engine.setKnobPosition(node.instance_id, jack, position).then(refresh);
-                    }}
-                    onKnobConfig={(jack, config: KnobConfig) => {
-                      void engine.setKnobConfig(node.instance_id, jack, config).then(refresh);
-                    }}
-                    onAttenOffset={(jack, atten, offset) => {
-                      void engine
-                        .setAttenOffset(node.instance_id, jack, atten, offset)
-                        .then(refresh);
-                    }}
+                    index={i}
+                    refresh={refresh}
+                    moveModule={moveModule}
+                    removeModule={removeModule}
+                    toggleSelected={toggleSelected}
+                    onJackClick={onJackClick}
                   />
-                </ErrorBoundary>
-              ))}
-              {nodes.length === 0 && (
-                <p className="rack-empty">
-                  No engine connection — run via <code>./run.sh</code> (Tauri) to see the live rack.
-                </p>
-              )}
+                ))}
+                {nodes.length === 0 && (
+                  <p className="rack-empty">
+                    No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
+                    rack.
+                  </p>
+                )}
+              </div>
+              <WireOverlay
+                wires={wires}
+                container={rackEl}
+                colors={wireColors}
+                pending={pending}
+                layoutKey={`${JSON.stringify(positions)}@${zoom}`}
+              />
             </div>
-            <WireOverlay
-              wires={wires}
-              container={rackEl}
-              colors={wireColors}
-              pending={pending}
-              layoutKey={`${JSON.stringify(positions)}@${zoom}`}
-            />
-          </div>
-        </DeckUIContext.Provider>
+          </DeckUIContext.Provider>
+        </RackStoreContext.Provider>
       </div>
     </main>
   );
