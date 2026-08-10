@@ -75,12 +75,80 @@ fn autosave_now(state: &AppState) {
     }
 }
 
+/// Undo-history key for a patch edit. The `Display` output is the
+/// coalescing key (rapid same-key edits merge into one undo step, e.g. a
+/// knob drag), so the exact strings must stay stable.
+enum EditKey<'a> {
+    Add(&'a str),
+    Remove(&'a str),
+    WireAdd(&'a str, &'a str, &'a str, &'a str),
+    WireRemove(&'a str, &'a str, &'a str, &'a str),
+    MidiAdd(&'a str, &'a str),
+    MidiRemove(&'a str, &'a str),
+    LedAdd(&'a str, &'a str),
+    LedRemove(&'a str, &'a str),
+    GestureMode(&'a str),
+    GestureAdd(&'a str, &'a str),
+    GestureRemove(&'a str, &'a str),
+    Knob(&'a str, &'a str),
+    KnobConfig(&'a str, &'a str),
+    AttenOffset(&'a str, &'a str),
+    Param(&'a str, &'a str),
+    Load(&'a str),
+    CollapseMacro,
+    Track(&'a str),
+}
+
+impl std::fmt::Display for EditKey<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EditKey::Add(i) => write!(f, "add:{i}"),
+            EditKey::Remove(i) => write!(f, "remove:{i}"),
+            EditKey::WireAdd(fi, fj, ti, tj) => write!(f, "wire+:{fi}:{fj}->{ti}:{tj}"),
+            EditKey::WireRemove(fi, fj, ti, tj) => write!(f, "wire-:{fi}:{fj}->{ti}:{tj}"),
+            EditKey::MidiAdd(i, n) => write!(f, "midi+:{i}:{n}"),
+            EditKey::MidiRemove(i, n) => write!(f, "midi-:{i}:{n}"),
+            EditKey::LedAdd(i, n) => write!(f, "led+:{i}:{n}"),
+            EditKey::LedRemove(i, n) => write!(f, "led-:{i}:{n}"),
+            EditKey::GestureMode(i) => write!(f, "gest-mode:{i}"),
+            EditKey::GestureAdd(i, n) => write!(f, "gest+:{i}:{n}"),
+            EditKey::GestureRemove(i, n) => write!(f, "gest-:{i}:{n}"),
+            EditKey::Knob(i, j) => write!(f, "knob:{i}:{j}"),
+            EditKey::KnobConfig(i, j) => write!(f, "knobcfg:{i}:{j}"),
+            EditKey::AttenOffset(i, j) => write!(f, "attoff:{i}:{j}"),
+            EditKey::Param(i, p) => write!(f, "param:{i}:{p}"),
+            EditKey::Load(d) => write!(f, "load:{d}"),
+            EditKey::CollapseMacro => write!(f, "collapse_macro"),
+            EditKey::Track(i) => write!(f, "track:{i}"),
+        }
+    }
+}
+
 /// Record the pre-edit snapshot for an undoable edit. Failures to lock the
 /// history never block the edit itself.
-fn record_edit(state: &State<AppState>, engine: &Engine, key: &str) {
+fn record_edit(state: &State<AppState>, engine: &Engine, key: &EditKey) {
     if let Ok(mut history) = state.history.lock() {
-        history.record(key, engine.snapshot("undo"));
+        history.record(&key.to_string(), engine.snapshot("undo"));
     }
+}
+
+/// Lock the engine with NO undo snapshot: queries, telemetry taps, backend
+/// start/stop, and DJ performance controls whose state is canonical in the
+/// library DB rather than the patch. A command that mutates the patch must
+/// use [`patch_edit`] instead so the edit lands in undo history.
+fn engine_lock<'a>(state: &'a State<AppState>) -> CmdResult<std::sync::MutexGuard<'a, Engine>> {
+    state.engine.lock().map_err(err)
+}
+
+/// Lock the engine for a patch-mutating edit, recording the pre-edit
+/// snapshot under `key` so the edit is undoable.
+fn patch_edit<'a>(
+    state: &'a State<AppState>,
+    key: EditKey,
+) -> CmdResult<std::sync::MutexGuard<'a, Engine>> {
+    let engine = engine_lock(state)?;
+    record_edit(state, &engine, &key);
+    Ok(engine)
 }
 
 /// Rebuild the engine from a snapshot, preserving the running backend.
@@ -137,7 +205,7 @@ fn restart_backend(engine: &mut Engine, backend: Option<Backend>, what: &str) ->
 /// Undo the last edit. Returns false when there is nothing to undo.
 #[tauri::command]
 fn undo(state: State<AppState>) -> CmdResult<bool> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     let doc = {
         let mut history = state.history.lock().map_err(err)?;
         history.undo(engine.snapshot("undo"))
@@ -151,8 +219,7 @@ fn undo(state: State<AppState>) -> CmdResult<bool> {
 /// Remove a module and all wires touching it (undoable).
 #[tauri::command]
 fn remove_module(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("remove:{instance}"));
+    let mut engine = patch_edit(&state, EditKey::Remove(&instance))?;
     let mut doc = engine.snapshot("edit");
     if !doc.remove_module(&instance) {
         return Err(format!("no such module instance: {instance}"));
@@ -171,7 +238,7 @@ fn end_edit(state: State<AppState>) -> CmdResult<()> {
 /// Redo the last undone edit. Returns false when there is nothing to redo.
 #[tauri::command]
 fn redo(state: State<AppState>) -> CmdResult<bool> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     let doc = {
         let mut history = state.history.lock().map_err(err)?;
         history.redo(engine.snapshot("undo"))
@@ -242,7 +309,7 @@ struct NodeSnapshot {
 
 #[tauri::command]
 fn list_extensions(state: State<AppState>) -> CmdResult<Vec<Manifest>> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     Ok(engine
         .registry
         .extensions
@@ -253,7 +320,7 @@ fn list_extensions(state: State<AppState>) -> CmdResult<Vec<Manifest>> {
 
 #[tauri::command]
 fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     // Macro-aware view: the snapshot document already collapses macro
     // internals into their instances and rewrites wires to external jacks.
     let doc = engine.snapshot("ui");
@@ -397,7 +464,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
 /// + user-library macros, PRD §6).
 #[tauri::command]
 fn list_modules(state: State<AppState>) -> CmdResult<Vec<Manifest>> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     let mut manifests = engine.registry.all_manifests();
     for def in engine.macros.list() {
         if let Some(m) = engine.macro_manifest(&def.id) {
@@ -409,7 +476,7 @@ fn list_modules(state: State<AppState>) -> CmdResult<Vec<Manifest>> {
 
 #[tauri::command]
 fn engine_wires(state: State<AppState>) -> CmdResult<Vec<WireSnapshot>> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     // Snapshot wires are macro-aware: internal wires are hidden and
     // boundary wires appear at the instance's promoted external jacks.
     let doc = engine.snapshot("ui");
@@ -429,8 +496,7 @@ fn engine_wires(state: State<AppState>) -> CmdResult<Vec<WireSnapshot>> {
 
 #[tauri::command]
 fn add_module(state: State<AppState>, instance: String, type_id: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("add:{instance}"));
+    let mut engine = patch_edit(&state, EditKey::Add(&instance))?;
     with_stopped(&mut engine, |e| {
         e.add_module(&instance, &type_id).map_err(err)
     })
@@ -444,12 +510,10 @@ fn connect_wire(
     to_instance: String,
     to_jack: String,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(
+    let mut engine = patch_edit(
         &state,
-        &engine,
-        &format!("wire+:{from_instance}:{from_jack}->{to_instance}:{to_jack}"),
-    );
+        EditKey::WireAdd(&from_instance, &from_jack, &to_instance, &to_jack),
+    )?;
     with_stopped(&mut engine, |e| {
         e.connect(&from_instance, &from_jack, &to_instance, &to_jack)
             .map_err(err)
@@ -464,12 +528,10 @@ fn disconnect_wire(
     to_instance: String,
     to_jack: String,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(
+    let mut engine = patch_edit(
         &state,
-        &engine,
-        &format!("wire-:{from_instance}:{from_jack}->{to_instance}:{to_jack}"),
-    );
+        EditKey::WireRemove(&from_instance, &from_jack, &to_instance, &to_jack),
+    )?;
     with_stopped(&mut engine, |e| {
         e.disconnect(&from_instance, &from_jack, &to_instance, &to_jack)
             .map_err(err)?;
@@ -499,8 +561,7 @@ fn add_midi_mapping(
     num: u8,
     name: String,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("midi+:{instance}:{name}"));
+    let mut engine = patch_edit(&state, EditKey::MidiAdd(&instance, &name))?;
     engine
         .add_midi_mapping(&instance, kind, num, &name)
         .map(|_| ())
@@ -511,8 +572,7 @@ fn add_midi_mapping(
 /// (restoring auto wire-style knobs), which needs the engine stopped.
 #[tauri::command]
 fn remove_midi_mapping(state: State<AppState>, instance: String, name: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("midi-:{instance}:{name}"));
+    let mut engine = patch_edit(&state, EditKey::MidiRemove(&instance, &name))?;
     let doomed: Vec<(String, String)> = engine
         .wire_specs()
         .iter()
@@ -557,8 +617,7 @@ fn add_midi_led_mapping(
     num: u8,
     name: String,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("led+:{instance}:{name}"));
+    let mut engine = patch_edit(&state, EditKey::LedAdd(&instance, &name))?;
     engine
         .add_midi_led_mapping(&instance, kind, num, &name)
         .map(|_| ())
@@ -573,8 +632,7 @@ fn remove_midi_led_mapping(
     instance: String,
     name: String,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("led-:{instance}:{name}"));
+    let mut engine = patch_edit(&state, EditKey::LedRemove(&instance, &name))?;
     with_stopped(&mut engine, |e| {
         e.remove_midi_led_mapping(&instance, &name).map_err(err)
     })
@@ -614,7 +672,7 @@ struct GestureStatus {
 
 #[tauri::command]
 fn gesture_status(state: State<AppState>, instance: String) -> CmdResult<GestureStatus> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     let g = engine.gesture(&instance).map_err(err)?;
     let mappings = g
         .mappings()
@@ -646,8 +704,7 @@ fn gesture_status(state: State<AppState>, instance: String) -> CmdResult<Gesture
 
 #[tauri::command]
 fn gesture_set_mode(state: State<AppState>, instance: String, mode: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("gest-mode:{instance}"));
+    let mut engine = patch_edit(&state, EditKey::GestureMode(&instance))?;
     engine.gesture_set_mode(&instance, &mode).map_err(err)
 }
 
@@ -661,8 +718,7 @@ fn gesture_add_mapping(
     mode: String,
     config: serde_json::Value,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("gest+:{instance}:{name}"));
+    let mut engine = patch_edit(&state, EditKey::GestureAdd(&instance, &name))?;
     engine
         .add_gesture_mapping(&instance, &name, &mode, config)
         .map(|_| ())
@@ -673,8 +729,7 @@ fn gesture_add_mapping(
 /// (restoring auto wire-style knobs), which needs the engine stopped.
 #[tauri::command]
 fn gesture_remove_mapping(state: State<AppState>, instance: String, name: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("gest-:{instance}:{name}"));
+    let mut engine = patch_edit(&state, EditKey::GestureRemove(&instance, &name))?;
     let doomed: Vec<(String, String)> = engine
         .wire_specs()
         .iter()
@@ -711,7 +766,7 @@ fn gesture_remove_mapping(state: State<AppState>, instance: String, name: String
 /// Arm the learn flow: the next detection is offered to the active mode.
 #[tauri::command]
 fn gesture_learn_begin(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.gesture_learn_begin(&instance).map_err(err)
 }
 
@@ -719,8 +774,7 @@ fn gesture_learn_begin(state: State<AppState>, instance: String) -> CmdResult<()
 /// returns true (the frontend polls like MIDI learn).
 #[tauri::command]
 fn gesture_learn_poll(state: State<AppState>, instance: String, name: String) -> CmdResult<bool> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("gest+:{instance}:{name}"));
+    let mut engine = patch_edit(&state, EditKey::GestureAdd(&instance, &name))?;
     Ok(engine
         .gesture_learn_poll(&instance, &name)
         .map_err(err)?
@@ -755,7 +809,7 @@ fn gesture_feed_start(
 ) -> CmdResult<()> {
     use std::sync::atomic::{AtomicBool, Ordering};
     let wheels = {
-        let engine = state.engine.lock().map_err(err)?;
+        let engine = engine_lock(&state)?;
         *engine.gesture(&instance).map_err(err)?.wheels()
     };
     let trace = gesture_fixture(&source, &wheels)
@@ -814,7 +868,7 @@ fn gesture_feed_stop(state: State<AppState>, instance: String) -> CmdResult<()> 
 #[tauri::command]
 fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     {
-        let engine = state.engine.lock().map_err(err)?;
+        let engine = engine_lock(&state)?;
         if !engine.nodes.is_empty() {
             return Ok(());
         }
@@ -841,7 +895,7 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
             Err(e) => eprintln!("[dj-audio] autosave restore failed ({e}); loading demo patch"),
         }
     }
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.add_module("midi1", "builtin.midi").map_err(err)?;
     engine
         .add_module("osc1", "com.dj.oscillator")
@@ -881,8 +935,7 @@ fn set_knob_position(
     jack: String,
     position: f32,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("knob:{instance}:{jack}"));
+    let mut engine = patch_edit(&state, EditKey::Knob(&instance, &jack))?;
     engine
         .set_knob_position(&instance, &jack, position)
         .map_err(err)
@@ -895,8 +948,7 @@ fn set_knob_config(
     jack: String,
     config: Option<KnobConfig>,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("knobcfg:{instance}:{jack}"));
+    let mut engine = patch_edit(&state, EditKey::KnobConfig(&instance, &jack))?;
     engine
         .set_knob_config(&instance, &jack, config)
         .map_err(err)
@@ -910,8 +962,7 @@ fn set_knob_atten_offset(
     atten: f32,
     offset: f32,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("attoff:{instance}:{jack}"));
+    let mut engine = patch_edit(&state, EditKey::AttenOffset(&instance, &jack))?;
     engine
         .set_knob_atten_offset(&instance, &jack, atten, offset)
         .map_err(err)
@@ -919,14 +970,13 @@ fn set_knob_atten_offset(
 
 #[tauri::command]
 fn set_param(state: State<AppState>, instance: String, param: String, value: f32) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("param:{instance}:{param}"));
+    let mut engine = patch_edit(&state, EditKey::Param(&instance, &param))?;
     engine.set_param(&instance, &param, value).map_err(err)
 }
 
 #[tauri::command]
 fn tap(state: State<AppState>, instance: String, jack: String) -> CmdResult<JackTelemetry> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     engine.tap(&instance, &jack).map_err(err)
 }
 
@@ -937,7 +987,7 @@ fn tap(state: State<AppState>, instance: String, jack: String) -> CmdResult<Jack
 /// instances expose their external input jacks.
 #[tauri::command]
 fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String, JackTelemetry>>> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     let mut out: BTreeMap<String, BTreeMap<String, JackTelemetry>> = BTreeMap::new();
     for n in &engine.nodes {
         if n.instance_id.contains('/') {
@@ -974,7 +1024,7 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
 
 #[tauri::command]
 fn save_patch(state: State<AppState>, dir: String, name: String) -> CmdResult<()> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     engine.save_patch(&PathBuf::from(dir), &name).map_err(err)
 }
 
@@ -995,7 +1045,7 @@ fn save_patch_as(state: State<AppState>, name: String) -> CmdResult<()> {
     if !valid_patch_name(&name) {
         return Err(format!("invalid patch name: {name:?}"));
     }
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     engine
         .save_patch(&patches_dir().join(&name), &name)
         .map_err(err)?;
@@ -1033,8 +1083,7 @@ fn current_patch(state: State<AppState>) -> CmdResult<String> {
 }
 
 fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(state, &engine, &format!("load:{}", dir.display()));
+    let mut engine = patch_edit(state, EditKey::Load(&dir.display().to_string()))?;
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
     *engine = Engine::load_patch(dir, registry).map_err(err)?;
@@ -1096,7 +1145,7 @@ fn load_patch(
     dir: String,
     resolutions: Option<Vec<(String, String)>>,
 ) -> CmdResult<Vec<MacroConflictInfo>> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     let mut doc = PatchDoc::read(Path::new(&dir)).map_err(err)?;
     let mut lib = db_macro_library(&state.library)?;
     for (macro_id, action) in resolutions.unwrap_or_default() {
@@ -1137,7 +1186,7 @@ fn load_patch(
             })
             .collect());
     }
-    record_edit(&state, &engine, &format!("load:{dir}"));
+    record_edit(&state, &engine, &EditKey::Load(&dir));
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
     *engine = Engine::from_doc_with_macros(&doc, registry, lib).map_err(err)?;
@@ -1166,7 +1215,7 @@ struct MacroInfo {
 /// Macros available for instantiation (user library, PRD §6).
 #[tauri::command]
 fn list_macros(state: State<AppState>) -> CmdResult<Vec<MacroInfo>> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     Ok(engine
         .macros
         .list()
@@ -1300,8 +1349,7 @@ fn collapse_macro(
     if selection.is_empty() {
         return Err("empty selection".into());
     }
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, "collapse_macro");
+    let mut engine = patch_edit(&state, EditKey::CollapseMacro)?;
     let slug: String = name
         .to_lowercase()
         .chars()
@@ -1341,13 +1389,13 @@ fn inject_midi(
     frame: u64,
     data: [u8; 3],
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.inject_midi(&instance, frame, data).map_err(err)
 }
 
 #[tauri::command]
 fn engine_start(state: State<AppState>) -> CmdResult<String> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     if engine.is_running() {
         return Ok("already-running".into());
     }
@@ -1371,7 +1419,7 @@ fn engine_start(state: State<AppState>) -> CmdResult<String> {
 
 #[tauri::command]
 fn engine_stop(state: State<AppState>) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.stop().map_err(err)
 }
 
@@ -1492,8 +1540,7 @@ fn watch_folders(state: State<AppState>) -> CmdResult<Vec<String>> {
 #[tauri::command]
 fn playback_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResult<()> {
     let track = state.library.track(track_id).map_err(err)?;
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("track:{instance}"));
+    let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
     engine
         .playback_load(&instance, &PathBuf::from(track.file_path))
         .map_err(err)
@@ -1587,7 +1634,7 @@ fn analyze_track(state: State<AppState>, track_id: i64) -> CmdResult<()> {
 /// analysis finished while the track was already loaded).
 #[tauri::command]
 fn deck_load_stems(state: State<AppState>, instance: String) -> CmdResult<bool> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     let Some(track) = deck_library_track(&state, &engine, &instance) else {
         return Ok(false);
     };
@@ -1603,7 +1650,7 @@ fn deck_load_stems(state: State<AppState>, instance: String) -> CmdResult<bool> 
 
 #[tauri::command]
 fn deck_clear_stems(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.deck_clear_stems(&instance).map_err(err)
 }
 
@@ -1625,8 +1672,7 @@ fn persist_deck_grid(state: &AppState, engine: &Engine, instance: &str) -> CmdRe
 #[tauri::command]
 fn deck_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResult<()> {
     let track = state.library.track(track_id).map_err(err)?;
-    let mut engine = state.engine.lock().map_err(err)?;
-    record_edit(&state, &engine, &format!("track:{instance}"));
+    let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
     engine
         .deck_load(&instance, &PathBuf::from(track.file_path))
         .map_err(err)?;
@@ -1635,14 +1681,14 @@ fn deck_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResu
 
 #[tauri::command]
 fn deck_status(state: State<AppState>, instance: String) -> CmdResult<dj_engine::deck::DeckStatus> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     engine.deck_status(&instance).map_err(err)
 }
 
 /// Waveform overview peaks (0..=1), `buckets` values.
 #[tauri::command]
 fn deck_waveform(state: State<AppState>, instance: String, buckets: usize) -> CmdResult<Vec<f32>> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     engine
         .deck_waveform(&instance, buckets.min(20_000))
         .map_err(err)
@@ -1650,7 +1696,7 @@ fn deck_waveform(state: State<AppState>, instance: String, buckets: usize) -> Cm
 
 #[tauri::command]
 fn deck_seek(state: State<AppState>, instance: String, position: f64) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.deck_seek(&instance, position).map_err(err)
 }
 
@@ -1662,7 +1708,7 @@ fn deck_set_cue(
     slot: usize,
     position: Option<f64>,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine
         .deck_set_cue(&instance, slot, position)
         .map_err(err)?;
@@ -1684,32 +1730,32 @@ fn deck_set_cue(
 /// Set the active loop region (transient until saved).
 #[tauri::command]
 fn deck_set_loop(state: State<AppState>, instance: String, start: f64, end: f64) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.deck_set_loop(&instance, start, end).map_err(err)
 }
 
 #[tauri::command]
 fn deck_loop_enable(state: State<AppState>, instance: String, enabled: bool) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.deck_loop_enable(&instance, enabled).map_err(err)
 }
 
 #[tauri::command]
 fn deck_loop_halve(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.deck_loop_halve(&instance).map_err(err)
 }
 
 #[tauri::command]
 fn deck_loop_double(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.deck_loop_double(&instance).map_err(err)
 }
 
 /// Save the current loop region as a named library loop for the track.
 #[tauri::command]
 fn deck_save_loop(state: State<AppState>, instance: String, name: String) -> CmdResult<i64> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     let status = engine.deck_status(&instance).map_err(err)?;
     let (Some(start), Some(end)) = (status.loop_start_secs, status.loop_end_secs) else {
         return Err("no loop region set".into());
@@ -1728,7 +1774,7 @@ fn deck_saved_loops(
     state: State<AppState>,
     instance: String,
 ) -> CmdResult<Vec<dj_library::SavedLoop>> {
-    let engine = state.engine.lock().map_err(err)?;
+    let engine = engine_lock(&state)?;
     match deck_library_track(&state, &engine, &instance) {
         Some(track) => state.library.track_loops(track.id).map_err(err),
         None => Ok(Vec::new()),
@@ -1742,7 +1788,7 @@ fn deck_set_beatgrid(
     bpm: f64,
     anchor: f64,
 ) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine
         .deck_set_beatgrid(&instance, bpm, anchor)
         .map_err(err)?;
@@ -1752,7 +1798,7 @@ fn deck_set_beatgrid(
 /// Tap tempo at the live playhead; the resulting grid persists.
 #[tauri::command]
 fn deck_tap_tempo(state: State<AppState>, instance: String) -> CmdResult<Option<(f64, f64)>> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     let grid = engine.deck_tap_tempo(&instance).map_err(err)?;
     persist_deck_grid(&state, &engine, &instance)?;
     Ok(grid)
@@ -1761,7 +1807,7 @@ fn deck_tap_tempo(state: State<AppState>, instance: String) -> CmdResult<Option<
 /// Nudge the beatgrid anchor by `delta` seconds.
 #[tauri::command]
 fn deck_nudge_beatgrid(state: State<AppState>, instance: String, delta: f64) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.deck_nudge_beatgrid(&instance, delta).map_err(err)?;
     persist_deck_grid(&state, &engine, &instance)
 }
@@ -1769,7 +1815,7 @@ fn deck_nudge_beatgrid(state: State<AppState>, instance: String, delta: f64) -> 
 /// Re-anchor the beatgrid at the current playhead.
 #[tauri::command]
 fn deck_anchor_here(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.deck_anchor_here(&instance).map_err(err)?;
     persist_deck_grid(&state, &engine, &instance)
 }
@@ -1777,7 +1823,7 @@ fn deck_anchor_here(state: State<AppState>, instance: String) -> CmdResult<()> {
 /// Beat-sync a deck to another deck (None clears sync).
 #[tauri::command]
 fn deck_sync(state: State<AppState>, instance: String, master: Option<String>) -> CmdResult<()> {
-    let mut engine = state.engine.lock().map_err(err)?;
+    let mut engine = engine_lock(&state)?;
     engine.deck_sync(&instance, master.as_deref()).map_err(err)
 }
 
