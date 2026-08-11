@@ -15,7 +15,10 @@
 //!   limited filter folds its resonant peak back down.
 //!
 //! Cutoff is exponential (1 V/oct, 0 = C4) from the `cutoff` jack — a wire
-//! adds to the knob baseline. Resonance runs from gently damped up to
+//! moves the knob's position around the baseline. The knob spans -6..6 V,
+//! so a full-amount wire maps ±5 V onto ±6 V (1.2 oct/V); dial the wire
+//! amount to 5/6 for exact 1 V/oct tracking through the wire.
+//! Resonance runs from gently damped up to
 //! self-oscillation. Every topology limits its own oscillation with an
 //! amplitude-dependent feedback term rather than by clipping: the loop
 //! gain is pulled back to exactly unity a few volts up, so with no input

@@ -2,9 +2,21 @@
 //!
 //! Every input jack is simultaneously a wire jack and a knob target.
 //! - Unwired: the knob position maps through the config to a constant value.
-//! - Wired: the knob keeps setting the baseline; the incoming signal adds on
-//!   top, scaled by the attenuverter (`atten` in [-1, 1]) plus `offset`:
-//!   `effective = knob_value + signal * atten + offset`.
+//! - Wired, knob-backed input: the blend happens in POSITION space so the
+//!   knob's curve shapes the modulation exactly like it shapes the dial. The
+//!   knob sets a baseline position; the signal moves that position, scaled
+//!   by the attenuverter (`atten` in [-1, 1], expressed against the ±10 V
+//!   rails so a full-scale ±5 V signal at atten = 1 sweeps half the travel)
+//!   plus `offset` (also in position units):
+//!   `effective = curve(clamp01(base_pos + signal * atten / 10 + offset))`.
+//!   On a linear knob spanning 10 units (pitch ±5 V, cv 0..10) this reduces
+//!   to the plain additive `knob_value + signal * atten` law; on exp/log
+//!   knobs the modulation tracks the baseline geometrically (the whole
+//!   point: ±CV on an exp rate knob is a musical spread at any baseline).
+//! - Wired, plain jack (no knob declared, or style `wire`): the signal adds
+//!   directly onto the mapped baseline, `knob_value + signal * atten +
+//!   offset`, hard-clipped to the ±10 V rails — audio and gate pass-through
+//!   paths must never be squeezed through a knob range.
 //!
 //! Knob config is data, not code. Per-patch overrides are stored in the patch.
 
@@ -70,10 +82,11 @@ impl Default for KnobConfig {
 }
 
 impl KnobConfig {
-    /// Map a normalized knob position (0..1) to a signal value.
-    pub fn map(&self, position: f32) -> f32 {
+    /// Style quantization of a raw 0..1 position: detent rounding for
+    /// `stepped`, on/off snap for `switch`/`button`, identity otherwise.
+    pub fn snap(&self, position: f32) -> f32 {
         let p = position.clamp(0.0, 1.0);
-        let p = match self.style {
+        match self.style {
             KnobStyle::Continuous | KnobStyle::Wire => p,
             KnobStyle::Switch | KnobStyle::Button => {
                 if p >= 0.5 {
@@ -86,7 +99,19 @@ impl KnobConfig {
                 let steps = self.steps.unwrap_or(2).max(2);
                 (p * (steps - 1) as f32).round() / (steps - 1) as f32
             }
-        };
+        }
+    }
+
+    /// Map a normalized knob position (0..1) to a signal value.
+    pub fn map(&self, position: f32) -> f32 {
+        self.curve_at(self.snap(position))
+    }
+
+    /// Curve mapping only (no style snap) of an already-snapped position —
+    /// the wired-blend path adds the signal in position space after the
+    /// baseline snap and must not re-quantize the moving sum.
+    pub fn curve_at(&self, position: f32) -> f32 {
+        let p = position.clamp(0.0, 1.0);
         match &self.curve {
             Curve::Linear => self.min + p * (self.max - self.min),
             Curve::Exp => {
@@ -153,6 +178,110 @@ impl Default for KnobState {
     }
 }
 
+/// Resolution of the RT lookup table custom curves are resampled into.
+pub const CURVE_TABLE_LEN: usize = 33;
+
+/// RT-evaluable curve: a `Copy` mirror of a `KnobConfig`'s curve branch so
+/// `JackRt` can cross the command ring and run per-sample without touching
+/// the `Curve::Custom` breakpoint `Vec` (no allocation or drop on the RT
+/// thread).
+#[derive(Debug, Clone, Copy)]
+pub enum CurveRt {
+    /// `min + p * span`
+    Linear { min: f32, span: f32 },
+    /// Geometric interpolation `min * e^(k·p)`, `k = ln(max/min)`.
+    Geometric { min: f32, k: f32 },
+    /// Squared-position fallback for `exp` with non-positive endpoints.
+    Squared { min: f32, span: f32 },
+    /// expm1 log map: `min + expm1(p·r) · inv_expm1_r · span`.
+    LogGeometric {
+        min: f32,
+        span: f32,
+        r: f32,
+        inv_expm1_r: f32,
+    },
+    /// `sqrt` fallback for `log` with non-positive endpoints.
+    Sqrt { min: f32, span: f32 },
+    /// Custom breakpoint curves, resampled onto a uniform grid (linear
+    /// interpolation between samples — breakpoints that fall between grid
+    /// points are approximated; the unwired baseline stays exact because it
+    /// is computed off-RT via `KnobConfig::map`).
+    Table { values: [f32; CURVE_TABLE_LEN] },
+}
+
+impl CurveRt {
+    pub fn from_config(cfg: &KnobConfig) -> Self {
+        let span = cfg.max - cfg.min;
+        match &cfg.curve {
+            Curve::Linear => CurveRt::Linear { min: cfg.min, span },
+            Curve::Exp => {
+                if cfg.min > 0.0 && cfg.max > 0.0 {
+                    CurveRt::Geometric {
+                        min: cfg.min,
+                        k: (cfg.max / cfg.min).ln(),
+                    }
+                } else {
+                    CurveRt::Squared { min: cfg.min, span }
+                }
+            }
+            Curve::Log => {
+                if cfg.min > 0.0 && cfg.max > 0.0 {
+                    let r = (cfg.max / cfg.min).ln();
+                    CurveRt::LogGeometric {
+                        min: cfg.min,
+                        span,
+                        r,
+                        inv_expm1_r: 1.0 / r.exp_m1(),
+                    }
+                } else {
+                    CurveRt::Sqrt { min: cfg.min, span }
+                }
+            }
+            Curve::Custom(_) => {
+                let mut values = [0.0f32; CURVE_TABLE_LEN];
+                for (i, v) in values.iter_mut().enumerate() {
+                    *v = cfg.curve_at(i as f32 / (CURVE_TABLE_LEN - 1) as f32);
+                }
+                CurveRt::Table { values }
+            }
+        }
+    }
+
+    /// Evaluate the curve at a (clamped) 0..1 position.
+    #[inline]
+    pub fn at(&self, position: f32) -> f32 {
+        let p = position.clamp(0.0, 1.0);
+        match self {
+            CurveRt::Linear { min, span } => min + p * span,
+            CurveRt::Geometric { min, k } => min * (k * p).exp(),
+            CurveRt::Squared { min, span } => min + p * p * span,
+            CurveRt::LogGeometric {
+                min,
+                span,
+                r,
+                inv_expm1_r,
+            } => min + (p * r).exp_m1() * inv_expm1_r * span,
+            CurveRt::Sqrt { min, span } => min + p.sqrt() * span,
+            CurveRt::Table { values } => {
+                let x = p * (CURVE_TABLE_LEN - 1) as f32;
+                let i = (x as usize).min(CURVE_TABLE_LEN - 2);
+                let t = x - i as f32;
+                values[i] + t * (values[i + 1] - values[i])
+            }
+        }
+    }
+}
+
+/// How a wired input combines the incoming signal with its knob (see the
+/// module docs above for the two laws).
+#[derive(Debug, Clone, Copy)]
+pub enum BlendRt {
+    /// Plain jack: `baseline + signal · atten + offset`, rail-clipped.
+    Additive,
+    /// Knob-backed: `curve(clamp01(base_pos + signal · atten / 10 + offset))`.
+    Positional { base_pos: f32, curve: CurveRt },
+}
+
 /// Precomputed RT-side values for one input jack (no allocation on RT path).
 #[derive(Debug, Clone, Copy)]
 pub struct JackRt {
@@ -160,6 +289,7 @@ pub struct JackRt {
     pub unwired_value: f32,
     pub atten: f32,
     pub offset: f32,
+    pub blend: BlendRt,
 }
 
 impl JackRt {
@@ -168,6 +298,10 @@ impl JackRt {
         manifest_config: Option<&KnobConfig>,
         default: f32,
     ) -> Self {
+        // A jack with no knob declared anywhere is a plain wire jack (audio
+        // ins, gate thrus): keep the additive law so bipolar signals are
+        // never squeezed through a knob range.
+        let plain = state.config.is_none() && manifest_config.is_none();
         let cfg_owned;
         let cfg = match (&state.config, manifest_config) {
             (Some(c), _) => c,
@@ -181,10 +315,19 @@ impl JackRt {
         // manifest default; callers set position from the default via
         // `position_for_value` when creating nodes.
         let _ = default;
+        let blend = if plain || cfg.style == KnobStyle::Wire {
+            BlendRt::Additive
+        } else {
+            BlendRt::Positional {
+                base_pos: cfg.snap(state.position),
+                curve: CurveRt::from_config(cfg),
+            }
+        };
         JackRt {
             unwired_value: cfg.map(state.position),
             atten: state.atten,
             offset: state.offset,
+            blend,
         }
     }
 }

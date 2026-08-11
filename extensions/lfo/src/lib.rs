@@ -6,8 +6,9 @@
 //! PolyBLEP/PolyBLAMP corrected, so the LFO stays clean when it is pushed
 //! into the audio band and used as an oscillator.
 //!
-//! Rate comes straight from the `rate` jack (a wire adds to the knob
-//! baseline). With a wire in `clock`, the rate instead locks to the measured
+//! Rate comes straight from the `rate` jack (a wire moves the knob's
+//! position, so CV sweeps the exp curve geometrically around the baseline).
+//! With a wire in `clock`, the rate instead locks to the measured
 //! clock period times the `ratio` selector (/8 /4 /3 /2 x1 x2 x3 x4 x8) and
 //! the phase realigns on the appropriate clock edge. `reset` restarts the
 //! cycle from phase 0.

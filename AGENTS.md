@@ -139,6 +139,18 @@ fails if it's missing.
   mirrors knob.rs EXACTLY, including the geometric exp/log branch for
   min>0 ranges (the old squared-fallback divergence was the "LFO shows
   285 at 1 Hz" bug); KnobMath.test.ts pins both sides.
+- Wired-input blend (knob.rs docs are canonical): knob-backed inputs
+  blend in POSITION space — `curve(clamp01(base_pos + sig·atten/10 +
+  offset))`, offset in position units — so the knob's curve shapes the
+  CV and the spread tracks the baseline (exp rate knobs get a geometric
+  spread; a linear knob spanning 10 units reduces to the old additive
+  law). Plain wire jacks (no knob declared: audio ins, gate thrus) keep
+  the additive `baseline + sig·atten + offset` law with the ±10 V rail
+  clip. RT side is `BlendRt`/`CurveRt` in knob.rs (Copy, custom curves
+  resampled to a 33-entry table); the TS twin is
+  `spreadRange`/`attenOffsetForSpread(…, plain)` in Knob.tsx, `plain`
+  derived in InputCell. wire_summing.rs and KnobMath.test.ts pin both
+  laws on both sides — change all four together.
 - App save/load lives in the native File menu (Tauri `MenuItemBuilder`
   in `app/src-tauri/src/main.rs`); the frontend listens via
   `onMenuAction` in `src/engine.ts` (menu events re-dispatched as

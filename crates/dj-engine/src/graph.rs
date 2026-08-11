@@ -12,7 +12,7 @@
 //!   instead of a rebuild-the-world event.
 
 use crate::builtin::AudioOutModule;
-use crate::knob::JackRt;
+use crate::knob::{BlendRt, JackRt};
 use crate::module_host::HostModule;
 use crate::telemetry::JackAnalyzer;
 
@@ -256,15 +256,28 @@ impl Graph {
                             dst[s] += src_buf[s];
                         }
                     }
-                    // Wired inputs blend with the manual knob: the knob's
-                    // mapped value is the baseline and the incoming signal
-                    // adds on top, scaled by the attenuverter (+ offset for
-                    // asymmetric spreads). Multiple wires sum, so the
-                    // result can exceed the rails — hard clip to ±10 V.
+                    // Wired inputs blend with the manual knob (knob.rs docs).
+                    // Knob-backed inputs blend in position space so the
+                    // knob's curve shapes the modulation; plain wire jacks
+                    // (audio/gate paths) stay additive. Multiple wires sum,
+                    // so the additive result can exceed the rails — hard
+                    // clip to ±10 V (positional blends clamp to the knob's
+                    // travel instead).
                     let dst = &mut self.in_bufs[node][jack];
-                    for x in dst.iter_mut().take(frames) {
-                        *x = (rt.unwired_value + *x * rt.atten + rt.offset)
-                            .clamp(-SIGNAL_MAX, SIGNAL_MAX);
+                    match rt.blend {
+                        BlendRt::Additive => {
+                            for x in dst.iter_mut().take(frames) {
+                                *x = (rt.unwired_value + *x * rt.atten + rt.offset)
+                                    .clamp(-SIGNAL_MAX, SIGNAL_MAX);
+                            }
+                        }
+                        BlendRt::Positional { base_pos, curve } => {
+                            let scale = rt.atten / SIGNAL_MAX;
+                            let base = base_pos + rt.offset;
+                            for x in dst.iter_mut().take(frames) {
+                                *x = curve.at(base + *x * scale);
+                            }
+                        }
                     }
                 }
                 self.analyzers[node][jack].update(&self.in_bufs[node][jack][..frames]);

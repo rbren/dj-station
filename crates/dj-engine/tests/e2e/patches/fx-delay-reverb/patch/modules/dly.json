@@ -12,7 +12,7 @@
       "offset": 0.0
     },
     "feedback": {
-      "position": 0.54999995,
+      "position": 0.55,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -22,12 +22,12 @@
       "offset": 0.0
     },
     "in_l": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "in_r": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },

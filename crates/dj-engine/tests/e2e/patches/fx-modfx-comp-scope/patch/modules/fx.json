@@ -2,7 +2,7 @@
   "ext": "com.dj.modfx",
   "knobs": {
     "depth": {
-      "position": 0.6999999,
+      "position": 0.7,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -12,12 +12,12 @@
       "offset": 0.0
     },
     "in_l": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "in_r": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },

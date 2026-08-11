@@ -2,7 +2,7 @@
   "ext": "com.dj.wavetable",
   "knobs": {
     "fine": {
-      "position": 0.57500005,
+      "position": 0.575,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -12,7 +12,7 @@
       "offset": 0.0
     },
     "fm_index": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -22,8 +22,8 @@
       "offset": 0.0
     },
     "pos": {
-      "position": 4.5474735e-13,
-      "atten": 0.1,
+      "position": 0.0,
+      "atten": 1.0,
       "offset": 0.5
     },
     "sync": {

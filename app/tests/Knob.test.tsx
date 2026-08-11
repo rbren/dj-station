@@ -369,14 +369,16 @@ describe('Knob', () => {
       />,
     );
     fireEvent.contextMenu(screen.getByRole('slider', { name: 'fm' }));
-    // Baseline 5, atten 0.4 => the wire swings ±2.
+    // Baseline 5, atten 0.4 => the wire swings ±2 (±0.2 of the travel on
+    // this linear 0..10 knob).
     expect((screen.getByLabelText('wire spread min') as HTMLInputElement).value).toBe('3');
     expect((screen.getByLabelText('wire spread max') as HTMLInputElement).value).toBe('7');
-    // Widening the top end to 10 gives a 3..10 spread: atten 0.7, centre 6.5.
+    // Widening the top end to 10 gives a 3..10 spread: atten 0.7 and a
+    // position-space offset of +0.15 (centre 6.5 = baseline 5 + 1.5 V).
     fireEvent.change(screen.getByLabelText('wire spread max'), { target: { value: '10' } });
     const [atten, offset] = onAttenOffset.mock.lastCall!;
     expect(atten).toBeCloseTo(0.7, 5);
-    expect(offset).toBeCloseTo(1.5, 5);
+    expect(offset).toBeCloseTo(0.15, 5);
   });
 
   it('unwired: menu has no wire spread controls', () => {

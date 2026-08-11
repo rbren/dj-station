@@ -18,6 +18,7 @@ export function KnobConfigMenu({
   onChange,
   onClose,
   wired,
+  plain,
   position,
   onPosition,
   onRelease,
@@ -31,6 +32,8 @@ export function KnobConfigMenu({
   onChange(config: KnobConfig): void;
   onClose(): void;
   wired?: boolean;
+  /** Plain wire jack — additive value-space blend (see Knob.tsx). */
+  plain?: boolean;
   /** Knob position: the spread is shown as absolute values around it. */
   position?: number;
   /** Direct value entry: sets the knob position for a typed value. */
@@ -60,9 +63,9 @@ export function KnobConfigMenu({
     };
   }, [onClose]);
 
-  const spread = spreadRange(config, position ?? 0, atten ?? 1, offset ?? 0);
+  const spread = spreadRange(config, position ?? 0, atten ?? 1, offset ?? 0, plain);
   const setSpread = (min: number, max: number) => {
-    const next = attenOffsetForSpread(config, position ?? 0, min, max);
+    const next = attenOffsetForSpread(config, position ?? 0, min, max, plain);
     onAttenOffset?.(next.atten, next.offset);
   };
 

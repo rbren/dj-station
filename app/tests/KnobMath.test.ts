@@ -19,7 +19,12 @@
 // (EXP_GEO / LOG_GEO / RATE cases).
 
 import { describe, expect, it } from 'vitest';
-import { mapPosition, positionForValue } from '../src/components/Knob';
+import {
+  attenOffsetForSpread,
+  mapPosition,
+  positionForValue,
+  spreadRange,
+} from '../src/components/Knob';
 import type { KnobConfig } from '../src/types';
 
 const LIN_0_10: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'linear' };
@@ -127,6 +132,64 @@ describe('positionForValue matches knob.rs position_for_value', () => {
         const v = mapPosition(config, p);
         expect(mapPosition(config, positionForValue(config, v))).toBeCloseTo(v, 4);
       }
+    }
+  });
+});
+
+describe('spreadRange matches the engine wired-blend laws (graph.rs)', () => {
+  // Positional (knob-backed) law: value = curve(clamp01(base_pos +
+  // signal * atten / 10 + offset)) for a ±5 V full-scale signal. Each row:
+  // [config, position, atten, offset, expected min, expected max].
+  const cases: [string, KnobConfig, number, number, number, number, number][] = [
+    // Linear 0..10 span: identical to the old additive ±5·atten law.
+    ['linear 0..10 centred, atten 1', LIN_0_10, 0.5, 1, 0, 0, 10],
+    ['linear 0..10 centred, atten 0.4', LIN_0_10, 0.5, 0.4, 0, 3, 7],
+    ['linear -5..5 pitch, atten 0.2', LIN_NEG, 0.5, 0.2, 0, -1, 1],
+    // Position offset shifts the band before mapping.
+    ['linear 0..10 offset +0.15', LIN_0_10, 0.5, 0.4, 0.15, 4.5, 8.5],
+    // Exp rate knob: the band is geometric around the baseline
+    // (mid = sqrt(0.01·2000) ≈ 4.472; ±quarter travel = ratio 21.147).
+    [
+      'exp rate centred, atten 0.5',
+      RATE,
+      0.5,
+      0.5,
+      0,
+      4.4721359 / 21.1474253,
+      4.4721359 * 21.1474253,
+    ],
+    // Full atten from centre reaches both endpoints (clamped travel).
+    ['exp rate centred, atten 1', RATE, 0.5, 1, 0, 0.01, 2000],
+    // Negative atten reverses the wire but not the displayed range.
+    ['linear 0..10 atten -0.4', LIN_0_10, 0.5, -0.4, 0, 3, 7],
+  ];
+  for (const [name, config, position, atten, offset, min, max] of cases) {
+    it(name, () => {
+      const s = spreadRange(config, position, atten, offset);
+      expect(s.min).toBeCloseTo(min, 4);
+      expect(s.max).toBeCloseTo(max, 4);
+    });
+  }
+
+  it('plain wire jacks keep the additive value-space law', () => {
+    // baseline 5 V + signal·0.4 for ±5 V: 3..7, offset in value units.
+    const s = spreadRange(LIN_0_10, 0.5, 0.4, 1.0, true);
+    expect(s.min).toBeCloseTo(4, 5);
+    expect(s.max).toBeCloseTo(8, 5);
+  });
+
+  it('attenOffsetForSpread inverts spreadRange (both laws)', () => {
+    const rows: [KnobConfig, number, number, boolean][] = [
+      [LIN_0_10, 2, 8, false],
+      [LIN_NEG, -3, 1, false],
+      [RATE, 2, 8, false],
+      [LIN_0_10, 2, 8, true],
+    ];
+    for (const [config, min, max, plain] of rows) {
+      const { atten, offset } = attenOffsetForSpread(config, 0.5, min, max, plain);
+      const s = spreadRange(config, 0.5, atten, offset, plain);
+      expect(s.min).toBeCloseTo(min, 3);
+      expect(s.max).toBeCloseTo(max, 3);
     }
   });
 });

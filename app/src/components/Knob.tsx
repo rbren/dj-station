@@ -4,9 +4,14 @@
 // they appear in the hover tooltip. Right-click opens the config editor.
 //
 // Wiring an input does not take the knob away: the knob sets the baseline
-// value and the incoming signal adds on top, scaled by the wire amount
-// (attenuverter). Drag sets the baseline; cmd/ctrl-drag sets the wire
-// amount, drawn as a spread arc around the knob's notch.
+// and the incoming signal moves it, scaled by the wire amount
+// (attenuverter). For knob-backed inputs the blend happens in POSITION
+// space — mirroring knob.rs JackRt exactly — so the knob's curve shapes
+// the modulation and the spread tracks the baseline (an exp rate knob
+// gets a geometric spread). Plain wire jacks (no manifest knob) keep the
+// additive value-space law so audio/gate paths pass through. Drag sets
+// the baseline; cmd/ctrl-drag sets the wire amount, drawn as a spread
+// arc around the knob's notch.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDisplay, stepLabel } from '../display';
@@ -17,17 +22,36 @@ const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 /** Nominal peak of a patch signal (modules output ±5 V full scale); the
  *  wire amount is expressed against it, so atten = 1 means the wire can
- *  swing the value by ±5. */
+ *  swing the value by ±5 V (additive) or half the knob travel
+ *  (positional). */
 export const WIRE_SIGNAL_REF = 5;
 
-export function mapPosition(config: KnobConfig, position: number): number {
-  let p = clamp01(position);
+/** The ±10 V signal rails — the positional blend's signal→position scale,
+ *  matching knob.rs (`signal * atten / 10`). */
+export const SIGNAL_RAIL = 10;
+
+/** Style quantization of a raw 0..1 position (knob.rs KnobConfig::snap):
+ *  detent rounding for stepped, on/off snap for switch/button. */
+export function snapPosition(config: KnobConfig, position: number): number {
+  const p = clamp01(position);
   if (config.style === 'switch' || config.style === 'button') {
-    p = p >= 0.5 ? 1 : 0;
-  } else if (config.style === 'stepped') {
-    const steps = Math.max(2, config.steps ?? 2);
-    p = Math.round(p * (steps - 1)) / (steps - 1);
+    return p >= 0.5 ? 1 : 0;
   }
+  if (config.style === 'stepped') {
+    const steps = Math.max(2, config.steps ?? 2);
+    return Math.round(p * (steps - 1)) / (steps - 1);
+  }
+  return p;
+}
+
+export function mapPosition(config: KnobConfig, position: number): number {
+  return curveAt(config, snapPosition(config, position));
+}
+
+/** Curve mapping only, no style snap (knob.rs KnobConfig::curve_at) — the
+ *  positional wire blend moves a snapped baseline continuously. */
+export function curveAt(config: KnobConfig, position: number): number {
+  let p = clamp01(position);
   if (config.curve === 'exp') {
     // Geometric interpolation when the range allows it, squared-position
     // fallback otherwise — exactly like knob.rs KnobConfig::map.
@@ -71,17 +95,53 @@ export function positionForValue(config: KnobConfig, value: number): number {
   return (lo + hi) / 2;
 }
 
-/** Value range a wired input can reach: the knob baseline plus the wire's
- *  swing (`signal * atten + offset` for a ±WIRE_SIGNAL_REF signal). */
-export function spreadRange(
+/** Knob-position swing of a ±WIRE_SIGNAL_REF signal in the positional
+ *  blend: `signal * atten / SIGNAL_RAIL` = half the travel at atten 1. */
+const positionalHalf = (atten: number) => (WIRE_SIGNAL_REF / SIGNAL_RAIL) * Math.abs(atten);
+
+/** Positions the positional blend can reach for a ±WIRE_SIGNAL_REF signal. */
+export function spreadPositions(
   config: KnobConfig,
   position: number,
   atten: number,
   offset: number,
 ): { min: number; max: number } {
-  const center = mapPosition(config, position) + offset;
-  const half = WIRE_SIGNAL_REF * Math.abs(atten);
-  return { min: center - half, max: center + half };
+  const center = snapPosition(config, position) + offset;
+  const half = positionalHalf(atten);
+  return { min: clamp01(center - half), max: clamp01(center + half) };
+}
+
+/** Value range a wired input can reach for a ±WIRE_SIGNAL_REF signal.
+ *  Positional (knob-backed) blend by default; `plain` selects the additive
+ *  value-space law of knob-less wire jacks (see the header comment). */
+export function spreadRange(
+  config: KnobConfig,
+  position: number,
+  atten: number,
+  offset: number,
+  plain = false,
+): { min: number; max: number } {
+  if (plain) {
+    const center = mapPosition(config, position) + offset;
+    const half = WIRE_SIGNAL_REF * Math.abs(atten);
+    return { min: center - half, max: center + half };
+  }
+  const p = spreadPositions(config, position, atten, offset);
+  return { min: curveAt(config, p.min), max: curveAt(config, p.max) };
+}
+
+/** Inverse of `curveAt` (no style snap): binary search over the monotone
+ *  curve, used to turn spread-editor values back into positions. */
+function positionForCurveValue(config: KnobConfig, value: number): number {
+  let lo = 0;
+  let hi = 1;
+  const increasing = curveAt(config, 1) >= curveAt(config, 0);
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (curveAt(config, mid) < value === increasing) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 /** Inverse of `spreadRange`: the atten/offset that put the wire's swing
@@ -91,11 +151,20 @@ export function attenOffsetForSpread(
   position: number,
   min: number,
   max: number,
+  plain = false,
 ): { atten: number; offset: number } {
-  const base = mapPosition(config, position);
+  if (plain) {
+    const base = mapPosition(config, position);
+    return {
+      atten: Math.max(-1, Math.min(1, (max - min) / (2 * WIRE_SIGNAL_REF))),
+      offset: (min + max) / 2 - base,
+    };
+  }
+  const pMin = positionForCurveValue(config, min);
+  const pMax = positionForCurveValue(config, max);
   return {
-    atten: Math.max(-1, Math.min(1, (max - min) / (2 * WIRE_SIGNAL_REF))),
-    offset: (min + max) / 2 - base,
+    atten: Math.max(-1, Math.min(1, (pMax - pMin) / (2 * positionalHalf(1)))),
+    offset: (pMin + pMax) / 2 - snapPosition(config, position),
   };
 }
 
@@ -125,6 +194,9 @@ export interface KnobProps {
    *  atten/offset (CV spread). */
   onReset?(): void;
   wired?: boolean;
+  /** Plain wire jack (no knob declared in the manifest or the patch):
+   *  the engine blends additively in value space, not position space. */
+  plain?: boolean;
   atten?: number;
   offset?: number;
   onAttenOffset?(atten: number, offset: number): void;
@@ -143,6 +215,7 @@ export function Knob(props: KnobProps) {
     onConfigChange,
     onReset,
     wired,
+    plain,
     appearance,
   } = props;
   const display = props.display;
@@ -204,6 +277,7 @@ export function Knob(props: KnobProps) {
       onChange={(c) => onConfigChange(c)}
       onClose={() => setMenuAt(null)}
       wired={wired}
+      plain={plain || config.style === 'wire'}
       position={position}
       onPosition={onPosition}
       onRelease={onRelease}
@@ -335,7 +409,17 @@ export function Knob(props: KnobProps) {
     );
   }
 
-  const spread = wired ? spreadRange(config, position, atten, offset) : null;
+  const spread = wired ? spreadRange(config, position, atten, offset, plain) : null;
+  // Arc endpoints in knob-position space: the positional blend already
+  // works there; the additive law inverts its value range back.
+  const arc = !spread
+    ? null
+    : plain
+      ? {
+          min: positionForValue(config, spread.min),
+          max: positionForValue(config, spread.max),
+        }
+      : spreadPositions(config, position, atten, offset);
   const shown = formatDisplay(display, value, config);
   const tooltip = spread
     ? `${label}: ${shown} (wire ${formatDisplay(display, spread.min, config)}…${formatDisplay(
@@ -351,7 +435,7 @@ export function Knob(props: KnobProps) {
 
   return (
     <div className="knob" data-testid={`knob-${label}`}>
-      {spread && (
+      {arc && (
         <svg className="knob-spread" viewBox="0 0 44 44" aria-hidden="true">
           {/* Overscrolling the cmd-drag past zero reverses the wire (negative
               atten); the arc flips color so the flipped range reads at a
@@ -359,13 +443,7 @@ export function Knob(props: KnobProps) {
           <path
             data-testid={`knob-spread-${label}`}
             className={atten < 0 ? 'knob-spread-reversed' : undefined}
-            d={arcPath(
-              positionForValue(config, spread.min),
-              positionForValue(config, spread.max),
-              22,
-              22,
-              20,
-            )}
+            d={arcPath(arc.min, arc.max, 22, 22, 20)}
           />
         </svg>
       )}

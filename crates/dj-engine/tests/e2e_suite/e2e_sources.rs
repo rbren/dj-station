@@ -38,9 +38,11 @@ fn regen_vco_wavetable() {
     e.set_knob_position("lfo", "pitch", 0.0).unwrap();
     e.connect("lfo", "tri", "vco1", "pwm").unwrap();
     e.connect("lfo", "tri", "wt1", "pos").unwrap();
-    // Attenuvert the LFO into each destination's useful range.
+    // Attenuvert the LFO into each destination's useful range. `pos` is a
+    // 0..1 knob: with the positional blend, offset +0.5 centres the travel
+    // and full atten lets the ±5 V triangle sweep the whole table.
     e.set_knob_atten_offset("vco1", "pwm", 0.6, 0.0).unwrap();
-    e.set_knob_atten_offset("wt1", "pos", 0.1, 0.5).unwrap();
+    e.set_knob_atten_offset("wt1", "pos", 1.0, 0.5).unwrap();
 
     e.set_knob_value("vco1", "pitch", -1.0).unwrap(); // C3
     e.set_knob_value("wt1", "pitch", 1.0).unwrap(); // C5

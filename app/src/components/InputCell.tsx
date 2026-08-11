@@ -35,6 +35,9 @@ export interface InputCellProps {
 export function InputCell(props: InputCellProps) {
   const { cell, state, wired } = props;
   const config = state?.config ?? props.manifestKnob ?? DEFAULT_KNOB;
+  // No knob declared anywhere = plain wire jack: the engine blends the
+  // signal additively in value space (knob.rs JackRt::from_state).
+  const plain = !state?.config && !props.manifestKnob;
   const control = cell.control ?? 'auto';
   const label = cell.label ?? cell.jack;
   const appearance = control === 'fader' ? 'fader' : control === 'hfader' ? 'hfader' : undefined;
@@ -64,6 +67,7 @@ export function InputCell(props: InputCellProps) {
           appearance={appearance}
           position={state?.position ?? 0}
           wired={wired}
+          plain={plain}
           atten={state?.atten}
           offset={state?.offset}
           onPosition={props.onKnobPosition}
