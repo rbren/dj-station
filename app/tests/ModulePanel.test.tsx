@@ -287,4 +287,13 @@ describe('grid-conforming panel size', () => {
     fireEvent.click(screen.getByTestId('module-remove-osc1'));
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
+
+  it('renders a ? docs button in the title bar only when onDocs is provided', () => {
+    const { rerender } = render(<ModulePanel {...baseProps} />);
+    expect(screen.queryByTestId('module-docs-osc1')).toBeNull();
+    const onDocs = vi.fn();
+    rerender(<ModulePanel {...baseProps} onDocs={onDocs} />);
+    fireEvent.click(screen.getByTestId('module-docs-osc1'));
+    expect(onDocs).toHaveBeenCalledTimes(1);
+  });
 });

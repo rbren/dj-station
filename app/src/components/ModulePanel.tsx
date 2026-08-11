@@ -67,6 +67,8 @@ export interface ModulePanelProps {
   zoom?: number;
   /** Delete this module instance (renders a ✕ button in the corner). */
   onRemove?(): void;
+  /** Open this module's documentation (renders a ? button in the title bar). */
+  onDocs?(): void;
   /** Called on pointer-up after knob/param drags (undo gesture boundary). */
   onEditEnd?(): void;
   /** Right-click on the panel (module context menu). */
@@ -194,6 +196,17 @@ export function ModulePanel(props: ModulePanelProps) {
         >
           {manifest.name}
           <span className="module-instance">{instanceId}</span>
+          {props.onDocs && (
+            <button
+              className="module-docs-btn"
+              data-testid={`module-docs-${instanceId}`}
+              data-tip="Documentation"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => props.onDocs?.()}
+            >
+              ?
+            </button>
+          )}
           {props.onRemove && (
             <button
               className="module-remove"

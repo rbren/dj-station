@@ -35,7 +35,10 @@ export const MACRO_DOC: ModuleDoc = {
     'A user macro: a saved sub-patch collapsed into a single module ' +
     '(select modules, then "Collapse to Module"). Its jacks are the ' +
     'promoted boundary connections of the modules inside; definitions ' +
-    'live in the library database and patches pin the version they used.',
+    'live in the library database and patches pin the version they used. ' +
+    'Good for taming rack sprawl and building a personal instrument ' +
+    'library: a favorite voice or effect chain becomes one module you can ' +
+    'drop into any patch.',
   examples: [
     'Collapse an oscillator + filter + ADSR voice into one reusable "voice" module.',
     'Wrap a send/return effect chain and reuse it across patches.',
@@ -47,7 +50,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.oscillator': {
     summary:
       'Basic audio oscillator with sine, saw, square and triangle shapes, ' +
-      'exponential FM and hard sync. Output is +-5 V audio.',
+      'exponential FM and hard sync. Output is +-5 V audio. The ' +
+      'bread-and-butter starting point for basslines, leads and drones: ' +
+      'pair it with a filter and envelope for a classic subtractive voice, ' +
+      'or point it at another oscillator\u2019s fm input as a modulator.',
     inputs: {
       pitch: 'Pitch CV, 1 V/oct.',
       fm: 'Exponential FM, added to pitch in 1 V/oct units.',
@@ -63,7 +69,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.vco': {
     summary:
       'Full-featured VCO: simultaneous saw/tri/sine/pulse outputs, linear ' +
-      'through-zero-style FM with an index control, PWM and hard sync.',
+      'through-zero-style FM with an index control, PWM and hard sync. ' +
+      'Good for rich layered voices (stack its outputs), animated PWM pads ' +
+      'and basses, and clangorous FM bells and percussion.',
     inputs: {
       pitch: 'Pitch CV, 1 V/oct.',
       fine: 'Fine tune, volts added to pitch (fractions of an octave).',
@@ -86,7 +94,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.wavetable': {
     summary:
       'Wavetable oscillator: morphs through a table of waveforms with the ' +
-      'pos control, plus FM and hard sync.',
+      'pos control, plus FM and hard sync. Good for evolving digital ' +
+      'timbres that static waveforms can\u2019t reach: sweep pos with an ' +
+      'LFO or envelope for anything from glassy keys to aggressive ' +
+      'modern basses.',
     inputs: {
       pitch: 'Pitch CV, 1 V/oct.',
       fine: 'Fine tune offset.',
@@ -101,7 +112,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.noise': {
     summary:
       'Noise source with white/pink/red/blue spectra plus a clocked or ' +
-      'free-running random CV (sample-and-hold style) output.',
+      'free-running random CV (sample-and-hold style) output. The raw ' +
+      'material for hi-hats, snares, wind and surf textures; the random ' +
+      'output is the classic source of unpredictable melodies and ' +
+      'stepped modulation.',
     inputs: {
       clock: 'Trigger: samples a new random value on each rising edge.',
       rate: 'Internal random rate (Hz) when no clock is patched.',
@@ -121,7 +135,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.drum': {
     summary:
       'Three-voice analog-style drum machine: kick, snare and hi-hat with ' +
-      'per-voice trigger, tune, decay and tone controls.',
+      'per-voice trigger, tune, decay and tone controls. Good for an ' +
+      'instant house/techno rhythm section without samples: patch triggers ' +
+      'from a sequencer and tune the voices to sit under a playing deck.',
     inputs: {
       kick_trig: 'Kick trigger (rising edge).',
       kick_tune: 'Kick pitch offset, volts.',
@@ -152,7 +168,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.filter': {
     summary:
       'Multimode filter with simultaneous low-pass, band-pass, high-pass ' +
-      'and notch outputs, resonance, drive and selectable topology.',
+      'and notch outputs, resonance, drive and selectable topology. The ' +
+      'heart of subtractive synthesis: it turns raw buzzy waveforms into ' +
+      'plucks, acid lines, soft pads and filter sweeps, and doubles as a ' +
+      'tone-shaping EQ stage for drums or a whole mix.',
     inputs: {
       in: 'Audio input.',
       cutoff: 'Cutoff frequency, Hz (exponential response).',
@@ -174,7 +193,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.vca': {
     summary:
       'Voltage-controlled amplifier: multiplies the input by the CV. ' +
-      'CV at 0 V mutes; full CV passes the signal through.',
+      'CV at 0 V mutes; full CV passes the signal through. This is what ' +
+      'gives notes a beginning and an end \u2014 an envelope on cv shapes ' +
+      'loudness into plucks, swells and stabs \u2014 and with an LFO it ' +
+      'makes tremolo or rhythmic gating.',
     inputs: {
       in: 'Signal input (audio or CV).',
       cv: 'Gain CV: 0 V = silent, full scale = unity.',
@@ -188,7 +210,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.vca_dual': {
     summary:
       'Two independent VCAs with selectable linear/exponential response ' +
-      'and a CV offset per channel; useful as a stereo pair.',
+      'and a CV offset per channel; useful as a stereo pair. Good for ' +
+      'fading stereo sources (a deck, an effect return) under one ' +
+      'envelope, or as two utility level controls anywhere in the patch.',
     inputs: {
       'in#': 'Channel signal input.',
       'cv#': 'Channel gain CV.',
@@ -201,7 +225,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.waveshaper': {
     summary:
       'Nonlinear waveshaper/distortion with multiple transfer-curve modes, ' +
-      'drive, DC bias and output level.',
+      'drive, DC bias and output level. Good for adding harmonics and ' +
+      'attitude: warm a thin sine into a usable bass, crunch drums, or ' +
+      'push it hard for aggressive fuzz and broken-speaker textures.',
     inputs: {
       in: 'Audio input.',
       mode: 'Shaping curve select (stepped).',
@@ -216,7 +242,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Stereo compressor with sidechain input, threshold/ratio/knee, ' +
       'attack/release and makeup gain. The gr output exposes the gain ' +
-      'reduction as a CV.',
+      'reduction as a CV. Good for gluing a mix together, keeping levels ' +
+      'consistent, and \u2014 via the sidechain \u2014 the pumping ' +
+      'kick-ducks-everything effect at the core of house and EDM.',
     inputs: {
       in_l: 'Left audio input.',
       in_r: 'Right audio input.',
@@ -241,7 +269,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Attack / Decay / Sustain / Release envelope generator. The envelope ' +
       'rises while gate is high and releases when it falls; retrig restarts ' +
-      'the attack without dropping the gate.',
+      'the attack without dropping the gate. The standard way to give ' +
+      'notes shape: snappy settings make plucks and percussion, slow ones ' +
+      'make pads and swells \u2014 aim it at a VCA for loudness or a ' +
+      'filter cutoff for tone.',
     inputs: {
       gate: 'Gate input: high (>= 1 V) opens the envelope.',
       retrig: 'Trigger: rising edge restarts the attack phase.',
@@ -260,7 +291,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Low-frequency oscillator with multiple shapes, clock sync with ' +
       'ratio, phase offset and reset. Bipolar, unipolar and phase-shifted ' +
-      'outputs run simultaneously.',
+      'outputs run simultaneously. The workhorse for adding movement to ' +
+      'anything static: filter wobbles, tremolo, vibrato, auto-panning ' +
+      'and slow drifting pads \u2014 clock-sync it for dubstep-style ' +
+      'tempo-locked wubs.',
     inputs: {
       rate: 'Free-running rate, Hz.',
       shape: 'Waveform select (stepped: sine, tri, saw, square, random...).',
@@ -284,7 +318,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Function generator (Maths-style): a rise/fall slope that can be a ' +
       'triggered envelope, a gated ASR, a slew limiter on in, or a cycling ' +
-      'LFO. End-of-rise / end-of-cycle triggers make it a rhythm tool too.',
+      'LFO. End-of-rise / end-of-cycle triggers make it a rhythm tool too. ' +
+      'The Swiss-army modulator: percussive envelopes, portamento on ' +
+      'pitch CVs, and \u2014 chained via eoc \u2014 self-patched ' +
+      'generative rhythms.',
     inputs: {
       in: 'Signal to slew-limit (follows in at the rise/fall rates).',
       trig: 'Trigger: fires one rise+fall cycle.',
@@ -307,7 +344,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.sample_hold': {
     summary:
       'Sample & hold / track & hold with built-in noise source and slew. ' +
-      'Samples in on each trig edge; mode selects sample vs track behavior.',
+      'Samples in on each trig edge; mode selects sample vs track behavior. ' +
+      'The classic recipe for burbling random melodies (clock it, quantize ' +
+      'its output) and for turning any moving signal into stepped, ' +
+      'rhythmic modulation.',
     inputs: {
       in: 'Signal to sample (defaults to internal noise if unpatched).',
       trig: 'Trigger: sample on rising edge.',
@@ -326,7 +366,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Master clock: BPM with run/reset, swing and a bar-length setting. ' +
       'Emits the base clock plus divided (/2../16) and multiplied (x2..x4) ' +
-      'triggers and a once-per-bar pulse.',
+      'triggers and a once-per-bar pulse. The heartbeat of any rhythmic ' +
+      'patch: it keeps sequencers, LFOs and delays locked to one tempo, ' +
+      'and its divisions layer half-time and double-time parts that ' +
+      'stay in step.',
     inputs: {
       bpm: 'Tempo, beats per minute.',
       run: 'Run switch: clock emits pulses while high.',
@@ -353,7 +396,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.step_seq': {
     summary:
       '16-step CV/gate sequencer: per-step CV, gate on/off and ratchet ' +
-      'count, with length, direction (fwd/rev/pendulum/random) and glide.',
+      'count, with length, direction (fwd/rev/pendulum/random) and glide. ' +
+      'The main tool for writing melodic lines in the rack: basslines, ' +
+      'arpeggios and acid sequences, with ratchets for fills and glide ' +
+      'for 303-style slides.',
     inputs: {
       clock: 'Step advance trigger.',
       reset: 'Trigger: jump back to step 1.',
@@ -376,7 +422,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       '8-track trigger sequencer: each track has a pattern (set from the ' +
       'panel grid) and its own length, so tracks can polyrhythm against ' +
-      'each other.',
+      'each other. The drum-programming surface of the rack: draw kick, ' +
+      'snare and hat patterns 808-style, and give tracks different ' +
+      'lengths for evolving polyrhythms.',
     inputs: {
       clock: 'Step advance trigger for all tracks.',
       reset: 'Trigger: all tracks back to step 1.',
@@ -393,7 +441,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Four-channel Euclidean rhythm generator: each channel spreads fill ' +
       'hits evenly across steps with a rotation, a musical way to get ' +
-      'interlocking patterns from one clock.',
+      'interlocking patterns from one clock. Good for grooves you ' +
+      'wouldn\u2019t program by hand: world-rhythm and techno patterns ' +
+      'emerge from two numbers, and nudging fill or rotation live makes ' +
+      'instant variations.',
     inputs: {
       clock: 'Step advance trigger.',
       reset: 'Trigger: back to step 1 on all channels.',
@@ -412,7 +463,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Random looping CV (Turing machine style): a shift register that ' +
       'mutates with probability prob; at prob 0 the loop repeats forever, ' +
-      'at full prob it is fully random. Optional built-in quantizer.',
+      'at full prob it is fully random. Optional built-in quantizer. ' +
+      'The generative-melody machine: dial in some chaos until a phrase ' +
+      'you like appears, then lock it \u2014 great for self-playing ' +
+      'ambient patches and endless hooks.',
     inputs: {
       clock: 'Step advance trigger.',
       prob: 'Mutation probability, 0..1 (0 = locked loop).',
@@ -434,7 +488,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Sequential switch / router: distributes in across outputs o1..o8, or ' +
       'selects one of i1..i8 onto out — stepped by a clock or addressed ' +
-      'directly by CV. Per-step mute switches skip steps.',
+      'directly by CV. Per-step mute switches skip steps. Good for ' +
+      'evolving patches without touching a knob: rotate one melody across ' +
+      'several voices, or cycle different modulators onto one destination ' +
+      'for movement that changes every bar.',
     inputs: {
       in: 'Signal to distribute to o1..o8 (1-to-N mode).',
       'i#': 'Input # for N-to-1 selection onto out.',
@@ -457,7 +514,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   // ----------------------------------------------------------------- Effects
   'com.dj.delay': {
     summary:
-      'Stereo delay with clock-syncable time, feedback, damping filters and ' + 'ping-pong mode.',
+      'Stereo delay with clock-syncable time, feedback, damping filters and ' +
+      'ping-pong mode. Good for adding space and rhythm at once: dub ' +
+      'echoes on stabs and vocals, dotted-eighth bounce on melodies, and ' +
+      'runaway feedback swells as a transition effect.',
     inputs: {
       in_l: 'Left audio input.',
       in_r: 'Right audio input.',
@@ -476,7 +536,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.reverb': {
     summary:
       'Stereo algorithmic reverb with size, decay, damping, diffusion and a ' +
-      'freeze switch that holds the tail forever.',
+      'freeze switch that holds the tail forever. Good for putting sounds ' +
+      'in a space \u2014 from tight rooms on drums to huge ambient washes ' +
+      'on pads \u2014 and freeze turns any moment into a sustained drone ' +
+      'to play over.',
     inputs: {
       in_l: 'Left audio input.',
       in_r: 'Right audio input.',
@@ -494,7 +557,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Granular processor: chops the incoming audio into grains with ' +
       'controllable density, size, playback position, pitch and stereo ' +
-      'spread; freeze locks the buffer.',
+      'spread; freeze locks the buffer. Good for turning any source into ' +
+      'shimmering clouds, stretched ambient beds and glitchy stutters ' +
+      '\u2014 freeze a deck mid-phrase and smear it into a texture while ' +
+      'the next track comes in.',
     inputs: {
       in_l: 'Left audio input.',
       in_r: 'Right audio input.',
@@ -516,7 +582,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Stereo modulation multi-effect: chorus / flanger / phaser modes with ' +
       'rate, depth, feedback and stereo spread; through_zero enables ' +
-      'through-zero flanging.',
+      'through-zero flanging. Good for width and motion: chorus thickens ' +
+      'pads and unison leads, flanger adds jet-engine sweeps to drums, ' +
+      'phaser gives keys and guitars a classic swirl.',
     inputs: {
       in_l: 'Left audio input.',
       in_r: 'Right audio input.',
@@ -535,7 +603,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Physical-modelling resonator (Rings-style): excites a modal / string ' +
       'model with the input or trig, tuned by pitch with structure, ' +
-      'brightness, damping and position controls.',
+      'brightness, damping and position controls. Good for acoustic-feeling ' +
+      'voices no oscillator makes: plucked strings, struck bells, marimbas ' +
+      'and gongs \u2014 or feed it a full mix to make everything ring in key.',
     inputs: {
       in: 'Excitation audio input.',
       trig: 'Trigger: strike the resonator.',
@@ -556,7 +626,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.mixer': {
     summary:
       'Six-channel mixer with per-channel level and a master level; the inv ' +
-      'output is the inverted mix for phase tricks and CV math.',
+      'output is the inverted mix for phase tricks and CV math. Good for ' +
+      'summing a multi-oscillator stack into one fat voice, balancing a ' +
+      'few parts into a submix, or blending LFOs into complex modulation.',
     inputs: {
       'in#': 'Channel # input (audio or CV).',
       'lvl#': 'Channel # level, 0..1.',
@@ -576,7 +648,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Eight-channel attenuverter/offset: each channel scales its input by ' +
       '-1..+1 (inverting below zero) and adds a DC offset — the utility ' +
       'knob for taming or flipping any CV. Unpatched channels output just ' +
-      'the offset, making it a CV source too.',
+      'the offset, making it a CV source too. Good for making modulation ' +
+      'musical: shrink an LFO to a subtle vibrato, flip an envelope to ' +
+      'duck instead of swell, or dial in a fixed voltage by hand.',
     inputs: {
       'in#': 'Channel # input.',
       'atten#': 'Channel # gain, -1..+1 (negative inverts).',
@@ -591,7 +665,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.mult': {
     summary:
       'Buffered mult, merge and split in one panel: two 1-to-4 mults, a ' +
-      '4-to-1 merge (sum), and a 1-of-4 splitter addressed by split_sel.',
+      '4-to-1 merge (sum), and a 1-of-4 splitter addressed by split_sel. ' +
+      'The plumbing of a patch: send one clock or pitch CV to several ' +
+      'destinations at once, or gather several triggers onto one input.',
     inputs: {
       a_in: 'Mult A input (copied to a1..a4).',
       b_in: 'Mult B input (copied to b1..b4).',
@@ -610,7 +686,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.logic': {
     summary:
       'Logic and comparator toolbox: boolean gates on a/b/c, a threshold ' +
-      'comparator, a window comparator and a gate-to-trigger converter.',
+      'comparator, a window comparator and a gate-to-trigger converter. ' +
+      'Good for deriving new rhythms from existing ones \u2014 combine two ' +
+      'sequencer patterns into a third \u2014 and for turning any CV into ' +
+      'gates (e.g. fire an event whenever an LFO crosses a level).',
     inputs: {
       a: 'Logic input A (>= 1 V is true).',
       b: 'Logic input B.',
@@ -642,7 +721,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Pitch quantizer: snaps the input CV to the nearest note of a scale ' +
       '(scale 0 is a custom scale from the panel keyboard), with root, ' +
-      'semitone and octave transpose. Emits a trigger on each note change.',
+      'semitone and octave transpose. Emits a trigger on each note change. ' +
+      'What turns raw voltages into music: put it between any modulation ' +
+      'source \u2014 random, LFO, sequencer \u2014 and an oscillator and ' +
+      'the output always lands in key.',
     inputs: {
       in: 'CV to quantize (1 V/oct).',
       scale: 'Scale select (0 = custom scale from the keyboard).',
@@ -660,7 +742,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.gain_native': {
     summary:
       'Sample native (dylib) extension: a simple gain stage. Demonstrates ' +
-      'the unsandboxed native module ABI; the boost param adds fixed gain.',
+      'the unsandboxed native module ABI; the boost param adds fixed gain. ' +
+      'Musically it\u2019s a utility level trim; its real purpose is as ' +
+      'the reference example for writing native extensions.',
     inputs: {
       in: 'Signal input.',
       gain: 'Gain multiplier.',
@@ -675,7 +759,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Oscilloscope and signal analyzer: displays the input and extracts ' +
       'pitch, level and trigger information as CV outputs. Audio passes ' +
-      'through unchanged on thru.',
+      'through unchanged on thru. Good for understanding a patch \u2014 ' +
+      'see what a knob actually does to the wave \u2014 and its pitch/ ' +
+      'level/onset outputs let audio itself drive the rack, e.g. a deck ' +
+      'triggering envelopes.',
     inputs: {
       in: 'Signal to analyze.',
       hysteresis: 'Trigger-detection hysteresis, volts.',
@@ -696,7 +783,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Live webcam monitor panel. The video preview is pure app-layer ' +
       '(getUserMedia); audio passes through in -> thru so the panel can sit ' +
       'inline in the rack. Camera enablement is per-session and never saved ' +
-      'in the patch. Independent of the Gesture module.',
+      'in the patch. Independent of the Gesture module. Good for streaming ' +
+      'and recorded performances: keep your framing in view, or just watch ' +
+      'your hands while learning controller moves.',
     inputs: { in: 'Audio pass-through input.' },
     outputs: { thru: 'Unchanged copy of in.' },
     examples: ['Drop it anywhere in the rack to keep an eye on yourself while performing.'],
@@ -707,7 +796,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'The rack\u2019s connection to the audio device: whatever arrives at ' +
       'l/r is what you hear. channel_offset picks the first hardware output ' +
-      'channel pair on multi-channel interfaces.',
+      'channel pair on multi-channel interfaces. Every audible patch ends ' +
+      'here \u2014 it serves no sound of its own, it\u2019s the speakers.',
     inputs: {
       l: 'Left channel to the audio device.',
       r: 'Right channel to the audio device.',
@@ -721,7 +811,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       '(map0..) — use the panel\u2019s learn flow to bind knobs/pads. A ' +
       '4-voice polyphonic note allocator feeds the v1..v4 pitch/gate/velocity ' +
       'trios, plus channel-wide wheels and transport. LED feedback mappings ' +
-      'are input jacks (led0..) that drive lights on the controller.',
+      'are input jacks (led0..) that drive lights on the controller. This ' +
+      'is how hardware gets hands-on with the rack: play patches from a ' +
+      'keyboard, and put filter sweeps and crossfades under real knobs ' +
+      'and faders for live performance.',
     inputs: { 'led#': 'LED feedback: send a CV here to light the mapped control.' },
     outputs: {
       'map#': 'A learned control (CC/note), 0..+10 V.',
@@ -747,7 +840,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'the active mode and each named mapping becomes an output jack, like ' +
       'MIDI mappings. Detection runs off the audio thread; values are ' +
       'applied sample-accurately and hold their last value on dropped ' +
-      'frames.',
+      'frames. Good for performing without touching anything: wave a hand ' +
+      'to sweep a filter, ride a virtual wheel to nudge a deck, keep ' +
+      'playing while your hands are on other gear.',
     outputs: { 'map#': 'A gesture mapping value, as configured in the panel.' },
     examples: ['Add a "wheel" mapping and wire it to a Deck speed for touchless nudging.'],
   },
@@ -756,7 +851,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'DJ deck: plays a library track with pitch fader, phase nudge, hot ' +
       'cues, loop and beat-synced outputs. Beatgrids, cues and loops are ' +
       'stored in the track library (not the patch). When stems are analyzed, ' +
-      'per-stem outputs and gain params let you remix the track in the rack.',
+      'per-stem outputs and gain params let you remix the track in the rack. ' +
+      'The centerpiece of DJing in the rack: beat-match and blend real ' +
+      'tracks, and \u2014 because beats and stems are jacks \u2014 let the ' +
+      'music drive synths, sequencers and effects around it.',
     inputs: {
       play_gate: 'Play/pause gate: high plays, low pauses.',
       speed: 'Pitch fader, scaled by the pitch_range param.',
@@ -796,7 +894,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Simple file player: plays a loaded audio file with variable speed ' +
       'and looping — the deck\u2019s minimal sibling for backing tracks and ' +
-      'samples.',
+      'samples. Good for anything that just needs to play: ambient beds ' +
+      'and field recordings under a set, loops and one-shots as extra ' +
+      'texture, with speed as a quick pitch/time effect.',
     inputs: {
       play_gate: 'Play/pause gate.',
       speed: 'Playback rate multiplier, -2..+2 (negative reverses).',
@@ -808,7 +908,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'builtin.crossfader': {
     summary:
       'DJ crossfader: blends stereo pair A and pair B under one fader. ' +
-      '-10 V is full A, +10 V full B, 0 V an equal-power blend.',
+      '-10 V is full A, +10 V full B, 0 V an equal-power blend. The heart ' +
+      'of the two-deck mix \u2014 smooth transitions and cuts between ' +
+      'tracks \u2014 and, driven by CV, an automatic or rhythmic blend ' +
+      'between any two stereo sources.',
     inputs: {
       a_l: 'Channel A left.',
       a_r: 'Channel A right.',

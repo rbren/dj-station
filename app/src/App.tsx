@@ -657,6 +657,14 @@ export default function App() {
     setCtxMenu({ x: e.clientX, y: e.clientY, instance });
   }, []);
 
+  const openDocs = useCallback(
+    (instance: string) => {
+      const node = store.getState().nodes.find((n) => n.instance_id === instance);
+      if (node) setDocs({ typeId: node.type_id, manifest: node.manifest });
+    },
+    [store],
+  );
+
   const onRackContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setCtxMenu({ x: e.clientX, y: e.clientY });
@@ -709,10 +717,7 @@ export default function App() {
       {
         label: 'Documentation',
         testId: 'ctx-docs',
-        onSelect: () => {
-          const node = store.getState().nodes.find((n) => n.instance_id === instance);
-          if (node) setDocs({ typeId: node.type_id, manifest: node.manifest });
-        },
+        onSelect: () => openDocs(instance),
       },
       {
         label: 'Reset to defaults',
@@ -728,7 +733,7 @@ export default function App() {
         hint: 'not implemented',
       },
     ];
-  }, [ctxMenu, savePatch, removeModule, store, refresh]);
+  }, [ctxMenu, savePatch, removeModule, openDocs, refresh]);
 
   return (
     <main className="app">
@@ -924,6 +929,7 @@ export default function App() {
                     endModuleDrag={endModuleDrag}
                     zoom={zoom}
                     removeModule={removeModule}
+                    openDocs={openDocs}
                     toggleSelected={toggleSelected}
                     onJackClick={onJackClick}
                     onContextMenu={onModuleContextMenu}

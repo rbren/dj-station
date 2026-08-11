@@ -1387,6 +1387,28 @@ body {
   background: #2a2e35;
 }
 
+.module-docs-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #565e6b;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.module-docs-btn:hover {
+  color: #62d0ff;
+  background: #2a2e35;
+}
+
+/* When the ? button is present it carries the auto margin; ✕ sits next to it. */
+.module-docs-btn ~ .module-remove {
+  margin-left: 0;
+}
+
 .patch-title {
   color: #8a93a2;
   font-size: 12px;
@@ -2105,13 +2127,6 @@ body {
 .docs-summary {
   margin: 0 0 6px;
   line-height: 1.5;
-}
-
-.docs-conventions {
-  margin: 0 0 10px;
-  font-size: 11px;
-  color: #8a93a2;
-  line-height: 1.4;
 }
 
 .docs-section h4 {
