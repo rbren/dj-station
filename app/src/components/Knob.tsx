@@ -299,8 +299,12 @@ export function Knob(props: KnobProps) {
     <div className="knob" data-testid={`knob-${label}`}>
       {spread && (
         <svg className="knob-spread" viewBox="0 0 44 44" aria-hidden="true">
+          {/* Overscrolling the cmd-drag past zero reverses the wire (negative
+              atten); the arc flips color so the flipped range reads at a
+              glance. */}
           <path
             data-testid={`knob-spread-${label}`}
+            className={atten < 0 ? 'knob-spread-reversed' : undefined}
             d={arcPath(
               positionForValue(config, spread.min),
               positionForValue(config, spread.max),
