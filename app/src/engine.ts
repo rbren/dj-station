@@ -226,8 +226,10 @@ export class EngineClient extends IpcClient {
   addMidiLedMapping(instance: string, kind: string, num: number, name: string) {
     return this.call<void>('add_midi_led_mapping', { instance, kind, num, name });
   }
+  /** Polled by the gesture panel; quiet because a poll racing the module's
+   *  removal (or an undo/redo rebuild) is expected, not an error. */
   gestureStatus(instance: string) {
-    return this.call<GestureStatus>('gesture_status', { instance });
+    return this.call<GestureStatus>('gesture_status', { instance }, { quiet: true });
   }
   gestureSetMode(instance: string, mode: string) {
     return this.call<void>('gesture_set_mode', { instance, mode });

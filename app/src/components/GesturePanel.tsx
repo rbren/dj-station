@@ -88,10 +88,22 @@ export function GesturePanel({ instance, api, onChanged, pollMs = 100 }: Gesture
   const [learnName, setLearnName] = useState('');
   const [learning, setLearning] = useState(false);
   const learningRef = useRef(false);
+  // Guards in-flight status polls that resolve after the panel unmounts
+  // (module removed): the interval is cleared, but a pending IPC round
+  // trip must not land a setState on the dead panel.
+  const disposedRef = useRef(false);
+  useEffect(() => {
+    disposedRef.current = false;
+    return () => {
+      disposedRef.current = true;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     const s = await api.status(instance);
-    if (s) setStatus(s);
+    // A null status is an expected race (the module was just removed or an
+    // undo rebuilt the engine); keep the last snapshot rather than flicker.
+    if (s && !disposedRef.current) setStatus(s);
   }, [api, instance]);
 
   // Overlay poll: detection data + values arrive with the status. First
