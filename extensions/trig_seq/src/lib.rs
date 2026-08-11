@@ -2,7 +2,11 @@
 //! per-track length.
 //!
 //! Inputs: `clock`, `reset`, `pat1..pat8` (16-bit pattern per track) and
-//! `len1..len8` (1..16). Outputs: `trig1..trig8`.
+//! `len1..len8` (1..16). Outputs: `trig1..trig8` plus `pos` — the number
+//! of clocks played since the last reset (-1 until the first clock), from
+//! which each track's current step is `pos mod len`. `pos` wraps at
+//! 720720 = lcm(1..16), so the modulus stays exact for every track length
+//! and the value stays exactly representable in f32.
 //!
 //! ## Why a bitmask instead of 128 jacks
 //!
@@ -37,14 +41,20 @@ const IN_LEN0: usize = 10;
 
 const TRACKS: usize = 8;
 const STEPS: usize = 16;
+const OUT_POS: usize = TRACKS;
 const GATE_V: f32 = 10.0;
 const PULSE_SECS: f32 = 0.005;
 const DEFAULT_INTERVAL_SECS: f32 = 0.02;
+/// `pos` wrap point: lcm(1..16), so `pos mod len` survives the wrap for
+/// every track length (and 720720 < 2^24 stays f32-exact).
+const POS_WRAP: u32 = 720_720;
 
 pub struct TrigSeq {
     sample_rate: f32,
     step: [u8; TRACKS],
     timers: [i32; TRACKS],
+    /// Clocks played since the last arm (reset/instantiation), mod POS_WRAP.
+    pos: u32,
     armed: bool,
     last_clock: f32,
     last_reset: f32,
@@ -55,13 +65,14 @@ pub struct TrigSeq {
 
 impl Module for TrigSeq {
     const N_INPUTS: usize = 18;
-    const N_OUTPUTS: usize = TRACKS;
+    const N_OUTPUTS: usize = TRACKS + 1;
 
     fn new(ctx: &InitCtx) -> Self {
         TrigSeq {
             sample_rate: ctx.sample_rate,
             step: [0; TRACKS],
             timers: [0; TRACKS],
+            pos: 0,
             armed: true,
             last_clock: 0.0,
             last_reset: 0.0,
@@ -101,6 +112,11 @@ impl Module for TrigSeq {
                 self.since_clock = 0.0;
                 let width =
                     ((PULSE_SECS * self.sample_rate).min(0.45 * self.interval) as i32).max(1);
+                self.pos = if self.armed {
+                    0
+                } else {
+                    (self.pos + 1) % POS_WRAP
+                };
                 for t in 0..TRACKS {
                     if self.armed {
                         self.step[t] = 0;
@@ -126,17 +142,19 @@ impl Module for TrigSeq {
                     0.0
                 };
             }
+            io.outputs[OUT_POS][s] = if self.armed { -1.0 } else { self.pos as f32 };
         }
     }
 
     fn save_state(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(TRACKS + 17);
+        let mut out = Vec::with_capacity(TRACKS + 21);
         out.extend_from_slice(&self.step);
         out.push(self.armed as u8 | ((self.seen_clock as u8) << 1));
         out.extend_from_slice(&self.interval.to_le_bytes());
         out.extend_from_slice(&self.since_clock.to_le_bytes());
         out.extend_from_slice(&self.last_clock.to_le_bytes());
         out.extend_from_slice(&self.last_reset.to_le_bytes());
+        out.extend_from_slice(&self.pos.to_le_bytes());
         out
     }
 
@@ -155,6 +173,12 @@ impl Module for TrigSeq {
         self.since_clock = f32::from_le_bytes(bytes[TRACKS + 5..TRACKS + 9].try_into().unwrap());
         self.last_clock = f32::from_le_bytes(bytes[TRACKS + 9..TRACKS + 13].try_into().unwrap());
         self.last_reset = f32::from_le_bytes(bytes[TRACKS + 13..TRACKS + 17].try_into().unwrap());
+        // `pos` was appended to the state blob; older snapshots omit it.
+        self.pos = if bytes.len() >= TRACKS + 21 {
+            u32::from_le_bytes(bytes[TRACKS + 17..TRACKS + 21].try_into().unwrap()) % POS_WRAP
+        } else {
+            self.step[0] as u32
+        };
     }
 }
 

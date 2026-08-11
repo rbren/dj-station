@@ -392,6 +392,29 @@ fn step_seq_glide_slews_the_cv_between_steps() {
     assert!((at(0.9) - 2.0).abs() < 1e-3, "post-glide {}", at(0.9));
 }
 
+/// The `step` output reports the playing step index (-1 until the first
+/// clock) — the panel's playhead source.
+#[test]
+fn step_seq_step_output_follows_the_playhead() {
+    // 240 BPM: one step every 0.25 s, 4-step loop. Swap the gate probe on
+    // master R for the step output (wires to one input sum).
+    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    e.disconnect("seq", "gate", "probe", "r").unwrap();
+    e.connect("seq", "step", "probe", "r").unwrap();
+    let out = e.render_offline((1.35 * SR) as usize).unwrap();
+    // Steps advance 0,1,2,3 then wrap to 0.
+    for (t, want) in [
+        (0.1f32, 0.0f32),
+        (0.35, 1.0),
+        (0.6, 2.0),
+        (0.85, 3.0),
+        (1.1, 0.0),
+    ] {
+        let got = out[1][(t * SR) as usize];
+        assert_eq!(got, want, "step at {t} s");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Trigger sequencer
 // ---------------------------------------------------------------------------
@@ -440,9 +463,52 @@ fn trig_seq_tracks_run_at_independent_lengths() {
     );
 }
 
+/// The `pos` output reports clocks since reset (-1 before the first clock);
+/// the panel derives each track's playhead as `pos mod len`.
+#[test]
+fn trig_seq_pos_output_counts_clocks() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("trg", "com.dj.trig_seq").unwrap();
+    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 0.25 s per step
+    e.connect("clk", "clock", "trg", "clock").unwrap();
+    probe(&mut e, 0, "trg", "pos");
+    let out = e.render_offline((1.1 * SR) as usize).unwrap();
+    // First clock is at t=0, so pos starts at 0 and increments every 0.25 s.
+    for (t, want) in [(0.1f32, 0.0f32), (0.35, 1.0), (0.6, 2.0), (0.85, 3.0)] {
+        let got = out[0][(t * SR) as usize];
+        assert_eq!(got, want, "pos at {t} s");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Euclidean generator
 // ---------------------------------------------------------------------------
+
+/// Each channel's `stepN` output tracks its own playhead, wrapping at the
+/// channel's step count (-1 until the first clock).
+#[test]
+fn euclid_step_outputs_track_each_channel() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("euc", "com.dj.euclid").unwrap();
+    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 0.25 s per step
+    e.connect("clk", "clock", "euc", "clock").unwrap();
+    set_stepped(&mut e, "euc", "steps1", 4.0);
+    set_stepped(&mut e, "euc", "steps2", 3.0);
+    probe(&mut e, 0, "euc", "step1");
+    probe(&mut e, 1, "euc", "step2");
+    let out = e.render_offline((1.1 * SR) as usize).unwrap();
+    for (t, want1, want2) in [
+        (0.1f32, 0.0f32, 0.0f32),
+        (0.35, 1.0, 1.0),
+        (0.6, 2.0, 2.0),
+        (0.85, 3.0, 0.0), // ch2 wraps at 3 steps
+    ] {
+        assert_eq!(out[0][(t * SR) as usize], want1, "step1 at {t} s");
+        assert_eq!(out[1][(t * SR) as usize], want2, "step2 at {t} s");
+    }
+}
 
 #[test]
 fn euclid_generates_bjorklund_patterns_with_rotation() {
@@ -575,6 +641,32 @@ fn turing_full_ccw_keeps_randomizing_and_stays_deterministic() {
         sample_per_step(&out2[0], 0.1, 24),
         "PRNG is not deterministic"
     );
+}
+
+/// The `reg` output mirrors the shift register (the panel's bit-lamp
+/// source): integer 0..65535, low byte consistent with `cv`.
+#[test]
+fn turing_reg_output_mirrors_the_register() {
+    let mut e = turing_engine(0.0, 8.0);
+    e.disconnect("trn", "quant", "probe", "r").unwrap();
+    e.connect("trn", "reg", "probe", "r").unwrap();
+    e.set_knob_value("trn", "range", 10.0).unwrap();
+    let out = e.render_offline((2.5 * SR) as usize).unwrap();
+    let cv = sample_per_step(&out[0], 0.1, 24);
+    let reg = sample_per_step(&out[1], 0.1, 24);
+    let mut distinct = std::collections::BTreeSet::new();
+    for (i, (&r, &c)) in reg.iter().zip(&cv).enumerate() {
+        assert_eq!(r, r.round(), "step {i}: reg {r} is not an integer");
+        assert!((0.0..=65535.0).contains(&r), "step {i}: reg {r} off-range");
+        let low = (r as u32) & 0xFF;
+        let want_cv = low as f32 / 255.0 * 10.0;
+        assert!(
+            (c - want_cv).abs() < 1e-4,
+            "step {i}: cv {c} disagrees with reg low byte {low}"
+        );
+        distinct.insert(r as u32);
+    }
+    assert!(distinct.len() > 1, "register never shifted");
 }
 
 #[test]

@@ -2,7 +2,10 @@
 //!
 //! Inputs: `clock`, `reset` and, per channel, `stepsN` (1..32), `fillN`
 //! (0..32, clamped to `stepsN`) and `rotN` (0..31). Outputs: `ch1..ch4`
-//! triggers plus `or`, which is high whenever any channel fires.
+//! triggers plus `or`, which is high whenever any channel fires, and
+//! `step1..step4` — each channel's current 0-based step index (-1 until
+//! the first clock after instantiation or a reset), which drives the
+//! panel's playhead display.
 //!
 //! ## Pattern
 //!
@@ -30,6 +33,8 @@ const IN_RESET: usize = 1;
 const IN_CH0: usize = 2;
 
 const CHANNELS: usize = 4;
+/// First of the per-channel current-step outputs (after ch1..ch4 and or).
+const OUT_STEP0: usize = CHANNELS + 1;
 const MAX_STEPS: usize = 32;
 const GATE_V: f32 = 10.0;
 const PULSE_SECS: f32 = 0.005;
@@ -125,7 +130,7 @@ pub struct Euclid {
 
 impl Module for Euclid {
     const N_INPUTS: usize = 2 + 3 * CHANNELS;
-    const N_OUTPUTS: usize = CHANNELS + 1;
+    const N_OUTPUTS: usize = 2 * CHANNELS + 1;
 
     fn new(ctx: &InitCtx) -> Self {
         Euclid {
@@ -209,6 +214,11 @@ impl Module for Euclid {
                     any = true;
                 }
                 io.outputs[c][s] = if high { GATE_V } else { 0.0 };
+                io.outputs[OUT_STEP0 + c][s] = if self.armed {
+                    -1.0
+                } else {
+                    self.step[c] as f32
+                };
             }
             io.outputs[CHANNELS][s] = if any { GATE_V } else { 0.0 };
         }

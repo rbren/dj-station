@@ -2,8 +2,9 @@
 //!
 //! Inputs: `clock`, `prob`, `length` (1..16), `range` (output volts),
 //! `scale`, `root`. Outputs: `cv` (raw register voltage), `bit1`/`bit2`
-//! (gates from register bits 0 and 1) and `quant` (`cv` quantized to the
-//! selected scale, 1 V/oct).
+//! (gates from register bits 0 and 1), `quant` (`cv` quantized to the
+//! selected scale, 1 V/oct) and `reg` — the raw 16-bit register value
+//! (0..65535, f32-exact), which drives the panel's bit-lamp display.
 //!
 //! ## Register
 //!
@@ -50,6 +51,7 @@ const OUT_CV: usize = 0;
 const OUT_BIT1: usize = 1;
 const OUT_BIT2: usize = 2;
 const OUT_QUANT: usize = 3;
+const OUT_REG: usize = 4;
 
 const GATE_V: f32 = 10.0;
 const SEED: u32 = 0x1D3B_7A55;
@@ -102,7 +104,7 @@ pub struct Turing {
 
 impl Module for Turing {
     const N_INPUTS: usize = 6;
-    const N_OUTPUTS: usize = 4;
+    const N_OUTPUTS: usize = 5;
 
     fn new(_ctx: &InitCtx) -> Self {
         Turing {
@@ -147,6 +149,7 @@ impl Module for Turing {
             io.outputs[OUT_BIT1][s] = if self.reg & 1 != 0 { GATE_V } else { 0.0 };
             io.outputs[OUT_BIT2][s] = if self.reg & 2 != 0 { GATE_V } else { 0.0 };
             io.outputs[OUT_QUANT][s] = quantize(cv, mask, root);
+            io.outputs[OUT_REG][s] = self.reg as f32;
         }
     }
 

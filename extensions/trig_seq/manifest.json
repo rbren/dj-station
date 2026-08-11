@@ -244,6 +244,10 @@
     {
       "id": "trig8",
       "name": "Trig 8"
+    },
+    {
+      "id": "pos",
+      "name": "Position"
     }
   ],
   "latency_samples": 0
