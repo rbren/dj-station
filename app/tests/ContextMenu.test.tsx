@@ -140,6 +140,29 @@ describe('module context menu', () => {
     expect(screen.queryByTestId('docs-panel')).toBeNull();
   });
 
+  it('right-clicking a knob does NOT open the module context menu', async () => {
+    await renderApp();
+    // The knob's own right-click gesture (config menu) must not also pop
+    // the module menu on top of it.
+    const knob = screen.getByTestId('knob-pitch');
+    fireEvent.contextMenu(knob.querySelector('.knob-dial') ?? knob, {
+      clientX: 20,
+      clientY: 20,
+    });
+    expect(screen.queryByTestId('context-menu')).toBeNull();
+    // The knob config menu (the knob-specific gesture) still opens.
+    expect(document.querySelector('.knob-config-menu')).toBeTruthy();
+  });
+
+  it('module-body right-click still opens the module menu after a knob click', async () => {
+    await renderApp();
+    const knob = screen.getByTestId('knob-pitch');
+    fireEvent.contextMenu(knob.querySelector('.knob-dial') ?? knob);
+    expect(screen.queryByTestId('context-menu')).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId('module-header-osc1'), { clientX: 5, clientY: 5 });
+    expect(screen.getByTestId('ctx-delete')).toBeTruthy();
+  });
+
   it('closes on Escape and on an outside mousedown', async () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 10, clientY: 10 });

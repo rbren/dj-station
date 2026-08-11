@@ -179,6 +179,10 @@ export function Knob(props: KnobProps) {
   const angle = angleFor(position);
   const openMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    // Right-click is the knob's own gesture (its config menu, when
+    // configurable) — never let it bubble up and open the module panel's
+    // context menu on top of it.
+    e.stopPropagation();
     if (onConfigChange) setMenuAt({ x: e.clientX, y: e.clientY });
   };
   const menu = menuAt && onConfigChange && (
