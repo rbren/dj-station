@@ -9,9 +9,11 @@
     { "id": "trig", "name": "Trigger", "default": 0.0,
       "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "mode", "name": "Mode", "default": 0.0,
-      "knob": { "style": "stepped", "min": 0.0, "max": 1.0, "curve": "linear", "steps": 2 } },
+      "knob": { "style": "stepped", "min": 0.0, "max": 1.0, "curve": "linear", "steps": 2 },
+      "display": { "steps": ["sample", "track"] } },
     { "id": "slew", "name": "Slew", "default": 0.0,
-      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "exp" } }
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "exp" },
+      "display": { "unit": "s" } }
   ],
   "outputs": [
     { "id": "out", "name": "Out" },

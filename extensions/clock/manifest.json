@@ -6,7 +6,8 @@
   "category": "Clock & Sequencing",
   "inputs": [
     { "id": "bpm", "name": "BPM", "default": 120.0,
-      "knob": { "style": "continuous", "min": 20.0, "max": 300.0, "curve": "linear" } },
+      "knob": { "style": "continuous", "min": 20.0, "max": 300.0, "curve": "linear" },
+      "display": { "unit": "BPM" } },
     { "id": "run", "name": "Run", "default": 10.0,
       "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "reset", "name": "Reset", "default": 0.0,

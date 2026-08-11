@@ -104,6 +104,7 @@ pub fn audio_out_manifest() -> Manifest {
                 name: (*name).into(),
                 default: 0.0,
                 knob: None,
+                display: None,
             })
             .chain(std::iter::once(JackDecl {
                 id: "channel_offset".into(),
@@ -116,6 +117,7 @@ pub fn audio_out_manifest() -> Manifest {
                     curve: Curve::Linear,
                     steps: Some(9),
                 }),
+                display: None,
             }))
             .collect(),
         outputs: vec![],
@@ -141,6 +143,7 @@ pub fn midi_manifest() -> Manifest {
                 name: format!("LED {i}"),
                 default: 0.0,
                 knob: None,
+                display: None,
             })
             .collect(),
         // Outputs are, in order: MAX_MIDI_JACKS dynamic mapping slots (one
@@ -151,6 +154,7 @@ pub fn midi_manifest() -> Manifest {
             .map(|i| OutputDecl {
                 id: format!("map{i}"),
                 name: format!("Mapping {i}"),
+                display: None,
             })
             .chain((0..MIDI_POLY_VOICES).flat_map(|v| {
                 [("pitch", "Pitch"), ("gate", "Gate"), ("vel", "Velocity")]
@@ -158,11 +162,13 @@ pub fn midi_manifest() -> Manifest {
                     .map(move |(id, name)| OutputDecl {
                         id: format!("v{}_{id}", v + 1),
                         name: format!("Voice {} {name}", v + 1),
+                        display: None,
                     })
             }))
             .chain(MIDI_GLOBAL_OUTS.iter().map(|(id, name)| OutputDecl {
                 id: (*id).into(),
                 name: (*name).into(),
+                display: None,
             }))
             .collect(),
         params: vec![],

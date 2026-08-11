@@ -37,6 +37,7 @@ impl Engine {
                     name: j.id.clone(),
                     default: 0.0,
                     knob: None,
+                    display: None,
                 })
                 .collect(),
             outputs: def
@@ -46,6 +47,7 @@ impl Engine {
                 .map(|j| crate::manifest::OutputDecl {
                     id: j.id.clone(),
                     name: j.id.clone(),
+                    display: None,
                 })
                 .collect(),
             params: def

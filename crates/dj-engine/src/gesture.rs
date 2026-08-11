@@ -34,6 +34,7 @@ pub fn gesture_manifest() -> Manifest {
             .map(|i| OutputDecl {
                 id: format!("map{i}"),
                 name: format!("Mapping {i}"),
+                display: None,
             })
             .collect(),
         params: vec![],

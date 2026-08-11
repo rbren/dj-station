@@ -35,12 +35,53 @@ pub struct JackDecl {
     pub default: f32,
     #[serde(default)]
     pub knob: Option<KnobConfig>,
+    /// How the jack's value reads to a human (unit / mapping / step labels).
+    /// None = raw Volts. Pure display metadata — never touches the DSP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<DisplaySpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputDecl {
     pub id: String,
     pub name: String,
+    /// Display unit/mapping for the output's telemetry value; None = Volts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<DisplaySpec>,
+}
+
+/// Display mapping for a jack value (PRD §7.2): a unit suffix, an optional
+/// value transform, and optional per-step labels for stepped inputs. The
+/// engine only carries this to the UI; all formatting happens app-side
+/// (app/src/display.ts) so the raw engine value is never changed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DisplaySpec {
+    /// Unit suffix ("Hz", "s", "dB", ...). None = "V"; "" = unitless.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Transform from raw engine value to displayed number (identity when
+    /// None — the raw value already IS the displayed quantity).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map: Option<DisplayMap>,
+    /// Labels for stepped inputs, index = step (["custom", "major", ...]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steps: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DisplayMap {
+    /// displayed = base * 2^value — 1 V/oct pitch CV; `base` defaults to
+    /// middle C, matching the SDK's `pitch_to_hz`.
+    VoltPerOctave {
+        #[serde(default = "default_pitch_base")]
+        base: f32,
+    },
+}
+
+/// Middle C (C4) — `dj_module_sdk::pitch_to_hz(0.0)`.
+pub fn default_pitch_base() -> f32 {
+    261.626
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
