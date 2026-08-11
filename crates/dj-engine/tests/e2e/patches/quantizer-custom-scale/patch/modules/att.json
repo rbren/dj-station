@@ -1,0 +1,126 @@
+{
+  "ext": "com.dj.attenuverter",
+  "knobs": {
+    "atten1": {
+      "position": 0.6,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten2": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten3": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten4": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten5": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten6": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten7": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten8": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in6": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in7": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in8": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset1": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset2": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset3": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset4": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset5": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset6": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset7": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset8": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

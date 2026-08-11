@@ -198,6 +198,33 @@ fn tiny_fast_ripple_is_not_volatile() {
     );
 }
 
+/// Output jacks publish telemetry too (used by the UI for panel meters and
+/// sequencer step displays): `tap_out` reads the module's rendered
+/// output, wired or not.
+#[test]
+fn output_tap_reports_module_output_level() {
+    let mut engine = crate::common::default_engine();
+    engine.add_module("osc1", "com.dj.oscillator").unwrap();
+    engine.add_module("vca1", "com.dj.vca").unwrap();
+    engine.connect("osc1", "audio", "vca1", "in").unwrap();
+    // cv knob fully open (default 10) -> unity gain.
+    engine.render_offline((0.5 * SR) as usize).unwrap();
+
+    // The oscillator's own output jack — even though nothing taps `audio`
+    // downstream of the analyzer, the slot publishes every block.
+    let t = engine.tap_out("osc1", "audio").unwrap();
+    assert!(t.is_fast, "C4 sine is fast: {t:?}");
+    let expected_rms = 5.0 / 2.0f32.sqrt();
+    assert!((t.rms_100ms - expected_rms).abs() < 0.05, "{t:?}");
+
+    // The VCA's output matches its input (unity gain).
+    let t = engine.tap_out("vca1", "out").unwrap();
+    assert!((t.rms_100ms - expected_rms).abs() < 0.05, "vca out {t:?}");
+
+    // Unknown jacks error rather than panicking.
+    assert!(engine.tap_out("vca1", "nope").is_err());
+}
+
 /// Master bus telemetry is exposed too (used by the UI for output metering).
 #[test]
 fn master_tap_reports_output_level() {

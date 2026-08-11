@@ -451,6 +451,75 @@ fn quantizer_hysteresis_ignores_a_wobble_on_a_note_boundary() {
     );
 }
 
+#[test]
+fn quantizer_custom_scale_mask_selects_the_degrees() {
+    // Scale 0 with a custom mask: a saw sweep must visit exactly the
+    // masked degrees.
+    let mut e = probe_engine(2);
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("q", "com.dj.quantizer").unwrap();
+    e.set_knob_position("osc1", "waveform", 1.0 / 3.0).unwrap(); // saw
+    e.set_knob_value("osc1", "pitch", -5.0).unwrap(); // ~8 Hz sweep
+    e.connect("osc1", "audio", "q", "in").unwrap();
+    e.set_knob_position("q", "scale", 0.0).unwrap();
+    probe(&mut e, "q", "out", 0);
+
+    // C major triad: degrees {0, 4, 7} -> mask 0b000010010001 = 145.
+    let degrees = [0i32, 4, 7];
+    let mask: u16 = degrees.iter().map(|d| 1u16 << d).sum();
+    e.set_knob_value("q", "custom", mask as f32).unwrap();
+
+    let out = e.render_offline((0.3 * SR) as usize).unwrap();
+    let mut seen = std::collections::BTreeSet::new();
+    for (i, &v) in out[0].iter().enumerate() {
+        let semi = v * 12.0;
+        let rounded = semi.round();
+        assert!(
+            (semi - rounded).abs() < 1e-3,
+            "sample {i}: {semi} is not an integer semitone"
+        );
+        let pc = rounded.rem_euclid(12.0) as i32;
+        assert!(
+            degrees.contains(&pc),
+            "sample {i}: pitch class {pc} off-mask"
+        );
+        seen.insert(pc);
+    }
+    assert_eq!(seen.len(), degrees.len(), "sweep must visit every degree");
+
+    // The mask is relative to the root: root = D shifts everything +2.
+    e.set_knob_position("q", "root", 2.0 / 11.0).unwrap();
+    let out = e.render_offline((0.3 * SR) as usize).unwrap();
+    for (i, &v) in out[0].iter().enumerate() {
+        let pc = (v * 12.0).round().rem_euclid(12.0) as i32;
+        assert!(
+            degrees.contains(&((pc - 2).rem_euclid(12))),
+            "rooted sample {i}: pitch class {pc} off-mask"
+        );
+    }
+
+    // An empty mask degenerates to root-only (octaves of D here).
+    e.set_knob_value("q", "custom", 0.0).unwrap();
+    let out = e.render_offline((0.3 * SR) as usize).unwrap();
+    for (i, &v) in out[0].iter().enumerate() {
+        let pc = (v * 12.0).round().rem_euclid(12.0) as i32;
+        assert_eq!(pc, 2, "empty mask sample {i}: expected the root, got {pc}");
+    }
+
+    // Preset scales ignore the mask entirely (mask still 0 here).
+    e.set_knob_position("q", "root", 0.0).unwrap();
+    e.set_knob_position("q", "scale", 4.0 / 9.0).unwrap(); // pentatonic major
+    let out = e.render_offline((0.3 * SR) as usize).unwrap();
+    let penta = [0, 2, 4, 7, 9];
+    for (i, &v) in out[0].iter().enumerate() {
+        let pc = (v * 12.0).round().rem_euclid(12.0) as i32;
+        assert!(
+            penta.contains(&pc),
+            "preset sample {i}: {pc} not pentatonic"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Logic & comparator
 // ---------------------------------------------------------------------------

@@ -8,7 +8,11 @@ import AdsrUI from '../../../extensions/adsr/ui-src/AdsrUI';
 import CameraUI from '../../../extensions/camera/ui-src/CameraUI';
 import EuclidUI from '../../../extensions/euclid/ui-src/EuclidUI';
 import LfoUI from '../../../extensions/lfo/ui-src/LfoUI';
+import QuantizerUI from '../../../extensions/quantizer/ui-src/QuantizerUI';
+import SeqSwitchUI from '../../../extensions/seq_switch/ui-src/SeqSwitchUI';
+import StepSeqUI from '../../../extensions/step_seq/ui-src/StepSeqUI';
 import TrigSeqUI from '../../../extensions/trig_seq/ui-src/TrigSeqUI';
+import TuringUI from '../../../extensions/turing/ui-src/TuringUI';
 import WaveshaperUI from '../../../extensions/waveshaper/ui-src/WaveshaperUI';
 import { engine, type NodeSnapshot } from '../engine';
 import { defaultPosition, panelStyle } from '../rackLayout';
@@ -17,6 +21,7 @@ import type { JackTelemetry, KnobConfig, ModuleHandle } from '../types';
 import { DeckCustomUI } from './DeckPanel';
 import { ErrorBoundary } from './ErrorBoundary';
 import { GesturePanel } from './GesturePanel';
+import { CompressorUI, FilterUI, MixerUI, VcaDualUI, VcaUI } from './LevelMeter';
 import { MidiPanel } from './MidiPanel';
 import { ModulePanel } from './ModulePanel';
 import { mapPosition, positionForValue } from './Knob';
@@ -25,9 +30,18 @@ import { mapPosition, positionForValue } from './Knob';
 const CUSTOM_UIS: Record<string, ComponentType<{ handle: ModuleHandle; instanceId?: string }>> = {
   'com.dj.adsr': AdsrUI,
   'com.dj.camera': CameraUI,
+  'com.dj.compressor': CompressorUI,
   'com.dj.euclid': EuclidUI,
+  'com.dj.filter': FilterUI,
   'com.dj.lfo': LfoUI,
+  'com.dj.mixer': MixerUI,
+  'com.dj.quantizer': QuantizerUI,
+  'com.dj.seq_switch': SeqSwitchUI,
+  'com.dj.step_seq': StepSeqUI,
   'com.dj.trig_seq': TrigSeqUI,
+  'com.dj.turing': TuringUI,
+  'com.dj.vca': VcaUI,
+  'com.dj.vca_dual': VcaDualUI,
   'com.dj.waveshaper': WaveshaperUI,
   'builtin.deck': DeckCustomUI,
 };

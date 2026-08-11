@@ -192,6 +192,22 @@
     {
       "id": "or",
       "name": "Or"
+    },
+    {
+      "id": "step1",
+      "name": "Step 1"
+    },
+    {
+      "id": "step2",
+      "name": "Step 2"
+    },
+    {
+      "id": "step3",
+      "name": "Step 3"
+    },
+    {
+      "id": "step4",
+      "name": "Step 4"
     }
   ],
   "latency_samples": 0

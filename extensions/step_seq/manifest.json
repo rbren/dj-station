@@ -619,6 +619,10 @@
     {
       "id": "eos",
       "name": "End of Seq"
+    },
+    {
+      "id": "step",
+      "name": "Step"
     }
   ],
   "latency_samples": 0

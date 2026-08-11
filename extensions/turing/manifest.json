@@ -22,7 +22,8 @@
     { "id": "cv", "name": "CV" },
     { "id": "bit1", "name": "Bit 1" },
     { "id": "bit2", "name": "Bit 2" },
-    { "id": "quant", "name": "Quantized" }
+    { "id": "quant", "name": "Quantized" },
+    { "id": "reg", "name": "Register" }
   ],
   "latency_samples": 0
 }

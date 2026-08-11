@@ -3,7 +3,10 @@
 //! Inputs: `clock`, `reset`, `length` (1..16), `dir` (0 forward, 1 reverse,
 //! 2 ping-pong, 3 random), `glide` (seconds), plus per step `cv1..cv16`
 //! (volts, 1 V/oct), `gate1..gate16` (on/off) and `ratchet1..ratchet16`
-//! (1..4 sub-divisions inside the step). Outputs: `cv`, `gate`, `eos`.
+//! (1..4 sub-divisions inside the step). Outputs: `cv`, `gate`, `eos` and
+//! `step` — the 0-based index of the step currently playing (-1 until the
+//! first clock after instantiation or a reset), which drives the panel's
+//! playhead display and can address another module's step input.
 //!
 //! ## Timing
 //!
@@ -46,6 +49,7 @@ const IN_RATCHET0: usize = 37;
 const OUT_CV: usize = 0;
 const OUT_GATE: usize = 1;
 const OUT_EOS: usize = 2;
+const OUT_STEP: usize = 3;
 
 const STEPS: usize = 16;
 const GATE_V: f32 = 10.0;
@@ -157,7 +161,7 @@ impl StepSeq {
 
 impl Module for StepSeq {
     const N_INPUTS: usize = 53;
-    const N_OUTPUTS: usize = 3;
+    const N_OUTPUTS: usize = 4;
 
     fn new(ctx: &InitCtx) -> Self {
         StepSeq {
@@ -263,6 +267,7 @@ impl Module for StepSeq {
             } else {
                 0.0
             };
+            io.outputs[OUT_STEP][s] = if self.armed { -1.0 } else { self.step as f32 };
         }
     }
 

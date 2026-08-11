@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "out1",
+      "to": "quant",
+      "to_jack": "in"
+    }
+  ]
+}
