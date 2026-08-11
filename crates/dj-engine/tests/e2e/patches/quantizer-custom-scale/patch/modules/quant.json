@@ -1,0 +1,36 @@
+{
+  "ext": "com.dj.quantizer",
+  "knobs": {
+    "custom": {
+      "position": 0.033455435,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "octaves": {
+      "position": 0.4375,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "root": {
+      "position": 0.18181819,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "scale": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "semitones": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}
