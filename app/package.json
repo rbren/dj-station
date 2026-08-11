@@ -6,11 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && npm run build:extension-uis",
-    "build:extension-uis": "esbuild ../extensions/adsr/ui-src/AdsrUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/adsr/ui.js && esbuild ../extensions/euclid/ui-src/EuclidUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/euclid/ui.js && esbuild ../extensions/lfo/ui-src/LfoUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/lfo/ui.js && esbuild ../extensions/trig_seq/ui-src/TrigSeqUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/trig_seq/ui.js && esbuild ../extensions/waveshaper/ui-src/WaveshaperUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/waveshaper/ui.js",
+    "build:extension-uis": "esbuild ../extensions/adsr/ui-src/AdsrUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/adsr/ui.js && esbuild ../extensions/camera/ui-src/CameraUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/camera/ui.js && esbuild ../extensions/euclid/ui-src/EuclidUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/euclid/ui.js && esbuild ../extensions/lfo/ui-src/LfoUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/lfo/ui.js && esbuild ../extensions/trig_seq/ui-src/TrigSeqUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/trig_seq/ui.js && esbuild ../extensions/waveshaper/ui-src/WaveshaperUI.tsx --bundle --format=esm --external:react --external:react/jsx-runtime --outfile=../extensions/waveshaper/ui.js",
     "preview": "vite preview",
     "test": "vitest run",
-    "lint": "eslint . && prettier --check src tests ../extensions/adsr/ui-src ../extensions/euclid/ui-src ../extensions/lfo/ui-src ../extensions/trig_seq/ui-src ../extensions/waveshaper/ui-src",
-    "format": "prettier --write src tests ../extensions/adsr/ui-src ../extensions/euclid/ui-src ../extensions/lfo/ui-src ../extensions/trig_seq/ui-src ../extensions/waveshaper/ui-src"
+    "lint": "eslint . && prettier --check src tests ../extensions/adsr/ui-src ../extensions/camera/ui-src ../extensions/euclid/ui-src ../extensions/lfo/ui-src ../extensions/trig_seq/ui-src ../extensions/waveshaper/ui-src",
+    "format": "prettier --write src tests ../extensions/adsr/ui-src ../extensions/camera/ui-src ../extensions/euclid/ui-src ../extensions/lfo/ui-src ../extensions/trig_seq/ui-src ../extensions/waveshaper/ui-src"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

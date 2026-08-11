@@ -5,6 +5,7 @@
 
 import { memo, useContext, useMemo, type ComponentType } from 'react';
 import AdsrUI from '../../../extensions/adsr/ui-src/AdsrUI';
+import CameraUI from '../../../extensions/camera/ui-src/CameraUI';
 import EuclidUI from '../../../extensions/euclid/ui-src/EuclidUI';
 import LfoUI from '../../../extensions/lfo/ui-src/LfoUI';
 import TrigSeqUI from '../../../extensions/trig_seq/ui-src/TrigSeqUI';
@@ -23,6 +24,7 @@ import { mapPosition, positionForValue } from './Knob';
 /** Module types with a host-registered custom UI (PRD §5.3). */
 const CUSTOM_UIS: Record<string, ComponentType<{ handle: ModuleHandle; instanceId?: string }>> = {
   'com.dj.adsr': AdsrUI,
+  'com.dj.camera': CameraUI,
   'com.dj.euclid': EuclidUI,
   'com.dj.lfo': LfoUI,
   'com.dj.trig_seq': TrigSeqUI,
