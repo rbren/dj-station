@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the bundle (and embedded into dev binaries) by tauri-build.
+     Required for getUserMedia in the WKWebView: without the usage string
+     macOS kills the process on first camera access. -->
+<plist version="1.0">
+<dict>
+    <key>NSCameraUsageDescription</key>
+    <string>The Camera rack module shows a live feed from your webcam.</string>
+</dict>
+</plist>
