@@ -383,10 +383,19 @@ body {
 
 .knob-spread path {
   fill: none;
-  stroke: #e6b450;
+  /* Teal: deliberately distinct from the gold wired-jack/wire-default
+     (#e6b450), the cyan accent (#62d0ff), the green outputs (#7dde8a) and
+     every WIRE_COLORS cable entry. */
+  stroke: #3fd2c0;
   stroke-width: 3;
   stroke-linecap: round;
   opacity: 0.85;
+}
+
+/* Negative atten (cmd-drag overscrolled past zero): the wire's swing is
+   reversed, flagged in the legacy warning orange. */
+.knob-spread path.knob-spread-reversed {
+  stroke: #e6b450;
 }
 
 .param-name {

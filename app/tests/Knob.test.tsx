@@ -3,6 +3,7 @@
 // right-click config editing, attenuverter+offset in the menu when wired.
 
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { Knob, mapPosition } from '../src/components/Knob';
 import type { KnobConfig } from '../src/types';
@@ -209,6 +210,41 @@ describe('Knob', () => {
     fireEvent.mouseUp(window);
     expect(onPosition).not.toHaveBeenCalled();
     expect(onAttenOffset.mock.lastCall![0]).toBeCloseTo(0.4, 5);
+  });
+
+  it('wired: spread arc color flips live as a cmd-drag overscrolls past zero', () => {
+    // Controlled wrapper so the atten from the drag feeds straight back in,
+    // like the real rack does.
+    function Wired() {
+      const [atten, setAtten] = useState(0.2);
+      return (
+        <Knob
+          label="fm"
+          config={LINEAR}
+          position={0.5}
+          onPosition={() => {}}
+          onAttenOffset={(a) => setAtten(a)}
+          wired={true}
+          atten={atten}
+          offset={0}
+        />
+      );
+    }
+    render(<Wired />);
+    const arc = () => screen.getByTestId('knob-spread-fm');
+    // Positive atten: the normal (teal) styling, no reversed marker.
+    expect(arc().getAttribute('class')).toBeNull();
+    fireEvent.mouseDown(screen.getByRole('slider', { name: 'fm' }), {
+      clientY: 100,
+      metaKey: true,
+    });
+    // Drag down past zero (-0.4 delta => atten -0.2): reversed (orange).
+    fireEvent.mouseMove(window, { clientY: 160 });
+    expect(arc().getAttribute('class')).toBe('knob-spread-reversed');
+    // Back above zero mid-drag: normal color returns live.
+    fireEvent.mouseMove(window, { clientY: 85 });
+    expect(arc().getAttribute('class')).toBeNull();
+    fireEvent.mouseUp(window);
   });
 
   it('unwired: no spread arc, plain value tooltip', () => {
