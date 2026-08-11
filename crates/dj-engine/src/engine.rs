@@ -682,6 +682,35 @@ impl Engine {
         &self.wires
     }
 
+    /// Carry per-node DSP state (sequencer position, LFO phase, turing
+    /// register, held MIDI notes, deck position, …) from `old` into this
+    /// freshly rebuilt engine, using the same save_state/load_state pair as
+    /// hot reload. Nodes match by (instance_id, ext_id); anything without a
+    /// match keeps its fresh state. Both engines must be stopped.
+    ///
+    /// Structural edits that go through a from_doc rebuild (remove module,
+    /// undo/redo) call this so modules untouched by the edit don't reset.
+    pub fn adopt_dsp_state(&mut self, old: &mut Engine) -> Result<()> {
+        let pairs: Vec<(usize, usize)> = self
+            .nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(new_idx, info)| {
+                let &old_idx = old.node_by_id.get(&info.instance_id)?;
+                (old.nodes[old_idx].ext_id == info.ext_id).then_some((new_idx, old_idx))
+            })
+            .collect();
+        let old_core = old.core_mut()?;
+        let core = self.core_mut()?;
+        for (new_idx, old_idx) in pairs {
+            let state = old_core.graph.nodes[old_idx].module.save_state();
+            if !state.is_empty() {
+                core.graph.nodes[new_idx].module.load_state(&state);
+            }
+        }
+        Ok(())
+    }
+
     /// Resolve an output jack index to its persistent name.
     pub fn output_jack_name(&self, node: usize, jack: usize) -> String {
         let info = &self.nodes[node];

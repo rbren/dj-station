@@ -375,6 +375,70 @@ fn step_seq_state_survives_a_hot_reload() {
     }
 }
 
+/// Removing a module rebuilds the engine from the patch document (the app's
+/// remove_module flow); `adopt_dsp_state` must carry live DSP state over so
+/// an unrelated edit doesn't reset the sequencer — or any other module.
+#[test]
+fn removing_an_unrelated_module_does_not_reset_the_sequencer() {
+    // step_seq patch plus free-running bystanders (LFO phase, turing
+    // register) whose state must also survive the rebuild.
+    let build = || {
+        let mut e = step_seq_patch(240.0, 4.0, 0.0);
+        e.add_module("lfo1", "com.dj.lfo").unwrap();
+        e.add_module("turing1", "com.dj.turing").unwrap();
+        e.connect("clk", "clock", "turing1", "clock").unwrap();
+        e
+    };
+    let pre = (0.752 * SR) as usize; // 2 ms into the 4th clock pulse
+    let post = (0.6 * SR) as usize;
+
+    let mut e = build();
+    let a = e.render_offline(pre).unwrap();
+
+    // Add then remove an UNRELATED module the way the app does: document
+    // edit -> from_doc rebuild -> adopt the old engine's DSP state.
+    e.add_module("junk1", "com.dj.vca").unwrap();
+    let mut doc = e.snapshot("edit");
+    assert!(doc.remove_module("junk1"));
+    let mut rebuilt = Engine::from_doc(&doc, e.registry.clone()).unwrap();
+    rebuilt.adopt_dsp_state(&mut e).unwrap();
+    let b = rebuilt.render_offline(post).unwrap();
+
+    // The sequencer continues from step 4 instead of restarting at step 1.
+    let mut cv = a[0].clone();
+    cv.extend_from_slice(&b[0]);
+    let mut gate = a[1].clone();
+    gate.extend_from_slice(&b[1]);
+    let edges = rising_edges(&gate);
+    assert_edges_near(
+        &edges,
+        &[0.0, 0.25, 0.5, 0.75, 1.0, 1.25],
+        2,
+        "gates across a remove-module rebuild",
+    );
+    let cvs = cv_at_edges(&cv, &edges);
+    for (i, (&got, &w)) in cvs
+        .iter()
+        .zip(&[1.0f32, 2.0, 3.0, 4.0, 1.0, 2.0])
+        .enumerate()
+    {
+        assert!((got - w).abs() < 1e-3, "step {i}: cv {got} != {w}");
+    }
+
+    // Bonus: the LFO phase and turing register also survive — the rebuilt
+    // engine matches a control engine that rendered straight through.
+    let mut control = build();
+    control.render_offline(pre + post).unwrap();
+    for (module, jack) in [("lfo1", "bi"), ("turing1", "reg")] {
+        let got = rebuilt.tap_out(module, jack).unwrap().instantaneous;
+        let want = control.tap_out(module, jack).unwrap().instantaneous;
+        assert!(
+            (got - want).abs() < 1e-4,
+            "{module}:{jack} reset across the rebuild: {got} != {want}"
+        );
+    }
+}
+
 #[test]
 fn step_seq_glide_slews_the_cv_between_steps() {
     let mut e = step_seq_patch(120.0, 2.0, 0.0); // 0.5 s per step, cv 1 -> 2

@@ -164,4 +164,46 @@ describe('GesturePanel', () => {
     });
     expect(api.feedStop).toHaveBeenCalledWith('gest1');
   });
+
+  it('stops polling status on unmount (module removed from the rack)', async () => {
+    vi.useFakeTimers();
+    try {
+      const api = makeApi(baseStatus);
+      const { unmount } = render(
+        <GesturePanel instance="gest1" api={api} onChanged={noop} pollMs={10} />,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(api.status.mock.calls.length).toBeGreaterThan(0);
+      unmount();
+      const calls = api.status.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(api.status.mock.calls.length).toBe(calls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the last snapshot when a poll returns null (removal/undo race)', async () => {
+    vi.useFakeTimers();
+    try {
+      const api = makeApi(baseStatus);
+      render(<GesturePanel instance="gest1" api={api} onChanged={noop} pollMs={10} />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15);
+      });
+      expect(screen.getByTestId('gesture-zone-0-1')).toBeTruthy();
+      // The module disappears server-side; the quiet poll yields null.
+      api.status.mockResolvedValue(null);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(screen.getByTestId('gesture-zone-0-1')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
