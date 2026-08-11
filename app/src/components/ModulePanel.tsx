@@ -64,6 +64,8 @@ export interface ModulePanelProps {
   onRemove?(): void;
   /** Called on pointer-up after knob/param drags (undo gesture boundary). */
   onEditEnd?(): void;
+  /** Right-click on the panel (module context menu). */
+  onContextMenu?(e: React.MouseEvent<HTMLDivElement>): void;
   /** Jack currently armed as a pending wire end, if any. */
   pendingSource?: (JackRef & { kind: 'input' | 'output'; color?: number }) | null;
   /** Multi-select for collapse-to-macro (PRD §6): shift-click toggles. */
@@ -136,6 +138,7 @@ export function ModulePanel(props: ModulePanelProps) {
       }`}
       data-testid={`module-${instanceId}`}
       data-selected={props.selected ? 'true' : undefined}
+      onContextMenu={props.onContextMenu}
       style={{
         ...(position ? { left: position.x, top: position.y } : undefined),
         ...(size ? { width: size.w, height: size.h } : undefined),

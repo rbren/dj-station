@@ -60,6 +60,8 @@ export interface RackModuleProps {
     jack: string,
     shift?: boolean,
   ): Promise<void>;
+  /** Right-click anywhere on the panel opens the module context menu. */
+  onContextMenu?(instance: string, e: React.MouseEvent): void;
 }
 
 export const RackModule = memo(function RackModule(props: RackModuleProps) {
@@ -147,6 +149,7 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         position={pos}
         onMove={(x, y) => moveModule(instanceId, x, y)}
         onRemove={() => void removeModule(instanceId)}
+        onContextMenu={(e) => props.onContextMenu?.(instanceId, e)}
         onEditEnd={() => void engine.endEdit()}
         selected={selected}
         onSelectToggle={() => toggleSelected(instanceId)}

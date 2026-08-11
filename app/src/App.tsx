@@ -11,7 +11,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { engine, onMenuAction } from './engine';
 import { library, type Track } from './library';
+import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { DeckUIContext } from './components/DeckPanel';
+import { DocsPanel } from './components/DocsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
@@ -82,6 +84,10 @@ export default function App() {
   const [saveAsName, setSaveAsName] = useState('untitled');
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   const [collapseName, setCollapseName] = useState<string | null>(null);
+  // Right-click menu: over a module (instance set) or the rack background.
+  const [ctxMenu, setCtxMenu] = useState<null | { x: number; y: number; instance?: string }>(null);
+  // In-app module documentation (opened from the module context menu).
+  const [docs, setDocs] = useState<null | { typeId: string; manifest: Manifest }>(null);
   const [zoom, setZoom] = useState<number>(() => loadZoom());
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
@@ -506,6 +512,26 @@ export default function App() {
     [store, wireColors, refresh, setPending],
   );
 
+  // Right-click never shows the browser/Tauri context menu anywhere in the
+  // app; specific surfaces (modules, rack background) open the app-styled
+  // ContextMenu instead.
+  useEffect(() => {
+    const suppress = (e: Event) => e.preventDefault();
+    window.addEventListener('contextmenu', suppress);
+    return () => window.removeEventListener('contextmenu', suppress);
+  }, []);
+
+  const onModuleContextMenu = useCallback((instance: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY, instance });
+  }, []);
+
+  const onRackContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY });
+  }, []);
+
   const removeModule = useCallback(
     async (instance: string) => {
       await engine.removeModule(instance);
@@ -536,6 +562,42 @@ export default function App() {
     }),
     [libraryTracks, nodes, refresh],
   );
+
+  const ctxMenuItems = useMemo<ContextMenuItem[]>(() => {
+    if (!ctxMenu) return [];
+    const instance = ctxMenu.instance;
+    if (!instance) {
+      // Rack background: just Save, the same action as File > Save / cmd+S.
+      return [{ label: 'Save', testId: 'ctx-save', onSelect: () => void savePatch() }];
+    }
+    return [
+      {
+        label: 'Delete',
+        testId: 'ctx-delete',
+        onSelect: () => void removeModule(instance),
+      },
+      {
+        label: 'Documentation',
+        testId: 'ctx-docs',
+        onSelect: () => {
+          const node = store.getState().nodes.find((n) => n.instance_id === instance);
+          if (node) setDocs({ typeId: node.type_id, manifest: node.manifest });
+        },
+      },
+      {
+        label: 'Reset to defaults',
+        testId: 'ctx-reset',
+        disabled: true,
+        hint: 'not implemented',
+      },
+      {
+        label: 'Save patch',
+        testId: 'ctx-save-patch',
+        disabled: true,
+        hint: 'not implemented',
+      },
+    ];
+  }, [ctxMenu, savePatch, removeModule, store]);
 
   return (
     <main className="app">
@@ -619,6 +681,17 @@ export default function App() {
         )}
       </header>
       <ErrorBanner />
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={ctxMenuItems}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
+      {docs && (
+        <DocsPanel typeId={docs.typeId} manifest={docs.manifest} onClose={() => setDocs(null)} />
+      )}
       {fileDialog && (
         <div
           className="file-dialog-backdrop"
@@ -694,6 +767,7 @@ export default function App() {
               data-testid="rack-area"
               onDragOver={onRackDragOver}
               onDrop={onRackDrop}
+              onContextMenu={onRackContextMenu}
               onClick={(e) => {
                 // Clicking the rack background abandons a pending wire.
                 if (
@@ -719,6 +793,7 @@ export default function App() {
                     removeModule={removeModule}
                     toggleSelected={toggleSelected}
                     onJackClick={onJackClick}
+                    onContextMenu={onModuleContextMenu}
                   />
                 ))}
                 {nodes.length === 0 && (
