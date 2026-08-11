@@ -1175,11 +1175,20 @@ body {
   flex: 1;
 }
 
+/* The cable layer must paint above EVERY module panel: panels (and the
+   zoomed .rack wrapper's transform) create their own stacking contexts,
+   so rely on an explicit z-index rather than DOM order. `overflow:
+   visible` stops the SVG (which is sized to the rack-area's layout box,
+   not the zoomed rack's visual extent) from truncating cables at its
+   edge. pointer-events stays none so jacks/knobs under it remain
+   interactive. */
 .wire-overlay {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  overflow: visible;
+  z-index: 10;
   pointer-events: none;
 }
 
