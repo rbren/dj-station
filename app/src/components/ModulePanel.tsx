@@ -209,6 +209,7 @@ export function ModulePanel(props: ModulePanelProps) {
                         instance={instanceId}
                         cell={cell}
                         manifestKnob={decl?.knob}
+                        display={decl?.display}
                         state={knobs[cell.jack]}
                         wired={wired[cell.jack] ?? false}
                         telemetry={telemetry?.[cell.jack]}
@@ -251,6 +252,7 @@ export function ModulePanel(props: ModulePanelProps) {
                       id={id}
                       kind="output"
                       telemetry={telemetry?.[`out:${id}`]}
+                      display={manifest.outputs.find((o) => o.id === id)?.display}
                       selected={
                         pendingSource?.kind === 'output' &&
                         pendingSource.instance === instanceId &&

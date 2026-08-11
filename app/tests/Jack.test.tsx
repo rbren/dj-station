@@ -83,7 +83,7 @@ describe('Jack indicator rendering', () => {
     render(<Jack instance="m1" id="out" kind="output" telemetry={t({ display: 10 })} />);
     const glow = screen.getByTestId('jack-glow-out');
     expect(glow.getAttribute('data-indicator')).toBe('hsl(210, 100%, 52%)');
-    expect(screen.getByTestId('jack-output-out').getAttribute('data-tip')).toBe('out: 10.00');
+    expect(screen.getByTestId('jack-output-out').getAttribute('data-tip')).toBe('out: 10.0 V');
   });
 
   it('no telemetry leaves the CSS fallback (no inline style)', () => {

@@ -296,6 +296,26 @@ body {
   transform-origin: 50% 9px;
 }
 
+/* Current step's declared label (manifest display.steps), overlaid on the
+   bottom edge of a stepped dial without growing its 32x32 box. */
+.knob-step-label {
+  position: absolute;
+  left: 50%;
+  bottom: -3px;
+  transform: translateX(-50%);
+  font-size: 0.55rem;
+  line-height: 1;
+  color: var(--accent, #62d0ff);
+  background: rgba(20, 23, 28, 0.85);
+  border-radius: 3px;
+  padding: 0 2px;
+  max-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* Fader controls (layout appearance 'fader' / 'hfader'). */
 .knob-fader-box {
   width: 32px;

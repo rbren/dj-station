@@ -4,7 +4,7 @@
 // grids. The label can be hidden and the control swapped for a fader or
 // suppressed entirely ('jack') by the layout.
 
-import type { JackTelemetry, KnobConfig, KnobState } from '../types';
+import type { DisplaySpec, JackTelemetry, KnobConfig, KnobState } from '../types';
 import type { CellSpec } from './panelLayouts';
 import { Jack } from './Jack';
 import { Knob } from './Knob';
@@ -15,6 +15,8 @@ export interface InputCellProps {
   instance: string;
   cell: CellSpec;
   manifestKnob?: KnobConfig | null;
+  /** Manifest display spec (unit / mapping / step labels); absent = Volts. */
+  display?: DisplaySpec | null;
   state?: KnobState;
   wired: boolean;
   telemetry?: JackTelemetry;
@@ -44,6 +46,8 @@ export function InputCell(props: InputCellProps) {
         id={cell.jack}
         kind="input"
         telemetry={props.telemetry}
+        display={props.display}
+        knob={config}
         wired={wired}
         selected={props.selected}
         selectedColor={props.selectedColor}
@@ -54,6 +58,7 @@ export function InputCell(props: InputCellProps) {
         <Knob
           label={cell.jack}
           config={config}
+          display={props.display}
           appearance={appearance}
           position={state?.position ?? 0}
           wired={wired}

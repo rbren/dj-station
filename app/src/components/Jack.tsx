@@ -15,8 +15,9 @@
 // The displayed level uses `telemetry.display`, which the engine low-pass
 // smooths over its 100 ms (10 Hz) window.
 
-import { fixed, safeNumber } from '../format';
-import type { JackTelemetry } from '../types';
+import { formatDisplay } from '../display';
+import { safeNumber } from '../format';
+import type { DisplaySpec, JackTelemetry, KnobConfig } from '../types';
 
 /** Volatility below this renders as an ordinary value, not an alert. */
 const VOLATILE_MIN = 0.05;
@@ -55,6 +56,8 @@ export function Jack({
   kind,
   label,
   telemetry,
+  display,
+  knob,
   wired,
   selected,
   selectedColor,
@@ -67,6 +70,10 @@ export function Jack({
   /** Display label (defaults to the jack id). */
   label?: string;
   telemetry?: JackTelemetry;
+  /** Manifest display spec for the tooltip value; absent = Volts. */
+  display?: DisplaySpec | null;
+  /** Knob config, used to resolve step labels for stepped inputs. */
+  knob?: KnobConfig | null;
   wired?: boolean;
   selected?: boolean;
   /** Outline color while armed — the pending wire's cable color. */
@@ -79,9 +86,9 @@ export function Jack({
   const style = telemetry ? indicatorStyle(telemetry) : null;
   const volatile = style?.volatile ?? false;
   const tooltip = telemetry
-    ? `${id}: ${fixed(telemetry.display)}${telemetry.is_fast ? ' (rms)' : ''}${
-        volatile ? ' ⚡ >10 Hz' : ''
-      }`
+    ? `${id}: ${formatDisplay(display, telemetry.display, knob)}${
+        telemetry.is_fast ? ' (rms)' : ''
+      }${volatile ? ' ⚡ >10 Hz' : ''}`
     : id;
   return (
     <button

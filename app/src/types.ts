@@ -18,16 +18,33 @@ export interface KnobState {
   config?: KnobConfig | null;
 }
 
+/** Display transform from raw engine value to human-readable number
+ *  (mirrors `DisplayMap` in crates/dj-engine/src/manifest.rs). */
+export type DisplayMap = { kind: 'volt_per_octave'; base?: number };
+
+/** How a jack's value reads to a human: unit suffix, optional transform,
+ *  optional per-step labels for stepped inputs. Absent = raw Volts.
+ *  (Mirrors `DisplaySpec` in crates/dj-engine/src/manifest.rs.) */
+export interface DisplaySpec {
+  /** Unit suffix ("Hz", "s", "dB", ...). Undefined = "V"; "" = unitless. */
+  unit?: string;
+  map?: DisplayMap;
+  /** Labels for stepped inputs, index = step. */
+  steps?: string[];
+}
+
 export interface JackDecl {
   id: string;
   name: string;
   default?: number;
   knob?: KnobConfig | null;
+  display?: DisplaySpec | null;
 }
 
 export interface OutputDecl {
   id: string;
   name: string;
+  display?: DisplaySpec | null;
 }
 
 export interface ParamDecl {
