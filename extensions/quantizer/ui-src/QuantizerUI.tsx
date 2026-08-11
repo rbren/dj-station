@@ -32,7 +32,9 @@ const SCALES: number[][] = [
   [0, 2, 4, 6, 8, 10], // whole tone
 ];
 
-const SCALE_NAMES = [
+// Exported so the app can pin the manifest's `display.steps` labels (the
+// knob/tooltip readout) to this panel's readout — one source of names.
+export const SCALE_NAMES = [
   "custom",
   "major",
   "minor",
@@ -45,7 +47,7 @@ const SCALE_NAMES = [
   "whole tone",
 ];
 
-const NOTE_NAMES = [
+export const NOTE_NAMES = [
   "C",
   "C#",
   "D",

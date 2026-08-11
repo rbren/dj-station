@@ -125,6 +125,20 @@ fails if it's missing.
   target those. After any manifest/knob change, run
   `./scripts/regen-goldens.sh` and the full workspace suite (macro and
   perf_m4 tests reference module controls).
+- Units & display mapping: jack values are Volts to the engine; a
+  manifest input/output may carry a `display` spec (unit string —
+  default "V" — plus optional `volt_per_octave` map and per-step
+  labels for stepped selectors). `JackDecl`/`OutputDecl.display` is
+  passthrough metadata (the engine never computes on it); the ONE app
+  formatter is `app/src/display.ts` (`formatDisplay`), used by every
+  knob and jack tooltip, inputs and outputs alike. Step-label lists
+  must match the knob's detent count (`display_units` integration test
+  pins it) and the quantizer/LFO panels' name tables (Display.test.ts
+  pins those — the manifests and the exported `SCALE_NAMES`/`SHAPES`
+  arrays are the same names). The TS knob curve math in `Knob.tsx`
+  mirrors knob.rs EXACTLY, including the geometric exp/log branch for
+  min>0 ranges (the old squared-fallback divergence was the "LFO shows
+  285 at 1 Hz" bug); KnobMath.test.ts pins both sides.
 - App save/load lives in the native File menu (Tauri `MenuItemBuilder`
   in `app/src-tauri/src/main.rs`); the frontend listens via
   `onMenuAction` in `src/engine.ts` (menu events re-dispatched as

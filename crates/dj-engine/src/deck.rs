@@ -101,6 +101,7 @@ pub fn deck_manifest() -> Manifest {
                 curve: Curve::Linear,
                 steps: None,
             }),
+            display: None,
         },
         JackDecl {
             id: "speed".into(),
@@ -113,6 +114,7 @@ pub fn deck_manifest() -> Manifest {
                 curve: Curve::Linear,
                 steps: None,
             }),
+            display: None,
         },
         JackDecl {
             id: "phase_nudge".into(),
@@ -125,6 +127,7 @@ pub fn deck_manifest() -> Manifest {
                 curve: Curve::Linear,
                 steps: None,
             }),
+            display: None,
         },
         JackDecl {
             id: "loop_toggle".into(),
@@ -137,6 +140,7 @@ pub fn deck_manifest() -> Manifest {
                 curve: Curve::Linear,
                 steps: None,
             }),
+            display: None,
         },
     ];
     for i in 1..=N_CUES {
@@ -151,32 +155,39 @@ pub fn deck_manifest() -> Manifest {
                 curve: Curve::Linear,
                 steps: None,
             }),
+            display: None,
         });
     }
     let mut outputs = vec![
         OutputDecl {
             id: "audio_l".into(),
             name: "Audio L".into(),
+            display: None,
         },
         OutputDecl {
             id: "audio_r".into(),
             name: "Audio R".into(),
+            display: None,
         },
         OutputDecl {
             id: "beat_clock".into(),
             name: "Beat Clock".into(),
+            display: None,
         },
         OutputDecl {
             id: "bar_clock".into(),
             name: "Bar Clock".into(),
+            display: None,
         },
         OutputDecl {
             id: "phase".into(),
             name: "Bar Phase".into(),
+            display: None,
         },
         OutputDecl {
             id: "bpm".into(),
             name: "BPM".into(),
+            display: None,
         },
     ];
     // Stem output jacks (M3): independently routable, post-stem-gain.
@@ -184,6 +195,7 @@ pub fn deck_manifest() -> Manifest {
         outputs.push(OutputDecl {
             id: format!("stem_{stem}"),
             name: format!("Stem {}{}", stem[..1].to_uppercase(), &stem[1..]),
+            display: None,
         });
     }
     let mut params = vec![

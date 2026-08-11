@@ -6,13 +6,15 @@
   "category": "Sources",
   "inputs": [
     { "id": "pitch", "name": "Pitch", "default": 0.0,
-      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
+      "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" },
+      "display": { "unit": "Hz", "map": { "kind": "volt_per_octave" } } },
     { "id": "fm", "name": "FM", "default": 0.0,
       "knob": { "style": "continuous", "min": -5.0, "max": 5.0, "curve": "linear" } },
     { "id": "sync", "name": "Sync", "default": 0.0,
       "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "waveform", "name": "Waveform", "default": 0.0,
-      "knob": { "style": "stepped", "min": 0.0, "max": 3.0, "curve": "linear", "steps": 4 } }
+      "knob": { "style": "stepped", "min": 0.0, "max": 3.0, "curve": "linear", "steps": 4 },
+      "display": { "steps": ["sine", "saw", "square", "tri"] } }
   ],
   "outputs": [
     { "id": "audio", "name": "Audio" }

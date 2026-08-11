@@ -15,16 +15,22 @@ const OSC_MANIFEST: Manifest = {
   version: '0.1.0',
   abi: 'wasm-1',
   inputs: [
-    { id: 'pitch', name: 'Pitch', knob: { style: 'continuous', min: -5, max: 5, curve: 'linear' } },
+    {
+      id: 'pitch',
+      name: 'Pitch',
+      knob: { style: 'continuous', min: -5, max: 5, curve: 'linear' },
+      display: { unit: 'Hz', map: { kind: 'volt_per_octave' } },
+    },
     { id: 'fm', name: 'FM', knob: { style: 'continuous', min: -1, max: 1, curve: 'linear' } },
     { id: 'sync', name: 'Sync' },
     {
       id: 'waveform',
       name: 'Waveform',
       knob: { style: 'stepped', min: 0, max: 3, curve: 'linear', steps: 4 },
+      display: { steps: ['sine', 'saw', 'square', 'tri'] },
     },
   ],
-  outputs: [{ id: 'audio', name: 'Audio' }],
+  outputs: [{ id: 'audio', name: 'Audio', display: { unit: 'Hz' } }],
   params: [],
 };
 
@@ -76,8 +82,29 @@ describe('ModulePanel', () => {
         }}
       />,
     );
-    expect(screen.getByTestId('jack-input-pitch').getAttribute('data-tip')).toBe('pitch: 2.00');
-    expect(screen.getByTestId('jack-input-fm').getAttribute('data-tip')).toBe('fm: 3.54 (rms)');
+    // pitch declares a 1 V/oct Hz display: 2 V above middle C = 1046.5 Hz.
+    expect(screen.getByTestId('jack-input-pitch').getAttribute('data-tip')).toBe('pitch: 1047 Hz');
+    // fm declares nothing: Volts is the default unit.
+    expect(screen.getByTestId('jack-input-fm').getAttribute('data-tip')).toBe('fm: 3.54 V (rms)');
+  });
+
+  it('stepped inputs with labels show the step name inline and in tooltips', () => {
+    render(
+      <ModulePanel
+        {...baseProps}
+        knobs={{ waveform: { position: 1, atten: 1, offset: 0 } }}
+        telemetry={{
+          waveform: { instantaneous: 3, rms_100ms: 3, display: 3, volatility: 0, is_fast: false },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('knob-step-waveform').textContent).toBe('tri');
+    expect(screen.getByRole('slider', { name: 'waveform' }).getAttribute('data-tip')).toBe(
+      'waveform: tri',
+    );
+    expect(screen.getByTestId('jack-input-waveform').getAttribute('data-tip')).toBe(
+      'waveform: tri',
+    );
   });
 
   it('shows output-jack telemetry in the tooltip, same as inputs', () => {
@@ -95,8 +122,9 @@ describe('ModulePanel', () => {
         }}
       />,
     );
+    // The output declares Hz: same formatter as inputs, its unit applied.
     expect(screen.getByTestId('jack-output-audio').getAttribute('data-tip')).toBe(
-      'audio: 3.50 (rms)',
+      'audio: 3.50 Hz (rms)',
     );
   });
 

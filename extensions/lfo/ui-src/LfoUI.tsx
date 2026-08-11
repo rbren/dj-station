@@ -15,7 +15,9 @@ const H = 56;
 const PAD = 5;
 const N = 96;
 
-const SHAPES = [
+// Exported so the app can pin the manifest's `display.steps` labels (the
+// knob/tooltip readout) to this panel's readout — one source of names.
+export const SHAPES = [
   "sine",
   "tri",
   "saw ↑",

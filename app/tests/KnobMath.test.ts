@@ -7,13 +7,16 @@
 // this test fails.
 //
 // KNOWN DIVERGENCES (documented, deliberately NOT pinned as matching):
-// - Curve 'exp'/'log' with min > 0 && max > 0: knob.rs switches to
-//   geometric interpolation (min * (max/min)^p and its inverse); the TS
-//   side always uses the squared/sqrt fallback. The cases below use
-//   min = 0 ranges, where both sides share the fallback formula.
 // - Custom curves: knob.rs treats breakpoint y-values as final values;
 //   the TS side treats them as normalized positions re-mapped through
 //   min/max. The cases below use min=0/max=1 where the two coincide.
+//
+// Curve 'exp'/'log' with min > 0 && max > 0 WAS such a divergence: knob.rs
+// switches to geometric interpolation (min * (max/min)^p and the expm1
+// inverse) while the TS side used the squared/sqrt fallback everywhere.
+// That mismatch was the LFO displayed-rate bug — a rate knob whose engine
+// value was 1 Hz displayed as ~285 — and is now pinned as matching below
+// (EXP_GEO / LOG_GEO / RATE cases).
 
 import { describe, expect, it } from 'vitest';
 import { mapPosition, positionForValue } from '../src/components/Knob';
@@ -23,6 +26,10 @@ const LIN_0_10: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'lin
 const LIN_NEG: KnobConfig = { style: 'continuous', min: -5, max: 5, curve: 'linear' };
 const EXP_0_10: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'exp' };
 const LOG_0_10: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'log' };
+const EXP_GEO: KnobConfig = { style: 'continuous', min: 1, max: 100, curve: 'exp' };
+const LOG_GEO: KnobConfig = { style: 'continuous', min: 1, max: 100, curve: 'log' };
+/** The LFO rate knob's manifest config — the displayed-rate bug's config. */
+const RATE: KnobConfig = { style: 'continuous', min: 0.01, max: 2000, curve: 'exp' };
 const STEP_5: KnobConfig = { style: 'stepped', min: 0, max: 10, curve: 'linear', steps: 5 };
 const SWITCH: KnobConfig = { style: 'switch', min: 0, max: 1, curve: 'linear' };
 const CUSTOM: KnobConfig = {
@@ -53,10 +60,23 @@ describe('mapPosition matches knob.rs KnobConfig::map', () => {
     ['exp 0..10 @ 0.5', EXP_0_10, 0.5, 2.5],
     ['exp 0..10 @ 0.25', EXP_0_10, 0.25, 0.625],
     ['exp 0..10 @ 1', EXP_0_10, 1, 10],
+    // exp with min > 0: geometric interpolation min * (max/min)^p
+    ['exp 1..100 @ 0', EXP_GEO, 0, 1],
+    ['exp 1..100 @ 0.5', EXP_GEO, 0.5, 10],
+    ['exp 1..100 @ 1', EXP_GEO, 1, 100],
+    ['exp 0.01..2000 @ 0.25', RATE, 0.25, 0.2114743],
+    ['exp 0.01..2000 @ 0.5', RATE, 0.5, 4.4721359],
+    // The bug position: engine value 1 Hz; the squared fallback showed
+    // ~284.7 here.
+    ['exp 0.01..2000 @ 0.3772852 (1 Hz)', RATE, 0.3772852, 1],
     // log with min = 0: both sides use min + sqrt(p) * (max - min)
     ['log 0..10 @ 0.25', LOG_0_10, 0.25, 5],
     ['log 0..10 @ 0.04', LOG_0_10, 0.04, 2],
     ['log 0..10 @ 1', LOG_0_10, 1, 10],
+    // log with min > 0: expm1 interpolation (inverse of the exp map)
+    ['log 1..100 @ 0.25', LOG_GEO, 0.25, 3.1622777],
+    ['log 1..100 @ 0.5', LOG_GEO, 0.5, 10],
+    ['log 1..100 @ 1', LOG_GEO, 1, 100],
     // stepped: round(p * (steps-1)) / (steps-1), then linear map
     ['stepped 5 @ 0.3', STEP_5, 0.3, 2.5],
     ['stepped 5 @ 0.4', STEP_5, 0.4, 5],
@@ -87,7 +107,10 @@ describe('positionForValue matches knob.rs position_for_value', () => {
     ['linear 0..10 value 10', LIN_0_10, 10, 1],
     ['linear -5..5 value 0', LIN_NEG, 0, 0.5],
     ['exp 0..10 value 2.5', EXP_0_10, 2.5, 0.5],
+    ['exp 1..100 value 10', EXP_GEO, 10, 0.5],
+    ['exp 0.01..2000 value 1 (the 1 Hz LFO)', RATE, 1, 0.3772852],
     ['log 0..10 value 5', LOG_0_10, 5, 0.25],
+    ['log 1..100 value 10', LOG_GEO, 10, 0.5],
     ['custom value 0.1', CUSTOM, 0.1, 0.25],
   ];
   for (const [name, config, value, expected] of cases) {
@@ -99,7 +122,7 @@ describe('positionForValue matches knob.rs position_for_value', () => {
   it('round-trips through mapPosition on every curve', () => {
     // 4 decimal places: the binary search (40 iterations, like knob.rs)
     // leaves an epsilon at curve endpoints (e.g. exp value 0 at p=0).
-    for (const config of [LIN_0_10, LIN_NEG, EXP_0_10, LOG_0_10, CUSTOM]) {
+    for (const config of [LIN_0_10, LIN_NEG, EXP_0_10, LOG_0_10, EXP_GEO, LOG_GEO, RATE, CUSTOM]) {
       for (const p of [0, 0.2, 0.5, 0.8, 1]) {
         const v = mapPosition(config, p);
         expect(mapPosition(config, positionForValue(config, v))).toBeCloseTo(v, 4);

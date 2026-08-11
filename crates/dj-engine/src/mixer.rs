@@ -27,6 +27,7 @@ pub fn crossfader_manifest() -> Manifest {
         name: name.into(),
         default: 0.0,
         knob: None,
+        display: None,
     };
     Manifest {
         id: CROSSFADER_ID.into(),
@@ -50,16 +51,19 @@ pub fn crossfader_manifest() -> Manifest {
                     curve: Curve::Linear,
                     steps: None,
                 }),
+                display: None,
             },
         ],
         outputs: vec![
             OutputDecl {
                 id: "out_l".into(),
                 name: "Out L".into(),
+                display: None,
             },
             OutputDecl {
                 id: "out_r".into(),
                 name: "Out R".into(),
+                display: None,
             },
         ],
         params: vec![],

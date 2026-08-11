@@ -10,13 +10,17 @@
     { "id": "prob", "name": "Probability", "default": 0.5,
       "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
     { "id": "length", "name": "Length", "default": 8.0,
-      "knob": { "style": "stepped", "min": 1.0, "max": 16.0, "curve": "linear", "steps": 16 } },
+      "knob": { "style": "stepped", "min": 1.0, "max": 16.0, "curve": "linear", "steps": 16 },
+      "display": { "unit": "steps" } },
     { "id": "range", "name": "Range", "default": 2.0,
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "scale", "name": "Scale", "default": 0.0,
-      "knob": { "style": "stepped", "min": 0.0, "max": 9.0, "curve": "linear", "steps": 10 } },
+      "knob": { "style": "stepped", "min": 0.0, "max": 9.0, "curve": "linear", "steps": 10 },
+      "display": { "steps": ["chromatic", "major", "minor", "dorian", "mixolydian",
+                             "penta maj", "penta min", "blues", "whole tone", "harm minor"] } },
     { "id": "root", "name": "Root", "default": 0.0,
-      "knob": { "style": "stepped", "min": 0.0, "max": 11.0, "curve": "linear", "steps": 12 } }
+      "knob": { "style": "stepped", "min": 0.0, "max": 11.0, "curve": "linear", "steps": 12 },
+      "display": { "steps": ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] } }
   ],
   "outputs": [
     { "id": "cv", "name": "CV" },

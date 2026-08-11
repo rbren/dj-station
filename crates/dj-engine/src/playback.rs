@@ -44,6 +44,7 @@ pub fn playback_manifest() -> Manifest {
                     curve: Curve::Linear,
                     steps: None,
                 }),
+                display: None,
             },
             JackDecl {
                 id: "speed".into(),
@@ -56,6 +57,7 @@ pub fn playback_manifest() -> Manifest {
                     curve: Curve::Linear,
                     steps: None,
                 }),
+                display: None,
             },
             JackDecl {
                 id: "loop".into(),
@@ -68,16 +70,19 @@ pub fn playback_manifest() -> Manifest {
                     curve: Curve::Linear,
                     steps: None,
                 }),
+                display: None,
             },
         ],
         outputs: vec![
             OutputDecl {
                 id: "audio_l".into(),
                 name: "Audio L".into(),
+                display: None,
             },
             OutputDecl {
                 id: "audio_r".into(),
                 name: "Audio R".into(),
+                display: None,
             },
         ],
         params: vec![],

@@ -10,13 +10,17 @@
     { "id": "retrig", "name": "Retrig", "default": 0.0,
       "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "attack", "name": "Attack", "default": 0.01,
-      "knob": { "style": "continuous", "min": 0.0005, "max": 5.0, "curve": "linear" } },
+      "knob": { "style": "continuous", "min": 0.0005, "max": 5.0, "curve": "linear" },
+      "display": { "unit": "s" } },
     { "id": "decay", "name": "Decay", "default": 0.1,
-      "knob": { "style": "continuous", "min": 0.001, "max": 5.0, "curve": "linear" } },
+      "knob": { "style": "continuous", "min": 0.001, "max": 5.0, "curve": "linear" },
+      "display": { "unit": "s" } },
     { "id": "sustain", "name": "Sustain", "default": 0.7,
-      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" } },
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" },
+      "display": { "unit": "" } },
     { "id": "release", "name": "Release", "default": 0.2,
-      "knob": { "style": "continuous", "min": 0.001, "max": 10.0, "curve": "linear" } }
+      "knob": { "style": "continuous", "min": 0.001, "max": 10.0, "curve": "linear" },
+      "display": { "unit": "s" } }
   ],
   "outputs": [
     { "id": "env", "name": "Env" }

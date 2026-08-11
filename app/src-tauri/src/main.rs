@@ -399,6 +399,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                         .map(|mm| dj_engine::manifest::OutputDecl {
                             id: mm.name.clone(),
                             name: mm.name.clone(),
+                            display: None,
                         })
                         .collect();
                     // LED input jacks likewise (M4): one per LED mapping,
@@ -411,6 +412,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                             name: mm.name.clone(),
                             default: 0.0,
                             knob: None,
+                            display: None,
                         })
                         .collect();
                 }
@@ -423,6 +425,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                         .map(|(_, d)| dj_engine::manifest::OutputDecl {
                             id: d.name.clone(),
                             name: d.name.clone(),
+                            display: None,
                         })
                         .collect();
                 }

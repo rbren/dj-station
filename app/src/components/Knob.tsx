@@ -9,8 +9,8 @@
 // amount, drawn as a spread arc around the knob's notch.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fixed } from '../format';
-import type { KnobConfig } from '../types';
+import { formatDisplay, stepLabel } from '../display';
+import type { DisplaySpec, KnobConfig } from '../types';
 import { KnobConfigMenu } from './KnobConfigMenu';
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -28,9 +28,20 @@ export function mapPosition(config: KnobConfig, position: number): number {
     const steps = Math.max(2, config.steps ?? 2);
     p = Math.round(p * (steps - 1)) / (steps - 1);
   }
-  if (config.curve === 'exp') p = p * p;
-  else if (config.curve === 'log') p = Math.sqrt(p);
-  else if (typeof config.curve === 'object') {
+  if (config.curve === 'exp') {
+    // Geometric interpolation when the range allows it, squared-position
+    // fallback otherwise — exactly like knob.rs KnobConfig::map.
+    if (config.min > 0 && config.max > 0) {
+      return config.min * Math.pow(config.max / config.min, p);
+    }
+    p = p * p;
+  } else if (config.curve === 'log') {
+    if (config.min > 0 && config.max > 0) {
+      const ratio = Math.log(config.max / config.min);
+      return config.min + (Math.expm1(p * ratio) / Math.expm1(ratio)) * (config.max - config.min);
+    }
+    p = Math.sqrt(p);
+  } else if (typeof config.curve === 'object') {
     // piecewise-linear custom curve
     const pts = config.curve.custom;
     for (let i = 1; i < pts.length; i++) {
@@ -103,6 +114,8 @@ function arcPath(fromPos: number, toPos: number, cx: number, cy: number, r: numb
 export interface KnobProps {
   label: string;
   config: KnobConfig;
+  /** Manifest display spec (unit / mapping / step labels); absent = Volts. */
+  display?: DisplaySpec | null;
   position: number;
   onPosition(position: number): void;
   /** End of an interaction gesture (drag release / toggle / momentary up). */
@@ -120,6 +133,7 @@ export interface KnobProps {
 export function Knob(props: KnobProps) {
   const { label, config, position, onPosition, onRelease, onConfigChange, wired, appearance } =
     props;
+  const display = props.display;
   const { onAttenOffset } = props;
   const atten = props.atten ?? 1;
   const offset = props.offset ?? 0;
@@ -233,7 +247,7 @@ export function Knob(props: KnobProps) {
           role="switch"
           aria-checked={on}
           aria-label={label}
-          data-tip={`${label}: ${fixed(value)}`}
+          data-tip={`${label}: ${formatDisplay(display, value, config)}`}
           className={`knob-toggle${on ? ' knob-toggle-on' : ''}`}
           onClick={() => {
             onPosition(on ? 0 : 1);
@@ -274,7 +288,7 @@ export function Knob(props: KnobProps) {
           aria-valuemax={config.max}
           aria-valuenow={value}
           aria-orientation={horizontal ? 'horizontal' : 'vertical'}
-          data-tip={`${label}: ${fixed(value)}`}
+          data-tip={`${label}: ${formatDisplay(display, value, config)}`}
           tabIndex={0}
           onMouseDown={startDrag}
           onContextMenu={openMenu}
@@ -291,9 +305,18 @@ export function Knob(props: KnobProps) {
   }
 
   const spread = wired ? spreadRange(config, position, atten, offset) : null;
+  const shown = formatDisplay(display, value, config);
   const tooltip = spread
-    ? `${label}: ${fixed(value)} (wire ${fixed(spread.min)}…${fixed(spread.max)})`
-    : `${label}: ${fixed(value)}`;
+    ? `${label}: ${shown} (wire ${formatDisplay(display, spread.min, config)}…${formatDisplay(
+        display,
+        spread.max,
+        config,
+      )})`
+    : `${label}: ${shown}`;
+  // Stepped selectors with declared labels show the current step inline —
+  // the one case where the value beats the tooltip (you can't tell "major"
+  // from "dorian" by needle angle).
+  const inlineStep = config.style === 'stepped' ? stepLabel(display, value, config) : null;
 
   return (
     <div className="knob" data-testid={`knob-${label}`}>
@@ -329,6 +352,11 @@ export function Knob(props: KnobProps) {
       >
         <div className="knob-pointer" style={{ transform: `rotate(${angle}deg)` }} />
       </div>
+      {inlineStep !== null && (
+        <span className="knob-step-label" data-testid={`knob-step-${label}`}>
+          {inlineStep}
+        </span>
+      )}
       {menu}
     </div>
   );
