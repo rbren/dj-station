@@ -1,7 +1,8 @@
 // Right-click editor for per-patch knob config overrides (PRD §7.2):
-// style, endpoints and curve are data, not code. When the jack is wired
-// this menu also hosts the wire spread — the value range the incoming
-// signal can swing the knob's baseline through.
+// style, endpoints and curve are data, not code. It also hosts a direct
+// numeric entry for the knob's value (exact values are hard to hit by
+// drag), and when the jack is wired the wire spread — the value range the
+// incoming signal can swing the knob's baseline through.
 //
 // Rendered in a portal at the cursor: module panels clip their content, so
 // an in-flow menu would be cut off at the panel edge.
@@ -9,7 +10,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { CurveName, KnobConfig, KnobStyle } from '../types';
-import { attenOffsetForSpread, spreadRange } from './Knob';
+import { attenOffsetForSpread, mapPosition, positionForValue, spreadRange } from './Knob';
 
 export function KnobConfigMenu({
   config,
@@ -18,6 +19,8 @@ export function KnobConfigMenu({
   onClose,
   wired,
   position,
+  onPosition,
+  onRelease,
   atten,
   offset,
   onAttenOffset,
@@ -30,6 +33,9 @@ export function KnobConfigMenu({
   wired?: boolean;
   /** Knob position: the spread is shown as absolute values around it. */
   position?: number;
+  /** Direct value entry: sets the knob position for a typed value. */
+  onPosition?(position: number): void;
+  onRelease?(): void;
   atten?: number;
   offset?: number;
   onAttenOffset?(atten: number, offset: number): void;
@@ -60,6 +66,11 @@ export function KnobConfigMenu({
     onAttenOffset?.(next.atten, next.offset);
   };
 
+  const value = mapPosition(config, position ?? 0);
+  const setValue = (v: number) => {
+    if (Number.isFinite(v)) onPosition?.(positionForValue(config, v));
+  };
+
   const menu = (
     <div
       ref={ref}
@@ -68,6 +79,29 @@ export function KnobConfigMenu({
       aria-label="Knob configuration"
       style={at ? { position: 'fixed', left: at.x, top: at.y } : undefined}
     >
+      {onPosition && config.style !== 'wire' && (
+        <label>
+          Value
+          <input
+            type="number"
+            aria-label="knob value"
+            step={0.1}
+            min={Math.min(config.min, config.max)}
+            max={Math.max(config.min, config.max)}
+            value={Number(value.toFixed(4))}
+            // valueAsNumber: NaN for empty/partial input (Number('') is 0,
+            // which would slam the knob while the user is still typing).
+            onChange={(e) => setValue(e.target.valueAsNumber)}
+            onBlur={() => onRelease?.()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                onRelease?.();
+                onClose();
+              }
+            }}
+          />
+        </label>
+      )}
       <label>
         Style
         <select

@@ -139,6 +139,65 @@ describe('Knob', () => {
     expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({ curve: 'exp' }));
   });
 
+  it('config menu Value field sets the exact knob value', () => {
+    const onPosition = vi.fn();
+    const onRelease = vi.fn();
+    render(
+      <Knob
+        label="freq"
+        config={{ style: 'continuous', min: 20, max: 2000, curve: 'exp' }}
+        position={0.5}
+        onPosition={onPosition}
+        onRelease={onRelease}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'freq' }));
+    const field = screen.getByLabelText('knob value') as HTMLInputElement;
+    // Shows the current mapped value (geometric midpoint of 20..2000).
+    expect(Number(field.value)).toBeCloseTo(200, 1);
+    fireEvent.change(field, { target: { value: '440' } });
+    expect(onPosition).toHaveBeenCalledTimes(1);
+    const cfg: KnobConfig = { style: 'continuous', min: 20, max: 2000, curve: 'exp' };
+    expect(mapPosition(cfg, onPosition.mock.lastCall![0])).toBeCloseTo(440, 2);
+    // Enter commits the edit gesture and closes the menu.
+    expect(onRelease).not.toHaveBeenCalled();
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(onRelease).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText('knob value')).toBeNull();
+  });
+
+  it('config menu Value field ignores unparseable input', () => {
+    const onPosition = vi.fn();
+    render(
+      <Knob
+        label="cv"
+        config={LINEAR}
+        position={0.5}
+        onPosition={onPosition}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'cv' }));
+    fireEvent.change(screen.getByLabelText('knob value'), { target: { value: '' } });
+    expect(onPosition).not.toHaveBeenCalled();
+  });
+
+  it('config menu on a wire-style input has no Value field', () => {
+    render(
+      <Knob
+        label="gate"
+        config={{ ...LINEAR, style: 'wire' }}
+        position={0}
+        onPosition={() => {}}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByTestId('knob-gate'));
+    expect(screen.getByLabelText('knob style')).toBeTruthy();
+    expect(screen.queryByLabelText('knob value')).toBeNull();
+  });
+
   it('style changes what renders: dial vs toggle vs plain wire jack', () => {
     const { rerender } = render(
       <Knob label="g" config={LINEAR} position={0} onPosition={() => {}} />,

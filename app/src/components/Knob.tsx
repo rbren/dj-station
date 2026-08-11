@@ -205,6 +205,8 @@ export function Knob(props: KnobProps) {
       onClose={() => setMenuAt(null)}
       wired={wired}
       position={position}
+      onPosition={onPosition}
+      onRelease={onRelease}
       atten={props.atten}
       offset={props.offset}
       onAttenOffset={onAttenOffset}
