@@ -157,7 +157,12 @@ fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> 
     if backend.is_some() {
         engine.stop().map_err(err)?;
     }
-    *engine = Engine::from_doc(doc, engine.registry.clone()).map_err(err)?;
+    let mut rebuilt = Engine::from_doc(doc, engine.registry.clone()).map_err(err)?;
+    // The rebuild reconstructs every module instance; carry over live DSP
+    // state (sequencer positions, LFO phases, held notes, …) so an edit
+    // doesn't reset modules it never touched.
+    rebuilt.adopt_dsp_state(engine).map_err(err)?;
+    *engine = rebuilt;
     // Undo snapshots embed only the macros they use; re-register the rest
     // of the user library so instantiation stays available.
     if let Ok(lib) = db_macro_library(&state.library) {
