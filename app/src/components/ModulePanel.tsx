@@ -200,7 +200,11 @@ export function ModulePanel(props: ModulePanelProps) {
                   className="input-group-cells"
                   style={
                     group.kind === 'grid' && group.columns
-                      ? { gridTemplateColumns: `repeat(${group.columns}, max-content)` }
+                      ? // Columns share the panel's --cell-w token so custom-UI
+                        // strips (e.g. the step sequencer playhead) can render
+                        // an identically-sized grid that lines up column-for-
+                        // column with the cells.
+                        { gridTemplateColumns: `repeat(${group.columns}, var(--cell-w, max-content))` }
                       : undefined
                   }
                 >

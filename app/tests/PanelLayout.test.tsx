@@ -4,7 +4,9 @@
 // renders exactly once even if a layout forgets or misnames it.
 
 import { render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import StepSeqUI from '../../extensions/step_seq/ui-src/StepSeqUI';
 import { ModulePanel } from '../src/components/ModulePanel';
 import { resolveLayout } from '../src/components/panelLayouts';
 import type { Manifest, ModuleHandle } from '../src/types';
@@ -147,5 +149,67 @@ describe('ModulePanel with layouts', () => {
     for (const id of ['clock', 'div2', 'mul4', 'bar']) {
       expect(screen.getByTestId(`jack-output-${id}`)).toBeTruthy();
     }
+  });
+});
+
+// The playhead strip (custom StepSeqUI) must line up with the per-step
+// cv/gate/ratchet columns: the step grid is the FIRST input group (right
+// under the custom UI), both grids use 16 columns sized by the shared
+// --cell-w token, and lamp N sits over the column holding cvN/gateN/
+// ratchetN.
+describe('step sequencer strip alignment', () => {
+  const stepSeqManifest = () => {
+    const inputs = ['clock', 'reset', 'length', 'dir', 'glide'];
+    for (let i = 1; i <= 16; i++) inputs.push(`cv${i}`);
+    for (let i = 1; i <= 16; i++) inputs.push(`gate${i}`);
+    for (let i = 1; i <= 16; i++) inputs.push(`ratchet${i}`);
+    return manifest('com.dj.step_seq', inputs, ['cv', 'gate', 'step']);
+  };
+
+  it('the 16-column step grid is the first group; column s holds cv/gate/ratchet s', () => {
+    const layout = resolveLayout(stepSeqManifest());
+    const grid = layout.groups[0];
+    expect(grid.kind).toBe('grid');
+    expect(grid.columns).toBe(16);
+    // Row-major grid fill: row 1 = cv1..cv16, row 2 = gates, row 3 =
+    // ratchets — so column s stacks cvS over gateS over ratchetS.
+    const jacks = grid.cells.map((c) => c.jack);
+    for (let s = 1; s <= 16; s++) {
+      expect(jacks[s - 1]).toBe(`cv${s}`);
+      expect(jacks[16 + s - 1]).toBe(`gate${s}`);
+      expect(jacks[32 + s - 1]).toBe(`ratchet${s}`);
+    }
+    // Transport moved below the step grid.
+    expect(layout.groups[1].title).toBe('transport');
+  });
+
+  it('renders the strip before the step grid with the shared column template', () => {
+    render(
+      <ModulePanel {...baseProps} instanceId="seq1" manifest={stepSeqManifest()} customUI={StepSeqUI} />,
+    );
+    const strip = screen.getByTestId('stepseq-ui');
+    const grid = document.querySelector<HTMLElement>('.input-group-grid .input-group-cells');
+    expect(grid).toBeTruthy();
+    // 16 numbered lamps, one per column.
+    expect(strip.querySelectorAll('.stepseq-lamp')).toHaveLength(16);
+    // Strip sits above (before) the step grid in document order.
+    expect(strip.compareDocumentPosition(grid!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The panel grid's columns are the shared --cell-w token — the same
+    // token .stepseq-ui uses for its own 16 columns (pinned below).
+    expect(grid!.style.gridTemplateColumns).toBe('repeat(16, var(--cell-w, max-content))');
+  });
+
+  it('styles.css sizes the strip and the input cells from the same tokens', () => {
+    // vitest runs with the app directory as cwd.
+    const css = readFileSync('src/styles.css', 'utf8');
+    const rule = (selector: string) => {
+      const m = css.match(new RegExp(`\\${selector}\\s*{[^}]*}`));
+      if (!m) throw new Error(`missing rule ${selector}`);
+      return m[0];
+    };
+    expect(rule('.stepseq-ui')).toContain('grid-template-columns: repeat(16, var(--cell-w))');
+    expect(rule('.stepseq-ui')).toContain('gap: var(--cell-gap)');
+    expect(rule('.input-cell')).toContain('width: var(--cell-w)');
+    expect(rule('.input-group-cells')).toContain('gap: var(--cell-gap)');
   });
 });

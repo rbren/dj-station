@@ -1,8 +1,12 @@
 // Step sequencer playhead strip: one lamp per step above the 16-column
 // knob grid, with the currently-playing step lit hot (bright fill + glow)
-// so it reads at a glance from across the room. The step index comes from
-// the module's `step` output via the batched telemetry tap (out:step);
-// -1 (armed, no clock yet) shows no playhead.
+// so it reads at a glance from across the room. The strip renders as a
+// CSS grid sharing the panel's --cell-w/--cell-gap tokens with the
+// cv/gate/ratchet step grid below (see .stepseq-ui in styles.css and the
+// com.dj.step_seq layout in panelLayouts.ts), so lamp N sits directly
+// above step column N. The step index comes from the module's `step`
+// output via the batched telemetry tap (out:step); -1 (armed, no clock
+// yet) shows no playhead.
 
 // Structural copy of the host's ModuleHandle (extensions compile standalone).
 interface ModuleHandle {
