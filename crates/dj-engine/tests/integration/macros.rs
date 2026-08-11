@@ -130,6 +130,42 @@ fn remove_module_takes_a_whole_macro_instance_with_its_internals() {
     assert!(e.remove_module("tone2/osc1").is_err());
 }
 
+/// Reset on a macro instance targets the definition's saved state — what a
+/// fresh instantiation would give — not the raw manifest defaults.
+#[test]
+fn reset_on_a_macro_instance_restores_the_definition_state() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e); // saves vca1 cv at position 0.5 into the def
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone-reset",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+
+    // Knob reset on the external jack: back to the def's saved 0.5.
+    e.set_knob_position("tone1", "level", 0.9).unwrap();
+    e.set_knob_atten_offset("tone1", "level", -0.5, 2.0)
+        .unwrap();
+    e.reset_knob("tone1", "level").unwrap();
+    let s = e.knob_state("tone1", "level").unwrap();
+    assert_eq!(s.position, 0.5);
+    assert_eq!((s.atten, s.offset), (1.0, 0.0));
+
+    // Module-wide reset: every internal knob back to the def's state.
+    e.set_knob_position("tone1", "level", 0.9).unwrap();
+    e.set_knob_position("tone1", "pitch", 1.0).unwrap();
+    e.reset_module("tone1").unwrap();
+    assert_eq!(e.knob_state("tone1", "level").unwrap().position, 0.5);
+    // pitch was at its manifest default when collapsed (0 on -5..5 => 0.5).
+    assert_eq!(e.knob_state("tone1", "pitch").unwrap().position, 0.5);
+    // Non-structural: internals and the instance record survive.
+    assert!(e.macro_instances().contains_key("tone1"));
+    assert!(e.nodes.iter().any(|n| n.instance_id == "tone1/osc1"));
+}
+
 #[test]
 fn instantiate_twice_and_edit_internals_updates_both_instances() {
     // Build, collapse, then wire TWO instances of the macro to the output.

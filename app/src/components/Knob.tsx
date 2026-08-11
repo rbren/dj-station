@@ -121,6 +121,9 @@ export interface KnobProps {
   /** End of an interaction gesture (drag release / toggle / momentary up). */
   onRelease?(): void;
   onConfigChange?(config: KnobConfig): void;
+  /** Double-click: reset to the manifest default value, including wire
+   *  atten/offset (CV spread). */
+  onReset?(): void;
   wired?: boolean;
   atten?: number;
   offset?: number;
@@ -131,8 +134,17 @@ export interface KnobProps {
 }
 
 export function Knob(props: KnobProps) {
-  const { label, config, position, onPosition, onRelease, onConfigChange, wired, appearance } =
-    props;
+  const {
+    label,
+    config,
+    position,
+    onPosition,
+    onRelease,
+    onConfigChange,
+    onReset,
+    wired,
+    appearance,
+  } = props;
   const display = props.display;
   const { onAttenOffset } = props;
   const atten = props.atten ?? 1;
@@ -277,6 +289,18 @@ export function Knob(props: KnobProps) {
     };
   };
 
+  // Double-click resets to the default value — baseline position AND the
+  // wire's atten/offset spread. The reset is its own undo step, so end the
+  // gesture the double-click's drags may have opened.
+  const onDoubleClick = onReset
+    ? (e: React.MouseEvent) => {
+        e.preventDefault();
+        drag.current = null;
+        onReset();
+        onRelease?.();
+      }
+    : undefined;
+
   if (appearance === 'fader' || appearance === 'hfader') {
     const pct = clamp01(position) * 100;
     return (
@@ -295,6 +319,7 @@ export function Knob(props: KnobProps) {
           data-tip={`${label}: ${formatDisplay(display, value, config)}`}
           tabIndex={0}
           onMouseDown={startDrag}
+          onDoubleClick={onDoubleClick}
           onContextMenu={openMenu}
         >
           <div className="fader-track" />
@@ -352,6 +377,7 @@ export function Knob(props: KnobProps) {
         data-tip={tooltip}
         tabIndex={0}
         onMouseDown={startDrag}
+        onDoubleClick={onDoubleClick}
         onContextMenu={openMenu}
       >
         <div className="knob-pointer" style={{ transform: `rotate(${angle}deg)` }} />

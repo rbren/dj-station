@@ -159,6 +159,16 @@ export class EngineClient extends IpcClient {
   setAttenOffset(instance: string, jack: string, atten: number, offset: number) {
     return this.call<void>('set_knob_atten_offset', { instance, jack, atten, offset });
   }
+  /** Double-click knob reset: position to the manifest default, wire
+   *  atten/offset back to defaults. */
+  resetKnob(instance: string, jack: string) {
+    return this.call<void>('reset_knob', { instance, jack });
+  }
+  /** Module "Reset to defaults": every knob and param back to a freshly
+   *  added module's state (wires and mappings stay). */
+  resetModule(instance: string) {
+    return this.call<void>('reset_module', { instance });
+  }
   setParam(instance: string, param: string, value: number) {
     return this.call<void>('set_param', { instance, param, value });
   }

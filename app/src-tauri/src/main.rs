@@ -92,7 +92,9 @@ enum EditKey<'a> {
     GestureRemove(&'a str, &'a str),
     Knob(&'a str, &'a str),
     KnobConfig(&'a str, &'a str),
+    KnobReset(&'a str, &'a str),
     AttenOffset(&'a str, &'a str),
+    ModuleReset(&'a str),
     Param(&'a str, &'a str),
     Load(&'a str),
     CollapseMacro,
@@ -115,7 +117,9 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::GestureRemove(i, n) => write!(f, "gest-:{i}:{n}"),
             EditKey::Knob(i, j) => write!(f, "knob:{i}:{j}"),
             EditKey::KnobConfig(i, j) => write!(f, "knobcfg:{i}:{j}"),
+            EditKey::KnobReset(i, j) => write!(f, "knobreset:{i}:{j}"),
             EditKey::AttenOffset(i, j) => write!(f, "attoff:{i}:{j}"),
+            EditKey::ModuleReset(i) => write!(f, "modreset:{i}"),
             EditKey::Param(i, p) => write!(f, "param:{i}:{p}"),
             EditKey::Load(d) => write!(f, "load:{d}"),
             EditKey::CollapseMacro => write!(f, "collapse_macro"),
@@ -1006,6 +1010,23 @@ fn set_knob_atten_offset(
     engine
         .set_knob_atten_offset(&instance, &jack, atten, offset)
         .map_err(err)
+}
+
+/// Double-click knob reset: position back to the manifest default, wire
+/// atten/offset and config override back to their defaults.
+#[tauri::command]
+fn reset_knob(state: State<AppState>, instance: String, jack: String) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::KnobReset(&instance, &jack))?;
+    engine.reset_knob(&instance, &jack).map_err(err)
+}
+
+/// Module context menu "Reset to defaults": every knob and param back to
+/// the state a freshly added module would have. Non-structural — wires,
+/// MIDI/gesture mappings and loaded tracks stay.
+#[tauri::command]
+fn reset_module(state: State<AppState>, instance: String) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ModuleReset(&instance))?;
+    engine.reset_module(&instance).map_err(err)
 }
 
 #[tauri::command]
@@ -2105,6 +2126,8 @@ fn main() {
             set_knob_position,
             set_knob_config,
             set_knob_atten_offset,
+            reset_knob,
+            reset_module,
             set_param,
             tap,
             tap_all,

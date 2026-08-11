@@ -68,6 +68,47 @@ impl Engine {
         })
     }
 
+    /// The knob state a fresh instantiation of `def` would give an internal
+    /// jack: the state saved in the definition (recursing through nested
+    /// macros), or `None` when the definition saved nothing for it (the
+    /// concrete jack's manifest default applies).
+    pub(crate) fn macro_default_knob(
+        &self,
+        def: &MacroDef,
+        node: &str,
+        jack: &str,
+    ) -> Option<KnobState> {
+        let mf = def.modules.get(node)?;
+        if let Some(saved) = mf.knobs.get(jack) {
+            return Some(saved.clone());
+        }
+        let inner = self.macros.get(&mf.ext)?;
+        let ij = inner.interface.inputs.iter().find(|j| j.id == jack)?;
+        self.macro_default_knob(inner, &ij.node, &ij.jack)
+    }
+
+    /// Reset a macro instance's expanded internal nodes to the state a
+    /// fresh instantiation of `def` would give them: manifest defaults with
+    /// the definition's saved params/knobs applied on top (mirroring
+    /// `expand_macro_def`). Non-structural — wiring and mappings stay.
+    pub(super) fn reset_macro_state(&mut self, prefix: &str, def: &MacroDef) -> Result<()> {
+        for (inner, mf) in &def.modules {
+            let full = format!("{prefix}/{inner}");
+            if let Some(inner_def) = self.macros.get(&mf.ext).cloned() {
+                self.reset_macro_state(&full, &inner_def)?;
+            } else {
+                self.reset_node_to_manifest(&full)?;
+            }
+            for (param, value) in &mf.params {
+                self.set_param(&full, param, *value)?;
+            }
+            for (jack, state) in &mf.knobs {
+                self.restore_knob(&full, jack, state.clone())?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn resolve_param(&self, id: &str, param: &str) -> Result<(String, String)> {
         if let Some(mi) = self.macro_instances.get(id) {
             let (_, node, p) = mi

@@ -953,6 +953,80 @@ impl Engine {
         self.push_knob_rt(node, jack)
     }
 
+    /// Reset one input knob to its default *value*: position back to the
+    /// manifest default, wire atten/offset back to `KnobState` defaults.
+    /// A per-patch config override (style/range/curve) is a deliberate
+    /// customization, not a value — it stays, and the default position is
+    /// computed against it. On a macro instance's external jack the
+    /// default is the state saved in the macro definition (what a fresh
+    /// instantiation would give).
+    pub fn reset_knob(&mut self, instance_id: &str, jack_id: &str) -> Result<()> {
+        let (node, jack) = self.in_jack_indices(instance_id, jack_id)?;
+        let saved = self.macro_instances.get(instance_id).and_then(|mi| {
+            let def = self.macros.get(&mi.macro_id)?;
+            let ij = def.interface.inputs.iter().find(|ij| ij.id == jack_id)?;
+            self.macro_default_knob(def, &ij.node, &ij.jack)
+        });
+        let state = saved.unwrap_or_else(|| {
+            let decl = &self.nodes[node].manifest.inputs[jack];
+            let config = self.nodes[node].knobs[jack].config.clone();
+            let cfg = config
+                .clone()
+                .or_else(|| decl.knob.clone())
+                .unwrap_or_default();
+            KnobState {
+                position: position_for_value(&cfg, decl.default),
+                config,
+                ..KnobState::default()
+            }
+        });
+        self.nodes[node].knobs[jack] = state;
+        self.push_knob_rt(node, jack)
+    }
+
+    /// Reset every input knob and every param of a module to defaults —
+    /// the state a freshly added module of this type would have. For a
+    /// macro instance that is the definition's saved internal state.
+    /// Non-structural: wires, MIDI/gesture mappings and loaded tracks are
+    /// untouched.
+    pub fn reset_module(&mut self, instance_id: &str) -> Result<()> {
+        if self.macro_instances.contains_key(instance_id) {
+            let macro_id = self.macro_instances[instance_id].macro_id.clone();
+            let def = self
+                .macros
+                .get(&macro_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
+            return self.reset_macro_state(instance_id, &def);
+        }
+        self.node_idx(instance_id)?;
+        self.reset_node_to_manifest(instance_id)
+    }
+
+    /// Reset one concrete node's knobs and params to its manifest defaults.
+    pub(super) fn reset_node_to_manifest(&mut self, instance_id: &str) -> Result<()> {
+        let node = self.node_idx(instance_id)?;
+        for jack in 0..self.nodes[node].manifest.inputs.len() {
+            let decl = &self.nodes[node].manifest.inputs[jack];
+            let cfg = decl.knob.clone().unwrap_or_default();
+            self.nodes[node].knobs[jack] = KnobState {
+                position: position_for_value(&cfg, decl.default),
+                ..KnobState::default()
+            };
+            self.push_knob_rt(node, jack)?;
+        }
+        let params: Vec<(String, f32)> = self.nodes[node]
+            .manifest
+            .params
+            .iter()
+            .map(|p| (p.id.clone(), p.default_f32()))
+            .collect();
+        for (param, value) in params {
+            self.set_param(instance_id, &param, value)?;
+        }
+        Ok(())
+    }
+
     /// Right-click knob reconfiguration: style/endpoints/curve, per patch.
     pub fn set_knob_config(
         &mut self,

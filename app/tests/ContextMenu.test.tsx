@@ -1,7 +1,7 @@
 // Right-click context menus: the browser menu is suppressed globally;
-// right-clicking a module shows Delete / Documentation / disabled stubs,
-// right-clicking the rack background shows Save (the File-menu save
-// action). Documentation opens the in-app docs panel.
+// right-clicking a module shows Delete / Documentation / Reset to defaults
+// / a disabled stub, right-clicking the rack background shows Save (the
+// File-menu save action). Documentation opens the in-app docs panel.
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,6 +46,7 @@ const fakeEngine = {
   listPatches: vi.fn(async () => ['demo']),
   savePatchAs: vi.fn(async () => {}),
   removeModule: vi.fn(async () => {}),
+  resetModule: vi.fn(async () => {}),
   endEdit: vi.fn(async () => {}),
 };
 
@@ -91,20 +92,30 @@ describe('global right-click override', () => {
 });
 
 describe('module context menu', () => {
-  it('opens on right-click with Delete, Documentation and disabled stubs', async () => {
+  it('opens on right-click with Delete, Documentation, Reset and a disabled stub', async () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 40, clientY: 60 });
     expect(screen.getByTestId('context-menu')).toBeTruthy();
     expect(screen.getByTestId('ctx-delete')).toBeTruthy();
     expect(screen.getByTestId('ctx-docs')).toBeTruthy();
 
-    // Reset to defaults / Save patch are visible but disabled with a hint.
     const reset = screen.getByTestId('ctx-reset') as HTMLButtonElement;
+    expect(reset.disabled).toBe(false);
+
+    // Save patch is visible but disabled with a hint.
     const savePatch = screen.getByTestId('ctx-save-patch') as HTMLButtonElement;
-    expect(reset.disabled).toBe(true);
     expect(savePatch.disabled).toBe(true);
-    expect(reset.textContent).toContain('not implemented');
     expect(savePatch.textContent).toContain('not implemented');
+  });
+
+  it('Reset to defaults resets the module through the engine and closes the menu', async () => {
+    await renderApp();
+    fireEvent.contextMenu(screen.getByTestId('module-vca1'), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByTestId('ctx-reset'));
+    await waitFor(() => expect(fakeEngine.resetModule).toHaveBeenCalledWith('vca1'));
+    // Non-structural: the module itself is not removed.
+    expect(fakeEngine.removeModule).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('context-menu')).toBeNull();
   });
 
   it('Delete removes the module through the engine and closes the menu', async () => {
@@ -118,7 +129,7 @@ describe('module context menu', () => {
   it('disabled items do nothing and keep the menu open', async () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 10, clientY: 10 });
-    fireEvent.click(screen.getByTestId('ctx-reset'));
+    fireEvent.click(screen.getByTestId('ctx-save-patch'));
     expect(screen.getByTestId('context-menu')).toBeTruthy();
     expect(fakeEngine.removeModule).not.toHaveBeenCalled();
     expect(fakeEngine.savePatchAs).not.toHaveBeenCalled();

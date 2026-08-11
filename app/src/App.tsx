@@ -717,8 +717,9 @@ export default function App() {
       {
         label: 'Reset to defaults',
         testId: 'ctx-reset',
-        disabled: true,
-        hint: 'not implemented',
+        onSelect: () => {
+          void engine.resetModule(instance).then(refresh);
+        },
       },
       {
         label: 'Save patch',
@@ -727,7 +728,7 @@ export default function App() {
         hint: 'not implemented',
       },
     ];
-  }, [ctxMenu, savePatch, removeModule, store]);
+  }, [ctxMenu, savePatch, removeModule, store, refresh]);
 
   return (
     <main className="app">

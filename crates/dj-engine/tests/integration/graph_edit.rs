@@ -160,6 +160,67 @@ fn apply_doc_preserves_untouched_module_state() {
     );
 }
 
+/// Double-click knob reset: position back to the manifest default,
+/// atten/offset back to defaults; a per-patch config override survives and
+/// the default position is computed against it.
+#[test]
+fn reset_knob_restores_default_value_and_wire_spread() {
+    let mut e = crate::common::default_engine();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+
+    // cv default is 10.0 on a 0..10 knob => position 1.0.
+    e.set_knob_position("vca1", "cv", 0.3).unwrap();
+    e.set_knob_atten_offset("vca1", "cv", -0.5, 2.0).unwrap();
+    e.reset_knob("vca1", "cv").unwrap();
+    let s = e.knob_state("vca1", "cv").unwrap();
+    assert_eq!(s.position, 1.0);
+    assert_eq!(s.atten, 1.0);
+    assert_eq!(s.offset, 0.0);
+    assert!(s.config.is_none());
+
+    // A config override is a customization, not a value: it stays, and the
+    // default value maps through it (default 10 on a 0..20 knob => 0.5).
+    let cfg = dj_engine::KnobConfig {
+        max: 20.0,
+        ..Default::default()
+    };
+    e.set_knob_config("vca1", "cv", Some(cfg.clone())).unwrap();
+    e.set_knob_position("vca1", "cv", 0.9).unwrap();
+    e.reset_knob("vca1", "cv").unwrap();
+    let s = e.knob_state("vca1", "cv").unwrap();
+    assert_eq!(s.config, Some(cfg));
+    assert!((s.position - 0.5).abs() < 1e-6, "{}", s.position);
+
+    assert!(e.reset_knob("vca1", "nope").is_err());
+}
+
+/// Module-wide reset: every knob and param back to manifest defaults —
+/// non-structural, so wires stay connected.
+#[test]
+fn reset_module_restores_all_knobs_and_params_but_keeps_wires() {
+    let mut e = crate::common::default_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+
+    e.set_knob_position("osc1", "pitch", 0.9).unwrap();
+    e.set_knob_position("osc1", "waveform", 1.0).unwrap();
+    e.set_knob_atten_offset("osc1", "fm", 0.25, -1.0).unwrap();
+    e.reset_module("osc1").unwrap();
+
+    // pitch default 0 on -5..5 => 0.5; waveform default 0 => ~0 (stepped
+    // knobs invert through the binary-search fallback).
+    assert_eq!(e.knob_state("osc1", "pitch").unwrap().position, 0.5);
+    let wf = e.knob_state("osc1", "waveform").unwrap().position;
+    assert!(wf.abs() < 1e-6, "{wf}");
+    let fm = e.knob_state("osc1", "fm").unwrap();
+    assert_eq!((fm.atten, fm.offset), (1.0, 0.0));
+    // Non-structural: the wire is untouched.
+    assert_eq!(e.wire_specs().len(), 1);
+
+    assert!(e.reset_module("nope").is_err());
+}
+
 #[test]
 fn wire_knob_style_roundtrips_like_any_other_config() {
     let mut engine = crate::common::default_engine();

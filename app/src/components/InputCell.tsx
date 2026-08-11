@@ -27,6 +27,8 @@ export interface InputCellProps {
   onKnobPosition(position: number): void;
   onKnobConfig(config: KnobConfig): void;
   onAttenOffset(atten: number, offset: number): void;
+  /** Double-click reset to the default value (incl. wire spread). */
+  onKnobReset?(): void;
   onEditEnd?(): void;
 }
 
@@ -67,6 +69,7 @@ export function InputCell(props: InputCellProps) {
           onPosition={props.onKnobPosition}
           onConfigChange={props.onKnobConfig}
           onAttenOffset={props.onAttenOffset}
+          onReset={props.onKnobReset}
           onRelease={props.onEditEnd}
         />
       )}

@@ -69,6 +69,47 @@ describe('Knob', () => {
     expect(onRelease).toHaveBeenCalledTimes(1);
   });
 
+  it('double-click resets to the default and ends the edit gesture', () => {
+    const onReset = vi.fn();
+    const onRelease = vi.fn();
+    render(
+      <Knob
+        label="cv"
+        config={LINEAR}
+        position={0.7}
+        onPosition={() => {}}
+        onReset={onReset}
+        onRelease={onRelease}
+      />,
+    );
+    fireEvent.doubleClick(screen.getByRole('slider', { name: 'cv' }));
+    expect(onReset).toHaveBeenCalledTimes(1);
+    expect(onRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('double-click on a fader also resets', () => {
+    const onReset = vi.fn();
+    render(
+      <Knob
+        label="cv"
+        config={LINEAR}
+        position={0.7}
+        onPosition={() => {}}
+        onReset={onReset}
+        appearance="fader"
+      />,
+    );
+    fireEvent.doubleClick(screen.getByRole('slider', { name: 'cv' }));
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('double-click without onReset is a no-op', () => {
+    const onPosition = vi.fn();
+    render(<Knob label="cv" config={LINEAR} position={0.7} onPosition={onPosition} />);
+    fireEvent.doubleClick(screen.getByRole('slider', { name: 'cv' }));
+    expect(onPosition).not.toHaveBeenCalled();
+  });
+
   it('shows the value only in the hover tooltip, not inline', () => {
     render(<Knob label="cv" config={LINEAR} position={0.5} onPosition={() => {}} />);
     const dial = screen.getByRole('slider', { name: 'cv' });

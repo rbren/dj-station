@@ -80,6 +80,8 @@ export interface ModulePanelProps {
   onKnobPosition(jackId: string, position: number): void;
   onKnobConfig(jackId: string, config: KnobConfig): void;
   onAttenOffset(jackId: string, atten: number, offset: number): void;
+  /** Double-click knob reset to the default value (incl. wire spread). */
+  onKnobReset?(jackId: string): void;
 }
 
 export function ModulePanel(props: ModulePanelProps) {
@@ -256,6 +258,9 @@ export function ModulePanel(props: ModulePanelProps) {
                         onKnobPosition={(p) => props.onKnobPosition(cell.jack, p)}
                         onKnobConfig={(c) => props.onKnobConfig(cell.jack, c)}
                         onAttenOffset={(a, o) => props.onAttenOffset(cell.jack, a, o)}
+                        onKnobReset={
+                          props.onKnobReset ? () => props.onKnobReset?.(cell.jack) : undefined
+                        }
                         onEditEnd={props.onEditEnd}
                       />
                     );

@@ -172,6 +172,9 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         onAttenOffset={(jack, atten, offset) => {
           void engine.setAttenOffset(instanceId, jack, atten, offset).then(refresh);
         }}
+        onKnobReset={(jack) => {
+          void engine.resetKnob(instanceId, jack).then(refresh);
+        }}
       />
     </ErrorBoundary>
   );
