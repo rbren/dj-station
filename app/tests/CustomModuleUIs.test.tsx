@@ -29,6 +29,7 @@ function handleWith(values: Record<string, number>, taps: Record<string, number>
       instantaneous: taps[jackId] ?? 0,
       rms_100ms: taps[jackId] ?? 0,
       display: taps[jackId] ?? 0,
+      volatility: 0,
       is_fast: false,
     }),
     endEdit: vi.fn(),
