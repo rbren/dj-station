@@ -18,10 +18,6 @@ export interface ModuleDoc {
   examples?: string[];
 }
 
-export const SIGNAL_CONVENTIONS =
-  'Signals are volts, nominal -10..+10 V. Pitch CV is 1 V/oct, ' +
-  'gates/triggers go 0 -> +10 V (threshold >= 1 V), audio is typically +-5 V.';
-
 /** Docs for a jack id: exact match first, then with digits collapsed to
  *  `#` so numbered families (cv1..cv16) share one entry. */
 export function jackDoc(map: Record<string, string> | undefined, id: string): string | undefined {

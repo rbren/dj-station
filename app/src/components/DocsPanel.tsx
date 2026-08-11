@@ -3,7 +3,7 @@
 // (so they never drift from the engine); moduleDocs.ts supplies the prose.
 
 import type { JackDecl, KnobConfig, Manifest, OutputDecl, ParamDecl } from '../types';
-import { getModuleDoc, jackDoc, SIGNAL_CONVENTIONS, type ModuleDoc } from '../moduleDocs';
+import { getModuleDoc, jackDoc, type ModuleDoc } from '../moduleDocs';
 
 export interface DocsPanelProps {
   typeId: string;
@@ -148,7 +148,6 @@ export function DocsPanel({ typeId, manifest, onClose }: DocsPanelProps) {
           <p className="docs-summary" data-testid="docs-summary">
             {doc?.summary ?? 'No documentation for this module type yet.'}
           </p>
-          <p className="docs-conventions">{SIGNAL_CONVENTIONS}</p>
           <JackTable title="Inputs" rows={inputRows(manifest.inputs, doc)} />
           <JackTable title="Outputs" rows={outputRows(manifest.outputs, doc)} />
           <JackTable title="Params" rows={paramRows(manifest.params, doc)} />
