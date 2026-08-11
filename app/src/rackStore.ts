@@ -79,6 +79,7 @@ function telemetrySliceEqual(
       x.instantaneous !== y.instantaneous ||
       x.rms_100ms !== y.rms_100ms ||
       x.display !== y.display ||
+      x.volatility !== y.volatility ||
       x.is_fast !== y.is_fast
     ) {
       return false;

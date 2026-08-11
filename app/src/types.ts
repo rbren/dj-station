@@ -55,7 +55,10 @@ export interface Manifest {
 export interface JackTelemetry {
   instantaneous: number;
   rms_100ms: number;
+  /** Low-pass smoothed value for display (100 ms mean, RMS when fast). */
   display: number;
+  /** 0..1 — how much fast (>10 Hz) fluctuation the display value hides. */
+  volatility: number;
   is_fast: boolean;
 }
 

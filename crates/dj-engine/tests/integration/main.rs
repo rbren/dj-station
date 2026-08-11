@@ -35,3 +35,4 @@ mod persistence;
 mod playback;
 mod telemetry;
 mod undo;
+mod wire_summing;

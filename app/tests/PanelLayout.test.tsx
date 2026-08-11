@@ -12,7 +12,7 @@ import type { Manifest, ModuleHandle } from '../src/types';
 const HANDLE: ModuleHandle = {
   paramValue: () => 0,
   setParam: () => {},
-  signalTap: () => ({ instantaneous: 0, rms_100ms: 0, display: 0, is_fast: false }),
+  signalTap: () => ({ instantaneous: 0, rms_100ms: 0, display: 0, volatility: 0, is_fast: false }),
   size: { w: 300, h: 150 },
 };
 

@@ -187,6 +187,7 @@ function makeHandle(
         instantaneous: 0,
         rms_100ms: 0,
         display: 0,
+        volatility: 0,
         is_fast: false,
       },
     endEdit: () => void engine.endEdit(),

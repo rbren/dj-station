@@ -1034,8 +1034,10 @@ fn tap(state: State<AppState>, instance: String, jack: String) -> CmdResult<Jack
 /// Batched telemetry for the UI's 100 ms poll: one lock acquisition and one
 /// IPC round-trip for the whole rack instead of one `tap` per jack. Keys
 /// mirror the `engine_nodes` snapshot the UI renders from: macro internals
-/// are hidden, MIDI nodes expose their LED-mapping jacks by name, and macro
-/// instances expose their external input jacks.
+/// are hidden, MIDI nodes expose their LED-mapping input jacks and mapped
+/// output jacks by name, gesture nodes their mapping outputs, and macro
+/// instances their external jacks. Output jacks are namespaced as
+/// `out:<jack>` so they can never collide with an input of the same name.
 #[tauri::command]
 fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String, JackTelemetry>>> {
     let engine = engine_lock(&state)?;
@@ -1051,10 +1053,29 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
                     jacks.insert(m.name.clone(), slot.read());
                 }
             }
+            for m in &n.midi_mappings {
+                if let Some(slot) = n.out_telemetry.get(m.jack) {
+                    jacks.insert(format!("out:{}", m.name), slot.read());
+                }
+            }
         } else {
             for (i, decl) in n.manifest.inputs.iter().enumerate() {
                 if let Some(slot) = n.telemetry.get(i) {
                     jacks.insert(decl.id.clone(), slot.read());
+                }
+            }
+            if let Some(g) = &n.gesture {
+                // Gesture output jacks are dynamic, one per mapping.
+                for (jack, d) in g.mappings() {
+                    if let Some(slot) = n.out_telemetry.get(jack) {
+                        jacks.insert(format!("out:{}", d.name), slot.read());
+                    }
+                }
+            } else {
+                for (i, decl) in n.manifest.outputs.iter().enumerate() {
+                    if let Some(slot) = n.out_telemetry.get(i) {
+                        jacks.insert(format!("out:{}", decl.id), slot.read());
+                    }
                 }
             }
         }
@@ -1067,6 +1088,11 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
         for (ext_jack, node, jack) in &mi.inputs {
             if let Ok(t) = engine.tap(node, jack) {
                 jacks.insert(ext_jack.clone(), t);
+            }
+        }
+        for (ext_jack, node, jack) in &mi.outputs {
+            if let Ok(t) = engine.tap_out(node, jack) {
+                jacks.insert(format!("out:{ext_jack}"), t);
             }
         }
     }

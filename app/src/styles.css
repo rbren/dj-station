@@ -214,27 +214,44 @@ body {
   flex: none;
 }
 
+/* Value indicator LED: neutral gray near 0 V, ramping to saturated blue
+   (positive) / orange-red (negative); pure red + pulse when the signal
+   fluctuates faster than the 10 Hz display smoothing can follow. Color
+   and halo are driven inline from telemetry (see Jack.tsx); this rule is
+   the no-telemetry fallback and the shared geometry. Bigger and haloed
+   so levels read at a glance. */
 .jack-glow {
-  width: 7px;
-  height: 7px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: radial-gradient(circle, #62d0ff 0%, #20303a 90%);
+  background: hsl(210, 8%, 62%);
+  box-shadow: 0 0 3px 1px rgba(140, 150, 160, 0.35);
   display: inline-block;
   flex: none;
 }
 
-/* Outputs read as square green sources; inputs stay round cyan sinks. */
+/* Outputs read as square sources; inputs stay round sinks. */
 .jack-output .jack-socket {
   border-radius: 4px;
 }
 
 .jack-output .jack-glow {
   border-radius: 2px;
-  background: radial-gradient(circle, #7dde8a 0%, #1f3a26 90%);
 }
 
-.jack.jack-wired .jack-glow {
-  background: radial-gradient(circle, #e6b450 0%, #3a3020 90%);
+/* Volatile (>10 Hz) signals pulse — distinct from the steady orange-red
+   of a negative value even for color-impaired users. */
+.jack-glow-volatile {
+  animation: jack-volatile-pulse 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes jack-volatile-pulse {
+  from {
+    filter: brightness(0.75);
+  }
+  to {
+    filter: brightness(1.35);
+  }
 }
 
 .jack.jack-selected {

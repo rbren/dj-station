@@ -1,10 +1,18 @@
 //! Jack activation telemetry — PRD §4 "Input activation display".
 //!
-//! For every input jack the RT thread publishes:
+//! For every jack (inputs and outputs) the RT thread publishes:
 //! - instantaneous value (last sample of the block),
 //! - RMS over a 100 ms sliding window,
-//! - a "fast" flag: whether the signal fluctuates faster than 10 Hz,
-//! - the display value the UI should show (RMS if fast, instantaneous if slow).
+//! - a "fast" flag: whether the signal fluctuates faster than 10 Hz — the
+//!   binary selector for which smoothed value `display` carries,
+//! - the display value the UI should show: a genuinely low-pass smoothed
+//!   value — the 100 ms windowed mean for slow signals (equivalent to a
+//!   10 Hz smoothing interval), the 100 ms RMS for fast ones,
+//! - a volatility measure in 0..1. This is NOT `is_fast` re-graded: it
+//!   weighs the AC energy the smoothed display value *hides* (RMS of the
+//!   signal around its window mean) by how far the dominant frequency sits
+//!   beyond the 10 Hz display bandwidth. A fast but tiny ripple is not
+//!   volatile (the steady display is honest); a ±5 V LFO at 11 Hz is.
 //!
 //! Everything is fixed-size and lock-free: the RT thread writes atomics, the
 //! UI thread reads them.
@@ -14,6 +22,13 @@ use std::sync::Arc;
 
 pub const RMS_WINDOW_SECONDS: f32 = 0.1;
 pub const FAST_HZ_THRESHOLD: f32 = 10.0;
+/// Volatility's rate term saturates here: a 60 Hz LFO reads as maximally
+/// un-displayable (PRD-style acceptance: 11 Hz clearly red, 60 Hz deepest).
+const VOLATILITY_SAT_HZ: f32 = 60.0;
+/// AC RMS (fluctuation around the window mean) at which the amplitude
+/// weight reaches 1. 2.5 V: a ±5 V sine (AC RMS ≈ 3.5 V) is full weight,
+/// a ±0.1 V ripple is ~4 % — fast, but nothing meaningful is hidden.
+const VOLATILITY_AC_FULL: f32 = 2.5;
 
 /// Lock-free published values for one jack.
 #[derive(Debug, Default)]
@@ -21,6 +36,7 @@ pub struct JackSlot {
     inst: AtomicU32,
     rms: AtomicU32,
     display: AtomicU32,
+    volatility: AtomicU32,
     fast: AtomicBool,
 }
 
@@ -29,6 +45,13 @@ pub struct JackTelemetry {
     pub instantaneous: f32,
     pub rms_100ms: f32,
     pub display: f32,
+    /// 0..1 — un-displayable AC energy: the RMS of the fluctuation the
+    /// smoothed `display` hides, weighted by how far the dominant
+    /// frequency exceeds the 10 Hz display bandwidth. 0 for slow signals
+    /// and for fast-but-negligible ripple; ~0.4+ for a full-scale 11 Hz
+    /// LFO, saturating at 60 Hz.
+    #[serde(default)]
+    pub volatility: f32,
     pub is_fast: bool,
 }
 
@@ -52,6 +75,8 @@ impl JackSlot {
             .store(finite(t.rms_100ms).to_bits(), Ordering::Relaxed);
         self.display
             .store(finite(t.display).to_bits(), Ordering::Relaxed);
+        self.volatility
+            .store(finite(t.volatility).to_bits(), Ordering::Relaxed);
         self.fast.store(t.is_fast, Ordering::Relaxed);
     }
 
@@ -60,6 +85,7 @@ impl JackSlot {
             instantaneous: f32::from_bits(self.inst.load(Ordering::Relaxed)),
             rms_100ms: f32::from_bits(self.rms.load(Ordering::Relaxed)),
             display: f32::from_bits(self.display.load(Ordering::Relaxed)),
+            volatility: f32::from_bits(self.volatility.load(Ordering::Relaxed)),
             is_fast: self.fast.load(Ordering::Relaxed),
         }
     }
@@ -185,11 +211,36 @@ impl JackAnalyzer {
         let est_hz = self.total_zc as f32 / (2.0 * window_secs.max(1e-6));
         let is_fast = est_hz > FAST_HZ_THRESHOLD;
         let instantaneous = self.last_sample;
-        let display = if is_fast { rms } else { instantaneous };
+        // The displayed value is low-pass smoothed at the 10 Hz display
+        // rate: the 100 ms windowed mean (whose first spectral null sits at
+        // 10 Hz) for slow signals, the 100 ms RMS envelope for fast ones —
+        // never the raw instantaneous sample, which would jitter.
+        let window_mean = (self.total_sum / self.total_n.max(1) as f64) as f32;
+        let display = if is_fast { rms } else { window_mean };
+        // Volatility = (how much the display hides) x (how fast it moves).
+        // AC RMS is the fluctuation around the window mean — exactly the
+        // part a 10 Hz-smoothed display cannot show. The rate term enters
+        // at 0.4 the moment the dominant frequency passes 10 Hz (an 11 Hz
+        // full-scale LFO must be *clearly* flagged) and ramps to 1 on a
+        // log scale at VOLATILITY_SAT_HZ.
+        let ac_rms = ((self.total_sq / self.total_n.max(1) as f64)
+            - (window_mean as f64) * (window_mean as f64))
+            .max(0.0)
+            .sqrt() as f32;
+        let volatility = if is_fast {
+            let ramp = (est_hz / FAST_HZ_THRESHOLD).log2()
+                / (VOLATILITY_SAT_HZ / FAST_HZ_THRESHOLD).log2();
+            let rate = 0.4 + 0.6 * ramp.clamp(0.0, 1.0);
+            let amplitude = (ac_rms / VOLATILITY_AC_FULL).clamp(0.0, 1.0);
+            rate * amplitude
+        } else {
+            0.0
+        };
         self.slot.publish(JackTelemetry {
             instantaneous,
             rms_100ms: rms,
             display,
+            volatility,
             is_fast,
         });
     }

@@ -55,7 +55,7 @@ function makeApi(status: DeckStatus): DeckApi {
 const HANDLE: ModuleHandle = {
   paramValue: () => 0,
   setParam: vi.fn(),
-  signalTap: () => ({ instantaneous: 0, rms_100ms: 0, display: 0, is_fast: false }),
+  signalTap: () => ({ instantaneous: 0, rms_100ms: 0, display: 0, volatility: 0, is_fast: false }),
   size: { w: 360, h: 260 },
 };
 

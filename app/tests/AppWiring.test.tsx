@@ -167,6 +167,26 @@ describe('App wiring flow', () => {
     expect(swatch.style.background).toBeTruthy();
   });
 
+  it('completing a pending wire onto an already-wired input ADDS, not replaces', async () => {
+    state.nodes = [node('osc1', OSC), node('vca1', VCA, ['in'])];
+    state.wires = [
+      { from_instance: 'osc1', from_jack: 'audio', to_instance: 'vca1', to_jack: 'in' },
+    ];
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
+    // Arm a second wire from the same output, then drop it on the wired input.
+    fireEvent.click(screen.getByTestId('jack-output-audio'));
+    fireEvent.click(screen.getByTestId('jack-input-in'));
+    await waitFor(() =>
+      expect(fakeEngine.connectWire).toHaveBeenCalledWith(
+        { instance: 'osc1', jack: 'audio' },
+        { instance: 'vca1', jack: 'in' },
+      ),
+    );
+    // The existing wire must survive: signals sum in the engine.
+    expect(fakeEngine.disconnectWire).not.toHaveBeenCalled();
+  });
+
   it('clicking a wired input picks the cable up, armed from its source', async () => {
     state.nodes = [node('osc1', OSC), node('vca1', VCA, ['in'])];
     state.wires = [

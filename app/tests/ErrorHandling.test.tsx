@@ -34,7 +34,7 @@ const noop = () => {};
 const HANDLE: ModuleHandle = {
   paramValue: () => 0.5,
   setParam: noop,
-  signalTap: () => ({ instantaneous: 0, rms_100ms: 0, display: 0, is_fast: false }),
+  signalTap: () => ({ instantaneous: 0, rms_100ms: 0, display: 0, volatility: 0, is_fast: false }),
   size: { w: 300, h: 150 },
 };
 
@@ -71,16 +71,19 @@ describe('Jack with malformed telemetry', () => {
     expect(screen.getByTestId('jack-input-ch1').getAttribute('data-tip')).toBe('ch1: — (rms)');
   });
 
-  it('keeps the glow at its floor rather than NaN opacity', () => {
+  it('degrades a NaN display to the neutral near-zero gray, not a crash', () => {
     render(
       <Jack
         instance="mixer1"
         id="ch1"
         kind="input"
-        telemetry={{ instantaneous: 0, rms_100ms: 0, display: NaN, is_fast: false }}
+        telemetry={{ instantaneous: 0, rms_100ms: 0, display: NaN, volatility: 0, is_fast: false }}
       />,
     );
-    expect(screen.getByTestId('jack-glow-ch1').style.opacity).toBe('0.15');
+    const glow = screen.getByTestId('jack-glow-ch1');
+    // NaN reads as 0 → the neutral gray (low saturation), no volatile pulse.
+    expect(glow.getAttribute('data-indicator')).toBe('hsl(210, 12%, 64%)');
+    expect(glow.className).not.toContain('jack-glow-volatile');
   });
 
   it('renders a whole panel whose telemetry is all nulls', () => {
