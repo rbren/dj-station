@@ -10,7 +10,7 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["vitest/globals"],
+    "types": ["vitest/globals", "vite/client"],
     "baseUrl": ".",
     "paths": {
       "react": ["./node_modules/@types/react"],
