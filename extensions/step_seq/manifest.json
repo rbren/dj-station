@@ -30,14 +30,15 @@
     {
       "id": "length",
       "name": "Length",
-      "default": 16.0,
+      "default": 8.0,
       "knob": {
         "style": "stepped",
         "min": 1.0,
         "max": 16.0,
         "curve": "linear",
         "steps": 16
-      }
+      },
+      "display": { "unit": "steps" }
     },
     {
       "id": "dir",
