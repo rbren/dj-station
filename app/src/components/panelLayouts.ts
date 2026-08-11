@@ -205,20 +205,25 @@ const LAYOUTS: Record<string, LayoutFactory> = {
   }),
 
   // One column per step (cv over gate over ratchet), like a hardware
-  // sequencer's per-step channel.
+  // sequencer's per-step channel. The step grid comes FIRST so it sits
+  // directly under the custom playhead strip (StepSeqUI), which renders
+  // a grid with the same --cell-w columns — lamp s aligns with column s.
   'com.dj.step_seq': () => ({
     groups: [
-      { title: 'transport', inputs: ['clock', 'reset', 'length', 'dir', 'glide'] },
       {
-        title: 'steps 1–16: cv / gate / ratchet',
+        title: 'cv / gate / ratchet',
         kind: 'grid',
         columns: 16,
-        break: true,
         inputs: [
           ...seq('cv', 1, 16),
           ...seq('gate', 1, 16, { hideLabel: true }),
           ...seq('ratchet', 1, 16, { hideLabel: true }),
         ],
+      },
+      {
+        title: 'transport',
+        break: true,
+        inputs: ['clock', 'reset', 'length', 'dir', 'glide'],
       },
     ],
   }),

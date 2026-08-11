@@ -19,8 +19,11 @@ type CamState =
   | { kind: "live" }
   | { kind: "error"; message: string };
 
-const W = 192;
-const H = 144;
+// Monitor size: 16:9 and roughly double the old 192x144 area, so a live
+// feed is comfortably visible in the rack (the panel sizes itself from
+// this content).
+const W = 320;
+const H = 180;
 
 function errorMessage(err: unknown): string {
   const name = err instanceof DOMException ? err.name : "";
@@ -63,7 +66,7 @@ export default function CameraUI() {
     setState({ kind: "starting" });
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 } },
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       });
       if (!wantRef.current) {
