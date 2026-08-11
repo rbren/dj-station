@@ -8,7 +8,7 @@
 // it renders and each RackModule subscribes to its own, so telemetry ticks
 // and knob drags re-render only the affected panels.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { engine, onMenuAction } from './engine';
 import { library, type Track } from './library';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
@@ -22,7 +22,13 @@ import { GRID, snap } from './components/ModulePanel';
 import { RackModule } from './components/RackModule';
 import { TooltipLayer } from './components/TooltipLayer';
 import { WIRE_COLORS, WireOverlay } from './components/WireOverlay';
-import { defaultPosition, moduleRect, rectsOverlap, type Rect } from './rackLayout';
+import {
+  defaultPosition,
+  moduleRect,
+  nearestFreeSpot,
+  rectsOverlap,
+  type Rect,
+} from './rackLayout';
 import {
   createRackStore,
   loadJson,
@@ -117,22 +123,51 @@ export default function App() {
     });
   }, []);
 
+  // A drag-induced neighbour bump in flight: `bumped` was displaced from
+  // `from` to open a slot for `dragged`. Provisional until the drag ends —
+  // every move first re-evaluates with the bump virtually reverted, so the
+  // neighbour springs back the moment the dragged panel fits elsewhere.
+  const dragBump = useRef<null | {
+    dragged: string;
+    bumped: string;
+    from: { x: number; y: number };
+  }>(null);
+
+  const endModuleDrag = useCallback((instance: string) => {
+    // Releasing the drag makes any surviving bump permanent (positions,
+    // including the neighbour's, were already committed by moveModule
+    // through the one shared setPositions/saveJson path).
+    if (dragBump.current?.dragged === instance) dragBump.current = null;
+  }, []);
+
   const moveModule = useCallback(
     (instance: string, x: number, y: number) => {
       const nodes = store.getState().nodes;
       setPositions((prev) => {
-        const otherRects: Rect[] = [];
+        const bump = dragBump.current?.dragged === instance ? dragBump.current : null;
+        // Two views of the neighbours: `others` virtually reverts an active
+        // bump (the bump only survives if this move still needs it), while
+        // `realRects` reflects what is actually on screen.
+        const others: { id: string; pos: { x: number; y: number }; rect: Rect }[] = [];
+        const realRects: Rect[] = [];
         for (const [i, node] of nodes.entries()) {
-          if (node.instance_id === instance) continue;
-          const otherPos = prev[node.instance_id] ?? defaultPosition(i);
-          otherRects.push(moduleRect(node.instance_id, otherPos));
+          const id = node.instance_id;
+          if (id === instance) continue;
+          const realPos = prev[id] ?? defaultPosition(i);
+          const pos = bump && bump.bumped === id ? bump.from : realPos;
+          others.push({ id, pos, rect: moduleRect(id, pos) });
+          realRects.push(moduleRect(id, realPos));
         }
         const rectAt = (pos: { x: number; y: number }) => moduleRect(instance, pos);
         const overlapsAny = (pos: { x: number; y: number }) =>
-          otherRects.some((r) => rectsOverlap(rectAt(pos), r));
+          others.some((o) => rectsOverlap(rectAt(pos), o.rect));
 
         const selfIdx = nodes.findIndex((n) => n.instance_id === instance);
         const currentPos = prev[instance] ?? defaultPosition(Math.max(selfIdx, 0));
+        // No-op move: keep everything (including an active bump) as-is —
+        // re-resolving against the virtually-reverted neighbour would yank
+        // the panel out of a bumped-open slot it already occupies.
+        if (x === currentPos.x && y === currentPos.y) return prev;
 
         // Modules never overlap: when the requested spot is occupied, push
         // the dragged panel out to the nearest free grid spot along the
@@ -141,7 +176,7 @@ export default function App() {
         // midpoint the far-side push wins and the panel jumps over it.
         const resolve = (requested: { x: number; y: number }) => {
           const rect = rectAt(requested);
-          const hits = otherRects.filter((r) => rectsOverlap(rect, r));
+          const hits = others.filter((o) => rectsOverlap(rect, o.rect)).map((o) => o.rect);
           const horizFirst =
             Math.abs(requested.x - currentPos.x) >= Math.abs(requested.y - currentPos.y);
           for (const axis of horizFirst ? (['x', 'y'] as const) : (['y', 'x'] as const)) {
@@ -172,16 +207,119 @@ export default function App() {
           return null;
         };
 
+        // Co-operative bump: the drag has committed past a neighbour (the
+        // panel's center crossed the neighbour's center along the drag
+        // axis) but there is no room for it on the far side — displace
+        // that one neighbour the opposite way, just enough (grid-snapped)
+        // to open a slot for the panel at the cursor. No cascades: if the
+        // bump would push the neighbour out of the rack or into a third
+        // module, give up and keep today's blocked feel.
+        const tryBump = (requested: { x: number; y: number }) => {
+          const rect = rectAt(requested);
+          const hits = others.filter((o) => rectsOverlap(rect, o.rect));
+          if (hits.length === 0) return null;
+          const dx = requested.x - currentPos.x;
+          const dy = requested.y - currentPos.y;
+          const axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+          const dir = Math.sign(axis === 'x' ? dx : dy);
+          if (dir === 0) return null;
+          const center = (r: Rect) => (axis === 'x' ? r.x + r.w / 2 : r.y + r.h / 2);
+          const aCenter = center(rect);
+          // Exactly one overlapped neighbour may have been dragged past.
+          const passed = hits.filter((o) =>
+            dir > 0 ? aCenter >= center(o.rect) : aCenter <= center(o.rect),
+          );
+          if (passed.length !== 1) return null;
+          const hit = passed[0];
+          const r = hit.rect;
+          // Only bump when the normal jump over that neighbour is blocked.
+          const far =
+            axis === 'x'
+              ? { x: snap(dir > 0 ? r.x + r.w : r.x - rect.w), y: requested.y }
+              : { x: requested.x, y: snap(dir > 0 ? r.y + r.h : r.y - rect.h) };
+          if (!overlapsAny(far)) return null;
+          // Land the panel at the cursor, clamped back against the other
+          // obstacles it overlaps, so only `hit` has to give way.
+          const aPos = { ...requested };
+          for (const o of hits) {
+            if (o === hit) continue;
+            if (axis === 'x') {
+              aPos.x =
+                dir > 0
+                  ? Math.min(aPos.x, Math.floor((o.rect.x - rect.w) / GRID) * GRID)
+                  : Math.max(aPos.x, Math.ceil((o.rect.x + o.rect.w) / GRID) * GRID);
+            } else {
+              aPos.y =
+                dir > 0
+                  ? Math.min(aPos.y, Math.floor((o.rect.y - rect.h) / GRID) * GRID)
+                  : Math.max(aPos.y, Math.ceil((o.rect.y + o.rect.h) / GRID) * GRID);
+            }
+          }
+          if (aPos.x < 0 || aPos.y < 0) return null;
+          const aRect = rectAt(aPos);
+          if (!rectsOverlap(aRect, r)) return null; // clamped clear — no bump needed
+          if (others.some((o) => o !== hit && rectsOverlap(aRect, o.rect))) return null;
+          // Displace the neighbour the opposite way, just enough to clear.
+          const to =
+            axis === 'x'
+              ? {
+                  x:
+                    dir > 0
+                      ? Math.floor((aPos.x - r.w) / GRID) * GRID
+                      : Math.ceil((aPos.x + aRect.w) / GRID) * GRID,
+                  y: r.y,
+                }
+              : {
+                  x: r.x,
+                  y:
+                    dir > 0
+                      ? Math.floor((aPos.y - r.h) / GRID) * GRID
+                      : Math.ceil((aPos.y + aRect.h) / GRID) * GRID,
+                };
+          if (to.x < 0 || to.y < 0) return null;
+          const bumpedRect = moduleRect(hit.id, to);
+          if (rectsOverlap(bumpedRect, aRect)) return null;
+          if (others.some((o) => o.id !== hit.id && rectsOverlap(bumpedRect, o.rect))) {
+            return null;
+          }
+          return { aPos, bumped: hit.id, from: hit.pos, to };
+        };
+
         let target = { x, y };
+        let nextBump: { bumped: string; from: { x: number; y: number }; to: typeof target } | null =
+          null;
         if (overlapsAny(target)) {
-          const resolved = resolve(target);
-          if (resolved) target = resolved;
-          // No free spot nearby: hold position, but always allow escaping
-          // when the module is already overlapping (bad legacy placement).
-          else if (!overlapsAny(currentPos)) return prev;
+          const plan = tryBump(target);
+          if (plan) {
+            target = plan.aPos;
+            nextBump = { bumped: plan.bumped, from: plan.from, to: plan.to };
+          } else {
+            const resolved = resolve(target);
+            if (resolved) target = resolved;
+            // No free spot nearby: hold position (keeping any active bump),
+            // but always allow escaping when the module is already really
+            // overlapping (bad legacy placement).
+            else if (!realRects.some((r) => rectsOverlap(rectAt(currentPos), r))) return prev;
+          }
         }
-        if (target.x === currentPos.x && target.y === currentPos.y) return prev;
+        const sameBump =
+          (nextBump === null && bump === null) ||
+          (nextBump !== null &&
+            bump !== null &&
+            nextBump.bumped === bump.bumped &&
+            prev[nextBump.bumped]?.x === nextBump.to.x &&
+            prev[nextBump.bumped]?.y === nextBump.to.y);
+        if (target.x === currentPos.x && target.y === currentPos.y && sameBump) return prev;
+
+        // One positions update covers the panel's move plus any bump
+        // apply/revert, so the whole gesture persists (and coalesces)
+        // through the same path as a plain move.
         const next = { ...prev, [instance]: target };
+        if (bump && bump.bumped !== nextBump?.bumped) next[bump.bumped] = bump.from;
+        if (nextBump) next[nextBump.bumped] = nextBump.to;
+        dragBump.current = nextBump
+          ? { dragged: instance, bumped: nextBump.bumped, from: nextBump.from }
+          : null;
         saveJson(POSITIONS_KEY, next);
         return next;
       });
@@ -189,8 +327,9 @@ export default function App() {
     [store, setPositions],
   );
 
-  // Post-render placement pass: with real panel sizes in the DOM, nudge any
-  // module that overlaps an earlier one straight down to the next free row.
+  // Post-render placement pass: with real panel sizes in the DOM, move any
+  // module that overlaps an earlier one to the nearest free grid spot (same
+  // search as drop placement, so corrections stay near the intended point).
   // Covers click-to-add, drops estimated with fallback sizes, and stale
   // saved layouts.
   useEffect(() => {
@@ -202,18 +341,13 @@ export default function App() {
         for (const [i, node] of nodes.entries()) {
           const id = node.instance_id;
           let pos = next[id] ?? defaultPosition(i);
-          let rect = moduleRect(id, pos);
-          let tries = 0;
-          while (placed.some((r) => rectsOverlap(rect, r)) && tries < 400) {
-            pos = { x: pos.x, y: pos.y + GRID };
-            rect = moduleRect(id, pos);
-            tries++;
-          }
+          const size = moduleRect(id, pos);
+          pos = nearestFreeSpot(pos, { w: size.w, h: size.h }, placed) ?? pos;
           if (next[id]?.x !== pos.x || next[id]?.y !== pos.y) {
             next[id] = pos;
             changed = true;
           }
-          placed.push(rect);
+          placed.push(moduleRect(id, pos));
         }
         if (!changed) return prev;
         saveJson(POSITIONS_KEY, next);
@@ -316,19 +450,15 @@ export default function App() {
       const instance = nextInstanceId(typeId, taken);
       await engine.addModule(instance, typeId);
       if (at) {
-        // Nudge the drop point down one grid row at a time until it does
-        // not overlap an existing module.
-        let y = at.y;
-        for (let tries = 0; tries < 200; tries++) {
-          const rect = moduleRect(instance, { x: at.x, y });
-          const collides = nodes.some((node, i) => {
-            const pos = positions[node.instance_id] ?? defaultPosition(i);
-            return rectsOverlap(rect, moduleRect(node.instance_id, pos));
-          });
-          if (!collides) break;
-          y += GRID;
-        }
-        moveModule(instance, at.x, y);
+        // Deterministic, near-the-cursor placement: the drop point itself
+        // when free, otherwise the nearest free grid spot (ring search) —
+        // never a far-away jump.
+        const rect = moduleRect(instance, at);
+        const others = nodes.map((node, i) =>
+          moduleRect(node.instance_id, positions[node.instance_id] ?? defaultPosition(i)),
+        );
+        const spot = nearestFreeSpot(at, { w: rect.w, h: rect.h }, others) ?? at;
+        moveModule(instance, spot.x, spot.y);
       }
       await refresh();
     },
@@ -790,6 +920,8 @@ export default function App() {
                     index={i}
                     refresh={refresh}
                     moveModule={moveModule}
+                    endModuleDrag={endModuleDrag}
+                    zoom={zoom}
                     removeModule={removeModule}
                     toggleSelected={toggleSelected}
                     onJackClick={onJackClick}

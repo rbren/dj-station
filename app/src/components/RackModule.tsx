@@ -52,6 +52,10 @@ export interface RackModuleProps {
   index: number;
   refresh(): Promise<void>;
   moveModule(instance: string, x: number, y: number): void;
+  /** Header drag released — finalizes any provisional neighbour bump. */
+  endModuleDrag?(instance: string): void;
+  /** Rack scale factor, forwarded so drags convert px to rack coords. */
+  zoom?: number;
   removeModule(instance: string): Promise<void>;
   toggleSelected(instance: string): void;
   onJackClick(
@@ -148,6 +152,8 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         }
         position={pos}
         onMove={(x, y) => moveModule(instanceId, x, y)}
+        onMoveEnd={() => props.endModuleDrag?.(instanceId)}
+        zoom={props.zoom}
         onRemove={() => void removeModule(instanceId)}
         onContextMenu={(e) => props.onContextMenu?.(instanceId, e)}
         onEditEnd={() => void engine.endEdit()}

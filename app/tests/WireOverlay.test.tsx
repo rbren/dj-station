@@ -2,6 +2,7 @@
 // lines with the selected color, and re-measures when the DOM shifts
 // (e.g. a deck panel growing after async content loads).
 
+import { readFileSync } from 'node:fs';
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { WIRE_COLORS, WireOverlay } from '../src/components/WireOverlay';
@@ -78,5 +79,27 @@ describe('WireOverlay', () => {
     src.getBoundingClientRect = () => fakeRect(100, 120);
     container.appendChild(document.createElement('div'));
     await waitFor(() => expect(getByTestId(`cable-${KEY}`).getAttribute('y1')).toBe('129'));
+  });
+});
+
+describe('wire overlay stacking (CSS-level pin)', () => {
+  // jsdom doesn't paint, so pin the stylesheet directly: the cable layer
+  // must sit above every module panel (explicit z-index — panel popups and
+  // the zoomed rack create stacking contexts), never clip cables at its
+  // own layout box (SVG defaults to overflow hidden while the zoomed rack
+  // paints past it), and stay click-through so jacks/knobs work.
+  it('.wire-overlay renders above panels, unclipped, and click-through', () => {
+    // vitest runs with app/ (the vite root) as cwd.
+    const css = readFileSync('src/styles.css', 'utf-8');
+    const rule = /\.wire-overlay\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(rule).toMatch(/z-index:\s*[1-9]/);
+    expect(rule).toMatch(/overflow:\s*visible/);
+    expect(rule).toMatch(/pointer-events:\s*none/);
+    // No module-panel rule may out-stack the overlay's z-index.
+    const overlayZ = Number(/z-index:\s*(\d+)/.exec(rule)?.[1]);
+    for (const m of css.matchAll(/\.module-panel[^{,]*\{([^}]*)\}/g)) {
+      const z = /z-index:\s*(\d+)/.exec(m[1]);
+      if (z) expect(Number(z[1])).toBeLessThan(overlayZ);
+    }
   });
 });
