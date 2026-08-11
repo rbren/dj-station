@@ -102,6 +102,8 @@ pub struct NodeInfo {
     pub knobs: Vec<KnobState>,
     pub params: BTreeMap<String, f32>,
     pub telemetry: Vec<Arc<JackSlot>>,
+    /// Output-jack telemetry, one slot per manifest output.
+    pub out_telemetry: Vec<Arc<JackSlot>>,
     pub midi_shared: Option<Arc<MidiShared>>,
     pub midi_mappings: Vec<MidiMappingInfo>,
     /// LED feedback mappings (input jacks -> note/CC out; PRD §7.1).
@@ -575,6 +577,15 @@ impl Engine {
             .iter()
             .map(|s| JackAnalyzer::new(s.clone(), self.config.sample_rate, self.config.block_size))
             .collect();
+        let out_telemetry: Vec<Arc<JackSlot>> = manifest
+            .outputs
+            .iter()
+            .map(|_| Arc::new(JackSlot::default()))
+            .collect();
+        let out_analyzers: Vec<JackAnalyzer> = out_telemetry
+            .iter()
+            .map(|s| JackAnalyzer::new(s.clone(), self.config.sample_rate, self.config.block_size))
+            .collect();
         let jack_rt: Vec<JackRt> = manifest
             .inputs
             .iter()
@@ -589,6 +600,7 @@ impl Engine {
             knobs,
             params: params.clone(),
             telemetry,
+            out_telemetry,
             midi_shared,
             midi_mappings: Vec::new(),
             midi_led_mappings: Vec::new(),
@@ -603,7 +615,7 @@ impl Engine {
             audio_out: BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::AudioOut),
         };
         let core = self.core_mut()?;
-        let idx = core.graph.add_node(node, jack_rt, analyzers);
+        let idx = core.graph.add_node(node, jack_rt, analyzers, out_analyzers);
         // Apply default params.
         for (i, p) in manifest.params.iter().enumerate() {
             core.graph.nodes[idx]
@@ -805,11 +817,25 @@ impl Engine {
         Ok(self.nodes[node].knobs[jack].clone())
     }
 
-    /// Read a jack's live telemetry (`graph.tap`) — instantaneous value,
-    /// 100 ms RMS, fast flag, and the value the UI should display.
+    /// Read an input jack's live telemetry (`graph.tap`) — instantaneous
+    /// value, 100 ms RMS, fast flag, volatility, and the value the UI
+    /// should display.
     pub fn tap(&self, instance_id: &str, jack_id: &str) -> Result<JackTelemetry> {
         let (node, jack) = self.in_jack_indices(instance_id, jack_id)?;
         Ok(self.nodes[node].telemetry[jack].read())
+    }
+
+    /// Read an output jack's live telemetry — same shape as [`Engine::tap`],
+    /// resolving macro externals and named MIDI/gesture mapping jacks.
+    pub fn tap_out(&self, instance_id: &str, jack_id: &str) -> Result<JackTelemetry> {
+        let (rid, rjack) = self.resolve_out_jack(instance_id, jack_id)?;
+        let node = self.node_idx(&rid)?;
+        let jack = self.out_jack_index(node, &rjack)?;
+        self.nodes[node]
+            .out_telemetry
+            .get(jack)
+            .map(|s| s.read())
+            .ok_or_else(|| anyhow!("no output telemetry for {instance_id:?}:{jack_id:?}"))
     }
 
     /// Telemetry for a master output channel.

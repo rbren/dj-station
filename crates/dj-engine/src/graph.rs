@@ -42,6 +42,7 @@ pub struct Graph {
     out_prev: Vec<Vec<Vec<f32>>>,
     pub jack_rt: Vec<Vec<JackRt>>,
     analyzers: Vec<Vec<JackAnalyzer>>,
+    out_analyzers: Vec<Vec<JackAnalyzer>>,
 
     incoming: Vec<Vec<Vec<Incoming>>>,
     connected_mask: Vec<u64>,
@@ -61,6 +62,7 @@ impl Graph {
             out_prev: Vec::new(),
             jack_rt: Vec::new(),
             analyzers: Vec::new(),
+            out_analyzers: Vec::new(),
             incoming: Vec::new(),
             connected_mask: Vec::new(),
             order: Vec::new(),
@@ -73,12 +75,14 @@ impl Graph {
         self.block_size
     }
 
-    /// Add a node. `jack_rt` and `analyzers` must have one entry per input.
+    /// Add a node. `jack_rt` and `analyzers` must have one entry per input;
+    /// `out_analyzers` one per output.
     pub fn add_node(
         &mut self,
         node: GraphNode,
         jack_rt: Vec<JackRt>,
         analyzers: Vec<JackAnalyzer>,
+        out_analyzers: Vec<JackAnalyzer>,
     ) -> usize {
         let n_in = node.n_in;
         let n_out = node.n_out;
@@ -87,6 +91,7 @@ impl Graph {
         self.out_prev.push(vec![vec![0.0; self.block_size]; n_out]);
         self.jack_rt.push(jack_rt);
         self.analyzers.push(analyzers);
+        self.out_analyzers.push(out_analyzers);
         self.incoming.push(vec![Vec::new(); n_in]);
         self.connected_mask.push(0);
         self.nodes.push(node);
@@ -194,10 +199,12 @@ impl Graph {
                     // Wired inputs blend with the manual knob: the knob's
                     // mapped value is the baseline and the incoming signal
                     // adds on top, scaled by the attenuverter (+ offset for
-                    // asymmetric spreads).
+                    // asymmetric spreads). Multiple wires sum, so the
+                    // result can exceed the rails — hard clip to ±10 V.
                     let dst = &mut self.in_bufs[node][jack];
                     for x in dst.iter_mut().take(frames) {
-                        *x = rt.unwired_value + *x * rt.atten + rt.offset;
+                        *x = (rt.unwired_value + *x * rt.atten + rt.offset)
+                            .clamp(-SIGNAL_MAX, SIGNAL_MAX);
                     }
                 }
                 self.analyzers[node][jack].update(&self.in_bufs[node][jack][..frames]);
@@ -211,6 +218,11 @@ impl Graph {
                 mask,
                 frames,
             );
+
+            // Tap outputs for telemetry (same machinery as inputs).
+            for jack in 0..self.nodes[node].n_out {
+                self.out_analyzers[node][jack].update(&self.out_curr[node][jack][..frames]);
+            }
 
             // Mix audio-out nodes into the master bus (hard clip happens at
             // the device/file boundary, not here).

@@ -97,6 +97,107 @@ fn telemetry_stays_finite_when_a_loud_signal_goes_silent() {
     }
 }
 
+/// Output jacks have telemetry taps too (`Engine::tap_out`), fed by the
+/// same analyzer machinery as inputs.
+#[test]
+fn output_jack_reports_telemetry() {
+    let mut engine = crate::common::default_engine();
+    engine.add_module("osc1", "com.dj.oscillator").unwrap();
+    engine.add_module("att1", "com.dj.attenuverter").unwrap();
+    engine.set_knob_value("att1", "offset1", 5.0).unwrap();
+
+    engine.render_offline((0.5 * SR) as usize).unwrap();
+
+    // Audio-rate source output: fast, RMS = amplitude / sqrt(2).
+    let t = engine.tap_out("osc1", "audio").unwrap();
+    assert!(t.is_fast, "261 Hz output must be fast: {t:?}");
+    assert!(
+        (t.rms_100ms - 5.0 / 2.0f32.sqrt()).abs() < 0.05,
+        "output rms {t:?}"
+    );
+    // DC output: slow, display = value.
+    let t = engine.tap_out("att1", "out1").unwrap();
+    assert!(!t.is_fast, "DC output must be slow: {t:?}");
+    assert!((t.display - 5.0).abs() < 1e-3, "DC output display {t:?}");
+    assert_eq!(t.volatility, 0.0, "DC output volatility {t:?}");
+}
+
+/// A slow signal's display value is the low-pass windowed mean, not the
+/// jumpy instantaneous sample: right after a gate falls, the instantaneous
+/// value is already 0 but the display still carries the window's mean.
+#[test]
+fn slow_display_value_is_windowed_mean() {
+    let mut engine = crate::common::default_engine();
+    engine.add_module("midi1", "builtin.midi").unwrap();
+    engine.add_module("adsr1", "com.dj.adsr").unwrap();
+    engine
+        .add_midi_mapping("midi1", dj_engine::MidiMapKind::Note, 60, "pad_1")
+        .unwrap();
+    engine.connect("midi1", "pad_1", "adsr1", "gate").unwrap();
+
+    // Hold the gate long enough to fill the 100 ms window, release, then
+    // render exactly half a window more.
+    engine.inject_midi("midi1", 0, [0x90, 60, 100]).unwrap();
+    engine.render_offline((0.3 * SR) as usize).unwrap();
+    engine.inject_midi("midi1", 0, [0x80, 60, 0]).unwrap();
+    engine.render_offline((0.05 * SR) as usize).unwrap();
+
+    let t = engine.tap("adsr1", "gate").unwrap();
+    assert!(!t.is_fast, "a single gate edge must stay slow: {t:?}");
+    assert!(t.instantaneous.abs() < 1e-4, "gate released {t:?}");
+    // Half the window was at 10, half at 0: the smoothed display ~5.
+    assert!(
+        (t.display - 5.0).abs() < 1.0,
+        "display must be the windowed mean, not the instantaneous 0: {t:?}"
+    );
+}
+
+/// Volatility grades fast full-scale signals: 0 for slow, clearly nonzero
+/// at 11 Hz, deeper at 60 Hz.
+#[test]
+fn volatility_scales_with_rate() {
+    let mut engine = crate::common::default_engine();
+    for (id, rate) in [("lfo_slow", 2.0), ("lfo_11", 11.0), ("lfo_60", 60.0)] {
+        engine.add_module(id, "com.dj.lfo").unwrap();
+        engine.set_knob_value(id, "rate", rate).unwrap();
+    }
+
+    engine.render_offline((0.5 * SR) as usize).unwrap();
+
+    let slow = engine.tap_out("lfo_slow", "bi").unwrap();
+    let v11 = engine.tap_out("lfo_11", "bi").unwrap();
+    let v60 = engine.tap_out("lfo_60", "bi").unwrap();
+    assert_eq!(slow.volatility, 0.0, "2 Hz LFO displayable: {slow:?}");
+    assert!(
+        v11.volatility > 0.3,
+        "11 Hz full-scale LFO must be clearly volatile: {v11:?}"
+    );
+    assert!(
+        v60.volatility > v11.volatility && v60.volatility > 0.8,
+        "60 Hz must be deeper than 11 Hz: {v60:?} vs {v11:?}"
+    );
+}
+
+/// A fast but negligible ripple is not volatile: the smoothed display
+/// hides nothing that matters.
+#[test]
+fn tiny_fast_ripple_is_not_volatile() {
+    let mut engine = crate::common::default_engine();
+    engine.add_module("lfo1", "com.dj.lfo").unwrap();
+    engine.add_module("att1", "com.dj.attenuverter").unwrap();
+    engine.set_knob_value("lfo1", "rate", 60.0).unwrap();
+    engine.set_knob_value("att1", "atten1", 0.01).unwrap(); // ±0.05 V
+    engine.connect("lfo1", "bi", "att1", "in1").unwrap();
+
+    engine.render_offline((0.5 * SR) as usize).unwrap();
+
+    let t = engine.tap_out("att1", "out1").unwrap();
+    assert!(
+        t.volatility < 0.05,
+        "±0.05 V ripple must not read as volatile: {t:?}"
+    );
+}
+
 /// Master bus telemetry is exposed too (used by the UI for output metering).
 #[test]
 fn master_tap_reports_output_level() {
