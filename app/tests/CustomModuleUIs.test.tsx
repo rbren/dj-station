@@ -264,6 +264,19 @@ describe('LfoUI', () => {
     const poly = container.querySelector('.lfo-wave');
     expect(poly?.getAttribute('points')?.split(' ').length).toBeGreaterThan(50);
   });
+
+  it('renders the blink lamp and animates its level', async () => {
+    const handle = handleWith({ shape: 0, rate: 1, pw: 0.5 });
+    render(<LfoUI handle={handle} />);
+    const lamp = screen.getByTestId('lfo-lamp');
+    // The rAF loop sets --lfo-level (0..1 brightness) on the lamp.
+    await vi.waitFor(() => {
+      const level = lamp.style.getPropertyValue('--lfo-level');
+      expect(level).not.toBe('');
+      expect(Number(level)).toBeGreaterThanOrEqual(0);
+      expect(Number(level)).toBeLessThanOrEqual(1);
+    });
+  });
 });
 
 describe('WaveshaperUI', () => {
