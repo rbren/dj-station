@@ -204,7 +204,9 @@ export function ModulePanel(props: ModulePanelProps) {
                         // strips (e.g. the step sequencer playhead) can render
                         // an identically-sized grid that lines up column-for-
                         // column with the cells.
-                        { gridTemplateColumns: `repeat(${group.columns}, var(--cell-w, max-content))` }
+                        {
+                          gridTemplateColumns: `repeat(${group.columns}, var(--cell-w, max-content))`,
+                        }
                       : undefined
                   }
                 >

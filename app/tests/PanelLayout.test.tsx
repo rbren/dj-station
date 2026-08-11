@@ -185,7 +185,12 @@ describe('step sequencer strip alignment', () => {
 
   it('renders the strip before the step grid with the shared column template', () => {
     render(
-      <ModulePanel {...baseProps} instanceId="seq1" manifest={stepSeqManifest()} customUI={StepSeqUI} />,
+      <ModulePanel
+        {...baseProps}
+        instanceId="seq1"
+        manifest={stepSeqManifest()}
+        customUI={StepSeqUI}
+      />,
     );
     const strip = screen.getByTestId('stepseq-ui');
     const grid = document.querySelector<HTMLElement>('.input-group-grid .input-group-cells');

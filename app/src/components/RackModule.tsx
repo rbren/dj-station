@@ -9,6 +9,7 @@ import CameraUI from '../../../extensions/camera/ui-src/CameraUI';
 import EuclidUI from '../../../extensions/euclid/ui-src/EuclidUI';
 import LfoUI from '../../../extensions/lfo/ui-src/LfoUI';
 import QuantizerUI from '../../../extensions/quantizer/ui-src/QuantizerUI';
+import ScopeUI from '../../../extensions/scope/ui-src/ScopeUI';
 import SeqSwitchUI from '../../../extensions/seq_switch/ui-src/SeqSwitchUI';
 import StepSeqUI from '../../../extensions/step_seq/ui-src/StepSeqUI';
 import TrigSeqUI from '../../../extensions/trig_seq/ui-src/TrigSeqUI';
@@ -36,6 +37,7 @@ const CUSTOM_UIS: Record<string, ComponentType<{ handle: ModuleHandle; instanceI
   'com.dj.lfo': LfoUI,
   'com.dj.mixer': MixerUI,
   'com.dj.quantizer': QuantizerUI,
+  'com.dj.scope': ScopeUI,
   'com.dj.seq_switch': SeqSwitchUI,
   'com.dj.step_seq': StepSeqUI,
   'com.dj.trig_seq': TrigSeqUI,

@@ -755,6 +755,60 @@ body {
   padding: 2px 0 0;
 }
 
+/* --- Scope trace + spectrum ----------------------------------------- */
+
+.scope-ui {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.scope-views {
+  display: flex;
+  gap: 3px;
+}
+
+.scope-view-btn {
+  background: #1b1e24;
+  color: #8a93a2;
+  border: 1px solid #2a2f38;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 0.62rem;
+  cursor: pointer;
+}
+
+.scope-view-btn[aria-pressed='true'] {
+  color: #e6e9ef;
+  border-color: var(--accent, #9aa7b5);
+}
+
+.scope-bg {
+  fill: #14161a;
+  rx: 4;
+}
+
+.scope-axis {
+  stroke: #262c35;
+  stroke-width: 1;
+}
+
+.scope-wave {
+  stroke: var(--accent, #62d0ff);
+  stroke-width: 1.4;
+}
+
+.scope-bar {
+  fill: color-mix(in srgb, var(--accent, #62d0ff) 80%, transparent);
+}
+
+.scope-readout {
+  font-size: 0.65rem;
+  color: #8a93a2;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Camera live feed ---------------------------------------------- */
 
 .camera-ui {
