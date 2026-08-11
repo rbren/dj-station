@@ -11,11 +11,23 @@ import { useEffect, useState } from "react";
 interface ModuleHandle {
   paramValue(id: string): number;
   setParam(id: string, v: number): void;
+  signalTap?(jackId: string): { display: number };
   endEdit?(): void;
 }
 
 const TRACKS = 8;
 const STEPS = 16;
+
+/** Current step per track from the `pos` output (clocks since reset,
+ *  -1 before the first clock); each track wraps at its own length. */
+const playhead = (
+  handle: ModuleHandle,
+  lengths: number[],
+): (number | null)[] => {
+  const pos = handle.signalTap?.("out:pos")?.display ?? -1;
+  if (pos < 0) return Array.from({ length: TRACKS }, () => null);
+  return lengths.map((len) => Math.round(pos) % len);
+};
 
 const readPatterns = (handle: ModuleHandle): number[] =>
   Array.from(
@@ -54,6 +66,9 @@ export default function TrigSeqUI({ handle }: { handle: ModuleHandle }) {
     handle.endEdit?.();
   };
 
+  // Live playhead, re-read on every telemetry-driven render.
+  const current = playhead(handle, lengths);
+
   return (
     <div className="trigseq-ui" data-testid="trigseq-ui">
       {patterns.map((pattern, t) => (
@@ -62,16 +77,18 @@ export default function TrigSeqUI({ handle }: { handle: ModuleHandle }) {
           {Array.from({ length: STEPS }, (_, s) => {
             const on = (pattern & (1 << s)) !== 0;
             const beyond = s >= lengths[t];
+            const playing = current[t] === s && !beyond;
             return (
               <button
                 key={s}
                 type="button"
                 aria-pressed={on}
                 data-testid={`trigseq-cell-${t + 1}-${s + 1}`}
+                data-playing={playing || undefined}
                 title={`track ${t + 1} step ${s + 1}`}
                 className={`trigseq-cell${on ? " on" : ""}${beyond ? " beyond" : ""}${
                   s % 4 === 0 ? " beat" : ""
-                }`}
+                }${playing ? " playing" : ""}`}
                 onClick={() => toggle(t, s)}
               />
             );

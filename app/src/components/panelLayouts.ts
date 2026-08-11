@@ -244,7 +244,10 @@ const LAYOUTS: Record<string, LayoutFactory> = {
         inputs: seq('len', 1, 8),
       },
     ],
-    outputGroups: [{ title: 'trig', outputs: seqIds('trig', 1, 8), columns: 8 }],
+    outputGroups: [
+      { title: 'trig', outputs: seqIds('trig', 1, 8), columns: 8 },
+      { outputs: ['pos'] },
+    ],
   }),
 
   'com.dj.euclid': () => ({
@@ -260,7 +263,10 @@ const LAYOUTS: Record<string, LayoutFactory> = {
         ],
       })),
     ],
-    outputGroups: [{ outputs: ['ch1', 'ch2', 'ch3', 'ch4', 'or'] }],
+    outputGroups: [
+      { outputs: ['ch1', 'ch2', 'ch3', 'ch4', 'or'] },
+      { title: 'step', outputs: seqIds('step', 1, 4) },
+    ],
   }),
 
   'com.dj.drum': () => ({
@@ -314,6 +320,9 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
+  // The scale keyboard (QuantizerUI) is the custom-mask editor; the
+  // `custom` jack stays wireable as a jack-only cell like trig_seq's
+  // pattern jacks.
   'com.dj.quantizer': () => ({
     groups: [
       { title: 'quantize', inputs: ['in', 'scale', 'root'] },
@@ -324,6 +333,7 @@ const LAYOUTS: Record<string, LayoutFactory> = {
           { jack: 'octaves', label: 'oct' },
         ],
       },
+      { inputs: [{ jack: 'custom', control: 'jack', label: 'cust' }] },
     ],
   }),
 

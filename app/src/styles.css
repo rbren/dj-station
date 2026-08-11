@@ -550,6 +550,96 @@ body {
   opacity: 0.3;
 }
 
+/* The playing step burns hot white regardless of on/off state — readable
+   from across the room. */
+.trigseq-cell.playing {
+  background: #fff;
+  border-color: #fff;
+  box-shadow:
+    0 0 6px #fff,
+    0 0 14px var(--accent, #5fb6d4);
+}
+
+.trigseq-cell.on.playing {
+  background: color-mix(in srgb, var(--accent, #5fb6d4) 35%, #fff);
+}
+
+/* --- Step sequencer playhead strip ---------------------------------- */
+
+.stepseq-ui {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.stepseq-lamp {
+  width: 20px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid #343b45;
+  background: #14171c;
+  color: #6f7987;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.stepseq-lamp.beat {
+  border-color: #454c58;
+}
+
+.stepseq-lamp.beyond {
+  opacity: 0.3;
+}
+
+.stepseq-lamp.playing {
+  background: #fff;
+  border-color: #fff;
+  color: #10151b;
+  font-weight: 700;
+  box-shadow:
+    0 0 6px #fff,
+    0 0 14px var(--accent, #5fb6d4);
+}
+
+/* --- Turing register lamps ------------------------------------------ */
+
+.turing-ui {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.turing-bit {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid #343b45;
+  background: #14171c;
+}
+
+.turing-bit.on {
+  background: var(--accent, #5fb6d4);
+  border-color: color-mix(in srgb, var(--accent, #5fb6d4) 70%, #fff);
+}
+
+.turing-bit.beyond {
+  opacity: 0.3;
+}
+
+.turing-bit.playing {
+  border-color: #fff;
+  box-shadow:
+    0 0 6px #fff,
+    0 0 12px var(--accent, #5fb6d4);
+}
+
+.turing-bit.on.playing {
+  background: #fff;
+}
+
 /* --- Euclidean rings ------------------------------------------------ */
 
 .euclid-ui {
@@ -570,6 +660,14 @@ body {
 
 .euclid-dot.on {
   fill: var(--accent, #5fb6d4);
+}
+
+/* The currently-playing step flares white with an accent halo. */
+.euclid-dot.playing {
+  fill: #fff;
+  stroke: var(--accent, #5fb6d4);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px #fff);
 }
 
 .euclid-count {
@@ -608,6 +706,118 @@ body {
   font-size: 0.65rem;
   color: #8a93a2;
   padding: 2px 0 0;
+}
+
+/* --- Live level meters (VCA CV, compressor GR, ...) ------------------ */
+
+.level-meters {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  min-width: 150px;
+}
+
+.level-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.level-meter-label {
+  width: 34px;
+  font-size: 0.62rem;
+  color: #8a93a2;
+  text-align: right;
+}
+
+.level-meter-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: #14171c;
+  border: 1px solid #2a2f38;
+  overflow: hidden;
+}
+
+.level-meter-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent, #62d0ff) 60%, #14171c),
+    var(--accent, #62d0ff)
+  );
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent, #62d0ff) 55%, transparent);
+  transition: width 0.1s linear;
+}
+
+.level-meter-value {
+  width: 52px;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: #dfe4ec;
+}
+
+/* --- Quantizer scale keyboard ---------------------------------------- */
+
+.quantizer-ui {
+  margin-bottom: 8px;
+}
+
+.quantizer-keys {
+  display: flex;
+  gap: 2px;
+  align-items: flex-start;
+}
+
+.quantizer-key {
+  width: 20px;
+  border-radius: 0 0 3px 3px;
+  border: 1px solid #343b45;
+  cursor: pointer;
+  padding: 0 0 3px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.quantizer-key.white {
+  height: 52px;
+  background: #262b33;
+}
+
+.quantizer-key.black {
+  height: 36px;
+  background: #101318;
+}
+
+.quantizer-key .quantizer-key-label {
+  font-size: 8px;
+  color: #6f7987;
+  pointer-events: none;
+}
+
+.quantizer-key.active {
+  background: var(--accent, #7fae8b);
+  border-color: color-mix(in srgb, var(--accent, #7fae8b) 70%, #fff);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--accent, #7fae8b) 60%, transparent);
+}
+
+.quantizer-key.active .quantizer-key-label {
+  color: #10151b;
+  font-weight: 700;
+}
+
+.quantizer-key.root {
+  border-bottom-width: 3px;
+  border-bottom-color: #fff;
+}
+
+.quantizer-scale-name {
+  font-size: 0.65rem;
+  color: #8a93a2;
+  padding: 3px 0 0;
 }
 
 /* ------------------------------------------------------------------ */

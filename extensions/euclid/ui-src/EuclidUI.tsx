@@ -1,13 +1,16 @@
 // Custom UI for the Euclidean sequencer: four pattern rings, each drawing
-// its E(fill, steps) onset pattern (rotated by rot) as dots on a circle.
-// Purely a state display — the steps/fill/rot knobs below stay the
-// controls; the rings re-render as their values change via the handle.
+// its E(fill, steps) onset pattern (rotated by rot) as dots on a circle,
+// with the currently-playing step lit hot (bright halo) from the module's
+// step1..step4 outputs via the batched telemetry tap. The steps/fill/rot
+// knobs below stay the controls; the rings re-render as their values (and
+// the playhead) change via the handle.
 
 import { useEffect, useState } from "react";
 
 // Structural copy of the host's ModuleHandle (extensions compile standalone).
 interface ModuleHandle {
   paramValue(id: string): number;
+  signalTap?(jackId: string): { display: number };
 }
 
 const CHANNELS = 4;
@@ -72,6 +75,9 @@ export default function EuclidUI({ handle }: { handle: ModuleHandle }) {
         const pattern = base.map((_, i) => base[(i + ring.rot) % ring.steps]);
         const cx = BOX / 2;
         const cy = BOX / 2;
+        // Live playhead from the module's stepN output (-1 = not running).
+        const raw = handle.signalTap?.(`out:step${c + 1}`)?.display ?? -1;
+        const current = raw >= 0 ? Math.round(raw) % ring.steps : null;
         return (
           <svg
             key={c}
@@ -86,13 +92,15 @@ export default function EuclidUI({ handle }: { handle: ModuleHandle }) {
             <circle cx={cx} cy={cy} r={R} className="euclid-circle" />
             {pattern.map((on, i) => {
               const a = (i / ring.steps) * 2 * Math.PI - Math.PI / 2;
+              const playing = current === i;
               return (
                 <circle
                   key={i}
                   cx={cx + R * Math.cos(a)}
                   cy={cy + R * Math.sin(a)}
-                  r={on ? 3.2 : 1.4}
-                  className={on ? "euclid-dot on" : "euclid-dot"}
+                  r={playing ? 4.6 : on ? 3.2 : 1.4}
+                  data-playing={playing || undefined}
+                  className={`euclid-dot${on ? " on" : ""}${playing ? " playing" : ""}`}
                 />
               );
             })}
