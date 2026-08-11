@@ -5,12 +5,12 @@
 // (showLabel=false); output groups keep the inline label.
 //
 // Indicator color language (both inputs and outputs):
-// - near zero      → neutral GRAY (not a dim blue/red)
-// - positive value → ramps gray → saturated BLUE at +10 V
-// - negative value → ramps gray → saturated ORANGE-RED (hue 18°) at −10 V
+// - near zero      → neutral GRAY (not a dim azure/amber)
+// - positive value → ramps gray → saturated AZURE (hue 210°) at +10 V
+// - negative value → ramps gray → saturated AMBER (hue 45°) at −10 V
 // - volatile (>10 Hz fluctuation the smoothed display can't follow)
 //   → PURE RED (hue 0°), saturation/depth scaled by telemetry.volatility,
-//     plus a pulsing halo. The hue split (orange-red vs pure red) and the
+//     plus a pulsing halo. The hue split (45° amber vs 0° red) and the
 //     pulse keep "negative" and "too fast to display" visually distinct.
 // The displayed level uses `telemetry.display`, which the engine low-pass
 // smooths over its 100 ms (10 Hz) window.
@@ -37,9 +37,10 @@ export function indicatorStyle(telemetry: JackTelemetry | undefined): {
     const color = `hsl(0, ${s}%, ${l}%)`;
     return { volatile: true, color, halo: `0 0 10px 2px ${color}` };
   }
-  // Signed value: neutral gray at 0 ramping to a saturated hue at ±10 V.
+  // Signed value: neutral gray at 0 ramping to a saturated hue at ±10 V
+  // (azure for positive, amber for negative).
   const level = Math.min(1, Math.abs(display) / 10);
-  const hue = display >= 0 ? 210 : 18;
+  const hue = display >= 0 ? 210 : 45;
   const s = Math.round(12 + 88 * level);
   const l = Math.round(64 - 12 * level);
   const color = `hsl(${hue}, ${s}%, ${l}%)`;

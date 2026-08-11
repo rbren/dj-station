@@ -214,8 +214,8 @@ body {
   flex: none;
 }
 
-/* Value indicator LED: neutral gray near 0 V, ramping to saturated blue
-   (positive) / orange-red (negative); pure red + pulse when the signal
+/* Value indicator LED: neutral gray near 0 V, ramping to saturated azure
+   (positive) / amber (negative); pure red + pulse when the signal
    fluctuates faster than the 10 Hz display smoothing can follow. Color
    and halo are driven inline from telemetry (see Jack.tsx); this rule is
    the no-telemetry fallback and the shared geometry. Bigger and haloed
@@ -239,7 +239,7 @@ body {
   border-radius: 2px;
 }
 
-/* Volatile (>10 Hz) signals pulse — distinct from the steady orange-red
+/* Volatile (>10 Hz) signals pulse — distinct from the steady amber
    of a negative value even for color-impaired users. */
 .jack-glow-volatile {
   animation: jack-volatile-pulse 0.5s ease-in-out infinite alternate;

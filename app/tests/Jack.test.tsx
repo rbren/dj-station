@@ -1,5 +1,5 @@
 // Jack value-indicator color language: neutral gray near 0 V, ramping to
-// saturated blue at +10 V / orange-red at −10 V, and a distinct pulsing
+// saturated azure at +10 V / amber at −10 V, and a distinct pulsing
 // pure red for signals fluctuating faster than the 10 Hz display smoothing
 // (deeper red = more volatile).
 
@@ -19,7 +19,7 @@ function hsl(color: string): { h: number; s: number; l: number } {
 }
 
 describe('indicatorStyle', () => {
-  it('renders near-zero values as neutral gray, not a dim blue/red', () => {
+  it('renders near-zero values as neutral gray, not a dim azure/amber', () => {
     for (const display of [0, 0.05, -0.05]) {
       const { color, volatile } = indicatorStyle(t({ display }));
       expect(volatile).toBe(false);
@@ -27,7 +27,7 @@ describe('indicatorStyle', () => {
     }
   });
 
-  it('ramps positive values to saturated blue at +10 V', () => {
+  it('ramps positive values to saturated azure at +10 V', () => {
     const half = hsl(indicatorStyle(t({ display: 5 })).color);
     const full = hsl(indicatorStyle(t({ display: 10 })).color);
     expect(half.h).toBe(210);
@@ -37,10 +37,20 @@ describe('indicatorStyle', () => {
     expect(half.s).toBeGreaterThan(40); // 5 V is clearly colored, not faint
   });
 
-  it('ramps negative values to saturated orange-red at -10 V', () => {
+  it('ramps negative values to saturated amber at -10 V', () => {
+    const half = hsl(indicatorStyle(t({ display: -5 })).color);
     const full = hsl(indicatorStyle(t({ display: -10 })).color);
-    expect(full.h).toBe(18); // orange-red, distinct from volatile pure red
+    expect(half.h).toBe(45);
+    expect(full.h).toBe(45); // amber, distinct from volatile pure red
     expect(full.s).toBe(100);
+    expect(full.s).toBeGreaterThan(half.s);
+  });
+
+  it('keeps the amber negative hue clearly apart from the volatile red', () => {
+    const amber = hsl(indicatorStyle(t({ display: -10 })).color);
+    const red = hsl(indicatorStyle(t({ display: -10, volatility: 1, is_fast: true })).color);
+    expect(red.h).toBe(0);
+    expect(Math.abs(amber.h - red.h)).toBeGreaterThanOrEqual(40);
   });
 
   it('volatile signals go pure red, deeper with more volatility', () => {
