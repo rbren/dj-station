@@ -29,16 +29,21 @@ export function TooltipLayer() {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let current: HTMLElement | null = null;
+    // While a drag started on the anchor is in flight, the tooltip stays
+    // pinned (knob drags show the live value); hover retargeting resumes
+    // on mouseup.
+    let dragging = false;
 
     const clear = () => {
       if (timer) clearTimeout(timer);
       timer = null;
       current = null;
+      dragging = false;
       setTip(null);
     };
 
-    const onOver = (e: MouseEvent) => {
-      const anchor = (e.target as HTMLElement).closest?.('[data-tip]') as HTMLElement | null;
+    const retarget = (target: HTMLElement | null) => {
+      const anchor = target?.closest?.('[data-tip]') as HTMLElement | null;
       if (anchor === current) return;
       if (timer) clearTimeout(timer);
       timer = null;
@@ -51,14 +56,38 @@ export function TooltipLayer() {
       }, SHOW_DELAY_MS);
     };
 
-    // Hide on any interaction: the tooltip should never sit over a menu or
-    // linger through a drag.
+    const onOver = (e: MouseEvent) => {
+      if (dragging) return;
+      retarget(e.target as HTMLElement);
+    };
+
+    // A mousedown ON the tooltip's anchor starts a drag: keep the tooltip
+    // alive so live values (knob drags) stay visible. Mousedowns anywhere
+    // else still dismiss it — it should never sit over a menu.
+    const onDown = (e: MouseEvent) => {
+      if (current && current.contains(e.target as Node)) {
+        dragging = true;
+        return;
+      }
+      clear();
+    };
+
+    // Drag over: hide if the pointer ended up off the anchor (or retarget
+    // to whatever anchor it landed on).
+    const onUp = (e: MouseEvent) => {
+      if (!dragging) return;
+      dragging = false;
+      retarget(e.target as HTMLElement);
+    };
+
     document.addEventListener('mouseover', onOver);
-    document.addEventListener('mousedown', clear, true);
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('mouseup', onUp);
     window.addEventListener('blur', clear);
     return () => {
       document.removeEventListener('mouseover', onOver);
-      document.removeEventListener('mousedown', clear, true);
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('mouseup', onUp);
       window.removeEventListener('blur', clear);
       if (timer) clearTimeout(timer);
     };
