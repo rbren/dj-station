@@ -130,6 +130,74 @@ impl NodeInfo {
     }
 }
 
+/// Control-side node metadata in STABLE slots, mirroring the graph's slot
+/// space one-to-one: `nodes[i]` and the RT graph's slot `i` are the same
+/// node, and neither index ever shifts (removal tombstones the slot; the
+/// next add reuses it). Indexing a dead slot panics — a stale index is an
+/// engine bookkeeping bug. Iteration yields live nodes only.
+#[derive(Default)]
+pub struct NodeSlots {
+    slots: Vec<Option<NodeInfo>>,
+}
+
+impl NodeSlots {
+    /// Live nodes, in slot order.
+    pub fn iter(&self) -> impl Iterator<Item = &NodeInfo> {
+        self.slots.iter().flatten()
+    }
+
+    /// Live nodes with their slot indices (the indices used by
+    /// [`WireSpec`] and the RT graph).
+    pub fn iter_slots(&self) -> impl Iterator<Item = (usize, &NodeInfo)> {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n)| n.as_ref().map(|n| (i, n)))
+    }
+
+    pub fn get(&self, slot: usize) -> Option<&NodeInfo> {
+        self.slots.get(slot).and_then(|n| n.as_ref())
+    }
+
+    /// True when no live nodes exist.
+    pub fn is_empty(&self) -> bool {
+        self.iter().next().is_none()
+    }
+
+    fn insert(&mut self, slot: usize, info: NodeInfo) {
+        if slot >= self.slots.len() {
+            self.slots.resize_with(slot + 1, || None);
+        }
+        debug_assert!(self.slots[slot].is_none(), "slot {slot} already live");
+        self.slots[slot] = Some(info);
+    }
+
+    fn remove(&mut self, slot: usize) -> NodeInfo {
+        self.slots[slot].take().expect("dead node slot")
+    }
+}
+
+impl std::ops::Index<usize> for NodeSlots {
+    type Output = NodeInfo;
+    fn index(&self, slot: usize) -> &NodeInfo {
+        self.slots[slot].as_ref().expect("dead node slot")
+    }
+}
+
+impl std::ops::IndexMut<usize> for NodeSlots {
+    fn index_mut(&mut self, slot: usize) -> &mut NodeInfo {
+        self.slots[slot].as_mut().expect("dead node slot")
+    }
+}
+
+impl<'a> IntoIterator for &'a NodeSlots {
+    type Item = &'a NodeInfo;
+    type IntoIter = std::iter::Flatten<std::slice::Iter<'a, Option<NodeInfo>>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.slots.iter().flatten()
+    }
+}
+
 /// RT-side core: graph + queues + counters. Lives on whichever thread the
 /// active backend drives.
 pub struct EngineCore {
@@ -146,7 +214,7 @@ impl EngineCore {
         while let Ok(cmd) = self.cmd_rx.pop() {
             match cmd {
                 Command::SetParam { node, index, value } => {
-                    self.graph.nodes[node].module.on_param(index, value);
+                    self.graph.module_mut(node).on_param(index, value);
                 }
                 Command::SetKnobRt { node, jack, rt } => {
                     self.graph.set_jack_rt(node, jack, rt);
@@ -205,7 +273,8 @@ pub struct Engine {
     wasm: WasmRuntime,
     native: crate::native_host::NativeRuntime,
     state: EngineState,
-    pub nodes: Vec<NodeInfo>,
+    /// Control-side node metadata, slot-for-slot with the RT graph.
+    pub nodes: NodeSlots,
     node_by_id: HashMap<String, usize>,
     /// Control-side copy of the wire list (graph itself may be on the RT thread).
     wires: Vec<WireSpec>,
@@ -300,7 +369,7 @@ impl Engine {
             wasm: WasmRuntime::new()?,
             native: crate::native_host::NativeRuntime::new(),
             state: EngineState::Stopped(Box::new(core)),
-            nodes: Vec::new(),
+            nodes: NodeSlots::default(),
             node_by_id: HashMap::new(),
             wires: Vec::new(),
             cmd_tx: Arc::new(Mutex::new(cmd_tx)),
@@ -324,7 +393,7 @@ impl Engine {
         })
     }
 
-    fn core_mut(&mut self) -> Result<&mut EngineCore> {
+    pub(crate) fn core_mut(&mut self) -> Result<&mut EngineCore> {
         match &mut self.state {
             EngineState::Stopped(core) => Ok(core),
             _ => Err(anyhow!("engine is running; stop it first")),
@@ -355,7 +424,7 @@ impl Engine {
         }
     }
 
-    fn node_idx(&self, instance_id: &str) -> Result<usize> {
+    pub(crate) fn node_idx(&self, instance_id: &str) -> Result<usize> {
         self.node_by_id
             .get(instance_id)
             .copied()
@@ -508,39 +577,40 @@ impl Engine {
             .manifest(ext_id)
             .ok_or_else(|| anyhow!("unknown extension {ext_id:?}"))?;
 
+        // Side-table entries are keyed by the graph SLOT, which is only
+        // known after add_node (slots are recycled); build now, file later.
         let mut midi_shared = None;
         let mut gesture = None;
+        let mut midi_plumbing = None;
+        let mut gesture_tx = None;
+        let mut playback_plumbing = None;
+        let mut deck_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
             Some(BuiltinKind::Midi) => {
                 let (tx, rx) = rtrb::RingBuffer::new(4096);
                 let (out_tx, out_rx) = rtrb::RingBuffer::new(4096);
                 let shared = Arc::new(MidiShared::default());
                 midi_shared = Some(shared.clone());
-                self.midi_producers.insert(self.nodes.len(), tx);
-                self.midi_out_consumers.insert(self.nodes.len(), out_rx);
+                midi_plumbing = Some((tx, out_rx));
                 Box::new(MidiModule::new(rx, shared, out_tx))
             }
             Some(BuiltinKind::Gesture) => {
                 let (tx, rx) = rtrb::RingBuffer::new(GESTURE_QUEUE_CAP);
-                self.gesture_producers.insert(self.nodes.len(), tx);
+                gesture_tx = Some(tx);
                 gesture = Some(dj_gesture::GestureProcessor::default());
                 Box::new(GestureRtModule::new(rx))
             }
             Some(BuiltinKind::Playback) => {
                 let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
                 let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
-                self.playback_producers.insert(self.nodes.len(), tx);
-                self.playback_garbage.insert(self.nodes.len(), garbage_rx);
+                playback_plumbing = Some((tx, garbage_rx));
                 Box::new(PlaybackModule::new(rx, garbage_tx, self.config.sample_rate))
             }
             Some(BuiltinKind::Deck) => {
                 let (tx, rx) = rtrb::RingBuffer::new(DECK_QUEUE_CAP);
                 let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(DECK_QUEUE_CAP);
                 let shared = Arc::new(crate::deck::DeckShared::default());
-                self.decks.insert(
-                    self.nodes.len(),
-                    DeckControl::new(tx, garbage_rx, shared.clone()),
-                );
+                deck_ctl = Some(DeckControl::new(tx, garbage_rx, shared.clone()));
                 Box::new(DeckModule::new(
                     rx,
                     garbage_tx,
@@ -618,13 +688,96 @@ impl Engine {
         let idx = core.graph.add_node(node, jack_rt, analyzers, out_analyzers);
         // Apply default params.
         for (i, p) in manifest.params.iter().enumerate() {
-            core.graph.nodes[idx]
-                .module
-                .on_param(i as u32, params[&p.id]);
+            core.graph.module_mut(idx).on_param(i as u32, params[&p.id]);
         }
-        debug_assert_eq!(idx, self.nodes.len());
+        if let Some((tx, out_rx)) = midi_plumbing {
+            self.midi_producers.insert(idx, tx);
+            self.midi_out_consumers.insert(idx, out_rx);
+        }
+        if let Some(tx) = gesture_tx {
+            self.gesture_producers.insert(idx, tx);
+        }
+        if let Some((tx, garbage_rx)) = playback_plumbing {
+            self.playback_producers.insert(idx, tx);
+            self.playback_garbage.insert(idx, garbage_rx);
+        }
+        if let Some(ctl) = deck_ctl {
+            self.decks.insert(idx, ctl);
+        }
         self.node_by_id.insert(instance_id.to_string(), idx);
-        self.nodes.push(info);
+        self.nodes.insert(idx, info);
+        Ok(())
+    }
+
+    /// Remove a module instance incrementally: its wires, side-table
+    /// entries and graph slot go; every OTHER node keeps its module state,
+    /// telemetry windows and slot index — nothing else resets. Accepts a
+    /// top-level plain module or a macro instance (whose expanded internal
+    /// nodes are all removed). Only valid while stopped, like the other
+    /// structural edits.
+    pub fn remove_module(&mut self, instance_id: &str) -> Result<()> {
+        anyhow::ensure!(
+            !instance_id.contains('/'),
+            "cannot remove macro-internal node {instance_id:?}"
+        );
+        if self.macro_instances.contains_key(instance_id) {
+            return self.remove_macro_instance(instance_id);
+        }
+        anyhow::ensure!(
+            self.node_by_id.contains_key(instance_id),
+            "no such module instance: {instance_id}"
+        );
+        self.remove_node(instance_id)
+    }
+
+    /// Remove one concrete engine node (plain module or macro internal).
+    pub(super) fn remove_node(&mut self, instance_id: &str) -> Result<()> {
+        // Drain pending RT commands before the slot can be recycled, so a
+        // stale knob/param command can't land on the slot's next occupant.
+        let core = self.core_mut()?;
+        core.apply_commands();
+        let slot = *self
+            .node_by_id
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("no such module instance: {instance_id}"))?;
+
+        self.wires
+            .retain(|w| w.from_node != slot && w.to_node != slot);
+        self.midi_producers.remove(&slot);
+        self.midi_out_consumers.remove(&slot);
+        self.gesture_producers.remove(&slot);
+        self.playback_producers.remove(&slot);
+        self.playback_garbage.remove(&slot);
+        self.decks.remove(&slot);
+        // Other decks sync-locked to this one lose their master.
+        for ctl in self.decks.values_mut() {
+            if ctl.sync_to.as_deref() == Some(instance_id) {
+                ctl.sync_to = None;
+            }
+        }
+        self.node_by_id.remove(instance_id);
+        self.nodes.remove(slot);
+        // The module (which may own wasm stores or track data) drops here,
+        // on the control thread — the engine is stopped, so this is safe.
+        let _module = self.core_mut()?.graph.remove_node(slot);
+        Ok(())
+    }
+
+    /// Remove a macro instance: all of its expanded internal nodes (and
+    /// nested instances) plus the instance record.
+    fn remove_macro_instance(&mut self, instance_id: &str) -> Result<()> {
+        let prefix = format!("{instance_id}/");
+        let internal_nodes: Vec<String> = self
+            .node_by_id
+            .keys()
+            .filter(|id| id.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for id in internal_nodes {
+            self.remove_node(&id)?;
+        }
+        self.macro_instances
+            .retain(|id, _| id != instance_id && !id.starts_with(&prefix));
         Ok(())
     }
 
@@ -682,35 +835,6 @@ impl Engine {
         &self.wires
     }
 
-    /// Carry per-node DSP state (sequencer position, LFO phase, turing
-    /// register, held MIDI notes, deck position, …) from `old` into this
-    /// freshly rebuilt engine, using the same save_state/load_state pair as
-    /// hot reload. Nodes match by (instance_id, ext_id); anything without a
-    /// match keeps its fresh state. Both engines must be stopped.
-    ///
-    /// Structural edits that go through a from_doc rebuild (remove module,
-    /// undo/redo) call this so modules untouched by the edit don't reset.
-    pub fn adopt_dsp_state(&mut self, old: &mut Engine) -> Result<()> {
-        let pairs: Vec<(usize, usize)> = self
-            .nodes
-            .iter()
-            .enumerate()
-            .filter_map(|(new_idx, info)| {
-                let &old_idx = old.node_by_id.get(&info.instance_id)?;
-                (old.nodes[old_idx].ext_id == info.ext_id).then_some((new_idx, old_idx))
-            })
-            .collect();
-        let old_core = old.core_mut()?;
-        let core = self.core_mut()?;
-        for (new_idx, old_idx) in pairs {
-            let state = old_core.graph.nodes[old_idx].module.save_state();
-            if !state.is_empty() {
-                core.graph.nodes[new_idx].module.load_state(&state);
-            }
-        }
-        Ok(())
-    }
-
     /// Resolve an output jack index to its persistent name.
     pub fn output_jack_name(&self, node: usize, jack: usize) -> String {
         let info = &self.nodes[node];
@@ -763,7 +887,7 @@ impl Engine {
             .ok_or_else(|| anyhow!("no param {param_id:?}"))? as u32;
         self.nodes[node].params.insert(param_id.to_string(), value);
         match &mut self.state {
-            EngineState::Stopped(core) => core.graph.nodes[node].module.on_param(index, value),
+            EngineState::Stopped(core) => core.graph.module_mut(node).on_param(index, value),
             _ => self
                 .cmd_tx
                 .lock()

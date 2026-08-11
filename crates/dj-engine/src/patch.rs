@@ -116,10 +116,10 @@ fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
 }
 
 impl PatchDoc {
-    /// Remove a module instance and every wire touching it. Returns false
-    /// when the instance does not exist. (Node removal is done at the
-    /// document level and rebuilt via `from_doc` — the RT graph never
-    /// re-indexes live.)
+    /// Remove a module instance and every wire touching it from the
+    /// DOCUMENT. Returns false when the instance does not exist. Live
+    /// engines use [`Engine::remove_module`] (incremental); this is for
+    /// editing serialized patches.
     pub fn remove_module(&mut self, instance: &str) -> bool {
         if self.modules.remove(instance).is_none() {
             return false;
@@ -151,7 +151,7 @@ impl Engine {
             version: env!("CARGO_PKG_VERSION").into(),
         };
         let mut modules = BTreeMap::new();
-        for (node_idx, info) in self.nodes.iter().enumerate() {
+        for (node_idx, info) in self.nodes.iter_slots() {
             // Macro-internal nodes are part of the macro definition, not
             // the patch document.
             if info.instance_id.contains('/') {
@@ -394,38 +394,7 @@ impl Engine {
         // sort after its follower).
         let mut deferred_syncs: Vec<(String, String)> = Vec::new();
         for (instance_id, mf) in &doc.modules {
-            engine.add_module(instance_id, &mf.ext)?;
-            for m in &mf.midi_mappings {
-                engine.add_midi_mapping(instance_id, m.kind, m.num, &m.name)?;
-            }
-            for m in &mf.midi_led_mappings {
-                engine.add_midi_led_mapping(instance_id, m.kind, m.num, &m.name)?;
-            }
-            if let Some(g) = &mf.gesture {
-                engine.gesture_set_mode(instance_id, &g.mode)?;
-                engine.gesture_set_wheels(instance_id, g.wheels)?;
-                for m in &g.mappings {
-                    engine.restore_gesture_mapping(instance_id, m)?;
-                }
-            }
-            if let Some(track) = &mf.track {
-                if crate::builtin::BuiltinKind::from_ext_id(&mf.ext)
-                    == Some(crate::builtin::BuiltinKind::Deck)
-                {
-                    engine.deck_load(instance_id, Path::new(track))?;
-                } else {
-                    engine.playback_load(instance_id, Path::new(track))?;
-                }
-            }
-            if let Some(sync_to) = &mf.sync_to {
-                deferred_syncs.push((instance_id.clone(), sync_to.clone()));
-            }
-            for (param, value) in &mf.params {
-                engine.set_param(instance_id, param, *value)?;
-            }
-            for (jack, state) in &mf.knobs {
-                engine.restore_knob(instance_id, jack, state.clone())?;
-            }
+            engine.add_module_from_file(instance_id, mf, &mut deferred_syncs)?;
         }
         for (instance, master) in &deferred_syncs {
             engine.deck_sync(instance, Some(master))?;
@@ -437,6 +406,278 @@ impl Engine {
             }
         }
         Ok(engine)
+    }
+
+    /// Add one module instance from its patch entry, restoring mappings,
+    /// gesture state, track, params and knobs. Deck sync targets are pushed
+    /// onto `deferred_syncs` (applied once every module exists).
+    fn add_module_from_file(
+        &mut self,
+        instance_id: &str,
+        mf: &ModuleFile,
+        deferred_syncs: &mut Vec<(String, String)>,
+    ) -> Result<()> {
+        self.add_module(instance_id, &mf.ext)?;
+        for m in &mf.midi_mappings {
+            self.add_midi_mapping(instance_id, m.kind, m.num, &m.name)?;
+        }
+        for m in &mf.midi_led_mappings {
+            self.add_midi_led_mapping(instance_id, m.kind, m.num, &m.name)?;
+        }
+        if let Some(g) = &mf.gesture {
+            self.gesture_set_mode(instance_id, &g.mode)?;
+            self.gesture_set_wheels(instance_id, g.wheels)?;
+            for m in &g.mappings {
+                self.restore_gesture_mapping(instance_id, m)?;
+            }
+        }
+        if let Some(track) = &mf.track {
+            if crate::builtin::BuiltinKind::from_ext_id(&mf.ext)
+                == Some(crate::builtin::BuiltinKind::Deck)
+            {
+                self.deck_load(instance_id, Path::new(track))?;
+            } else {
+                self.playback_load(instance_id, Path::new(track))?;
+            }
+        }
+        if let Some(sync_to) = &mf.sync_to {
+            deferred_syncs.push((instance_id.to_string(), sync_to.clone()));
+        }
+        for (param, value) in &mf.params {
+            self.set_param(instance_id, param, *value)?;
+        }
+        for (jack, state) in &mf.knobs {
+            self.restore_knob(instance_id, jack, state.clone())?;
+        }
+        Ok(())
+    }
+
+    /// Morph the LIVE engine into `doc` by diffing, instead of rebuilding:
+    /// modules present in both keep their graph slot, module (DSP) state and
+    /// telemetry windows — only what actually differs is touched. This is
+    /// the undo/redo/structural-edit restore path; loading a patch into a
+    /// fresh engine is [`Engine::from_doc`].
+    ///
+    /// The engine must be stopped (structural edit). The doc's header must
+    /// match the engine's config — undo history never changes it.
+    ///
+    /// Returns the instance ids that were (re)created from scratch (missing
+    /// from the live engine, or whose shape changed) — their fresh state may
+    /// need app-layer re-application (deck metadata, stems).
+    pub fn apply_doc(&mut self, doc: &PatchDoc) -> Result<Vec<String>> {
+        self.core_mut()?; // must be stopped
+        anyhow::ensure!(
+            doc.header.format == PATCH_FORMAT,
+            "unsupported patch format"
+        );
+        anyhow::ensure!(
+            doc.header.sample_rate == self.config.sample_rate
+                && doc.header.block_size == self.config.block_size
+                && doc.header.master_channels == self.config.master_channels,
+            "apply_doc cannot change the engine config (load a fresh patch instead)"
+        );
+        for def in doc.macros.values() {
+            self.macros.register(def.clone());
+        }
+
+        // Which top-level instances must be (re)created: missing, different
+        // ext, macro version bump, or a track that can't be un-loaded
+        // in place.
+        let current: Vec<String> = self
+            .nodes
+            .iter()
+            .map(|n| n.instance_id.clone())
+            .filter(|id| !id.contains('/'))
+            .chain(
+                self.macro_instances()
+                    .keys()
+                    .filter(|id| !id.contains('/'))
+                    .cloned(),
+            )
+            .collect();
+        let mut recreate: Vec<String> = Vec::new();
+        for id in &current {
+            match doc.modules.get(id) {
+                None => recreate.push(id.clone()),
+                Some(mf) => {
+                    if !self.module_matches_shape(id, mf) {
+                        recreate.push(id.clone());
+                    }
+                }
+            }
+        }
+        for id in &recreate {
+            self.remove_module(id)?;
+        }
+
+        // Diff kept modules in place; collect new ones.
+        let mut created: Vec<String> = Vec::new();
+        let mut deferred_syncs: Vec<(String, String)> = Vec::new();
+        for (instance_id, mf) in &doc.modules {
+            if recreate.iter().any(|r| r == instance_id) || (!self.has_instance(instance_id)) {
+                self.add_module_from_file(instance_id, mf, &mut deferred_syncs)?;
+                created.push(instance_id.clone());
+            } else {
+                self.diff_module_in_place(instance_id, mf, &mut deferred_syncs)?;
+            }
+        }
+
+        // Wire diff by persisted names (jack indices may have changed when
+        // mappings were rebuilt).
+        let want: BTreeSet<(String, WireEntry)> = doc
+            .wires
+            .iter()
+            .flat_map(|(src, wf)| wf.wires.iter().map(move |w| (src.clone(), w.clone())))
+            .collect();
+        let have: BTreeSet<(String, WireEntry)> = self
+            .wire_entries()
+            .into_iter()
+            .flat_map(|(src, ws)| ws.into_iter().map(move |w| (src.clone(), w)))
+            .collect();
+        for (src, w) in have.difference(&want) {
+            self.disconnect(src, &w.from_jack, &w.to, &w.to_jack)?;
+        }
+        for (src, w) in want.difference(&have) {
+            self.connect(src, &w.from_jack, &w.to, &w.to_jack)?;
+        }
+
+        // Deck sync state for every kept deck (adds queued theirs above).
+        for (instance, master) in &deferred_syncs {
+            self.deck_sync(instance, Some(master))?;
+        }
+        Ok(created)
+    }
+
+    fn has_instance(&self, id: &str) -> bool {
+        self.macro_instances().contains_key(id) || self.nodes.iter().any(|n| n.instance_id == id)
+    }
+
+    /// Can `id` be morphed into `mf` in place? Same ext, same macro
+    /// version, and no track unload (tracks can be replaced, not removed).
+    fn module_matches_shape(&self, id: &str, mf: &ModuleFile) -> bool {
+        if let Some(mi) = self.macro_instances().get(id) {
+            return mi.macro_id == mf.ext && Some(mi.version) == mf.macro_version;
+        }
+        let Some(info) = self.nodes.iter().find(|n| n.instance_id == id) else {
+            return false;
+        };
+        if info.ext_id != mf.ext {
+            return false;
+        }
+        if info.track_path.is_some() && mf.track.is_none() {
+            return false;
+        }
+        true
+    }
+
+    /// Bring one kept module's control state to `mf`, touching only what
+    /// differs. DSP state (sequencer position, LFO phase, …) and telemetry
+    /// stay live throughout.
+    fn diff_module_in_place(
+        &mut self,
+        instance_id: &str,
+        mf: &ModuleFile,
+        deferred_syncs: &mut Vec<(String, String)>,
+    ) -> Result<()> {
+        // MIDI mappings: rebuilt wholesale when the set differs (jack
+        // allocation is order-dependent; wires re-resolve by name later).
+        if self.macro_instances().get(instance_id).is_none() {
+            let node = self.node_idx(instance_id)?;
+            let cur: Vec<(String, crate::builtin::MidiMapKind, u8)> = self.nodes[node]
+                .midi_mappings
+                .iter()
+                .map(|m| (m.name.clone(), m.kind, m.num))
+                .collect();
+            let want: Vec<(String, crate::builtin::MidiMapKind, u8)> = mf
+                .midi_mappings
+                .iter()
+                .map(|m| (m.name.clone(), m.kind, m.num))
+                .collect();
+            if cur != want {
+                for (name, _, _) in &cur {
+                    self.remove_midi_mapping(instance_id, name)?;
+                }
+                for m in &mf.midi_mappings {
+                    self.add_midi_mapping(instance_id, m.kind, m.num, &m.name)?;
+                }
+            }
+            let cur: Vec<(String, crate::builtin::MidiMapKind, u8)> = self.nodes[node]
+                .midi_led_mappings
+                .iter()
+                .map(|m| (m.name.clone(), m.kind, m.num))
+                .collect();
+            let want: Vec<(String, crate::builtin::MidiMapKind, u8)> = mf
+                .midi_led_mappings
+                .iter()
+                .map(|m| (m.name.clone(), m.kind, m.num))
+                .collect();
+            if cur != want {
+                for (name, _, _) in &cur {
+                    self.remove_midi_led_mapping(instance_id, name)?;
+                }
+                for m in &mf.midi_led_mappings {
+                    self.add_midi_led_mapping(instance_id, m.kind, m.num, &m.name)?;
+                }
+            }
+
+            // Gesture state (mode, wheels, mappings).
+            if let Some(g) = &mf.gesture {
+                if self.nodes[node].gesture.is_some() {
+                    let p = self.nodes[node].gesture.as_ref().unwrap();
+                    if p.active_mode() != g.mode {
+                        self.gesture_set_mode(instance_id, &g.mode)?;
+                    }
+                    let node = self.node_idx(instance_id)?;
+                    if *self.nodes[node].gesture.as_ref().unwrap().wheels() != g.wheels {
+                        self.gesture_set_wheels(instance_id, g.wheels)?;
+                    }
+                    let cur = self.gesture_mappings(instance_id)?;
+                    if cur != g.mappings {
+                        for m in &cur {
+                            self.remove_gesture_mapping(instance_id, &m.name)?;
+                        }
+                        for m in &g.mappings {
+                            self.restore_gesture_mapping(instance_id, m)?;
+                        }
+                    }
+                }
+            }
+
+            // Track (replace only; unload forces recreate upstream).
+            let node = self.node_idx(instance_id)?;
+            if let Some(track) = &mf.track {
+                if self.nodes[node].track_path.as_deref() != Some(track.as_str()) {
+                    if self.nodes[node].is_deck() {
+                        self.deck_load(instance_id, Path::new(track))?;
+                    } else {
+                        self.playback_load(instance_id, Path::new(track))?;
+                    }
+                }
+            }
+
+            // Deck sync partner.
+            if self.nodes[node].is_deck() && self.deck_sync_to(instance_id)? != mf.sync_to {
+                match &mf.sync_to {
+                    Some(master) => deferred_syncs.push((instance_id.to_string(), master.clone())),
+                    None => self.deck_sync(instance_id, None)?,
+                }
+            }
+        }
+
+        // Params and knobs (macro externals resolve through the instance).
+        for (param, value) in &mf.params {
+            let (rid, rparam) = self.resolve_param(instance_id, param)?;
+            let node = self.node_idx(&rid)?;
+            if self.nodes[node].params.get(&rparam) != Some(value) {
+                self.set_param(instance_id, param, *value)?;
+            }
+        }
+        for (jack, state) in &mf.knobs {
+            if &self.knob_state(instance_id, jack)? != state {
+                self.restore_knob(instance_id, jack, state.clone())?;
+            }
+        }
+        Ok(())
     }
 
     /// Load a patch directory into a fresh engine (macros expand from the

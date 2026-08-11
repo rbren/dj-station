@@ -190,3 +190,18 @@ fails if it's missing.
   Raw `state.engine.lock()` in a command body is a review smell. Undo
   coalescing keys are the `EditKey` enum's `Display` strings — keep
   them stable.
+- Structural edits are INCREMENTAL — never rebuild the engine. Node
+  indices are stable slots: `Graph.nodes`/`Engine.nodes` are slot vectors
+  with tombstones + a free-list (`NodeSlots`; iterate via `.iter()` /
+  `.iter_slots()`, never assume dense indices), and engine side tables
+  (midi/gesture/playback producers, decks) are keyed by slot.
+  `Engine::remove_module` removes one module (or a whole macro instance)
+  in place; `Engine::apply_doc` morphs the live engine to a `PatchDoc` by
+  diffing (the undo/redo restore path in the app's `restore_doc`,
+  returning the ids it had to recreate so deck metadata can be
+  re-applied). Untouched modules keep DSP state AND telemetry across
+  edits (`modules_sequencing` + `graph_edit` tests pin this), and a
+  remove-while-running audio gap is ~1 ms vs the ~250 ms a from_doc
+  rebuild costs — `Engine::from_doc` is ONLY for loading patches into a
+  fresh engine. `PatchDoc::remove_module` edits the document, not a live
+  engine.

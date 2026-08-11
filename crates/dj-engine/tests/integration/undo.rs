@@ -35,6 +35,8 @@ fn snapshot_restores_modules_wires_knobs_and_params() {
 
 #[test]
 fn undo_and_redo_walk_the_edit_history() {
+    // Restores go through `apply_doc` — the live diff-based morph the app's
+    // restore_doc uses — not a from_doc rebuild.
     let mut e = demo_engine();
     let mut h = UndoHistory::new();
 
@@ -49,19 +51,19 @@ fn undo_and_redo_walk_the_edit_history() {
     // Undo the add, then the knob move.
     let doc = h.undo(e.snapshot("t")).unwrap();
     assert_eq!(doc, after_knob);
-    e = Engine::from_doc(&doc, registry()).unwrap();
+    e.apply_doc(&doc).unwrap();
     let doc = h.undo(e.snapshot("t")).unwrap();
-    e = Engine::from_doc(&doc, registry()).unwrap();
+    e.apply_doc(&doc).unwrap();
     assert_eq!(e.knob_state("osc1", "pitch").unwrap().position, 0.25);
     assert!(h.undo(e.snapshot("t")).is_none());
 
     // Redo both.
     let doc = h.redo(e.snapshot("t")).unwrap();
     assert_eq!(doc, after_knob);
-    e = Engine::from_doc(&doc, registry()).unwrap();
+    e.apply_doc(&doc).unwrap();
     let doc = h.redo(e.snapshot("t")).unwrap();
     assert_eq!(doc, after_add);
-    e = Engine::from_doc(&doc, registry()).unwrap();
+    e.apply_doc(&doc).unwrap();
     assert!(e.nodes.iter().any(|n| n.instance_id == "osc2"));
     assert!(h.redo(e.snapshot("t")).is_none());
 }

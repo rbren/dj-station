@@ -68,7 +68,7 @@ impl Engine {
         })
     }
 
-    pub(super) fn resolve_param(&self, id: &str, param: &str) -> Result<(String, String)> {
+    pub(crate) fn resolve_param(&self, id: &str, param: &str) -> Result<(String, String)> {
         if let Some(mi) = self.macro_instances.get(id) {
             let (_, node, p) = mi
                 .params

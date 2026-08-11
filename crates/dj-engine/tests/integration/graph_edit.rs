@@ -65,6 +65,101 @@ fn structural_edits_work_across_stop_start_cycles() {
     engine.stop().unwrap();
 }
 
+/// Incremental remove: the slot is recycled by the next add, wires to
+/// OTHER nodes keep working, and stale ids fail cleanly.
+#[test]
+fn remove_module_is_incremental_and_recycles_the_slot() {
+    let mut e = crate::common::default_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
+
+    // Removing vca1 drops both touching wires; osc1/out1 survive.
+    e.remove_module("vca1").unwrap();
+    assert!(e.wire_specs().is_empty());
+    assert!(e.remove_module("vca1").is_err()); // already gone
+    assert!(e.nodes.iter().all(|n| n.instance_id != "vca1"));
+    e.render_offline(4_800).unwrap(); // still renders
+
+    // The freed slot is reused and the recycled graph works end-to-end.
+    e.add_module("vca2", "com.dj.vca").unwrap();
+    e.connect("osc1", "audio", "vca2", "in").unwrap();
+    e.connect("vca2", "out", "out1", "l").unwrap();
+    e.set_knob_position("vca2", "cv", 1.0).unwrap();
+    e.render_offline((0.2 * SR) as usize).unwrap();
+    assert!(
+        e.tap("out1", "l").unwrap().rms_100ms > 0.5,
+        "audio must flow through the module in the recycled slot"
+    );
+}
+
+/// `apply_doc` morphs the live engine to a snapshot by diffing: modules in
+/// both keep their slot (and thus DSP state + telemetry); removed ones go;
+/// new ones appear; knob/param/wire deltas apply.
+#[test]
+fn apply_doc_diffs_the_live_engine_instead_of_rebuilding() {
+    let mut e = crate::common::default_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
+    e.set_knob_position("osc1", "pitch", 0.25).unwrap();
+    let before = e.snapshot("undo");
+
+    // Mutate: knob, param-ish knob, extra module, dropped wire.
+    e.set_knob_position("osc1", "pitch", 0.9).unwrap();
+    e.add_module("osc2", "com.dj.oscillator").unwrap();
+    e.disconnect("vca1", "out", "out1", "l").unwrap();
+
+    // Undo via apply_doc: state converges exactly on the snapshot.
+    let created = e.apply_doc(&before).unwrap();
+    assert!(created.is_empty(), "no module should need recreating");
+    assert_eq!(e.snapshot("undo"), before);
+    assert_eq!(e.knob_state("osc1", "pitch").unwrap().position, 0.25);
+    assert!(e.nodes.iter().all(|n| n.instance_id != "osc2"));
+
+    // Redo direction: a doc with an extra module reports it as created.
+    let mut redo = before.clone();
+    redo.modules
+        .insert("osc3".into(), before.modules.get("osc1").cloned().unwrap());
+    let created = e.apply_doc(&redo).unwrap();
+    assert_eq!(created, vec!["osc3".to_string()]);
+    assert_eq!(e.snapshot("undo"), redo);
+}
+
+/// The reason for the rewrite: across an apply_doc undo, an untouched
+/// module's DSP state must keep running — no rebuild, no reset.
+#[test]
+fn apply_doc_preserves_untouched_module_state() {
+    let mut e = crate::common::default_engine();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.render_offline((0.3 * SR) as usize).unwrap();
+
+    // Control: same patch rendered straight through.
+    let mut control = crate::common::default_engine();
+    control.add_module("lfo1", "com.dj.lfo").unwrap();
+    control.add_module("vca1", "com.dj.vca").unwrap();
+    control.render_offline((0.3 * SR) as usize).unwrap();
+
+    // Undo an add (osc2 disappears again) — the LFO must not notice.
+    let before = e.snapshot("undo");
+    e.add_module("osc2", "com.dj.oscillator").unwrap();
+    e.apply_doc(&before).unwrap();
+
+    e.render_offline((0.1 * SR) as usize).unwrap();
+    control.render_offline((0.1 * SR) as usize).unwrap();
+    let got = e.tap_out("lfo1", "bi").unwrap().instantaneous;
+    let want = control.tap_out("lfo1", "bi").unwrap().instantaneous;
+    assert!(
+        (got - want).abs() < 1e-4,
+        "LFO phase reset across apply_doc: {got} != {want}"
+    );
+}
+
 #[test]
 fn wire_knob_style_roundtrips_like_any_other_config() {
     let mut engine = crate::common::default_engine();

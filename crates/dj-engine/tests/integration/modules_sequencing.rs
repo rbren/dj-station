@@ -375,13 +375,13 @@ fn step_seq_state_survives_a_hot_reload() {
     }
 }
 
-/// Removing a module rebuilds the engine from the patch document (the app's
-/// remove_module flow); `adopt_dsp_state` must carry live DSP state over so
-/// an unrelated edit doesn't reset the sequencer — or any other module.
+/// Removing a module is an incremental edit (`Engine::remove_module`) —
+/// every OTHER module keeps its live DSP state: the sequencer doesn't
+/// reset, free-running LFO phase and turing registers march on.
 #[test]
 fn removing_an_unrelated_module_does_not_reset_the_sequencer() {
     // step_seq patch plus free-running bystanders (LFO phase, turing
-    // register) whose state must also survive the rebuild.
+    // register) whose state must also survive the edit.
     let build = || {
         let mut e = step_seq_patch(240.0, 4.0, 0.0);
         e.add_module("lfo1", "com.dj.lfo").unwrap();
@@ -395,14 +395,10 @@ fn removing_an_unrelated_module_does_not_reset_the_sequencer() {
     let mut e = build();
     let a = e.render_offline(pre).unwrap();
 
-    // Add then remove an UNRELATED module the way the app does: document
-    // edit -> from_doc rebuild -> adopt the old engine's DSP state.
+    // Add then remove an UNRELATED module, live, in the same engine.
     e.add_module("junk1", "com.dj.vca").unwrap();
-    let mut doc = e.snapshot("edit");
-    assert!(doc.remove_module("junk1"));
-    let mut rebuilt = Engine::from_doc(&doc, e.registry.clone()).unwrap();
-    rebuilt.adopt_dsp_state(&mut e).unwrap();
-    let b = rebuilt.render_offline(post).unwrap();
+    e.remove_module("junk1").unwrap();
+    let b = e.render_offline(post).unwrap();
 
     // The sequencer continues from step 4 instead of restarting at step 1.
     let mut cv = a[0].clone();
@@ -414,7 +410,7 @@ fn removing_an_unrelated_module_does_not_reset_the_sequencer() {
         &edges,
         &[0.0, 0.25, 0.5, 0.75, 1.0, 1.25],
         2,
-        "gates across a remove-module rebuild",
+        "gates across a remove-module edit",
     );
     let cvs = cv_at_edges(&cv, &edges);
     for (i, (&got, &w)) in cvs
@@ -425,18 +421,47 @@ fn removing_an_unrelated_module_does_not_reset_the_sequencer() {
         assert!((got - w).abs() < 1e-3, "step {i}: cv {got} != {w}");
     }
 
-    // Bonus: the LFO phase and turing register also survive — the rebuilt
+    // Bonus: the LFO phase and turing register also survive — the edited
     // engine matches a control engine that rendered straight through.
     let mut control = build();
     control.render_offline(pre + post).unwrap();
     for (module, jack) in [("lfo1", "bi"), ("turing1", "reg")] {
-        let got = rebuilt.tap_out(module, jack).unwrap().instantaneous;
+        let got = e.tap_out(module, jack).unwrap().instantaneous;
         let want = control.tap_out(module, jack).unwrap().instantaneous;
         assert!(
             (got - want).abs() < 1e-4,
-            "{module}:{jack} reset across the rebuild: {got} != {want}"
+            "{module}:{jack} reset across the edit: {got} != {want}"
         );
     }
+}
+
+/// The playhead strip (StepSeqUI) reads the sequencer's `step` OUTPUT through
+/// jack telemetry (`tap_all` -> `signalTap("out:step")`), not DSP state — so
+/// telemetry, like DSP state, must survive a remove-module edit or the strip
+/// visibly flashes back to step 1. With the incremental `remove_module`,
+/// untouched nodes keep their analyzers; nothing resets.
+#[test]
+fn telemetry_survives_a_remove_module_edit_like_dsp_state_does() {
+    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    // Mid-step so the 100 ms telemetry window sits fully inside step 4.
+    e.render_offline((0.87 * SR) as usize).unwrap();
+    let before = e.tap_out("seq", "step").unwrap().display;
+    assert!(
+        (before - 3.0).abs() < 0.1,
+        "sanity: playhead telemetry on step 4 (index 3): {before}"
+    );
+
+    // The app's remove_module flow, now incremental.
+    e.add_module("junk1", "com.dj.vca").unwrap();
+    e.remove_module("junk1").unwrap();
+
+    // What the frontend's next tap_all poll observes — the playhead source.
+    let after = e.tap_out("seq", "step").unwrap().display;
+    assert!(
+        (after - before).abs() < 0.1,
+        "playhead telemetry reset by the edit: step display {before} -> {after} \
+         (the UI strip flashes back to step 1)"
+    );
 }
 
 #[test]

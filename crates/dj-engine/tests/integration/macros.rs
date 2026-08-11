@@ -99,6 +99,37 @@ fn collapsed_macro_renders_identically_to_the_flat_patch() {
     assert_eq!(golden, collapsed, "collapse changed the audio");
 }
 
+/// Removing a macro instance incrementally removes every expanded internal
+/// node plus the instance record; the rest of the patch is untouched.
+#[test]
+fn remove_module_takes_a_whole_macro_instance_with_its_internals() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone-rm",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    assert!(e.nodes.iter().any(|n| n.instance_id == "tone1/osc1"));
+
+    e.remove_module("tone1").unwrap();
+    assert!(!e.macro_instances().contains_key("tone1"));
+    assert!(e.nodes.iter().all(|n| !n.instance_id.starts_with("tone1/")));
+    // Boundary wire (tone1 -> out1) went with it; bystanders remain.
+    assert!(e.wire_specs().is_empty());
+    assert!(e.nodes.iter().any(|n| n.instance_id == "lfo1"));
+    assert!(e.nodes.iter().any(|n| n.instance_id == "out1"));
+    render(&mut e, 0.05); // still renders
+
+    // Internal nodes are not directly removable.
+    e.add_module("tone2", "macro.tone-rm").unwrap();
+    assert!(e.remove_module("tone2/osc1").is_err());
+}
+
 #[test]
 fn instantiate_twice_and_edit_internals_updates_both_instances() {
     // Build, collapse, then wire TWO instances of the macro to the output.

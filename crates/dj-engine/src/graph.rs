@@ -5,6 +5,11 @@
 //!   current block.
 //! - All buffers are allocated at edit/plan time; `process_block` performs no
 //!   allocation and takes no locks.
+//! - Node slots are STABLE: removing a node leaves a tombstone (`None`) and
+//!   the slot goes on a free-list for reuse by the next add. Slot indices in
+//!   `WireSpec`s, RT command queues and the engine's side tables therefore
+//!   never shift, which is what makes remove-module an incremental edit
+//!   instead of a rebuild-the-world event.
 
 use crate::builtin::AudioOutModule;
 use crate::knob::JackRt;
@@ -33,14 +38,17 @@ pub struct GraphNode {
 }
 
 pub struct Graph {
-    pub nodes: Vec<GraphNode>,
+    /// Stable node slots; `None` is a tombstone left by `remove_node`
+    /// (reused by the next `add_node`). Indices never shift.
+    nodes: Vec<Option<GraphNode>>,
+    free: Vec<usize>,
     pub wires: Vec<WireSpec>,
 
-    // Per node, per jack buffers (allocated at plan time).
+    // Per slot, per jack buffers (allocated at edit/plan time).
     in_bufs: Vec<Vec<Vec<f32>>>,
     out_curr: Vec<Vec<Vec<f32>>>,
     out_prev: Vec<Vec<Vec<f32>>>,
-    pub jack_rt: Vec<Vec<JackRt>>,
+    jack_rt: Vec<Vec<JackRt>>,
     analyzers: Vec<Vec<JackAnalyzer>>,
     out_analyzers: Vec<Vec<JackAnalyzer>>,
 
@@ -56,6 +64,7 @@ impl Graph {
     pub fn new(block_size: usize) -> Self {
         Graph {
             nodes: Vec::new(),
+            free: Vec::new(),
             wires: Vec::new(),
             in_bufs: Vec::new(),
             out_curr: Vec::new(),
@@ -75,8 +84,19 @@ impl Graph {
         self.block_size
     }
 
-    /// Add a node. `jack_rt` and `analyzers` must have one entry per input;
-    /// `out_analyzers` one per output.
+    /// The module in a live slot. Panics on a tombstone (a stale index is
+    /// an engine bookkeeping bug, not a recoverable condition).
+    pub fn module_mut(&mut self, slot: usize) -> &mut dyn HostModule {
+        self.nodes[slot]
+            .as_mut()
+            .expect("dead graph slot")
+            .module
+            .as_mut()
+    }
+
+    /// Add a node into a free slot (or a new one). `jack_rt` and
+    /// `analyzers` must have one entry per input; `out_analyzers` one per
+    /// output. Returns the slot index, stable for the node's lifetime.
     pub fn add_node(
         &mut self,
         node: GraphNode,
@@ -86,18 +106,53 @@ impl Graph {
     ) -> usize {
         let n_in = node.n_in;
         let n_out = node.n_out;
-        self.in_bufs.push(vec![vec![0.0; self.block_size]; n_in]);
-        self.out_curr.push(vec![vec![0.0; self.block_size]; n_out]);
-        self.out_prev.push(vec![vec![0.0; self.block_size]; n_out]);
-        self.jack_rt.push(jack_rt);
-        self.analyzers.push(analyzers);
-        self.out_analyzers.push(out_analyzers);
-        self.incoming.push(vec![Vec::new(); n_in]);
-        self.connected_mask.push(0);
-        self.nodes.push(node);
-        let idx = self.nodes.len() - 1;
+        let idx = if let Some(idx) = self.free.pop() {
+            self.in_bufs[idx] = vec![vec![0.0; self.block_size]; n_in];
+            self.out_curr[idx] = vec![vec![0.0; self.block_size]; n_out];
+            self.out_prev[idx] = vec![vec![0.0; self.block_size]; n_out];
+            self.jack_rt[idx] = jack_rt;
+            self.analyzers[idx] = analyzers;
+            self.out_analyzers[idx] = out_analyzers;
+            self.incoming[idx] = vec![Vec::new(); n_in];
+            self.connected_mask[idx] = 0;
+            self.nodes[idx] = Some(node);
+            idx
+        } else {
+            self.in_bufs.push(vec![vec![0.0; self.block_size]; n_in]);
+            self.out_curr.push(vec![vec![0.0; self.block_size]; n_out]);
+            self.out_prev.push(vec![vec![0.0; self.block_size]; n_out]);
+            self.jack_rt.push(jack_rt);
+            self.analyzers.push(analyzers);
+            self.out_analyzers.push(out_analyzers);
+            self.incoming.push(vec![Vec::new(); n_in]);
+            self.connected_mask.push(0);
+            self.nodes.push(Some(node));
+            self.nodes.len() - 1
+        };
         self.replan();
         idx
+    }
+
+    /// Remove a node: drop every wire touching it, tombstone the slot and
+    /// recycle it. Other slots (and their buffers, analyzers and module
+    /// state) are untouched. Returns the removed module for off-thread drop.
+    pub fn remove_node(&mut self, slot: usize) -> Box<dyn HostModule> {
+        let node = self.nodes[slot].take().expect("dead graph slot");
+        self.wires
+            .retain(|w| w.from_node != slot && w.to_node != slot);
+        // Free the slot's buffers now; add_node re-sizes them for the
+        // next occupant.
+        self.in_bufs[slot] = Vec::new();
+        self.out_curr[slot] = Vec::new();
+        self.out_prev[slot] = Vec::new();
+        self.jack_rt[slot] = Vec::new();
+        self.analyzers[slot] = Vec::new();
+        self.out_analyzers[slot] = Vec::new();
+        self.incoming[slot] = Vec::new();
+        self.connected_mask[slot] = 0;
+        self.free.push(slot);
+        self.replan();
+        node.module
     }
 
     pub fn add_wire(&mut self, w: WireSpec) {
@@ -111,7 +166,8 @@ impl Graph {
     }
 
     /// Recompute execution order, back edges, incoming lists, and masks.
-    /// Called on the control thread only.
+    /// Called on the control thread only. Tombstoned slots never enter the
+    /// execution order (wires touching them are removed with the node).
     fn replan(&mut self) {
         let n = self.nodes.len();
         // DFS computing reverse postorder; edges to gray nodes are back edges.
@@ -125,7 +181,7 @@ impl Graph {
 
         // Iterative DFS.
         for start in 0..n {
-            if color[start] != 0 {
+            if color[start] != 0 || self.nodes[start].is_none() {
                 continue;
             }
             let mut stack: Vec<(usize, usize)> = vec![(start, 0)];
@@ -153,7 +209,10 @@ impl Graph {
         self.order = postorder;
 
         for node in 0..n {
-            for jack in 0..self.nodes[node].n_in {
+            let Some(gn) = &self.nodes[node] else {
+                continue;
+            };
+            for jack in 0..gn.n_in {
                 self.incoming[node][jack].clear();
             }
             self.connected_mask[node] = 0;
@@ -174,7 +233,8 @@ impl Graph {
 
         for oi in 0..self.order.len() {
             let node = self.order[oi];
-            let n_in = self.nodes[node].n_in;
+            // Order only contains live slots (replan skips tombstones).
+            let n_in = self.nodes[node].as_ref().unwrap().n_in;
 
             // Gather effective inputs.
             for jack in 0..n_in {
@@ -212,22 +272,19 @@ impl Graph {
 
             // Run the module.
             let mask = self.connected_mask[node];
-            self.nodes[node].module.process(
-                &self.in_bufs[node],
-                &mut self.out_curr[node],
-                mask,
-                frames,
-            );
+            let gn = self.nodes[node].as_mut().unwrap();
+            gn.module
+                .process(&self.in_bufs[node], &mut self.out_curr[node], mask, frames);
 
             // Tap outputs for telemetry (same machinery as inputs).
-            for jack in 0..self.nodes[node].n_out {
+            for jack in 0..gn.n_out {
                 self.out_analyzers[node][jack].update(&self.out_curr[node][jack][..frames]);
             }
 
             // Mix audio-out nodes into the master bus (hard clip happens at
             // the device/file boundary, not here).
-            if self.nodes[node].audio_out {
-                let offset = self.nodes[node]
+            if gn.audio_out {
+                let offset = gn
                     .module
                     .as_any()
                     .downcast_ref::<AudioOutModule>()
@@ -268,9 +325,10 @@ impl Graph {
         node: usize,
         mut new_module: Box<dyn HostModule>,
     ) -> Box<dyn HostModule> {
-        let state = self.nodes[node].module.save_state();
+        let gn = self.nodes[node].as_mut().expect("dead graph slot");
+        let state = gn.module.save_state();
         new_module.load_state(&state);
-        std::mem::replace(&mut self.nodes[node].module, new_module)
+        std::mem::replace(&mut gn.module, new_module)
     }
 
     pub fn set_jack_rt(&mut self, node: usize, jack: usize, rt: JackRt) {

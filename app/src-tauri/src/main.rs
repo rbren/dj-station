@@ -151,38 +151,21 @@ fn patch_edit<'a>(
     Ok(engine)
 }
 
-/// Rebuild the engine from a snapshot, preserving the running backend.
+/// Morph the live engine to a snapshot (undo/redo), preserving the running
+/// backend. `apply_doc` diffs instead of rebuilding, so modules untouched
+/// by the edit keep their DSP state AND telemetry — nothing visibly resets.
 fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> CmdResult<()> {
-    let backend = engine.backend();
-    if backend.is_some() {
-        engine.stop().map_err(err)?;
-    }
-    let mut rebuilt = Engine::from_doc(doc, engine.registry.clone()).map_err(err)?;
-    // The rebuild reconstructs every module instance; carry over live DSP
-    // state (sequencer positions, LFO phases, held notes, …) so an edit
-    // doesn't reset modules it never touched.
-    rebuilt.adopt_dsp_state(engine).map_err(err)?;
-    *engine = rebuilt;
-    // Undo snapshots embed only the macros they use; re-register the rest
-    // of the user library so instantiation stays available.
-    if let Ok(lib) = db_macro_library(&state.library) {
-        for def in lib.defs.into_values() {
-            if engine.macros.get(&def.id).is_none() {
-                engine.register_macro(def);
+    with_stopped(engine, |e| {
+        let recreated = e.apply_doc(doc).map_err(err)?;
+        // Deck metadata (grids/cues/loops) is canonical in the library DB;
+        // re-apply it to decks apply_doc had to recreate.
+        for instance in recreated {
+            if e.nodes.iter().any(|n| n.instance_id == instance && n.is_deck()) {
+                apply_deck_metadata(state, e, &instance)?;
             }
         }
-    }
-    let deck_instances: Vec<String> = engine
-        .nodes
-        .iter()
-        .filter(|n| n.is_deck())
-        .map(|n| n.instance_id.clone())
-        .collect();
-    for instance in deck_instances {
-        apply_deck_metadata(state, engine, &instance)?;
-    }
-    restart_backend(engine, backend, "undo/redo")?;
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Restart the backend that was running before a stop/mutate cycle. A cpal
@@ -221,17 +204,15 @@ fn undo(state: State<AppState>) -> CmdResult<bool> {
     }
 }
 
-/// Remove a module and all wires touching it (undoable).
+/// Remove a module and all wires touching it (undoable). Incremental: no
+/// other module's state, telemetry or wiring is touched.
 #[tauri::command]
 fn remove_module(state: State<AppState>, instance: String) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::Remove(&instance))?;
-    let mut doc = engine.snapshot("edit");
-    if !doc.remove_module(&instance) {
-        return Err(CmdError::not_found(format!(
-            "no such module instance: {instance}"
-        )));
-    }
-    restore_doc(&state, &mut engine, &doc)
+    with_stopped(&mut engine, |e| {
+        e.remove_module(&instance)
+            .map_err(|e| CmdError::not_found(e.to_string()))
+    })
 }
 
 /// Mark the end of an edit gesture (pointer-up after a knob/segment drag)
