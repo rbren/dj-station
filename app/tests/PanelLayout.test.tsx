@@ -4,8 +4,8 @@
 // renders exactly once even if a layout forgets or misnames it.
 
 import { render, screen } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import StepSeqUI from '../../extensions/step_seq/ui-src/StepSeqUI';
 import { ModulePanel } from '../src/components/ModulePanel';
 import { resolveLayout } from '../src/components/panelLayouts';
@@ -205,7 +205,8 @@ describe('step sequencer strip alignment', () => {
   });
 
   it('styles.css sizes the strip and the input cells from the same tokens', () => {
-    // vitest runs with the app directory as cwd.
+    // vitest runs with the app directory as cwd. (A `?raw` import would
+    // be nicer, but vitest's css handling returns '' for .css imports.)
     const css = readFileSync('src/styles.css', 'utf8');
     const rule = (selector: string) => {
       const m = css.match(new RegExp(`\\${selector}\\s*{[^}]*}`));
