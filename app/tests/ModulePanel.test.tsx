@@ -31,7 +31,7 @@ const OSC_MANIFEST: Manifest = {
 const HANDLE: ModuleHandle = {
   paramValue: () => 0.5,
   setParam: () => {},
-  signalTap: () => ({ instantaneous: 0, rms_100ms: 0, display: 0, is_fast: false }),
+  signalTap: () => ({ instantaneous: 0, rms_100ms: 0, display: 0, volatility: 0, is_fast: false }),
   size: { w: 300, h: 150 },
 };
 
@@ -71,13 +71,33 @@ describe('ModulePanel', () => {
       <ModulePanel
         {...baseProps}
         telemetry={{
-          pitch: { instantaneous: 2, rms_100ms: 2, display: 2, is_fast: false },
-          fm: { instantaneous: 0.1, rms_100ms: 3.54, display: 3.54, is_fast: true },
+          pitch: { instantaneous: 2, rms_100ms: 2, display: 2, volatility: 0, is_fast: false },
+          fm: { instantaneous: 0.1, rms_100ms: 3.54, display: 3.54, volatility: 0, is_fast: true },
         }}
       />,
     );
     expect(screen.getByTestId('jack-input-pitch').getAttribute('data-tip')).toBe('pitch: 2.00');
     expect(screen.getByTestId('jack-input-fm').getAttribute('data-tip')).toBe('fm: 3.54 (rms)');
+  });
+
+  it('shows output-jack telemetry in the tooltip, same as inputs', () => {
+    render(
+      <ModulePanel
+        {...baseProps}
+        telemetry={{
+          'out:audio': {
+            instantaneous: 1,
+            rms_100ms: 3.5,
+            display: 3.5,
+            volatility: 0,
+            is_fast: true,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('jack-output-audio').getAttribute('data-tip')).toBe(
+      'audio: 3.50 (rms)',
+    );
   });
 
   it('uses saved knob state and per-patch config overrides', () => {
