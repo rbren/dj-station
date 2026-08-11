@@ -554,6 +554,11 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
+  'com.dj.camera': () => ({
+    groups: [{ inputs: ['in'] }],
+    outputGroups: [{ outputs: ['thru'] }],
+  }),
+
   'com.dj.gain_native': () => ({
     groups: [{ inputs: ['in', 'gain'] }],
   }),

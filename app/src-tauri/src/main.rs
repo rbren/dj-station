@@ -1975,6 +1975,32 @@ fn main() {
             gesture_feeds: Mutex::new(BTreeMap::new()),
         })
         .setup(|app| {
+            // Camera module (getUserMedia) permission plumbing. macOS: wry's
+            // WKUIDelegate already grants media-capture requests (the OS
+            // then shows its own consent prompt, gated on the
+            // NSCameraUsageDescription in Info.plist). Linux/webkitgtk has
+            // no such handler and denies by default, so grant user-media
+            // requests on the raw webview and enable media streams.
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                use webkit2gtk::{PermissionRequestExt, SettingsExt, WebViewExt};
+                let _ = window.with_webview(|webview| {
+                    let wv = webview.inner();
+                    if let Some(settings) = WebViewExt::settings(&wv) {
+                        settings.set_enable_media_stream(true);
+                    }
+                    wv.connect_permission_request(|_, request| {
+                        use webkit2gtk::glib::object::Cast;
+                        if let Some(user_media) =
+                            request.downcast_ref::<webkit2gtk::UserMediaPermissionRequest>()
+                        {
+                            user_media.allow();
+                            return true;
+                        }
+                        false
+                    });
+                });
+            }
             // Periodic crash-recovery autosave (skips unchanged states).
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {

@@ -17,6 +17,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-camera"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-clock"
 version = "0.1.0"
 dependencies = [

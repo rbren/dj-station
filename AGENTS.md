@@ -104,6 +104,18 @@ fails if it's missing.
   also carry `gestures` fixture specs in `events.json`. The app's mock
   feed thread (fixture -> full pipeline at 30 fps) stands in for the
   macOS camera behind the same start/stop IPC commands.
+- Camera module (`extensions/camera`, `com.dj.camera`): the live webcam
+  feed is pure app-layer — `ui-src/CameraUI.tsx` runs `getUserMedia` and
+  renders a `<video>`; the DSP side is a buffered `in -> thru`
+  pass-through so the panel can sit inline (like the scope). Camera
+  enablement is deliberately EPHEMERAL app state, never persisted in the
+  patch (whether a camera exists/should be on is per-machine,
+  per-session); the panel mounts off and releases the MediaStream on
+  disable and unmount. It is independent of the gesture subsystem.
+  Permission plumbing: macOS needs `NSCameraUsageDescription`
+  (`app/src-tauri/Info.plist`); Linux/webkitgtk denies user-media by
+  default, so `main.rs` `setup` grants `UserMediaPermissionRequest` on
+  the raw webview (shell depends on `webkit2gtk =2.0.2`, pinned to wry's).
 - Params vs. inputs (post-M5 refactor): ALL WASM-module controls
   (oscillator `waveform`, ADSR `attack/decay/sustain/release`, playback
   `loop`) are ordinary knob-backed input jacks — wireable, per-patch

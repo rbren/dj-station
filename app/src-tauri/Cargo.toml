@@ -24,6 +24,12 @@ dj-engine = { path = "../../crates/dj-engine" }
 dj-library = { path = "../../crates/dj-library" }
 dj-analysis = { path = "../../crates/dj-analysis" }
 
+# Camera module (getUserMedia) permission plumbing: webkitgtk denies
+# user-media permission requests by default, so main.rs grants them on the
+# webview directly. Pinned to the version wry links so the types unify.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+
 [features]
 # custom-protocol embeds frontendDist (app/dist) into the binary and serves
 # it over tauri://localhost. Without it the app runs in "dev" mode and tries
