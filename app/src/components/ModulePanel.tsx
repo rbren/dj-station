@@ -60,6 +60,11 @@ export interface ModulePanelProps {
    *  header becomes a drag handle snapping to the coarse GRID. */
   position?: { x: number; y: number };
   onMove?(x: number, y: number): void;
+  /** Called once when a header drag gesture ends (mouseup). */
+  onMoveEnd?(): void;
+  /** Rack scale factor: pointer deltas are screen px, positions are
+   *  unzoomed rack coordinates, so drags divide deltas by this. */
+  zoom?: number;
   /** Delete this module instance (renders a ✕ button in the corner). */
   onRemove?(): void;
   /** Called on pointer-up after knob/param drags (undo gesture boundary). */
@@ -78,7 +83,18 @@ export interface ModulePanelProps {
 }
 
 export function ModulePanel(props: ModulePanelProps) {
-  const { manifest, instanceId, knobs, wired, telemetry, pendingSource, position, onMove } = props;
+  const {
+    manifest,
+    instanceId,
+    knobs,
+    wired,
+    telemetry,
+    pendingSource,
+    position,
+    onMove,
+    onMoveEnd,
+    zoom = 1,
+  } = props;
   const pendingColor =
     pendingSource?.color !== undefined
       ? WIRE_COLORS[pendingSource.color % WIRE_COLORS.length]
@@ -93,13 +109,21 @@ export function ModulePanel(props: ModulePanelProps) {
     (e: MouseEvent) => {
       const d = drag.current;
       if (!d || !onMove) return;
-      onMove(snap(d.origX + e.clientX - d.startX), snap(d.origY + e.clientY - d.startY));
+      // Pointer deltas are screen px while the rack is scaled by `zoom`:
+      // divide so the panel tracks the cursor 1:1 at any zoom level.
+      onMove(
+        snap(d.origX + (e.clientX - d.startX) / zoom),
+        snap(d.origY + (e.clientY - d.startY) / zoom),
+      );
     },
-    [onMove],
+    [onMove, zoom],
   );
   const onDragEnd = useCallback(() => {
-    drag.current = null;
-  }, []);
+    if (drag.current) {
+      drag.current = null;
+      onMoveEnd?.();
+    }
+  }, [onMoveEnd]);
   useEffect(() => {
     window.addEventListener('mousemove', onDragMove);
     window.addEventListener('mouseup', onDragEnd);

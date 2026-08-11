@@ -161,6 +161,20 @@ fails if it's missing.
   `app/tests/KnobMath.test.ts` pins the TS knob curve math to
   `knob.rs`; if either side's mapping changes, update both plus that
   table.
+- Rack geometry (frontend): module positions are UNZOOMED rack
+  coordinates — any pointer math must divide screen deltas by the rack
+  zoom (panel drags in `ModulePanel`, drops in `App.onRackDrop`). All
+  placement/collision logic is one system: `nearestFreeSpot` in
+  `app/src/rackLayout.ts` (drops + post-render fixup) and
+  `App.moveModule` (push-out with drag-past-to-commit, plus the
+  provisional co-operative bump — a neighbour displaced to open a slot,
+  reverted if the drag moves on, finalized on release via
+  `endModuleDrag`). Behavior is pinned by
+  `app/tests/RackCollision.test.tsx`. The `.wire-overlay` CSS must keep
+  `z-index`, `overflow: visible` and `pointer-events: none`
+  (WireOverlay.test.tsx pins it); knob right-clicks stopPropagation so
+  the module context menu never opens over a knob
+  (ContextMenu.test.tsx pins it).
 - Module layout (post-refactor): `engine.rs` keeps core types,
   construction, graph editing, knobs and telemetry; feature-area
   `impl Engine` blocks live under `src/engine/` (`midi`, `gesture_api`,

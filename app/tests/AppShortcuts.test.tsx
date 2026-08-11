@@ -159,8 +159,10 @@ describe('drag module from library onto rack', () => {
       expect(fakeEngine.addModule).toHaveBeenCalledWith('oscillat1', 'com.dj.oscillator'),
     );
     // 100px/60px snapped to the 48px grid (jsdom rects are at 0,0), then
-    // nudged down one row: (96,48) overlaps osc1's nominal footprint at
-    // its default slot (0,0).
+    // moved to the NEAREST free grid spot: (96,48) overlaps osc1's nominal
+    // footprint at its default slot (0,0), and (96,96) — one cell down —
+    // is the closest free cell (deliberately pins the nearest-spot search
+    // that replaced the old downward-only nudge).
     await waitFor(() => {
       const positions = JSON.parse(localStorage.getItem('dj-rack-positions') ?? '{}');
       expect(positions.oscillat1).toEqual({ x: 96, y: 96 });
