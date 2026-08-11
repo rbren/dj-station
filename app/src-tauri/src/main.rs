@@ -1035,7 +1035,8 @@ fn tap(state: State<AppState>, instance: String, jack: String) -> CmdResult<Jack
 /// IPC round-trip for the whole rack instead of one `tap` per jack. Keys
 /// mirror the `engine_nodes` snapshot the UI renders from: macro internals
 /// are hidden, MIDI nodes expose their LED-mapping jacks by name, and macro
-/// instances expose their external input jacks.
+/// instances expose their external input jacks. Output jacks appear under
+/// `out:<jack>` keys (the ModulePanel convention).
 #[tauri::command]
 fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String, JackTelemetry>>> {
     let engine = engine_lock(&state)?;
@@ -1051,10 +1052,27 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
                     jacks.insert(m.name.clone(), slot.read());
                 }
             }
+            for m in &n.midi_mappings {
+                if let Some(slot) = n.out_telemetry.get(m.jack) {
+                    jacks.insert(format!("out:{}", m.name), slot.read());
+                }
+            }
+        } else if let Some(g) = &n.gesture {
+            // Gesture outputs are dynamic mapping jacks, keyed by name.
+            for (jack, d) in g.mappings() {
+                if let Some(slot) = n.out_telemetry.get(jack) {
+                    jacks.insert(format!("out:{}", d.name), slot.read());
+                }
+            }
         } else {
             for (i, decl) in n.manifest.inputs.iter().enumerate() {
                 if let Some(slot) = n.telemetry.get(i) {
                     jacks.insert(decl.id.clone(), slot.read());
+                }
+            }
+            for (i, decl) in n.manifest.outputs.iter().enumerate() {
+                if let Some(slot) = n.out_telemetry.get(i) {
+                    jacks.insert(format!("out:{}", decl.id), slot.read());
                 }
             }
         }
@@ -1067,6 +1085,11 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
         for (ext_jack, node, jack) in &mi.inputs {
             if let Ok(t) = engine.tap(node, jack) {
                 jacks.insert(ext_jack.clone(), t);
+            }
+        }
+        for (ext_jack, node, jack) in &mi.outputs {
+            if let Ok(t) = engine.tap_output(node, jack) {
+                jacks.insert(format!("out:{ext_jack}"), t);
             }
         }
     }
