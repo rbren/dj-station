@@ -75,9 +75,9 @@ export interface ModulePanelProps {
   onContextMenu?(e: React.MouseEvent<HTMLDivElement>): void;
   /** Jack currently armed as a pending wire end, if any. */
   pendingSource?: (JackRef & { kind: 'input' | 'output'; color?: number }) | null;
-  /** Selection (copy/paste/delete/collapse-to-macro): a plain click on any
-   *  non-interactive part of the panel selects it (`additive` false — the
-   *  selection is replaced); shift/cmd/ctrl-click toggles membership. */
+  /** Selection (copy/paste/delete/collapse-to-macro): a plain mousedown on
+   *  any non-interactive part of the panel selects it (`additive` false —
+   *  the selection is replaced); shift/cmd/ctrl toggles membership. */
   selected?: boolean;
   onSelect?(additive: boolean): void;
   onJackClick?(kind: 'input' | 'output', jackId: string, shift?: boolean): void;
@@ -112,17 +112,10 @@ export function ModulePanel(props: ModulePanelProps) {
   const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(
     null,
   );
-  // A real header drag (pointer moved past a small threshold) must not
-  // register as a click-to-select when the button is released — the click
-  // event that follows mouseup is swallowed once.
-  const dragMoved = useRef(false);
   const onDragMove = useCallback(
     (e: MouseEvent) => {
       const d = drag.current;
       if (!d || !onMove) return;
-      if (Math.abs(e.clientX - d.startX) + Math.abs(e.clientY - d.startY) > 3) {
-        dragMoved.current = true;
-      }
       // Pointer deltas are screen px while the rack is scaled by `zoom`:
       // divide so the panel tracks the cursor 1:1 at any zoom level.
       onMove(
@@ -136,24 +129,21 @@ export function ModulePanel(props: ModulePanelProps) {
     if (drag.current) {
       drag.current = null;
       onMoveEnd?.();
-      // The click that follows this mouseup (if any) must still see the
-      // flag; clear it right after so it can't swallow a later real click
-      // (e.g. when the mouseup landed outside the panel).
-      if (dragMoved.current) setTimeout(() => (dragMoved.current = false), 0);
     }
   }, [onMoveEnd]);
 
-  // Click-to-select: any click on the panel that isn't aimed at an
+  // Select on MOUSEDOWN, not click (canvas-editor convention: pressing a
+  // module selects it, a drag then moves the already-selected module).
+  // Click-based selection is ambiguous with header drags — a few px of
+  // wobble during a "click" either selects mid-drag or forces the click to
+  // be swallowed, and a swallowed click silently leaves the previous
+  // selection (and thus the copy buffer) live. Mousedowns aimed at an
   // interactive control (buttons, jacks, knobs, faders, form fields, a
-  // custom UI's surface) selects the module. Plain click replaces the
-  // selection; shift/cmd/ctrl-click toggles membership (multi-select).
-  const onPanelClick = useCallback(
+  // custom UI's surface) never touch the selection. Plain press replaces
+  // the selection; shift/cmd/ctrl-press toggles membership (multi-select).
+  const onPanelMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (dragMoved.current) {
-        dragMoved.current = false;
-        return;
-      }
-      if (!onSelect) return;
+      if (!onSelect || e.button !== 0) return;
       const interactive = (e.target as HTMLElement).closest?.(
         'button, input, select, textarea, a, [role="slider"], [role="switch"], ' +
           '[contenteditable="true"], .knob, .jack, .module-custom-ui, .knob-config-menu',
@@ -202,7 +192,7 @@ export function ModulePanel(props: ModulePanelProps) {
       data-testid={`module-${instanceId}`}
       data-selected={props.selected ? 'true' : undefined}
       onContextMenu={props.onContextMenu}
-      onClick={onPanelClick}
+      onMouseDown={onPanelMouseDown}
       style={{
         ...(position ? { left: position.x, top: position.y } : undefined),
         ...(size ? { width: size.w, height: size.h } : undefined),
@@ -216,7 +206,6 @@ export function ModulePanel(props: ModulePanelProps) {
           onMouseDown={(e) => {
             if (!onMove || !position || e.button !== 0 || e.shiftKey) return;
             e.preventDefault();
-            dragMoved.current = false;
             drag.current = {
               startX: e.clientX,
               startY: e.clientY,

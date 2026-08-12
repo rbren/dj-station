@@ -158,8 +158,8 @@ describe('module context menu', () => {
   it('right-click inside a multi-selection acts on the whole group', async () => {
     await renderApp();
     // Shift-click both module headers to build the selection.
-    fireEvent.click(screen.getByTestId('module-header-osc1'), { shiftKey: true });
-    fireEvent.click(screen.getByTestId('module-header-vca1'), { shiftKey: true });
+    fireEvent.mouseDown(screen.getByTestId('module-header-osc1'), { shiftKey: true });
+    fireEvent.mouseDown(screen.getByTestId('module-header-vca1'), { shiftKey: true });
     fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 10, clientY: 10 });
     expect(screen.getByTestId('ctx-copy').textContent).toContain('2 modules');
     // No per-module Documentation entry for a group.

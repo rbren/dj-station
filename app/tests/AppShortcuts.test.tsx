@@ -167,7 +167,7 @@ describe('infinite canvas pan (overscroll)', () => {
 
 describe('selection copy/paste/delete shortcuts', () => {
   const selectOsc1 = () =>
-    fireEvent.click(screen.getByTestId('module-header-osc1'), { shiftKey: true });
+    fireEvent.mouseDown(screen.getByTestId('module-header-osc1'), { shiftKey: true });
 
   it('cmd+C copies the selection, cmd+V pastes it', async () => {
     await renderApp();

@@ -46,8 +46,8 @@ const fakeEngine = {
   undo: vi.fn(async () => true),
   removeModule: vi.fn(async () => {}),
   removeModules: vi.fn(async () => {}),
-  copyModules: vi.fn(async () => 'CLIP'),
-  pasteModules: vi.fn(async () => ({ osc1: 'osc2' })),
+  copyModules: vi.fn(async (ids: string[]) => `CLIP:${ids.join(',')}`),
+  pasteModules: vi.fn(async (_clip: string) => ({ osc1: 'osc2' })),
   connectWire: vi.fn(async () => {}),
   disconnectWire: vi.fn(async () => {}),
   endEdit: vi.fn(async () => {}),
@@ -84,58 +84,71 @@ async function renderApp() {
 }
 
 const isSelected = (id: string) => screen.getByTestId(`module-${id}`).dataset.selected === 'true';
+const press = (testId: string, opts: object = {}) =>
+  fireEvent.mouseDown(screen.getByTestId(testId), { button: 0, ...opts });
 
-describe('click-to-select', () => {
-  it('plain click on a panel selects it; clicking another replaces the selection', async () => {
+describe('press-to-select', () => {
+  it('plain press on a panel selects it; pressing another replaces the selection', async () => {
     await renderApp();
-    fireEvent.click(screen.getByTestId('module-osc1'));
+    press('module-osc1');
     expect(isSelected('osc1')).toBe(true);
     expect(isSelected('vca1')).toBe(false);
 
-    fireEvent.click(screen.getByTestId('module-vca1'));
+    press('module-vca1');
     expect(isSelected('osc1')).toBe(false);
     expect(isSelected('vca1')).toBe(true);
   });
 
-  it('shift-click and cmd/ctrl-click toggle membership', async () => {
+  it('shift-press and cmd/ctrl-press toggle membership', async () => {
     await renderApp();
-    fireEvent.click(screen.getByTestId('module-osc1'));
-    fireEvent.click(screen.getByTestId('module-vca1'), { shiftKey: true });
+    press('module-osc1');
+    press('module-vca1', { shiftKey: true });
     expect(isSelected('osc1')).toBe(true);
     expect(isSelected('vca1')).toBe(true);
 
-    fireEvent.click(screen.getByTestId('module-vca1'), { ctrlKey: true });
+    press('module-vca1', { ctrlKey: true });
     expect(isSelected('osc1')).toBe(true);
     expect(isSelected('vca1')).toBe(false);
   });
 
-  it('clicking the rack background clears the selection', async () => {
+  it('pressing the rack background clears the selection', async () => {
     await renderApp();
-    fireEvent.click(screen.getByTestId('module-osc1'));
+    press('module-osc1');
     expect(isSelected('osc1')).toBe(true);
-    fireEvent.click(screen.getByTestId('rack-area'));
+    press('rack-area');
     expect(isSelected('osc1')).toBe(false);
   });
 
-  it('clicking a jack or a header button does not change the selection', async () => {
+  it('pressing a jack or a header button does not change the selection', async () => {
     await renderApp();
+    press('jack-output-audio');
     fireEvent.click(screen.getByTestId('jack-output-audio'));
     expect(isSelected('osc1')).toBe(false);
 
-    fireEvent.click(screen.getByTestId('module-vca1'));
-    fireEvent.click(screen.getByTestId('module-docs-osc1'));
+    press('module-vca1');
+    press('module-docs-osc1');
     expect(isSelected('osc1')).toBe(false);
     expect(isSelected('vca1')).toBe(true);
   });
 
-  it('a header drag does not select the module on release', async () => {
+  it('a header drag selects the module and keeps it selected on release', async () => {
     await renderApp();
     const header = screen.getByTestId('module-header-osc1');
     fireEvent.mouseDown(header, { button: 0, clientX: 10, clientY: 10 });
+    expect(isSelected('osc1')).toBe(true);
     fireEvent.mouseMove(window, { clientX: 120, clientY: 90 });
     fireEvent.mouseUp(window);
     fireEvent.click(header, { clientX: 120, clientY: 90 });
-    expect(isSelected('osc1')).toBe(false);
+    expect(isSelected('osc1')).toBe(true);
+  });
+
+  it('a plain press on a member of a multi-selection keeps the group (drag it as one)', async () => {
+    await renderApp();
+    press('module-osc1');
+    press('module-vca1', { shiftKey: true });
+    press('module-header-osc1');
+    expect(isSelected('osc1')).toBe(true);
+    expect(isSelected('vca1')).toBe(true);
   });
 
   it('cmd/ctrl+A selects every module', async () => {
@@ -149,7 +162,7 @@ describe('click-to-select', () => {
 describe('context-menu selection retargeting', () => {
   it('right-click outside the selection retargets it to the clicked module', async () => {
     await renderApp();
-    fireEvent.click(screen.getByTestId('module-osc1'));
+    press('module-osc1');
     fireEvent.contextMenu(screen.getByTestId('module-vca1'), { clientX: 10, clientY: 10 });
     expect(isSelected('osc1')).toBe(false);
     expect(isSelected('vca1')).toBe(true);
@@ -157,8 +170,8 @@ describe('context-menu selection retargeting', () => {
 
   it('right-click inside a multi-selection keeps the whole group', async () => {
     await renderApp();
-    fireEvent.click(screen.getByTestId('module-osc1'));
-    fireEvent.click(screen.getByTestId('module-vca1'), { shiftKey: true });
+    press('module-osc1');
+    press('module-vca1', { shiftKey: true });
     fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 10, clientY: 10 });
     expect(isSelected('osc1')).toBe(true);
     expect(isSelected('vca1')).toBe(true);
@@ -166,11 +179,41 @@ describe('context-menu selection retargeting', () => {
   });
 });
 
+describe('copy buffer follows the selection', () => {
+  it('copy A, paste, copy B, paste pastes B (regression: wobbly click on B)', async () => {
+    await renderApp();
+
+    // Copy + paste module A.
+    press('module-osc1');
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+    await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenLastCalledWith(['osc1']));
+    state.nodes = [node('osc1', OSC), node('vca1', VCA), node('osc2', OSC)];
+    fireEvent.keyDown(window, { key: 'v', metaKey: true });
+    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenLastCalledWith('CLIP:osc1'));
+    await waitFor(() => expect(isSelected('osc2')).toBe(true));
+
+    // Select module B with a slightly wobbly click (mousedown, small move,
+    // mouseup) — exactly the gesture that used to be swallowed, leaving the
+    // pasted A-copy selected and the clipboard stuck on A.
+    const headerB = screen.getByTestId('module-header-vca1');
+    fireEvent.mouseDown(headerB, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(window, { clientX: 14, clientY: 12 });
+    fireEvent.mouseUp(window);
+    expect(isSelected('vca1')).toBe(true);
+    expect(isSelected('osc2')).toBe(false);
+
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+    await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenLastCalledWith(['vca1']));
+    fireEvent.keyDown(window, { key: 'v', metaKey: true });
+    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenLastCalledWith('CLIP:vca1'));
+  });
+});
+
 describe('stale-selection pruning', () => {
   it('an engine refresh drops selected modules that no longer exist', async () => {
     await renderApp();
-    fireEvent.click(screen.getByTestId('module-osc1'));
-    fireEvent.click(screen.getByTestId('module-vca1'), { shiftKey: true });
+    press('module-osc1');
+    press('module-vca1', { shiftKey: true });
 
     // The engine loses osc1 behind the app's back (undo, patch load, …).
     state.nodes = [node('vca1', VCA)];
@@ -185,7 +228,7 @@ describe('stale-selection pruning', () => {
 
   it('paste selects exactly the pasted modules', async () => {
     await renderApp();
-    fireEvent.click(screen.getByTestId('module-osc1'));
+    press('module-osc1');
     fireEvent.keyDown(window, { key: 'c', metaKey: true });
     await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenCalled());
 

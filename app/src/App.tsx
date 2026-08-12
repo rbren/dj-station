@@ -542,9 +542,16 @@ export default function App() {
   // so a selection can never outlive its modules.
   const selectModule = useCallback(
     (instance: string, additive: boolean) => {
+      // Selecting a module supersedes any text selection: cmd+C defers to
+      // text copy when one exists, and the drag path's preventDefault stops
+      // the browser from collapsing it naturally.
+      window.getSelection()?.removeAllRanges();
       const prev = store.getState().selected;
       if (!additive) {
-        store.set({ selected: [instance] });
+        // Pressing an already-selected module keeps the whole selection
+        // (selection happens on mousedown, so a header drag of one member
+        // must not collapse the group).
+        if (!prev.includes(instance)) store.set({ selected: [instance] });
         return;
       }
       store.set({
@@ -1160,9 +1167,13 @@ export default function App() {
               onDragOver={onRackDragOver}
               onDrop={onRackDrop}
               onContextMenu={onRackContextMenu}
-              onClick={(e) => {
-                // Clicking the rack background abandons a pending wire and
-                // clears the selection.
+              onMouseDown={(e) => {
+                // Pressing the rack background abandons a pending wire and
+                // clears the selection. Mousedown, not click: selection
+                // happens on mousedown too, and the synthetic click a
+                // module drag fires on the rack (mouseup landing over the
+                // background) must not wipe the drag's own selection.
+                if (e.button !== 0) return;
                 if ((e.target as HTMLElement).closest?.('.module-panel')) return;
                 const { pending, selected } = store.getState();
                 if (pending) setPending(null);

@@ -102,8 +102,8 @@ beforeEach(() => {
 async function selectBoth() {
   render(<App />);
   await screen.findByTestId('module-osc1');
-  fireEvent.click(screen.getByTestId('module-header-osc1'), { shiftKey: true });
-  fireEvent.click(screen.getByTestId('module-header-vca1'), { shiftKey: true });
+  fireEvent.mouseDown(screen.getByTestId('module-header-osc1'), { shiftKey: true });
+  fireEvent.mouseDown(screen.getByTestId('module-header-vca1'), { shiftKey: true });
 }
 
 describe('collapse-to-macro UI', () => {
@@ -113,14 +113,18 @@ describe('collapse-to-macro UI', () => {
     expect(screen.getByTestId('module-vca1').dataset.selected).toBe('true');
     expect(screen.getByTestId('collapse-macro-btn').textContent).toContain('(2)');
     // Shift-click again deselects.
-    fireEvent.click(screen.getByTestId('module-header-vca1'), { shiftKey: true });
+    fireEvent.mouseDown(screen.getByTestId('module-header-vca1'), { shiftKey: true });
     expect(screen.getByTestId('module-vca1').dataset.selected).toBeUndefined();
     expect(screen.getByTestId('collapse-macro-btn').textContent).toContain('(1)');
   });
 
-  it('plain click selects exactly one module, replacing the selection', async () => {
+  it('plain press on an unselected module replaces the selection', async () => {
     await selectBoth();
-    fireEvent.click(screen.getByTestId('module-header-osc1'));
+    // Shrink the selection to vca1, then a plain press on osc1 (outside
+    // the selection) must replace it with just osc1.
+    fireEvent.mouseDown(screen.getByTestId('module-header-osc1'), { shiftKey: true });
+    expect(screen.getByTestId('module-osc1').dataset.selected).toBeUndefined();
+    fireEvent.mouseDown(screen.getByTestId('module-header-osc1'), { button: 0 });
     expect(screen.getByTestId('module-osc1').dataset.selected).toBe('true');
     expect(screen.getByTestId('module-vca1').dataset.selected).toBeUndefined();
     expect(screen.getByTestId('collapse-macro-btn').textContent).toContain('(1)');

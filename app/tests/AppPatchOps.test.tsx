@@ -178,8 +178,8 @@ describe('pending wire preview', () => {
       expect(c.getAttribute('y2')).toBe('200');
     });
 
-    // Clicking empty rack background abandons the pending wire.
-    fireEvent.click(screen.getByTestId('rack-area'));
+    // Pressing empty rack background abandons the pending wire.
+    fireEvent.mouseDown(screen.getByTestId('rack-area'), { button: 0 });
     await waitFor(() => expect(screen.queryByTestId('pending-cable')).toBeNull());
     expect(fakeEngine.connectWire).not.toHaveBeenCalled();
   });

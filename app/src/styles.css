@@ -65,6 +65,10 @@ body {
      columns from the same tokens. */
   --cell-w: 40px;
   --cell-gap: 2px;
+  /* Panels are click/drag surfaces (select on mousedown, shift-click
+     multi-select): labels and readouts must never turn into a text
+     selection mid-gesture. Form fields below re-enable selection. */
+  user-select: none;
   background: linear-gradient(180deg, #22262e 0%, #1b1e24 14%, #191c21 100%);
   border: 1px solid #2a2e35;
   border-top: 2px solid color-mix(in srgb, var(--accent) 55%, #2a2e35);
@@ -80,6 +84,14 @@ body {
   padding: 8px 10px 10px;
   width: max-content;
   min-width: 140px;
+}
+
+/* Text entry inside panels stays selectable despite the panel-wide
+   user-select: none. */
+.module-panel input,
+.module-panel textarea,
+.module-panel [contenteditable='true'] {
+  user-select: text;
 }
 
 .module-title {
