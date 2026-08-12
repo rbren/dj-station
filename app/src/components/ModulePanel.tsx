@@ -250,6 +250,32 @@ export function ModulePanel(props: ModulePanelProps) {
                   }
                 >
                   {group.cells.map((cell) => {
+                    if (cell.output) {
+                      // Inline output jack (e.g. the attenuverter's per-
+                      // channel out at the foot of its input column).
+                      return (
+                        <div className="input-cell output-cell" key={cell.jack}>
+                          <Jack
+                            instance={instanceId}
+                            id={cell.jack}
+                            kind="output"
+                            telemetry={telemetry?.[`out:${cell.jack}`]}
+                            display={manifest.outputs.find((o) => o.id === cell.jack)?.display}
+                            selected={
+                              pendingSource?.kind === 'output' &&
+                              pendingSource.instance === instanceId &&
+                              pendingSource.jack === cell.jack
+                            }
+                            selectedColor={pendingColor}
+                            onClick={(shift) => props.onJackClick?.('output', cell.jack, shift)}
+                            showLabel={false}
+                          />
+                          {!cell.hideLabel && (
+                            <span className="input-cell-label">{cell.label ?? cell.jack}</span>
+                          )}
+                        </div>
+                      );
+                    }
                     const decl = manifest.inputs.find((i) => i.id === cell.jack);
                     return (
                       <InputCell

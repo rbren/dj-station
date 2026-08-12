@@ -1385,6 +1385,15 @@ body {
   width: auto;
 }
 
+/* Inline output jack living inside an input group (layout cells with
+   `output: true`, e.g. the attenuverter's per-channel out at the foot of
+   its column). A subtle top rule separates it from the inputs above. */
+.output-cell {
+  border-top: 1px dashed #454c58;
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
 .wire-color-swatch {
   display: inline-block;
   width: 10px;

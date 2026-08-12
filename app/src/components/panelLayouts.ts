@@ -20,6 +20,11 @@ export interface CellSpec {
   label?: string;
   hideLabel?: boolean;
   control?: CellControl;
+  /** The cell hosts an OUTPUT jack: renders a plain output jack inline in
+   *  the group (e.g. the attenuverter's per-channel out under its input
+   *  column) instead of an input cell. Such outputs are consumed here and
+   *  excluded from the module's output-group strip. */
+  output?: boolean;
 }
 
 export interface GroupSpec {
@@ -180,19 +185,19 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     outputGroups: [{ title: 'out', outputs: ['out_l', 'out_r'] }],
   }),
 
+  // One short column per channel, signal flowing top to bottom:
+  // in -> atten -> offset -> out, so each output lines up under its input.
   'com.dj.attenuverter': () => ({
-    groups: [
-      {
-        kind: 'grid',
-        columns: 3,
-        inputs: [1, 2, 3, 4, 5, 6, 7, 8].flatMap((ch) => [
-          { jack: `in${ch}`, label: `in ${ch}` },
-          { jack: `atten${ch}`, label: 'atten' },
-          { jack: `offset${ch}`, label: 'offset' },
-        ]),
-      },
-    ],
-    outputGroups: [{ outputs: seqIds('out', 1, 8) }],
+    groups: [1, 2, 3, 4, 5, 6, 7, 8].map((ch) => ({
+      title: String(ch),
+      kind: 'column' as const,
+      inputs: [
+        { jack: `in${ch}`, label: 'in' },
+        { jack: `atten${ch}`, label: 'atten' },
+        { jack: `offset${ch}`, label: 'offset' },
+        { jack: `out${ch}`, label: 'out', output: true },
+      ],
+    })),
   }),
 
   'com.dj.clock': () => ({
@@ -684,12 +689,16 @@ export function resolveLayout(manifest: Manifest): ResolvedLayout {
   const outputIds = new Set(manifest.outputs.map((o) => o.id));
 
   const seen = new Set<string>();
+  const seenOut = new Set<string>();
   const groups: ResolvedGroup[] = layout.groups
     .map((g) => ({
       ...g,
-      cells: g.inputs
-        .map(cell)
-        .filter((c) => inputIds.has(c.jack) && !seen.has(c.jack) && (seen.add(c.jack), true)),
+      cells: g.inputs.map(cell).filter((c) => {
+        if (c.output) {
+          return outputIds.has(c.jack) && !seenOut.has(c.jack) && (seenOut.add(c.jack), true);
+        }
+        return inputIds.has(c.jack) && !seen.has(c.jack) && (seen.add(c.jack), true);
+      }),
     }))
     .filter((g) => g.cells.length > 0);
   const missing = manifest.inputs.filter((i) => !seen.has(i.id));
@@ -697,7 +706,6 @@ export function resolveLayout(manifest: Manifest): ResolvedLayout {
     groups.push({ cells: missing.map((i) => ({ jack: i.id })) });
   }
 
-  const seenOut = new Set<string>();
   const outputGroups: OutputGroupSpec[] = (layout.outputGroups ?? [])
     .map((g) => ({
       ...g,

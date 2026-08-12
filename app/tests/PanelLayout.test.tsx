@@ -181,6 +181,42 @@ describe('ModulePanel with layouts', () => {
       expect(screen.getByTestId(`jack-output-${id}`)).toBeTruthy();
     }
   });
+
+  it('the attenuverter pairs each output with its inputs in one short column', () => {
+    const inputs: string[] = [];
+    const outputs: string[] = [];
+    for (let ch = 1; ch <= 8; ch++) {
+      inputs.push(`in${ch}`, `atten${ch}`, `offset${ch}`);
+      outputs.push(`out${ch}`);
+    }
+    const m = manifest('com.dj.attenuverter', inputs, outputs);
+    const layout = resolveLayout(m);
+    // Eight channel columns, each in -> atten -> offset -> out.
+    expect(layout.groups).toHaveLength(8);
+    for (const [i, g] of layout.groups.entries()) {
+      const ch = i + 1;
+      expect(g.kind).toBe('column');
+      expect(g.cells.map((c) => c.jack)).toEqual([
+        `in${ch}`,
+        `atten${ch}`,
+        `offset${ch}`,
+        `out${ch}`,
+      ]);
+      expect(g.cells[3].output).toBe(true);
+    }
+    // The inline outputs are consumed: no separate output strip remains.
+    expect(layout.outputGroups).toHaveLength(0);
+
+    render(<ModulePanel {...baseProps} instanceId="att1" manifest={m} />);
+    for (let ch = 1; ch <= 8; ch++) {
+      const out = screen.getByTestId(`jack-output-out${ch}`);
+      // Rendered inside its channel's input group, under the same column
+      // as the channel inputs.
+      const group = out.closest('.input-group');
+      expect(group).toBeTruthy();
+      expect(group!.querySelector(`[data-jack="att1:input:in${ch}"]`)).toBeTruthy();
+    }
+  });
 });
 
 // The playhead strip (custom StepSeqUI) must line up with the per-step

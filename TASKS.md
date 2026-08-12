@@ -19,7 +19,7 @@
       voltage, but it should accept the value in Hz, exactly as displayed
       (respect the jack's display mapping, e.g. volt-per-octave, when
       converting the entered value back to a knob position).
-- [ ] Attenuverter: make it prettier — line up each output with its input,
+- [x] Attenuverter: make it prettier — line up each output with its input,
       using short columns for each input/output pair.
 - [ ] Infinite canvas: let the rack overscroll to open up new areas in every
       direction.
