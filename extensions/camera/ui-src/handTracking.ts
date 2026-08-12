@@ -12,12 +12,14 @@
 // screen. The tracker, however, is fed the RAW (unmirrored) camera
 // frames — we never repaint the video just to flip it.
 //
-// MediaPipe's handedness classifier assumes its input is already
-// mirrored (selfie-style). Ours is not, so the label it emits names the
-// WRONG physical hand and must be swapped exactly once, here, in
-// `physicalHand`. Verification: raise your RIGHT hand — the wrist label
-// drawn in the overlay must read "R". A fixture test with a known
-// physical-right-hand frame pins this mapping.
+// Handedness: on our RAW (unmirrored) frames the label MediaPipe emits
+// names the PHYSICAL hand directly — verified empirically against a
+// live camera (the docs' "assumes mirrored input" caveat does not
+// produce a swapped label for this pipeline). The label is mapped —
+// NOT swapped — exactly once, here, in `physicalHand`. Verification:
+// raise your RIGHT hand — the wrist label drawn in the overlay must
+// read "R". A fixture test with a known physical-right-hand frame pins
+// this mapping.
 //
 // ## Coordinates (R-8)
 //
@@ -109,11 +111,11 @@ export function toEngineCoords(lm: {
 }
 
 /**
- * MediaPipe label -> physical hand. MediaPipe assumes mirrored input;
- * we feed unmirrored frames, so its label is swapped (module docs).
+ * MediaPipe label -> physical hand. On our raw frames the label names
+ * the physical hand directly — no swap (module docs, verified live).
  */
 export function physicalHand(mediapipeLabel: string): PhysicalHand {
-  return mediapipeLabel === "Left" ? "right" : "left";
+  return mediapipeLabel === "Left" ? "left" : "right";
 }
 
 /** Boundary conversion: one raw MediaPipe result -> one HandFrame. */

@@ -16,9 +16,9 @@
 //
 // Mirroring convention (R-7, canonical write-up in handTracking.ts):
 // the <video> is CSS-mirrored so the panel behaves like a mirror; the
-// tracker sees RAW frames and the handedness swap happens once, in
-// handTracking.physicalHand. The overlay canvas is NOT mirrored —
-// engine coordinates are already mirror-view.
+// tracker sees RAW frames and the handedness label maps to the physical
+// hand once (no swap), in handTracking.physicalHand. The overlay canvas
+// is NOT mirrored — engine coordinates are already mirror-view.
 //
 // The tracking loop is driven by requestVideoFrameCallback — not
 // requestAnimationFrame — and every landmark set carries the frame's

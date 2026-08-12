@@ -124,9 +124,10 @@ fails if it's missing.
   model URL is version-pinned and SHA-256-verified; offline no-op once
   present) — the packaged app never loads from a CDN. CONVENTIONS ARE
   LOAD-BEARING, canonical write-up in `handTracking.ts`: the `<video>`
-  display is CSS-mirrored but the tracker sees RAW frames, so MediaPipe's
-  handedness label (which assumes mirrored input) is swapped exactly once
-  in `physicalHand`; engine coords are X right (mirror view), Y UP,
+  display is CSS-mirrored but the tracker sees RAW frames; on raw frames
+  MediaPipe's handedness label names the PHYSICAL hand directly (verified
+  live — no swap), mapped exactly once in `physicalHand`; engine coords
+  are X right (mirror view), Y UP,
   origin frame-center, [-1,1], converted once in `toEngineCoords`; the
   loop is `requestVideoFrameCallback` (never rAF) and every landmark set
   carries the frame's `mediaTime`. Later CV-output phases inherit all of

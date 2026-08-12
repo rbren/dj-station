@@ -1,5 +1,5 @@
 {
-  "description": "Raw MediaPipe HandLandmarker output shape for a physical RIGHT hand raised palm-to-camera in an UNMIRRORED frame: the hand sits on the image-left half and MediaPipe (which assumes mirrored input) labels it 'Left'. resolveHands must report physical 'right' with engine x > 0 (mirror view). Hand-authored deterministic geometry: wrist at image (0.30, 0.55), fingers extending upward (image y decreasing), thumb toward image-right.",
+  "description": "Raw MediaPipe HandLandmarker output shape for a physical RIGHT hand raised palm-to-camera in an UNMIRRORED frame: the hand sits on the image-left half and MediaPipe labels it 'Right' (on our raw frames the label names the physical hand directly; verified live). resolveHands must report physical 'right' with engine x > 0 (mirror view). Hand-authored deterministic geometry: wrist at image (0.30, 0.55), fingers extending upward (image y decreasing), thumb toward image-right.",
   "physicalHand": "right",
   "mediaTime": 1.2345,
   "result": {
@@ -115,7 +115,7 @@
     "handedness": [
       [
         {
-          "categoryName": "Left",
+          "categoryName": "Right",
           "score": 0.97
         }
       ]

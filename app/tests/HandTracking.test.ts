@@ -2,9 +2,9 @@
 // (extensions/camera/ui-src/handTracking.ts — the canonical write-up):
 //
 //  - Mirroring (R-7): the tracker sees RAW camera frames while the
-//    display is CSS-mirrored; MediaPipe assumes mirrored input, so its
-//    handedness label names the wrong physical hand and is swapped
-//    exactly once, at the boundary.
+//    display is CSS-mirrored; on our raw frames MediaPipe's handedness
+//    label names the PHYSICAL hand directly (verified live), so the
+//    label is mapped without a swap, exactly once, at the boundary.
 //  - Coordinates (R-8): engine space is X right (mirror view), Y UP,
 //    origin at frame center, normalized [-1, 1]; image space (y down,
 //    origin top-left) is converted once, in toEngineCoords.
@@ -12,7 +12,7 @@
 // The known-handedness fixture (tests/fixtures/right-hand-raised.json)
 // is a deterministic synthetic frame: a physical RIGHT hand raised in
 // an unmirrored frame lands on the image-LEFT half and MediaPipe labels
-// it 'Left'. The geometry is hand-authored (described in the fixture's
+// it 'Right'. The geometry is hand-authored (described in the fixture's
 // description field), never a video binary.
 
 import { readFileSync } from 'node:fs';
@@ -54,10 +54,11 @@ describe('coordinate convention (R-8)', () => {
 });
 
 describe('mirroring / handedness convention (R-7)', () => {
-  it("swaps MediaPipe's label to the physical hand", () => {
-    // MediaPipe assumes an already-mirrored input; ours is raw.
-    expect(physicalHand('Left')).toBe('right');
-    expect(physicalHand('Right')).toBe('left');
+  it("maps MediaPipe's label to the physical hand without a swap", () => {
+    // On our raw frames the label names the physical hand directly
+    // (verified against a live camera).
+    expect(physicalHand('Left')).toBe('left');
+    expect(physicalHand('Right')).toBe('right');
   });
 
   it('resolves the known-handedness fixture to the physical right hand', () => {
