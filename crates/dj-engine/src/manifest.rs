@@ -33,6 +33,11 @@ pub struct JackDecl {
     pub name: String,
     #[serde(default)]
     pub default: f32,
+    /// Audio pass-through jack: values only ever arrive by wire, so the UI
+    /// renders a plain jack — no manual knob, no CV/attenuverter settings.
+    /// Purely presentational; the engine still treats it as a normal input.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub audio: bool,
     #[serde(default)]
     pub knob: Option<KnobConfig>,
     /// How the jack's value reads to a human (unit / mapping / step labels).

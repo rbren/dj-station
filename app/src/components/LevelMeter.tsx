@@ -66,8 +66,11 @@ export const VcaDualUI = meterUI([
 /** Compressor gain reduction: `gr` is 0.5 V per dB (see the module docs). */
 export const CompressorUI = meterUI([{ jack: 'out:gr', label: 'gr', format: (v) => db(v * 2) }]);
 
-/** Mixer master output level. */
-export const MixerUI = meterUI([{ jack: 'out:out', label: 'out' }]);
+/** Mixer master output levels. */
+export const MixerUI = meterUI([
+  { jack: 'out:out_l', label: 'L' },
+  { jack: 'out:out_r', label: 'R' },
+]);
 
 /** Filter cutoff CV (knob + wires summed at the jack). */
 export const FilterUI = meterUI([{ jack: 'cutoff', label: 'cutoff' }]);

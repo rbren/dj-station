@@ -75,7 +75,11 @@ describe('resolveLayout', () => {
   });
 
   it('never renders the same jack twice', () => {
-    const m = manifest('com.dj.mixer', ['in1', 'lvl1', 'cv1', 'master'], ['out', 'inv']);
+    const m = manifest(
+      'com.dj.mixer',
+      ['in1_l', 'in1_r', 'lvl1', 'pan1', 'cv1', 'master'],
+      ['out_l', 'out_r'],
+    );
     const layout = resolveLayout(m);
     const all = layout.groups.flatMap((g) => g.cells.map((c) => c.jack));
     expect(new Set(all).size).toBe(all.length);
@@ -116,8 +120,13 @@ describe('ModulePanel with layouts', () => {
   });
 
   it('the mixer renders channel-strip level faders (sliders, hidden labels)', () => {
-    const inputs = [1, 2, 3, 4, 5, 6].flatMap((c) => [`in${c}`, `lvl${c}`, `cv${c}`]);
-    const m = manifest('com.dj.mixer', [...inputs, 'master'], ['out', 'inv']);
+    const inputs = [1, 2, 3, 4, 5, 6].flatMap((c) => [
+      `in${c}_l`,
+      `in${c}_r`,
+      `lvl${c}`,
+      `pan${c}`,
+    ]);
+    const m = manifest('com.dj.mixer', [...inputs, 'master'], ['out_l', 'out_r']);
     render(<ModulePanel {...baseProps} instanceId="mix1" manifest={m} />);
     for (const ch of [1, 2, 3, 4, 5, 6]) {
       const cell = screen.getByTestId(`input-cell-lvl${ch}`);
@@ -125,8 +134,30 @@ describe('ModulePanel with layouts', () => {
       expect(cell.querySelector('.fader-v')).toBeTruthy();
       // hideLabel: no visible label under the fader.
       expect(cell.querySelector('.input-cell-label')).toBeNull();
+      // Pan renders as an ordinary dial.
+      expect(screen.getByTestId(`input-cell-pan${ch}`).querySelector('.knob')).toBeTruthy();
     }
     expect(screen.getByTestId('input-cell-master').querySelector('.fader-v')).toBeTruthy();
+  });
+
+  it('audio-flagged inputs render as plain jacks with no control (mixer ins)', () => {
+    const m: Manifest = {
+      ...manifest('com.dj.mixer', ['lvl1', 'master'], ['out_l', 'out_r']),
+      inputs: [
+        { id: 'in1_l', name: 'In 1 L', audio: true },
+        { id: 'in1_r', name: 'In 1 R', audio: true },
+        { id: 'lvl1', name: 'Level 1' },
+        { id: 'master', name: 'Master' },
+      ],
+    };
+    render(<ModulePanel {...baseProps} instanceId="mix1" manifest={m} />);
+    for (const jack of ['in1_l', 'in1_r']) {
+      const cell = screen.getByTestId(`input-cell-${jack}`);
+      expect(cell.querySelector('[data-jack]')).toBeTruthy();
+      expect(cell.querySelector('.knob')).toBeNull();
+    }
+    // Non-audio inputs keep their controls.
+    expect(screen.getByTestId('input-cell-master').querySelector('.knob')).toBeTruthy();
   });
 
   it('jack-only cells (trig_seq patterns) render the jack without a control', () => {

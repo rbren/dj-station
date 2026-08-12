@@ -56,67 +56,86 @@ fn assert_near(actual: f32, expected: f32, what: &str) {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn mixer_sums_channels_with_attenuverters() {
+fn mixer_sums_stereo_channels_with_levels() {
     let mut e = probe_engine(2);
     e.add_module("mx", "com.dj.mixer").unwrap();
-    probe(&mut e, "mx", "out", 0);
-    probe(&mut e, "mx", "inv", 1);
+    probe(&mut e, "mx", "out_l", 0);
+    probe(&mut e, "mx", "out_r", 1);
 
-    // Channel 1: +3 V at unity. Channel 2: +4 V through an inverting level.
-    e.set_knob_value("mx", "in1", 3.0).unwrap();
-    e.set_knob_value("mx", "lvl1", 1.0).unwrap();
-    e.set_knob_value("mx", "in2", 4.0).unwrap();
-    e.set_knob_value("mx", "lvl2", -0.5).unwrap();
+    // Channel 1: +3 V at unity (lvl 10). Channel 2: +4 V at half (lvl 5).
+    // Pans stay centred: both sides at unity.
+    e.set_knob_value("mx", "in1_l", 3.0).unwrap();
+    e.set_knob_value("mx", "lvl1", 10.0).unwrap();
+    e.set_knob_value("mx", "in2_l", 4.0).unwrap();
+    e.set_knob_value("mx", "lvl2", 5.0).unwrap();
     let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 3.0 - 2.0, "mixer sum");
-    assert_near(tail[1], -(3.0 - 2.0), "mixer inverted sum");
-
-    // Level CV rides the lvl jack directly: a wire adds to the fader
-    // baseline (half strength here via the attenuverter).
-    e.set_knob_value("mx", "lvl1", 0.5).unwrap();
-    let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 1.5 - 2.0, "mixer sum with lvl1 at half");
+    assert_near(tail[0], 3.0 + 2.0, "mixer left sum");
+    assert_near(tail[1], 3.0 + 2.0, "mixer right sum (R normalled to L)");
 
     // Master scales the whole sum.
     e.set_knob_value("mx", "master", 2.0).unwrap();
     let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 0.2 * (1.5 - 2.0), "mixer sum with master at 0.2");
+    assert_near(tail[0], 0.2 * 5.0, "mixer sum with master at 0.2");
 
-    // Unpatched channels with a centred level contribute nothing.
+    // Channels with the fader down contribute nothing.
     e.set_knob_value("mx", "master", 10.0).unwrap();
     e.set_knob_value("mx", "lvl1", 0.0).unwrap();
     e.set_knob_value("mx", "lvl2", 0.0).unwrap();
     let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 0.0, "mixer silent with levels centred");
+    assert_near(tail[0], 0.0, "mixer silent with faders down");
 }
 
 #[test]
-fn mixer_cancels_a_signal_against_its_inverse() {
+fn mixer_pan_places_a_mono_source_in_the_field() {
+    let mut e = probe_engine(2);
+    e.add_module("mx", "com.dj.mixer").unwrap();
+    probe(&mut e, "mx", "out_l", 0);
+    probe(&mut e, "mx", "out_r", 1);
+    e.set_knob_value("mx", "in1_l", 4.0).unwrap();
+    e.set_knob_value("mx", "lvl1", 10.0).unwrap();
+
+    // Hard left: L at unity, R silent.
+    e.set_knob_value("mx", "pan1", -10.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 4.0, "hard left keeps L at unity");
+    assert_near(tail[1], 0.0, "hard left silences R");
+
+    // Half right: L fades to half, R stays at unity (balance law).
+    e.set_knob_value("mx", "pan1", 5.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 2.0, "half right fades L");
+    assert_near(tail[1], 4.0, "half right keeps R at unity");
+}
+
+#[test]
+fn mixer_right_input_breaks_the_left_normal_when_wired() {
     let mut e = probe_engine(2);
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("mx", "com.dj.mixer").unwrap();
-    e.connect("osc1", "audio", "mx", "in1").unwrap();
-    e.connect("osc1", "audio", "mx", "in2").unwrap();
-    e.set_knob_value("mx", "lvl1", 1.0).unwrap();
-    e.set_knob_value("mx", "lvl2", -1.0).unwrap();
-    probe(&mut e, "mx", "out", 0);
-    probe(&mut e, "osc1", "audio", 1);
+    e.connect("osc1", "audio", "mx", "in1_l").unwrap();
+    e.set_knob_value("mx", "lvl1", 10.0).unwrap();
+    probe(&mut e, "mx", "out_l", 0);
+    probe(&mut e, "mx", "out_r", 1);
 
+    // R unwired: normalled to L, both sides identical.
     let out = e.render_offline((0.1 * SR) as usize).unwrap();
     let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
-    let src_peak = out[1].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
-    assert!(src_peak > 4.9, "oscillator should swing ±5, got {src_peak}");
-    assert!(peak < 1e-6, "signal + inverse should cancel, peak {peak}");
-
-    // Same signal at unity on both channels: exactly double.
-    e.set_knob_value("mx", "lvl2", 1.0).unwrap();
-    let out = e.render_offline((0.1 * SR) as usize).unwrap();
-    for (i, (&sum, &src)) in out[0].iter().zip(&out[1]).enumerate() {
-        assert!(
-            (sum - 2.0 * src).abs() < 1e-4,
-            "sample {i}: {sum} != 2 * {src}"
-        );
+    assert!(peak > 4.9, "oscillator should reach ±5, got {peak}");
+    for (i, (&l, &r)) in out[0].iter().zip(&out[1]).enumerate() {
+        assert!((l - r).abs() < 1e-6, "sample {i}: normalled R {r} != L {l}");
     }
+
+    // Wiring R replaces the normal with the jack's own signal (silent here).
+    e.add_module("att", "com.dj.attenuverter").unwrap();
+    e.connect("att", "out1", "mx", "in1_r").unwrap();
+    let out = e.render_offline((0.1 * SR) as usize).unwrap();
+    let peak_l = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    let peak_r = out[1].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    assert!(peak_l > 4.9, "L keeps the oscillator, got {peak_l}");
+    assert!(
+        peak_r < 1e-6,
+        "wired-but-silent R must not mirror L: {peak_r}"
+    );
 }
 
 // ---------------------------------------------------------------------------

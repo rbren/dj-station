@@ -15,6 +15,9 @@ export interface InputCellProps {
   instance: string;
   cell: CellSpec;
   manifestKnob?: KnobConfig | null;
+  /** Audio pass-through input: plain jack only — no manual control and no
+   *  CV/attenuverter settings (the value only ever arrives by wire). */
+  audio?: boolean;
   /** Manifest display spec (unit / mapping / step labels); absent = Volts. */
   display?: DisplaySpec | null;
   state?: KnobState;
@@ -38,7 +41,8 @@ export function InputCell(props: InputCellProps) {
   // No knob declared anywhere = plain wire jack: the engine blends the
   // signal additively in value space (knob.rs JackRt::from_state).
   const plain = !state?.config && !props.manifestKnob;
-  const control = cell.control ?? 'auto';
+  // Audio jacks carry sound, not a settable signal: jack only.
+  const control = props.audio ? 'jack' : (cell.control ?? 'auto');
   const label = cell.label ?? cell.jack;
   const appearance = control === 'fader' ? 'fader' : control === 'hfader' ? 'hfader' : undefined;
   return (

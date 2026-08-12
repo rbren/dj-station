@@ -1,7 +1,7 @@
 {
   "wires": [
     {
-      "from_jack": "out",
+      "from_jack": "out_l",
       "to": "out1",
       "to_jack": "l"
     }

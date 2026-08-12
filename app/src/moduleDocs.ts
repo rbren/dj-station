@@ -625,22 +625,25 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   // --------------------------------------------------------------- Utilities
   'com.dj.mixer': {
     summary:
-      'Six-channel mixer with per-channel level and a master level; the inv ' +
-      'output is the inverted mix for phase tricks and CV math. Good for ' +
-      'summing a multi-oscillator stack into one fat voice, balancing a ' +
-      'few parts into a submix, or blending LFOs into complex modulation.',
+      'Six-channel stereo mixer with per-channel level and pan plus a ' +
+      'master level. Each channel is an L/R pair; leave R unpatched and ' +
+      'it mirrors L, so a mono source pans across the stereo field. Good ' +
+      'for summing a multi-oscillator stack into one fat voice, balancing ' +
+      'a few parts into a stereo submix, or placing voices in the field.',
     inputs: {
-      'in#': 'Channel # input (audio or CV).',
-      'lvl#': 'Channel # level, 0..1.',
+      'in#_l': 'Channel # left input (audio).',
+      'in#_r': 'Channel # right input (audio; mirrors L when unpatched).',
+      'lvl#': 'Channel # level fader, 0..10 (10 = unity).',
+      'pan#': 'Channel # pan/balance, -10 (left) .. +10 (right).',
       master: 'Master output level.',
     },
     outputs: {
-      out: 'Mix output.',
-      inv: 'Inverted mix (-out).',
+      out_l: 'Left mix output.',
+      out_r: 'Right mix output.',
     },
     examples: [
       'Sum a three-oscillator stack before one Filter.',
-      'Mix two LFOs into one complex modulation CV.',
+      'Pan two voices apart for instant stereo width.',
     ],
   },
   'com.dj.attenuverter': {

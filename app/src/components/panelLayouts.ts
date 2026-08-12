@@ -157,15 +157,17 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
-  // A real-mixer look: one strip per channel — input jack on top, level
-  // fader below it — plus a master strip.
+  // A real-mixer look: one strip per channel — stereo input jacks on top,
+  // pan knob, then the level fader — plus a master strip.
   'com.dj.mixer': () => ({
     groups: [
       ...[1, 2, 3, 4, 5, 6].map((ch) => ({
         title: String(ch),
         kind: 'column' as const,
         inputs: [
-          { jack: `in${ch}`, label: 'in' },
+          { jack: `in${ch}_l`, label: 'L' },
+          { jack: `in${ch}_r`, label: 'R' },
+          { jack: `pan${ch}`, label: 'pan' },
           { jack: `lvl${ch}`, control: 'fader' as const, hideLabel: true },
         ],
       })),
@@ -175,6 +177,7 @@ const LAYOUTS: Record<string, LayoutFactory> = {
         inputs: [{ jack: 'master', control: 'fader', hideLabel: true }],
       },
     ],
+    outputGroups: [{ title: 'out', outputs: ['out_l', 'out_r'] }],
   }),
 
   'com.dj.attenuverter': () => ({

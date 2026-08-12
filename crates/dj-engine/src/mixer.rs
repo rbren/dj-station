@@ -26,6 +26,7 @@ pub fn crossfader_manifest() -> Manifest {
         id: id.into(),
         name: name.into(),
         default: 0.0,
+        audio: false,
         knob: None,
         display: None,
     };
@@ -44,6 +45,7 @@ pub fn crossfader_manifest() -> Manifest {
                 id: "xfade".into(),
                 name: "Crossfade".into(),
                 default: 0.0,
+                audio: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Continuous,
                     min: -10.0,

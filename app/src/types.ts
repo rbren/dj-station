@@ -37,6 +37,9 @@ export interface JackDecl {
   id: string;
   name: string;
   default?: number;
+  /** Audio pass-through jack: renders as a plain jack with no manual
+   *  control and no CV/attenuverter settings (values only arrive by wire). */
+  audio?: boolean;
   knob?: KnobConfig | null;
   display?: DisplaySpec | null;
 }

@@ -42,10 +42,10 @@ fn regen_quantizer_custom() {
     e.connect("quant", "out", "voice", "pitch").unwrap();
 
     // Voice through the mixer at half master level.
-    e.connect("voice", "audio", "mix", "in1").unwrap();
-    e.set_knob_value("mix", "lvl1", 1.0).unwrap();
+    e.connect("voice", "audio", "mix", "in1_l").unwrap();
+    e.set_knob_value("mix", "lvl1", 10.0).unwrap();
     e.set_knob_value("mix", "master", 5.0).unwrap();
-    e.connect("mix", "out", "out1", "l").unwrap();
+    e.connect("mix", "out_l", "out1", "l").unwrap();
 
     e.save_patch(&dir.join("patch"), "e2e-quantizer-custom-scale")
         .unwrap();

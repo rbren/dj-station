@@ -37,6 +37,7 @@ pub fn playback_manifest() -> Manifest {
                 id: "play_gate".into(),
                 name: "Play Gate".into(),
                 default: 0.0,
+                audio: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Button,
                     min: 0.0,
@@ -50,6 +51,7 @@ pub fn playback_manifest() -> Manifest {
                 id: "speed".into(),
                 name: "Speed".into(),
                 default: 0.0,
+                audio: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Continuous,
                     min: -2.0,
@@ -63,6 +65,7 @@ pub fn playback_manifest() -> Manifest {
                 id: "loop".into(),
                 name: "Loop".into(),
                 default: 0.0,
+                audio: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Switch,
                     min: 0.0,

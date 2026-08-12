@@ -401,6 +401,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                             id: mm.name.clone(),
                             name: mm.name.clone(),
                             default: 0.0,
+                            audio: false,
                             knob: None,
                             display: None,
                         })

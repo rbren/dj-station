@@ -76,11 +76,11 @@ fn telemetry_stays_finite_when_a_loud_signal_goes_silent() {
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("mx", "com.dj.mixer").unwrap();
     engine.add_module("vca1", "com.dj.vca").unwrap();
-    engine.connect("osc1", "audio", "mx", "in1").unwrap();
-    engine.connect("mx", "out", "vca1", "in").unwrap();
+    engine.connect("osc1", "audio", "mx", "in1_l").unwrap();
+    engine.connect("mx", "out_l", "vca1", "in").unwrap();
 
     // Loud for long enough to fill the 100 ms window...
-    engine.set_knob_value("mx", "lvl1", 1.0).unwrap();
+    engine.set_knob_value("mx", "lvl1", 10.0).unwrap();
     engine.render_offline((0.3 * SR) as usize).unwrap();
     // ...then exactly silent, and drain the window in small steps.
     engine.set_knob_value("mx", "lvl1", 0.0).unwrap();

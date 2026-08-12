@@ -257,6 +257,7 @@ export function ModulePanel(props: ModulePanelProps) {
                         instance={instanceId}
                         cell={cell}
                         manifestKnob={decl?.knob}
+                        audio={decl?.audio}
                         display={decl?.display}
                         state={knobs[cell.jack]}
                         wired={wired[cell.jack] ?? false}

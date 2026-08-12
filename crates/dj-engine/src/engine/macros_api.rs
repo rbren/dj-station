@@ -36,6 +36,7 @@ impl Engine {
                     id: j.id.clone(),
                     name: j.id.clone(),
                     default: 0.0,
+                    audio: false,
                     knob: None,
                     display: None,
                 })

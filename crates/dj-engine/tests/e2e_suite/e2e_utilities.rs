@@ -1,11 +1,14 @@
 //! E2E golden audio cases for the Utilities modules (PRD §10.1).
 //!
-//! Two serialized patches cover the batch:
+//! Serialized patches covering the batch:
 //! - `utilities-quantized-voice`: LFO -> attenuverter -> quantizer ->
 //!   oscillator -> mixer, i.e. a pentatonic arpeggio driven by a saw sweep.
 //! - `utilities-logic-switch`: a square clock distributed by the mult,
 //!   converted to triggers by the logic module, clocking the sequential
 //!   switch that selects between attenuverter-generated pitches.
+//! - `utilities-mixer-stereo-pan`: two oscillators panned apart on the
+//!   stereo mixer (one modulated by an LFO wired into the pan jack),
+//!   rendered to a stereo master.
 //!
 //! The shared harness lives in `tests/common/e2e.rs`.
 
@@ -45,10 +48,10 @@ fn regen_quantized_voice() {
     e.connect("quant", "out", "voice", "pitch").unwrap();
 
     // Voice through the mixer at half master level.
-    e.connect("voice", "audio", "mix", "in1").unwrap();
-    e.set_knob_value("mix", "lvl1", 1.0).unwrap();
+    e.connect("voice", "audio", "mix", "in1_l").unwrap();
+    e.set_knob_value("mix", "lvl1", 10.0).unwrap();
     e.set_knob_value("mix", "master", 5.0).unwrap();
-    e.connect("mix", "out", "out1", "l").unwrap();
+    e.connect("mix", "out_l", "out1", "l").unwrap();
 
     e.save_patch(&dir.join("patch"), "e2e-utilities-quantized-voice")
         .unwrap();
@@ -92,12 +95,42 @@ fn regen_logic_switch() {
     e.set_knob_position("sw", "steps", 2.0 / 6.0).unwrap(); // 4 steps
     e.connect("sw", "out", "voice", "pitch").unwrap();
 
-    e.connect("voice", "audio", "mix", "in1").unwrap();
-    e.set_knob_value("mix", "lvl1", 1.0).unwrap();
+    e.connect("voice", "audio", "mix", "in1_l").unwrap();
+    e.set_knob_value("mix", "lvl1", 10.0).unwrap();
     e.set_knob_value("mix", "master", 5.0).unwrap();
-    e.connect("mix", "out", "out1", "l").unwrap();
+    e.connect("mix", "out_l", "out1", "l").unwrap();
 
     e.save_patch(&dir.join("patch"), "e2e-utilities-logic-switch")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(0.5));
+}
+
+fn regen_mixer_stereo_pan() {
+    let dir = crate::common::e2e::case_dir("utilities-mixer-stereo-pan");
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("osc2", "com.dj.oscillator").unwrap();
+    e.add_module("lfo", "com.dj.oscillator").unwrap();
+    e.add_module("mix", "com.dj.mixer").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    // Voice 1 (C4) panned half left; voice 2 (G4) auto-panned by a slow
+    // sine LFO riding the pan jack on top of a centred knob.
+    e.connect("osc1", "audio", "mix", "in1_l").unwrap();
+    e.set_knob_value("mix", "lvl1", 10.0).unwrap();
+    e.set_knob_value("mix", "pan1", -5.0).unwrap();
+
+    e.set_knob_value("osc2", "pitch", 7.0 / 12.0).unwrap();
+    e.connect("osc2", "audio", "mix", "in2_l").unwrap();
+    e.set_knob_value("mix", "lvl2", 10.0).unwrap();
+    e.set_knob_value("lfo", "pitch", -7.0).unwrap();
+    e.connect("lfo", "audio", "mix", "pan2").unwrap();
+
+    e.set_knob_value("mix", "master", 5.0).unwrap();
+    e.connect("mix", "out_l", "out1", "l").unwrap();
+    e.connect("mix", "out_r", "out1", "r").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-utilities-mixer-stereo-pan")
         .unwrap();
     write_events(&dir, &EventsFile::seconds(0.5));
 }
@@ -116,4 +149,12 @@ fn e2e_utilities_logic_switch() {
         regen_logic_switch();
     }
     check_case("utilities-logic-switch");
+}
+
+#[test]
+fn e2e_utilities_mixer_stereo_pan() {
+    if regen() {
+        regen_mixer_stereo_pan();
+    }
+    check_case("utilities-mixer-stereo-pan");
 }
