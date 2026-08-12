@@ -488,13 +488,27 @@ export default function App() {
     [refresh],
   );
 
+  // EVERY write to the module selection goes through here: it also clears
+  // any native text selection, because a stray text selection makes cmd+C
+  // defer to text copy (drags and shift-clicks create them as a side
+  // effect, and preventDefault on mousedown stops them collapsing).
+  // Bypassing this with a raw store.set({ selected }) is a review smell.
+  const setSelected = useCallback(
+    (ids: string[]) => {
+      window.getSelection()?.removeAllRanges();
+      store.set({ selected: ids });
+    },
+    [store],
+  );
+
   // Sync the UI after the engine was replaced by a New Patch (the backend
   // reset already happened — native menu path — or is done by newPatch).
   const afterNewPatch = useCallback(async () => {
-    store.set({ selected: [], pending: null });
+    setSelected([]);
+    store.set({ pending: null });
     setPatchName('untitled');
     await refresh();
-  }, [store, refresh]);
+  }, [store, refresh, setSelected]);
 
   const newPatch = useCallback(async () => {
     await engine.newPatch();
@@ -592,25 +606,20 @@ export default function App() {
   // so a selection can never outlive its modules.
   const selectModule = useCallback(
     (instance: string, additive: boolean) => {
-      // Selecting a module supersedes any text selection: cmd+C defers to
-      // text copy when one exists, and the drag path's preventDefault stops
-      // the browser from collapsing it naturally.
-      window.getSelection()?.removeAllRanges();
       const prev = store.getState().selected;
       if (!additive) {
         // Pressing an already-selected module keeps the whole selection
         // (selection happens on mousedown, so a header drag of one member
         // must not collapse the group).
-        if (!prev.includes(instance)) store.set({ selected: [instance] });
+        if (!prev.includes(instance)) setSelected([instance]);
+        else window.getSelection()?.removeAllRanges();
         return;
       }
-      store.set({
-        selected: prev.includes(instance)
-          ? prev.filter((i) => i !== instance)
-          : [...prev, instance],
-      });
+      setSelected(
+        prev.includes(instance) ? prev.filter((i) => i !== instance) : [...prev, instance],
+      );
     },
-    [store],
+    [store, setSelected],
   );
 
   // Module clipboard: an opaque engine payload (modules + wires internal
@@ -699,8 +708,8 @@ export default function App() {
     // nodes in — setNodes prunes selection against the live node list, so
     // selecting first would race the prune.
     await refresh();
-    store.set({ selected: Object.values(renames) });
-  }, [store, setPositions, refresh]);
+    setSelected(Object.values(renames));
+  }, [setPositions, refresh, setSelected]);
 
   const removeModules = useCallback(
     async (instances: string[]) => {
@@ -713,11 +722,11 @@ export default function App() {
         return next;
       });
       const { pending, selected } = store.getState();
-      store.set({ selected: selected.filter((i) => !instances.includes(i)) });
+      setSelected(selected.filter((i) => !instances.includes(i)));
       if (pending && instances.includes(pending.instance)) setPending(null);
       await refresh();
     },
-    [store, setPositions, setPending, refresh],
+    [store, setPositions, setPending, refresh, setSelected],
   );
 
   const collapseToMacro = useCallback(
@@ -725,13 +734,13 @@ export default function App() {
       const selected = store.getState().selected;
       if (!name.trim() || selected.length === 0) return;
       await engine.collapseMacro(selected, name.trim());
-      store.set({ selected: [] });
+      setSelected([]);
       setCollapseName(null);
       const modules = await engine.listModules();
       if (modules) setModuleLib(modules);
       await refresh();
     },
-    [store, refresh],
+    [store, refresh, setSelected],
   );
 
   // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z),
@@ -740,7 +749,8 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        store.set({ pending: null, selected: [] });
+        store.set({ pending: null });
+        setSelected([]);
         setCollapseName(null);
         return;
       }
@@ -768,8 +778,11 @@ export default function App() {
         e.preventDefault();
         void engine.redo().then(refresh);
       } else if (key === 'c') {
-        // Leave cmd+C alone when the user is copying text.
-        if (window.getSelection()?.toString()) return;
+        // Module selection wins: every selection write clears native text
+        // selections (setSelected), so any that exists here is deliberate
+        // text-copying — but only defer to it when NO modules are
+        // selected, so a stray highlight can never silently eat a module
+        // copy.
         const selected = store.getState().selected;
         if (selected.length > 0) {
           e.preventDefault();
@@ -780,7 +793,7 @@ export default function App() {
         void pasteModules();
       } else if (key === 'a') {
         e.preventDefault();
-        store.set({ selected: store.getState().nodes.map((n) => n.instance_id) });
+        setSelected(store.getState().nodes.map((n) => n.instance_id));
       } else if (key === 'm') {
         e.preventDefault();
         setPickerOpen((open) => !open);
@@ -797,7 +810,16 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [store, refresh, changeZoom, savePatch, copyModules, pasteModules, removeModules]);
+  }, [
+    store,
+    refresh,
+    changeZoom,
+    savePatch,
+    copyModules,
+    pasteModules,
+    removeModules,
+    setSelected,
+  ]);
 
   // Click-to-add from the picker: land the module at the center of the
   // current view (pan/zoom-aware), then close the modal.
@@ -974,8 +996,11 @@ export default function App() {
           ),
         )
         .map((n) => n.instance_id);
-      const next = m.additive ? [...new Set([...selected, ...hit])] : hit;
-      store.set({ selected: next });
+      // setSelected (not a raw store.set): the sweep drags across text
+      // outside the panels and leaves a native text selection behind,
+      // which would make the next cmd+C silently copy text instead of
+      // the swept modules.
+      setSelected(m.additive ? [...new Set([...selected, ...hit])] : hit);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -983,7 +1008,7 @@ export default function App() {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [marqueeActive, toRackCoords, store]);
+  }, [marqueeActive, toRackCoords, store, setSelected]);
 
   // Right-click never shows the browser/Tauri context menu anywhere in the
   // app; specific surfaces (modules, rack background) open the app-styled
@@ -1002,11 +1027,11 @@ export default function App() {
       // clicked module (standard desktop behavior); inside it, the menu
       // acts on the whole group.
       if (!store.getState().selected.includes(instance)) {
-        store.set({ selected: [instance] });
+        setSelected([instance]);
       }
       setCtxMenu({ x: e.clientX, y: e.clientY, instance });
     },
-    [store],
+    [store, setSelected],
   );
 
   const openDocs = useCallback(
@@ -1317,10 +1342,13 @@ export default function App() {
                 // selection.
                 if (e.button !== 0) return;
                 if ((e.target as HTMLElement).closest?.('.module-panel')) return;
+                // The sweep must never double as a native text-selection
+                // drag (a text selection hijacks cmd+C).
+                e.preventDefault();
                 const additive = e.shiftKey || e.metaKey || e.ctrlKey;
                 const { pending, selected } = store.getState();
                 if (pending) setPending(null);
-                if (!additive && selected.length > 0) store.set({ selected: [] });
+                if (!additive && selected.length > 0) setSelected([]);
                 const p = toRackCoords(e.clientX, e.clientY);
                 setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
               }}

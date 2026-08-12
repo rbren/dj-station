@@ -247,6 +247,40 @@ describe('marquee select', () => {
     expect(isSelected('osc1')).toBe(false);
     expect(isSelected('vca1')).toBe(false);
   });
+
+  it('marquee-select then cmd+C copies the swept modules (regression)', async () => {
+    await renderApp();
+    // The sweep doubles as a text-selection drag in the browser: simulate
+    // the native selection it used to leave behind, which made the old
+    // cmd+C guard silently skip module copy.
+    fireEvent.mouseDown(rackArea(), { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: 100, clientY: 80 });
+    const stray = document.createElement('span');
+    stray.textContent = 'swept-over label text';
+    document.body.appendChild(stray);
+    window.getSelection()?.selectAllChildren(stray);
+    expect(window.getSelection()?.toString()).not.toBe('');
+    fireEvent.mouseUp(window);
+    expect(isSelected('osc1')).toBe(true);
+
+    // Resolving the sweep cleared the text selection; copy targets modules.
+    expect(window.getSelection()?.toString()).toBe('');
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+    await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenCalledWith(['osc1']));
+    stray.remove();
+  });
+
+  it('cmd+C prefers the module selection even if a text selection lingers', async () => {
+    await renderApp();
+    press('module-osc1');
+    const stray = document.createElement('span');
+    stray.textContent = 'later highlight';
+    document.body.appendChild(stray);
+    window.getSelection()?.selectAllChildren(stray);
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+    await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenCalledWith(['osc1']));
+    stray.remove();
+  });
 });
 
 describe('group drag', () => {
