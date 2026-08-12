@@ -1939,9 +1939,25 @@ body {
 /* Selected modules get a bright, unmissable border (multi-select for
    copy/paste/delete/collapse-to-macro). */
 .module-panel-selected {
+  /* Inset outline: the highlight lives entirely within the panel's own
+     bounds, so flush neighbours can never paint over it (an outward
+     outline was hidden by adjacent modules). The z-index lifts the glow
+     above later siblings without touching layout. */
   outline: 3px solid #4dd8ff;
-  outline-offset: 2px;
+  outline-offset: -3px;
   box-shadow: 0 0 12px 2px rgba(77, 216, 255, 0.55);
+  z-index: 1;
+}
+
+/* Marquee select: the swept rectangle shown while dragging on the rack
+   background. Lives inside the zoomed .rack (rack coordinates); inert to
+   the pointer so the drag keeps flowing to the window listeners. */
+.marquee {
+  position: absolute;
+  border: 1px solid #4dd8ff;
+  background: rgba(77, 216, 255, 0.12);
+  pointer-events: none;
+  z-index: 5;
 }
 
 .add-module-btn {

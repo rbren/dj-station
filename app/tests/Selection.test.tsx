@@ -209,6 +209,92 @@ describe('copy buffer follows the selection', () => {
   });
 });
 
+describe('marquee select', () => {
+  const rackArea = () => screen.getByTestId('rack-area');
+
+  it('dragging on the background sweeps a rectangle and selects intersecting modules', async () => {
+    await renderApp();
+    // Default positions: osc1 at (0,0), vca1 one fallback-width to the
+    // right (moduleRect fallback 192x96 in jsdom).
+    fireEvent.mouseDown(rackArea(), { button: 0, clientX: 0, clientY: 0 });
+    expect(screen.getByTestId('marquee')).toBeTruthy();
+    fireEvent.mouseMove(window, { clientX: 100, clientY: 80 });
+    const m = screen.getByTestId('marquee');
+    expect(m.style.width).toBe('100px');
+    expect(m.style.height).toBe('80px');
+    fireEvent.mouseUp(window);
+    expect(screen.queryByTestId('marquee')).toBeNull();
+    expect(isSelected('osc1')).toBe(true);
+    expect(isSelected('vca1')).toBe(false);
+  });
+
+  it('a wide sweep catches both; shift-sweep adds to the selection', async () => {
+    await renderApp();
+    press('module-vca1');
+    fireEvent.mouseDown(rackArea(), { button: 0, clientX: 0, clientY: 0, shiftKey: true });
+    fireEvent.mouseMove(window, { clientX: 100, clientY: 80 });
+    fireEvent.mouseUp(window);
+    // Shift kept vca1 and the sweep added osc1.
+    expect(isSelected('osc1')).toBe(true);
+    expect(isSelected('vca1')).toBe(true);
+  });
+
+  it('a motionless background press just clears (no marquee selection)', async () => {
+    await renderApp();
+    press('module-osc1');
+    fireEvent.mouseDown(rackArea(), { button: 0, clientX: 5, clientY: 5 });
+    fireEvent.mouseUp(window);
+    expect(isSelected('osc1')).toBe(false);
+    expect(isSelected('vca1')).toBe(false);
+  });
+});
+
+describe('group drag', () => {
+  it('dragging one member moves the whole selection rigidly', async () => {
+    await renderApp();
+    press('module-osc1');
+    press('module-vca1', { shiftKey: true });
+    // Defaults: osc1 at (0,0), vca1 at (480,0) (defaultPosition column
+    // pitch). Drag osc1's header by (+48, +96): both move by that delta.
+    const header = screen.getByTestId('module-header-osc1');
+    fireEvent.mouseDown(header, { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: 48, clientY: 96 });
+    fireEvent.mouseUp(window);
+    const osc = screen.getByTestId('module-osc1');
+    const vca = screen.getByTestId('module-vca1');
+    expect({ x: osc.style.left, y: osc.style.top }).toEqual({ x: '48px', y: '96px' });
+    expect({ x: vca.style.left, y: vca.style.top }).toEqual({ x: '528px', y: '96px' });
+  });
+});
+
+describe('paste arrangement', () => {
+  it('pasted modules keep their relative arrangement as one group', async () => {
+    fakeEngine.pasteModules.mockImplementationOnce(async () => ({
+      osc1: 'osc2',
+      vca1: 'vca2',
+    }));
+    await renderApp();
+    press('module-osc1');
+    press('module-vca1', { shiftKey: true });
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+    await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenCalled());
+
+    state.nodes = [node('osc1', OSC), node('vca1', VCA), node('osc2', OSC), node('vca2', VCA)];
+    fireEvent.keyDown(window, { key: 'v', metaKey: true });
+    await waitFor(() => expect(screen.getByTestId('module-osc2')).toBeTruthy());
+    await waitFor(() => expect(isSelected('osc2')).toBe(true));
+
+    // Sources sit at (0,0) and (480,0): the pasted pair must preserve the
+    // 480px horizontal offset whatever anchor the group landed on.
+    const osc2 = screen.getByTestId('module-osc2');
+    const vca2 = screen.getByTestId('module-vca2');
+    const dx = parseFloat(vca2.style.left) - parseFloat(osc2.style.left);
+    const dy = parseFloat(vca2.style.top) - parseFloat(osc2.style.top);
+    expect(dx).toBe(480);
+    expect(dy).toBe(0);
+  });
+});
+
 describe('stale-selection pruning', () => {
   it('an engine refresh drops selected modules that no longer exist', async () => {
     await renderApp();

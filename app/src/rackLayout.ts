@@ -34,6 +34,66 @@ export function rectsOverlap(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
+/** Smallest rect covering all of `rects` (must be non-empty). Groups
+ *  (multi-module drags, group pastes) collide as this one bounding box. */
+export function boundingBox(rects: Rect[]): Rect {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const r of rects) {
+    x0 = Math.min(x0, r.x);
+    y0 = Math.min(y0, r.y);
+    x1 = Math.max(x1, r.x + r.w);
+    y1 = Math.max(y1, r.y + r.h);
+  }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** Drag push-out: when a `size` footprint requested at `requested` overlaps
+ *  neighbours, find the nearest free grid spot along the drag's dominant
+ *  axis (near-side pushes stop the panel against its neighbour; far-side
+ *  pushes jump over it once the pointer commits). Returns null when neither
+ *  axis has a free spot. Shared by single-module and group drags. */
+export function resolvePush(
+  requested: { x: number; y: number },
+  current: { x: number; y: number },
+  size: { w: number; h: number },
+  others: Rect[],
+): { x: number; y: number } | null {
+  const snap = (v: number) => Math.round(v / GRID) * GRID;
+  const overlapsAny = (pos: { x: number; y: number }) =>
+    others.some((o) => rectsOverlap({ ...pos, ...size }, o));
+  const hits = others.filter((o) => rectsOverlap({ ...requested, ...size }, o));
+  const horizFirst = Math.abs(requested.x - current.x) >= Math.abs(requested.y - current.y);
+  for (const axis of horizFirst ? (['x', 'y'] as const) : (['y', 'x'] as const)) {
+    let best: { x: number; y: number } | null = null;
+    let bestDist = Infinity;
+    for (const r of hits) {
+      const cands =
+        axis === 'x'
+          ? [
+              { x: snap(r.x + r.w), y: requested.y },
+              { x: snap(r.x - size.w), y: requested.y },
+            ]
+          : [
+              { x: requested.x, y: snap(r.y + r.h) },
+              { x: requested.x, y: snap(r.y - size.h) },
+            ];
+      for (const c of cands) {
+        if (overlapsAny(c)) continue;
+        const dist = Math.abs(c.x - requested.x) + Math.abs(c.y - requested.y);
+        if (dist < bestDist) {
+          best = c;
+          bestDist = dist;
+        }
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
 /** Nearest free grid spot for a `size` footprint around `want`: returns
  *  `want` itself when free, otherwise scans grid offsets ring by ring
  *  outwards (closest Euclidean candidate within each ring, ties broken

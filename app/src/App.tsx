@@ -23,10 +23,12 @@ import { RackModule } from './components/RackModule';
 import { TooltipLayer } from './components/TooltipLayer';
 import { WIRE_COLORS, WireOverlay } from './components/WireOverlay';
 import {
+  boundingBox,
   defaultPosition,
   moduleRect,
   nearestFreeSpot,
   rectsOverlap,
+  resolvePush,
   type Rect,
 } from './rackLayout';
 import {
@@ -111,6 +113,22 @@ export default function App() {
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
+  // Marquee select: dragging on the rack background sweeps a rectangle
+  // (rack coordinates); on release every module whose rect intersects it
+  // joins the selection (replacing it, or adding with shift/cmd/ctrl).
+  const [marquee, setMarquee] = useState<null | {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    additive: boolean;
+  }>(null);
+  // Latest marquee for the window mouseup handler (kept in sync via
+  // effect — refs must not be written during render).
+  const marqueeRef = useRef(marquee);
+  useEffect(() => {
+    marqueeRef.current = marquee;
+  }, [marquee]);
 
   const setPositions = useCallback(
     (updater: (prev: Positions) => Positions) => {
@@ -176,9 +194,65 @@ export default function App() {
     if (dragBump.current?.dragged === instance) dragBump.current = null;
   }, []);
 
+  // Group drag: dragging any member of a multi-selection moves the whole
+  // selection rigidly (relative arrangement preserved). Collision is the
+  // group's bounding box against every non-member (simpler than per-member
+  // resolution and predictable for irregular shapes): the same push-out
+  // law as single modules, no co-operative bump.
+  const moveGroup = useCallback(
+    (instance: string, x: number, y: number, group: string[]) => {
+      const nodes = store.getState().nodes;
+      setPositions((prev) => {
+        const posOf = (id: string) => {
+          const idx = nodes.findIndex((n) => n.instance_id === id);
+          return prev[id] ?? defaultPosition(Math.max(idx, 0));
+        };
+        const currentPos = posOf(instance);
+        if (x === currentPos.x && y === currentPos.y) return prev;
+        const memberRects = group.map((id) => moduleRect(id, posOf(id)));
+        const bbox = boundingBox(memberRects);
+        const others = nodes
+          .filter((n) => !group.includes(n.instance_id))
+          .map((n) => moduleRect(n.instance_id, posOf(n.instance_id)));
+        // The drag reports the grabbed member's position; the bbox moves by
+        // the same delta and the push-out resolves in bbox space.
+        const dx = x - currentPos.x;
+        const dy = y - currentPos.y;
+        const want = { x: bbox.x + dx, y: bbox.y + dy };
+        let target = want;
+        if (others.some((o) => rectsOverlap({ ...want, w: bbox.w, h: bbox.h }, o))) {
+          const resolved = resolvePush(
+            want,
+            { x: bbox.x, y: bbox.y },
+            { w: bbox.w, h: bbox.h },
+            others,
+          );
+          if (!resolved) return prev;
+          target = resolved;
+        }
+        if (target.x === bbox.x && target.y === bbox.y) return prev;
+        const next = { ...prev };
+        for (const [i, id] of group.entries()) {
+          next[id] = {
+            x: memberRects[i].x + (target.x - bbox.x),
+            y: memberRects[i].y + (target.y - bbox.y),
+          };
+        }
+        saveJson(POSITIONS_KEY, next);
+        return next;
+      });
+    },
+    [store, setPositions],
+  );
+
   const moveModule = useCallback(
     (instance: string, x: number, y: number) => {
-      const nodes = store.getState().nodes;
+      const { nodes, selected } = store.getState();
+      if (selected.length > 1 && selected.includes(instance)) {
+        dragBump.current = null;
+        moveGroup(instance, x, y, selected);
+        return;
+      }
       setPositions((prev) => {
         const bump = dragBump.current?.dragged === instance ? dragBump.current : null;
         // Two views of the neighbours: `others` virtually reverts an active
@@ -207,40 +281,16 @@ export default function App() {
 
         // Modules never overlap: when the requested spot is occupied, push
         // the dragged panel out to the nearest free grid spot along the
-        // drag's dominant axis. Near-side pushes make the panel stop
-        // against its neighbour; once the pointer crosses the neighbour's
-        // midpoint the far-side push wins and the panel jumps over it.
+        // drag's dominant axis (resolvePush in rackLayout.ts — shared with
+        // group drags).
         const resolve = (requested: { x: number; y: number }) => {
-          const rect = rectAt(requested);
-          const hits = others.filter((o) => rectsOverlap(rect, o.rect)).map((o) => o.rect);
-          const horizFirst =
-            Math.abs(requested.x - currentPos.x) >= Math.abs(requested.y - currentPos.y);
-          for (const axis of horizFirst ? (['x', 'y'] as const) : (['y', 'x'] as const)) {
-            let best: { x: number; y: number } | null = null;
-            let bestDist = Infinity;
-            for (const r of hits) {
-              const cands =
-                axis === 'x'
-                  ? [
-                      { x: snap(r.x + r.w), y: requested.y },
-                      { x: snap(r.x - rect.w), y: requested.y },
-                    ]
-                  : [
-                      { x: requested.x, y: snap(r.y + r.h) },
-                      { x: requested.x, y: snap(r.y - rect.h) },
-                    ];
-              for (const c of cands) {
-                if (overlapsAny(c)) continue;
-                const dist = Math.abs(c.x - requested.x) + Math.abs(c.y - requested.y);
-                if (dist < bestDist) {
-                  best = c;
-                  bestDist = dist;
-                }
-              }
-            }
-            if (best) return best;
-          }
-          return null;
+          const { w, h } = rectAt(requested);
+          return resolvePush(
+            requested,
+            currentPos,
+            { w, h },
+            others.map((o) => o.rect),
+          );
         };
 
         // Co-operative bump: the drag has committed past a neighbour (the
@@ -358,7 +408,7 @@ export default function App() {
         return next;
       });
     },
-    [store, setPositions],
+    [store, setPositions, moveGroup],
   );
 
   // Post-render placement pass: with real panel sizes in the DOM, move any
@@ -564,9 +614,11 @@ export default function App() {
   );
 
   // Module clipboard: an opaque engine payload (modules + wires internal
-  // to the copied set) plus the copied panels' rack positions, so pastes
-  // land near their sources. Frontend-owned so it survives engine edits.
-  const clipboard = useRef<null | { payload: string; positions: Positions }>(null);
+  // to the copied set) plus each copied panel's rack rect (position AND
+  // measured size — the pasted panels aren't in the DOM yet when they're
+  // placed, so sizes must travel with the clipboard). Frontend-owned so it
+  // survives engine edits.
+  const clipboard = useRef<null | { payload: string; rects: Record<string, Rect> }>(null);
   // Rendered state for the paste menu items (a ref alone wouldn't
   // re-render the menu when the first copy happens).
   const [clipboardFilled, setClipboardFilled] = useState(false);
@@ -576,34 +628,69 @@ export default function App() {
       if (instances.length === 0) return;
       const payload = await engine.copyModules(instances);
       if (!payload) return;
-      const { positions } = store.getState();
-      const copied: Positions = {};
+      const { nodes, positions } = store.getState();
+      const rects: Record<string, Rect> = {};
       for (const id of instances) {
-        if (positions[id]) copied[id] = positions[id];
+        const idx = nodes.findIndex((n) => n.instance_id === id);
+        const pos = positions[id] ?? defaultPosition(Math.max(idx, 0));
+        rects[id] = moduleRect(id, pos);
       }
-      clipboard.current = { payload, positions: copied };
+      clipboard.current = { payload, rects };
       setClipboardFilled(true);
     },
     [store],
   );
+
+  // Last pointer position over the rack, in unzoomed rack coordinates —
+  // pastes land the group there. Tracked in a ref (no re-renders).
+  const rackMouse = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!rackEl) return;
+    const onMove = (e: MouseEvent) => {
+      const rect = rackEl.getBoundingClientRect();
+      rackMouse.current = {
+        x: (e.clientX - rect.left - pan.x) / zoom,
+        y: (e.clientY - rect.top - pan.y) / zoom,
+      };
+    };
+    const onLeave = () => {
+      rackMouse.current = null;
+    };
+    rackEl.addEventListener('mousemove', onMove);
+    rackEl.addEventListener('mouseleave', onLeave);
+    return () => {
+      rackEl.removeEventListener('mousemove', onMove);
+      rackEl.removeEventListener('mouseleave', onLeave);
+    };
+  }, [rackEl, pan, zoom]);
 
   const pasteModules = useCallback(async () => {
     const clip = clipboard.current;
     if (!clip) return;
     const renames = await engine.pasteModules(clip.payload);
     if (!renames) return;
-    // Place each pasted panel one grid step down-right of its source
-    // (falling back to the nearest free spot), and select the new set.
+    // The group pastes as ONE rigid unit: relative arrangement preserved,
+    // its bounding box centered on the pointer (or one grid step down-right
+    // of the source when the pointer isn't over the rack), snapped to the
+    // grid and pushed to the nearest free spot for the whole box.
     setPositions((prev) => {
       const next = { ...prev };
       const placed: Rect[] = Object.entries(next).map(([id, pos]) => moduleRect(id, pos));
+      const srcRects = Object.keys(renames)
+        .map((oldId) => clip.rects[oldId])
+        .filter((r): r is Rect => !!r);
+      const bbox = boundingBox(srcRects.length > 0 ? srcRects : [{ x: 0, y: 0, w: 0, h: 0 }]);
+      const mouse = rackMouse.current;
+      const want = mouse
+        ? { x: snap(mouse.x - bbox.w / 2), y: snap(mouse.y - bbox.h / 2) }
+        : { x: bbox.x + GRID, y: bbox.y + GRID };
+      const spot = nearestFreeSpot(want, { w: bbox.w, h: bbox.h }, placed) ?? want;
       for (const [oldId, newId] of Object.entries(renames)) {
-        const src = clip.positions[oldId];
-        const at = src ? { x: src.x + GRID, y: src.y + GRID } : { x: 0, y: 0 };
-        const rect = moduleRect(newId, at);
-        const spot = nearestFreeSpot(at, { w: rect.w, h: rect.h }, placed) ?? at;
-        next[newId] = spot;
-        placed.push(moduleRect(newId, spot));
+        const src = clip.rects[oldId];
+        next[newId] = src
+          ? { x: spot.x + (src.x - bbox.x), y: spot.y + (src.y - bbox.y) }
+          : { x: spot.x, y: spot.y };
+        placed.push({ ...next[newId], w: src?.w ?? GRID * 4, h: src?.h ?? GRID * 2 });
       }
       saveJson(POSITIONS_KEY, next);
       return next;
@@ -844,6 +931,59 @@ export default function App() {
     },
     [store, wireColors, refresh, setPending],
   );
+
+  // Marquee select: window-level move/up listeners while a background drag
+  // is sweeping. Selection resolves on release — every module whose rect
+  // intersects the swept rectangle (in rack coordinates) gets selected.
+  const toRackCoords = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = rackEl?.getBoundingClientRect();
+      return {
+        x: ((rect ? clientX - rect.left : clientX) - pan.x) / zoom,
+        y: ((rect ? clientY - rect.top : clientY) - pan.y) / zoom,
+      };
+    },
+    [rackEl, pan, zoom],
+  );
+  const marqueeActive = marquee !== null;
+  useEffect(() => {
+    if (!marqueeActive) return;
+    const onMove = (e: MouseEvent) => {
+      const p = toRackCoords(e.clientX, e.clientY);
+      setMarquee((m) => (m ? { ...m, x1: p.x, y1: p.y } : m));
+    };
+    const onUp = () => {
+      const m = marqueeRef.current;
+      setMarquee(null);
+      if (!m) return;
+      const box: Rect = {
+        x: Math.min(m.x0, m.x1),
+        y: Math.min(m.y0, m.y1),
+        w: Math.abs(m.x1 - m.x0),
+        h: Math.abs(m.y1 - m.y0),
+      };
+      // A motionless press is a plain background click (already cleared on
+      // mousedown), not a selection sweep.
+      if (box.w < 2 && box.h < 2) return;
+      const { nodes, positions, selected } = store.getState();
+      const hit = nodes
+        .filter((n, i) =>
+          rectsOverlap(
+            box,
+            moduleRect(n.instance_id, positions[n.instance_id] ?? defaultPosition(i)),
+          ),
+        )
+        .map((n) => n.instance_id);
+      const next = m.additive ? [...new Set([...selected, ...hit])] : hit;
+      store.set({ selected: next });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [marqueeActive, toRackCoords, store]);
 
   // Right-click never shows the browser/Tauri context menu anywhere in the
   // app; specific surfaces (modules, rack background) open the app-styled
@@ -1168,16 +1308,21 @@ export default function App() {
               onDrop={onRackDrop}
               onContextMenu={onRackContextMenu}
               onMouseDown={(e) => {
-                // Pressing the rack background abandons a pending wire and
-                // clears the selection. Mousedown, not click: selection
-                // happens on mousedown too, and the synthetic click a
-                // module drag fires on the rack (mouseup landing over the
-                // background) must not wipe the drag's own selection.
+                // Pressing the rack background abandons a pending wire,
+                // clears the selection (unless shift/cmd/ctrl — additive
+                // marquee), and arms a marquee sweep. Mousedown, not click:
+                // selection happens on mousedown too, and the synthetic
+                // click a module drag fires on the rack (mouseup landing
+                // over the background) must not wipe the drag's own
+                // selection.
                 if (e.button !== 0) return;
                 if ((e.target as HTMLElement).closest?.('.module-panel')) return;
+                const additive = e.shiftKey || e.metaKey || e.ctrlKey;
                 const { pending, selected } = store.getState();
                 if (pending) setPending(null);
-                if (selected.length > 0) store.set({ selected: [] });
+                if (!additive && selected.length > 0) store.set({ selected: [] });
+                const p = toRackCoords(e.clientX, e.clientY);
+                setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
               }}
             >
               <div
@@ -1209,6 +1354,18 @@ export default function App() {
                     No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
                     rack.
                   </p>
+                )}
+                {marquee && (
+                  <div
+                    className="marquee"
+                    data-testid="marquee"
+                    style={{
+                      left: Math.min(marquee.x0, marquee.x1),
+                      top: Math.min(marquee.y0, marquee.y1),
+                      width: Math.abs(marquee.x1 - marquee.x0),
+                      height: Math.abs(marquee.y1 - marquee.y0),
+                    }}
+                  />
                 )}
               </div>
               <WireOverlay
