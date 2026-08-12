@@ -153,7 +153,9 @@ describe('collapse-to-macro UI', () => {
   it('macros list in their own library section and instantiate on click', async () => {
     state.modules = [OSC, VCA, TONE_MACRO];
     render(<App />);
-    await screen.findByTestId('library-category-Macros');
+    await screen.findByTestId('add-module-btn');
+    fireEvent.click(screen.getByTestId('add-module-btn'));
+    await screen.findByTestId('picker-category-Macros');
     fireEvent.click(screen.getByTestId('library-add-macro.tone'));
     await waitFor(() =>
       expect(fakeEngine.addModule).toHaveBeenCalledWith(

@@ -277,9 +277,10 @@ describe('App wiring flow', () => {
     expect(screen.queryByTestId('wiring-hint')).toBeNull();
   });
 
-  it('adding a module from the library generates a fresh instance id', async () => {
+  it('adding a module from the picker generates a fresh instance id', async () => {
     render(<App />);
-    await waitFor(() => expect(screen.getByTestId('module-library')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('add-module-btn')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('add-module-btn'));
     fireEvent.click(screen.getByTestId('library-add-com.dj.oscillator'));
     await waitFor(() =>
       // osc1 is taken by the existing node's instance id namespace; the

@@ -17,7 +17,7 @@ import { DocsPanel } from './components/DocsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
-import { MODULE_DRAG_TYPE, ModuleLibrary, nextInstanceId } from './components/ModuleLibrary';
+import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
 import { GRID, snap } from './components/ModulePanel';
 import { RackModule } from './components/RackModule';
 import { TooltipLayer } from './components/TooltipLayer';
@@ -101,6 +101,8 @@ export default function App() {
   const [ctxMenu, setCtxMenu] = useState<null | { x: number; y: number; instance?: string }>(null);
   // In-app module documentation (opened from the module context menu).
   const [docs, setDocs] = useState<null | { typeId: string; manifest: Manifest }>(null);
+  // Cmd+M module picker modal.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [zoom, setZoom] = useState<number>(() => loadZoom());
   // Infinite canvas: the rack is translated by `pan` (screen px) before the
   // zoom scale, so scrolling/dragging the background opens up new area in
@@ -670,6 +672,9 @@ export default function App() {
       } else if (key === 'v') {
         e.preventDefault();
         void pasteModules();
+      } else if (key === 'm') {
+        e.preventDefault();
+        setPickerOpen((open) => !open);
       } else if (key === '=' || key === '+') {
         e.preventDefault();
         changeZoom(1);
@@ -684,6 +689,24 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [store, refresh, changeZoom, savePatch, copyModules, pasteModules, removeModules]);
+
+  // Click-to-add from the picker: land the module at the center of the
+  // current view (pan/zoom-aware), then close the modal.
+  const addFromPicker = useCallback(
+    (typeId: string) => {
+      let at: { x: number; y: number } | undefined;
+      if (rackEl) {
+        const rect = rackEl.getBoundingClientRect();
+        at = {
+          x: snap((rect.width / 2 - pan.x) / zoom),
+          y: snap((rect.height / 2 - pan.y) / zoom),
+        };
+      }
+      setPickerOpen(false);
+      void addModule(typeId, at);
+    },
+    [rackEl, pan, zoom, addModule],
+  );
 
   // Drop a module dragged out of the library at the pointer position,
   // snapped to the rack grid (in unzoomed rack coordinates).
@@ -710,6 +733,7 @@ export default function App() {
           y: snap(e.clientY - rect.top - pan.y),
         };
       }
+      setPickerOpen(false);
       void addModule(typeId, at);
     },
     [rackEl, zoom, pan, addModule],
@@ -868,8 +892,17 @@ export default function App() {
       onSelect: () => void pasteModules(),
     };
     if (!instance) {
-      // Rack background: Paste plus the same items as the native File menu.
-      return [paste, ...fileMenuItems];
+      // Rack background: Add Module + Paste plus the same items as the
+      // native File menu.
+      return [
+        {
+          label: 'Add Module… (⌘M)',
+          testId: 'ctx-add-module',
+          onSelect: () => setPickerOpen(true),
+        },
+        paste,
+        ...fileMenuItems,
+      ];
     }
     // Right-click inside a multi-selection acts on the whole group; on any
     // other module it acts on just that module.
@@ -937,6 +970,14 @@ export default function App() {
             Library
           </button>
         </nav>
+        <button
+          className="add-module-btn"
+          data-testid="add-module-btn"
+          data-tip="Add a module (⌘M)"
+          onClick={() => setPickerOpen(true)}
+        >
+          + Add Module
+        </button>
         <span
           className="patch-title"
           data-testid="patch-title"
@@ -1074,8 +1115,14 @@ export default function App() {
         </div>
       )}
       {view === 'library' && <LibraryView client={library} />}
+      {pickerOpen && (
+        <ModulePicker
+          modules={moduleLib}
+          onAdd={addFromPicker}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
       <div className="app-body" style={view === 'rack' ? undefined : { display: 'none' }}>
-        <ModuleLibrary modules={moduleLib} onAdd={(typeId) => void addModule(typeId)} />
         <RackStoreContext.Provider value={store}>
           <DeckUIContext.Provider value={deckUI}>
             <div

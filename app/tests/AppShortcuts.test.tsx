@@ -45,7 +45,7 @@ vi.mock('../src/engine', () => ({
 }));
 
 import App from '../src/App';
-import { MODULE_DRAG_TYPE } from '../src/components/ModuleLibrary';
+import { MODULE_DRAG_TYPE } from '../src/components/ModulePicker';
 
 function node(instance: string, manifest: Manifest) {
   return {
@@ -222,20 +222,27 @@ describe('selection copy/paste/delete shortcuts', () => {
   });
 });
 
-describe('drag module from library onto rack', () => {
-  it('library entries are draggable and export the module type', async () => {
+describe('cmd+M module picker', () => {
+  it('cmd/ctrl+M toggles the picker modal; adding closes it', async () => {
     await renderApp();
-    const entry = screen.getByTestId('library-add-com.dj.oscillator');
-    expect(entry.getAttribute('draggable')).toBe('true');
-    const dataTransfer = {
-      data: {} as Record<string, string>,
-      setData(type: string, v: string) {
-        this.data[type] = v;
-      },
-      effectAllowed: '',
-    };
-    fireEvent.dragStart(entry, { dataTransfer });
-    expect(dataTransfer.data[MODULE_DRAG_TYPE]).toBe('com.dj.oscillator');
+    expect(screen.queryByTestId('module-picker')).toBeNull();
+    fireEvent.keyDown(window, { key: 'm', metaKey: true });
+    expect(screen.getByTestId('module-picker')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('library-add-com.dj.oscillator'));
+    await waitFor(() =>
+      expect(fakeEngine.addModule).toHaveBeenCalledWith('oscillat1', 'com.dj.oscillator'),
+    );
+    expect(screen.queryByTestId('module-picker')).toBeNull();
+    fireEvent.keyDown(window, { key: 'm', ctrlKey: true });
+    expect(screen.getByTestId('module-picker')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'm', ctrlKey: true });
+    expect(screen.queryByTestId('module-picker')).toBeNull();
+  });
+
+  it('the header button opens it too', async () => {
+    await renderApp();
+    fireEvent.click(screen.getByTestId('add-module-btn'));
+    expect(screen.getByTestId('module-picker')).toBeTruthy();
   });
 
   it('dropping on the rack adds the module at the snapped drop point', async () => {

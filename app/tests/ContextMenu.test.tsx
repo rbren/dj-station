@@ -220,18 +220,20 @@ describe('module context menu', () => {
 });
 
 describe('background context menu', () => {
-  it('mirrors the File menu (plus Paste): New / Save / Save As / Open', async () => {
+  it('mirrors the File menu (plus Add Module / Paste)', async () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 300, clientY: 200 });
     const menu = screen.getByTestId('context-menu');
     expect(menu).toBeTruthy();
+    expect(screen.getByTestId('ctx-add-module')).toBeTruthy();
     expect(screen.getByTestId('ctx-paste')).toBeTruthy();
     expect(screen.getByTestId('ctx-new-patch')).toBeTruthy();
     expect(screen.getByTestId('ctx-save')).toBeTruthy();
     expect(screen.getByTestId('ctx-save-as')).toBeTruthy();
     expect(screen.getByTestId('ctx-open')).toBeTruthy();
-    // Paste plus exactly the File-menu items — no module actions here.
-    expect(menu.querySelectorAll('.context-menu-item')).toHaveLength(5);
+    // Add Module + Paste plus exactly the File-menu items — no module
+    // actions here.
+    expect(menu.querySelectorAll('.context-menu-item')).toHaveLength(6);
     expect(screen.queryByTestId('ctx-delete')).toBeNull();
 
     fireEvent.click(screen.getByTestId('ctx-save'));

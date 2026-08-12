@@ -23,7 +23,7 @@
       using short columns for each input/output pair.
 - [x] Infinite canvas: let the rack overscroll to open up new areas in every
       direction.
-- [ ] Module picker overhaul: remove the ugly left pane; cmd+m opens a modal
+- [x] Module picker overhaul: remove the ugly left pane; cmd+m opens a modal
       picker showing each module fully rendered but zoomed out; click-drag
       modules from the modal onto the canvas; include a category filter.
 - [ ] Much better EQ/filter module: frequency-domain display with 4 draggable
