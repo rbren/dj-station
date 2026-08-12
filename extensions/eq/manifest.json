@@ -1,0 +1,55 @@
+{
+  "id": "com.dj.eq",
+  "name": "EQ",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Shaping",
+  "ui": "ui.js",
+  "inputs": [
+    { "id": "in", "name": "In", "default": 0.0, "audio": true },
+
+    { "id": "freq1", "name": "Freq 1", "default": -1.4,
+      "knob": { "style": "continuous", "min": -3.7, "max": 6.1, "curve": "linear" },
+      "display": { "unit": "Hz", "map": { "kind": "volt_per_octave" } } },
+    { "id": "gain1", "name": "Gain 1", "default": 0.0,
+      "knob": { "style": "continuous", "min": -15.0, "max": 15.0, "curve": "linear" },
+      "display": { "unit": "dB" } },
+    { "id": "q1", "name": "Q 1", "default": 1.0,
+      "knob": { "style": "continuous", "min": 0.2, "max": 12.0, "curve": "exp" },
+      "display": { "unit": "" } },
+
+    { "id": "freq2", "name": "Freq 2", "default": 0.6,
+      "knob": { "style": "continuous", "min": -3.7, "max": 6.1, "curve": "linear" },
+      "display": { "unit": "Hz", "map": { "kind": "volt_per_octave" } } },
+    { "id": "gain2", "name": "Gain 2", "default": 0.0,
+      "knob": { "style": "continuous", "min": -15.0, "max": 15.0, "curve": "linear" },
+      "display": { "unit": "dB" } },
+    { "id": "q2", "name": "Q 2", "default": 1.0,
+      "knob": { "style": "continuous", "min": 0.2, "max": 12.0, "curve": "exp" },
+      "display": { "unit": "" } },
+
+    { "id": "freq3", "name": "Freq 3", "default": 2.6,
+      "knob": { "style": "continuous", "min": -3.7, "max": 6.1, "curve": "linear" },
+      "display": { "unit": "Hz", "map": { "kind": "volt_per_octave" } } },
+    { "id": "gain3", "name": "Gain 3", "default": 0.0,
+      "knob": { "style": "continuous", "min": -15.0, "max": 15.0, "curve": "linear" },
+      "display": { "unit": "dB" } },
+    { "id": "q3", "name": "Q 3", "default": 1.0,
+      "knob": { "style": "continuous", "min": 0.2, "max": 12.0, "curve": "exp" },
+      "display": { "unit": "" } },
+
+    { "id": "freq4", "name": "Freq 4", "default": 4.6,
+      "knob": { "style": "continuous", "min": -3.7, "max": 6.1, "curve": "linear" },
+      "display": { "unit": "Hz", "map": { "kind": "volt_per_octave" } } },
+    { "id": "gain4", "name": "Gain 4", "default": 0.0,
+      "knob": { "style": "continuous", "min": -15.0, "max": 15.0, "curve": "linear" },
+      "display": { "unit": "dB" } },
+    { "id": "q4", "name": "Q 4", "default": 1.0,
+      "knob": { "style": "continuous", "min": 0.2, "max": 12.0, "curve": "exp" },
+      "display": { "unit": "" } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Out" }
+  ],
+  "latency_samples": 0
+}

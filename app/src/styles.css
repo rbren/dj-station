@@ -784,6 +784,46 @@ body {
   padding: 2px 0 0;
 }
 
+/* --- 4-band parametric EQ ------------------------------------------- */
+
+.eq-ui {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.eq-plot {
+  background: #14161a;
+  border-radius: 4px;
+}
+
+.eq-grid-label {
+  fill: #5d6675;
+  font-size: 8px;
+}
+
+.eq-handle {
+  cursor: grab;
+}
+
+.eq-handle-label {
+  fill: #14161a;
+  font-size: 7px;
+  font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+}
+
+.eq-readout {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.6rem;
+  color: #8a93a2;
+  white-space: nowrap;
+}
+
 /* --- Scope trace + spectrum ----------------------------------------- */
 
 .scope-ui {

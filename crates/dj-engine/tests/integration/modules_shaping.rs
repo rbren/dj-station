@@ -998,3 +998,99 @@ fn function_curve_bends_the_rise() {
         "negative curve is not slow-starting: {slow}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// com.dj.eq
+// ---------------------------------------------------------------------------
+
+/// Sine at `pitch` -> EQ (band 1 configured, others flat) -> out.
+fn render_eq(pitch: f32, freq1: f32, gain1: f32, q1: f32) -> Vec<f32> {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("eq1", "com.dj.eq").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "eq1", "in").unwrap();
+    e.connect("eq1", "out", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "pitch", pitch).unwrap();
+    e.set_knob_value("eq1", "freq1", freq1).unwrap();
+    e.set_knob_value("eq1", "gain1", gain1).unwrap();
+    e.set_knob_value("eq1", "q1", q1).unwrap();
+    e.render_offline((0.4 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap()
+}
+
+fn db_vs(x: &[f32], r: &[f32]) -> f32 {
+    20.0 * (rms(tail(x)) / rms(tail(r))).log10()
+}
+
+#[test]
+fn eq_flat_bands_pass_through() {
+    let flat = render_eq(0.0, 0.0, 0.0, 1.0);
+    let dry = {
+        let mut e = mono_engine();
+        e.add_module("osc1", "com.dj.oscillator").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.connect("osc1", "audio", "out1", "l").unwrap();
+        e.render_offline((0.4 * SR) as usize)
+            .unwrap()
+            .pop()
+            .unwrap()
+    };
+    let (f, d) = (rms(tail(&flat)), rms(tail(&dry)));
+    assert!(
+        (f - d).abs() / d < 0.01,
+        "flat EQ is not transparent: {f} vs {d}"
+    );
+}
+
+#[test]
+fn eq_boost_and_cut_at_center_track_the_gain() {
+    // Band centered exactly on the tone (pitch 0 = C4).
+    let boosted = render_eq(0.0, 0.0, 6.0, 2.0);
+    let cut = render_eq(0.0, 0.0, -6.0, 2.0);
+    let flat = render_eq(0.0, 0.0, 0.0, 2.0);
+    let up = db_vs(&boosted, &flat);
+    let down = db_vs(&cut, &flat);
+    assert!((up - 6.0).abs() < 0.5, "+6 dB boost measured {up} dB");
+    assert!((down + 6.0).abs() < 0.5, "-6 dB cut measured {down} dB");
+}
+
+#[test]
+fn eq_q_narrows_the_band() {
+    // Cut centered one octave above the tone: a wide (low-Q) bell still
+    // reaches down to the tone, a narrow (high-Q) one does not.
+    let wide = render_eq(0.0, 1.0, -12.0, 0.4);
+    let narrow = render_eq(0.0, 1.0, -12.0, 8.0);
+    let flat = render_eq(0.0, 1.0, 0.0, 1.0);
+    let w = db_vs(&wide, &flat);
+    let n = db_vs(&narrow, &flat);
+    assert!(w < -2.0, "wide cut should reach the tone: {w} dB");
+    assert!(n > -0.5, "narrow cut should spare the tone: {n} dB");
+    assert!(w < n - 2.0, "wider band should cut more: {w} vs {n}");
+}
+
+#[test]
+fn eq_stays_finite_with_all_bands_extreme() {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("eq1", "com.dj.eq").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "eq1", "in").unwrap();
+    e.connect("eq1", "out", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "waveform", 1.0).unwrap(); // saw
+    for b in 1..=4 {
+        e.set_knob_value("eq1", &format!("freq{b}"), b as f32 - 2.0)
+            .unwrap();
+        e.set_knob_value("eq1", &format!("gain{b}"), 15.0).unwrap();
+        e.set_knob_value("eq1", &format!("q{b}"), 12.0).unwrap();
+    }
+    let out = e
+        .render_offline((0.4 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert!(out.iter().all(|v| v.is_finite()), "EQ output blew up");
+    assert!(peak(&out) <= 15.0 + 1e-3, "EQ output exceeds clamp");
+}

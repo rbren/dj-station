@@ -6,6 +6,7 @@
 import { memo, useContext, useMemo, type ComponentType } from 'react';
 import AdsrUI from '../../../extensions/adsr/ui-src/AdsrUI';
 import CameraUI from '../../../extensions/camera/ui-src/CameraUI';
+import EqUI from '../../../extensions/eq/ui-src/EqUI';
 import EuclidUI from '../../../extensions/euclid/ui-src/EuclidUI';
 import LfoUI from '../../../extensions/lfo/ui-src/LfoUI';
 import QuantizerUI from '../../../extensions/quantizer/ui-src/QuantizerUI';
@@ -32,6 +33,7 @@ const CUSTOM_UIS: Record<string, ComponentType<{ handle: ModuleHandle; instanceI
   'com.dj.adsr': AdsrUI,
   'com.dj.camera': CameraUI,
   'com.dj.compressor': CompressorUI,
+  'com.dj.eq': EqUI,
   'com.dj.euclid': EuclidUI,
   'com.dj.filter': FilterUI,
   'com.dj.lfo': LfoUI,

@@ -544,6 +544,21 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     outputGroups: [{ outputs: ['out_l', 'out_r', 'gr'] }],
   }),
 
+  'com.dj.eq': () => ({
+    groups: [
+      { title: 'audio', inputs: ['in'] },
+      ...[1, 2, 3, 4].map((b) => ({
+        title: `band ${b}`,
+        kind: 'column' as const,
+        inputs: [
+          { jack: `freq${b}`, label: 'freq' },
+          { jack: `gain${b}`, label: 'gain' },
+          { jack: `q${b}`, label: 'Q' },
+        ],
+      })),
+    ],
+  }),
+
   'com.dj.waveshaper': () => ({
     groups: [
       { title: 'audio', inputs: ['in'] },

@@ -26,7 +26,7 @@
 - [x] Module picker overhaul: remove the ugly left pane; cmd+m opens a modal
       picker showing each module fully rendered but zoomed out; click-drag
       modules from the modal onto the canvas; include a category filter.
-- [ ] Much better EQ/filter module: frequency-domain display with 4 draggable
+- [x] Much better EQ/filter module: frequency-domain display with 4 draggable
       controls for frequency levels, each with a Q parameter controlling how
       wide a band it governs.
 - [ ] Drums are way too quiet — make them louder.

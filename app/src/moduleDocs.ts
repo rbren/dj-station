@@ -238,6 +238,26 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     outputs: { out: 'Shaped audio.' },
     examples: ['Oscillator -> in with LFO -> drive for evolving grit.'],
   },
+  'com.dj.eq': {
+    summary:
+      'Four-band parametric EQ: four peaking bells in series, each with ' +
+      'frequency (1 V/oct), gain in dB and Q (bandwidth). A band at 0 dB ' +
+      'is transparent, so unused bands cost nothing. Drag the handles on ' +
+      'the response plot (scroll to change Q), or use the knobs \u2014 ' +
+      'both edit the same values. Carve mixes, notch resonances, or ' +
+      'modulate a band frequency for wah-like sweeps.',
+    inputs: {
+      in: 'Audio input.',
+      'freq#': 'Band # center frequency (1 V/oct, 0 = C4).',
+      'gain#': 'Band # boost/cut in dB (0 = bypass).',
+      'q#': 'Band # Q: higher = narrower bell.',
+    },
+    outputs: { out: 'Equalized audio.' },
+    examples: [
+      'Mixer -> in, cut 300 Hz mud and boost 3 kHz presence.',
+      'LFO -> freq2 with gain2 boosted for a slow wah sweep.',
+    ],
+  },
   'com.dj.compressor': {
     summary:
       'Stereo compressor with sidechain input, threshold/ratio/knee, ' +

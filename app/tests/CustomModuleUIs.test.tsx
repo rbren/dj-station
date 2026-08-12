@@ -8,6 +8,7 @@
 
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import EqUI from '../../extensions/eq/ui-src/EqUI';
 import EuclidUI from '../../extensions/euclid/ui-src/EuclidUI';
 import LfoUI from '../../extensions/lfo/ui-src/LfoUI';
 import QuantizerUI from '../../extensions/quantizer/ui-src/QuantizerUI';
@@ -285,5 +286,64 @@ describe('WaveshaperUI', () => {
     const { container } = render(<WaveshaperUI handle={handle} />);
     expect(screen.getByTestId('shaper-mode').textContent).toBe('saturate');
     expect(container.querySelector('.shaper-curve')).toBeTruthy();
+  });
+});
+
+describe('EqUI', () => {
+  const eqValues = () => ({
+    freq1: -1.4,
+    gain1: 0,
+    q1: 1,
+    freq2: 0.6,
+    gain2: 6,
+    q2: 2,
+    freq3: 2.6,
+    gain3: 0,
+    q3: 1,
+    freq4: 4.6,
+    gain4: 0,
+    q4: 1,
+  });
+
+  it('draws the response curve and four band handles with a readout', () => {
+    const { container } = render(<EqUI handle={handleWith(eqValues())} />);
+    expect(screen.getByTestId('eq-curve')).toBeTruthy();
+    for (let b = 1; b <= 4; b++) expect(screen.getByTestId(`eq-handle-${b}`)).toBeTruthy();
+    // Only the active (nonzero-gain) band draws its shadow curve.
+    expect(container.querySelectorAll('.eq-band-curve')).toHaveLength(1);
+    expect(screen.getByTestId('eq-readout').textContent).toContain('+6.0dB');
+  });
+
+  it('dragging a handle writes freq and gain; release is an edit boundary', () => {
+    const handle = handleWith(eqValues());
+    render(<EqUI handle={handle} />);
+    fireEvent.mouseDown(screen.getByTestId('eq-handle-2'), {
+      clientX: 100,
+      clientY: 60,
+      button: 0,
+    });
+    // Right = higher frequency, up = more gain.
+    fireEvent.mouseMove(window, { clientX: 140, clientY: 40 });
+    const calls = (handle.setParam as ReturnType<typeof vi.fn>).mock.calls;
+    const freq = calls.find(([id]) => id === 'freq2');
+    const gain = calls.find(([id]) => id === 'gain2');
+    expect(freq).toBeTruthy();
+    expect(freq![1]).toBeGreaterThan(0.6);
+    expect(gain).toBeTruthy();
+    expect(gain![1]).toBeGreaterThan(6);
+    expect(handle.endEdit).not.toHaveBeenCalled();
+    fireEvent.mouseUp(window);
+    expect(handle.endEdit).toHaveBeenCalled();
+  });
+
+  it('scrolling over a handle adjusts that band Q within limits', () => {
+    const handle = handleWith(eqValues());
+    render(<EqUI handle={handle} />);
+    // Scroll down = wider (lower Q).
+    fireEvent.wheel(screen.getByTestId('eq-handle-2'), { deltaY: 480 });
+    const calls = (handle.setParam as ReturnType<typeof vi.fn>).mock.calls;
+    const q = calls.find(([id]) => id === 'q2');
+    expect(q).toBeTruthy();
+    expect(q![1]).toBeCloseTo(1, 3); // 2 * 2^-1
   });
 });

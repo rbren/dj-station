@@ -104,12 +104,57 @@ fn regen_modulation_voice() {
     write_events(&dir, &EventsFile::seconds(0.6));
 }
 
+/// The 4-band parametric EQ carving a saw: a low-shelf-ish wide boost, a
+/// narrow mid cut, a presence bump and a high notch, all four bands live.
+fn regen_eq_carve() {
+    let dir = crate::common::e2e::case_dir("shaping-eq-carve");
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("eq1", "com.dj.eq").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    e.set_knob_value("osc1", "waveform", 1.0).unwrap(); // saw
+    e.set_knob_value("osc1", "pitch", -2.0).unwrap(); // C2
+
+    e.connect("osc1", "audio", "eq1", "in").unwrap();
+    // Band 1: broad low boost around 110 Hz.
+    e.set_knob_value("eq1", "freq1", -1.25).unwrap();
+    e.set_knob_value("eq1", "gain1", 6.0).unwrap();
+    e.set_knob_value("eq1", "q1", 0.7).unwrap();
+    // Band 2: narrow cut near 520 Hz.
+    e.set_knob_value("eq1", "freq2", 1.0).unwrap();
+    e.set_knob_value("eq1", "gain2", -12.0).unwrap();
+    e.set_knob_value("eq1", "q2", 6.0).unwrap();
+    // Band 3: presence bump near 2.1 kHz.
+    e.set_knob_value("eq1", "freq3", 3.0).unwrap();
+    e.set_knob_value("eq1", "gain3", 4.5).unwrap();
+    e.set_knob_value("eq1", "q3", 1.5).unwrap();
+    // Band 4: deep notch near 8.4 kHz.
+    e.set_knob_value("eq1", "freq4", 5.0).unwrap();
+    e.set_knob_value("eq1", "gain4", -15.0).unwrap();
+    e.set_knob_value("eq1", "q4", 8.0).unwrap();
+
+    e.connect("eq1", "out", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-shaping-eq-carve")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(0.5));
+}
+
 #[test]
 fn e2e_shaping_fold_ladder() {
     if regen() {
         regen_shaping_chain();
     }
     check_case("shaping-fold-ladder");
+}
+
+#[test]
+fn e2e_shaping_eq_carve() {
+    if regen() {
+        regen_eq_carve();
+    }
+    check_case("shaping-eq-carve");
 }
 
 #[test]

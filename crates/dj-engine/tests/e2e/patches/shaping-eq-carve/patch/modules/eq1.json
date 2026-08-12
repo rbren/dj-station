@@ -1,0 +1,71 @@
+{
+  "ext": "com.dj.eq",
+  "knobs": {
+    "freq1": {
+      "position": 0.25,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "freq2": {
+      "position": 0.47959182,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "freq3": {
+      "position": 0.68367344,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "freq4": {
+      "position": 0.88775504,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gain1": {
+      "position": 0.7,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gain2": {
+      "position": 0.1,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gain3": {
+      "position": 0.65,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gain4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "q1": {
+      "position": 0.30597395,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "q2": {
+      "position": 0.83070624,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "q3": {
+      "position": 0.4921186,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "q4": {
+      "position": 0.9009695,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}
