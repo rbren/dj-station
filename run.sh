@@ -77,7 +77,10 @@ else
   if [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
     fail "webkit2gtk-4.1 not found — install libwebkit2gtk-4.1-dev (Linux) or run headless"
   fi
-  if [ ! -d app/node_modules ]; then
+  # Install deps when node_modules is missing OR stale (lockfile updated
+  # since the last install — npm ci stamps .package-lock.json on success).
+  if [ ! -d app/node_modules ] \
+    || [ app/package-lock.json -nt app/node_modules/.package-lock.json ]; then
     echo "==> installing frontend deps"
     (cd app && npm ci --no-audit --no-fund) || fail "npm ci failed"
   fi
