@@ -1789,9 +1789,12 @@ body {
 
 /* Collapse-to-macro (M4, PRD §6) */
 
+/* Selected modules get a bright, unmissable border (multi-select for
+   copy/paste/delete/collapse-to-macro). */
 .module-panel-selected {
-  outline: 2px solid #e6b450;
+  outline: 3px solid #4dd8ff;
   outline-offset: 2px;
+  box-shadow: 0 0 12px 2px rgba(77, 216, 255, 0.55);
 }
 
 .collapse-macro-btn {

@@ -95,9 +95,12 @@ enum EditKey<'a> {
     KnobReset(&'a str, &'a str),
     AttenOffset(&'a str, &'a str),
     ModuleReset(&'a str),
+    ModuleResetMany,
     Param(&'a str, &'a str),
     Load(&'a str),
     NewPatch,
+    Paste,
+    RemoveMany,
     CollapseMacro,
     Track(&'a str),
 }
@@ -121,9 +124,12 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::KnobReset(i, j) => write!(f, "knobreset:{i}:{j}"),
             EditKey::AttenOffset(i, j) => write!(f, "attoff:{i}:{j}"),
             EditKey::ModuleReset(i) => write!(f, "modreset:{i}"),
+            EditKey::ModuleResetMany => write!(f, "modreset_many"),
             EditKey::Param(i, p) => write!(f, "param:{i}:{p}"),
             EditKey::Load(d) => write!(f, "load:{d}"),
             EditKey::NewPatch => write!(f, "new_patch"),
+            EditKey::Paste => write!(f, "paste"),
+            EditKey::RemoveMany => write!(f, "remove_many"),
             EditKey::CollapseMacro => write!(f, "collapse_macro"),
             EditKey::Track(i) => write!(f, "track:{i}"),
         }
@@ -1051,6 +1057,62 @@ fn reset_knob(state: State<AppState>, instance: String, jack: String) -> CmdResu
 fn reset_module(state: State<AppState>, instance: String) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::ModuleReset(&instance))?;
     engine.reset_module(&instance).map_err(err)
+}
+
+/// Group "Reset to defaults": one undo step for the whole selection.
+#[tauri::command]
+fn reset_modules(state: State<AppState>, instances: Vec<String>) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ModuleResetMany)?;
+    for instance in &instances {
+        engine.reset_module(instance).map_err(err)?;
+    }
+    Ok(())
+}
+
+/// Copy: the selected modules (with wires internal to the selection) as a
+/// clipboard document, serialized to JSON. The frontend owns the clipboard
+/// so it survives engine edits.
+#[tauri::command]
+fn copy_modules(state: State<AppState>, instances: Vec<String>) -> CmdResult<String> {
+    let engine = engine_lock(&state)?;
+    let doc = engine.snapshot("clipboard").extract_selection(&instances);
+    if doc.modules.is_empty() {
+        return Err(CmdError::invalid("nothing to copy".to_string()));
+    }
+    serde_json::to_string(&doc).map_err(err)
+}
+
+/// Paste a [`copy_modules`] clipboard as new instances (fresh ids, internal
+/// wires remapped). One undo step; returns copied id -> created id so the
+/// frontend can place each paste near its source module.
+#[tauri::command]
+fn paste_modules(
+    state: State<AppState>,
+    clipboard: String,
+) -> CmdResult<BTreeMap<String, String>> {
+    let clip: PatchDoc = serde_json::from_str(&clipboard)
+        .map_err(|e| CmdError::invalid(format!("bad clipboard: {e}")))?;
+    let mut engine = patch_edit(&state, EditKey::Paste)?;
+    let mut doc = engine.snapshot("paste");
+    let renames = doc.paste(&clip);
+    with_stopped(&mut engine, |e| {
+        e.apply_doc(&doc).map_err(err)?;
+        Ok(())
+    })?;
+    Ok(renames)
+}
+
+/// Delete the whole selection as one undo step.
+#[tauri::command]
+fn remove_modules(state: State<AppState>, instances: Vec<String>) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::RemoveMany)?;
+    with_stopped(&mut engine, |eng| {
+        for instance in &instances {
+            eng.remove_module(instance)
+                .map_err(|e| CmdError::not_found(e.to_string()))?;
+        }
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -2188,6 +2250,10 @@ fn main() {
             set_knob_atten_offset,
             reset_knob,
             reset_module,
+            reset_modules,
+            copy_modules,
+            paste_modules,
+            remove_modules,
             set_param,
             tap,
             tap_all,

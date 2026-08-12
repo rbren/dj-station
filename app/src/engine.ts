@@ -169,6 +169,23 @@ export class EngineClient extends IpcClient {
   resetModule(instance: string) {
     return this.call<void>('reset_module', { instance });
   }
+  /** Group "Reset to defaults" — one undo step for the whole selection. */
+  resetModules(instances: string[]) {
+    return this.call<void>('reset_modules', { instances });
+  }
+  /** Copy the selection as an opaque clipboard string (wires internal to
+   *  the selection ride along; external wires are dropped). */
+  copyModules(instances: string[]) {
+    return this.call<string>('copy_modules', { instances });
+  }
+  /** Paste a copyModules clipboard; returns copied id -> new instance id. */
+  pasteModules(clipboard: string) {
+    return this.call<Record<string, string>>('paste_modules', { clipboard });
+  }
+  /** Delete a whole selection as one undo step. */
+  removeModules(instances: string[]) {
+    return this.call<void>('remove_modules', { instances });
+  }
   setParam(instance: string, param: string, value: number) {
     return this.call<void>('set_param', { instance, param, value });
   }

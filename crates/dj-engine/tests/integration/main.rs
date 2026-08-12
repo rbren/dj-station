@@ -16,6 +16,7 @@
 mod common;
 
 mod analysis_sync;
+mod clipboard;
 mod conformance;
 mod deck;
 mod deck_library;

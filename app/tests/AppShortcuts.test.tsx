@@ -33,6 +33,9 @@ const fakeEngine = {
   savePatchAs: vi.fn(async () => {}),
   loadPatchByName: vi.fn(async () => {}),
   removeModule: vi.fn(async () => {}),
+  removeModules: vi.fn(async () => {}),
+  copyModules: vi.fn(async () => 'CLIP'),
+  pasteModules: vi.fn(async () => ({ osc1: 'osc2' })),
   endEdit: vi.fn(async () => {}),
 };
 
@@ -119,6 +122,63 @@ describe('zoom shortcuts', () => {
     expect(scaleOf()).toBe('scale(2.5)');
     for (let i = 0; i < 40; i++) fireEvent.keyDown(window, { key: '_', metaKey: true });
     expect(scaleOf()).toBe('scale(0.4)');
+  });
+});
+
+describe('selection copy/paste/delete shortcuts', () => {
+  const selectOsc1 = () =>
+    fireEvent.click(screen.getByTestId('module-header-osc1'), { shiftKey: true });
+
+  it('cmd+C copies the selection, cmd+V pastes it', async () => {
+    await renderApp();
+    selectOsc1();
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+    await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenCalledWith(['osc1']));
+    fireEvent.keyDown(window, { key: 'v', metaKey: true });
+    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenCalledWith('CLIP'));
+  });
+
+  it('cmd+C with nothing selected does nothing; paste with an empty clipboard too', async () => {
+    await renderApp();
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+    fireEvent.keyDown(window, { key: 'v', metaKey: true });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fakeEngine.copyModules).not.toHaveBeenCalled();
+    expect(fakeEngine.pasteModules).not.toHaveBeenCalled();
+  });
+
+  it('Backspace deletes the selection', async () => {
+    await renderApp();
+    selectOsc1();
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    await waitFor(() => expect(fakeEngine.removeModules).toHaveBeenCalledWith(['osc1']));
+  });
+
+  it('Backspace with no selection or in an input does nothing', async () => {
+    await renderApp();
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    selectOsc1();
+    fireEvent.keyDown(input, { key: 'Backspace' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fakeEngine.removeModules).not.toHaveBeenCalled();
+    input.remove();
+  });
+
+  it('pasted modules become the new selection', async () => {
+    await renderApp();
+    selectOsc1();
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+    await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenCalled());
+    state.nodes = [node('osc1', OSC), node('osc2', OSC)];
+    fireEvent.keyDown(window, { key: 'v', metaKey: true });
+    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenCalled());
+    await waitFor(() => {
+      const panel = screen.getByTestId('module-osc2');
+      expect(panel.dataset.selected).toBe('true');
+    });
+    expect(screen.getByTestId('module-osc1').dataset.selected).toBeUndefined();
   });
 });
 

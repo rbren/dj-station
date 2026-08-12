@@ -136,6 +136,97 @@ impl PatchDoc {
         }
         true
     }
+
+    /// Copy: extract `selection` as a standalone clipboard document. Keeps
+    /// wires INTERNAL to the selection (both ends selected) and drops
+    /// everything referencing modules outside it (external wires, external
+    /// deck sync targets). Macro definitions used by selected instances are
+    /// carried along so the clipboard pastes into other patches.
+    pub fn extract_selection(&self, selection: &[String]) -> PatchDoc {
+        let selected: BTreeSet<&str> = selection.iter().map(String::as_str).collect();
+        let mut modules = BTreeMap::new();
+        for (id, mf) in &self.modules {
+            if !selected.contains(id.as_str()) {
+                continue;
+            }
+            let mut mf = mf.clone();
+            if let Some(sync) = &mf.sync_to {
+                if !selected.contains(sync.as_str()) {
+                    mf.sync_to = None;
+                }
+            }
+            modules.insert(id.clone(), mf);
+        }
+        let mut wires = BTreeMap::new();
+        for (src, wf) in &self.wires {
+            if !modules.contains_key(src) {
+                continue;
+            }
+            let internal: Vec<WireEntry> = wf
+                .wires
+                .iter()
+                .filter(|w| modules.contains_key(&w.to))
+                .cloned()
+                .collect();
+            if !internal.is_empty() {
+                wires.insert(src.clone(), WireFile { wires: internal });
+            }
+        }
+        let macros = self
+            .macros
+            .iter()
+            .filter(|(id, _)| modules.values().any(|m| &m.ext == *id))
+            .map(|(id, def)| (id.clone(), def.clone()))
+            .collect();
+        PatchDoc {
+            header: self.header.clone(),
+            modules,
+            wires,
+            macros,
+        }
+    }
+
+    /// Paste: merge `clipboard` (an [`extract_selection`] result) into this
+    /// document under fresh instance ids, remapping the clipboard's internal
+    /// wires and sync targets to the new names. Returns old id -> new id.
+    pub fn paste(&mut self, clipboard: &PatchDoc) -> BTreeMap<String, String> {
+        let mut renames: BTreeMap<String, String> = BTreeMap::new();
+        for old in clipboard.modules.keys() {
+            let base = old.trim_end_matches(|c: char| c.is_ascii_digit());
+            let base = if base.is_empty() { "mod" } else { base };
+            let fresh = (1..)
+                .map(|n| format!("{base}{n}"))
+                .find(|c| !self.modules.contains_key(c) && !renames.values().any(|v| v == c))
+                .unwrap();
+            renames.insert(old.clone(), fresh);
+        }
+        for (id, def) in &clipboard.macros {
+            self.macros.entry(id.clone()).or_insert_with(|| def.clone());
+        }
+        for (old, mf) in &clipboard.modules {
+            let mut mf = mf.clone();
+            mf.sync_to = mf.sync_to.and_then(|s| renames.get(&s).cloned());
+            self.modules.insert(renames[old].clone(), mf);
+        }
+        for (src, wf) in &clipboard.wires {
+            let entries: Vec<WireEntry> = wf
+                .wires
+                .iter()
+                .filter_map(|w| {
+                    Some(WireEntry {
+                        from_jack: w.from_jack.clone(),
+                        to: renames.get(&w.to)?.clone(),
+                        to_jack: w.to_jack.clone(),
+                    })
+                })
+                .collect();
+            if let Some(new_src) = renames.get(src) {
+                self.wires
+                    .insert(new_src.clone(), WireFile { wires: entries });
+            }
+        }
+        renames
+    }
 }
 
 impl Engine {

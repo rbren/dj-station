@@ -513,6 +513,73 @@ export default function App() {
     [store],
   );
 
+  // Module clipboard: an opaque engine payload (modules + wires internal
+  // to the copied set) plus the copied panels' rack positions, so pastes
+  // land near their sources. Frontend-owned so it survives engine edits.
+  const clipboard = useRef<null | { payload: string; positions: Positions }>(null);
+  // Rendered state for the paste menu items (a ref alone wouldn't
+  // re-render the menu when the first copy happens).
+  const [clipboardFilled, setClipboardFilled] = useState(false);
+
+  const copyModules = useCallback(
+    async (instances: string[]) => {
+      if (instances.length === 0) return;
+      const payload = await engine.copyModules(instances);
+      if (!payload) return;
+      const { positions } = store.getState();
+      const copied: Positions = {};
+      for (const id of instances) {
+        if (positions[id]) copied[id] = positions[id];
+      }
+      clipboard.current = { payload, positions: copied };
+      setClipboardFilled(true);
+    },
+    [store],
+  );
+
+  const pasteModules = useCallback(async () => {
+    const clip = clipboard.current;
+    if (!clip) return;
+    const renames = await engine.pasteModules(clip.payload);
+    if (!renames) return;
+    // Place each pasted panel one grid step down-right of its source
+    // (falling back to the nearest free spot), and select the new set.
+    setPositions((prev) => {
+      const next = { ...prev };
+      const placed: Rect[] = Object.entries(next).map(([id, pos]) => moduleRect(id, pos));
+      for (const [oldId, newId] of Object.entries(renames)) {
+        const src = clip.positions[oldId];
+        const at = src ? { x: src.x + GRID, y: src.y + GRID } : { x: 0, y: 0 };
+        const rect = moduleRect(newId, at);
+        const spot = nearestFreeSpot(at, { w: rect.w, h: rect.h }, placed) ?? at;
+        next[newId] = spot;
+        placed.push(moduleRect(newId, spot));
+      }
+      saveJson(POSITIONS_KEY, next);
+      return next;
+    });
+    store.set({ selected: Object.values(renames) });
+    await refresh();
+  }, [store, setPositions, refresh]);
+
+  const removeModules = useCallback(
+    async (instances: string[]) => {
+      if (instances.length === 0) return;
+      await engine.removeModules(instances);
+      setPositions((prev) => {
+        const next = { ...prev };
+        for (const id of instances) delete next[id];
+        saveJson(POSITIONS_KEY, next);
+        return next;
+      });
+      const { pending, selected } = store.getState();
+      store.set({ selected: selected.filter((i) => !instances.includes(i)) });
+      if (pending && instances.includes(pending.instance)) setPending(null);
+      await refresh();
+    },
+    [store, setPositions, setPending, refresh],
+  );
+
   const collapseToMacro = useCallback(
     async (name: string) => {
       const selected = store.getState().selected;
@@ -527,13 +594,22 @@ export default function App() {
     [store, refresh],
   );
 
-  // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z)
-  // and rack zoom (cmd/ctrl +/-/0).
+  // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z),
+  // rack zoom (cmd/ctrl +/-/0), selection copy/paste (cmd/ctrl+C/V) and
+  // selection delete (Backspace).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         store.set({ pending: null, selected: [] });
         setCollapseName(null);
+        return;
+      }
+      if (e.key === 'Backspace' && !isEditableTarget(e.target)) {
+        const selected = store.getState().selected;
+        if (selected.length > 0) {
+          e.preventDefault();
+          void removeModules(selected);
+        }
         return;
       }
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -551,6 +627,17 @@ export default function App() {
       } else if (key === 'y') {
         e.preventDefault();
         void engine.redo().then(refresh);
+      } else if (key === 'c') {
+        // Leave cmd+C alone when the user is copying text.
+        if (window.getSelection()?.toString()) return;
+        const selected = store.getState().selected;
+        if (selected.length > 0) {
+          e.preventDefault();
+          void copyModules(selected);
+        }
+      } else if (key === 'v') {
+        e.preventDefault();
+        void pasteModules();
       } else if (key === '=' || key === '+') {
         e.preventDefault();
         changeZoom(1);
@@ -564,7 +651,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [store, refresh, changeZoom, savePatch]);
+  }, [store, refresh, changeZoom, savePatch, copyModules, pasteModules, removeModules]);
 
   // Drop a module dragged out of the library at the pointer position,
   // snapped to the rack grid (in unzoomed rack coordinates).
@@ -740,36 +827,60 @@ export default function App() {
   const ctxMenuItems = useMemo<ContextMenuItem[]>(() => {
     if (!ctxMenu) return [];
     const instance = ctxMenu.instance;
+    const paste: ContextMenuItem = {
+      label: 'Paste',
+      testId: 'ctx-paste',
+      disabled: !clipboardFilled,
+      onSelect: () => void pasteModules(),
+    };
     if (!instance) {
-      // Rack background: the same items as the native File menu.
-      return fileMenuItems;
+      // Rack background: Paste plus the same items as the native File menu.
+      return [paste, ...fileMenuItems];
     }
+    // Right-click inside a multi-selection acts on the whole group; on any
+    // other module it acts on just that module.
+    const group = selected.includes(instance) && selected.length > 1 ? selected : [instance];
+    const suffix = group.length > 1 ? ` (${group.length} modules)` : '';
     return [
       {
-        label: 'Delete',
+        label: `Copy${suffix}`,
+        testId: 'ctx-copy',
+        onSelect: () => void copyModules(group),
+      },
+      paste,
+      {
+        label: `Delete${suffix}`,
         testId: 'ctx-delete',
-        onSelect: () => void removeModule(instance),
+        onSelect: () => void removeModules(group),
       },
+      ...(group.length === 1
+        ? [
+            {
+              label: 'Documentation',
+              testId: 'ctx-docs',
+              onSelect: () => openDocs(instance),
+            },
+          ]
+        : []),
       {
-        label: 'Documentation',
-        testId: 'ctx-docs',
-        onSelect: () => openDocs(instance),
-      },
-      {
-        label: 'Reset to defaults',
+        label: `Reset to defaults${suffix}`,
         testId: 'ctx-reset',
         onSelect: () => {
-          void engine.resetModule(instance).then(refresh);
+          void engine.resetModules(group).then(refresh);
         },
       },
-      {
-        label: 'Save patch',
-        testId: 'ctx-save-patch',
-        disabled: true,
-        hint: 'not implemented',
-      },
     ];
-  }, [ctxMenu, fileMenuItems, removeModule, openDocs, refresh]);
+  }, [
+    ctxMenu,
+    fileMenuItems,
+    selected,
+    clipboardFilled,
+    copyModules,
+    pasteModules,
+    removeModules,
+    openDocs,
+    refresh,
+  ]);
 
   return (
     <main className="app">

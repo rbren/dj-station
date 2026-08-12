@@ -48,7 +48,11 @@ const fakeEngine = {
   savePatchAs: vi.fn(async () => {}),
   newPatch: vi.fn(async () => {}),
   removeModule: vi.fn(async () => {}),
+  removeModules: vi.fn(async () => {}),
   resetModule: vi.fn(async () => {}),
+  resetModules: vi.fn(async () => {}),
+  copyModules: vi.fn(async () => 'CLIP'),
+  pasteModules: vi.fn(async () => ({})),
   endEdit: vi.fn(async () => {}),
 };
 
@@ -94,29 +98,29 @@ describe('global right-click override', () => {
 });
 
 describe('module context menu', () => {
-  it('opens on right-click with Delete, Documentation, Reset and a disabled stub', async () => {
+  it('opens on right-click with Copy, Paste, Delete, Documentation and Reset', async () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 40, clientY: 60 });
     expect(screen.getByTestId('context-menu')).toBeTruthy();
+    expect(screen.getByTestId('ctx-copy')).toBeTruthy();
     expect(screen.getByTestId('ctx-delete')).toBeTruthy();
     expect(screen.getByTestId('ctx-docs')).toBeTruthy();
 
     const reset = screen.getByTestId('ctx-reset') as HTMLButtonElement;
     expect(reset.disabled).toBe(false);
 
-    // Save patch is visible but disabled with a hint.
-    const savePatch = screen.getByTestId('ctx-save-patch') as HTMLButtonElement;
-    expect(savePatch.disabled).toBe(true);
-    expect(savePatch.textContent).toContain('not implemented');
+    // Paste is visible but disabled until something has been copied.
+    const paste = screen.getByTestId('ctx-paste') as HTMLButtonElement;
+    expect(paste.disabled).toBe(true);
   });
 
   it('Reset to defaults resets the module through the engine and closes the menu', async () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('module-vca1'), { clientX: 10, clientY: 10 });
     fireEvent.click(screen.getByTestId('ctx-reset'));
-    await waitFor(() => expect(fakeEngine.resetModule).toHaveBeenCalledWith('vca1'));
+    await waitFor(() => expect(fakeEngine.resetModules).toHaveBeenCalledWith(['vca1']));
     // Non-structural: the module itself is not removed.
-    expect(fakeEngine.removeModule).not.toHaveBeenCalled();
+    expect(fakeEngine.removeModules).not.toHaveBeenCalled();
     expect(screen.queryByTestId('context-menu')).toBeNull();
   });
 
@@ -124,17 +128,44 @@ describe('module context menu', () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('module-vca1'), { clientX: 10, clientY: 10 });
     fireEvent.click(screen.getByTestId('ctx-delete'));
-    await waitFor(() => expect(fakeEngine.removeModule).toHaveBeenCalledWith('vca1'));
+    await waitFor(() => expect(fakeEngine.removeModules).toHaveBeenCalledWith(['vca1']));
     expect(screen.queryByTestId('context-menu')).toBeNull();
   });
 
   it('disabled items do nothing and keep the menu open', async () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 10, clientY: 10 });
-    fireEvent.click(screen.getByTestId('ctx-save-patch'));
+    // Paste is disabled until something has been copied.
+    fireEvent.click(screen.getByTestId('ctx-paste'));
     expect(screen.getByTestId('context-menu')).toBeTruthy();
-    expect(fakeEngine.removeModule).not.toHaveBeenCalled();
-    expect(fakeEngine.savePatchAs).not.toHaveBeenCalled();
+    expect(fakeEngine.pasteModules).not.toHaveBeenCalled();
+    expect(fakeEngine.removeModules).not.toHaveBeenCalled();
+  });
+
+  it('Copy then Paste round-trips through the engine clipboard', async () => {
+    await renderApp();
+    fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByTestId('ctx-copy'));
+    await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenCalledWith(['osc1']));
+
+    fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 200, clientY: 200 });
+    const paste = screen.getByTestId('ctx-paste') as HTMLButtonElement;
+    expect(paste.disabled).toBe(false);
+    fireEvent.click(paste);
+    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenCalledWith('CLIP'));
+  });
+
+  it('right-click inside a multi-selection acts on the whole group', async () => {
+    await renderApp();
+    // Shift-click both module headers to build the selection.
+    fireEvent.click(screen.getByTestId('module-header-osc1'), { shiftKey: true });
+    fireEvent.click(screen.getByTestId('module-header-vca1'), { shiftKey: true });
+    fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 10, clientY: 10 });
+    expect(screen.getByTestId('ctx-copy').textContent).toContain('2 modules');
+    // No per-module Documentation entry for a group.
+    expect(screen.queryByTestId('ctx-docs')).toBeNull();
+    fireEvent.click(screen.getByTestId('ctx-delete'));
+    await waitFor(() => expect(fakeEngine.removeModules).toHaveBeenCalledWith(['osc1', 'vca1']));
   });
 
   it('Documentation opens the docs panel for the module type', async () => {
@@ -189,17 +220,18 @@ describe('module context menu', () => {
 });
 
 describe('background context menu', () => {
-  it('mirrors the File menu: New / Save / Save As / Open', async () => {
+  it('mirrors the File menu (plus Paste): New / Save / Save As / Open', async () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 300, clientY: 200 });
     const menu = screen.getByTestId('context-menu');
     expect(menu).toBeTruthy();
+    expect(screen.getByTestId('ctx-paste')).toBeTruthy();
     expect(screen.getByTestId('ctx-new-patch')).toBeTruthy();
     expect(screen.getByTestId('ctx-save')).toBeTruthy();
     expect(screen.getByTestId('ctx-save-as')).toBeTruthy();
     expect(screen.getByTestId('ctx-open')).toBeTruthy();
-    // Exactly the File-menu items — no module actions on the background.
-    expect(menu.querySelectorAll('.context-menu-item')).toHaveLength(4);
+    // Paste plus exactly the File-menu items — no module actions here.
+    expect(menu.querySelectorAll('.context-menu-item')).toHaveLength(5);
     expect(screen.queryByTestId('ctx-delete')).toBeNull();
 
     fireEvent.click(screen.getByTestId('ctx-save'));
