@@ -37,11 +37,10 @@ type CamState =
   | { kind: "live" }
   | { kind: "error"; message: string };
 
-// Monitor size: 16:9 and roughly double the old 192x144 area, so a live
-// feed is comfortably visible in the rack (the panel sizes itself from
-// this content).
-const W = 320;
-const H = 180;
+// Monitor size: 16:9, sized for hand tracking — the overlay's landmark
+// detail wants a big view (the panel sizes itself from this content).
+const W = 640;
+const H = 360;
 
 function errorMessage(err: unknown): string {
   const name = err instanceof DOMException ? err.name : "";
@@ -188,10 +187,37 @@ export default function CameraUI() {
     statsAccRef.current.reset();
     statsAccRef.current.delegate = landmarker.delegate;
     setTrackState("on");
+    console.info(
+      `[camera] tracking started: video ${video.videoWidth}x${video.videoHeight}, ` +
+        `readyState=${video.readyState}, paused=${video.paused}, ` +
+        `overlay=${overlayOnRef.current ? "on" : "off"}`,
+    );
+
+    // Debug counters for the throttled loop log below.
+    let frames = 0;
+    let lastHands = -1;
+    let errorsLogged = 0;
+    let warnedNoCtx = false;
+
+    // Watchdog: rVFC never firing (video paused / stream dead) is
+    // otherwise indistinguishable from "no hands in frame".
+    const watchdog = setTimeout(() => {
+      if (trackWantRef.current && frames === 0) {
+        const v = videoRef.current;
+        console.warn(
+          "[camera] no video frames after 2s — rVFC is not firing " +
+            `(readyState=${v?.readyState}, paused=${v?.paused}, ` +
+            `srcObject=${v?.srcObject ? "set" : "null"})`,
+        );
+      }
+    }, 2000);
 
     const acc = statsAccRef.current;
     const tick: VideoFrameRequestCallback = (now, meta) => {
-      if (!trackWantRef.current || !landmarkerRef.current) return;
+      if (!trackWantRef.current || !landmarkerRef.current) {
+        clearTimeout(watchdog);
+        return;
+      }
       const v = videoRef.current;
       if (!v) return;
       // rVFC ticks whose mediaTime did not advance are counted as
@@ -204,7 +230,32 @@ export default function CameraUI() {
           const t1 = performance.now();
           // The frame carries its mediaTime from the start (R-6).
           const frame: HandFrame = resolveHands(raw, meta.mediaTime);
+          frames++;
+          if (frame.hands.length !== lastHands) {
+            lastHands = frame.hands.length;
+            console.info(
+              `[camera] hands: ${frame.hands.length}` +
+                frame.hands
+                  .map(
+                    (h) =>
+                      ` [${h.hand} score=${h.score.toFixed(2)} wrist=(${h.points[0].x.toFixed(2)},${h.points[0].y.toFixed(2)})]`,
+                  )
+                  .join(""),
+            );
+          }
           const ctx = canvasRef.current?.getContext("2d");
+          if (!warnedNoCtx && (!ctx || v.videoWidth <= 0)) {
+            warnedNoCtx = true;
+            if (!ctx) {
+              console.warn(
+                `[camera] overlay canvas 2d context unavailable (canvas=${canvasRef.current ? "mounted" : "null"}) — nothing will be drawn`,
+              );
+            } else {
+              console.warn(
+                "[camera] video reports 0x0 dimensions — overlay cannot project, skipping draw",
+              );
+            }
+          }
           if (ctx) {
             if (overlayOnRef.current) {
               drawHandFrame(ctx, frame, v.videoWidth, v.videoHeight, W, H);
@@ -217,8 +268,23 @@ export default function CameraUI() {
           // presentation timestamp is the fallback reference.
           const ref = meta.captureTime ?? meta.presentationTime ?? now;
           acc.frameProcessed(t1 - t0, performance.now() - ref);
-        } catch {
+          // Heartbeat every ~5s at 30fps: loop health at a glance.
+          if (frames % 150 === 0) {
+            const s = acc.snapshot();
+            console.info(
+              `[camera] tracking: ${frames} frames, ${s.cameraFps.toFixed(1)} fps, ` +
+                `infer ${s.inferenceMs.toFixed(1)} ms, latency ${s.latencyMs.toFixed(1)} ms, ` +
+                `dropped ${s.droppedFrames}, hands=${lastHands}`,
+            );
+          }
+        } catch (err) {
           acc.frameFailed();
+          // First few errors in full, then every 100th — inference can
+          // fail per-frame and this loop runs at camera rate.
+          if (errorsLogged < 3 || errorsLogged % 100 === 0) {
+            console.error(`[camera] inference failed (frame ${frames}):`, err);
+          }
+          errorsLogged++;
         }
       }
       rvfcIdRef.current = v.requestVideoFrameCallback(tick);

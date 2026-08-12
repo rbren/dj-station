@@ -132,12 +132,12 @@ describe('CameraUI', () => {
     expect(gum).not.toHaveBeenCalled();
   });
 
-  it('renders a 16:9 monitor big enough for a live feed (320x180)', () => {
+  it('renders a 16:9 monitor big enough for the hand overlay (640x360)', () => {
     render(<CameraUI />);
     const frame = screen.getByTestId('camera-video').parentElement as HTMLElement;
     expect(frame.className).toContain('camera-frame');
-    expect(frame.style.width).toBe('320px');
-    expect(frame.style.height).toBe('180px');
+    expect(frame.style.width).toBe('640px');
+    expect(frame.style.height).toBe('360px');
   });
 
   it('enable acquires a video-only stream and shows the feed', async () => {
