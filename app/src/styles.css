@@ -70,8 +70,8 @@ body {
      selection mid-gesture. Form fields below re-enable selection. */
   user-select: none;
   background: linear-gradient(180deg, #22262e 0%, #1b1e24 14%, #191c21 100%);
-  border: 1px solid #2a2e35;
-  border-top: 2px solid color-mix(in srgb, var(--accent) 55%, #2a2e35);
+  border: 1px solid #414854;
+  border-top: 2px solid color-mix(in srgb, var(--accent) 60%, #414854);
   border-radius: 8px;
   box-sizing: border-box;
   overflow: hidden;
