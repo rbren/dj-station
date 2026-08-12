@@ -3,7 +3,7 @@
 - [x] File menu: add "New Patch". Background right-click menu shows the same
       items as the File menu (not just "Save") — dedupe so the two stay in
       sync.
-- [ ] Mixer: default each channel level to 8V.
+- [x] Mixer: default each channel level to 8V.
 - [ ] Multi-select modules + copy/paste/delete:
   - select multiple modules, highlight with a bright border when selected
   - cmd+c / cmd+v copy/paste; Backspace deletes the selection
