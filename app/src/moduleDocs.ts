@@ -933,11 +933,11 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'The computer keyboard as a gate source: one output jack per ' +
       'alphanumeric key plus the space bar, arranged like the physical ' +
-      'QWERTY rows. While "capture keys" is on, holding a key drives its ' +
-      'jack to 10 V and releasing drops it to 0 V (typing into text ' +
-      'fields and app shortcuts with cmd/ctrl are ignored). No hardware ' +
-      'needed: trigger envelopes, drums and sequencer resets straight ' +
-      'from the keys under your fingers.',
+      'QWERTY rows. Holding a key holds its jack at 10 V; releasing ' +
+      'drops it to 0 V (typing into text fields and app shortcuts with ' +
+      'cmd/ctrl are ignored). No hardware needed: trigger envelopes, ' +
+      'drums and sequencer resets straight from the keys under your ' +
+      'fingers.',
     outputs: {
       '#': 'Gate: 10 V while the number-row key is held.',
       space: 'Gate: 10 V while the space bar is held.',

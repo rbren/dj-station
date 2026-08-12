@@ -1519,10 +1519,14 @@ body {
   row-gap: 3px;
 }
 
-/* 'break' output groups start a new line of the strip (e.g. the QWERTY
-   module's keyboard rows, staggered with a per-group indent). */
-.output-group-break {
-  flex-basis: 100%;
+/* Layouts with 'break' output groups stack them as rows (e.g. the QWERTY
+   module's keyboard rows, staggered with a per-group indent). A column
+   flex keeps the panel's intrinsic width at the widest row — a
+   flex-basis:100% wrap hack would still sum every row side by side when
+   the panel measures its content width. */
+.module-outputs-rows {
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .module-outputs .jack {
@@ -1679,29 +1683,13 @@ body {
   font-size: 0.8rem;
 }
 
-/* --- QWERTY module: capture toggle above the keyboard-row jacks ------ */
+/* --- QWERTY module: hint line above the keyboard-row jacks ----------- */
 
 .qwerty-panel {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid #2a2e35;
-  border-radius: 6px;
-  padding: 4px 6px;
-  margin-bottom: 8px;
-  font-size: 0.72rem;
-}
-
-.qwerty-capture {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.qwerty-hint {
   color: #8a93a2;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  margin-bottom: 6px;
 }
 
 .midi-empty {

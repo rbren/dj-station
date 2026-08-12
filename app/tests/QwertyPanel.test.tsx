@@ -64,6 +64,24 @@ describe('QwertyPanel', () => {
     ]);
   });
 
+  it('keeps the gate held across parent re-renders (fresh onKey closures)', () => {
+    // The rack re-renders constantly (telemetry). If the key listeners
+    // re-mounted per render, their cleanup would release held gates.
+    const calls: [string, boolean][] = [];
+    const { rerender } = render(
+      <QwertyPanel instance="kb1" onKey={(k, d) => calls.push([k, d])} />,
+    );
+    fireEvent.keyDown(window, { key: 'g' });
+    rerender(<QwertyPanel instance="kb1" onKey={(k, d) => calls.push([k, d])} />);
+    rerender(<QwertyPanel instance="kb1" onKey={(k, d) => calls.push([k, d])} />);
+    expect(calls).toEqual([['g', true]]); // no spurious release
+    fireEvent.keyUp(window, { key: 'g' });
+    expect(calls).toEqual([
+      ['g', true],
+      ['g', false],
+    ]);
+  });
+
   it('maps the space bar and uppercase letters to their jacks', () => {
     const onKey = vi.fn();
     render(<QwertyPanel instance="kb1" onKey={onKey} />);
@@ -90,22 +108,18 @@ describe('QwertyPanel', () => {
     expect(onKey).not.toHaveBeenCalled();
   });
 
-  it('stops capturing when the toggle is off and releases held keys', () => {
+  it('releases held keys on unmount so gates never stick high', () => {
     const onKey = vi.fn();
-    render(<QwertyPanel instance="kb1" onKey={onKey} />);
+    const { unmount } = render(<QwertyPanel instance="kb1" onKey={onKey} />);
     fireEvent.keyDown(window, { key: 'b' });
     expect(onKey.mock.calls).toEqual([['b', true]]);
-    // Disabling releases the held key so its gate doesn't stick high.
-    fireEvent.click(screen.getByTestId('qwerty-capture-kb1'));
+    unmount();
     expect(onKey.mock.calls).toEqual([
       ['b', true],
       ['b', false],
     ]);
+    // And the listeners are gone.
     fireEvent.keyDown(window, { key: 'c' });
     expect(onKey).toHaveBeenCalledTimes(2);
-    // Re-enabling resumes capture.
-    fireEvent.click(screen.getByTestId('qwerty-capture-kb1'));
-    fireEvent.keyDown(window, { key: 'c' });
-    expect(onKey.mock.calls[2]).toEqual(['c', true]);
   });
 });
