@@ -104,6 +104,23 @@ fails if it's missing.
   also carry `gestures` fixture specs in `events.json`. The app's mock
   feed thread (fixture -> full pipeline at 30 fps) stands in for the
   macOS camera behind the same start/stop IPC commands.
+- Choreography module (`builtin.choreo`, `crates/dj-engine/src/choreo.rs` +
+  `engine/choreo_api.rs`): a beat-indexed multi-track timeline. Track
+  state (`ChoreoState`) is canonical control-side, persisted per instance
+  in the patch `ModuleFile` (`choreo` field) and restored via
+  `choreo_set_state`; every edit compiles to an immutable `ChoreoProgram`
+  shipped to the RT module over an SPSC ring (garbage ring for off-RT
+  drop — the playback/track-handoff pattern). Output jacks are dynamic
+  slots `t<n>` from a 64-slot budget: a track keeps its slot across
+  rename/reorder so wires survive, and a note track owns two contiguous
+  slots (`t<n>` pitch + `t<n+1>` velocity) — `alloc_jacks` finds a free
+  contiguous run. RT timing: silent until the first clock edge; the beat
+  interval is unknown until the second edge (continuous-track
+  interpolation holds until then). The scale table exists twice by
+  design — `SCALES` in choreo.rs and `CHOREO_SCALES` in
+  `app/src/components/ChoreoPanel.tsx` — and `ChoreoPanel.test.tsx`
+  parses the Rust source to pin them equal. The Tauri commands are
+  `choreo_*` with per-concern `EditKey` variants for undo coalescing.
 - Camera module (`extensions/camera`, `com.dj.camera`): the live webcam
   feed is pure app-layer — `ui-src/CameraUI.tsx` runs `getUserMedia` and
   renders a `<video>`; the DSP side is a buffered `in -> thru`
