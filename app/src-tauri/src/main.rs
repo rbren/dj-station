@@ -1593,6 +1593,16 @@ fn inject_midi(
     engine.inject_midi(&instance, frame, data).map_err(err)
 }
 
+/// One key transition into a QWERTY node (the panel's window key
+/// listeners call this). Pure live control data — nothing persists, so
+/// `engine_lock`, not `patch_edit`.
+#[tauri::command]
+fn qwerty_key(state: State<AppState>, instance: String, key: String, down: bool) -> CmdResult<()> {
+    let mut engine = engine_lock(&state)?;
+    let frame = engine.current_frame();
+    engine.qwerty_key(&instance, frame, &key, down).map_err(err)
+}
+
 #[tauri::command]
 fn engine_start(state: State<AppState>) -> CmdResult<String> {
     let mut engine = engine_lock(&state)?;
@@ -2267,6 +2277,7 @@ fn main() {
             list_macros,
             collapse_macro,
             inject_midi,
+            qwerty_key,
             add_midi_mapping,
             remove_midi_mapping,
             add_midi_led_mapping,

@@ -1,0 +1,18 @@
+{
+  "seconds": 1.0,
+  "midi": [],
+  "qwerty": [
+    {
+      "instance": "kb1",
+      "frame": 0,
+      "key": "space",
+      "down": true
+    },
+    {
+      "instance": "kb1",
+      "frame": 24000,
+      "key": "space",
+      "down": false
+    }
+  ]
+}

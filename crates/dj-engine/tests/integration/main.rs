@@ -36,6 +36,7 @@ mod modules_sources;
 mod modules_utilities;
 mod persistence;
 mod playback;
+mod qwerty;
 mod telemetry;
 mod undo;
 mod wire_summing;

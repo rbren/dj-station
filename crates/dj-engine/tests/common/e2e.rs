@@ -72,11 +72,23 @@ pub struct HandsTraceSpec {
     pub trace: String,
 }
 
+/// A key transition into a QWERTY node at an engine frame (the qwerty
+/// analogue of `MidiEventSpec`).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QwertyEventSpec {
+    pub instance: String,
+    pub frame: u64,
+    pub key: String,
+    pub down: bool,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EventsFile {
     pub seconds: f32,
     #[serde(default)]
     pub midi: Vec<MidiEventSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub qwerty: Vec<QwertyEventSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracks: Vec<TrackLoadSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -179,6 +191,11 @@ fn render_case(case: &str) -> PathBuf {
     }
     for ev in &events.midi {
         engine.inject_midi(&ev.instance, ev.frame, ev.data).unwrap();
+    }
+    for ev in &events.qwerty {
+        engine
+            .qwerty_key(&ev.instance, ev.frame, &ev.key, ev.down)
+            .unwrap();
     }
     for g in &events.gestures {
         let trace = dj_engine::dj_gesture::PoseTrace::load(&case_dir.join(&g.trace)).unwrap();

@@ -170,6 +170,7 @@ fn regen_patches() {
             &EventsFile {
                 seconds: 0.5,
                 midi: vec![],
+                qwerty: vec![],
                 tracks: vec![TrackLoadSpec {
                     instance: "play1".into(),
                     file: "tone.wav".into(),
@@ -207,6 +208,7 @@ fn regen_deck_patches() {
             &EventsFile {
                 seconds: 2.5,
                 midi: vec![],
+                qwerty: vec![],
                 tracks: vec![TrackLoadSpec {
                     instance: "deck1".into(),
                     file: "tone.wav".into(),
@@ -255,6 +257,7 @@ fn regen_deck_patches() {
             &EventsFile {
                 seconds: 2.0,
                 midi: vec![],
+                qwerty: vec![],
                 tracks: vec![
                     TrackLoadSpec {
                         instance: "deckA".into(),
@@ -335,6 +338,7 @@ fn regen_stem_patches() {
             &EventsFile {
                 seconds: 1.0,
                 midi: vec![],
+                qwerty: vec![],
                 tracks: vec![TrackLoadSpec {
                     instance: "deck1".into(),
                     file: "mix.wav".into(),

@@ -34,6 +34,7 @@ mod hot_reload;
 mod lifecycle;
 mod macros_api;
 mod midi;
+mod qwerty_api;
 
 pub const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
 pub const DEFAULT_BLOCK_SIZE: usize = 128;
@@ -293,6 +294,8 @@ pub struct Engine {
             crate::hands::HandsControl,
         ),
     >,
+    /// Key gate events toward the RT thread, per QWERTY node.
+    qwerty_producers: HashMap<usize, rtrb::Producer<crate::qwerty::QwertyEvent>>,
     /// LED feedback messages coming back from the RT thread, per MIDI node.
     midi_out_consumers: HashMap<usize, rtrb::Consumer<MidiOutEvent>>,
     /// Registered macro definitions (engine-side view of the library store).
@@ -328,6 +331,8 @@ const CMD_QUEUE_CAP: usize = 1024;
 const GESTURE_QUEUE_CAP: usize = 4096;
 /// Pending hands CV events per Hands node (same sizing rationale).
 const HANDS_QUEUE_CAP: usize = 4096;
+/// Pending key events per QWERTY node (same sizing rationale).
+const QWERTY_QUEUE_CAP: usize = 4096;
 /// Pending track loads per Playback node (drained at the next block).
 const PLAYBACK_QUEUE_CAP: usize = 64;
 /// Pending control commands per Deck node (drained at the next block).
@@ -389,6 +394,7 @@ impl Engine {
             midi_producers: HashMap::new(),
             gesture_producers: HashMap::new(),
             hands_producers: HashMap::new(),
+            qwerty_producers: HashMap::new(),
             midi_out_consumers: HashMap::new(),
             macros: MacroLibrary::default(),
             macro_instances: BTreeMap::new(),
@@ -528,6 +534,7 @@ impl Engine {
             Some(BuiltinKind::Crossfader) => Ok(Box::new(CrossfaderModule)),
             Some(
                 BuiltinKind::Midi
+                | BuiltinKind::Qwerty
                 | BuiltinKind::Gesture
                 | BuiltinKind::Hands
                 | BuiltinKind::Playback
@@ -598,6 +605,7 @@ impl Engine {
         let mut midi_plumbing = None;
         let mut gesture_tx = None;
         let mut hands_plumbing = None;
+        let mut qwerty_plumbing = None;
         let mut playback_plumbing = None;
         let mut deck_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
@@ -619,6 +627,11 @@ impl Engine {
                 let (tx, rx) = rtrb::RingBuffer::new(HANDS_QUEUE_CAP);
                 hands_plumbing = Some(tx);
                 Box::new(crate::hands::HandsRtModule::new(rx, self.current_frame()))
+            }
+            Some(BuiltinKind::Qwerty) => {
+                let (tx, rx) = rtrb::RingBuffer::new(QWERTY_QUEUE_CAP);
+                qwerty_plumbing = Some(tx);
+                Box::new(crate::qwerty::QwertyRtModule::new(rx, self.current_frame()))
             }
             Some(BuiltinKind::Playback) => {
                 let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
@@ -721,6 +734,9 @@ impl Engine {
             self.hands_producers
                 .insert(idx, (tx, crate::hands::HandsControl::default()));
         }
+        if let Some(tx) = qwerty_plumbing {
+            self.qwerty_producers.insert(idx, tx);
+        }
         if let Some((tx, garbage_rx)) = playback_plumbing {
             self.playback_producers.insert(idx, tx);
             self.playback_garbage.insert(idx, garbage_rx);
@@ -771,6 +787,7 @@ impl Engine {
         self.midi_out_consumers.remove(&slot);
         self.gesture_producers.remove(&slot);
         self.hands_producers.remove(&slot);
+        self.qwerty_producers.remove(&slot);
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);
         self.decks.remove(&slot);

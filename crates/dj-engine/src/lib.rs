@@ -24,6 +24,7 @@ pub mod module_host;
 pub mod native_host;
 pub mod patch;
 pub mod playback;
+pub mod qwerty;
 pub mod registry;
 pub mod telemetry;
 pub mod wasm_host;

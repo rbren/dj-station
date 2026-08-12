@@ -333,7 +333,11 @@ export function ModulePanel(props: ModulePanelProps) {
         {layout.outputGroups.length > 0 && (
           <div className="module-outputs">
             {layout.outputGroups.map((group, gi) => (
-              <div key={group.title ?? gi} className="output-group">
+              <div
+                key={group.title ?? gi}
+                className={`output-group${group.break ? ' output-group-break' : ''}`}
+                style={group.indent ? { paddingLeft: group.indent } : undefined}
+              >
                 {group.title && <span className="output-group-title">{group.title}</span>}
                 <div
                   className={`output-group-jacks${group.columns ? ' output-group-grid' : ''}`}

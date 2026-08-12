@@ -26,6 +26,7 @@ import { GesturePanel } from './GesturePanel';
 import { CompressorUI, FilterUI, MixerUI, VcaDualUI, VcaUI } from './LevelMeter';
 import { MidiPanel } from './MidiPanel';
 import { ModulePanel } from './ModulePanel';
+import { QwertyPanel } from './QwertyPanel';
 import { mapPosition, positionForValue } from './Knob';
 
 /** Module types with a host-registered custom UI (PRD §5.3). */
@@ -139,6 +140,11 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
                 void engine.removeMidiLedMapping(instanceId, name).then(refresh)
               }
               onMidi={(data) => void engine.injectMidi(instanceId, 0, data)}
+            />
+          ) : node.type_id === 'builtin.qwerty' ? (
+            <QwertyPanel
+              instance={instanceId}
+              onKey={(key, down) => void engine.qwertyKey(instanceId, key, down)}
             />
           ) : node.type_id === 'builtin.gesture' ? (
             <GesturePanel

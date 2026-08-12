@@ -1519,6 +1519,12 @@ body {
   row-gap: 3px;
 }
 
+/* 'break' output groups start a new line of the strip (e.g. the QWERTY
+   module's keyboard rows, staggered with a per-group indent). */
+.output-group-break {
+  flex-basis: 100%;
+}
+
 .module-outputs .jack {
   width: auto;
 }
@@ -1671,6 +1677,31 @@ body {
   padding: 6px;
   margin-bottom: 8px;
   font-size: 0.8rem;
+}
+
+/* --- QWERTY module: capture toggle above the keyboard-row jacks ------ */
+
+.qwerty-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #2a2e35;
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin-bottom: 8px;
+  font-size: 0.72rem;
+}
+
+.qwerty-capture {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.qwerty-hint {
+  color: #8a93a2;
 }
 
 .midi-empty {

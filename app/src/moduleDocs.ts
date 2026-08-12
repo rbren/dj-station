@@ -929,6 +929,25 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Map a knob to map0 and wire it to Filter cutoff.',
     ],
   },
+  'builtin.qwerty': {
+    summary:
+      'The computer keyboard as a gate source: one output jack per ' +
+      'alphanumeric key plus the space bar, arranged like the physical ' +
+      'QWERTY rows. While "capture keys" is on, holding a key drives its ' +
+      'jack to 10 V and releasing drops it to 0 V (typing into text ' +
+      'fields and app shortcuts with cmd/ctrl are ignored). No hardware ' +
+      'needed: trigger envelopes, drums and sequencer resets straight ' +
+      'from the keys under your fingers.',
+    outputs: {
+      '#': 'Gate: 10 V while the number-row key is held.',
+      space: 'Gate: 10 V while the space bar is held.',
+    },
+    examples: [
+      'space -> ADSR gate for a playable drone: hold to swell, release to fade.',
+      'z/x/c -> drum trig inputs for finger-drumming a beat.',
+      'q -> sequencer reset: tap to restart the pattern on the downbeat.',
+    ],
+  },
   'builtin.gesture': {
     summary:
       'Camera gesture control (PRD \u00a77.3): hand tracking is evaluated by ' +

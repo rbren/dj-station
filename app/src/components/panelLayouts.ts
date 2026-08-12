@@ -43,6 +43,10 @@ export interface OutputGroupSpec {
   outputs: string[];
   /** Grid column count; outputs wrap freely when unset. */
   columns?: number;
+  /** Start this group on a new line of the output strip. */
+  break?: boolean;
+  /** Left inset in px (e.g. the QWERTY module's staggered key rows). */
+  indent?: number;
 }
 
 export interface PanelLayout {
@@ -684,6 +688,27 @@ const LAYOUTS: Record<string, LayoutFactory> = {
   'builtin.gesture': () => ({
     groups: [],
     outputGroups: [{ title: 'mappings', outputs: seqIds('map', 0, 63), columns: 8 }],
+  }),
+
+  // The computer keyboard as a gate source: one output jack per key,
+  // arranged like the physical QWERTY rows (staggered via indent).
+  'builtin.qwerty': () => ({
+    groups: [],
+    outputGroups: [
+      { outputs: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'], break: true },
+      {
+        outputs: ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+        break: true,
+        indent: 14,
+      },
+      {
+        outputs: ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+        break: true,
+        indent: 24,
+      },
+      { outputs: ['z', 'x', 'c', 'v', 'b', 'n', 'm'], break: true, indent: 38 },
+      { outputs: ['space'], break: true, indent: 110 },
+    ],
   }),
 };
 

@@ -246,6 +246,10 @@ export class EngineClient extends IpcClient {
   injectMidi(instance: string, frame: number, data: [number, number, number]) {
     return this.call<void>('inject_midi', { instance, frame, data });
   }
+  /** One key transition into a QWERTY module (lowercased `event.key`). */
+  qwertyKey(instance: string, key: string, down: boolean) {
+    return this.call<void>('qwerty_key', { instance, key, down });
+  }
   addMidiMapping(instance: string, kind: string, num: number, name: string) {
     return this.call<void>('add_midi_mapping', { instance, kind, num, name });
   }
