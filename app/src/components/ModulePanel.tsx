@@ -41,7 +41,7 @@ export interface JackRef {
 /** Coarse placement grid, ~0.5in at 96dpi. */
 export const GRID = 48;
 
-export const snap = (v: number) => Math.max(0, Math.round(v / GRID) * GRID);
+export const snap = (v: number) => Math.round(v / GRID) * GRID;
 
 /** Panels occupy whole grid cells: round a content size up to the grid. */
 export const snapUpToGrid = (px: number) => Math.max(GRID, Math.ceil(px / GRID) * GRID);

@@ -252,11 +252,14 @@ describe('overlap-free module placement', () => {
     const panel = screen.getByTestId('module-vca1');
     const header = screen.getByTestId('module-header-vca1');
     // Even while overlapping, a drag to open space must not be rejected.
+    // (The auto-nudge pass may have already moved vca1 off osc1, so pin
+    // the drag delta relative to wherever it starts.)
+    const startTop = Number.parseInt(panel.style.top || '0', 10);
     fireEvent.mouseDown(header, { button: 0, clientX: 0, clientY: 0 });
     fireEvent.mouseMove(window, { clientX: 960, clientY: 480 });
     fireEvent.mouseUp(window);
     await waitFor(() => expect(panel.style.left).toBe('960px'));
-    expect(Number.parseInt(panel.style.top || '0', 10)).toBeGreaterThanOrEqual(480);
+    expect(Number.parseInt(panel.style.top || '0', 10)).toBe(startTop + 480);
   });
 
   it('overlapped modules are auto-nudged apart after render', async () => {
@@ -267,12 +270,16 @@ describe('overlap-free module placement', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
 
-    // The post-render placement pass pushes vca1 below osc1's footprint.
+    // The post-render placement pass moves vca1 clear of osc1's 192×96
+    // footprint (on the infinite canvas the nearest free spot may be
+    // above, i.e. negative y).
     const osc = screen.getByTestId('module-osc1');
     const vca = screen.getByTestId('module-vca1');
     await waitFor(() => {
       expect(osc.style.top).toBe('0px');
-      expect(Number.parseInt(vca.style.top || '0', 10)).toBeGreaterThanOrEqual(96);
+      const top = Number.parseInt(vca.style.top || '0', 10);
+      const left = Number.parseInt(vca.style.left || '0', 10);
+      expect(Math.abs(top) >= 96 || Math.abs(left) >= 192).toBe(true);
     });
   });
 });

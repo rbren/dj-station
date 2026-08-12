@@ -21,7 +21,7 @@
       converting the entered value back to a knob position).
 - [x] Attenuverter: make it prettier — line up each output with its input,
       using short columns for each input/output pair.
-- [ ] Infinite canvas: let the rack overscroll to open up new areas in every
+- [x] Infinite canvas: let the rack overscroll to open up new areas in every
       direction.
 - [ ] Module picker overhaul: remove the ugly left pane; cmd+m opens a modal
       picker showing each module fully rendered but zoomed out; click-drag

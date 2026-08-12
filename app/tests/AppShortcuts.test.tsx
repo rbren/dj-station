@@ -102,26 +102,66 @@ describe('undo/redo shortcuts', () => {
 
 describe('zoom shortcuts', () => {
   const scaleOf = () => screen.getByTestId('rack').style.transform;
+  const scaled = (z: number, pan = { x: 0, y: 0 }) =>
+    `translate(${pan.x}px, ${pan.y}px) scale(${z})`;
 
   it('ctrl/cmd +/-/0 zoom in, out, and reset, persisting the level', async () => {
     await renderApp();
-    expect(scaleOf()).toBe('scale(1)');
+    expect(scaleOf()).toBe(scaled(1));
     fireEvent.keyDown(window, { key: '=', ctrlKey: true });
-    expect(scaleOf()).toBe('scale(1.2)');
+    expect(scaleOf()).toBe(scaled(1.2));
     expect(localStorage.getItem('dj-rack-zoom')).toBe('1.2');
     fireEvent.keyDown(window, { key: '-', ctrlKey: true });
     fireEvent.keyDown(window, { key: '-', ctrlKey: true });
-    expect(scaleOf()).toBe(`scale(${1.2 / 1.2 / 1.2})`);
+    expect(scaleOf()).toBe(scaled(1.2 / 1.2 / 1.2));
     fireEvent.keyDown(window, { key: '0', ctrlKey: true });
-    expect(scaleOf()).toBe('scale(1)');
+    expect(scaleOf()).toBe(scaled(1));
   });
 
   it('zoom is clamped to sane bounds', async () => {
     await renderApp();
     for (let i = 0; i < 20; i++) fireEvent.keyDown(window, { key: '+', metaKey: true });
-    expect(scaleOf()).toBe('scale(2.5)');
+    expect(scaleOf()).toBe(scaled(2.5));
     for (let i = 0; i < 40; i++) fireEvent.keyDown(window, { key: '_', metaKey: true });
-    expect(scaleOf()).toBe('scale(0.4)');
+    expect(scaleOf()).toBe(scaled(0.4));
+  });
+});
+
+describe('infinite canvas pan (overscroll)', () => {
+  const transformOf = () => screen.getByTestId('rack').style.transform;
+
+  it('wheel scrolling over the rack pans in any direction and persists', async () => {
+    await renderApp();
+    const area = screen.getByTestId('rack-area');
+    fireEvent.wheel(area, { deltaX: 30, deltaY: 50 });
+    expect(transformOf()).toBe('translate(-30px, -50px) scale(1)');
+    // Panning past the origin (up-left) opens new canvas: positive pan.
+    fireEvent.wheel(area, { deltaX: -100, deltaY: -100 });
+    expect(transformOf()).toBe('translate(70px, 50px) scale(1)');
+    expect(JSON.parse(localStorage.getItem('dj-rack-pan')!)).toEqual({ x: 70, y: 50 });
+  });
+
+  it('the saved pan is restored on load', async () => {
+    localStorage.setItem('dj-rack-pan', JSON.stringify({ x: -120, y: 48 }));
+    await renderApp();
+    expect(transformOf()).toBe('translate(-120px, 48px) scale(1)');
+  });
+
+  it('ctrl/cmd+0 resets the pan along with the zoom', async () => {
+    await renderApp();
+    fireEvent.wheel(screen.getByTestId('rack-area'), { deltaY: 200 });
+    fireEvent.keyDown(window, { key: '0', ctrlKey: true });
+    expect(transformOf()).toBe('translate(0px, 0px) scale(1)');
+    expect(JSON.parse(localStorage.getItem('dj-rack-pan')!)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('the dot grid tracks the pan and zoom', async () => {
+    await renderApp();
+    fireEvent.wheel(screen.getByTestId('rack-area'), { deltaX: -30, deltaY: -20 });
+    fireEvent.keyDown(window, { key: '=', ctrlKey: true });
+    const area = screen.getByTestId('rack-area');
+    expect(area.style.backgroundPosition).toBe('30px 20px');
+    expect(area.style.backgroundSize).toBe(`${48 * 1.2}px ${48 * 1.2}px`);
   });
 });
 

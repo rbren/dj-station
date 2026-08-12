@@ -230,7 +230,7 @@ describe('ModulePanel', () => {
     expect(onMove).not.toHaveBeenCalled();
   });
 
-  it('never drags below the canvas origin', () => {
+  it('drags freely past the origin (infinite canvas: negative coords)', () => {
     const onMove = vi.fn();
     render(<ModulePanel {...baseProps} position={{ x: 0, y: 0 }} onMove={onMove} />);
     fireEvent.mouseDown(screen.getByTestId('module-header-osc1'), {
@@ -239,7 +239,7 @@ describe('ModulePanel', () => {
       clientY: 100,
     });
     fireEvent.mouseMove(window, { clientX: 0, clientY: 0 });
-    expect(onMove).toHaveBeenLastCalledWith(0, 0);
+    expect(onMove).toHaveBeenLastCalledWith(-96, -96);
   });
 });
 

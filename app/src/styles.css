@@ -38,8 +38,6 @@ body {
   position: relative;
   min-height: 1200px;
   min-width: 1500px;
-  background-image: radial-gradient(circle, #22262d 1px, transparent 1px);
-  background-size: 48px 48px;
 }
 
 .module-panel-placed {
@@ -1295,9 +1293,17 @@ body {
   color: #8a93a2;
 }
 
+/* Infinite canvas viewport: the .rack inside is translated by the pan and
+   scaled by the zoom; this clips it and paints the dot grid itself (the
+   dots track pan/zoom via inline background-position/size, so the grid
+   never runs out no matter how far the canvas is panned). */
 .rack-area {
   position: relative;
   flex: 1;
+  overflow: hidden;
+  min-height: calc(100vh - 48px);
+  background-image: radial-gradient(circle, #22262d 1px, transparent 1px);
+  background-size: 48px 48px;
 }
 
 /* The cable layer must paint above EVERY module panel: panels (and the

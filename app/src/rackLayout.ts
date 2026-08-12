@@ -46,8 +46,10 @@ export function nearestFreeSpot(
   others: Rect[],
   maxRings = 40,
 ): { x: number; y: number } | null {
+  // The canvas is infinite in every direction, so any grid spot (negative
+  // coordinates included) is fair game.
   const free = (pos: { x: number; y: number }) =>
-    pos.x >= 0 && pos.y >= 0 && !others.some((r) => rectsOverlap({ ...pos, ...size }, r));
+    !others.some((r) => rectsOverlap({ ...pos, ...size }, r));
   if (free(want)) return want;
   for (let ring = 1; ring <= maxRings; ring++) {
     let best: { x: number; y: number } | null = null;

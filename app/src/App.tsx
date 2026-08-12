@@ -53,6 +53,13 @@ function loadZoom(): number {
   return Number.isFinite(z) && z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 1;
 }
 
+const PAN_KEY = 'dj-rack-pan';
+
+function loadPan(): { x: number; y: number } {
+  const p = loadJson<{ x: number; y: number }>(PAN_KEY, { x: 0, y: 0 });
+  return Number.isFinite(p.x) && Number.isFinite(p.y) ? p : { x: 0, y: 0 };
+}
+
 const WIRE_COLORS_KEY = 'dj-wire-colors';
 const LAST_WIRE_COLOR_KEY = 'dj-wire-last-color';
 const NUM_WIRE_COLORS = WIRE_COLORS.length;
@@ -95,6 +102,10 @@ export default function App() {
   // In-app module documentation (opened from the module context menu).
   const [docs, setDocs] = useState<null | { typeId: string; manifest: Manifest }>(null);
   const [zoom, setZoom] = useState<number>(() => loadZoom());
+  // Infinite canvas: the rack is translated by `pan` (screen px) before the
+  // zoom scale, so scrolling/dragging the background opens up new area in
+  // every direction — positions themselves may be negative.
+  const [pan, setPan] = useState<{ x: number; y: number }>(() => loadPan());
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
@@ -110,6 +121,23 @@ export default function App() {
 
   const setPending = useCallback((pending: PendingWire | null) => store.set({ pending }), [store]);
 
+  // Overscroll pan: wheel/trackpad scrolling over the rack shifts the
+  // canvas in any direction. Native non-passive listener so the page never
+  // rubber-bands instead.
+  useEffect(() => {
+    if (!rackEl) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setPan((prev) => {
+        const next = { x: prev.x - e.deltaX, y: prev.y - e.deltaY };
+        saveJson(PAN_KEY, next);
+        return next;
+      });
+    };
+    rackEl.addEventListener('wheel', onWheel, { passive: false });
+    return () => rackEl.removeEventListener('wheel', onWheel);
+  }, [rackEl]);
+
   const changeZoom = useCallback((direction: 1 | -1 | 0) => {
     setZoom((prev) => {
       const next =
@@ -121,6 +149,12 @@ export default function App() {
       }
       return next;
     });
+    // Cmd+0 is "reset view": zoom 1 AND pan back to the origin, so a user
+    // lost in empty canvas always has a way home.
+    if (direction === 0) {
+      setPan({ x: 0, y: 0 });
+      saveJson(PAN_KEY, { x: 0, y: 0 });
+    }
   }, []);
 
   // A drag-induced neighbour bump in flight: `bumped` was displaced from
@@ -255,7 +289,6 @@ export default function App() {
                   : Math.max(aPos.y, Math.ceil((o.rect.y + o.rect.h) / GRID) * GRID);
             }
           }
-          if (aPos.x < 0 || aPos.y < 0) return null;
           const aRect = rectAt(aPos);
           if (!rectsOverlap(aRect, r)) return null; // clamped clear — no bump needed
           if (others.some((o) => o !== hit && rectsOverlap(aRect, o.rect))) return null;
@@ -276,7 +309,6 @@ export default function App() {
                       ? Math.floor((aPos.y - r.h) / GRID) * GRID
                       : Math.ceil((aPos.y + aRect.h) / GRID) * GRID,
                 };
-          if (to.x < 0 || to.y < 0) return null;
           const bumpedRect = moduleRect(hit.id, to);
           if (rectsOverlap(bumpedRect, aRect)) return null;
           if (others.some((o) => o.id !== hit.id && rectsOverlap(bumpedRect, o.rect))) {
@@ -670,15 +702,17 @@ export default function App() {
       let at: { x: number; y: number } | undefined;
       if (rackEl) {
         const rect = rackEl.getBoundingClientRect();
-        const snap = (v: number) => Math.max(0, Math.round(v / zoom / GRID) * GRID);
+        // Screen -> rack coordinates: undo the pan translate, then the
+        // zoom scale (both applied to the .rack wrapper).
+        const snap = (v: number) => Math.round(v / zoom / GRID) * GRID;
         at = {
-          x: snap(e.clientX - rect.left + rackEl.scrollLeft),
-          y: snap(e.clientY - rect.top + rackEl.scrollTop),
+          x: snap(e.clientX - rect.left - pan.x),
+          y: snap(e.clientY - rect.top - pan.y),
         };
       }
       void addModule(typeId, at);
     },
-    [rackEl, zoom, addModule],
+    [rackEl, zoom, pan, addModule],
   );
 
   const onJackClick = useCallback(
@@ -1048,6 +1082,10 @@ export default function App() {
               className="rack-area"
               ref={setRackEl}
               data-testid="rack-area"
+              style={{
+                backgroundPosition: `${pan.x}px ${pan.y}px`,
+                backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
+              }}
               onDragOver={onRackDragOver}
               onDrop={onRackDrop}
               onContextMenu={onRackContextMenu}
@@ -1064,7 +1102,10 @@ export default function App() {
               <div
                 className="rack"
                 data-testid="rack"
-                style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}
+                style={{
+                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                  transformOrigin: '0 0',
+                }}
               >
                 {nodes.map((node, i) => (
                   <RackModule
@@ -1094,7 +1135,7 @@ export default function App() {
                 container={rackEl}
                 colors={wireColors}
                 pending={pending}
-                layoutKey={`${JSON.stringify(positions)}@${zoom}`}
+                layoutKey={`${JSON.stringify(positions)}@${zoom}@${pan.x},${pan.y}`}
               />
             </div>
           </DeckUIContext.Provider>

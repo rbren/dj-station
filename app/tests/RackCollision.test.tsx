@@ -9,7 +9,7 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { nearestFreeSpot } from '../src/rackLayout';
+import { nearestFreeSpot, rectsOverlap } from '../src/rackLayout';
 import type { Manifest } from '../src/types';
 
 const OSC: Manifest = {
@@ -109,17 +109,17 @@ describe('nearestFreeSpot', () => {
     expect(nearestFreeSpot({ x: 96, y: 48 }, SIZE, others)).toEqual({ x: 96, y: 96 });
   });
 
-  it('never returns an out-of-bounds or far-away spot', () => {
-    // Fully surrounded near the origin: the search walks outward ring by
-    // ring and lands just past the blockers, not rows away.
+  it('never returns a far-away spot; negative coordinates are fair game', () => {
+    // Blocked near the origin: the search walks outward ring by ring and
+    // lands just past the blockers, not rows away. The canvas is infinite,
+    // so a spot above the origin (negative y) is a legal nearest answer.
     const others = [
       { x: 0, y: 0, w: 192, h: 96 },
       { x: 192, y: 0, w: 192, h: 96 },
     ];
     const spot = nearestFreeSpot({ x: 48, y: 0 }, SIZE, others)!;
-    expect(spot.x).toBeGreaterThanOrEqual(0);
-    expect(spot.y).toBeGreaterThanOrEqual(0);
     expect(Math.abs(spot.x - 48) + Math.abs(spot.y - 0)).toBeLessThanOrEqual(96 + 48);
+    expect(others.some((r) => rectsOverlap({ ...spot, ...SIZE }, r))).toBe(false);
   });
 });
 
@@ -182,10 +182,12 @@ describe('co-operative bump', () => {
     expect(savedPositions().b).toEqual({ x: 0, y: 0 });
   });
 
-  it('(d) bump impossible (would displace a third module): stays blocked', async () => {
+  it('(d) bump impossible (would displace a third module): neighbours hold', async () => {
     // Row 0: d | b | c | e packed tight; row 1: a | f | g. Dragging a
-    // up-right past b cannot bump b left (d is there) and every push-out
-    // spot is taken, so nothing moves.
+    // up-right past b cannot bump b left (d is there) and every in-row
+    // push-out spot is taken — no neighbour moves. On the infinite canvas
+    // the dragged panel itself escapes to the free space above the row
+    // instead of staying pinned.
     setPositions({
       d: { x: 192, y: 0 },
       b: { x: 384, y: 0 },
@@ -198,7 +200,7 @@ describe('co-operative bump', () => {
     await renderApp(['d', 'b', 'c', 'e', 'a', 'f', 'g']);
     const at = grab('a');
     fireEvent.mouseMove(window, { clientX: at.x + 240, clientY: at.y - 96 });
-    expect(panelPos('a')).toEqual({ x: 192, y: 96 });
+    expect(panelPos('a')).toEqual({ x: 432, y: -96 });
     expect(panelPos('b')).toEqual({ x: 384, y: 0 });
     expect(panelPos('d')).toEqual({ x: 192, y: 0 });
   });
