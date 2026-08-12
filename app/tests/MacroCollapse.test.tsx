@@ -118,12 +118,12 @@ describe('collapse-to-macro UI', () => {
     expect(screen.getByTestId('collapse-macro-btn').textContent).toContain('(1)');
   });
 
-  it('plain click does not select', async () => {
-    render(<App />);
-    await screen.findByTestId('module-osc1');
+  it('plain click selects exactly one module, replacing the selection', async () => {
+    await selectBoth();
     fireEvent.click(screen.getByTestId('module-header-osc1'));
-    expect(screen.getByTestId('module-osc1').dataset.selected).toBeUndefined();
-    expect(screen.queryByTestId('collapse-macro-btn')).toBeNull();
+    expect(screen.getByTestId('module-osc1').dataset.selected).toBe('true');
+    expect(screen.getByTestId('module-vca1').dataset.selected).toBeUndefined();
+    expect(screen.getByTestId('collapse-macro-btn').textContent).toContain('(1)');
   });
 
   it('naming and confirming collapses the selection via the engine', async () => {

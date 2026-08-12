@@ -75,9 +75,11 @@ export interface ModulePanelProps {
   onContextMenu?(e: React.MouseEvent<HTMLDivElement>): void;
   /** Jack currently armed as a pending wire end, if any. */
   pendingSource?: (JackRef & { kind: 'input' | 'output'; color?: number }) | null;
-  /** Multi-select for collapse-to-macro (PRD §6): shift-click toggles. */
+  /** Selection (copy/paste/delete/collapse-to-macro): a plain click on any
+   *  non-interactive part of the panel selects it (`additive` false — the
+   *  selection is replaced); shift/cmd/ctrl-click toggles membership. */
   selected?: boolean;
-  onSelectToggle?(): void;
+  onSelect?(additive: boolean): void;
   onJackClick?(kind: 'input' | 'output', jackId: string, shift?: boolean): void;
   onKnobPosition(jackId: string, position: number): void;
   onKnobConfig(jackId: string, config: KnobConfig): void;
@@ -97,6 +99,7 @@ export function ModulePanel(props: ModulePanelProps) {
     position,
     onMove,
     onMoveEnd,
+    onSelect,
     zoom = 1,
   } = props;
   const pendingColor =
@@ -109,10 +112,17 @@ export function ModulePanel(props: ModulePanelProps) {
   const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(
     null,
   );
+  // A real header drag (pointer moved past a small threshold) must not
+  // register as a click-to-select when the button is released — the click
+  // event that follows mouseup is swallowed once.
+  const dragMoved = useRef(false);
   const onDragMove = useCallback(
     (e: MouseEvent) => {
       const d = drag.current;
       if (!d || !onMove) return;
+      if (Math.abs(e.clientX - d.startX) + Math.abs(e.clientY - d.startY) > 3) {
+        dragMoved.current = true;
+      }
       // Pointer deltas are screen px while the rack is scaled by `zoom`:
       // divide so the panel tracks the cursor 1:1 at any zoom level.
       onMove(
@@ -126,8 +136,33 @@ export function ModulePanel(props: ModulePanelProps) {
     if (drag.current) {
       drag.current = null;
       onMoveEnd?.();
+      // The click that follows this mouseup (if any) must still see the
+      // flag; clear it right after so it can't swallow a later real click
+      // (e.g. when the mouseup landed outside the panel).
+      if (dragMoved.current) setTimeout(() => (dragMoved.current = false), 0);
     }
   }, [onMoveEnd]);
+
+  // Click-to-select: any click on the panel that isn't aimed at an
+  // interactive control (buttons, jacks, knobs, faders, form fields, a
+  // custom UI's surface) selects the module. Plain click replaces the
+  // selection; shift/cmd/ctrl-click toggles membership (multi-select).
+  const onPanelClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (dragMoved.current) {
+        dragMoved.current = false;
+        return;
+      }
+      if (!onSelect) return;
+      const interactive = (e.target as HTMLElement).closest?.(
+        'button, input, select, textarea, a, [role="slider"], [role="switch"], ' +
+          '[contenteditable="true"], .knob, .jack, .module-custom-ui, .knob-config-menu',
+      );
+      if (interactive) return;
+      onSelect(e.shiftKey || e.metaKey || e.ctrlKey);
+    },
+    [onSelect],
+  );
   useEffect(() => {
     window.addEventListener('mousemove', onDragMove);
     window.addEventListener('mouseup', onDragEnd);
@@ -167,6 +202,7 @@ export function ModulePanel(props: ModulePanelProps) {
       data-testid={`module-${instanceId}`}
       data-selected={props.selected ? 'true' : undefined}
       onContextMenu={props.onContextMenu}
+      onClick={onPanelClick}
       style={{
         ...(position ? { left: position.x, top: position.y } : undefined),
         ...(size ? { width: size.w, height: size.h } : undefined),
@@ -177,15 +213,10 @@ export function ModulePanel(props: ModulePanelProps) {
         <header
           className={`module-title${onMove ? ' module-title-draggable' : ''}`}
           data-testid={`module-header-${instanceId}`}
-          onClick={(e) => {
-            if (e.shiftKey) {
-              e.preventDefault();
-              props.onSelectToggle?.();
-            }
-          }}
           onMouseDown={(e) => {
             if (!onMove || !position || e.button !== 0 || e.shiftKey) return;
             e.preventDefault();
+            dragMoved.current = false;
             drag.current = {
               startX: e.clientX,
               startY: e.clientY,

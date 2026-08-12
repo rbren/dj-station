@@ -535,9 +535,18 @@ export default function App() {
     [store, refresh, moveModule],
   );
 
-  const toggleSelected = useCallback(
-    (instance: string) => {
+  // Selection model (standard desktop semantics): a plain click on a module
+  // selects exactly that module, shift/cmd/ctrl-click toggles membership,
+  // a rack-background click or Escape clears, cmd/ctrl+A selects all.
+  // Engine refreshes prune ids that no longer exist (rackStore.setNodes),
+  // so a selection can never outlive its modules.
+  const selectModule = useCallback(
+    (instance: string, additive: boolean) => {
       const prev = store.getState().selected;
+      if (!additive) {
+        store.set({ selected: [instance] });
+        return;
+      }
       store.set({
         selected: prev.includes(instance)
           ? prev.filter((i) => i !== instance)
@@ -592,8 +601,11 @@ export default function App() {
       saveJson(POSITIONS_KEY, next);
       return next;
     });
-    store.set({ selected: Object.values(renames) });
+    // Select the pasted set only after the refresh has brought the new
+    // nodes in — setNodes prunes selection against the live node list, so
+    // selecting first would race the prune.
     await refresh();
+    store.set({ selected: Object.values(renames) });
   }, [store, setPositions, refresh]);
 
   const removeModules = useCallback(
@@ -629,8 +641,8 @@ export default function App() {
   );
 
   // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z),
-  // rack zoom (cmd/ctrl +/-/0), selection copy/paste (cmd/ctrl+C/V) and
-  // selection delete (Backspace).
+  // rack zoom (cmd/ctrl +/-/0), select-all (cmd/ctrl+A), selection
+  // copy/paste (cmd/ctrl+C/V) and selection delete (Backspace).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -672,6 +684,9 @@ export default function App() {
       } else if (key === 'v') {
         e.preventDefault();
         void pasteModules();
+      } else if (key === 'a') {
+        e.preventDefault();
+        store.set({ selected: store.getState().nodes.map((n) => n.instance_id) });
       } else if (key === 'm') {
         e.preventDefault();
         setPickerOpen((open) => !open);
@@ -832,11 +847,20 @@ export default function App() {
     return () => window.removeEventListener('contextmenu', suppress);
   }, []);
 
-  const onModuleContextMenu = useCallback((instance: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setCtxMenu({ x: e.clientX, y: e.clientY, instance });
-  }, []);
+  const onModuleContextMenu = useCallback(
+    (instance: string, e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Right-clicking outside the current selection retargets it to the
+      // clicked module (standard desktop behavior); inside it, the menu
+      // acts on the whole group.
+      if (!store.getState().selected.includes(instance)) {
+        store.set({ selected: [instance] });
+      }
+      setCtxMenu({ x: e.clientX, y: e.clientY, instance });
+    },
+    [store],
+  );
 
   const openDocs = useCallback(
     (instance: string) => {
@@ -1137,13 +1161,12 @@ export default function App() {
               onDrop={onRackDrop}
               onContextMenu={onRackContextMenu}
               onClick={(e) => {
-                // Clicking the rack background abandons a pending wire.
-                if (
-                  store.getState().pending &&
-                  !(e.target as HTMLElement).closest?.('.module-panel')
-                ) {
-                  setPending(null);
-                }
+                // Clicking the rack background abandons a pending wire and
+                // clears the selection.
+                if ((e.target as HTMLElement).closest?.('.module-panel')) return;
+                const { pending, selected } = store.getState();
+                if (pending) setPending(null);
+                if (selected.length > 0) store.set({ selected: [] });
               }}
             >
               <div
@@ -1165,7 +1188,7 @@ export default function App() {
                     zoom={zoom}
                     removeModule={removeModule}
                     openDocs={openDocs}
-                    toggleSelected={toggleSelected}
+                    selectModule={selectModule}
                     onJackClick={onJackClick}
                     onContextMenu={onModuleContextMenu}
                   />

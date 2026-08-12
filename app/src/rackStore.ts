@@ -38,7 +38,10 @@ export interface RackStore {
   getState(): RackState;
   set(patch: Partial<RackState>): void;
   /** Replace nodes, keeping the previous object for any node whose snapshot
-   *  is unchanged so memoized panels skip re-rendering. */
+   *  is unchanged so memoized panels skip re-rendering. Also prunes
+   *  `selected` and `pending` of instances that no longer exist, so ghost
+   *  selections can never survive an engine-side change (undo, patch load,
+   *  collapse, paste). */
   setNodes(nodes: NodeSnapshot[]): void;
   /** Replace telemetry, keeping per-instance slice identity when nothing
    *  moved (an idle rack causes zero re-renders). */
@@ -112,11 +115,16 @@ export function createRackStore(): RackStore {
         const prev = prevById.get(n.instance_id);
         return prev && JSON.stringify(prev) === JSON.stringify(n) ? prev : n;
       });
+      const live = new Set(stabilized.map((n) => n.instance_id));
+      const selected = state.selected.filter((id) => live.has(id));
+      const pending = state.pending && !live.has(state.pending.instance) ? null : state.pending;
       const unchanged =
         stabilized.length === state.nodes.length &&
-        stabilized.every((n, i) => n === state.nodes[i]);
+        stabilized.every((n, i) => n === state.nodes[i]) &&
+        selected.length === state.selected.length &&
+        pending === state.pending;
       if (unchanged) return;
-      state = { ...state, nodes: stabilized };
+      state = { ...state, nodes: stabilized, selected, pending };
       notify();
     },
     setTelemetry(next) {

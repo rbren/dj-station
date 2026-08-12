@@ -63,7 +63,9 @@ export interface RackModuleProps {
   removeModule(instance: string): Promise<void>;
   /** Open the documentation panel for this module (? in the title bar). */
   openDocs?(instance: string): void;
-  toggleSelected(instance: string): void;
+  /** Click-to-select: `additive` toggles membership (shift/cmd/ctrl-click),
+   *  otherwise the selection is replaced by this one module. */
+  selectModule(instance: string, additive: boolean): void;
   onJackClick(
     instance: string,
     kind: 'input' | 'output',
@@ -75,8 +77,7 @@ export interface RackModuleProps {
 }
 
 export const RackModule = memo(function RackModule(props: RackModuleProps) {
-  const { instanceId, index, refresh, moveModule, removeModule, toggleSelected, onJackClick } =
-    props;
+  const { instanceId, index, refresh, moveModule, removeModule, selectModule, onJackClick } = props;
   const store = useContext(RackStoreContext);
   if (!store) throw new Error('RackModule outside RackStoreContext');
   const node = useRackSelector((s) => s.nodes.find((n) => n.instance_id === instanceId));
@@ -165,7 +166,7 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         onContextMenu={(e) => props.onContextMenu?.(instanceId, e)}
         onEditEnd={() => void engine.endEdit()}
         selected={selected}
-        onSelectToggle={() => toggleSelected(instanceId)}
+        onSelect={(additive) => selectModule(instanceId, additive)}
         pendingSource={pending}
         onJackClick={(kind, jack, shift) => void onJackClick(instanceId, kind, jack, shift)}
         onKnobPosition={(jack, position) => {
