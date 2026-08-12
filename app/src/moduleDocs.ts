@@ -55,12 +55,18 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'pair it with a filter and envelope for a classic subtractive voice, ' +
       'or point it at another oscillator\u2019s fm input as a modulator.',
     inputs: {
-      pitch: 'Pitch CV, 1 V/oct.',
+      pitch:
+        'Which note to play: 1 V/oct pitch CV (0 V = C4). Patch a sequencer, ' +
+        'quantizer or MIDI pitch output here for melodies.',
       fm: 'Exponential FM, added to pitch in 1 V/oct units.',
       sync: 'Hard sync: a rising edge (>= 1 V) resets the phase.',
       waveform: 'Wave select: 0 sine, 1 saw, 2 square, 3 triangle.',
     },
-    outputs: { audio: 'Audio out, +-5 V.' },
+    outputs: {
+      audio:
+        'The tone itself, +-5 V audio. It drones continuously \u2014 patch it ' +
+        'through a filter and/or VCA to shape it into notes.',
+    },
     examples: [
       'pitch <- Quantizer out, audio -> Filter in for a classic subtractive voice.',
       'audio -> another Oscillator fm for two-operator FM.',
@@ -73,18 +79,24 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Good for rich layered voices (stack its outputs), animated PWM pads ' +
       'and basses, and clangorous FM bells and percussion.',
     inputs: {
-      pitch: 'Pitch CV, 1 V/oct.',
+      pitch: 'Which note to play: 1 V/oct pitch CV (0 V = C4).',
       fine: 'Fine tune, volts added to pitch (fractions of an octave).',
       fm: 'FM signal input (audio or CV).',
       fm_index: 'FM depth: how strongly fm modulates the frequency.',
-      pwm: 'Pulse width for the pulse output.',
+      pwm:
+        'Pulse width for the pulse output: 0 V is a square wave, away from ' +
+        'that it thins out. Wire an LFO here for classic PWM movement.',
       sync: 'Hard sync trigger: rising edge resets phase.',
     },
     outputs: {
-      saw: 'Sawtooth, +-5 V.',
-      tri: 'Triangle, +-5 V.',
-      sine: 'Sine, +-5 V.',
-      pulse: 'Pulse (width set by pwm), +-5 V.',
+      saw:
+        'Sawtooth, +-5 V: bright and buzzy with every harmonic \u2014 the ' +
+        'classic raw material for filtered basses and leads.',
+      tri: 'Triangle, +-5 V: mellow and flute-like, only soft odd harmonics.',
+      sine: 'Sine, +-5 V: just the fundamental \u2014 clean sub-bass, or an FM modulator.',
+      pulse:
+        'Pulse, +-5 V: hollow and reedy. Its width follows pwm; modulating ' +
+        'that width animates the timbre.',
     },
     examples: [
       'LFO bi -> pwm for movement on the pulse output.',
@@ -99,14 +111,16 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'LFO or envelope for anything from glassy keys to aggressive ' +
       'modern basses.',
     inputs: {
-      pitch: 'Pitch CV, 1 V/oct.',
-      fine: 'Fine tune offset.',
+      pitch: 'Which note to play: 1 V/oct pitch CV (0 V = C4).',
+      fine: 'Fine tune: a small pitch offset for detuning against another oscillator.',
       pos: 'Wavetable position: morphs between the table frames.',
       fm: 'FM signal input.',
-      fm_index: 'FM depth.',
-      sync: 'Hard sync trigger.',
+      fm_index: 'FM depth: how strongly the fm signal modulates the frequency.',
+      sync: 'Hard sync: a rising edge resets the wave phase (tearing sync leads).',
     },
-    outputs: { audio: 'Audio out, +-5 V.' },
+    outputs: {
+      audio: 'The morphing tone, +-5 V audio; shape it with a filter and VCA.',
+    },
     examples: ['LFO uni -> pos for slowly evolving timbres.'],
   },
   'com.dj.noise': {
@@ -121,11 +135,15 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       rate: 'Internal random rate (Hz) when no clock is patched.',
     },
     outputs: {
-      white: 'White noise, +-5 V.',
-      pink: 'Pink noise (-3 dB/oct), +-5 V.',
-      red: 'Red/brown noise (-6 dB/oct), +-5 V.',
-      blue: 'Blue noise (+3 dB/oct), +-5 V.',
-      random: 'Stepped random CV.',
+      white:
+        'White noise (equal energy per Hz), +-5 V: bright hiss \u2014 the raw ' +
+        'material for hats and snares.',
+      pink: 'Pink noise (-3 dB/oct), +-5 V: darker and natural \u2014 wind, surf, vinyl air.',
+      red: 'Red/brown noise (-6 dB/oct), +-5 V: deep rumble with almost no top end.',
+      blue: 'Blue noise (+3 dB/oct), +-5 V: extra-bright sizzle for crisp hats.',
+      random:
+        'Stepped random CV: a new value on every clock edge (or at rate). ' +
+        'Quantize it for random melodies, or slew it for drifting modulation.',
     },
     examples: [
       'random -> Quantizer in for random melodies.',
@@ -140,23 +158,27 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'from a sequencer and tune the voices to sit under a playing deck.',
     inputs: {
       kick_trig: 'Kick trigger (rising edge).',
-      kick_tune: 'Kick pitch offset, volts.',
+      kick_tune:
+        'Kick pitch, 1 V/oct around 52 Hz: down for deeper subs, up for ' + 'tighter house thumps.',
       kick_decay: 'Kick decay time, seconds.',
       kick_tone: 'Kick click/attack amount, 0..1.',
       snare_trig: 'Snare trigger (rising edge).',
-      snare_tune: 'Snare pitch offset, volts.',
+      snare_tune: 'Snare pitch, 1 V/oct around 185 Hz.',
       snare_decay: 'Snare decay time, seconds.',
       snare_tone: 'Snare snappy (noise) amount, 0..1.',
       hat_trig: 'Hi-hat trigger (rising edge).',
-      hat_tune: 'Hi-hat pitch offset, volts.',
+      hat_tune: 'Hi-hat filter pitch, 1 V/oct around 6.5 kHz: down = trashier, up = crisper.',
       hat_decay: 'Hi-hat decay time, seconds.',
       hat_tone: 'Hi-hat tone/brightness, 0..1.',
     },
     outputs: {
-      kick: 'Kick voice only, +-5 V.',
-      snare: 'Snare voice only, +-5 V.',
-      hat: 'Hi-hat voice only, +-5 V.',
-      mix: 'Sum of all three voices.',
+      kick: 'The kick voice alone \u2014 give it its own filter, compressor or mixer channel.',
+      snare: 'The snare voice alone, for separate processing (reverb sends love snares).',
+      hat: 'The hi-hat voice alone.',
+      mix:
+        'All three voices summed (at -6 dB so simultaneous hits fit the ' +
+        'rails) \u2014 the one-cable output when you don\u2019t need per-voice ' +
+        'processing.',
     },
     examples: [
       'Trigger Sequencer trig1/2/3 -> kick_trig/snare_trig/hat_trig for a drum machine.',
@@ -173,17 +195,23 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'plucks, acid lines, soft pads and filter sweeps, and doubles as a ' +
       'tone-shaping EQ stage for drums or a whole mix.',
     inputs: {
-      in: 'Audio input.',
-      cutoff: 'Cutoff frequency, Hz (exponential response).',
+      in: 'The sound to filter \u2014 an oscillator, drum voice or whole mix.',
+      cutoff:
+        'Where the filter acts: cutoff frequency as 1 V/oct pitch CV. Sweep ' +
+        'it with an envelope or LFO \u2014 this is THE knob on a filter.',
       res: 'Resonance, 0..1 (self-oscillates near the top).',
-      drive: 'Input drive/saturation amount.',
+      drive:
+        'Gain into the filter core. In ladder/OTA topologies pushing past 1 ' +
+        'saturates, adding grit and compression.',
       topology: 'Filter topology/character select (stepped).',
     },
     outputs: {
-      lp: 'Low-pass output.',
-      bp: 'Band-pass output.',
-      hp: 'High-pass output.',
-      notch: 'Notch output.',
+      lp:
+        'Low-pass: keeps what\u2019s below the cutoff. The classic warm ' +
+        'output \u2014 basses, plucks, acid lines.',
+      bp: 'Band-pass: keeps a band around the cutoff, cutting lows and highs \u2014 nasal, vocal tones.',
+      hp: 'High-pass: keeps what\u2019s above the cutoff \u2014 thins a sound down to its sparkle.',
+      notch: 'Notch: cuts a band at the cutoff and passes the rest \u2014 subtle phasey sweeps.',
     },
     examples: [
       'Oscillator audio -> in, ADSR env -> cutoff for a plucked voice.',
@@ -214,8 +242,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'fading stereo sources (a deck, an effect return) under one ' +
       'envelope, or as two utility level controls anywhere in the patch.',
     inputs: {
-      'in#': 'Channel signal input.',
-      'cv#': 'Channel gain CV.',
+      'in#': 'Channel # signal input, audio or CV.',
+      'cv#':
+        'Channel # gain CV: 0 V mutes, full scale is unity. Patch an ' + 'envelope or LFO here.',
       'resp#': 'Response curve select: linear or exponential.',
       'offset#': 'Constant added to the channel CV, volts.',
     },
@@ -229,11 +258,11 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'attitude: warm a thin sine into a usable bass, crunch drums, or ' +
       'push it hard for aggressive fuzz and broken-speaker textures.',
     inputs: {
-      in: 'Audio input.',
+      in: 'The sound to distort; hotter signals hit the curve harder.',
       mode: 'Shaping curve select (stepped).',
       drive: 'Amount of gain into the shaper.',
       bias: 'DC offset added before shaping (asymmetry).',
-      level: 'Output level.',
+      level: 'Output trim, 0..2: pull back after heavy drive to keep levels sane downstream.',
     },
     outputs: { out: 'Shaped audio.' },
     examples: ['Oscillator -> in with LFO -> drive for evolving grit.'],
@@ -247,7 +276,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'both edit the same values. Carve mixes, notch resonances, or ' +
       'modulate a band frequency for wah-like sweeps.',
     inputs: {
-      in: 'Audio input.',
+      in: 'The sound to equalize \u2014 a single voice or a whole mix.',
       'freq#': 'Band # center frequency (1 V/oct, 0 = C4).',
       'gain#': 'Band # boost/cut in dB (0 = bypass).',
       'q#': 'Band # Q: higher = narrower bell.',
@@ -269,16 +298,24 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       in_l: 'Left audio input.',
       in_r: 'Right audio input.',
       sidechain: 'External detector input (compresses in_l/in_r from this signal).',
-      threshold: 'Threshold, dB.',
-      ratio: 'Compression ratio, 1..20.',
-      attack: 'Attack time, seconds.',
-      release: 'Release time, seconds.',
-      knee: 'Soft knee width, dB.',
-      makeup: 'Makeup gain, dB.',
+      threshold:
+        'Level (dB) where compression starts: signal above it gets squashed. ' +
+        'Lower it to compress more of the signal.',
+      ratio:
+        'How hard to squash above the threshold, 1..20: 2 is gentle glue, ' +
+        '4 punchy drums, 20 is a limiter.',
+      attack:
+        'How fast the compressor clamps down, seconds: slower lets drum ' +
+        'transients punch through before the squash.',
+      release:
+        'How fast it lets go, seconds: this times the \u201cpumping\u201d ' +
+        '\u2014 short is aggressive, long is smooth.',
+      knee: 'Soft knee width, dB: widens the onset of compression around the threshold.',
+      makeup: 'Output gain, dB: brings the compressed signal back up to level.',
     },
     outputs: {
-      out_l: 'Left output.',
-      out_r: 'Right output.',
+      out_l: 'Compressed left channel.',
+      out_r: 'Compressed right channel.',
       gr: 'Gain reduction, as a CV (for meters or ducking other signals).',
     },
     examples: ['Drum mix -> sidechain, pads -> in_l/in_r for pumping sidechain ducking.'],
@@ -296,10 +333,12 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     inputs: {
       gate: 'Gate input: high (>= 1 V) opens the envelope.',
       retrig: 'Trigger: rising edge restarts the attack phase.',
-      attack: 'Attack time, seconds.',
-      decay: 'Decay time, seconds.',
+      attack:
+        'Attack time, seconds: gate-on to full level. Short = percussive, ' +
+        'long = swelling pads.',
+      decay: 'Decay time, seconds: the fall from the attack peak down to the sustain level.',
       sustain: 'Sustain level, 0..1 of full scale.',
-      release: 'Release time, seconds.',
+      release: 'Release time, seconds: the fade-out after the gate falls.',
     },
     outputs: { env: 'Envelope CV, 0..+10 V.' },
     examples: [
@@ -316,7 +355,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'and slow drifting pads \u2014 clock-sync it for dubstep-style ' +
       'tempo-locked wubs.',
     inputs: {
-      rate: 'Free-running rate, Hz.',
+      rate:
+        'Speed in Hz when no clock is patched: below 1 Hz for slow drifts, ' +
+        'up to audio rate for FM-like effects.',
       shape: 'Waveform select (stepped: sine, tri, saw, square, random...).',
       pw: 'Pulse width / shape skew, 0..1.',
       clock: 'Clock input: rising edges tempo-sync the LFO.',
@@ -325,8 +366,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       phase: 'Phase offset, 0..1 cycles.',
     },
     outputs: {
-      bi: 'Bipolar output, +-5 V.',
-      uni: 'Unipolar output, 0..+10 V.',
+      bi: 'Bipolar output, +-5 V: swings around zero \u2014 natural for vibrato and panning.',
+      uni: 'Unipolar output, 0..+10 V: positive only \u2014 natural for VCA levels and filter opens.',
       shifted: 'Copy of bi at the phase offset (for quadrature effects).',
     },
     examples: [
@@ -353,8 +394,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     },
     outputs: {
       out: 'Function output, 0..+10 V.',
-      eor: 'End-of-rise trigger.',
-      eoc: 'End-of-cycle trigger.',
+      eor: 'Fires the instant the rise completes \u2014 sequence a second event off the first.',
+      eoc:
+        'Fires when the fall completes. With cycle on, patch it to another ' +
+        'module\u2019s trig for chained self-playing rhythms.',
     },
     examples: [
       'trig from a sequencer, out -> VCA cv: a two-stage envelope.',
@@ -375,7 +418,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       slew: 'Slew (glide) between held values, seconds.',
     },
     outputs: {
-      out: 'Held value.',
+      out: 'The held voltage: steps to a new value on each trigger \u2014 stepped, rhythmic modulation.',
       noise: 'Internal white noise, +-5 V.',
     },
     examples: ['Clock -> trig, out -> Quantizer in for stepped random melodies.'],
@@ -398,14 +441,14 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       beats: 'Beats per bar, 1..16.',
     },
     outputs: {
-      clock: 'Beat clock trigger.',
-      div2: 'Clock divided by 2.',
-      div4: 'Clock divided by 4.',
-      div8: 'Clock divided by 8.',
-      div16: 'Clock divided by 16.',
-      mul2: 'Clock multiplied by 2.',
-      mul3: 'Clock multiplied by 3.',
-      mul4: 'Clock multiplied by 4.',
+      clock: 'One trigger per beat at the set BPM \u2014 the master pulse for sequencers.',
+      div2: 'Every 2nd beat (half-time feels).',
+      div4: 'Every 4th beat \u2014 once per bar in 4/4.',
+      div8: 'Every 8th beat \u2014 two-bar phrases.',
+      div16: 'Every 16th beat \u2014 slow chord or scene changes.',
+      mul2: '2 pulses per beat (8th notes).',
+      mul3: '3 pulses per beat (triplets).',
+      mul4: '4 pulses per beat (16th notes) \u2014 hi-hat territory.',
       bar: 'One trigger per bar.',
     },
     examples: [
@@ -421,7 +464,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'arpeggios and acid sequences, with ratchets for fills and glide ' +
       'for 303-style slides.',
     inputs: {
-      clock: 'Step advance trigger.',
+      clock:
+        'Advances one step per rising edge \u2014 patch the master clock (or a division) here.',
       reset: 'Trigger: jump back to step 1.',
       length: 'Sequence length, 1..16 steps.',
       dir: 'Play direction (stepped: forward, reverse, pendulum, random).',
@@ -431,10 +475,12 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'ratchet#': 'Ratchet count for step # (retriggers within the step).',
     },
     outputs: {
-      cv: 'Current step CV.',
+      cv:
+        'The active step\u2019s CV value \u2014 through a Quantizer into an ' +
+        'oscillator pitch is the classic melody path.',
       gate: 'Gate output (high on active steps, ratcheted).',
       eos: 'End-of-sequence trigger.',
-      step: 'Current step index as CV.',
+      step: 'Playhead position as a rising CV \u2014 drive a second module in lockstep.',
     },
     examples: ['Clock clock -> clock, cv -> Quantizer -> Oscillator pitch, gate -> ADSR gate.'],
   },
@@ -452,7 +498,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'len#': 'Track # length in steps.',
     },
     outputs: {
-      'trig#': 'Track # trigger output.',
+      'trig#':
+        'Fires on track #\u2019s active steps \u2014 patch to drum triggers or envelope gates.',
       pos: 'Current step position as CV.',
     },
     examples: ['trig1/trig2/trig3 -> Drum kick_trig/snare_trig/hat_trig.'],
@@ -466,14 +513,14 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'emerge from two numbers, and nudging fill or rotation live makes ' +
       'instant variations.',
     inputs: {
-      clock: 'Step advance trigger.',
+      clock: 'Advances all channels one step per rising edge.',
       reset: 'Trigger: back to step 1 on all channels.',
       'steps#': 'Channel # pattern length, 1..32.',
       'fill#': 'Channel # number of hits distributed across the steps.',
       'rot#': 'Channel # pattern rotation.',
     },
     outputs: {
-      'ch#': 'Channel # trigger output.',
+      'ch#': 'Channel #\u2019s Euclidean pattern as triggers \u2014 patch to drums or envelopes.',
       or: 'Logical OR of all four channels.',
       'step#': 'Channel # current position as CV.',
     },
@@ -488,7 +535,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'you like appears, then lock it \u2014 great for self-playing ' +
       'ambient patches and endless hooks.',
     inputs: {
-      clock: 'Step advance trigger.',
+      clock: 'Advances the register one step per rising edge.',
       prob: 'Mutation probability, 0..1 (0 = locked loop).',
       length: 'Loop length in steps.',
       range: 'CV output range scaling.',
@@ -496,11 +543,11 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       root: 'Quantizer root note.',
     },
     outputs: {
-      cv: 'Raw register CV.',
-      bit1: 'Register bit 1 as a gate.',
-      bit2: 'Register bit 2 as a gate.',
+      cv: 'The looping random voltage, unquantized \u2014 modulation that repeats and mutates.',
+      bit1: 'One register bit as a gate: a looping random rhythm that mutates with prob.',
+      bit2: 'Another register bit as a gate \u2014 a related but different rhythm to bit1.',
       quant: 'Quantized CV output (scale/root).',
-      reg: 'Register value as CV.',
+      reg: 'The whole register read as one stepped CV, wider-ranging than cv.',
     },
     examples: ['quant -> Oscillator pitch, bit1 -> ADSR gate: a self-playing melody.'],
   },
@@ -515,7 +562,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     inputs: {
       in: 'Signal to distribute to o1..o8 (1-to-N mode).',
       'i#': 'Input # for N-to-1 selection onto out.',
-      clock: 'Step advance trigger.',
+      clock: 'Advances to the next step per rising edge.',
       reset: 'Trigger: back to step 1.',
       cv: 'CV addressing: selects the active step directly.',
       steps: 'Number of active steps, 1..8.',
@@ -544,13 +591,18 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       time: 'Delay time, seconds (used when no clock is patched).',
       clock: 'Clock input: delay time locks to the clock via div.',
       div: 'Clock division for synced delay time.',
-      feedback: 'Feedback amount, 0..1.',
+      feedback:
+        'How much of each repeat is fed back, 0..1: 0 is a single echo, ' +
+        'near 1 endless dub tails.',
       lowpass: 'Feedback-path low-pass cutoff, Hz (darkens repeats).',
       highpass: 'Feedback-path high-pass cutoff, Hz (thins repeats).',
       mix: 'Dry/wet mix, 0..1.',
       pingpong: 'Switch: alternate repeats left/right.',
     },
-    outputs: { out_l: 'Left output.', out_r: 'Right output.' },
+    outputs: {
+      out_l: 'Delayed left channel (includes the dry signal per mix).',
+      out_r: 'Delayed right channel.',
+    },
     examples: ['Clock clock -> clock with div at 3/16 for a dotted-eighth dub delay.'],
   },
   'com.dj.reverb': {
@@ -563,14 +615,17 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     inputs: {
       in_l: 'Left audio input.',
       in_r: 'Right audio input.',
-      size: 'Room size.',
-      decay: 'Tail decay time.',
+      size: 'Room size: small for tight ambience, large for halls and washes.',
+      decay: 'How long the tail rings: turn up for ambient washes, down for drum rooms.',
       damping: 'High-frequency damping in the tail.',
-      diffusion: 'Echo density.',
+      diffusion: 'Echo density: low is grainy early reflections, high a smooth wash.',
       freeze: 'Switch: infinitely sustain the current tail.',
       mix: 'Dry/wet mix, 0..1.',
     },
-    outputs: { out_l: 'Left output.', out_r: 'Right output.' },
+    outputs: {
+      out_l: 'Reverberated left channel (includes the dry signal per mix).',
+      out_r: 'Reverberated right channel.',
+    },
     examples: ['Gate the freeze switch from a sequencer for rhythmic frozen washes.'],
   },
   'com.dj.granular': {
@@ -584,8 +639,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     inputs: {
       in_l: 'Left audio input.',
       in_r: 'Right audio input.',
-      density: 'Grains per second.',
-      size: 'Grain length.',
+      density: 'Grains per second: sparse pointillism at low values, a smooth cloud at high.',
+      size: 'Grain length: short is buzzy and granular, long smears into texture.',
       position: 'Playback position within the buffer, 0..1.',
       pitch: 'Grain pitch shift, volts (1 V/oct).',
       texture: 'Grain envelope shape.',
@@ -595,7 +650,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       trig: 'Trigger: spawn a grain manually.',
       mix: 'Dry/wet mix, 0..1.',
     },
-    outputs: { out_l: 'Left output.', out_r: 'Right output.' },
+    outputs: {
+      out_l: 'Granulated left channel (includes the dry signal per mix).',
+      out_r: 'Granulated right channel.',
+    },
     examples: ['Freeze a deck stem and sweep position with an LFO for ambient beds.'],
   },
   'com.dj.modfx': {
@@ -610,13 +668,16 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       in_r: 'Right audio input.',
       mode: 'Effect select: chorus / flanger / phaser (stepped).',
       rate: 'Modulation rate, Hz.',
-      depth: 'Modulation depth.',
+      depth: 'Modulation depth: how far the sweep travels \u2014 subtle shimmer to full whoosh.',
       feedback: 'Feedback/resonance amount.',
       spread: 'Stereo phase spread of the modulation.',
       through_zero: 'Switch: through-zero flanging.',
       mix: 'Dry/wet mix, 0..1.',
     },
-    outputs: { out_l: 'Left output.', out_r: 'Right output.' },
+    outputs: {
+      out_l: 'Processed left channel (includes the dry signal per mix).',
+      out_r: 'Processed right channel.',
+    },
     examples: ['Deck stem_other -> in for wide chorused pads in a live set.'],
   },
   'com.dj.resonator': {
@@ -632,7 +693,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       pitch: 'Resonator pitch, 1 V/oct.',
       structure: 'Harmonic structure / inharmonicity.',
       brightness: 'Brightness of the excitation.',
-      damping: 'Decay damping.',
+      damping: 'How fast partials fade: low rings like a bell, high chokes like palm muting.',
       position: 'Excitation position along the string/membrane.',
       mode: 'Resonator model select (stepped).',
       voices: 'Polyphony (stepped).',
@@ -795,8 +856,13 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       thru: 'Unchanged copy of in.',
       pitch: 'Detected pitch as CV (1 V/oct).',
       hz: 'Detected frequency, Hz-scaled CV.',
-      peak: 'Peak level.',
-      rms: 'RMS level.',
+      peak:
+        'Instantaneous peak level of the input as a CV \u2014 spikes on ' +
+        'transients; good for triggering off hits.',
+      rms:
+        'Average loudness (RMS) of the input as a smooth CV \u2014 an ' +
+        'envelope follower: wire it (inverted) into a VCA to duck other ' +
+        'signals with the music.',
       trig: 'Trigger on detected onsets.',
     },
     examples: ['Sit inline after an oscillator to watch the waveform while patching.'],

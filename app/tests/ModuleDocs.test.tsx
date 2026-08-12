@@ -122,8 +122,8 @@ describe('DocsPanel rendering', () => {
   it('keeps individually-documented numbered jacks separate (clock divisions)', () => {
     const m = byId('com.dj.clock');
     render(<DocsPanel typeId={m.id} manifest={m} onClose={() => {}} />);
-    expect(screen.getByTestId('docs-row-div2').textContent).toContain('divided by 2');
-    expect(screen.getByTestId('docs-row-div16').textContent).toContain('divided by 16');
+    expect(screen.getByTestId('docs-row-div2').textContent).toContain('Every 2nd beat');
+    expect(screen.getByTestId('docs-row-div16').textContent).toContain('Every 16th beat');
   });
 
   it('renders builtin deck docs including params (from the live manifest)', () => {
