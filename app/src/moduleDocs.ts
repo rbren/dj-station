@@ -853,6 +853,39 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     outputs: { 'map#': 'A gesture mapping value, as configured in the panel.' },
     examples: ['Add a "wheel" mapping and wire it to a Deck speed for touchless nudging.'],
   },
+  'builtin.hands': {
+    summary:
+      'Hand-tracking CV outputs, fed by the Camera module\u2019s tracker: ' +
+      'switch tracking on in a Camera panel and every Hands module in the ' +
+      'rack receives the landmarks. Positions are engine-space (mirror ' +
+      'view, X right, Y up, center origin) scaled to \u00b15 V; a hand that ' +
+      'leaves the frame HOLDS its last values while its seen-gate drops to ' +
+      '0 V, so patches can tell "hand at center" from "no hand". Pinch is ' +
+      'scale-invariant (thumb\u2013index distance over palm span, ~0.5 V ' +
+      'touching to ~7 V spread); rotation is the thumb\u2019s signed angle ' +
+      'off the palm axis \u2014 thumb flared out is positive for both hands.',
+    outputs: {
+      cx: 'Centroid X over all visible hands, \u00b15 V.',
+      cy: 'Centroid Y over all visible hands, \u00b15 V.',
+      lx: 'Left-hand centroid X, \u00b15 V.',
+      ly: 'Left-hand centroid Y, \u00b15 V.',
+      rx: 'Right-hand centroid X, \u00b15 V.',
+      ry: 'Right-hand centroid Y, \u00b15 V.',
+      dx: 'Right minus left centroid X, \u00b110 V.',
+      dy: 'Right minus left centroid Y, \u00b110 V.',
+      l_pinch: 'Left thumb\u2013forefinger pinch, scale-invariant, 0\u201310 V.',
+      r_pinch: 'Right thumb\u2013forefinger pinch, scale-invariant, 0\u201310 V.',
+      l_rot: 'Left thumb rotation: out is positive, tucked negative, \u00b110 V.',
+      r_rot: 'Right thumb rotation: out is positive, tucked negative, \u00b110 V.',
+      l_seen: 'Gate: 10 V while the left hand is tracked.',
+      r_seen: 'Gate: 10 V while the right hand is tracked.',
+    },
+    examples: [
+      'Wire r_pinch to a filter cutoff and play it like a theremin.',
+      'dx between your hands into an LFO rate: spread arms = faster wobble.',
+      'Gate a delay send with l_seen so echoes only run while your hand is up.',
+    ],
+  },
   'builtin.deck': {
     summary:
       'DJ deck: plays a library track with pitch fader, phase nudge, hot ' +

@@ -12,6 +12,9 @@ export default defineConfig({
       '@mediapipe/tasks-vision': fileURLToPath(
         new URL('./node_modules/@mediapipe/tasks-vision', import.meta.url),
       ),
+      '@tauri-apps/api': fileURLToPath(
+        new URL('./node_modules/@tauri-apps/api', import.meta.url),
+      ),
     },
   },
   clearScreen: false,

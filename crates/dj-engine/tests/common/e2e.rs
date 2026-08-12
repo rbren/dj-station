@@ -62,6 +62,16 @@ pub struct GestureTraceSpec {
     pub trace: String,
 }
 
+/// A recorded hand-landmark fixture (JSON `HandsTrace`, case-relative)
+/// fed into a Hands node before rendering. Landmark frames come from the
+/// camera panel's tracker at runtime, so E2E cases carry them in the
+/// sidecar like deck metadata and gesture traces.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HandsTraceSpec {
+    pub instance: String,
+    pub trace: String,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EventsFile {
     pub seconds: f32,
@@ -73,6 +83,8 @@ pub struct EventsFile {
     pub decks: Vec<DeckSetupSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gestures: Vec<GestureTraceSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hands: Vec<HandsTraceSpec>,
 }
 
 impl EventsFile {
@@ -171,6 +183,10 @@ fn render_case(case: &str) -> PathBuf {
     for g in &events.gestures {
         let trace = dj_engine::dj_gesture::PoseTrace::load(&case_dir.join(&g.trace)).unwrap();
         engine.gesture_feed_trace(&g.instance, &trace, 0).unwrap();
+    }
+    for h in &events.hands {
+        let trace = dj_engine::hands::HandsTrace::load(&case_dir.join(&h.trace)).unwrap();
+        engine.hands_feed_trace(&h.instance, &trace, 0).unwrap();
     }
     let frames = (events.seconds * engine.config.sample_rate) as usize;
     let out = std::env::temp_dir().join(format!("dj-e2e-{case}.wav"));

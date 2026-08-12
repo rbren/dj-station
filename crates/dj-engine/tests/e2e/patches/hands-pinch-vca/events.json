@@ -1,0 +1,10 @@
+{
+  "seconds": 1.5,
+  "midi": [],
+  "hands": [
+    {
+      "instance": "hands1",
+      "trace": "pinch.json"
+    }
+  ]
+}

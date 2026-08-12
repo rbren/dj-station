@@ -16,7 +16,8 @@
     "paths": {
       "react": ["./node_modules/@types/react"],
       "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
-      "@mediapipe/tasks-vision": ["./node_modules/@mediapipe/tasks-vision"]
+      "@mediapipe/tasks-vision": ["./node_modules/@mediapipe/tasks-vision"],
+      "@tauri-apps/api/core": ["./node_modules/@tauri-apps/api/core"]
     }
   },
   "include": ["src", "tests", "../extensions/adsr/ui-src"]

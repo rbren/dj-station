@@ -141,6 +141,21 @@ fails if it's missing.
   camera `ui.js` marks it external, and vite resolves it via an alias
   (ui-src lives outside the app root, so node resolution misses
   `app/node_modules`).
+- Hands module (`builtin.hands`, `crates/dj-engine/src/hands.rs`): CV
+  outputs derived from the camera panel's tracker — a gesture-style
+  builtin with a FIXED 14-jack set (centroids/deltas ±5 V, scale-
+  invariant pinch, 2D signed-angle thumb rotation, seen gates; only
+  landmark x/y are trusted — MediaPipe z is estimated depth, never used).
+  Data path: camera panel `handsFeed.ts` (discovers Hands instances via
+  `engine_nodes`, ~3 s poll) -> `hands_feed` IPC (engine_lock, not
+  undoable) -> `Engine::hands_feed` (`engine/hands_api.rs`; control-
+  thread derivation + dedup in `HandsControl`) -> SPSC ring ->
+  `HandsRtModule` (holds last value). DROPOUT POLICY: a vanished hand
+  HOLDS its value jacks, only its `seen` gate falls; a `None`/dropped
+  frame updates nothing. The camera `ui.js` esbuild bundle marks
+  `@tauri-apps/api/core` external (dynamic import, absent in tests).
+  E2E sidecars carry `hands` fixture specs (`HandsTrace` JSON, synthetic
+  — never video); `hands_feed_trace` is the offline/golden path.
 - Params vs. inputs (post-M5 refactor): ALL WASM-module controls
   (oscillator `waveform`, ADSR `attack/decay/sustain/release`, playback
   `loop`) are ordinary knob-backed input jacks — wireable, per-patch

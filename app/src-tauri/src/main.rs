@@ -910,6 +910,22 @@ fn gesture_feed_stop(state: State<AppState>, instance: String) -> CmdResult<()> 
     Ok(())
 }
 
+/// One tracked camera frame into a Hands node (the camera panel calls
+/// this at camera rate while tracking is on). Pure live control data —
+/// nothing persists, so `engine_lock`, not `patch_edit`. Errors are
+/// returned (not fatal): the panel drops the frame and keeps going, and
+/// the RT side holds last values, matching the dropout policy.
+#[tauri::command]
+fn hands_feed(
+    state: State<AppState>,
+    instance: String,
+    detection: dj_engine::hands::HandsDetection,
+) -> CmdResult<()> {
+    let mut engine = engine_lock(&state)?;
+    let frame = engine.current_frame();
+    engine.hands_feed(&instance, frame, Some(&detection)).map_err(err)
+}
+
 #[tauri::command]
 fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     {
@@ -2153,6 +2169,7 @@ fn main() {
             gesture_learn_poll,
             gesture_feed_start,
             gesture_feed_stop,
+            hands_feed,
             undo,
             redo,
             end_edit,

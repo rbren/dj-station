@@ -14,6 +14,7 @@ pub mod deck;
 pub mod engine;
 pub mod gesture;
 pub mod graph;
+pub mod hands;
 pub mod history;
 pub mod knob;
 pub mod macros;

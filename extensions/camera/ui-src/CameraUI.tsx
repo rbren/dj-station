@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createHandLandmarker, type LandmarkerHandle } from "./handLandmarker";
+import { createHandsFeeder, type HandsFeeder } from "./handsFeed";
 import { resolveHands, type HandFrame } from "./handTracking";
 import { clearOverlay, drawHandFrame } from "./HandOverlay";
 import { StatsAccumulator, type TrackingStats } from "./trackingStats";
@@ -79,6 +80,9 @@ export default function CameraUI() {
   // Guards against the async landmarker load finishing after stop.
   const trackWantRef = useRef(false);
   const landmarkerRef = useRef<LandmarkerHandle | null>(null);
+  // Ships tracked frames to builtin.hands modules (CV outputs); lives
+  // exactly as long as the tracking loop.
+  const feederRef = useRef<HandsFeeder | null>(null);
   const rvfcIdRef = useRef<number | null>(null);
   const statsAccRef = useRef(new StatsAccumulator());
   // The rVFC tick reads the overlay toggle through a ref so flipping it
@@ -97,6 +101,8 @@ export default function CameraUI() {
     rvfcIdRef.current = null;
     landmarkerRef.current?.close();
     landmarkerRef.current = null;
+    feederRef.current?.close();
+    feederRef.current = null;
     statsAccRef.current.reset();
     const ctx = canvasRef.current?.getContext("2d");
     if (ctx) clearOverlay(ctx, W, H);
@@ -184,6 +190,7 @@ export default function CameraUI() {
       return;
     }
     landmarkerRef.current = landmarker;
+    feederRef.current = createHandsFeeder();
     statsAccRef.current.reset();
     statsAccRef.current.delegate = landmarker.delegate;
     setTrackState("on");
@@ -257,6 +264,7 @@ export default function CameraUI() {
           const t1 = performance.now();
           // The frame carries its timestamp from the start (R-6).
           const frame: HandFrame = resolveHands(raw, frameTime);
+          feederRef.current?.feed(frame);
           frames++;
           if (frame.hands.length !== lastHands) {
             lastHands = frame.hands.length;

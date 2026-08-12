@@ -29,6 +29,7 @@ use crate::wasm_host::WasmRuntime;
 // This file keeps construction, graph editing, knobs and telemetry.
 mod deck_api;
 mod gesture_api;
+mod hands_api;
 mod hot_reload;
 mod lifecycle;
 mod macros_api;
@@ -283,6 +284,15 @@ pub struct Engine {
     midi_producers: HashMap<usize, rtrb::Producer<MidiEvent>>,
     /// Gesture value events toward the RT thread, per gesture node.
     gesture_producers: HashMap<usize, rtrb::Producer<GestureEvent>>,
+    /// Hands CV events toward the RT thread plus the dedup control state,
+    /// per Hands node.
+    hands_producers: HashMap<
+        usize,
+        (
+            rtrb::Producer<crate::hands::HandsEvent>,
+            crate::hands::HandsControl,
+        ),
+    >,
     /// LED feedback messages coming back from the RT thread, per MIDI node.
     midi_out_consumers: HashMap<usize, rtrb::Consumer<MidiOutEvent>>,
     /// Registered macro definitions (engine-side view of the library store).
@@ -316,6 +326,8 @@ const CMD_QUEUE_CAP: usize = 1024;
 /// renders that pre-inject whole recorded fixtures (like MIDI's ring);
 /// live feeds drain it every block.
 const GESTURE_QUEUE_CAP: usize = 4096;
+/// Pending hands CV events per Hands node (same sizing rationale).
+const HANDS_QUEUE_CAP: usize = 4096;
 /// Pending track loads per Playback node (drained at the next block).
 const PLAYBACK_QUEUE_CAP: usize = 64;
 /// Pending control commands per Deck node (drained at the next block).
@@ -376,6 +388,7 @@ impl Engine {
             garbage_rx,
             midi_producers: HashMap::new(),
             gesture_producers: HashMap::new(),
+            hands_producers: HashMap::new(),
             midi_out_consumers: HashMap::new(),
             macros: MacroLibrary::default(),
             macro_instances: BTreeMap::new(),
@@ -516,6 +529,7 @@ impl Engine {
             Some(
                 BuiltinKind::Midi
                 | BuiltinKind::Gesture
+                | BuiltinKind::Hands
                 | BuiltinKind::Playback
                 | BuiltinKind::Deck,
             ) => Err(anyhow!("{ext_id} modules are created via add_module")),
@@ -583,6 +597,7 @@ impl Engine {
         let mut gesture = None;
         let mut midi_plumbing = None;
         let mut gesture_tx = None;
+        let mut hands_plumbing = None;
         let mut playback_plumbing = None;
         let mut deck_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
@@ -599,6 +614,11 @@ impl Engine {
                 gesture_tx = Some(tx);
                 gesture = Some(dj_gesture::GestureProcessor::default());
                 Box::new(GestureRtModule::new(rx))
+            }
+            Some(BuiltinKind::Hands) => {
+                let (tx, rx) = rtrb::RingBuffer::new(HANDS_QUEUE_CAP);
+                hands_plumbing = Some(tx);
+                Box::new(crate::hands::HandsRtModule::new(rx))
             }
             Some(BuiltinKind::Playback) => {
                 let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
@@ -697,6 +717,10 @@ impl Engine {
         if let Some(tx) = gesture_tx {
             self.gesture_producers.insert(idx, tx);
         }
+        if let Some(tx) = hands_plumbing {
+            self.hands_producers
+                .insert(idx, (tx, crate::hands::HandsControl::default()));
+        }
         if let Some((tx, garbage_rx)) = playback_plumbing {
             self.playback_producers.insert(idx, tx);
             self.playback_garbage.insert(idx, garbage_rx);
@@ -746,6 +770,7 @@ impl Engine {
         self.midi_producers.remove(&slot);
         self.midi_out_consumers.remove(&slot);
         self.gesture_producers.remove(&slot);
+        self.hands_producers.remove(&slot);
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);
         self.decks.remove(&slot);
