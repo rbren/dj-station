@@ -15,7 +15,8 @@
     "baseUrl": ".",
     "paths": {
       "react": ["./node_modules/@types/react"],
-      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"]
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
+      "@mediapipe/tasks-vision": ["./node_modules/@mediapipe/tasks-vision"]
     }
   },
   "include": ["src", "tests", "../extensions/adsr/ui-src"]

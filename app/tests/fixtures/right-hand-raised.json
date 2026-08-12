@@ -1,0 +1,124 @@
+{
+  "description": "Raw MediaPipe HandLandmarker output shape for a physical RIGHT hand raised palm-to-camera in an UNMIRRORED frame: the hand sits on the image-left half and MediaPipe (which assumes mirrored input) labels it 'Left'. resolveHands must report physical 'right' with engine x > 0 (mirror view). Hand-authored deterministic geometry: wrist at image (0.30, 0.55), fingers extending upward (image y decreasing), thumb toward image-right.",
+  "physicalHand": "right",
+  "mediaTime": 1.2345,
+  "result": {
+    "landmarks": [
+      [
+        {
+          "x": 0.3,
+          "y": 0.55,
+          "z": 0
+        },
+        {
+          "x": 0.345,
+          "y": 0.54,
+          "z": -0.02
+        },
+        {
+          "x": 0.365,
+          "y": 0.52,
+          "z": -0.04
+        },
+        {
+          "x": 0.38,
+          "y": 0.505,
+          "z": -0.06
+        },
+        {
+          "x": 0.39,
+          "y": 0.495,
+          "z": -0.08
+        },
+        {
+          "x": 0.33,
+          "y": 0.475,
+          "z": -0.02
+        },
+        {
+          "x": 0.334,
+          "y": 0.445,
+          "z": -0.04
+        },
+        {
+          "x": 0.336,
+          "y": 0.425,
+          "z": -0.06
+        },
+        {
+          "x": 0.338,
+          "y": 0.405,
+          "z": -0.08
+        },
+        {
+          "x": 0.31,
+          "y": 0.47,
+          "z": -0.02
+        },
+        {
+          "x": 0.312,
+          "y": 0.435,
+          "z": -0.04
+        },
+        {
+          "x": 0.313,
+          "y": 0.41,
+          "z": -0.06
+        },
+        {
+          "x": 0.314,
+          "y": 0.39,
+          "z": -0.08
+        },
+        {
+          "x": 0.29,
+          "y": 0.475,
+          "z": -0.02
+        },
+        {
+          "x": 0.288,
+          "y": 0.442,
+          "z": -0.04
+        },
+        {
+          "x": 0.287,
+          "y": 0.42,
+          "z": -0.06
+        },
+        {
+          "x": 0.286,
+          "y": 0.402,
+          "z": -0.08
+        },
+        {
+          "x": 0.27,
+          "y": 0.485,
+          "z": -0.02
+        },
+        {
+          "x": 0.266,
+          "y": 0.46,
+          "z": -0.04
+        },
+        {
+          "x": 0.264,
+          "y": 0.442,
+          "z": -0.06
+        },
+        {
+          "x": 0.262,
+          "y": 0.428,
+          "z": -0.08
+        }
+      ]
+    ],
+    "handedness": [
+      [
+        {
+          "categoryName": "Left",
+          "score": 0.97
+        }
+      ]
+    ]
+  }
+}

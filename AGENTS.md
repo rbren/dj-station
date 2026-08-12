@@ -116,6 +116,31 @@ fails if it's missing.
   (`app/src-tauri/Info.plist`); Linux/webkitgtk denies user-media by
   default, so `main.rs` `setup` grants `UserMediaPermissionRequest` on
   the raw webview (shell depends on `webkit2gtk =2.0.2`, pinned to wry's).
+- Camera hand tracking (MediaPipe `@mediapipe/tasks-vision`, WASM in the
+  webview — never bind the C++ from Rust): per-session like the camera,
+  all in `extensions/camera/ui-src/`. The runtime + `hand_landmarker.task`
+  model are vendored into `app/public/mediapipe/` (gitignored) by
+  `app/scripts/fetch-mediapipe-assets.mjs` (runs in `npm run dev`/`build`;
+  model URL is version-pinned and SHA-256-verified; offline no-op once
+  present) — the packaged app never loads from a CDN. CONVENTIONS ARE
+  LOAD-BEARING, canonical write-up in `handTracking.ts`: the `<video>`
+  display is CSS-mirrored but the tracker sees RAW frames, so MediaPipe's
+  handedness label (which assumes mirrored input) is swapped exactly once
+  in `physicalHand`; engine coords are X right (mirror view), Y UP,
+  origin frame-center, [-1,1], converted once in `toEngineCoords`; the
+  loop is `requestVideoFrameCallback` (never rAF) and every landmark set
+  carries the frame's `mediaTime`. Later CV-output phases inherit all of
+  this — `app/tests/HandTracking.test.ts` pins it with a hand-authored
+  known-handedness JSON fixture (`tests/fixtures/`, never video files).
+  The overlay is a separate toggleable canvas over the video (never baked
+  into the texture); the landmarker wrapper tries the GPU delegate,
+  falls back to CPU, and surfaces which one won in the stats readout.
+  jsdom tests stub `requestVideoFrameCallback`, canvas 2D contexts and
+  mock `./handLandmarker` (see CameraUI.test.tsx). The vision bundle is
+  a dynamic import so it stays out of the app's startup chunk; esbuild's
+  camera `ui.js` marks it external, and vite resolves it via an alias
+  (ui-src lives outside the app root, so node resolution misses
+  `app/node_modules`).
 - Params vs. inputs (post-M5 refactor): ALL WASM-module controls
   (oscillator `waveform`, ADSR `attack/decay/sustain/release`, playback
   `loop`) are ordinary knob-backed input jacks — wireable, per-patch

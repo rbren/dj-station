@@ -876,6 +876,36 @@ body {
   object-fit: cover;
 }
 
+/* Hand-tracking overlay: sits over the video, never baked into it. */
+.camera-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Diagnostics readout (fps / inference / latency / drops / delegate). */
+.camera-stats {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 3px 6px;
+  background: rgba(10, 12, 16, 0.75);
+  border-radius: 4px;
+  font-size: 0.6rem;
+  line-height: 1.35;
+  color: #9fe8a8;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.camera-controls {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
 .camera-status {
   font-size: 0.65rem;
   color: #6f7987;

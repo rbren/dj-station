@@ -786,9 +786,13 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Live webcam monitor panel. The video preview is pure app-layer ' +
       '(getUserMedia); audio passes through in -> thru so the panel can sit ' +
       'inline in the rack. Camera enablement is per-session and never saved ' +
-      'in the patch. Independent of the Gesture module. Good for streaming ' +
-      'and recorded performances: keep your framing in view, or just watch ' +
-      'your hands while learning controller moves.',
+      'in the patch. Independent of the Gesture module. Optional hand ' +
+      'tracking (MediaPipe, fully local — no network) draws both hands\u2019 ' +
+      'landmark skeletons over the mirrored feed with fingertips and L/R ' +
+      'labels highlighted; the overlay and a diagnostics readout (fps, ' +
+      'inference cost, latency, active delegate) are toggleable. Good for ' +
+      'streaming and recorded performances: keep your framing in view, or ' +
+      'watch your hands while learning controller moves.',
     inputs: { in: 'Audio pass-through input.' },
     outputs: { thru: 'Unchanged copy of in.' },
     examples: ['Drop it anywhere in the rack to keep an eye on yourself while performing.'],

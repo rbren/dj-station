@@ -2,6 +2,7 @@
 /extensions/target
 /app/node_modules
 /app/dist
+/app/public/mediapipe
 /app/src-tauri/target
 *.wasm.tmp
 /extensions/*/dsp.wasm
