@@ -960,6 +960,30 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     outputs: { 'map#': 'A gesture mapping value, as configured in the panel.' },
     examples: ['Add a "wheel" mapping and wire it to a Deck speed for touchless nudging.'],
   },
+
+  'builtin.choreo': {
+    summary:
+      'A beat-indexed multi-track timeline for choreographing a whole ' +
+      'song: hundreds or thousands of beats, advanced one beat per clock ' +
+      'rising edge. Each named track is an output jack. Boolean tracks ' +
+      'emit 0/10 V gates; continuous tracks draw a \u221210..+10 V curve ' +
+      'interpolated between beats; note tracks are a monophonic scale ' +
+      'grid (1\u20133 octaves, selectable scale and base note) with two ' +
+      'jacks \u2014 1 V/oct pitch and a 0\u201310 V velocity gate. Click ' +
+      'cells to toggle, cmd/ctrl+click a note to set velocity, drag the ' +
+      'handle to reorder tracks.',
+    inputs: {
+      clock: 'Rising edge advances one beat (wraps at the end).',
+      reset: 'Rising edge re-arms; the next clock plays beat 1.',
+    },
+    outputs: {
+      't#': "A track's value; note tracks also own the next slot for velocity.",
+    },
+    examples: [
+      'Clock \u2192 choreo; note track pitch \u2192 oscillator, velocity \u2192 VCA cv.',
+      'A continuous track wired to filter cutoff sweeps builds across the song.',
+    ],
+  },
   'builtin.hands': {
     summary:
       'Hand-tracking CV outputs, fed by the Camera module\u2019s tracker ' +

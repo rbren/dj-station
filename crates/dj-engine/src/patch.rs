@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::choreo::ChoreoState;
 use crate::engine::{Engine, EngineConfig, MidiMappingInfo};
 use crate::gesture::GestureState;
 use crate::knob::KnobState;
@@ -55,6 +56,10 @@ pub struct ModuleFile {
     /// mappings, all of which round-trip through save/load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gesture: Option<GestureState>,
+    /// Choreography timeline (beats + tracks; round-trips through
+    /// save/load, jack slots included so wires stay valid).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choreo: Option<ChoreoState>,
     /// Track path loaded into a Playback/Deck node (absolute;
     /// library-managed). Deck cues/loops/beatgrids are *not* stored here —
     /// they are track metadata in the library DB (PRD §7) and get
@@ -265,6 +270,7 @@ impl Engine {
                         wheels: *g.wheels(),
                         mappings: self.gesture_mappings(&info.instance_id).unwrap_or_default(),
                     }),
+                    choreo: info.choreo.clone(),
                     track: info.track_path.clone(),
                     sync_to: self.deck_sync_to_by_node(node_idx),
                     macro_version: None,
@@ -300,6 +306,7 @@ impl Engine {
                     midi_mappings: Vec::new(),
                     midi_led_mappings: Vec::new(),
                     gesture: None,
+                    choreo: None,
                     track: None,
                     sync_to: None,
                     macro_version: Some(mi.version),
@@ -522,6 +529,9 @@ impl Engine {
                 self.restore_gesture_mapping(instance_id, m)?;
             }
         }
+        if let Some(c) = &mf.choreo {
+            self.choreo_set_state(instance_id, c.clone())?;
+        }
         if let Some(track) = &mf.track {
             if crate::builtin::BuiltinKind::from_ext_id(&mf.ext)
                 == Some(crate::builtin::BuiltinKind::Deck)
@@ -731,6 +741,15 @@ impl Engine {
                             self.restore_gesture_mapping(instance_id, m)?;
                         }
                     }
+                }
+            }
+
+            // Choreography timeline: replace wholesale when it differs
+            // (cheap — compile is linear in beats x tracks).
+            if let Some(c) = &mf.choreo {
+                let node = self.node_idx(instance_id)?;
+                if self.nodes[node].choreo.as_ref() != Some(c) {
+                    self.choreo_set_state(instance_id, c.clone())?;
                 }
             }
 

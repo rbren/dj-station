@@ -101,6 +101,39 @@ export interface GestureStatus {
   camera: string;
 }
 
+/** One note-track cell: at most one note per beat (no polyphony). */
+export interface NoteStep {
+  /** Grid row: 0 = base note, counting up through the scale. */
+  degree: number;
+  /** 0..1; scales the velocity jack's 0..10 V output. */
+  velocity: number;
+}
+
+export type ChoreoTrackData =
+  | { kind: 'boolean'; steps: boolean[] }
+  | { kind: 'continuous'; values: number[] }
+  | {
+      kind: 'note';
+      octaves: number;
+      scale: string;
+      base_note: number;
+      steps: (NoteStep | null)[];
+    };
+
+export interface ChoreoTrack {
+  name: string;
+  /** First output-jack slot (`t<jack>`); note tracks also own `t<jack+1>`. */
+  jack: number;
+  data: ChoreoTrackData;
+}
+
+export interface ChoreoStatus {
+  beats: number;
+  tracks: ChoreoTrack[];
+  /** Current beat index; -1 until the first clock. */
+  playhead: number;
+}
+
 export interface MacroInfo {
   id: string;
   name: string;
@@ -289,6 +322,52 @@ export class EngineClient extends IpcClient {
   }
   removeMidiLedMapping(instance: string, name: string) {
     return this.call<void>('remove_midi_led_mapping', { instance, name });
+  }
+  /** Polled by the choreography panel; quiet because a poll racing the
+   *  module's removal is expected, not an error. */
+  choreoStatus(instance: string) {
+    return this.call<ChoreoStatus>('choreo_status', { instance }, { quiet: true });
+  }
+  choreoSetBeats(instance: string, beats: number) {
+    return this.call<void>('choreo_set_beats', { instance, beats });
+  }
+  choreoAddTrack(instance: string, name: string, kind: string) {
+    return this.call<void>('choreo_add_track', { instance, name, kind });
+  }
+  choreoRemoveTrack(instance: string, track: number) {
+    return this.call<void>('choreo_remove_track', { instance, track });
+  }
+  choreoRenameTrack(instance: string, track: number, name: string) {
+    return this.call<void>('choreo_rename_track', { instance, track, name });
+  }
+  choreoMoveTrack(instance: string, from: number, to: number) {
+    return this.call<void>('choreo_move_track', { instance, from, to });
+  }
+  choreoSetBool(instance: string, track: number, beat: number, on: boolean) {
+    return this.call<void>('choreo_set_bool', { instance, track, beat, on });
+  }
+  /** Write a run of continuous values starting at `start` (drag paints
+   *  batch into one call). */
+  choreoSetValues(instance: string, track: number, start: number, values: number[]) {
+    return this.call<void>('choreo_set_values', { instance, track, start, values });
+  }
+  choreoSetNote(instance: string, track: number, beat: number, note: NoteStep | null) {
+    return this.call<void>('choreo_set_note', { instance, track, beat, note });
+  }
+  choreoSetNoteSettings(
+    instance: string,
+    track: number,
+    octaves: number,
+    scale: string,
+    baseNote: number,
+  ) {
+    return this.call<void>('choreo_set_note_settings', {
+      instance,
+      track,
+      octaves,
+      scale,
+      baseNote,
+    });
   }
   undo() {
     return this.call<boolean>('undo');

@@ -27,6 +27,7 @@ use crate::wasm_host::WasmRuntime;
 
 // Facade modules: additional `impl Engine` blocks grouped by feature area.
 // This file keeps construction, graph editing, knobs and telemetry.
+mod choreo_api;
 mod deck_api;
 mod gesture_api;
 mod hands_api;
@@ -112,6 +113,9 @@ pub struct NodeInfo {
     pub midi_led_mappings: Vec<MidiMappingInfo>,
     /// Control-side gesture pipeline core for a Gesture node (PRD §7.3).
     pub gesture: Option<dj_gesture::GestureProcessor>,
+    /// Canonical timeline state for a Choreography node (persisted in the
+    /// patch; the RT side plays a compiled copy).
+    pub choreo: Option<crate::choreo::ChoreoState>,
     /// Path of the track loaded into a Playback/Deck node (persisted in the
     /// patch).
     pub track_path: Option<String>,
@@ -296,6 +300,8 @@ pub struct Engine {
     >,
     /// Key gate events toward the RT thread, per QWERTY node.
     qwerty_producers: HashMap<usize, rtrb::Producer<crate::qwerty::QwertyEvent>>,
+    /// Compiled-program handoff + playhead per Choreography node.
+    choreos: HashMap<usize, crate::choreo::ChoreoControl>,
     /// LED feedback messages coming back from the RT thread, per MIDI node.
     midi_out_consumers: HashMap<usize, rtrb::Consumer<MidiOutEvent>>,
     /// Registered macro definitions (engine-side view of the library store).
@@ -333,6 +339,9 @@ const GESTURE_QUEUE_CAP: usize = 4096;
 const HANDS_QUEUE_CAP: usize = 4096;
 /// Pending key events per QWERTY node (same sizing rationale).
 const QWERTY_QUEUE_CAP: usize = 4096;
+/// Pending compiled choreography programs per Choreo node (drained at the
+/// next block; edits are UI-rate).
+const CHOREO_QUEUE_CAP: usize = 64;
 /// Pending track loads per Playback node (drained at the next block).
 const PLAYBACK_QUEUE_CAP: usize = 64;
 /// Pending control commands per Deck node (drained at the next block).
@@ -395,6 +404,7 @@ impl Engine {
             gesture_producers: HashMap::new(),
             hands_producers: HashMap::new(),
             qwerty_producers: HashMap::new(),
+            choreos: HashMap::new(),
             midi_out_consumers: HashMap::new(),
             macros: MacroLibrary::default(),
             macro_instances: BTreeMap::new(),
@@ -534,6 +544,7 @@ impl Engine {
             Some(BuiltinKind::Crossfader) => Ok(Box::new(CrossfaderModule)),
             Some(
                 BuiltinKind::Midi
+                | BuiltinKind::Choreo
                 | BuiltinKind::Qwerty
                 | BuiltinKind::Gesture
                 | BuiltinKind::Hands
@@ -606,6 +617,7 @@ impl Engine {
         let mut gesture_tx = None;
         let mut hands_plumbing = None;
         let mut qwerty_plumbing = None;
+        let mut choreo_ctl = None;
         let mut playback_plumbing = None;
         let mut deck_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
@@ -632,6 +644,22 @@ impl Engine {
                 let (tx, rx) = rtrb::RingBuffer::new(QWERTY_QUEUE_CAP);
                 qwerty_plumbing = Some(tx);
                 Box::new(crate::qwerty::QwertyRtModule::new(rx, self.current_frame()))
+            }
+            Some(BuiltinKind::Choreo) => {
+                let (tx, rx) = rtrb::RingBuffer::new(CHOREO_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(CHOREO_QUEUE_CAP);
+                let shared = Arc::new(crate::choreo::ChoreoShared::default());
+                choreo_ctl = Some(crate::choreo::ChoreoControl::new(
+                    tx,
+                    garbage_rx,
+                    shared.clone(),
+                ));
+                Box::new(crate::choreo::ChoreoRtModule::new(
+                    rx,
+                    garbage_tx,
+                    shared,
+                    self.config.sample_rate,
+                ))
             }
             Some(BuiltinKind::Playback) => {
                 let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
@@ -708,6 +736,11 @@ impl Engine {
             midi_mappings: Vec::new(),
             midi_led_mappings: Vec::new(),
             gesture,
+            choreo: if BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::Choreo) {
+                Some(crate::choreo::ChoreoState::default())
+            } else {
+                None
+            },
             track_path: None,
         };
 
@@ -736,6 +769,9 @@ impl Engine {
         }
         if let Some(tx) = qwerty_plumbing {
             self.qwerty_producers.insert(idx, tx);
+        }
+        if let Some(ctl) = choreo_ctl {
+            self.choreos.insert(idx, ctl);
         }
         if let Some((tx, garbage_rx)) = playback_plumbing {
             self.playback_producers.insert(idx, tx);
@@ -788,6 +824,7 @@ impl Engine {
         self.gesture_producers.remove(&slot);
         self.hands_producers.remove(&slot);
         self.qwerty_producers.remove(&slot);
+        self.choreos.remove(&slot);
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);
         self.decks.remove(&slot);

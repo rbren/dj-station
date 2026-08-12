@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "clock",
+      "to": "ch",
+      "to_jack": "clock"
+    }
+  ]
+}

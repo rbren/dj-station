@@ -1,0 +1,24 @@
+{
+  "wires": [
+    {
+      "from_jack": "t0",
+      "to": "osc1",
+      "to_jack": "pitch"
+    },
+    {
+      "from_jack": "t1",
+      "to": "vca1",
+      "to_jack": "cv"
+    },
+    {
+      "from_jack": "t2",
+      "to": "flt",
+      "to_jack": "cutoff"
+    },
+    {
+      "from_jack": "t3",
+      "to": "vca2",
+      "to_jack": "cv"
+    }
+  ]
+}

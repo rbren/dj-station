@@ -690,6 +690,13 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     outputGroups: [{ title: 'mappings', outputs: seqIds('map', 0, 63), columns: 8 }],
   }),
 
+  // Choreography timeline: clock/reset inputs; the track jacks are dynamic
+  // (one or two per track), so they flow into the auto-appended group.
+  'builtin.choreo': () => ({
+    groups: [{ inputs: ['clock', 'reset'] }],
+    outputGroups: [{ title: 'tracks', outputs: seqIds('t', 0, 63), columns: 8 }],
+  }),
+
   // The computer keyboard as a gate source: one output jack per key,
   // arranged like the physical QWERTY rows (staggered via indent).
   'builtin.qwerty': () => ({

@@ -10,6 +10,7 @@
 //! - Hot reload: watch extension folders, save/load state, atomic block-boundary swap.
 
 pub mod builtin;
+pub mod choreo;
 pub mod deck;
 pub mod engine;
 pub mod gesture;
@@ -30,6 +31,7 @@ pub mod telemetry;
 pub mod wasm_host;
 
 pub use builtin::{MidiMapKind, MidiOutEvent, MidiOutSink, MockMidiSink};
+pub use choreo::{ChoreoState, ChoreoTrack, ChoreoTrackData, NoteStep, CHOREO_ID};
 /// Re-exported so embedders (Tauri shell, tests) use one consistent
 /// gesture API without a separate dependency.
 pub use dj_gesture;

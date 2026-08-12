@@ -74,6 +74,7 @@ impl ExtensionRegistry {
             builtin::audio_out_manifest(),
             builtin::midi_manifest(),
             crate::qwerty::qwerty_manifest(),
+            crate::choreo::choreo_manifest(),
             crate::playback::playback_manifest(),
             crate::deck::deck_manifest(),
             crate::mixer::crossfader_manifest(),

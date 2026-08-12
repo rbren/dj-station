@@ -90,6 +90,14 @@ enum EditKey<'a> {
     GestureMode(&'a str),
     GestureAdd(&'a str, &'a str),
     GestureRemove(&'a str, &'a str),
+    ChoreoBeats(&'a str),
+    ChoreoTrackAdd(&'a str, &'a str),
+    ChoreoTrackRemove(&'a str, usize),
+    ChoreoTrackRename(&'a str, usize),
+    ChoreoTrackMove(&'a str),
+    ChoreoTrackSettings(&'a str, usize),
+    /// Cell/value edits coalesce per track (drag paints stream updates).
+    ChoreoData(&'a str, usize),
     Knob(&'a str, &'a str),
     KnobConfig(&'a str, &'a str),
     KnobReset(&'a str, &'a str),
@@ -119,6 +127,13 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::GestureMode(i) => write!(f, "gest-mode:{i}"),
             EditKey::GestureAdd(i, n) => write!(f, "gest+:{i}:{n}"),
             EditKey::GestureRemove(i, n) => write!(f, "gest-:{i}:{n}"),
+            EditKey::ChoreoBeats(i) => write!(f, "choreo-beats:{i}"),
+            EditKey::ChoreoTrackAdd(i, n) => write!(f, "choreo-track+:{i}:{n}"),
+            EditKey::ChoreoTrackRemove(i, t) => write!(f, "choreo-track-:{i}:{t}"),
+            EditKey::ChoreoTrackRename(i, t) => write!(f, "choreo-rename:{i}:{t}"),
+            EditKey::ChoreoTrackMove(i) => write!(f, "choreo-move:{i}"),
+            EditKey::ChoreoTrackSettings(i, t) => write!(f, "choreo-settings:{i}:{t}"),
+            EditKey::ChoreoData(i, t) => write!(f, "choreo-data:{i}:{t}"),
             EditKey::Knob(i, j) => write!(f, "knob:{i}:{j}"),
             EditKey::KnobConfig(i, j) => write!(f, "knobcfg:{i}:{j}"),
             EditKey::KnobReset(i, j) => write!(f, "knobreset:{i}:{j}"),
@@ -415,6 +430,30 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                             audio: false,
                             knob: None,
                             display: None,
+                        })
+                        .collect();
+                }
+                // Choreography output jacks are dynamic: one (or two, for
+                // note tracks) per track, in track display order. Ids are
+                // the stable `t<slot>` names so wires survive renames.
+                if let Some(c) = &n.choreo {
+                    m.outputs = c
+                        .tracks
+                        .iter()
+                        .flat_map(|t| {
+                            let mut outs = vec![dj_engine::manifest::OutputDecl {
+                                id: format!("t{}", t.jack),
+                                name: t.name.clone(),
+                                display: None,
+                            }];
+                            if t.data.jack_count() == 2 {
+                                outs.push(dj_engine::manifest::OutputDecl {
+                                    id: format!("t{}", t.jack + 1),
+                                    name: format!("{} vel", t.name),
+                                    display: None,
+                                });
+                            }
+                            outs
                         })
                         .collect();
                 }
@@ -921,6 +960,184 @@ fn gesture_feed_stop(state: State<AppState>, instance: String) -> CmdResult<()> 
     Ok(())
 }
 
+/// Everything the choreography panel needs per poll: the timeline plus
+/// the live playhead beat.
+#[derive(serde::Serialize)]
+struct ChoreoStatus {
+    beats: usize,
+    tracks: Vec<dj_engine::ChoreoTrack>,
+    playhead: i64,
+}
+
+#[tauri::command]
+fn choreo_status(state: State<AppState>, instance: String) -> CmdResult<ChoreoStatus> {
+    let engine = engine_lock(&state)?;
+    let st = engine.choreo(&instance).map_err(err)?;
+    Ok(ChoreoStatus {
+        beats: st.beats,
+        tracks: st.tracks.clone(),
+        playhead: engine.choreo_playhead(&instance).map_err(err)?,
+    })
+}
+
+#[tauri::command]
+fn choreo_set_beats(state: State<AppState>, instance: String, beats: usize) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ChoreoBeats(&instance))?;
+    engine.choreo_set_beats(&instance, beats).map_err(err)
+}
+
+/// Add a track ("boolean" | "continuous" | "note"); it materializes as
+/// one (or two, for note tracks) output jacks.
+#[tauri::command]
+fn choreo_add_track(
+    state: State<AppState>,
+    instance: String,
+    name: String,
+    kind: String,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ChoreoTrackAdd(&instance, &name))?;
+    engine
+        .choreo_add_track(&instance, &name, &kind)
+        .map(|_| ())
+        .map_err(err)
+}
+
+/// Remove a track. Wires from its jack(s) are disconnected first
+/// (restoring auto wire-style knobs), which needs the engine stopped —
+/// the gesture-mapping-removal flow.
+#[tauri::command]
+fn choreo_remove_track(state: State<AppState>, instance: String, track: usize) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ChoreoTrackRemove(&instance, track))?;
+    let jacks: Vec<String> = {
+        let st = engine.choreo(&instance).map_err(err)?;
+        let t = st
+            .tracks
+            .get(track)
+            .ok_or_else(|| CmdError::not_found(format!("no track {track}")))?;
+        (t.jack..t.jack + t.data.jack_count())
+            .map(|j| format!("t{j}"))
+            .collect()
+    };
+    let doomed: Vec<(String, String, String)> = engine
+        .wire_specs()
+        .iter()
+        .filter(|w| {
+            engine.nodes[w.from_node].instance_id == instance
+                && jacks.contains(&engine.output_jack_name(w.from_node, w.from_jack))
+        })
+        .map(|w| {
+            (
+                engine.output_jack_name(w.from_node, w.from_jack),
+                engine.nodes[w.to_node].instance_id.clone(),
+                engine.nodes[w.to_node].manifest.inputs[w.to_jack].id.clone(),
+            )
+        })
+        .collect();
+    if doomed.is_empty() {
+        return engine.choreo_remove_track(&instance, track).map_err(err);
+    }
+    with_stopped(&mut engine, |e| {
+        for (from_jack, to_instance, to_jack) in &doomed {
+            e.disconnect(&instance, from_jack, to_instance, to_jack)
+                .map_err(err)?;
+            if let Ok(k) = e.knob_state(to_instance, to_jack) {
+                if k.config
+                    .as_ref()
+                    .is_some_and(|c| c.style == KnobStyle::Wire)
+                {
+                    e.set_knob_config(to_instance, to_jack, None).map_err(err)?;
+                }
+            }
+        }
+        e.choreo_remove_track(&instance, track).map_err(err)
+    })
+}
+
+#[tauri::command]
+fn choreo_rename_track(
+    state: State<AppState>,
+    instance: String,
+    track: usize,
+    name: String,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ChoreoTrackRename(&instance, track))?;
+    engine
+        .choreo_rename_track(&instance, track, &name)
+        .map_err(err)
+}
+
+/// Reorder tracks (display order only; jacks stay with their tracks).
+#[tauri::command]
+fn choreo_move_track(
+    state: State<AppState>,
+    instance: String,
+    from: usize,
+    to: usize,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ChoreoTrackMove(&instance))?;
+    engine.choreo_move_track(&instance, from, to).map_err(err)
+}
+
+#[tauri::command]
+fn choreo_set_bool(
+    state: State<AppState>,
+    instance: String,
+    track: usize,
+    beat: usize,
+    on: bool,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ChoreoData(&instance, track))?;
+    engine
+        .choreo_set_bool(&instance, track, beat, on)
+        .map_err(err)
+}
+
+/// Write a run of continuous values from `start` (drag paints batch).
+#[tauri::command]
+fn choreo_set_values(
+    state: State<AppState>,
+    instance: String,
+    track: usize,
+    start: usize,
+    values: Vec<f32>,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ChoreoData(&instance, track))?;
+    engine
+        .choreo_set_values(&instance, track, start, &values)
+        .map_err(err)
+}
+
+/// Set or clear the note at a beat (`degree`/`velocity` together; None
+/// clears).
+#[tauri::command]
+fn choreo_set_note(
+    state: State<AppState>,
+    instance: String,
+    track: usize,
+    beat: usize,
+    note: Option<dj_engine::NoteStep>,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ChoreoData(&instance, track))?;
+    engine
+        .choreo_set_note(&instance, track, beat, note)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn choreo_set_note_settings(
+    state: State<AppState>,
+    instance: String,
+    track: usize,
+    octaves: u8,
+    scale: String,
+    base_note: u8,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ChoreoTrackSettings(&instance, track))?;
+    engine
+        .choreo_set_note_settings(&instance, track, octaves, &scale, base_note)
+        .map_err(err)
+}
+
 /// One tracked camera frame into a Hands node (the camera panel calls
 /// this at camera rate while tracking is on). Pure live control data —
 /// nothing persists, so `engine_lock`, not `patch_edit`. Errors are
@@ -1165,6 +1382,16 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
                 for (jack, d) in g.mappings() {
                     if let Some(slot) = n.out_telemetry.get(jack) {
                         jacks.insert(format!("out:{}", d.name), slot.read());
+                    }
+                }
+            } else if let Some(c) = &n.choreo {
+                // Choreo output jacks are dynamic, 1-2 per track, keyed by
+                // the stable `t<slot>` ids the snapshot exposes.
+                for t in &c.tracks {
+                    for j in t.jack..t.jack + t.data.jack_count() {
+                        if let Some(slot) = n.out_telemetry.get(j) {
+                            jacks.insert(format!("out:t{j}"), slot.read());
+                        }
                     }
                 }
             } else {
@@ -2290,6 +2517,16 @@ fn main() {
             gesture_learn_poll,
             gesture_feed_start,
             gesture_feed_stop,
+            choreo_status,
+            choreo_set_beats,
+            choreo_add_track,
+            choreo_remove_track,
+            choreo_rename_track,
+            choreo_move_track,
+            choreo_set_bool,
+            choreo_set_values,
+            choreo_set_note,
+            choreo_set_note_settings,
             hands_feed,
             undo,
             redo,

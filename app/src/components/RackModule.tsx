@@ -20,6 +20,7 @@ import { engine, type NodeSnapshot } from '../engine';
 import { defaultPosition, panelStyle } from '../rackLayout';
 import { RackStoreContext, useRackSelector } from '../rackStore';
 import type { JackTelemetry, KnobConfig, ModuleHandle } from '../types';
+import { ChoreoPanel } from './ChoreoPanel';
 import { DeckCustomUI } from './DeckPanel';
 import { ErrorBoundary } from './ErrorBoundary';
 import { GesturePanel } from './GesturePanel';
@@ -145,6 +146,24 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
             <QwertyPanel
               instance={instanceId}
               onKey={(key, down) => void engine.qwertyKey(instanceId, key, down)}
+            />
+          ) : node.type_id === 'builtin.choreo' ? (
+            <ChoreoPanel
+              instance={instanceId}
+              api={{
+                status: (i) => engine.choreoStatus(i),
+                setBeats: (i, b) => engine.choreoSetBeats(i, b),
+                addTrack: (i, n, k) => engine.choreoAddTrack(i, n, k),
+                removeTrack: (i, t) => engine.choreoRemoveTrack(i, t),
+                renameTrack: (i, t, n) => engine.choreoRenameTrack(i, t, n),
+                moveTrack: (i, f, t) => engine.choreoMoveTrack(i, f, t),
+                setBool: (i, t, b, on) => engine.choreoSetBool(i, t, b, on),
+                setValues: (i, t, s, v) => engine.choreoSetValues(i, t, s, v),
+                setNote: (i, t, b, n) => engine.choreoSetNote(i, t, b, n),
+                setNoteSettings: (i, t, o, s, b) => engine.choreoSetNoteSettings(i, t, o, s, b),
+                endEdit: () => engine.endEdit(),
+              }}
+              onChanged={() => void refresh()}
             />
           ) : node.type_id === 'builtin.gesture' ? (
             <GesturePanel

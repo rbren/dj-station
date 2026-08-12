@@ -1,0 +1,90 @@
+{
+  "ext": "builtin.choreo",
+  "knobs": {
+    "clock": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {},
+  "choreo": {
+    "beats": 8,
+    "tracks": [
+      {
+        "name": "lead",
+        "jack": 0,
+        "data": {
+          "kind": "note",
+          "octaves": 2,
+          "scale": "penta min",
+          "base_note": 57,
+          "steps": [
+            {
+              "degree": 0,
+              "velocity": 1.0
+            },
+            {
+              "degree": 2,
+              "velocity": 0.6
+            },
+            null,
+            {
+              "degree": 4,
+              "velocity": 0.8
+            },
+            {
+              "degree": 5,
+              "velocity": 1.0
+            },
+            null,
+            {
+              "degree": 3,
+              "velocity": 0.5
+            },
+            null
+          ]
+        }
+      },
+      {
+        "name": "hat",
+        "jack": 2,
+        "data": {
+          "kind": "boolean",
+          "steps": [
+            false,
+            true,
+            false,
+            true,
+            false,
+            true,
+            false,
+            true
+          ]
+        }
+      },
+      {
+        "name": "sweep",
+        "jack": 3,
+        "data": {
+          "kind": "continuous",
+          "values": [
+            1.0,
+            2.0,
+            3.5,
+            5.0,
+            6.5,
+            5.0,
+            3.0,
+            1.5
+          ]
+        }
+      }
+    ]
+  }
+}
