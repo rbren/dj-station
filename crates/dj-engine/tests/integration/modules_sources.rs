@@ -451,7 +451,7 @@ fn drum_kick_sweeps_pitch_and_decays() {
     assert!(peak(&out[..4_800]) < 1e-9, "kick sounds before its trigger");
     let attack = peak(&out[4_800..5_280]);
     assert!(
-        attack > 3.5 && attack < 5.5,
+        attack > 5.5 && attack < 9.0,
         "kick attack peak {attack} out of range"
     );
 
@@ -491,7 +491,7 @@ fn drum_snare_balances_body_and_noise() {
         "body-only snare: fundamental {tonal_body} vs snappy {snappy_body}"
     );
     assert!(
-        tonal_peak > 2.0 && tonal_peak < 6.0 && snappy_peak > 2.0 && snappy_peak < 6.0,
+        tonal_peak > 3.0 && tonal_peak < 9.5 && snappy_peak > 3.0 && snappy_peak < 9.5,
         "snare levels: body {tonal_peak}, snappy {snappy_peak}"
     );
     assert!(
@@ -516,7 +516,7 @@ fn drum_hat_is_high_passed_and_short() {
     );
 
     let attack = peak(&out[4_800..5_280]);
-    assert!(attack > 1.0, "hat attack {attack} too quiet");
+    assert!(attack > 1.6, "hat attack {attack} too quiet");
     let tail = peak(&out[(4_800 + (0.06 * SR) as usize)..]);
     assert!(tail < 0.05 * attack, "hat still at {tail} after its decay");
 }
@@ -537,11 +537,11 @@ fn drum_mix_sums_the_three_voices() {
 
     let mut worst = 0.0f32;
     for i in 0..mix.len() {
-        worst = worst.max((mix[i] - 0.6 * (kick[i] + snare[i] + hat[i])).abs());
+        worst = worst.max((mix[i] - 0.5 * (kick[i] + snare[i] + hat[i])).abs());
     }
-    assert!(worst < 1e-5, "mix is not the -4.4 dB voice sum: {worst}");
+    assert!(worst < 1e-5, "mix is not the -6 dB voice sum: {worst}");
     assert!(
-        peak(&mix) > 2.0 && peak(&mix) < 10.0,
+        peak(&mix) > 3.0 && peak(&mix) < 10.0,
         "mix peak {}",
         peak(&mix)
     );

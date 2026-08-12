@@ -1,8 +1,13 @@
 //! Drum Voice: kick, snare and hat in one module, 808/909 flavoured.
 //!
 //! Each voice has its own trigger jack (rising gate edge), tune, decay and
-//! tone control, its own output, and all three sum into `mix` at -4.4 dB so
+//! tone control, its own output, and all three sum into `mix` at -6 dB so
 //! a simultaneous hit still fits the nominal ±10.
+//!
+//! Voices peak around ±8 V rather than the sustained sources' ±5: drums are
+//! transient, so at equal peak they read several dB quieter than a tone —
+//! the hotter peak brings their perceived level in line with the rest of
+//! the rack.
 //!
 //! - **Kick** — sine with a fast exponential pitch sweep (starting four
 //!   octaves-ish above the tuned frequency and settling in ~25 ms) plus a
@@ -19,12 +24,12 @@
 
 use dj_module_sdk::{export_module, InitCtx, Module, ProcessIo};
 
-const AMPLITUDE: f32 = 5.0;
+const AMPLITUDE: f32 = 8.0;
 const SEED: u32 = 0x9E37_79B9;
 /// -60 dB in nepers: an envelope with time constant `decay / LN_1000`
 /// reaches -60 dB exactly at `decay` seconds.
 const LN_1000: f32 = 6.907_755;
-const MIX_GAIN: f32 = 0.6;
+const MIX_GAIN: f32 = 0.5;
 
 const KICK_BASE_HZ: f32 = 52.0;
 const SNARE_BASE_HZ: f32 = 185.0;

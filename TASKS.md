@@ -29,7 +29,7 @@
 - [x] Much better EQ/filter module: frequency-domain display with 4 draggable
       controls for frequency levels, each with a Q parameter controlling how
       wide a band it governs.
-- [ ] Drums are way too quiet — make them louder.
+- [x] Drums are way too quiet — make them louder.
 - [ ] Input/output docs: replace self-defined descriptions (e.g. "RMS" ->
       "RMS level") with a practical sentence on what the jack is, what it's
       used for, and what it represents, so a novice knows what to do with it.
