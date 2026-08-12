@@ -871,8 +871,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     summary:
       'Live webcam monitor panel. The video preview is pure app-layer ' +
       '(getUserMedia); audio passes through in -> thru so the panel can sit ' +
-      'inline in the rack. Camera enablement is per-session and never saved ' +
-      'in the patch. Independent of the Gesture module. Optional hand ' +
+      'inline in the rack. The camera and hand tracking start automatically ' +
+      'when the module loads (per-session, never saved in the patch \u2014 ' +
+      'switching either off sticks for the session). Independent of the ' +
+      'Gesture module. Hand ' +
       'tracking (MediaPipe, fully local — no network) draws both hands\u2019 ' +
       'landmark skeletons over the mirrored feed with fingertips and L/R ' +
       'labels highlighted; the overlay and a diagnostics readout (fps, ' +
@@ -941,15 +943,16 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   },
   'builtin.hands': {
     summary:
-      'Hand-tracking CV outputs, fed by the Camera module\u2019s tracker: ' +
-      'switch tracking on in a Camera panel and every Hands module in the ' +
-      'rack receives the landmarks. Positions are engine-space (mirror ' +
-      'view, X right, Y up, center origin) scaled to \u00b15 V; a hand that ' +
-      'leaves the frame HOLDS its last values while its seen-gate drops to ' +
-      '0 V, so patches can tell "hand at center" from "no hand". Pinch is ' +
-      'scale-invariant (thumb\u2013index distance over palm span, ~0.5 V ' +
-      'touching to ~7 V spread); rotation is the thumb\u2019s signed angle ' +
-      'off the palm axis \u2014 thumb flared out is positive for both hands.',
+      'Hand-tracking CV outputs, fed by the Camera module\u2019s tracker ' +
+      '(which starts automatically): every Hands module in the rack ' +
+      'receives the landmarks. Positions are engine-space (mirror ' +
+      'view, X right, Y up, center origin) scaled to \u00b15 V. Visibility ' +
+      'changes are debounced over two frames, so one glitchy frame ' +
+      'doesn\u2019t thrash the outputs; when a hand really leaves the ' +
+      'frame its values decay to 0 V over 10 ms while its seen-gate drops. ' +
+      'Pinch is scale-invariant (thumb\u2013index distance over palm span, ' +
+      '0 V touching to ~6 V spread); rotation is the thumb\u2019s signed ' +
+      'angle off the palm axis \u2014 flared out is positive for both hands.',
     outputs: {
       cx: 'Centroid X over all visible hands, \u00b15 V.',
       cy: 'Centroid Y over all visible hands, \u00b15 V.',

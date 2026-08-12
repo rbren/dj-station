@@ -151,9 +151,17 @@ fails if it's missing.
   `engine_nodes`, ~3 s poll) -> `hands_feed` IPC (engine_lock, not
   undoable) -> `Engine::hands_feed` (`engine/hands_api.rs`; control-
   thread derivation + dedup in `HandsControl`) -> SPSC ring ->
-  `HandsRtModule` (holds last value). DROPOUT POLICY: a vanished hand
-  HOLDS its value jacks, only its `seen` gate falls; a `None`/dropped
-  frame updates nothing. The camera `ui.js` esbuild bundle marks
+  `HandsRtModule` (holds last value; per-jack linear ramps). DROPOUT
+  POLICY: visibility is DEBOUNCED (`DEBOUNCE_FRAMES` = 2 consecutive
+  camera frames to confirm appear/disappear — one glitch frame holds);
+  a CONFIRMED-vanished hand's value jacks (+deltas, +centroid when no
+  hand remains) decay to 0 V over `DECAY_SECONDS` (10 ms) via ramp
+  events while its `seen` gate falls; a `None`/dropped frame updates
+  nothing. Pinch volts are `ratio*5 - 1` clamped at 0 so a full
+  physical pinch reads 0 V. The camera panel AUTO-STARTS the camera
+  and tracking on mount (once per mount — manual off sticks; quiet
+  no-op when getUserMedia is absent). The camera `ui.js` esbuild
+  bundle marks
   `@tauri-apps/api/core` external (dynamic import, absent in tests).
   E2E sidecars carry `hands` fixture specs (`HandsTrace` JSON, synthetic
   — never video); `hands_feed_trace` is the offline/golden path.

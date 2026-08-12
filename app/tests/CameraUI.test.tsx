@@ -1,10 +1,11 @@
 // Camera module panel: a live webcam monitor driven by getUserMedia,
 // pure app-layer (the audio thread never sees the camera). Enablement is
-// ephemeral per-session state — the panel mounts with the camera off —
-// and the MediaStream is released on disable and on unmount. Hand
-// tracking (MediaPipe) is likewise per-session: the landmarker is
-// created on demand, driven by requestVideoFrameCallback, and closed
-// when tracking stops, the camera stops, or the panel unmounts.
+// ephemeral per-session state (never persisted), but the panel
+// AUTO-STARTS: mounting requests the camera and switches hand tracking
+// on once the feed is live — once per mount, so the manual toggles
+// stick. The MediaStream is released on disable and on unmount; the
+// landmarker is closed when tracking stops, the camera stops, or the
+// panel unmounts.
 
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -114,6 +115,9 @@ beforeEach(() => {
   pendingFrame = null;
   rvfcCancelled = [];
   mockedCreate.mockReset();
+  // Auto-start switches tracking on whenever the camera comes up, so
+  // every test needs a resolvable landmarker; tests that care override.
+  mockedCreate.mockResolvedValue(makeLandmarker());
   for (const fn of Object.values(ctx2d)) if (typeof fn === 'function') fn.mockClear();
 });
 
@@ -125,11 +129,16 @@ afterEach(() => {
 const flush = () => act(async () => {});
 
 describe('CameraUI', () => {
-  it('mounts with the camera off and does not touch getUserMedia', () => {
-    const gum = mockGetUserMedia(async () => makeStream());
+  it('auto-starts the camera and tracking on mount', async () => {
+    const stream = makeStream();
+    const gum = mockGetUserMedia(async () => stream);
     render(<CameraUI />);
-    expect(screen.getByTestId('camera-status').textContent).toBe('camera off');
-    expect(gum).not.toHaveBeenCalled();
+    expect(gum).toHaveBeenCalledTimes(1);
+    await flush(); // camera live
+    await flush(); // landmarker loaded
+    const video = screen.getByTestId('camera-video') as HTMLVideoElement;
+    expect(video.srcObject).toBe(stream);
+    expect(screen.getByTestId('camera-track-toggle').textContent).toBe('Stop tracking');
   });
 
   it('renders a 16:9 monitor big enough for the hand overlay (640x360)', () => {
@@ -140,11 +149,10 @@ describe('CameraUI', () => {
     expect(frame.style.height).toBe('360px');
   });
 
-  it('enable acquires a video-only stream and shows the feed', async () => {
+  it('acquires a video-only stream and shows the feed', async () => {
     const stream = makeStream();
     const gum = mockGetUserMedia(async () => stream);
     render(<CameraUI />);
-    fireEvent.click(screen.getByTestId('camera-toggle'));
     await flush();
     expect(gum).toHaveBeenCalledTimes(1);
     expect(gum.mock.calls[0][0]).toMatchObject({ audio: false });
@@ -154,16 +162,19 @@ describe('CameraUI', () => {
     expect(screen.getByTestId('camera-toggle').textContent).toBe('Disable camera');
   });
 
-  it('disable stops every track and releases the stream', async () => {
+  it('disable stops every track, releases the stream, and stays off', async () => {
     const stream = makeStream();
-    mockGetUserMedia(async () => stream);
+    const gum = mockGetUserMedia(async () => stream);
     render(<CameraUI />);
-    fireEvent.click(screen.getByTestId('camera-toggle'));
     await flush();
     fireEvent.click(screen.getByTestId('camera-toggle'));
     expect(stream.tracks[0].stop).toHaveBeenCalled();
     const video = screen.getByTestId('camera-video') as HTMLVideoElement;
     expect(video.srcObject).toBeNull();
+    expect(screen.getByTestId('camera-status').textContent).toBe('camera off');
+    // Auto-start ran once per mount: nothing re-enables behind the user.
+    await flush();
+    expect(gum).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('camera-status').textContent).toBe('camera off');
   });
 
@@ -171,7 +182,6 @@ describe('CameraUI', () => {
     const stream = makeStream();
     mockGetUserMedia(async () => stream);
     const { unmount } = render(<CameraUI />);
-    fireEvent.click(screen.getByTestId('camera-toggle'));
     await flush();
     unmount();
     expect(stream.tracks[0].stop).toHaveBeenCalled();
@@ -181,8 +191,7 @@ describe('CameraUI', () => {
     const stream = makeStream();
     let resolve!: (s: MediaStream) => void;
     mockGetUserMedia(() => new Promise<MediaStream>((r) => (resolve = r)));
-    render(<CameraUI />);
-    fireEvent.click(screen.getByTestId('camera-toggle')); // enable: pending prompt
+    render(<CameraUI />); // auto-start: pending prompt
     fireEvent.click(screen.getByTestId('camera-toggle')); // disable while pending
     resolve(stream);
     await flush();
@@ -195,7 +204,6 @@ describe('CameraUI', () => {
       throw new DOMException('denied', 'NotAllowedError');
     });
     render(<CameraUI />);
-    fireEvent.click(screen.getByTestId('camera-toggle'));
     await flush();
     expect(screen.getByTestId('camera-error').textContent).toContain('denied');
     expect(screen.getByTestId('camera-toggle').textContent).toBe('Enable camera');
@@ -206,14 +214,16 @@ describe('CameraUI', () => {
       throw new DOMException('none', 'NotFoundError');
     });
     render(<CameraUI />);
-    fireEvent.click(screen.getByTestId('camera-toggle'));
     await flush();
     expect(screen.getByTestId('camera-error').textContent).toBe('No camera found.');
   });
 
   it('handles environments without mediaDevices at all', async () => {
-    // afterEach removed navigator.mediaDevices; render without re-adding it.
+    // afterEach removed navigator.mediaDevices; render without re-adding
+    // it. Auto-start stays quiet; the manual button reports the error.
     render(<CameraUI />);
+    await flush();
+    expect(screen.getByTestId('camera-status').textContent).toBe('camera off');
     fireEvent.click(screen.getByTestId('camera-toggle'));
     await flush();
     expect(screen.getByTestId('camera-error').textContent).toBe('Camera is not supported here.');
@@ -227,7 +237,6 @@ describe('CameraUI', () => {
       return stream;
     });
     render(<CameraUI />);
-    fireEvent.click(screen.getByTestId('camera-toggle'));
     await flush();
     expect(screen.getByTestId('camera-error')).toBeTruthy();
     fail = false;
@@ -240,7 +249,6 @@ describe('CameraUI', () => {
   it('requests 60 fps in the getUserMedia constraints (R-5)', async () => {
     const gum = mockGetUserMedia(async () => makeStream());
     render(<CameraUI />);
-    fireEvent.click(screen.getByTestId('camera-toggle'));
     await flush();
     const constraints = gum.mock.calls[0][0] as { video: MediaTrackConstraints };
     expect(constraints.video.frameRate).toEqual({ ideal: 60 });
@@ -253,13 +261,12 @@ describe('CameraUI', () => {
   });
 });
 
+// Mount the panel and let auto-start bring the camera and tracking up.
 async function startCameraAndTracking() {
   mockGetUserMedia(async () => makeStream());
   const view = render(<CameraUI />);
-  fireEvent.click(screen.getByTestId('camera-toggle'));
-  await flush();
-  fireEvent.click(screen.getByTestId('camera-track-toggle'));
-  await flush();
+  await flush(); // camera live
+  await flush(); // landmarker loaded
   return view;
 }
 
@@ -268,7 +275,17 @@ describe('CameraUI hand tracking', () => {
     mockGetUserMedia(async () => makeStream());
     render(<CameraUI />);
     expect(screen.queryByTestId('camera-track-toggle')).toBeNull();
-    fireEvent.click(screen.getByTestId('camera-toggle'));
+    await flush();
+    await flush();
+    // Auto-start has already switched tracking on.
+    expect(screen.getByTestId('camera-track-toggle').textContent).toBe('Stop tracking');
+  });
+
+  it('does not restart tracking after the user stops it', async () => {
+    await startCameraAndTracking();
+    fireEvent.click(screen.getByTestId('camera-track-toggle'));
+    expect(screen.getByTestId('camera-track-toggle').textContent).toBe('Track hands');
+    // Auto-track ran once per mount: state changes don't re-arm it.
     await flush();
     expect(screen.getByTestId('camera-track-toggle').textContent).toBe('Track hands');
   });
@@ -360,9 +377,7 @@ describe('CameraUI hand tracking', () => {
     mockedCreate.mockReturnValue(new Promise((r) => (resolve = r)));
     mockGetUserMedia(async () => makeStream());
     render(<CameraUI />);
-    fireEvent.click(screen.getByTestId('camera-toggle'));
-    await flush();
-    fireEvent.click(screen.getByTestId('camera-track-toggle')); // load pending
+    await flush(); // camera live; auto-track load pending
     fireEvent.click(screen.getByTestId('camera-track-toggle')); // stop while pending
     resolve(lm);
     await flush();

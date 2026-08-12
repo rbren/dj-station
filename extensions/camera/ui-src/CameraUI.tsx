@@ -3,9 +3,13 @@
 //
 // The feed is pure front-end — getUserMedia renders into a <video>; the
 // audio thread never sees the camera. Enablement is ephemeral app state
-// (deliberately not persisted in the patch): the panel starts disabled
-// and the user switches the camera on per session. Hand tracking is
-// likewise per-session and off by default.
+// (deliberately not persisted in the patch), but the panel AUTO-STARTS
+// per session: mounting the module requests the camera immediately and
+// switches hand tracking on once the feed is live, so a Hands patch
+// works the moment the module loads. The toggles remain — a user who
+// switches the camera or tracking off stays off (auto-start runs once
+// per mount); permission-denied / no camera degrade to the same inline
+// messages as a manual start.
 //
 // Lifecycle: the MediaStream is acquired when the user enables the
 // camera and every track is stopped when the camera is disabled, the
@@ -330,6 +334,25 @@ export default function CameraUI() {
   // Release the camera when the panel unmounts (module deleted, patch
   // closed, panel error boundary, ...).
   useEffect(() => stop, [stop]);
+
+  // Auto-start: request the camera as soon as the module loads. When
+  // getUserMedia doesn't exist at all, stay quietly "camera off" — an
+  // error banner on every mount in a camera-less environment is noise
+  // (the manual Enable button still reports it loudly).
+  useEffect(() => {
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    void start();
+  }, [start]);
+
+  // ...and switch tracking on once the feed is live — ONCE per mount,
+  // so "Stop tracking" / "Disable camera" stick for the session.
+  const autoTrackRef = useRef(true);
+  useEffect(() => {
+    if (state.kind === "live" && autoTrackRef.current) {
+      autoTrackRef.current = false;
+      void startTracking();
+    }
+  }, [state.kind, startTracking]);
 
   const tracking = trackState === "on";
 

@@ -18,17 +18,32 @@
 //!
 //! ## Dropout policy
 //!
-//! A hand that leaves the frame produces NO events for its value jacks —
-//! the RT module holds the last value (same law as gesture frame drops).
-//! The `seen` gates are the exception: they report visibility itself
-//! (10 V tracked / 0 V not), so patches can distinguish "hand at center"
-//! from "no hand".
+//! Hand visibility is DEBOUNCED: a hand must appear or disappear for
+//! [`DEBOUNCE_FRAMES`] consecutive camera frames before the module
+//! believes it, so a single misdetected frame (e.g. the right hand
+//! momentarily labelled left) causes no thrash — glitch frames hold.
+//! When a hand's disappearance is confirmed, its value jacks (and the
+//! two-hand deltas) DECAY to 0 V over [`DECAY_SECONDS`] on the RT
+//! thread instead of holding, so patches don't freeze on a stale
+//! reading. The `seen` gates report the debounced visibility itself
+//! (10 V tracked / 0 V not). A dropped/failed frame (`None`) updates
+//! nothing at all — the tracker said nothing, which is different from
+//! "no hands seen".
 
 use crate::manifest::{categories, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 use serde::{Deserialize, Serialize};
 
 pub const HANDS_ID: &str = "builtin.hands";
+
+/// Consecutive camera frames a visibility change must persist before it
+/// is applied (see the dropout policy above). 2 = a single bad frame is
+/// ignored entirely, at the cost of one camera frame (~33 ms at 30 fps)
+/// of appearance/disappearance latency.
+pub const DEBOUNCE_FRAMES: u8 = 2;
+
+/// Decay-to-zero time for a confirmed-vanished hand's value jacks.
+pub const DECAY_SECONDS: f32 = 0.010;
 
 /// Output jack indices (manifest order).
 pub mod jack {
@@ -217,9 +232,12 @@ pub fn derive_jacks(det: &HandsDetection) -> [Option<f32>; N_HANDS_JACKS] {
         out[jack::DY] = Some(clamp((ry - ly) * 5.0, -10.0, 10.0));
     }
 
+    // Pinch: ratio -> volts, minus 1 V so a full physical pinch (whose
+    // ratio bottoms out around 0.2 — thumb and index TIP centers can't
+    // coincide) reads 0 V instead of idling at ~1 V.
     if let Some(pts) = &det.left {
         if let Some(p) = pinch_ratio(pts) {
-            out[jack::L_PINCH] = Some(clamp(p * 5.0, 0.0, 10.0));
+            out[jack::L_PINCH] = Some(clamp(p * 5.0 - 1.0, 0.0, 10.0));
         }
         if let Some(a) = thumb_rotation(pts, true) {
             out[jack::L_ROT] = Some(clamp(a * (10.0 / std::f32::consts::PI), -10.0, 10.0));
@@ -227,7 +245,7 @@ pub fn derive_jacks(det: &HandsDetection) -> [Option<f32>; N_HANDS_JACKS] {
     }
     if let Some(pts) = &det.right {
         if let Some(p) = pinch_ratio(pts) {
-            out[jack::R_PINCH] = Some(clamp(p * 5.0, 0.0, 10.0));
+            out[jack::R_PINCH] = Some(clamp(p * 5.0 - 1.0, 0.0, 10.0));
         }
         if let Some(a) = thumb_rotation(pts, false) {
             out[jack::R_ROT] = Some(clamp(a * (10.0 / std::f32::consts::PI), -10.0, 10.0));
@@ -241,26 +259,99 @@ pub fn derive_jacks(det: &HandsDetection) -> [Option<f32>; N_HANDS_JACKS] {
     out
 }
 
-/// Control-plane state per Hands node: dedups per-jack values so a
-/// static hand doesn't flood the event ring at camera rate.
+/// Per-hand debounced visibility (see the module docs' dropout policy).
+#[derive(Debug, Default)]
+struct DebouncedVis {
+    committed: bool,
+    /// Consecutive frames the raw visibility has disagreed with
+    /// `committed`.
+    streak: u8,
+}
+
+/// Value jacks owned by each hand (decayed when that hand is lost).
+const LEFT_VALUE_JACKS: [usize; 4] = [jack::LX, jack::LY, jack::L_PINCH, jack::L_ROT];
+const RIGHT_VALUE_JACKS: [usize; 4] = [jack::RX, jack::RY, jack::R_PINCH, jack::R_ROT];
+
+/// Control-plane state per Hands node: debounces hand visibility so a
+/// single misdetected frame causes no thrash, dedups per-jack values so
+/// a static hand doesn't flood the event ring at camera rate, and turns
+/// confirmed hand loss into decay-to-zero emissions.
 #[derive(Debug, Default)]
 pub struct HandsControl {
     last: [Option<f32>; N_HANDS_JACKS],
+    vis: [DebouncedVis; 2], // [left, right]
 }
 
 impl HandsControl {
-    /// Evaluate one tracked frame; `emit(jack, value)` is called for
-    /// each jack whose value changed. `None` = dropped/failed frame:
+    /// Evaluate one tracked frame; `emit(jack, value, decay)` is called
+    /// for each jack that changes — `decay = true` means "ramp to
+    /// `value` over [`DECAY_SECONDS`]" (hand loss), `false` means apply
+    /// at the event's frame as usual. `None` = dropped/failed frame:
     /// nothing updates (values AND gates hold — the tracker said
     /// nothing, which is different from "no hands seen").
-    pub fn feed(&mut self, det: Option<&HandsDetection>, mut emit: impl FnMut(usize, f32)) {
+    pub fn feed(&mut self, det: Option<&HandsDetection>, mut emit: impl FnMut(usize, f32, bool)) {
         let Some(det) = det else { return };
-        let values = derive_jacks(det);
+
+        // Debounce raw visibility into committed visibility.
+        let raw = [det.left.is_some(), det.right.is_some()];
+        let mut newly_lost = [false; 2];
+        for (h, vis) in self.vis.iter_mut().enumerate() {
+            if raw[h] == vis.committed {
+                vis.streak = 0;
+                continue;
+            }
+            vis.streak += 1;
+            if vis.streak >= DEBOUNCE_FRAMES {
+                vis.committed = raw[h];
+                vis.streak = 0;
+                newly_lost[h] = !raw[h];
+            }
+        }
+
+        // Derive from the DEBOUNCED detection: an unconfirmed change
+        // contributes nothing this frame (glitch frames hold).
+        let eff = HandsDetection {
+            left: if self.vis[0].committed {
+                det.left
+            } else {
+                None
+            },
+            right: if self.vis[1].committed {
+                det.right
+            } else {
+                None
+            },
+        };
+        let mut values = derive_jacks(&eff);
+        // The gates report COMMITTED visibility, not this frame's raw
+        // one — a committed hand whose data glitched out for a frame
+        // keeps its gate high while its values hold.
+        values[jack::L_SEEN] = Some(if self.vis[0].committed { 10.0 } else { 0.0 });
+        values[jack::R_SEEN] = Some(if self.vis[1].committed { 10.0 } else { 0.0 });
         for (j, v) in values.iter().enumerate() {
             let Some(v) = *v else { continue };
             if self.last[j] != Some(v) {
                 self.last[j] = Some(v);
-                emit(j, v);
+                emit(j, v, false);
+            }
+        }
+
+        // Confirmed hand loss: decay its value jacks (and the two-hand
+        // deltas; the combined centroid too once no hand remains) to
+        // 0 V. `last` is cleared so a reappearing hand always re-emits.
+        let both_gone = !self.vis[0].committed && !self.vis[1].committed;
+        for (h, hand_jacks) in [LEFT_VALUE_JACKS, RIGHT_VALUE_JACKS].iter().enumerate() {
+            if !newly_lost[h] {
+                continue;
+            }
+            let mut decayed: Vec<usize> = hand_jacks.to_vec();
+            decayed.extend([jack::DX, jack::DY]);
+            if both_gone {
+                decayed.extend([jack::CX, jack::CY]);
+            }
+            for j in decayed {
+                self.last[j] = None;
+                emit(j, 0.0, true);
             }
         }
     }
@@ -268,19 +359,24 @@ impl HandsControl {
 
 /// A control-thread-produced value for one jack, applied on the RT
 /// thread at (or after) `frame` on the engine sample clock.
+/// `ramp_frames` > 0 means "reach `value` linearly over that many
+/// samples" (hand-loss decay); 0 means apply immediately.
 #[derive(Debug, Clone, Copy)]
 pub struct HandsEvent {
     pub frame: u64,
     pub jack: u16,
+    pub ramp_frames: u32,
     pub value: f32,
 }
 
 /// RT-side module: pops jack-value events from the SPSC ring and renders
 /// them as held output signals (last value persists until the next
-/// event — a vanished hand upstream just means no events).
+/// event) with per-jack linear ramps for the hand-loss decay.
 pub struct HandsRtModule {
     consumer: rtrb::Consumer<HandsEvent>,
     values: [f32; N_HANDS_JACKS],
+    ramp_target: [f32; N_HANDS_JACKS],
+    ramp_remaining: [u32; N_HANDS_JACKS],
     frame: u64,
 }
 
@@ -294,7 +390,24 @@ impl HandsRtModule {
         HandsRtModule {
             consumer,
             values: [0.0; N_HANDS_JACKS],
+            ramp_target: [0.0; N_HANDS_JACKS],
+            ramp_remaining: [0; N_HANDS_JACKS],
             frame: start_frame,
+        }
+    }
+
+    fn apply(&mut self, ev: &HandsEvent) {
+        let j = ev.jack as usize;
+        if j >= N_HANDS_JACKS {
+            return;
+        }
+        if ev.ramp_frames > 0 {
+            self.ramp_target[j] = ev.value;
+            self.ramp_remaining[j] = ev.ramp_frames;
+        } else {
+            // A fresh measurement supersedes any in-flight decay.
+            self.values[j] = ev.value;
+            self.ramp_remaining[j] = 0;
         }
     }
 }
@@ -317,11 +430,16 @@ impl HostModule for HandsRtModule {
                     Ok(ev) if ev.frame <= now => {
                         let ev = *ev;
                         let _ = self.consumer.pop();
-                        if (ev.jack as usize) < N_HANDS_JACKS {
-                            self.values[ev.jack as usize] = ev.value;
-                        }
+                        self.apply(&ev);
                     }
                     _ => break,
+                }
+            }
+            for j in 0..N_HANDS_JACKS {
+                let rem = self.ramp_remaining[j];
+                if rem > 0 {
+                    self.values[j] += (self.ramp_target[j] - self.values[j]) / rem as f32;
+                    self.ramp_remaining[j] = rem - 1;
                 }
             }
             for (o, out) in outputs.iter_mut().enumerate().take(N_HANDS_JACKS) {
@@ -453,30 +571,89 @@ mod tests {
     }
 
     #[test]
+    fn pinch_volts_floor_at_zero_when_fully_pinched() {
+        // Thumb tip touching the index tip: the ratio bottoms out near
+        // 0.2, which the -1 V offset must map to 0 V, not ~1 V.
+        let touching = HandsDetection {
+            left: None,
+            right: Some(hand(0.0, 0.0, 0.3, 0.0, (0.1, 0.1))),
+        };
+        let v = derive_jacks(&touching);
+        assert_eq!(v[jack::R_PINCH], Some(0.0));
+        // A mid pinch still reads meaningfully above zero.
+        let mid = HandsDetection {
+            left: None,
+            right: Some(hand(0.0, 0.0, 0.3, 0.15, (0.1, 0.1))),
+        };
+        assert!(derive_jacks(&mid)[jack::R_PINCH].unwrap() > 0.5);
+    }
+
+    #[test]
     fn control_dedups_and_holds_on_dropout() {
         let mut ctl = HandsControl::default();
         let det = HandsDetection {
             left: None,
             right: Some(hand(0.4, 0.0, 0.3, 0.1, (0.1, 0.1))),
         };
-        let mut events: Vec<(usize, f32)> = Vec::new();
-        ctl.feed(Some(&det), |j, v| events.push((j, v)));
-        let first = events.len();
-        assert!(first > 0);
+        let mut events: Vec<(usize, f32, bool)> = Vec::new();
+        let feed = |ctl: &mut HandsControl,
+                    det: Option<&HandsDetection>,
+                    events: &mut Vec<(usize, f32, bool)>| {
+            ctl.feed(det, |j, v, d| events.push((j, v, d)));
+        };
+        // Appearance debounce: the first frame with the hand commits
+        // nothing but the (not yet raised) gate state.
+        feed(&mut ctl, Some(&det), &mut events);
+        assert!(events
+            .iter()
+            .all(|&(j, ..)| j == jack::R_SEEN || j == jack::L_SEEN));
+        events.clear();
+        // Second consecutive frame confirms the hand: values emit.
+        feed(&mut ctl, Some(&det), &mut events);
+        assert!(events.iter().any(|&(j, ..)| j == jack::RX));
+        assert!(events.contains(&(jack::R_SEEN, 10.0, false)));
         // Same detection again: nothing changed, nothing emitted.
         events.clear();
-        ctl.feed(Some(&det), |j, v| events.push((j, v)));
+        feed(&mut ctl, Some(&det), &mut events);
         assert!(
             events.is_empty(),
             "static hand must not re-emit: {events:?}"
         );
         // Dropped frame: nothing emitted (everything holds).
-        ctl.feed(None, |j, v| events.push((j, v)));
+        feed(&mut ctl, None, &mut events);
         assert!(events.is_empty());
-        // Hand vanishes: only the gate falls; value jacks hold.
+        // ONE frame without the hand: debounce absorbs it (no thrash).
         let gone = HandsDetection::default();
-        ctl.feed(Some(&gone), |j, v| events.push((j, v)));
-        assert_eq!(events, vec![(jack::R_SEEN, 0.0)]);
+        feed(&mut ctl, Some(&gone), &mut events);
+        assert!(events.is_empty(), "single bad frame must hold: {events:?}");
+        // And a recovery frame resets the streak without emitting.
+        feed(&mut ctl, Some(&det), &mut events);
+        assert!(events.is_empty());
+        // Two consecutive gone frames confirm the loss: the gate falls
+        // and the hand's value jacks (+deltas/centroid — no other hand)
+        // decay to zero.
+        feed(&mut ctl, Some(&gone), &mut events);
+        assert!(events.is_empty());
+        feed(&mut ctl, Some(&gone), &mut events);
+        assert!(events.contains(&(jack::R_SEEN, 0.0, false)));
+        for j in [
+            jack::RX,
+            jack::RY,
+            jack::R_PINCH,
+            jack::R_ROT,
+            jack::DX,
+            jack::CX,
+        ] {
+            assert!(
+                events.contains(&(j, 0.0, true)),
+                "jack {j} must decay to 0: {events:?}"
+            );
+        }
+        // Reappearing for two frames re-emits values (last was cleared).
+        events.clear();
+        feed(&mut ctl, Some(&det), &mut events);
+        feed(&mut ctl, Some(&det), &mut events);
+        assert!(events.iter().any(|&(j, _, d)| j == jack::RX && !d));
     }
 
     #[test]

@@ -31,16 +31,18 @@ impl Engine {
         det: Option<&HandsDetection>,
     ) -> Result<()> {
         let node = self.hands_node(instance_id)?;
+        let decay_frames = (crate::hands::DECAY_SECONDS * self.config.sample_rate).round() as u32;
         let (tx, ctl) = self
             .hands_producers
             .get_mut(&node)
             .ok_or_else(|| anyhow!("{instance_id:?} has no hands event ring"))?;
         let mut overflow = false;
-        ctl.feed(det, |jack, value| {
+        ctl.feed(det, |jack, value, decay| {
             overflow |= tx
                 .push(HandsEvent {
                     frame,
                     jack: jack as u16,
+                    ramp_frames: if decay { decay_frames } else { 0 },
                     value,
                 })
                 .is_err();

@@ -1,10 +1,26 @@
 //! The Hands module in the engine graph: camera-panel landmark frames in,
-//! held CV out. Values cross the SPSC ring and land at wired inputs; a
-//! vanished hand holds its last value while the seen gate falls; the node
-//! round-trips through the patch directory format.
+//! held CV out. Values cross the SPSC ring and land at wired inputs;
+//! visibility changes are debounced (one bad frame = no thrash); a
+//! confirmed-vanished hand decays its values to 0 V over DECAY_SECONDS
+//! while the seen gate falls; the node round-trips through the patch
+//! directory format.
 
-use dj_engine::hands::{jack, HandsDetection, N_HANDS_JACKS, N_LANDMARKS};
+use dj_engine::hands::{jack, HandsDetection, DEBOUNCE_FRAMES, N_HANDS_JACKS, N_LANDMARKS};
 use dj_engine::Engine;
+
+/// Feed the same detection enough consecutive frames to clear the
+/// visibility debounce, then let the ramps (if any) finish.
+fn feed_confirmed(engine: &mut Engine, det: &HandsDetection) {
+    for _ in 0..DEBOUNCE_FRAMES {
+        engine
+            .hands_feed("hands1", engine.current_frame(), Some(det))
+            .unwrap();
+        engine.process_blocks(2).unwrap();
+    }
+    // DECAY_SECONDS (10 ms) at 48 kHz / 128 is ~3.75 blocks; give
+    // in-flight ramps room to complete.
+    engine.process_blocks(6).unwrap();
+}
 
 /// A synthetic hand: all landmarks near (x, y), with the thumb/index/
 /// palm landmarks placed for a mid pinch and neutral thumb.
@@ -52,10 +68,7 @@ fn read(engine: &Engine, taps: &[(String, String)], jack: usize) -> f32 {
 #[test]
 fn detections_land_as_cv_at_wired_inputs() {
     let (mut engine, taps) = rigged_engine();
-    engine
-        .hands_feed("hands1", 0, Some(&both_hands(-0.5, 0.5)))
-        .unwrap();
-    engine.process_blocks(2).unwrap();
+    feed_confirmed(&mut engine, &both_hands(-0.5, 0.5));
 
     let lx = read(&engine, &taps, jack::LX);
     let rx = read(&engine, &taps, jack::RX);
@@ -80,40 +93,101 @@ fn detections_land_as_cv_at_wired_inputs() {
 }
 
 #[test]
-fn vanished_hand_holds_values_and_drops_gate() {
+fn vanished_hand_decays_values_and_drops_gate() {
     let (mut engine, taps) = rigged_engine();
-    engine
-        .hands_feed("hands1", 0, Some(&both_hands(-0.5, 0.5)))
-        .unwrap();
-    engine.process_blocks(2).unwrap();
-    let held_lx = read(&engine, &taps, jack::LX);
-    let held_pinch = read(&engine, &taps, jack::L_PINCH);
+    feed_confirmed(&mut engine, &both_hands(-0.5, 0.5));
+    assert!(read(&engine, &taps, jack::LX) < -1.0);
+    assert!(read(&engine, &taps, jack::L_PINCH) > 0.0);
 
-    // Left hand leaves the frame; right hand moves.
+    // Left hand leaves the frame (confirmed); right hand moves.
     let det = HandsDetection {
         left: None,
         right: Some(hand_at(0.8, 0.2)),
     };
-    engine.hands_feed("hands1", 0, Some(&det)).unwrap();
-    engine.process_blocks(2).unwrap();
+    feed_confirmed(&mut engine, &det);
 
-    // Left values hold; the gate falls; right keeps tracking.
-    assert_eq!(read(&engine, &taps, jack::LX), held_lx);
-    assert_eq!(read(&engine, &taps, jack::L_PINCH), held_pinch);
+    // Left values decayed to 0 V; the gate fell; right keeps tracking.
+    assert_eq!(read(&engine, &taps, jack::LX), 0.0);
+    assert_eq!(read(&engine, &taps, jack::L_PINCH), 0.0);
     assert_eq!(read(&engine, &taps, jack::L_SEEN), 0.0);
     assert_eq!(read(&engine, &taps, jack::R_SEEN), 10.0);
     assert!(read(&engine, &taps, jack::RX) > 3.5);
+    // The combined centroid still follows the remaining hand.
+    assert!(read(&engine, &taps, jack::CX) > 3.5);
 
     // A dropped frame (None) changes nothing at all.
     let before: Vec<f32> = (0..N_HANDS_JACKS)
         .map(|j| read(&engine, &taps, j))
         .collect();
-    engine.hands_feed("hands1", 0, None).unwrap();
+    engine
+        .hands_feed("hands1", engine.current_frame(), None)
+        .unwrap();
     engine.process_blocks(2).unwrap();
     let after: Vec<f32> = (0..N_HANDS_JACKS)
         .map(|j| read(&engine, &taps, j))
         .collect();
     assert_eq!(before, after);
+}
+
+#[test]
+fn single_glitch_frame_does_not_thrash_outputs() {
+    let (mut engine, taps) = rigged_engine();
+    feed_confirmed(&mut engine, &both_hands(-0.5, 0.5));
+    let lx = read(&engine, &taps, jack::LX);
+
+    // One bad frame: the left hand misdetected as gone (e.g. its
+    // landmarks momentarily labelled right). Debounce absorbs it.
+    let glitch = HandsDetection {
+        left: None,
+        right: Some(hand_at(0.5, 0.0)),
+    };
+    engine
+        .hands_feed("hands1", engine.current_frame(), Some(&glitch))
+        .unwrap();
+    engine.process_blocks(6).unwrap();
+    assert_eq!(read(&engine, &taps, jack::LX), lx, "glitch frame must hold");
+    assert_eq!(read(&engine, &taps, jack::L_SEEN), 10.0);
+
+    // Tracking resumes as if nothing happened.
+    engine
+        .hands_feed(
+            "hands1",
+            engine.current_frame(),
+            Some(&both_hands(-0.5, 0.5)),
+        )
+        .unwrap();
+    engine.process_blocks(2).unwrap();
+    assert_eq!(read(&engine, &taps, jack::LX), lx);
+}
+
+#[test]
+fn hand_loss_decays_over_10ms_not_instantly() {
+    let (mut engine, taps) = rigged_engine();
+    feed_confirmed(&mut engine, &both_hands(-0.5, 0.5));
+    let lx = read(&engine, &taps, jack::LX);
+    assert!(lx < -1.0);
+
+    // Confirm the loss (DEBOUNCE_FRAMES gone frames), processing only
+    // one block per feed so the ramp is still in flight afterwards.
+    let gone = HandsDetection::default();
+    for _ in 0..DEBOUNCE_FRAMES {
+        engine
+            .hands_feed("hands1", engine.current_frame(), Some(&gone))
+            .unwrap();
+        engine.process_blocks(1).unwrap();
+    }
+    // One block (128/48k ~ 2.7 ms) into the 10 ms ramp: partway down.
+    let mid = read(&engine, &taps, jack::LX);
+    assert!(
+        mid > lx && mid < 0.0,
+        "must be mid-decay: {mid} (from {lx})"
+    );
+
+    // After the full ramp: exactly zero.
+    engine.process_blocks(6).unwrap();
+    assert_eq!(read(&engine, &taps, jack::LX), 0.0);
+    assert_eq!(read(&engine, &taps, jack::CX), 0.0);
+    assert_eq!(read(&engine, &taps, jack::DX), 0.0);
 }
 
 #[test]
@@ -128,10 +202,16 @@ fn hands_node_round_trips_through_patch() {
     let mut loaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
     // The node exists with its fixed jack set, wire intact, and the feed
     // path is live.
-    loaded
-        .hands_feed("hands1", 0, Some(&both_hands(-0.3, 0.3)))
-        .unwrap();
-    loaded.process_blocks(2).unwrap();
+    for _ in 0..DEBOUNCE_FRAMES {
+        loaded
+            .hands_feed(
+                "hands1",
+                loaded.current_frame(),
+                Some(&both_hands(-0.3, 0.3)),
+            )
+            .unwrap();
+        loaded.process_blocks(2).unwrap();
+    }
     assert!(loaded.tap("scope1", "in").unwrap().instantaneous > 0.0);
 }
 
@@ -150,11 +230,19 @@ fn module_added_mid_session_applies_feeds_immediately() {
     engine.add_module("scope1", "com.dj.scope").unwrap();
     engine.connect("hands1", "rx", "scope1", "in").unwrap();
 
-    let now = engine.current_frame();
-    engine
-        .hands_feed("hands1", now, Some(&both_hands(-0.5, 0.5)))
-        .unwrap();
-    engine.process_blocks(2).unwrap();
+    // DEBOUNCE_FRAMES feeds to confirm the hand, one block each — the
+    // point is that events stamped "now" apply promptly, not after an
+    // engine-age lag.
+    for _ in 0..DEBOUNCE_FRAMES {
+        engine
+            .hands_feed(
+                "hands1",
+                engine.current_frame(),
+                Some(&both_hands(-0.5, 0.5)),
+            )
+            .unwrap();
+        engine.process_blocks(1).unwrap();
+    }
     let rx = engine.tap("scope1", "in").unwrap().instantaneous;
     assert!(
         rx > 1.0,
