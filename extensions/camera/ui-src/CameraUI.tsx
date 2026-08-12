@@ -199,6 +199,16 @@ export default function CameraUI() {
     let errorsLogged = 0;
     let warnedNoCtx = false;
 
+    // WebKit (WKWebView/webkitgtk) reports a non-advancing mediaTime for
+    // getUserMedia streams, which made every frame after the first look
+    // like a duplicate. Three consecutive stuck ticks ⇒ the clock is
+    // broken (real duplicate frames are isolated), so timestamp frames
+    // from the rVFC callback clock instead. mediaTime stays the
+    // convention (R-6) where it works.
+    let lastRawMediaTime = -1;
+    let stuckTicks = 0;
+    let clockFallback = false;
+
     // Watchdog: rVFC never firing (video paused / stream dead) is
     // otherwise indistinguishable from "no hands in frame".
     const watchdog = setTimeout(() => {
@@ -220,16 +230,33 @@ export default function CameraUI() {
       }
       const v = videoRef.current;
       if (!v) return;
-      // rVFC ticks whose mediaTime did not advance are counted as
+      if (!clockFallback) {
+        if (meta.mediaTime <= lastRawMediaTime) {
+          stuckTicks++;
+          if (stuckTicks >= 3) {
+            clockFallback = true;
+            console.warn(
+              `[camera] mediaTime is stuck at ${meta.mediaTime.toFixed(4)}s ` +
+                "(WebKit getUserMedia bug) — timestamping frames from the " +
+                "rVFC callback clock instead",
+            );
+          }
+        } else {
+          stuckTicks = 0;
+        }
+        lastRawMediaTime = meta.mediaTime;
+      }
+      const frameTime = clockFallback ? now / 1000 : meta.mediaTime;
+      // rVFC ticks whose timestamp did not advance are counted as
       // dropped and skipped — feeding a repeat timestamp to a VIDEO-mode
       // landmarker is invalid.
-      if (acc.frameArrived(meta.mediaTime)) {
+      if (acc.frameArrived(frameTime)) {
         try {
           const t0 = performance.now();
-          const raw = landmarkerRef.current.detect(v, meta.mediaTime * 1000);
+          const raw = landmarkerRef.current.detect(v, frameTime * 1000);
           const t1 = performance.now();
-          // The frame carries its mediaTime from the start (R-6).
-          const frame: HandFrame = resolveHands(raw, meta.mediaTime);
+          // The frame carries its timestamp from the start (R-6).
+          const frame: HandFrame = resolveHands(raw, frameTime);
           frames++;
           if (frame.hands.length !== lastHands) {
             lastHands = frame.hands.length;

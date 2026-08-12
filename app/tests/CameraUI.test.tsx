@@ -294,6 +294,25 @@ describe('CameraUI hand tracking', () => {
     expect(lm.detect).toHaveBeenCalledTimes(1);
   });
 
+  it('falls back to the rVFC clock when mediaTime is stuck (WebKit gUM bug)', async () => {
+    const lm = makeLandmarker();
+    mockedCreate.mockResolvedValue(lm);
+    await startCameraAndTracking();
+    // WebKit reports the same mediaTime on every tick for camera streams.
+    fireFrame(0.05); // inferred (first frame)
+    fireFrame(0.05); // stuck 1 — dropped
+    fireFrame(0.05); // stuck 2 — dropped
+    fireFrame(0.05); // stuck 3 — fallback engages, inferred via now-clock
+    fireFrame(0.05); // still inferred
+    fireFrame(0.05);
+    expect(lm.detect.mock.calls.length).toBeGreaterThanOrEqual(4);
+    // Timestamps fed to the landmarker keep advancing after the fallback.
+    const stamps = lm.detect.mock.calls.map((c) => c[1] as number);
+    for (let i = 4; i < stamps.length; i++) {
+      expect(stamps[i]).toBeGreaterThan(stamps[i - 1]);
+    }
+  });
+
   it('keeps the overlay out of the video: a separate toggleable canvas (R-13)', async () => {
     const lm = makeLandmarker();
     mockedCreate.mockResolvedValue(lm);
