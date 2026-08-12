@@ -9,7 +9,8 @@
 
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import type { CurveName, KnobConfig, KnobStyle } from '../types';
+import { DEFAULT_UNIT, displayNumber, displayToRaw, noteOptions } from '../display';
+import type { CurveName, DisplaySpec, KnobConfig, KnobStyle } from '../types';
 import { attenOffsetForSpread, mapPosition, positionForValue, spreadRange } from './Knob';
 
 export function KnobConfigMenu({
@@ -25,6 +26,7 @@ export function KnobConfigMenu({
   atten,
   offset,
   onAttenOffset,
+  display,
 }: {
   config: KnobConfig;
   /** Viewport coordinates to anchor the menu at (the right-click point). */
@@ -42,6 +44,10 @@ export function KnobConfigMenu({
   atten?: number;
   offset?: number;
   onAttenOffset?(atten: number, offset: number): void;
+  /** Manifest display spec: the Value field is entered in DISPLAY units
+   *  (the same numbers the tooltip shows), converted back through the
+   *  spec's map. Hz units additionally get a note picker. */
+  display?: DisplaySpec | null;
 }) {
   const curveName = typeof config.curve === 'string' ? config.curve : 'custom';
   const ref = useRef<HTMLDivElement | null>(null);
@@ -69,10 +75,23 @@ export function KnobConfigMenu({
     onAttenOffset?.(next.atten, next.offset);
   };
 
-  const value = mapPosition(config, position ?? 0);
+  // Direct entry works in DISPLAY units — the same numbers the tooltip
+  // shows (e.g. Hz for a volt-per-octave pitch knob) — converted back to a
+  // raw engine value through the display map before solving for position.
+  const unit = display?.unit ?? DEFAULT_UNIT;
+  const value = displayNumber(display, mapPosition(config, position ?? 0));
   const setValue = (v: number) => {
-    if (Number.isFinite(v)) onPosition?.(positionForValue(config, v));
+    if (!Number.isFinite(v)) return;
+    const raw = displayToRaw(display, v);
+    if (Number.isFinite(raw)) onPosition?.(positionForValue(config, raw));
   };
+  const displayMin = displayNumber(display, Math.min(config.min, config.max));
+  const displayMax = displayNumber(display, Math.max(config.min, config.max));
+  const notes =
+    unit === 'Hz' ? noteOptions().filter((n) => n.hz >= displayMin && n.hz <= displayMax) : [];
+  // The picker shows the nearest note when the current value matches one
+  // (within a cent), else a blank placeholder.
+  const currentNote = notes.find((n) => Math.abs(Math.log2(value / n.hz)) < 1 / 1200)?.name ?? '';
 
   const menu = (
     <div
@@ -83,27 +102,54 @@ export function KnobConfigMenu({
       style={at ? { position: 'fixed', left: at.x, top: at.y } : undefined}
     >
       {onPosition && config.style !== 'wire' && (
-        <label>
-          Value
-          <input
-            type="number"
-            aria-label="knob value"
-            step={0.1}
-            min={Math.min(config.min, config.max)}
-            max={Math.max(config.min, config.max)}
-            value={Number(value.toFixed(4))}
-            // valueAsNumber: NaN for empty/partial input (Number('') is 0,
-            // which would slam the knob while the user is still typing).
-            onChange={(e) => setValue(e.target.valueAsNumber)}
-            onBlur={() => onRelease?.()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                onRelease?.();
-                onClose();
-              }
-            }}
-          />
-        </label>
+        <>
+          <label>
+            Value{unit ? ` (${unit})` : ''}
+            <input
+              type="number"
+              aria-label="knob value"
+              step={0.1}
+              min={displayMin}
+              max={displayMax}
+              value={Number(value.toFixed(4))}
+              // valueAsNumber: NaN for empty/partial input (Number('') is 0,
+              // which would slam the knob while the user is still typing).
+              onChange={(e) => setValue(e.target.valueAsNumber)}
+              onBlur={() => onRelease?.()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onRelease?.();
+                  onClose();
+                }
+              }}
+            />
+          </label>
+          {notes.length > 0 && (
+            <label>
+              Note
+              <select
+                aria-label="knob note"
+                value={currentNote}
+                onChange={(e) => {
+                  const note = notes.find((n) => n.name === e.target.value);
+                  if (note) {
+                    setValue(note.hz);
+                    onRelease?.();
+                  }
+                }}
+              >
+                <option value="" disabled hidden>
+                  —
+                </option>
+                {notes.map((n) => (
+                  <option key={n.name} value={n.name}>
+                    {n.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </>
       )}
       <label>
         Style

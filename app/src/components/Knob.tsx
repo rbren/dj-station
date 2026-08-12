@@ -284,6 +284,7 @@ export function Knob(props: KnobProps) {
       atten={props.atten}
       offset={props.offset}
       onAttenOffset={onAttenOffset}
+      display={display}
     />
   );
 

@@ -167,6 +167,78 @@ describe('Knob', () => {
     expect(screen.queryByLabelText('knob value')).toBeNull();
   });
 
+  it('config menu Value shows the unit and accepts input in display units', () => {
+    // The oscillator pitch case: a ±5 V volt-per-octave knob displayed in
+    // Hz. Typing 440 must land the knob at the position whose raw value
+    // is log2(440/261.626), not at "440 volts".
+    const onPosition = vi.fn();
+    render(
+      <Knob
+        label="pitch"
+        config={{ style: 'continuous', min: -5, max: 5, curve: 'linear' }}
+        display={{ unit: 'Hz', map: { kind: 'volt_per_octave' } }}
+        position={0.5}
+        onPosition={onPosition}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    expect(screen.getByText(/Value \(Hz\)/)).toBeTruthy();
+    const field = screen.getByLabelText('knob value') as HTMLInputElement;
+    // Center position = 0 V = the v/oct base frequency (middle C).
+    expect(Number(field.value)).toBeCloseTo(261.626, 2);
+    fireEvent.change(field, { target: { value: '440' } });
+    const cfg: KnobConfig = { style: 'continuous', min: -5, max: 5, curve: 'linear' };
+    const raw = mapPosition(cfg, onPosition.mock.lastCall![0]);
+    expect(261.626 * Math.pow(2, raw)).toBeCloseTo(440, 1);
+  });
+
+  it('config menu shows a note picker for Hz knobs that sets the frequency', () => {
+    const onPosition = vi.fn();
+    const onRelease = vi.fn();
+    render(
+      <Knob
+        label="pitch"
+        config={{ style: 'continuous', min: -5, max: 5, curve: 'linear' }}
+        display={{ unit: 'Hz', map: { kind: 'volt_per_octave' } }}
+        position={0.5}
+        onPosition={onPosition}
+        onRelease={onRelease}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    const picker = screen.getByLabelText('knob note') as HTMLSelectElement;
+    // 0 V is middle C in the default v/oct map.
+    expect(picker.value).toBe('C4');
+    fireEvent.change(picker, { target: { value: 'A4' } });
+    const cfg: KnobConfig = { style: 'continuous', min: -5, max: 5, curve: 'linear' };
+    const raw = mapPosition(cfg, onPosition.mock.lastCall![0]);
+    expect(261.626 * Math.pow(2, raw)).toBeCloseTo(440, 1);
+    expect(onRelease).toHaveBeenCalledTimes(1);
+    // Note options stay within the knob's reachable range (±5 V ≈ C-1..C9,
+    // clamped to the table's C0..B8).
+    const names = Array.from(picker.options).map((o) => o.value);
+    expect(names).toContain('C0');
+    expect(names).toContain('B8');
+    expect(names).not.toContain('C9');
+  });
+
+  it('non-Hz knobs get a plain Volts unit and no note picker', () => {
+    render(
+      <Knob
+        label="cv"
+        config={LINEAR}
+        position={0.5}
+        onPosition={() => {}}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'cv' }));
+    expect(screen.getByText(/Value \(V\)/)).toBeTruthy();
+    expect(screen.queryByLabelText('knob note')).toBeNull();
+  });
+
   it('config menu Value field ignores unparseable input', () => {
     const onPosition = vi.fn();
     render(

@@ -12,7 +12,7 @@
     connect to modules outside the set
   - "Reset to defaults" for the whole selected group
   - copy/paste works for a single module too
-- [ ] Knob right-click "set value": display the unit next to the input.
+- [x] Knob right-click "set value": display the unit next to the input.
       When the unit is Hz, add a "note" picker that sets the numeric value
       to the corresponding frequency. Also fixes: setting pitch on the
       oscillator module is broken — the right-click menu only accepts a

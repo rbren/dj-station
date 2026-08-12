@@ -23,6 +23,32 @@ export function displayNumber(display: DisplaySpec | null | undefined, value: nu
   return value;
 }
 
+/** Displayed number -> raw engine value (inverse of `displayNumber`), so
+ *  direct entry accepts values in the same units the tooltip shows. */
+export function displayToRaw(display: DisplaySpec | null | undefined, shown: number): number {
+  const map = display?.map;
+  if (map?.kind === 'volt_per_octave') {
+    if (!(shown > 0)) return NaN;
+    return Math.log2(shown / (map.base ?? V_OCT_BASE));
+  }
+  return shown;
+}
+
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+/** Equal-tempered note table for Hz-displaying knobs' note picker:
+ *  C0 (MIDI 12) through B8 (MIDI 119), A4 = 440 Hz. */
+export function noteOptions(): { name: string; hz: number }[] {
+  const notes: { name: string; hz: number }[] = [];
+  for (let midi = 12; midi <= 119; midi++) {
+    notes.push({
+      name: `${NOTE_NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`,
+      hz: 440 * Math.pow(2, (midi - 69) / 12),
+    });
+  }
+  return notes;
+}
+
 /** Step label for a raw value, or null when the spec declares none. The
  *  step index comes from the knob range when known (labels.length spans
  *  min..max, matching the stepped knob's detents), else from round(value)
