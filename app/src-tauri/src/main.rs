@@ -97,6 +97,7 @@ enum EditKey<'a> {
     ModuleReset(&'a str),
     Param(&'a str, &'a str),
     Load(&'a str),
+    NewPatch,
     CollapseMacro,
     Track(&'a str),
 }
@@ -122,6 +123,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::ModuleReset(i) => write!(f, "modreset:{i}"),
             EditKey::Param(i, p) => write!(f, "param:{i}:{p}"),
             EditKey::Load(d) => write!(f, "load:{d}"),
+            EditKey::NewPatch => write!(f, "new_patch"),
             EditKey::CollapseMacro => write!(f, "collapse_macro"),
             EditKey::Track(i) => write!(f, "track:{i}"),
         }
@@ -164,7 +166,10 @@ fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> 
         // Deck metadata (grids/cues/loops) is canonical in the library DB;
         // re-apply it to decks apply_doc had to recreate.
         for instance in recreated {
-            if e.nodes.iter().any(|n| n.instance_id == instance && n.is_deck()) {
+            if e.nodes
+                .iter()
+                .any(|n| n.instance_id == instance && n.is_deck())
+            {
                 apply_deck_metadata(state, e, &instance)?;
             }
         }
@@ -923,7 +928,9 @@ fn hands_feed(
 ) -> CmdResult<()> {
     let mut engine = engine_lock(&state)?;
     let frame = engine.current_frame();
-    engine.hands_feed(&instance, frame, Some(&detection)).map_err(err)
+    engine
+        .hands_feed(&instance, frame, Some(&detection))
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -1154,6 +1161,29 @@ fn save_patch_as(state: State<AppState>, name: String) -> CmdResult<()> {
         .save_patch(&patches_dir().join(&name), &name)
         .map_err(err)?;
     *state.patch_name.lock().map_err(err)? = name;
+    Ok(())
+}
+
+/// File > New Patch: replace the rack with a fresh empty engine (undoable)
+/// and reset the working name to "untitled".
+#[tauri::command]
+fn new_patch(state: State<AppState>) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::NewPatch)?;
+    let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
+    let mut fresh = Engine::new(EngineConfig::default(), registry).map_err(err)?;
+    match db_macro_library(&state.library) {
+        Ok(lib) => {
+            for def in lib.defs.into_values() {
+                fresh.register_macro(def);
+            }
+        }
+        Err(e) => eprintln!("[dj-macros] loading macro library failed: {e}"),
+    }
+    with_stopped(&mut engine, |e| {
+        *e = fresh;
+        Ok(())
+    })?;
+    *state.patch_name.lock().map_err(err)? = "untitled".into();
     Ok(())
 }
 
@@ -2068,6 +2098,9 @@ fn main() {
             }
             // System menu: platform defaults (App/Edit/Window on macOS)
             // plus File (save/load) and Debug (web inspector) submenus.
+            let new_patch = MenuItemBuilder::with_id("file_new", "New Patch")
+                .accelerator("CmdOrCtrl+N")
+                .build(app)?;
             let save = MenuItemBuilder::with_id("file_save", "Save Patch")
                 .accelerator("CmdOrCtrl+S")
                 .build(app)?;
@@ -2078,6 +2111,7 @@ fn main() {
                 .accelerator("CmdOrCtrl+O")
                 .build(app)?;
             let file = SubmenuBuilder::new(app, "File")
+                .item(&new_patch)
                 .item(&save)
                 .item(&save_as)
                 .item(&open)
@@ -2128,6 +2162,15 @@ fn main() {
             "file_open" => {
                 let _ = app.emit("dj-menu", "open");
             }
+            // New Patch runs in the backend; the frontend refreshes its
+            // rack (and patch name) on the "new" notification.
+            "file_new" => {
+                if let Err(e) = new_patch(app.state::<AppState>()) {
+                    eprintln!("[dj-station] new patch failed: {e}");
+                } else {
+                    let _ = app.emit("dj-menu", "new");
+                }
+            }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
@@ -2150,6 +2193,7 @@ fn main() {
             tap_all,
             save_patch,
             save_patch_as,
+            new_patch,
             list_patches,
             load_patch_by_name,
             current_patch,

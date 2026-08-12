@@ -404,8 +404,31 @@ export default function App() {
     [refresh],
   );
 
-  // Native File menu (Save handled fully in the backend; Save As / Open
-  // open in-app dialogs). Tests drive this via `dj-menu` CustomEvents.
+  // Sync the UI after the engine was replaced by a New Patch (the backend
+  // reset already happened — native menu path — or is done by newPatch).
+  const afterNewPatch = useCallback(async () => {
+    store.set({ selected: [], pending: null });
+    setPatchName('untitled');
+    await refresh();
+  }, [store, refresh]);
+
+  const newPatch = useCallback(async () => {
+    await engine.newPatch();
+    await afterNewPatch();
+  }, [afterNewPatch]);
+
+  const openSaveAsDialog = useCallback(() => {
+    setSaveAsName(patchName);
+    setFileDialog('save-as');
+  }, [patchName]);
+
+  const openOpenDialog = useCallback(() => {
+    void engine.listPatches().then((l) => setPatchList(l ?? []));
+    setFileDialog('open');
+  }, []);
+
+  // Native File menu (New/Save handled fully in the backend; Save As /
+  // Open open in-app dialogs). Tests drive this via `dj-menu` CustomEvents.
   useEffect(
     () =>
       onMenuAction((action) => {
@@ -414,15 +437,28 @@ export default function App() {
             if (n) setPatchName(n);
           });
           void engine.listPatches().then((l) => setPatchList(l ?? []));
+        } else if (action === 'new') {
+          void afterNewPatch();
         } else if (action === 'save-as') {
-          setSaveAsName(patchName);
-          setFileDialog('save-as');
+          openSaveAsDialog();
         } else if (action === 'open') {
-          void engine.listPatches().then((l) => setPatchList(l ?? []));
-          setFileDialog('open');
+          openOpenDialog();
         }
       }),
-    [patchName],
+    [afterNewPatch, openSaveAsDialog, openOpenDialog],
+  );
+
+  // The File menu as context-menu items: the rack-background right-click
+  // menu renders exactly this list, and each entry reuses the same action
+  // the native File menu triggers, so the two menus stay in sync.
+  const fileMenuItems = useMemo<ContextMenuItem[]>(
+    () => [
+      { label: 'New Patch', testId: 'ctx-new-patch', onSelect: () => void newPatch() },
+      { label: 'Save Patch', testId: 'ctx-save', onSelect: () => void savePatch() },
+      { label: 'Save Patch As…', testId: 'ctx-save-as', onSelect: openSaveAsDialog },
+      { label: 'Open Patch…', testId: 'ctx-open', onSelect: openOpenDialog },
+    ],
+    [newPatch, savePatch, openSaveAsDialog, openOpenDialog],
   );
 
   useEffect(() => {
@@ -705,8 +741,8 @@ export default function App() {
     if (!ctxMenu) return [];
     const instance = ctxMenu.instance;
     if (!instance) {
-      // Rack background: just Save, the same action as File > Save / cmd+S.
-      return [{ label: 'Save', testId: 'ctx-save', onSelect: () => void savePatch() }];
+      // Rack background: the same items as the native File menu.
+      return fileMenuItems;
     }
     return [
       {
@@ -733,7 +769,7 @@ export default function App() {
         hint: 'not implemented',
       },
     ];
-  }, [ctxMenu, savePatch, removeModule, openDocs, refresh]);
+  }, [ctxMenu, fileMenuItems, removeModule, openDocs, refresh]);
 
   return (
     <main className="app">

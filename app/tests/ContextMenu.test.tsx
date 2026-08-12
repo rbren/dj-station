@@ -1,7 +1,8 @@
 // Right-click context menus: the browser menu is suppressed globally;
 // right-clicking a module shows Delete / Documentation / Reset to defaults
-// / a disabled stub, right-clicking the rack background shows Save (the
-// File-menu save action). Documentation opens the in-app docs panel.
+// / a disabled stub, right-clicking the rack background mirrors the File
+// menu (New / Save / Save As / Open). Documentation opens the in-app docs
+// panel.
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -45,6 +46,7 @@ const fakeEngine = {
   currentPatch: vi.fn(async () => 'demo'),
   listPatches: vi.fn(async () => ['demo']),
   savePatchAs: vi.fn(async () => {}),
+  newPatch: vi.fn(async () => {}),
   removeModule: vi.fn(async () => {}),
   resetModule: vi.fn(async () => {}),
   endEdit: vi.fn(async () => {}),
@@ -187,19 +189,44 @@ describe('module context menu', () => {
 });
 
 describe('background context menu', () => {
-  it('shows just Save and saves under the current patch name', async () => {
+  it('mirrors the File menu: New / Save / Save As / Open', async () => {
     await renderApp();
     fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 300, clientY: 200 });
     const menu = screen.getByTestId('context-menu');
     expect(menu).toBeTruthy();
+    expect(screen.getByTestId('ctx-new-patch')).toBeTruthy();
     expect(screen.getByTestId('ctx-save')).toBeTruthy();
-    // Only the one item — no module actions on the background.
-    expect(menu.querySelectorAll('.context-menu-item')).toHaveLength(1);
+    expect(screen.getByTestId('ctx-save-as')).toBeTruthy();
+    expect(screen.getByTestId('ctx-open')).toBeTruthy();
+    // Exactly the File-menu items — no module actions on the background.
+    expect(menu.querySelectorAll('.context-menu-item')).toHaveLength(4);
     expect(screen.queryByTestId('ctx-delete')).toBeNull();
 
     fireEvent.click(screen.getByTestId('ctx-save'));
     await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo'));
     expect(screen.queryByTestId('context-menu')).toBeNull();
+  });
+
+  it('New Patch resets the engine and the patch name', async () => {
+    await renderApp();
+    fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 300, clientY: 200 });
+    fireEvent.click(screen.getByTestId('ctx-new-patch'));
+    await waitFor(() => expect(fakeEngine.newPatch).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('untitled'));
+    expect(screen.queryByTestId('context-menu')).toBeNull();
+  });
+
+  it('Save As / Open open the same dialogs as the File menu', async () => {
+    await renderApp();
+    fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 300, clientY: 200 });
+    fireEvent.click(screen.getByTestId('ctx-save-as'));
+    expect(await screen.findByTestId('file-dialog-name')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('file-dialog-cancel'));
+
+    fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 300, clientY: 200 });
+    fireEvent.click(screen.getByTestId('ctx-open'));
+    expect(await screen.findByTestId('file-dialog')).toBeTruthy();
+    expect(screen.getByTestId('file-dialog-patch-demo')).toBeTruthy();
   });
 
   it('module right-click does not also open the background menu', async () => {

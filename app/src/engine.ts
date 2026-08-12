@@ -206,6 +206,10 @@ export class EngineClient extends IpcClient {
   savePatchAs(name: string) {
     return this.call<void>('save_patch_as', { name });
   }
+  /** File > New Patch: replace the rack with a fresh empty engine. */
+  newPatch() {
+    return this.call<void>('new_patch');
+  }
   listPatches() {
     return this.call<string[]>('list_patches');
   }

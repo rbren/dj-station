@@ -1,6 +1,6 @@
 # Tasks (temporary checklist)
 
-- [ ] File menu: add "New Patch". Background right-click menu shows the same
+- [x] File menu: add "New Patch". Background right-click menu shows the same
       items as the File menu (not just "Save") — dedupe so the two stay in
       sync.
 - [ ] Mixer: default each channel level to 8V.
