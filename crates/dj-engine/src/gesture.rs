@@ -83,11 +83,17 @@ pub struct GestureRtModule {
 }
 
 impl GestureRtModule {
-    pub fn new(consumer: rtrb::Consumer<GestureEvent>) -> Self {
+    /// `start_frame` seeds the module's local sample clock from the
+    /// ENGINE clock — live feeds are stamped `Engine::current_frame()`,
+    /// so a module added mid-session that started local at 0 would see
+    /// every event as far-future and apply it with a constant lag equal
+    /// to the engine's age at add time (see the hands.rs regression
+    /// test for the observable symptom).
+    pub fn new(consumer: rtrb::Consumer<GestureEvent>, start_frame: u64) -> Self {
         GestureRtModule {
             consumer,
             values: [0.0; MAX_GESTURE_JACKS],
-            frame: 0,
+            frame: start_frame,
         }
     }
 }

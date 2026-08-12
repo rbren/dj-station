@@ -613,12 +613,12 @@ impl Engine {
                 let (tx, rx) = rtrb::RingBuffer::new(GESTURE_QUEUE_CAP);
                 gesture_tx = Some(tx);
                 gesture = Some(dj_gesture::GestureProcessor::default());
-                Box::new(GestureRtModule::new(rx))
+                Box::new(GestureRtModule::new(rx, self.current_frame()))
             }
             Some(BuiltinKind::Hands) => {
                 let (tx, rx) = rtrb::RingBuffer::new(HANDS_QUEUE_CAP);
                 hands_plumbing = Some(tx);
-                Box::new(crate::hands::HandsRtModule::new(rx))
+                Box::new(crate::hands::HandsRtModule::new(rx, self.current_frame()))
             }
             Some(BuiltinKind::Playback) => {
                 let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);

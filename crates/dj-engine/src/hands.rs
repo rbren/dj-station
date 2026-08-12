@@ -285,11 +285,16 @@ pub struct HandsRtModule {
 }
 
 impl HandsRtModule {
-    pub fn new(consumer: rtrb::Consumer<HandsEvent>) -> Self {
+    /// `start_frame` seeds the module's local sample clock from the
+    /// ENGINE clock — feeds are stamped `Engine::current_frame()`, so a
+    /// module added mid-session that started local at 0 would see every
+    /// event as far-future and freeze (regression-tested in
+    /// tests/integration/hands.rs).
+    pub fn new(consumer: rtrb::Consumer<HandsEvent>, start_frame: u64) -> Self {
         HandsRtModule {
             consumer,
             values: [0.0; N_HANDS_JACKS],
-            frame: 0,
+            frame: start_frame,
         }
     }
 }

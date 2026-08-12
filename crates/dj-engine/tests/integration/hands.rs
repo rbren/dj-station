@@ -135,6 +135,33 @@ fn hands_node_round_trips_through_patch() {
     assert!(loaded.tap("scope1", "in").unwrap().instantaneous > 0.0);
 }
 
+/// Regression: a Hands module added mid-session must apply feeds
+/// immediately. Events are stamped with the GLOBAL engine frame clock;
+/// if the RT module's local clock starts at 0 instead of the engine's
+/// current frame, every event lands "in the future" and the outputs
+/// freeze (then jump as the local clock crawls past stale timestamps).
+#[test]
+fn module_added_mid_session_applies_feeds_immediately() {
+    let mut engine = crate::common::default_engine();
+    // Let the engine run a while before the module exists.
+    engine.process_blocks(500).unwrap();
+
+    engine.add_module("hands1", "builtin.hands").unwrap();
+    engine.add_module("scope1", "com.dj.scope").unwrap();
+    engine.connect("hands1", "rx", "scope1", "in").unwrap();
+
+    let now = engine.current_frame();
+    engine
+        .hands_feed("hands1", now, Some(&both_hands(-0.5, 0.5)))
+        .unwrap();
+    engine.process_blocks(2).unwrap();
+    let rx = engine.tap("scope1", "in").unwrap().instantaneous;
+    assert!(
+        rx > 1.0,
+        "feed stamped 'now' must apply within a block: {rx}"
+    );
+}
+
 #[test]
 fn feed_rejects_non_hands_instances() {
     let mut engine = crate::common::default_engine();
