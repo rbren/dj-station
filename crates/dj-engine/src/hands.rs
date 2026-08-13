@@ -201,27 +201,29 @@ fn clamp(v: f32, lo: f32, hi: f32) -> f32 {
 pub fn derive_jacks(det: &HandsDetection) -> [Option<f32>; N_HANDS_JACKS] {
     let mut out = [None; N_HANDS_JACKS];
 
-    // Positions: engine coords are [-1, 1] -> ±5 V.
+    // Positions: engine coords are [-1, 1] -> 0..10 V (unipolar;
+    // frame-center reads 5 V).
+    let volts = |c: f32| c * 5.0 + 5.0;
     let l = det.left.as_ref().map(centroid);
     let r = det.right.as_ref().map(centroid);
     if let Some((x, y)) = l {
-        out[jack::LX] = Some(x * 5.0);
-        out[jack::LY] = Some(y * 5.0);
+        out[jack::LX] = Some(volts(x));
+        out[jack::LY] = Some(volts(y));
     }
     if let Some((x, y)) = r {
-        out[jack::RX] = Some(x * 5.0);
-        out[jack::RY] = Some(y * 5.0);
+        out[jack::RX] = Some(volts(x));
+        out[jack::RY] = Some(volts(y));
     }
 
     // Combined centroid: over all visible hands' landmarks.
     match (l, r) {
         (Some((lx, ly)), Some((rx, ry))) => {
-            out[jack::CX] = Some((lx + rx) * 0.5 * 5.0);
-            out[jack::CY] = Some((ly + ry) * 0.5 * 5.0);
+            out[jack::CX] = Some(volts((lx + rx) * 0.5));
+            out[jack::CY] = Some(volts((ly + ry) * 0.5));
         }
         (Some((x, y)), None) | (None, Some((x, y))) => {
-            out[jack::CX] = Some(x * 5.0);
-            out[jack::CY] = Some(y * 5.0);
+            out[jack::CX] = Some(volts(x));
+            out[jack::CY] = Some(volts(y));
         }
         (None, None) => {}
     }
@@ -514,9 +516,9 @@ mod tests {
             centroid(det.left.as_ref().unwrap()),
             centroid(det.right.as_ref().unwrap()),
         );
-        assert!((v[jack::LX].unwrap() - lc.0 * 5.0).abs() < 1e-6);
-        assert!((v[jack::RY].unwrap() - rc.1 * 5.0).abs() < 1e-6);
-        assert!((v[jack::CX].unwrap() - (lc.0 + rc.0) * 2.5).abs() < 1e-6);
+        assert!((v[jack::LX].unwrap() - (lc.0 * 5.0 + 5.0)).abs() < 1e-6);
+        assert!((v[jack::RY].unwrap() - (rc.1 * 5.0 + 5.0)).abs() < 1e-6);
+        assert!((v[jack::CX].unwrap() - ((lc.0 + rc.0) * 2.5 + 5.0)).abs() < 1e-6);
         // dx is right minus left, in volts.
         assert!((v[jack::DX].unwrap() - (rc.0 - lc.0) * 5.0).abs() < 1e-5);
         assert_eq!(v[jack::L_SEEN], Some(10.0));

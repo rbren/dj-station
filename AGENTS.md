@@ -161,7 +161,8 @@ fails if it's missing.
   `app/node_modules`).
 - Hands module (`builtin.hands`, `crates/dj-engine/src/hands.rs`): CV
   outputs derived from the camera panel's tracker — a gesture-style
-  builtin with a FIXED 14-jack set (centroids/deltas ±5 V, scale-
+  builtin with a FIXED 14-jack set (centroid X/Y 0–10 V unipolar,
+  frame-center = 5 V; deltas bipolar ±10 V; scale-
   invariant pinch, 2D signed-angle thumb rotation, seen gates; only
   landmark x/y are trusted — MediaPipe z is estimated depth, never used).
   Data path: camera panel `handsFeed.ts` (discovers Hands instances via

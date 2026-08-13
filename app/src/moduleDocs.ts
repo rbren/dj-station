@@ -989,7 +989,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Hand-tracking CV outputs, fed by the Camera module\u2019s tracker ' +
       '(which starts automatically): every Hands module in the rack ' +
       'receives the landmarks. Positions are engine-space (mirror ' +
-      'view, X right, Y up, center origin) scaled to \u00b15 V. Visibility ' +
+      'view, X right, Y up, center origin) scaled to 0\u201310 V ' +
+      '(frame-center = 5 V). Visibility ' +
       'changes are debounced over two frames, so one glitchy frame ' +
       'doesn\u2019t thrash the outputs; when a hand really leaves the ' +
       'frame its values decay to 0 V over 10 ms while its seen-gate drops. ' +
@@ -997,12 +998,12 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       '0 V touching to ~6 V spread); rotation is the thumb\u2019s signed ' +
       'angle off the palm axis \u2014 flared out is positive for both hands.',
     outputs: {
-      cx: 'Centroid X over all visible hands, \u00b15 V.',
-      cy: 'Centroid Y over all visible hands, \u00b15 V.',
-      lx: 'Left-hand centroid X, \u00b15 V.',
-      ly: 'Left-hand centroid Y, \u00b15 V.',
-      rx: 'Right-hand centroid X, \u00b15 V.',
-      ry: 'Right-hand centroid Y, \u00b15 V.',
+      cx: 'Centroid X over all visible hands, 0\u201310 V (center = 5 V).',
+      cy: 'Centroid Y over all visible hands, 0\u201310 V (center = 5 V).',
+      lx: 'Left-hand centroid X, 0\u201310 V (center = 5 V).',
+      ly: 'Left-hand centroid Y, 0\u201310 V (center = 5 V).',
+      rx: 'Right-hand centroid X, 0\u201310 V (center = 5 V).',
+      ry: 'Right-hand centroid Y, 0\u201310 V (center = 5 V).',
       dx: 'Right minus left centroid X, \u00b110 V.',
       dy: 'Right minus left centroid Y, \u00b110 V.',
       l_pinch: 'Left thumb\u2013forefinger pinch, scale-invariant, 0\u201310 V.',

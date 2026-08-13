@@ -73,12 +73,12 @@ fn detections_land_as_cv_at_wired_inputs() {
     let lx = read(&engine, &taps, jack::LX);
     let rx = read(&engine, &taps, jack::RX);
     assert!(
-        lx < -1.0,
-        "left hand at x=-0.5 must read negative volts: {lx}"
+        lx > 0.0 && lx < 4.0,
+        "left hand at x=-0.5 must read below-center volts: {lx}"
     );
     assert!(
-        rx > 1.0,
-        "right hand at x=0.5 must read positive volts: {rx}"
+        rx > 6.0 && rx < 10.0,
+        "right hand at x=0.5 must read above-center volts: {rx}"
     );
     // dx = right - left, positive here; centroid between them.
     assert!(read(&engine, &taps, jack::DX) > 3.0);
@@ -96,7 +96,7 @@ fn detections_land_as_cv_at_wired_inputs() {
 fn vanished_hand_decays_values_and_drops_gate() {
     let (mut engine, taps) = rigged_engine();
     feed_confirmed(&mut engine, &both_hands(-0.5, 0.5));
-    assert!(read(&engine, &taps, jack::LX) < -1.0);
+    assert!(read(&engine, &taps, jack::LX) < 4.0);
     assert!(read(&engine, &taps, jack::L_PINCH) > 0.0);
 
     // Left hand leaves the frame (confirmed); right hand moves.
@@ -111,9 +111,9 @@ fn vanished_hand_decays_values_and_drops_gate() {
     assert_eq!(read(&engine, &taps, jack::L_PINCH), 0.0);
     assert_eq!(read(&engine, &taps, jack::L_SEEN), 0.0);
     assert_eq!(read(&engine, &taps, jack::R_SEEN), 10.0);
-    assert!(read(&engine, &taps, jack::RX) > 3.5);
+    assert!(read(&engine, &taps, jack::RX) > 8.5);
     // The combined centroid still follows the remaining hand.
-    assert!(read(&engine, &taps, jack::CX) > 3.5);
+    assert!(read(&engine, &taps, jack::CX) > 8.5);
 
     // A dropped frame (None) changes nothing at all.
     let before: Vec<f32> = (0..N_HANDS_JACKS)
@@ -165,7 +165,7 @@ fn hand_loss_decays_over_10ms_not_instantly() {
     let (mut engine, taps) = rigged_engine();
     feed_confirmed(&mut engine, &both_hands(-0.5, 0.5));
     let lx = read(&engine, &taps, jack::LX);
-    assert!(lx < -1.0);
+    assert!(lx > 1.0);
 
     // Confirm the loss (DEBOUNCE_FRAMES gone frames), processing only
     // one block per feed so the ramp is still in flight afterwards.
@@ -179,7 +179,7 @@ fn hand_loss_decays_over_10ms_not_instantly() {
     // One block (128/48k ~ 2.7 ms) into the 10 ms ramp: partway down.
     let mid = read(&engine, &taps, jack::LX);
     assert!(
-        mid > lx && mid < 0.0,
+        mid < lx && mid > 0.0,
         "must be mid-decay: {mid} (from {lx})"
     );
 
