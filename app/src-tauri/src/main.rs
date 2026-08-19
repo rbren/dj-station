@@ -1513,6 +1513,10 @@ fn current_patch(state: State<AppState>) -> CmdResult<String> {
 /// Returns the engine's non-fatal load warnings (dropped stale wires/params).
 fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>> {
     let mut engine = patch_edit(state, EditKey::Load(&dir.display().to_string()))?;
+    // The loaded engine replaces this one and comes up stopped, so the
+    // pre-load backend must be restarted afterwards — the frontend only
+    // calls engine_start once, at app startup.
+    let backend = engine.backend();
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
     *engine = Engine::load_patch(dir, registry).map_err(err)?;
@@ -1528,6 +1532,7 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     for instance in deck_instances {
         apply_deck_metadata(state, &mut engine, &instance)?;
     }
+    restart_backend(&mut engine, backend, "patch load")?;
     Ok(engine.load_warnings.clone())
 }
 
@@ -1620,6 +1625,9 @@ fn load_patch(
             .collect());
     }
     record_edit(&state, &engine, &EditKey::Load(&dir));
+    // As in load_patch_dir: the replacement engine comes up stopped, so
+    // restart the pre-load backend once the swap is done.
+    let backend = engine.backend();
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
     *engine = Engine::from_doc_with_macros(&doc, registry, lib).map_err(err)?;
@@ -1640,6 +1648,7 @@ fn load_patch(
     for instance in deck_instances {
         apply_deck_metadata(&state, &mut engine, &instance)?;
     }
+    restart_backend(&mut engine, backend, "patch load")?;
     Ok(Vec::new())
 }
 
