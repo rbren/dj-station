@@ -137,7 +137,188 @@
         "curve": "linear",
         "steps": 2
       },
-      "display": { "steps": ["gate", "scale"] }
+      "display": {
+        "steps": [
+          "gate",
+          "scale"
+        ]
+      }
+    },
+    {
+      "id": "rata1",
+      "name": "Row 1 Ratchet A",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "rata2",
+      "name": "Row 2 Ratchet A",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "rata3",
+      "name": "Row 3 Ratchet A",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "rata4",
+      "name": "Row 4 Ratchet A",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "rata5",
+      "name": "Row 5 Ratchet A",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "rata6",
+      "name": "Row 6 Ratchet A",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "rata7",
+      "name": "Row 7 Ratchet A",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "rata8",
+      "name": "Row 8 Ratchet A",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "ratb1",
+      "name": "Row 1 Ratchet B",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "ratb2",
+      "name": "Row 2 Ratchet B",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "ratb3",
+      "name": "Row 3 Ratchet B",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "ratb4",
+      "name": "Row 4 Ratchet B",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "ratb5",
+      "name": "Row 5 Ratchet B",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "ratb6",
+      "name": "Row 6 Ratchet B",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "ratb7",
+      "name": "Row 7 Ratchet B",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "ratb8",
+      "name": "Row 8 Ratchet B",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
     }
   ],
   "outputs": [

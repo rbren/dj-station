@@ -3,13 +3,19 @@
 //! Inputs: `clock`, `reset`, `row1..row8` (16-bit pattern per row, bit 0 =
 //! column 1 — same bitmask-jack convention as the trigger sequencer, so
 //! the panel grid, wires and patches all address one number per row),
-//! `level` (output voltage in gate mode, default 10 V) and `mode`
-//! (0 = gate, 1 = scale). Outputs: `out1..out8` plus `pos` — clocks played
-//! since the last reset (-1 until the first clock), from which the current
-//! column is `pos mod 16`.
+//! `level` (output voltage in gate mode, default 10 V), `mode`
+//! (0 = gate, 1 = scale) and per row two ratchet bitplanes `rata1..rata8` /
+//! `ratb1..ratb8` (same bit = column mapping; a cell's ratchet count is
+//! `1 + bitA + 2*bitB`, i.e. 1–4 pulses — two 16-bit masks because 2 bits x
+//! 16 columns does not fit one f32-exact knob value). Outputs: `out1..out8`
+//! plus `pos` — clocks played since the last reset (-1 until the first
+//! clock), from which the current column is `pos mod 16`.
 //!
 //! When the playhead reaches a column, every row whose cell is on in that
-//! column emits on its output for half the measured clock interval:
+//! column emits its ratchet count's pulses spread evenly over the measured
+//! clock interval, each high for 50 % of its sub-division (the step
+//! sequencer's ratchet law; the default count of 1 is the original
+//! half-interval gate):
 //!
 //! - **gate** mode: `level` volts (default 10 V) — drum triggers, resets,
 //!   envelope gates.
@@ -27,6 +33,9 @@ const IN_RESET: usize = 1;
 const IN_ROW0: usize = 2;
 const IN_LEVEL: usize = 10;
 const IN_MODE: usize = 11;
+// Appended after the original inputs so patched jack indices stay stable.
+const IN_RATA0: usize = 12;
+const IN_RATB0: usize = 20;
 
 pub const ROWS: usize = 8;
 pub const COLS: usize = 16;
@@ -43,10 +52,10 @@ const MAJOR_SEMITONES: [f32; ROWS] = [0.0, 2.0, 4.0, 5.0, 7.0, 9.0, 11.0, 12.0];
 pub struct GridSeq {
     sample_rate: f32,
     col: usize,
-    /// Samples remaining in the current column's gate window.
-    gate_timer: i32,
-    /// Latched per-row on/off for the current column.
-    active: [bool; ROWS],
+    /// Position inside the current column, in samples.
+    step_pos: f32,
+    /// Latched per-row ratchet count for the current column (0 = cell off).
+    active: [u8; ROWS],
     pos: u32,
     armed: bool,
     last_clock: f32,
@@ -57,15 +66,15 @@ pub struct GridSeq {
 }
 
 impl Module for GridSeq {
-    const N_INPUTS: usize = 12;
+    const N_INPUTS: usize = 28;
     const N_OUTPUTS: usize = ROWS + 1;
 
     fn new(ctx: &InitCtx) -> Self {
         GridSeq {
             sample_rate: ctx.sample_rate,
             col: 0,
-            gate_timer: 0,
-            active: [false; ROWS],
+            step_pos: 0.0,
+            active: [0; ROWS],
             pos: 0,
             armed: true,
             last_clock: 0.0,
@@ -81,9 +90,14 @@ impl Module for GridSeq {
         if n == 0 {
             return;
         }
+        let mask = |v: f32| v.round().clamp(0.0, 65535.0) as u16;
         let mut pattern = [0u16; ROWS];
-        for (r, p) in pattern.iter_mut().enumerate() {
-            *p = io.inputs[IN_ROW0 + r][0].round().clamp(0.0, 65535.0) as u16;
+        let mut rata = [0u16; ROWS];
+        let mut ratb = [0u16; ROWS];
+        for r in 0..ROWS {
+            pattern[r] = mask(io.inputs[IN_ROW0 + r][0]);
+            rata[r] = mask(io.inputs[IN_RATA0 + r][0]);
+            ratb[r] = mask(io.inputs[IN_RATB0 + r][0]);
         }
         let level = io.inputs[IN_LEVEL][0].clamp(-10.0, 10.0);
         let scale_mode = io.inputs[IN_MODE][0].round() >= 1.0;
@@ -111,19 +125,29 @@ impl Module for GridSeq {
                     self.col = (self.col + 1) % COLS;
                     self.pos = (self.pos + 1) % POS_WRAP;
                 }
-                for (active, row) in self.active.iter_mut().zip(pattern) {
-                    *active = row & (1 << self.col) != 0;
+                let bit = 1u16 << self.col;
+                for (r, active) in self.active.iter_mut().enumerate() {
+                    *active = if pattern[r] & bit != 0 {
+                        1 + (rata[r] & bit != 0) as u8 + 2 * (ratb[r] & bit != 0) as u8
+                    } else {
+                        0
+                    };
                 }
-                self.gate_timer = ((0.5 * self.interval) as i32).max(1);
+                self.step_pos = 0.0;
             }
             self.last_clock = clock;
 
-            let open = self.gate_timer > 0;
-            if open {
-                self.gate_timer -= 1;
-            }
+            // Ratcheted gates: each on row emits its count's pulses spread
+            // over the clock interval, high for half each sub-division. A
+            // count of 1 is the original single half-interval gate.
             for (r, &semitones) in MAJOR_SEMITONES.iter().enumerate() {
-                io.outputs[r][s] = if open && self.active[r] {
+                let ratchets = self.active[r];
+                let open = ratchets > 0 && {
+                    let sub = (self.interval / ratchets as f32).max(2.0);
+                    let idx = (self.step_pos / sub) as usize;
+                    idx < ratchets as usize && (self.step_pos - idx as f32 * sub) < 0.5 * sub
+                };
+                io.outputs[r][s] = if open {
                     if scale_mode {
                         semitones / 12.0
                     } else {
@@ -133,6 +157,7 @@ impl Module for GridSeq {
                     0.0
                 };
             }
+            self.step_pos += 1.0;
             io.outputs[OUT_POS][s] = if self.armed { -1.0 } else { self.pos as f32 };
         }
     }
@@ -142,9 +167,9 @@ impl Module for GridSeq {
         out.push(self.col as u8);
         out.push(self.armed as u8 | ((self.seen_clock as u8) << 1));
         for a in &self.active {
-            out.push(*a as u8);
+            out.push(*a);
         }
-        out.extend_from_slice(&self.gate_timer.to_le_bytes());
+        out.extend_from_slice(&self.step_pos.to_le_bytes());
         out.extend_from_slice(&self.interval.to_le_bytes());
         out.extend_from_slice(&self.since_clock.to_le_bytes());
         out.extend_from_slice(&self.last_clock.to_le_bytes());
@@ -161,11 +186,11 @@ impl Module for GridSeq {
         self.armed = bytes[1] & 1 != 0;
         self.seen_clock = bytes[1] & 2 != 0;
         for (r, a) in self.active.iter_mut().enumerate() {
-            *a = bytes[2 + r] != 0;
+            *a = bytes[2 + r].min(4);
         }
         let f = |o: usize| f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let base = 2 + ROWS;
-        self.gate_timer = i32::from_le_bytes(bytes[base..base + 4].try_into().unwrap());
+        self.step_pos = f(base).max(0.0);
         self.interval = f(base + 4).max(2.0);
         self.since_clock = f(base + 8);
         self.last_clock = f(base + 12);

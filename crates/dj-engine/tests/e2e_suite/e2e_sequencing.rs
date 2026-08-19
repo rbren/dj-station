@@ -171,8 +171,12 @@ fn regen_grid_seq() {
         e.connect("clk", "bar", m, "reset").unwrap();
     }
 
-    // Gate-mode grid: row 1 every 4th column at a 7 V level -> ADSR gate.
+    // Gate-mode grid: row 1 every 4th column at a 7 V level -> ADSR gate,
+    // with a x3 ratchet on column 5 (bitplanes: A=0, B=1 -> 1+0+2 = 3),
+    // which retriggers the envelope inside the 1.6 s render.
     e.set_knob_value("grid", "row1", 0b0001_0001_0001_0001 as f32)
+        .unwrap();
+    e.set_knob_value("grid", "ratb1", 0b0001_0000 as f32)
         .unwrap();
     e.set_knob_value("grid", "level", 7.0).unwrap();
 

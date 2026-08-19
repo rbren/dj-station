@@ -586,6 +586,12 @@ body {
   background: #14171c;
   cursor: pointer;
   padding: 0;
+  /* Ratchet count (grid seq shift+click), rendered as the button text. */
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #0d1013;
+  text-align: center;
 }
 
 .trigseq-cell.beat {

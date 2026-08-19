@@ -241,7 +241,8 @@ const LAYOUTS: Record<string, LayoutFactory> = {
   }),
 
   // The cell grid itself is the custom GridSeqUI; the row bitmask jacks
-  // stay wireable as jack-only cells, level/mode keep their knobs.
+  // (patterns plus the two ratchet bitplanes driven by shift+click) stay
+  // wireable as jack-only cells, level/mode keep their knobs.
   'com.dj.grid_seq': () => ({
     groups: [
       { title: 'transport', inputs: ['clock', 'reset'] },
@@ -249,10 +250,20 @@ const LAYOUTS: Record<string, LayoutFactory> = {
         title: 'row cv',
         kind: 'grid',
         columns: 8,
-        inputs: seq('row', 1, 8, { control: 'jack' }).map((c, i) => ({
-          ...c,
-          label: `r${i + 1}`,
-        })),
+        inputs: [
+          ...seq('row', 1, 8, { control: 'jack' }).map((c, i) => ({
+            ...c,
+            label: `r${i + 1}`,
+          })),
+          ...seq('rata', 1, 8, { control: 'jack' }).map((c, i) => ({
+            ...c,
+            label: `a${i + 1}`,
+          })),
+          ...seq('ratb', 1, 8, { control: 'jack' }).map((c, i) => ({
+            ...c,
+            label: `b${i + 1}`,
+          })),
+        ],
       },
       { title: 'output', inputs: ['level', 'mode'] },
     ],

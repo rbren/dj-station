@@ -509,15 +509,20 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.grid_seq': {
     summary:
       '8x16 grid sequencer: click cells on the panel grid to turn them ' +
-      'on/off; when the playhead reaches a column, every on row emits on ' +
-      'its output. In gate mode all rows emit the level voltage (10 V by ' +
-      'default) \u2014 an instant drum machine. In scale mode each row is a ' +
-      'note on a C major scale (row 1 = C4, ascending to the octave), so ' +
-      'the grid becomes a piano-roll melody writer.',
+      'on/off; shift+click a cell to add ratchets (cycles 1\u20134 retriggers ' +
+      'within the column, shown as a number on the cell). When the playhead ' +
+      'reaches a column, every on row emits on its output. In gate mode all ' +
+      'rows emit the level voltage (10 V by default) \u2014 an instant drum ' +
+      'machine. In scale mode each row is a note on a C major scale ' +
+      '(row 1 = C4, ascending to the octave), so the grid becomes a ' +
+      'piano-roll melody writer.',
     inputs: {
       clock: 'Advances the playhead one column per rising edge.',
       reset: 'Trigger: back to column 1.',
       'row#': 'Row # pattern (bitmask driven by the panel grid).',
+      'rata#':
+        'Row # ratchet bitplane A (with plane B: cell ratchet count = 1 + A + 2B, set by shift+click).',
+      'ratb#': 'Row # ratchet bitplane B (see rata#).',
       level: 'Output voltage of an on cell in gate mode (default 10 V).',
       mode: 'gate: rows emit level volts. scale: rows emit C-major pitches, 1 V/oct.',
     },

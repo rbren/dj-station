@@ -135,6 +135,42 @@ describe('GridSeqUI', () => {
     );
     expect(labels).toEqual(['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C']);
   });
+
+  it('shift+click cycles the ratchet count through the bitplanes and shows it', () => {
+    const handle = handleWith({ row3: 0 });
+    render(<GridSeqUI handle={handle} />);
+    const cell = () => screen.getByTestId('gridseq-cell-3-2');
+    // Shift+click an off cell: on with 1 ratchet (no number shown).
+    fireEvent.click(cell(), { shiftKey: true });
+    expect(handle.setParam).toHaveBeenCalledWith('row3', 2); // bit 1
+    expect(cell().getAttribute('aria-pressed')).toBe('true');
+    expect(cell().textContent).toBe('');
+    // Next shift+clicks: 2 (A bit), 3 (B bit), 4 (A+B), back to 1.
+    fireEvent.click(cell(), { shiftKey: true });
+    expect(handle.setParam).toHaveBeenLastCalledWith('rata3', 2);
+    expect(cell().textContent).toBe('2');
+    fireEvent.click(cell(), { shiftKey: true });
+    expect(handle.setParam).toHaveBeenCalledWith('ratb3', 2);
+    expect(cell().textContent).toBe('3');
+    fireEvent.click(cell(), { shiftKey: true });
+    expect(cell().textContent).toBe('4');
+    fireEvent.click(cell(), { shiftKey: true });
+    expect(cell().textContent).toBe('');
+    expect(cell().getAttribute('aria-pressed')).toBe('true');
+    expect(handle.endEdit).toHaveBeenCalled();
+  });
+
+  it('plain click clears the cell ratchets along with the cell', () => {
+    // Cell (1, 1) on with ratchet count 4 (both bitplanes set).
+    const handle = handleWith({ row1: 1, rata1: 1, ratb1: 1 });
+    render(<GridSeqUI handle={handle} />);
+    expect(screen.getByTestId('gridseq-cell-1-1').textContent).toBe('4');
+    fireEvent.click(screen.getByTestId('gridseq-cell-1-1'));
+    expect(handle.setParam).toHaveBeenCalledWith('row1', 0);
+    expect(handle.setParam).toHaveBeenCalledWith('rata1', 0);
+    expect(handle.setParam).toHaveBeenCalledWith('ratb1', 0);
+    expect(screen.getByTestId('gridseq-cell-1-1').textContent).toBe('');
+  });
 });
 
 describe('StepSeqUI', () => {

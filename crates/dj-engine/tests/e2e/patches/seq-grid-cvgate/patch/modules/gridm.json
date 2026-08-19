@@ -16,6 +16,86 @@
       "atten": 1.0,
       "offset": 0.0
     },
+    "rata1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata6": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata7": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata8": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb6": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb7": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb8": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
     "reset": {
       "position": 4.5474735e-13,
       "atten": 1.0,

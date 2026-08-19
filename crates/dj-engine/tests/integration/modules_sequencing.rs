@@ -655,6 +655,48 @@ fn grid_seq_wraps_at_16_and_reset_rephases() {
     assert_eq!(pos_at(0.53), 8.0, "pos counts clocks: column 9 mid-lap");
 }
 
+#[test]
+fn grid_seq_ratchet_bitplanes_retrigger_within_the_column() {
+    // 0.25 s per column. Cell (row 1, column 1) on with ratchet count
+    // 1 + A + 2B = 4: four pulses spread over the column, each high for
+    // half its sub-division. Row 2's plain cell keeps the single
+    // half-interval gate.
+    let mut e = grid_engine(240.0);
+    e.set_knob_value("grid", "row1", 1.0).unwrap();
+    e.set_knob_value("grid", "rata1", 1.0).unwrap();
+    e.set_knob_value("grid", "ratb1", 1.0).unwrap();
+    e.set_knob_value("grid", "row2", 1.0).unwrap();
+    probe(&mut e, 0, "grid", "out1");
+    probe(&mut e, 1, "grid", "out2");
+    // Second lap: the first lap's column 1 fires before an interval has
+    // been measured (20 ms default), the second uses the real 0.25 s.
+    let out = e.render_offline((4.6 * SR) as usize).unwrap();
+    let lap: Vec<usize> = rising_edges(&out[0])
+        .into_iter()
+        .filter(|&i| i >= (3.9 * SR) as usize && i < (4.3 * SR) as usize)
+        .collect();
+    assert_edges_near(
+        &lap,
+        &[4.0, 4.0625, 4.125, 4.1875],
+        4,
+        "4 ratchet pulses over the column",
+    );
+    // Each pulse is high for half its sub-division (0.25 s / 4 / 2).
+    let runs = high_runs(&out[0][(3.9 * SR) as usize..(4.3 * SR) as usize]);
+    assert_eq!(runs.len(), 4);
+    for run in &runs {
+        assert!(
+            run.abs_diff((0.03125 * SR) as usize) <= 4,
+            "ratchet pulse width {run}, expected ~{}",
+            (0.03125 * SR) as usize
+        );
+    }
+    // The plain cell still gates once, for half the interval.
+    let plain = high_runs(&out[1][(3.9 * SR) as usize..(4.3 * SR) as usize]);
+    assert_eq!(plain.len(), 1, "no ratchets on a plain cell");
+    assert!(plain[0].abs_diff((0.125 * SR) as usize) <= 4);
+}
+
 // ---------------------------------------------------------------------------
 // Step sequencer cvgate output
 // ---------------------------------------------------------------------------
