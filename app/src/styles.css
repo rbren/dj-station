@@ -627,6 +627,48 @@ body {
   background: color-mix(in srgb, var(--accent, #5fb6d4) 35%, #fff);
 }
 
+/* --- Grid Sequencer -------------------------------------------------- */
+
+/* Custom UI + a column of output jacks aligned row-for-row beside it
+   (output groups with `besideUI` in panelLayouts). The row pitch tokens
+   (--ui-row-h/--ui-row-gap) are shared by the UI's rows and the jack
+   column so both stay aligned; PanelLayout.test.tsx pins them equal. */
+.custom-ui-with-outputs {
+  --ui-row-h: 24px;
+  --ui-row-gap: 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.beside-ui-outputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-row-gap, 4px);
+}
+
+.beside-ui-outputs .jack {
+  height: var(--ui-row-h, 24px);
+}
+
+/* The grid seq gets bigger cells than the trigger sequencer's 16px —
+   the cells carry ratchet numbers and are the module's main surface.
+   Sized by the shared row-pitch tokens so its output jacks line up. */
+.gridseq-ui {
+  gap: var(--ui-row-gap, 4px);
+}
+
+.gridseq-ui .trigseq-track {
+  gap: var(--ui-row-gap, 4px);
+}
+
+.gridseq-ui .trigseq-cell {
+  width: var(--ui-row-h, 24px);
+  height: var(--ui-row-h, 24px);
+  border-radius: 4px;
+  font-size: 0.72rem;
+}
+
 /* --- Step sequencer playhead strip ---------------------------------- */
 
 /* The strip is a 16-column grid sharing the panel's --cell-w/--cell-gap

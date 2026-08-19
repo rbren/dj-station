@@ -6,6 +6,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import GridSeqUI from '../../extensions/grid_seq/ui-src/GridSeqUI';
 import StepSeqUI from '../../extensions/step_seq/ui-src/StepSeqUI';
 import { ModulePanel } from '../src/components/ModulePanel';
 import { resolveLayout } from '../src/components/panelLayouts';
@@ -284,5 +285,71 @@ describe('step sequencer strip alignment', () => {
     expect(rule('.stepseq-ui')).toContain('gap: var(--cell-gap)');
     expect(rule('.input-cell')).toContain('width: var(--cell-w)');
     expect(rule('.input-group-cells')).toContain('gap: var(--cell-gap)');
+  });
+});
+
+// The grid sequencer's row outputs (out1..out8) render as a column beside
+// the cell grid, one jack per grid row (output groups with `besideUI`);
+// `pos` stays in the bottom strip.
+describe('grid sequencer row-output alignment', () => {
+  const gridSeqManifest = () => {
+    const inputs = ['clock', 'reset'];
+    for (let i = 1; i <= 8; i++) inputs.push(`row${i}`);
+    inputs.push('level', 'mode');
+    for (let i = 1; i <= 8; i++) inputs.push(`rata${i}`);
+    for (let i = 1; i <= 8; i++) inputs.push(`ratb${i}`);
+    const outputs = [];
+    for (let i = 1; i <= 8; i++) outputs.push(`out${i}`);
+    outputs.push('pos');
+    return manifest('com.dj.grid_seq', inputs, outputs);
+  };
+
+  it('renders out1..out8 in a beside-UI column, in row order, pos in the strip', () => {
+    render(
+      <ModulePanel
+        {...baseProps}
+        instanceId="grid1"
+        manifest={gridSeqManifest()}
+        customUI={GridSeqUI}
+      />,
+    );
+    const beside = document.querySelector<HTMLElement>('.custom-ui-with-outputs');
+    expect(beside).toBeTruthy();
+    // The grid UI and the jack column share the flex row.
+    expect(beside!.querySelector('.gridseq-ui')).toBeTruthy();
+    const col = beside!.querySelector<HTMLElement>('.beside-ui-outputs');
+    expect(col).toBeTruthy();
+    const jacks = [...col!.querySelectorAll('[data-jack]')].map((el) =>
+      el.getAttribute('data-jack'),
+    );
+    expect(jacks).toEqual(Array.from({ length: 8 }, (_, i) => `grid1:output:out${i + 1}`));
+    // pos stays in the bottom output strip, outside the beside column.
+    const pos = screen.getByTestId('jack-output-pos');
+    expect(pos.closest('.module-outputs')).toBeTruthy();
+    expect(pos.closest('.beside-ui-outputs')).toBeNull();
+  });
+
+  it('falls back to the output strip when the panel has no custom UI', () => {
+    render(<ModulePanel {...baseProps} instanceId="grid2" manifest={gridSeqManifest()} />);
+    const out1 = screen.getByTestId('jack-output-out1');
+    expect(out1.closest('.module-outputs')).toBeTruthy();
+    expect(document.querySelector('.custom-ui-with-outputs')).toBeNull();
+  });
+
+  it('styles.css sizes the grid rows and the jack column from the same tokens', () => {
+    const css = readFileSync('src/styles.css', 'utf8');
+    const rule = (selector: string) => {
+      const m = css.match(new RegExp(`${selector.replace(/[.\s]/g, '\\$&')}\\s*{[^}]*}`));
+      if (!m) throw new Error(`missing rule ${selector}`);
+      return m[0];
+    };
+    // The flex row defines the row-pitch tokens...
+    expect(rule('.custom-ui-with-outputs')).toContain('--ui-row-h:');
+    expect(rule('.custom-ui-with-outputs')).toContain('--ui-row-gap:');
+    // ...the grid cells and the jack column both consume them.
+    expect(rule('.gridseq-ui .trigseq-cell')).toContain('height: var(--ui-row-h');
+    expect(rule('.gridseq-ui')).toContain('gap: var(--ui-row-gap');
+    expect(rule('.beside-ui-outputs .jack')).toContain('height: var(--ui-row-h');
+    expect(rule('.beside-ui-outputs')).toContain('gap: var(--ui-row-gap');
   });
 });

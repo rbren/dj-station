@@ -399,13 +399,13 @@ export function ModulePanel(props: ModulePanelProps) {
             ))}
           </div>
         )}
-        {layout.outputGroups.length > 0 && (
+        {stripGroups.length > 0 && (
           <div
             className={`module-outputs${
-              layout.outputGroups.some((g) => g.break) ? ' module-outputs-rows' : ''
+              stripGroups.some((g) => g.break) ? ' module-outputs-rows' : ''
             }`}
           >
-            {layout.outputGroups.map((group, gi) => (
+            {stripGroups.map((group, gi) => (
               <div
                 key={group.title ?? gi}
                 className="output-group"
@@ -420,23 +420,7 @@ export function ModulePanel(props: ModulePanelProps) {
                       : undefined
                   }
                 >
-                  {group.outputs.map((id) => (
-                    <LiveJack
-                      key={id}
-                      instance={instanceId}
-                      id={id}
-                      kind="output"
-                      telemetry={telemetry?.[`out:${id}`]}
-                      display={manifest.outputs.find((o) => o.id === id)?.display}
-                      selected={
-                        pendingSource?.kind === 'output' &&
-                        pendingSource.instance === instanceId &&
-                        pendingSource.jack === id
-                      }
-                      selectedColor={pendingColor}
-                      onClick={(shift) => props.onJackClick?.('output', id, shift)}
-                    />
-                  ))}
+                  {group.outputs.map(renderOutputJack)}
                 </div>
               </div>
             ))}
