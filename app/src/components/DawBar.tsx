@@ -419,7 +419,11 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
       contentBeats = Math.max(contentBeats, (status.clip_frames[i] ?? 0) / framesPerBeat);
       for (const n of t.notes ?? []) contentBeats = Math.max(contentBeats, n.beat + n.len);
     }
-    contentBeats = Math.max(contentBeats, status.playhead / framesPerBeat);
+    contentBeats = Math.max(
+      contentBeats,
+      status.playhead / framesPerBeat,
+      status.record_frames / framesPerBeat,
+    );
   }
   const totalBeats = Math.max(
     Math.ceil(lengthBeats / 4) * 4,
@@ -498,7 +502,14 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
   };
 
   const recording = status?.recording ?? null;
-  const playheadX = status ? (status.playhead / framesPerBeat) * pxPerBeat : 0;
+  // During a take the line tracks the recording (a finished take lands at
+  // timeline zero); the transport playhead needn't be rolling (mic takes).
+  const lineFrames = status
+    ? status.recording !== null
+      ? status.record_frames
+      : status.playhead
+    : 0;
+  const playheadX = (lineFrames / framesPerBeat) * pxPerBeat;
 
   const transport = (
     <span className="daw-transport">
@@ -521,6 +532,21 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
       <span className="daw-time" data-testid="daw-time">
         {fmtTime((status?.playhead ?? 0) / rate)}
       </span>
+      <Jack
+        instance={DAW_INSTANCE}
+        id="clock"
+        kind="output"
+        label="clock"
+        telemetry={telemetry?.clock}
+        wired={wires.some((w) => w.from_instance === DAW_INSTANCE && w.from_jack === 'clock')}
+        selected={
+          pending?.instance === DAW_INSTANCE &&
+          pending.kind === 'output' &&
+          pending.jack === 'clock'
+        }
+        onClick={(shift) => onJackClick(DAW_INSTANCE, 'output', 'clock', shift)}
+        showLabel
+      />
     </span>
   );
 

@@ -38,8 +38,18 @@ pub const DAW_ID: &str = "builtin.daw";
 /// Reserved instance id of the singleton DAW node.
 pub const DAW_INSTANCE: &str = "daw";
 
-/// Fixed jack budget (graph buffers are preallocated), inputs and outputs.
+/// Fixed TRACK jack budget (graph buffers are preallocated), inputs and
+/// outputs. Extra non-track outputs (the clock) live above this range.
 pub const MAX_DAW_JACKS: usize = 64;
+
+/// Output jack index of the transport clock (one pulse per beat while
+/// playing) — the slot just past the track budget, so track allocation
+/// never collides with it.
+pub const CLOCK_JACK: usize = MAX_DAW_JACKS;
+
+/// Clock pulse shape: 5 ms at 10 V, the clock extension's convention.
+pub const CLOCK_PULSE_SECS: f32 = 0.005;
+pub const CLOCK_GATE_V: f32 = 10.0;
 
 /// Capture ring capacity in samples (~21 s of stereo at 48 kHz); the
 /// control side drains it every poll, so this is headroom, not a limit.
@@ -175,6 +185,11 @@ pub fn daw_manifest() -> Manifest {
                 name: format!("Track {i}"),
                 display: None,
             })
+            .chain(std::iter::once(OutputDecl {
+                id: "clock".into(),
+                name: "Clock".into(),
+                display: None,
+            }))
             .collect(),
         params: vec![],
         ui: None,
@@ -218,6 +233,11 @@ pub struct DawProgramTrack {
 /// The immutable program shipped to the RT module on every edit.
 pub struct DawProgram {
     pub tracks: Vec<DawProgramTrack>,
+    /// Beat interval at the timeline BPM, for the clock output.
+    pub frames_per_beat: f64,
+    /// Clock pulse width ([`CLOCK_PULSE_SECS`] at the engine rate),
+    /// precomputed control-side so the RT thread does no rate math.
+    pub pulse_frames: u64,
 }
 
 /// Commands toward the RT module (SPSC ring, applied at block boundaries).
@@ -451,6 +471,23 @@ impl HostModule for DawRtModule {
                             if p < chan.len() {
                                 *o = chan[p] * SIGNAL_MAX;
                             }
+                        }
+                    }
+                }
+            }
+            // Clock: one pulse per beat while playing. A sample is high
+            // when it lands within `pulse_frames` of the last beat edge
+            // (beat edges are `round(k * frames_per_beat)`, matching the
+            // control side's note scheduling).
+            if let Some(program) = self.program.as_ref() {
+                if program.frames_per_beat > 0.0 {
+                    let clock = &mut outputs[CLOCK_JACK];
+                    for (s, o) in clock[..frames].iter_mut().enumerate() {
+                        let p = self.pos + s as u64;
+                        let k = (p as f64 / program.frames_per_beat).floor();
+                        let edge = (k * program.frames_per_beat).round() as u64;
+                        if p >= edge && p < edge + program.pulse_frames {
+                            *o = CLOCK_GATE_V;
                         }
                     }
                 }

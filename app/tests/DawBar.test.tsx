@@ -403,6 +403,15 @@ describe('timeline', () => {
     await waitFor(() => expect(api.seek).toHaveBeenCalledWith(72000));
   });
 
+  it('shows the playhead line at the recording position during a take', async () => {
+    // Recording track 0 (transport may be stopped — mic take): the line
+    // tracks record_frames. 48_000 frames = 2 beats at 120 BPM × 40 px.
+    renderBar(makeApi(makeStatus({ recording: 0, record_frames: 48000, playhead: 0 })));
+    fireEvent.click(await screen.findByTestId('daw-toggle'));
+    const line = await screen.findByTestId('daw-playhead');
+    await waitFor(() => expect(line.style.transform).toBe('translateX(80px)'));
+  });
+
   it('sets the total length in beats (rounded up to whole bars)', async () => {
     renderBar(makeApi());
     fireEvent.click(await screen.findByTestId('daw-toggle'));

@@ -550,3 +550,52 @@ fn bpm_and_notes_roundtrip_through_save_load() {
     let loaded = Engine::load_patch(dir2.path(), crate::common::registry()).unwrap();
     assert_eq!(loaded.daw().unwrap().bpm, 90.0);
 }
+
+#[test]
+fn clock_output_ticks_once_per_beat_while_playing() {
+    let mut e = engine();
+    // Stopped: silent, even with a program pushed.
+    e.daw_set_bpm(120.0).unwrap();
+    e.process_blocks(4).unwrap();
+    assert_eq!(out_v(&e, "clock"), 0.0);
+
+    // 120 BPM at 48 kHz = 24_000 frames/beat; blocks are 128 frames.
+    // The pulse is 5 ms = 240 frames high from every beat edge.
+    e.daw_play().unwrap();
+    e.process_blocks(1).unwrap(); // frames 0..128: inside beat 0's pulse
+    assert_eq!(out_v(&e, "clock"), 10.0);
+    e.process_blocks(2).unwrap(); // 256..384: past the 240-frame pulse
+    assert_eq!(out_v(&e, "clock"), 0.0);
+
+    // Seek just before beat 1 and step across the edge.
+    e.daw_seek(24_000 - 128).unwrap();
+    e.process_blocks(1).unwrap(); // ends at 24_000: still low
+    assert_eq!(out_v(&e, "clock"), 0.0);
+    e.process_blocks(1).unwrap(); // 24_000..24_128: beat 1 pulse
+    assert_eq!(out_v(&e, "clock"), 10.0);
+
+    // Tempo changes retime the clock: 480 BPM = 6_000 frames/beat.
+    e.daw_set_bpm(480.0).unwrap();
+    e.daw_seek(6_000).unwrap();
+    e.process_blocks(1).unwrap();
+    assert_eq!(out_v(&e, "clock"), 10.0);
+
+    // Stop: silent again.
+    e.daw_stop_transport().unwrap();
+    e.process_blocks(1).unwrap();
+    assert_eq!(out_v(&e, "clock"), 0.0);
+}
+
+#[test]
+fn clock_jack_lives_outside_the_track_budget() {
+    use dj_engine::daw::{CLOCK_JACK, MAX_DAW_JACKS};
+    assert_eq!(CLOCK_JACK, MAX_DAW_JACKS);
+    let mut e = engine();
+    // Fill the whole track budget: allocation must cap at MAX_DAW_JACKS
+    // and never hand out the clock's slot.
+    for i in 0..MAX_DAW_JACKS {
+        e.daw_add_track(&format!("t{i}"), "continuous", false)
+            .unwrap();
+    }
+    assert!(e.daw_add_track("overflow", "continuous", false).is_err());
+}

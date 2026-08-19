@@ -95,10 +95,17 @@ impl Engine {
                 },
             })
             .collect();
+        let pulse_frames = (crate::daw::CLOCK_PULSE_SECS * self.config.sample_rate)
+            .round()
+            .max(1.0) as u64;
         self.daws
             .get_mut(&node)
             .unwrap()
-            .send(DawCmd::Program(Arc::new(DawProgram { tracks })))
+            .send(DawCmd::Program(Arc::new(DawProgram {
+                tracks,
+                frames_per_beat,
+                pulse_frames,
+            })))
     }
 
     /// Set the timeline tempo. Re-schedules MIDI notes (beat -> frame
@@ -161,7 +168,7 @@ impl Engine {
             other => anyhow::bail!("unknown track kind {other:?}"),
         };
         let node = self.daw_node()?;
-        let budget = self.nodes[node].manifest.outputs.len();
+        let budget = crate::daw::MAX_DAW_JACKS;
         let state = self.nodes[node].daw.as_mut().unwrap();
         anyhow::ensure!(
             state.tracks.iter().all(|t| t.name != name),
@@ -289,7 +296,7 @@ impl Engine {
     /// stay valid; clips are reloaded from their persisted paths.
     pub fn daw_set_state(&mut self, state: DawState) -> Result<()> {
         let node = self.daw_node()?;
-        let budget = self.nodes[node].manifest.outputs.len();
+        let budget = crate::daw::MAX_DAW_JACKS;
         let mut used = vec![false; budget];
         for t in &state.tracks {
             let end = t.jack + t.channels();
@@ -335,6 +342,9 @@ impl Engine {
     // ------------------------------------------------------------------
 
     pub fn daw_play(&mut self) -> Result<()> {
+        // Push first: a fresh engine has never shipped a program, and the
+        // clock needs the tempo even with zero tracks.
+        self.daw_push_program()?;
         let node = self.daw_node()?;
         self.daws.get_mut(&node).unwrap().send(DawCmd::Play)
     }

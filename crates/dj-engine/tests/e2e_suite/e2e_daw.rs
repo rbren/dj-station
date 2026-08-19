@@ -144,3 +144,43 @@ fn daw_midi_case() {
     }
     check_case("daw-midi");
 }
+
+/// DAW clock output: the once-per-beat transport pulse (5 ms, 10 V) at
+/// 100 BPM gates a tone through a VCA — audible ticks every 0.6 s.
+fn regen_daw_clock() {
+    let dir = crate::common::e2e::case_dir("daw-clock");
+    let mut e = Engine::new(
+        EngineConfig {
+            master_channels: 1,
+            ..EngineConfig::default()
+        },
+        crate::common::registry(),
+    )
+    .unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    e.daw_set_bpm(100.0).unwrap();
+    e.connect("daw", "clock", "vca1", "cv").unwrap();
+    e.set_knob_value("vca1", "cv", 0.0).unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "daw-clock").unwrap();
+    write_events(
+        &dir,
+        &EventsFile {
+            daw_play: true,
+            ..EventsFile::seconds(2.0)
+        },
+    );
+}
+
+#[test]
+fn daw_clock_case() {
+    if regen() {
+        regen_daw_clock();
+    }
+    check_case("daw-clock");
+}
