@@ -98,6 +98,7 @@ impl Engine {
         let pulse_frames = (crate::daw::CLOCK_PULSE_SECS * self.config.sample_rate)
             .round()
             .max(1.0) as u64;
+        let end_frame = (state.length_beats as f64 * frames_per_beat).round() as u64;
         self.daws
             .get_mut(&node)
             .unwrap()
@@ -105,7 +106,17 @@ impl Engine {
                 tracks,
                 frames_per_beat,
                 pulse_frames,
+                end_frame,
             })))
+    }
+
+    /// Set the timeline length in beats. The transport stops there;
+    /// content past it is kept but neither renders nor plays.
+    pub fn daw_set_length(&mut self, beats: u32) -> Result<()> {
+        anyhow::ensure!(beats >= 1, "length must be at least one beat");
+        let node = self.daw_node()?;
+        self.nodes[node].daw.as_mut().unwrap().length_beats = beats;
+        self.daw_push_program()
     }
 
     /// Set the timeline tempo. Re-schedules MIDI notes (beat -> frame

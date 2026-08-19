@@ -1087,6 +1087,7 @@ export default function App() {
       recordCancel: () => engine.dawRecordCancel(),
       clipPeaks: (t, b) => engine.dawClipPeaks(t, b),
       setBpm: (b) => engine.dawSetBpm(b),
+      setLength: (b) => engine.dawSetLength(b),
       addNote: (t, n) => engine.dawAddNote(t, n.beat, n.len, n.pitch, n.velocity),
       removeNote: (t, beat, pitch) => engine.dawRemoveNote(t, beat, pitch),
       setKnobPosition: (jack, p) => engine.setKnobPosition('daw', jack, p),

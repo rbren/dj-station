@@ -105,6 +105,7 @@ enum EditKey<'a> {
     /// Clip changes (import/clear/finished recording) coalesce per track.
     DawClip(usize),
     DawBpm,
+    DawLength,
     /// MIDI note grid edits coalesce per track (click-painting).
     DawNotes(usize),
     Knob(&'a str, &'a str),
@@ -149,6 +150,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::DawTrackMove => write!(f, "daw-move"),
             EditKey::DawClip(t) => write!(f, "daw-clip:{t}"),
             EditKey::DawBpm => write!(f, "daw-bpm"),
+            EditKey::DawLength => write!(f, "daw-length"),
             EditKey::DawNotes(t) => write!(f, "daw-notes:{t}"),
             EditKey::Knob(i, j) => write!(f, "knob:{i}:{j}"),
             EditKey::KnobConfig(i, j) => write!(f, "knobcfg:{i}:{j}"),
@@ -1168,6 +1170,7 @@ struct DawStatusSnapshot {
     /// the bar renders a recordable knob on each input.
     knobs: std::collections::BTreeMap<String, dj_engine::knob::KnobState>,
     bpm: f32,
+    length_beats: u32,
     playhead: u64,
     playing: bool,
     recording: Option<usize>,
@@ -1183,6 +1186,7 @@ fn daw_status(state: State<AppState>) -> CmdResult<DawStatusSnapshot> {
     let daw = engine.daw().map_err(err)?;
     let tracks = daw.tracks.clone();
     let bpm = daw.bpm;
+    let length_beats = daw.length_beats;
     let clip_frames = (0..tracks.len())
         .map(|i| engine.daw_clip_frames(i).unwrap_or(0))
         .collect();
@@ -1200,6 +1204,7 @@ fn daw_status(state: State<AppState>) -> CmdResult<DawStatusSnapshot> {
         clip_frames,
         knobs,
         bpm,
+        length_beats,
         playhead: st.playhead,
         playing: st.playing,
         recording: st.recording,
@@ -1214,6 +1219,13 @@ fn daw_status(state: State<AppState>) -> CmdResult<DawStatusSnapshot> {
 fn daw_set_bpm(state: State<AppState>, bpm: f32) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::DawBpm)?;
     engine.daw_set_bpm(bpm).map_err(err)
+}
+
+/// Set the timeline length in beats (the transport stops there).
+#[tauri::command]
+fn daw_set_length(state: State<AppState>, beats: u32) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawLength)?;
+    engine.daw_set_length(beats).map_err(err)
 }
 
 /// Add (or replace) a note on a MIDI track's beat grid.
@@ -2801,6 +2813,7 @@ fn main() {
             daw_clip_peaks,
             daw_clip_frames,
             daw_set_bpm,
+            daw_set_length,
             daw_add_note,
             daw_remove_note,
             hands_feed,

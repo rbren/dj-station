@@ -53,6 +53,7 @@ export interface DawApi {
   recordCancel(): Promise<unknown>;
   clipPeaks(track: number, bins: number): Promise<[number, number][] | null>;
   setBpm(bpm: number): Promise<unknown>;
+  setLength(beats: number): Promise<unknown>;
   addNote(track: number, note: DawNote): Promise<unknown>;
   removeNote(track: number, beat: number, pitch: number): Promise<unknown>;
   setKnobPosition(jack: string, position: number): Promise<unknown>;
@@ -73,9 +74,11 @@ export interface DawBarProps {
 const COLLAPSED_KEY = 'dj-daw-collapsed';
 const ZOOM_KEY = 'dj-daw-zoom';
 const SNAP_KEY = 'dj-daw-snap';
-const LENGTH_KEY = 'dj-daw-length-beats';
+const HEIGHT_KEY = 'dj-daw-height';
+const MIDI_BASE_KEY = 'dj-daw-midi-base';
 
-const DEFAULT_LENGTH_BEATS = 16;
+const DEFAULT_BODY_H = 320;
+const MIN_BODY_H = 120;
 
 export const GRAPH_H = 52;
 const VMAX = 10;
@@ -101,10 +104,15 @@ const ZOOM_MAX = 320;
 const ZOOM_STEP = 1.5;
 const DEFAULT_ZOOM = 40;
 
-/** MIDI grid pitch range (rows render top-down from the highest). */
-export const MIDI_PITCH_MAX = 83; // B5
-export const MIDI_PITCH_MIN = 48; // C3
-const MIDI_ROW_H = 7;
+/** MIDI grid: a 2-octave window (24 rows, top-down from the highest) into
+ *  the full pitch range; per-track octave arrows slide it. */
+export const MIDI_PITCH_MAX = 83; // B5, default window top
+export const MIDI_WINDOW_ROWS = 24;
+export const MIDI_BASE_MIN = 24; // C1
+export const MIDI_BASE_MAX = 96; // C7
+export const MIDI_ROW_H = 9;
+/** Default window bottom: C4..B5. */
+export const MIDI_DEFAULT_BASE = MIDI_PITCH_MAX - MIDI_WINDOW_ROWS + 1;
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 export function midiNoteName(pitch: number): string {
@@ -170,14 +178,17 @@ export function ClipGraph({
   );
 }
 
-/** Beat×pitch note grid for a MIDI track. Clicking an empty cell adds a
- *  note at the snap resolution (snap length); clicking a note removes it. */
+/** Beat×pitch note grid for a MIDI track: a 2-octave window starting at
+ *  `basePitch`. Clicking an empty cell adds a note at the snap resolution
+ *  (snap length); clicking a note removes it. Notes outside the window
+ *  don't render (slide the window with the octave arrows to reach them). */
 export function MidiGrid({
   track,
   notes,
   beats,
   pxPerBeat,
   snapBeats,
+  basePitch = MIDI_DEFAULT_BASE,
   onToggle,
 }: {
   track: number;
@@ -185,12 +196,15 @@ export function MidiGrid({
   beats: number;
   pxPerBeat: number;
   snapBeats: number;
+  /** Lowest visible pitch; window spans basePitch..basePitch+23. */
+  basePitch?: number;
   onToggle(beat: number, pitch: number, existing: DawNote | undefined): void;
 }) {
-  const rows = MIDI_PITCH_MAX - MIDI_PITCH_MIN + 1;
+  const rows = MIDI_WINDOW_ROWS;
+  const top = basePitch + rows - 1;
   const height = rows * MIDI_ROW_H;
   const width = beats * pxPerBeat;
-  const rowY = (pitch: number) => (MIDI_PITCH_MAX - pitch) * MIDI_ROW_H;
+  const rowY = (pitch: number) => (top - pitch) * MIDI_ROW_H;
   const gridLines: number[] = [];
   for (let b = 0; b <= beats + 1e-6; b += snapBeats) gridLines.push(b);
   return (
@@ -203,8 +217,8 @@ export function MidiGrid({
         const rect = e.currentTarget.getBoundingClientRect();
         e.stopPropagation();
         const beat = Math.floor((e.clientX - rect.left) / pxPerBeat / snapBeats) * snapBeats;
-        const pitch = MIDI_PITCH_MAX - Math.floor((e.clientY - rect.top) / MIDI_ROW_H);
-        if (pitch < MIDI_PITCH_MIN || pitch > MIDI_PITCH_MAX || beat < 0) return;
+        const pitch = top - Math.floor((e.clientY - rect.top) / MIDI_ROW_H);
+        if (pitch < basePitch || pitch > top || beat < 0) return;
         // A click anywhere inside an existing note (same pitch) removes it.
         const existing = notes.find(
           (n) => n.pitch === pitch && beat >= n.beat - 1e-6 && beat < n.beat + n.len - 1e-6,
@@ -214,7 +228,7 @@ export function MidiGrid({
     >
       {/* black-key row shading */}
       {Array.from({ length: rows }, (_, r) => {
-        const pitch = MIDI_PITCH_MAX - r;
+        const pitch = top - r;
         const black = [1, 3, 6, 8, 10].includes(pitch % 12);
         return black ? (
           <rect
@@ -229,7 +243,7 @@ export function MidiGrid({
       })}
       {/* octave lines (C rows) */}
       {Array.from({ length: rows }, (_, r) => {
-        const pitch = MIDI_PITCH_MAX - r;
+        const pitch = top - r;
         return pitch % 12 === 0 ? (
           <line
             key={pitch}
@@ -251,21 +265,81 @@ export function MidiGrid({
           className={Math.abs(b - Math.round(b)) < 1e-6 ? 'daw-grid-beat' : 'daw-grid-snap'}
         />
       ))}
-      {notes.map((n) => (
-        <rect
-          key={`${n.beat}:${n.pitch}`}
-          x={n.beat * pxPerBeat}
-          y={rowY(n.pitch)}
-          width={Math.max(2, n.len * pxPerBeat - 1)}
-          height={MIDI_ROW_H - 1}
-          rx={1}
-          className="daw-midi-note"
-          data-testid={`daw-note-${track}-${n.beat}-${n.pitch}`}
-        >
-          <title>{`${midiNoteName(n.pitch)} @ beat ${n.beat}`}</title>
-        </rect>
-      ))}
+      {notes
+        .filter((n) => n.pitch >= basePitch && n.pitch <= top)
+        .map((n) => (
+          <rect
+            key={`${n.beat}:${n.pitch}`}
+            x={n.beat * pxPerBeat}
+            y={rowY(n.pitch)}
+            width={Math.max(2, n.len * pxPerBeat - 1)}
+            height={MIDI_ROW_H - 1}
+            rx={1}
+            className="daw-midi-note"
+            data-testid={`daw-note-${track}-${n.beat}-${n.pitch}`}
+          >
+            <title>{`${midiNoteName(n.pitch)} @ beat ${n.beat}`}</title>
+          </rect>
+        ))}
     </svg>
+  );
+}
+
+/** Sticky note-name gutter over a MIDI grid's left edge, same row
+ *  geometry, with octave up/down arrows floating at its corners. It
+ *  overlays the grid (negative margin) so the beat grid's x-origin stays
+ *  ruler-aligned. */
+function MidiGutter({
+  track,
+  basePitch,
+  onShift,
+}: {
+  track: number;
+  basePitch: number;
+  onShift(deltaOctaves: number): void;
+}) {
+  const top = basePitch + MIDI_WINDOW_ROWS - 1;
+  return (
+    <span
+      className="daw-midi-gutter"
+      data-testid={`daw-midi-gutter-${track}`}
+      style={{ height: MIDI_WINDOW_ROWS * MIDI_ROW_H }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <span className="daw-midi-names">
+        {Array.from({ length: MIDI_WINDOW_ROWS }, (_, r) => {
+          const pitch = top - r;
+          const black = [1, 3, 6, 8, 10].includes(pitch % 12);
+          return (
+            <span
+              key={pitch}
+              className={`daw-midi-name${black ? ' daw-midi-name-black' : ''}`}
+              style={{ height: MIDI_ROW_H }}
+            >
+              {black ? '' : midiNoteName(pitch)}
+            </span>
+          );
+        })}
+      </span>
+      <button
+        className="daw-btn daw-octave-btn daw-octave-up"
+        data-testid={`daw-octave-up-${track}`}
+        data-tip="show the octave above"
+        disabled={basePitch + 12 > MIDI_BASE_MAX}
+        onClick={() => onShift(1)}
+      >
+        ↑
+      </button>
+      <button
+        className="daw-btn daw-octave-btn daw-octave-down"
+        data-testid={`daw-octave-down-${track}`}
+        data-tip="show the octave below"
+        disabled={basePitch - 12 < MIDI_BASE_MIN}
+        onClick={() => onShift(-1)}
+      >
+        ↓
+      </button>
+    </span>
   );
 }
 
@@ -380,8 +454,11 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
   const [addStereo, setAddStereo] = useState(false);
   const [zoom, setZoom] = useState<number>(() => loadJson(ZOOM_KEY, DEFAULT_ZOOM));
   const [snap, setSnap] = useState<string>(() => loadJson(SNAP_KEY, '1/4'));
-  const [lengthBeats, setLengthBeats] = useState<number>(() =>
-    loadJson(LENGTH_KEY, DEFAULT_LENGTH_BEATS),
+  const [bodyH, setBodyH] = useState<number>(() => loadJson(HEIGHT_KEY, DEFAULT_BODY_H));
+  // Per-track MIDI window bottom, keyed by the track's stable jack slot
+  // (indices shift when tracks reorder). View-only state: localStorage.
+  const [midiBase, setMidiBase] = useState<Record<number, number>>(() =>
+    loadJson(MIDI_BASE_KEY, {}),
   );
   const pending = useRackSelector((s) => s.pending);
   const wires = useRackSelector((s) => s.wires);
@@ -403,15 +480,46 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
     };
   }, [refresh, pollMs]);
 
+  // Spacebar toggles the transport. Route current playing state through a
+  // ref so the listener mounts once (the qwerty-panel pattern). A qwerty
+  // module's space gate calls preventDefault first — defer to it.
+  const playingRef = useRef(false);
+  const playingNow = status?.playing ?? false;
+  useEffect(() => {
+    playingRef.current = playingNow;
+  }, [playingNow]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.defaultPrevented) return;
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.tagName === 'INPUT' ||
+          t.tagName === 'SELECT' ||
+          t.tagName === 'TEXTAREA' ||
+          t.tagName === 'BUTTON' ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault(); // space would scroll the rack
+      void (playingRef.current ? api.stop() : api.play()).then(() => void refresh());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [api, refresh]);
+
   const bpm = status?.bpm ?? 120;
   const rate = status?.sample_rate || 48000;
   const pxPerBeat = zoom;
   const framesPerBeat = (rate * 60) / bpm;
   const snapBeats = SNAP_OPTIONS.find((o) => o.label === snap)?.beats ?? 1;
 
-  // Timeline extent: the user-set total length, stretched if content
-  // (longest clip / last note / playhead) runs past it, rounded up to a
-  // whole 4-beat bar.
+  // Timeline extent: the engine-set total length (canonical, persisted in
+  // the patch), rounded up to a whole 4-beat bar. The transport stops at
+  // lengthBeats; content past it stays visible but grayed out.
+  const lengthBeats = status?.length_beats ?? 16;
   let contentBeats = 0;
   if (status) {
     for (let i = 0; i < status.tracks.length; i++) {
@@ -430,11 +538,41 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
     contentBeats > 0 ? (Math.floor(contentBeats / 4) + 1) * 4 : 0,
   );
   const timelineW = totalBeats * pxPerBeat;
+  // Region past the chosen length (content overflow): grayed out.
+  const pastX = lengthBeats * pxPerBeat;
+  const pastW = timelineW - pastX;
 
   const setLength = (beats: number) => {
     const b = Math.max(1, Math.round(beats));
-    saveJson(LENGTH_KEY, b);
-    setLengthBeats(b);
+    void api.setLength(b).then(refresh).then(api.endEdit);
+  };
+
+  const shiftMidiBase = (jack: number, deltaOctaves: number) => {
+    setMidiBase((m) => {
+      const cur = m[jack] ?? MIDI_DEFAULT_BASE;
+      const next = Math.max(MIDI_BASE_MIN, Math.min(MIDI_BASE_MAX, cur + deltaOctaves * 12));
+      const nm = { ...m, [jack]: next };
+      saveJson(MIDI_BASE_KEY, nm);
+      return nm;
+    });
+  };
+
+  // Vertical resize: drag the handle strip above the body. Height is
+  // view-only state (localStorage), like zoom.
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = bodyH;
+    const onMove = (ev: PointerEvent) => {
+      setBodyH(Math.max(MIN_BODY_H, startH + (startY - ev.clientY)));
+    };
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      saveJson(HEIGHT_KEY, Math.max(MIN_BODY_H, startH + (startY - ev.clientY)));
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   };
 
   // Re-fetch a lane's graph when its clip identity or the zoom level
@@ -703,7 +841,15 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
         )}
       </div>
       {!collapsed && (
-        <div className="daw-body" data-testid="daw-lanes">
+        <div
+          className="daw-resize"
+          data-testid="daw-resize"
+          data-tip="drag to resize the DAW"
+          onPointerDown={startResize}
+        />
+      )}
+      {!collapsed && (
+        <div className="daw-body" data-testid="daw-lanes" style={{ height: bodyH }}>
           <div className="daw-scroll" data-testid="daw-scroll">
             {/* Ruler row: empty sticky side spacer + beat ruler. */}
             <div className="daw-row daw-ruler-row">
@@ -734,6 +880,16 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
                       {bar + 1}
                     </text>
                   ))}
+                  {pastW > 0 && (
+                    <rect
+                      x={pastX}
+                      y={0}
+                      width={pastW}
+                      height={18}
+                      className="daw-past-end"
+                      data-testid="daw-past-end-ruler"
+                    />
+                  )}
                 </svg>
               </div>
             </div>
@@ -893,6 +1049,13 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
                     )}
                   </div>
                 </div>
+                {t.kind === 'midi' && (
+                  <MidiGutter
+                    track={i}
+                    basePitch={midiBase[t.jack] ?? MIDI_DEFAULT_BASE}
+                    onShift={(d) => shiftMidiBase(t.jack, d)}
+                  />
+                )}
                 <div
                   className="daw-timeline"
                   style={{ width: timelineW }}
@@ -928,6 +1091,7 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
                       beats={totalBeats}
                       pxPerBeat={pxPerBeat}
                       snapBeats={snapBeats}
+                      basePitch={midiBase[t.jack] ?? MIDI_DEFAULT_BASE}
                       onToggle={(beat, pitch, existing) => toggleNote(i, beat, pitch, existing)}
                     />
                   ) : (
@@ -939,6 +1103,13 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
                       onSeek={(frac) =>
                         seekBeats((frac * (status?.clip_frames[i] ?? 0)) / framesPerBeat)
                       }
+                    />
+                  )}
+                  {pastW > 0 && (
+                    <div
+                      className="daw-past-end-lane"
+                      data-testid={`daw-past-end-${i}`}
+                      style={{ left: pastX, width: pastW }}
                     />
                   )}
                 </div>

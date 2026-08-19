@@ -166,6 +166,8 @@ export interface DawStatus {
   knobs: Record<string, KnobState>;
   /** Timeline tempo (beat grid + MIDI note scheduling). */
   bpm: number;
+  /** Timeline length in beats; the transport stops there. */
+  length_beats: number;
   /** Transport position, engine frames. */
   playhead: number;
   playing: boolean;
@@ -425,6 +427,9 @@ export class EngineClient extends IpcClient {
   }
   dawSetBpm(bpm: number) {
     return this.call<void>('daw_set_bpm', { bpm });
+  }
+  dawSetLength(beats: number) {
+    return this.call<void>('daw_set_length', { beats });
   }
   dawAddNote(track: number, beat: number, len: number, pitch: number, velocity: number) {
     return this.call<void>('daw_add_note', { track, beat, len, pitch, velocity });

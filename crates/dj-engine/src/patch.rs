@@ -273,7 +273,10 @@ impl Engine {
             // engine, and omitting it keeps pre-DAW patches loading
             // byte-identically.
             if info.daw.as_ref().is_some_and(|d| {
-                d.tracks.is_empty() && d.bpm == crate::daw::DEFAULT_BPM && knobs.is_empty()
+                d.tracks.is_empty()
+                    && d.bpm == crate::daw::DEFAULT_BPM
+                    && d.length_beats == crate::daw::DEFAULT_LENGTH_BEATS
+                    && knobs.is_empty()
             }) {
                 continue;
             }

@@ -599,3 +599,69 @@ fn clock_jack_lives_outside_the_track_budget() {
     }
     assert!(e.daw_add_track("overflow", "continuous", false).is_err());
 }
+
+#[test]
+fn transport_stops_at_the_timeline_end_and_play_restarts() {
+    let mut e = engine();
+    // 1 beat at 120 BPM = 24_000 frames end. Blocks are 128 frames.
+    e.daw_set_length(1).unwrap();
+    e.daw_play().unwrap();
+    e.process_blocks(24_000 / 128 + 2).unwrap();
+    let st = e.daw_status().unwrap();
+    assert!(!st.playing, "transport must stop at the end");
+    assert_eq!(st.playhead, 24_000, "playhead parks exactly at the end");
+
+    // Play again from the end: restarts from the top instead of
+    // instantly re-stopping.
+    e.daw_play().unwrap();
+    e.process_blocks(1).unwrap();
+    let st = e.daw_status().unwrap();
+    assert!(st.playing);
+    assert!(
+        st.playhead <= 256,
+        "restarted from zero, got {}",
+        st.playhead
+    );
+}
+
+#[test]
+fn recording_rolls_past_the_timeline_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = engine();
+    e.daw_set_length(1).unwrap(); // 24_000 frames
+    e.daw_add_track("take", "continuous", false).unwrap();
+    e.daw_record_start(0, DawRecordSource::Input).unwrap();
+    e.daw_play().unwrap();
+    let blocks = 24_000 / 128 + 16;
+    e.process_blocks(blocks).unwrap();
+    let st = e.daw_status().unwrap();
+    assert!(st.playing, "an armed capture keeps the transport rolling");
+    assert_eq!(st.record_frames, blocks as u64 * 128);
+    e.daw_record_stop(dir.path()).unwrap();
+}
+
+#[test]
+fn length_roundtrips_through_save_load() {
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let mut e = engine();
+        e.daw_set_length(48).unwrap();
+        e.save_patch(dir.path(), "len-patch").unwrap();
+    }
+    // A length tweak alone persists the DAW module...
+    assert!(dir.path().join("modules/daw.json").exists());
+    let loaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+    assert_eq!(loaded.daw().unwrap().length_beats, 48);
+
+    // ...while an untouched DAW still stays out of the patch.
+    let dir2 = tempfile::tempdir().unwrap();
+    {
+        let e = engine();
+        e.save_patch(dir2.path(), "untouched").unwrap();
+    }
+    assert!(!dir2.path().join("modules/daw.json").exists());
+
+    // Zero beats is rejected.
+    let mut e = engine();
+    assert!(e.daw_set_length(0).is_err());
+}

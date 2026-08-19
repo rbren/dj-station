@@ -12,6 +12,7 @@ import {
   GRAPH_H,
   MidiGrid,
   MIDI_PITCH_MAX,
+  MIDI_ROW_H,
   SNAP_OPTIONS,
   type DawApi,
 } from '../src/components/DawBar';
@@ -60,6 +61,7 @@ function makeStatus(over: Partial<DawStatus> = {}): DawStatus {
       i2: { position: 0.65, atten: 1, offset: 0 },
     },
     bpm: 120,
+    length_beats: 16,
     playhead: 0,
     playing: false,
     recording: null,
@@ -99,6 +101,9 @@ function makeApi(status: DawStatus = makeStatus()): DawApi & { state: { status: 
     }),
     clipPeaks: vi.fn(async () => [[-5, 5]] as [number, number][]),
     setBpm: vi.fn(async () => {}),
+    setLength: vi.fn(async (beats: number) => {
+      state.status = { ...state.status, length_beats: beats };
+    }),
     addNote: vi.fn(async () => {}),
     removeNote: vi.fn(async () => {}),
     setKnobPosition: vi.fn(async () => {}),
@@ -412,21 +417,23 @@ describe('timeline', () => {
     await waitFor(() => expect(line.style.transform).toBe('translateX(80px)'));
   });
 
-  it('sets the total length in beats (rounded up to whole bars)', async () => {
-    renderBar(makeApi());
+  it('sets the total length in beats via the engine (rounded up to whole bars)', async () => {
+    const api = makeApi();
+    renderBar(api);
     fireEvent.click(await screen.findByTestId('daw-toggle'));
     const beats = await screen.findByTestId('daw-length-beats');
     fireEvent.change(beats, { target: { value: '30' } });
     fireEvent.blur(beats);
+    await waitFor(() => expect(api.setLength).toHaveBeenCalledWith(30));
     // 30 beats → 32 (whole 4-beat bars) × default zoom 40 px.
     await waitFor(() =>
       expect(Number(screen.getByTestId('daw-ruler').getAttribute('width'))).toBe(32 * 40),
     );
-    expect(JSON.parse(localStorage.getItem('dj-daw-length-beats')!)).toBe(30);
   });
 
   it('sets the total length in seconds, converted at the current BPM', async () => {
-    renderBar(makeApi());
+    const api = makeApi();
+    renderBar(api);
     fireEvent.click(await screen.findByTestId('daw-toggle'));
     const secs = await screen.findByTestId('daw-length-secs');
     // Default 16 beats at 120 BPM shows 8 s.
@@ -434,10 +441,59 @@ describe('timeline', () => {
     // 20 s at 120 BPM = 40 beats.
     fireEvent.change(secs, { target: { value: '20' } });
     fireEvent.blur(secs);
+    await waitFor(() => expect(api.setLength).toHaveBeenCalledWith(40));
     await waitFor(() =>
       expect(Number(screen.getByTestId('daw-ruler').getAttribute('width'))).toBe(40 * 40),
     );
-    expect(JSON.parse(localStorage.getItem('dj-daw-length-beats')!)).toBe(40);
+  });
+
+  it('grays out the region past the chosen length when content overflows', async () => {
+    // 8-beat length but a clip spanning 12 beats (12 × 24000 frames):
+    // timeline grows to 16 beats, the last 8 grayed out.
+    const api = makeApi(makeStatus({ length_beats: 8, clip_frames: [0, 12 * 24000] }));
+    renderBar(api);
+    fireEvent.click(await screen.findByTestId('daw-toggle'));
+    const ruler = await screen.findByTestId('daw-past-end-ruler');
+    expect(Number(ruler.getAttribute('x'))).toBe(8 * 40);
+    expect(Number(ruler.getAttribute('width'))).toBe(8 * 40);
+    const lane = screen.getByTestId('daw-past-end-1');
+    expect(lane.style.left).toBe(`${8 * 40}px`);
+    expect(lane.style.width).toBe(`${8 * 40}px`);
+  });
+
+  it('hides the past-end overlay when the length covers all content', async () => {
+    renderBar(makeApi());
+    fireEvent.click(await screen.findByTestId('daw-toggle'));
+    await screen.findByTestId('daw-ruler');
+    expect(screen.queryByTestId('daw-past-end-ruler')).toBeNull();
+  });
+
+  it('spacebar toggles the transport unless typing in a field', async () => {
+    const api = makeApi();
+    renderBar(api);
+    fireEvent.keyDown(window, { key: ' ' });
+    await waitFor(() => expect(api.play).toHaveBeenCalledTimes(1));
+    // Wait for the refreshed playing state before toggling back.
+    await waitFor(() => expect(screen.getByTestId('daw-play').textContent).toBe('⏹'));
+    fireEvent.keyDown(window, { key: ' ' });
+    await waitFor(() => expect(api.stop).toHaveBeenCalledTimes(1));
+    // Focus-like targets are ignored.
+    fireEvent.click(await screen.findByTestId('daw-toggle'));
+    const bpm = await screen.findByTestId('daw-bpm');
+    fireEvent.keyDown(bpm, { key: ' ' });
+    expect(api.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('drag-resizes the DAW body and persists the height', async () => {
+    renderBar(makeApi());
+    fireEvent.click(await screen.findByTestId('daw-toggle'));
+    const handle = await screen.findByTestId('daw-resize');
+    fireEvent.pointerDown(handle, { clientY: 300 });
+    fireEvent.pointerMove(window, { clientY: 200 });
+    fireEvent.pointerUp(window, { clientY: 200 });
+    // Default 320 + (300 − 200) dragged up = 420.
+    await waitFor(() => expect(screen.getByTestId('daw-lanes').style.height).toBe('420px'));
+    expect(JSON.parse(localStorage.getItem('dj-daw-height')!)).toBe(420);
   });
 
   it('renders a recordable knob on every non-MIDI input jack', async () => {
@@ -487,6 +543,26 @@ describe('MIDI tracks', () => {
     expect(screen.queryByTestId('daw-note-0-1-60')).not.toBeNull();
   });
 
+  it('shows note names in a gutter and shifts the window by octaves', async () => {
+    renderBar(makeApi(midiStatus()));
+    fireEvent.click(await screen.findByTestId('daw-toggle'));
+    const gutter = await screen.findByTestId('daw-midi-gutter-0');
+    // Default window C4..B5: white-key names, top row first.
+    expect(gutter.textContent).toContain('B5');
+    expect(gutter.textContent).toContain('C4');
+    // One octave down: C3..B4 — pitch 60 (C4) still visible, B5 gone.
+    fireEvent.click(screen.getByTestId('daw-octave-down-0'));
+    await waitFor(() => expect(gutter.textContent).toContain('C3'));
+    expect(gutter.textContent).not.toContain('B5');
+    expect(screen.queryByTestId('daw-note-0-1-60')).not.toBeNull();
+    // The choice persists per track slot.
+    expect(JSON.parse(localStorage.getItem('dj-daw-midi-base')!)).toEqual({ 0: 48 });
+    // Two octaves up from 48 → 72; C6..B7 hides pitch 60.
+    fireEvent.click(screen.getByTestId('daw-octave-up-0'));
+    fireEvent.click(screen.getByTestId('daw-octave-up-0'));
+    await waitFor(() => expect(screen.queryByTestId('daw-note-0-1-60')).toBeNull());
+  });
+
   it('adding a MIDI track offers no stereo option', async () => {
     const api = makeApi();
     renderBar(api);
@@ -532,7 +608,28 @@ describe('MidiGrid', () => {
     const { grid, onToggle } = renderGrid(vi.fn(), [note]);
     const row = MIDI_PITCH_MAX - 60;
     // beat 1.5 is inside the 1-beat note starting at beat 1.
-    fireEvent.pointerDown(grid, { clientX: 1.5 * 40, clientY: row * 7 + 3 });
+    fireEvent.pointerDown(grid, { clientX: 1.5 * 40, clientY: row * MIDI_ROW_H + 3 });
     expect(onToggle).toHaveBeenCalledWith(1.5, 60, note);
+  });
+
+  it('only renders notes inside the 2-octave window and maps rows to basePitch', () => {
+    const inWindow = { beat: 0, len: 1, pitch: 40, velocity: 1 };
+    const below = { beat: 1, len: 1, pitch: 30, velocity: 1 };
+    render(
+      <MidiGrid
+        track={1}
+        notes={[inWindow, below]}
+        beats={8}
+        pxPerBeat={40}
+        snapBeats={1}
+        basePitch={36}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('daw-note-1-0-40')).not.toBeNull();
+    expect(screen.queryByTestId('daw-note-1-1-30')).toBeNull();
+    // 24 rows × row height tall.
+    const grid = screen.getByTestId('daw-midi-grid-1');
+    expect(Number(grid.getAttribute('height'))).toBe(24 * MIDI_ROW_H);
   });
 });

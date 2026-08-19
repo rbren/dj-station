@@ -119,9 +119,14 @@ impl DawTrack {
 }
 
 pub const DEFAULT_BPM: f32 = 120.0;
+pub const DEFAULT_LENGTH_BEATS: u32 = 16;
 
 fn default_bpm() -> f32 {
     DEFAULT_BPM
+}
+
+fn default_length_beats() -> u32 {
+    DEFAULT_LENGTH_BEATS
 }
 
 /// DAW state, canonical on the control side and persisted in the patch.
@@ -132,6 +137,10 @@ pub struct DawState {
     /// it (audio/CV clips are frame-based and unaffected).
     #[serde(default = "default_bpm")]
     pub bpm: f32,
+    /// Timeline length in beats. The transport stops here; content past
+    /// it stays in the state but neither renders nor plays.
+    #[serde(default = "default_length_beats")]
+    pub length_beats: u32,
 }
 
 impl Default for DawState {
@@ -139,6 +148,7 @@ impl Default for DawState {
         DawState {
             tracks: Vec::new(),
             bpm: DEFAULT_BPM,
+            length_beats: DEFAULT_LENGTH_BEATS,
         }
     }
 }
@@ -238,6 +248,10 @@ pub struct DawProgram {
     /// Clock pulse width ([`CLOCK_PULSE_SECS`] at the engine rate),
     /// precomputed control-side so the RT thread does no rate math.
     pub pulse_frames: u64,
+    /// Timeline end (`length_beats` in frames). The transport stops here
+    /// instead of rolling forever — except while a capture is armed, so a
+    /// take can run long and the user trims by stopping.
+    pub end_frame: u64,
 }
 
 /// Commands toward the RT module (SPSC ring, applied at block boundaries).
@@ -401,7 +415,16 @@ impl HostModule for DawRtModule {
                         let _ = self.garbage_tx.push(old);
                     }
                 }
-                DawCmd::Play => self.playing = true,
+                DawCmd::Play => {
+                    // Parked at (or past) the end: play restarts from the
+                    // top, else it would stop again within one block.
+                    if let Some(p) = self.program.as_ref() {
+                        if self.pos >= p.end_frame {
+                            self.pos = 0;
+                        }
+                    }
+                    self.playing = true;
+                }
                 DawCmd::Stop => self.playing = false,
                 DawCmd::Seek(f) => self.pos = f,
                 DawCmd::CaptureStart { jack, channels } => self.capture = Some((jack, channels)),
@@ -492,9 +515,18 @@ impl HostModule for DawRtModule {
                     }
                 }
             }
-            // The transport keeps rolling past clip ends (recording and
-            // DAW convention both need it).
+            // The transport rolls past clip ends but stops at the
+            // timeline end — unless a capture is armed (a take may run
+            // long; the user trims by stopping).
             self.pos += frames as u64;
+            if self.capture.is_none() {
+                if let Some(program) = self.program.as_ref() {
+                    if self.pos >= program.end_frame {
+                        self.pos = program.end_frame;
+                        self.playing = false;
+                    }
+                }
+            }
         }
         self.shared.playhead.store(self.pos, Ordering::Relaxed);
         self.shared.playing.store(self.playing, Ordering::Relaxed);

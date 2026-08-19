@@ -2640,11 +2640,13 @@ body {
 
 /* Above the .wire-overlay (z-index 10): cables must never paint over the
    tracks — they visually plug into the bar's top edge instead. */
+/* Slightly translucent so wires plugged into DAW jacks stay visible
+   through the bar (it floats above the rack's wire overlay). */
 .daw-bar {
   position: relative;
   flex: none;
   border-top: 1px solid #2a2f38;
-  background: #14171c;
+  background: rgba(20, 23, 28, 0.85);
   display: flex;
   flex-direction: column;
   z-index: 20;
@@ -2741,8 +2743,21 @@ body {
   flex-direction: column;
   gap: 4px;
   padding: 4px 10px 8px;
-  max-height: 46vh;
+  max-height: 80vh;
   overflow-y: auto;
+}
+
+/* Drag strip between the header and the body: vertical resize. */
+.daw-resize {
+  flex: none;
+  height: 5px;
+  margin: -2px 0;
+  cursor: ns-resize;
+  z-index: 5;
+}
+
+.daw-resize:hover {
+  background: rgba(98, 208, 255, 0.25);
 }
 
 /* One shared horizontal scroller: sticky side stacks on the left, the
@@ -2765,12 +2780,16 @@ body {
 /* min/max-width pin the flex item to EXACTLY the spacer's width (the
    default min-width:auto would let min-content widen it past the ruler
    row's empty spacer — the old misalignment); overflow keeps controls
-   from spilling into the timeline. */
+   from spilling into the timeline. border-box is LOAD-BEARING: the app
+   has no global reset, so without it padding+border made a lane's side
+   column 16px wider than the ruler row's padding-less spacer — every
+   row must measure exactly --daw-side-w or the beat grid shears. */
 .daw-side {
   position: sticky;
   left: 0;
   z-index: 3;
   flex: none;
+  box-sizing: border-box;
   width: var(--daw-side-w);
   min-width: var(--daw-side-w);
   max-width: var(--daw-side-w);
@@ -2779,7 +2798,8 @@ body {
   flex-direction: column;
   gap: 6px;
   padding: 4px 8px 4px 6px;
-  background: #171b21;
+  /* Near-opaque: sticky, must mask the timeline scrolling beneath it. */
+  background: rgba(23, 27, 33, 0.96);
   border: 1px solid #232833;
   border-radius: 6px 0 0 6px;
 }
@@ -2812,13 +2832,13 @@ body {
 }
 
 .daw-lane {
-  background: #14171c;
+  background: rgba(20, 23, 28, 0.6);
 }
 
 .daw-timeline {
   position: relative;
   flex: none;
-  background: #0e1116;
+  background: rgba(14, 17, 22, 0.7);
   border: 1px solid #232833;
   border-left: none;
   border-radius: 0 6px 6px 0;
@@ -2947,6 +2967,77 @@ body {
   fill: #62d0ff;
   stroke: #8adfff;
   stroke-width: 0.5;
+}
+
+/* Note-name gutter: sticky over the MIDI grid's left edge. The negative
+   right margin makes it occupy zero flex width, so the grid behind it
+   starts at the timeline origin and stays ruler-aligned. */
+.daw-midi-gutter {
+  position: sticky;
+  left: var(--daw-side-w);
+  z-index: 2;
+  flex: none;
+  width: 34px;
+  margin-right: -34px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 17, 22, 0.85);
+  border-right: 1px solid #232833;
+  pointer-events: auto;
+}
+
+.daw-midi-names {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+}
+
+.daw-midi-name {
+  box-sizing: border-box;
+  display: block;
+  overflow: hidden;
+  font-size: 7px;
+  line-height: 9px;
+  color: #667080;
+  padding-left: 3px;
+  border-top: 1px solid transparent;
+}
+
+.daw-midi-name-black {
+  background: #12151b;
+}
+
+.daw-octave-btn {
+  position: absolute;
+  left: 1px;
+  width: 30px;
+  padding: 0;
+  font-size: 9px;
+  line-height: 12px;
+  opacity: 0.85;
+}
+
+.daw-octave-up {
+  top: 1px;
+}
+
+.daw-octave-down {
+  bottom: 1px;
+}
+
+/* Content past the chosen timeline length: grayed out (still visible). */
+.daw-past-end {
+  fill: rgba(10, 12, 16, 0.55);
+  pointer-events: none;
+}
+
+.daw-past-end-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(10, 12, 16, 0.55);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .daw-track-name {
