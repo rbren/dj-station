@@ -737,7 +737,7 @@ const LAYOUTS: Record<string, LayoutFactory> = {
       },
       { outputs: ['z', 'x', 'c', 'v', 'b', 'n', 'm'], break: true, indent: 38 },
       { outputs: ['space'], break: true, indent: 110 },
-      { title: 'note', outputs: ['note'], break: true },
+      { title: 'note', outputs: ['note', 'gate'], break: true },
     ],
   }),
 };

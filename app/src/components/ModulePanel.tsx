@@ -15,9 +15,10 @@ import {
   type ComponentType,
   type ReactNode,
 } from 'react';
+import { useLiveInstanceTelemetry } from '../rackStore';
 import type { JackTelemetry, KnobConfig, KnobState, Manifest, ModuleHandle } from '../types';
 import { InputCell } from './InputCell';
-import { Jack } from './Jack';
+import { LiveJack } from './Jack';
 import { resolveLayout } from './panelLayouts';
 import { WIRE_COLORS } from './WireOverlay';
 
@@ -51,6 +52,9 @@ export interface ModulePanelProps {
   manifest: Manifest;
   knobs: Record<string, KnobState>;
   wired: Record<string, boolean>;
+  /** STORELESS fallback only (docs previews, unit tests): inside a
+   *  RackStoreContext every jack subscribes to its own live reading via
+   *  LiveJack and this prop is ignored. */
   telemetry?: Record<string, JackTelemetry>;
   handle: ModuleHandle;
   customUI?: ComponentType<{ handle: ModuleHandle; instanceId?: string }>;
@@ -86,6 +90,27 @@ export interface ModulePanelProps {
   onAttenOffset(jackId: string, atten: number, offset: number): void;
   /** Double-click knob reset to the default value (incl. wire spread). */
   onKnobReset?(jackId: string): void;
+}
+
+/** Hosts a module's custom UI, subscribing to the module's telemetry slice
+ *  so visuals that read `handle.signalTap()` / wired `paramValue()` at
+ *  render time (level meters, sequencer playheads, EQ curves...) stay live
+ *  on every tick — without the whole ModulePanel re-rendering. */
+function CustomUIHost({
+  instanceId,
+  handle,
+  CustomUI,
+}: {
+  instanceId: string;
+  handle: ModuleHandle;
+  CustomUI: ComponentType<{ handle: ModuleHandle; instanceId?: string }>;
+}) {
+  useLiveInstanceTelemetry(instanceId);
+  return (
+    <div className="module-custom-ui">
+      <CustomUI handle={handle} instanceId={instanceId} />
+    </div>
+  );
 }
 
 export function ModulePanel(props: ModulePanelProps) {
@@ -240,9 +265,7 @@ export function ModulePanel(props: ModulePanelProps) {
           )}
         </header>
         {CustomUI && (
-          <div className="module-custom-ui">
-            <CustomUI handle={props.handle} instanceId={instanceId} />
-          </div>
+          <CustomUIHost instanceId={instanceId} handle={props.handle} CustomUI={CustomUI} />
         )}
         {props.extra}
         {layout.groups.length > 0 && (
@@ -275,7 +298,7 @@ export function ModulePanel(props: ModulePanelProps) {
                       // channel out at the foot of its input column).
                       return (
                         <div className="input-cell output-cell" key={cell.jack}>
-                          <Jack
+                          <LiveJack
                             instance={instanceId}
                             id={cell.jack}
                             kind="output"
@@ -352,7 +375,7 @@ export function ModulePanel(props: ModulePanelProps) {
                   }
                 >
                   {group.outputs.map((id) => (
-                    <Jack
+                    <LiveJack
                       key={id}
                       instance={instanceId}
                       id={id}

@@ -111,8 +111,8 @@ impl Module for GridSeq {
                     self.col = (self.col + 1) % COLS;
                     self.pos = (self.pos + 1) % POS_WRAP;
                 }
-                for r in 0..ROWS {
-                    self.active[r] = pattern[r] & (1 << self.col) != 0;
+                for (active, row) in self.active.iter_mut().zip(pattern) {
+                    *active = row & (1 << self.col) != 0;
                 }
                 self.gate_timer = ((0.5 * self.interval) as i32).max(1);
             }
@@ -122,10 +122,10 @@ impl Module for GridSeq {
             if open {
                 self.gate_timer -= 1;
             }
-            for r in 0..ROWS {
+            for (r, &semitones) in MAJOR_SEMITONES.iter().enumerate() {
                 io.outputs[r][s] = if open && self.active[r] {
                     if scale_mode {
-                        MAJOR_SEMITONES[r] / 12.0
+                        semitones / 12.0
                     } else {
                         level
                     }

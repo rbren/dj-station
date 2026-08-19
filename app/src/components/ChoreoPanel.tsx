@@ -10,6 +10,8 @@
 //     cmd/ctrl+click then vertical drag sets that note's velocity.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardCycle } from '../../../extensions/ui-lib/stepFollower';
+import { useStepFollowers } from '../../../extensions/ui-lib/useStepFollower';
 import type { ChoreoStatus, ChoreoTrack, NoteStep } from '../engine';
 
 /** IPC surface the panel needs; RackModule adapts EngineClient onto this. */
@@ -348,6 +350,29 @@ export function ChoreoPanel({ instance, api, onChanged, pollMs = 100 }: ChoreoPa
     onChanged();
   }, [refresh, onChanged]);
 
+  // The playhead is EXTRAPOLATED between status polls: a beat index
+  // sampled at ~10 Hz aliases against tempos past a few beats/s — see
+  // extensions/ui-lib/stepFollower.ts. Between polls the rAF loop moves
+  // the existing playhead div directly (a beat tick must not re-render
+  // the whole timeline); the null→visible transition always comes from a
+  // poll-driven render, so the patcher only ever moves an existing div.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [shownPlayhead] = useStepFollowers(
+    [
+      {
+        cycle: forwardCycle(status?.beats ?? 1),
+        sampled: status && status.playhead >= 0 ? status.playhead : null,
+      },
+    ],
+    panelRef,
+    (root, values) => {
+      const beat = values[0];
+      if (beat === null) return;
+      const el = root.querySelector<HTMLElement>('.choreo-playhead');
+      if (el) el.style.left = `${LABEL_W + beat * BEAT_W}px`;
+    },
+  );
+
   if (!status) {
     return (
       <div className="choreo-panel" data-testid={`choreo-panel-${instance}`}>
@@ -355,7 +380,8 @@ export function ChoreoPanel({ instance, api, onChanged, pollMs = 100 }: ChoreoPa
       </div>
     );
   }
-  const { beats, tracks, playhead } = status;
+  const { beats, tracks } = status;
+  const playhead = shownPlayhead ?? -1;
   const totalW = beats * BEAT_W;
 
   const rulerCells = [];
@@ -368,7 +394,7 @@ export function ChoreoPanel({ instance, api, onChanged, pollMs = 100 }: ChoreoPa
   }
 
   return (
-    <div className="choreo-panel" data-testid={`choreo-panel-${instance}`}>
+    <div className="choreo-panel" data-testid={`choreo-panel-${instance}`} ref={panelRef}>
       <div className="choreo-toolbar">
         <label>
           beats

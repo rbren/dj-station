@@ -184,3 +184,74 @@ fn saved_patch_records_engine_version() {
         env!("CARGO_PKG_VERSION")
     );
 }
+
+/// Backward compat: a patch saved against an older module version may
+/// reference jacks/params the current manifest no longer has (e.g. the
+/// camera module dropping its `in`/`thru` pass-through). Loading must not
+/// fail — stale wires are dropped with a warning, stale knob entries are
+/// skipped silently (nothing user-visible attached), and the rest of the
+/// patch loads intact.
+#[test]
+fn stale_jacks_from_older_module_versions_load_with_warnings() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
+    engine.save_patch(dir.path(), "test").unwrap();
+
+    // Simulate the old save: a wire into a jack that no longer exists, a
+    // knob entry for a removed jack, and a param the module dropped.
+    let vca_wires = dir.path().join("wires").join("osc1.json");
+    let mut wf: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&vca_wires).unwrap()).unwrap();
+    wf["wires"].as_array_mut().unwrap().push(serde_json::json!({
+        "from_jack": "audio", "to": "vca1", "to_jack": "gone_jack"
+    }));
+    std::fs::write(&vca_wires, serde_json::to_string_pretty(&wf).unwrap()).unwrap();
+
+    let vca_mod = dir.path().join("modules").join("vca1.json");
+    let mut mf: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&vca_mod).unwrap()).unwrap();
+    mf["knobs"]["gone_jack"] = serde_json::json!({ "position": 0.5, "atten": 1.0, "offset": 0.0 });
+    mf["params"]["gone_param"] = serde_json::json!(1.0);
+    std::fs::write(&vca_mod, serde_json::to_string_pretty(&mf).unwrap()).unwrap();
+
+    let reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+
+    // The good wires all survived; only the stale one was dropped.
+    assert_eq!(reloaded.wire_specs().len(), 5);
+    // One warning for the wire, one for the param; the stale knob entry is
+    // silent (it carries no user-visible state once the jack is gone).
+    assert_eq!(
+        reloaded.load_warnings.len(),
+        2,
+        "warnings: {:?}",
+        reloaded.load_warnings
+    );
+    assert!(
+        reloaded
+            .load_warnings
+            .iter()
+            .any(|w| w.contains("gone_jack")
+                && w.contains("dropped wire")
+                && w.contains("osc1")
+                && w.contains("vca1")),
+        "warnings: {:?}",
+        reloaded.load_warnings
+    );
+    assert!(
+        reloaded
+            .load_warnings
+            .iter()
+            .any(|w| w.contains("gone_param") && w.contains("vca1")),
+        "warnings: {:?}",
+        reloaded.load_warnings
+    );
+
+    // A clean load reports no warnings.
+    let dir2 = tempfile::tempdir().unwrap();
+    let mut clean = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut clean);
+    clean.save_patch(dir2.path(), "test").unwrap();
+    let clean_reload = Engine::load_patch(dir2.path(), crate::common::registry()).unwrap();
+    assert!(clean_reload.load_warnings.is_empty());
+}

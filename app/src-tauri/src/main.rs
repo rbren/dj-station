@@ -1425,7 +1425,10 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     let autosave = autosave_dir();
     if autosave.join("patch.json").is_file() {
         match load_patch_dir(&state, &autosave) {
-            Ok(()) => {
+            Ok(warnings) => {
+                for w in warnings {
+                    eprintln!("[dj-audio] autosave restore: {w}");
+                }
                 if let Some(name) = std::fs::read_to_string(autosave.join("patch.json"))
                     .ok()
                     .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
@@ -1760,14 +1763,16 @@ fn list_patches() -> CmdResult<Vec<String>> {
     Ok(names)
 }
 
+/// Returns non-fatal load warnings (e.g. wires dropped because a newer
+/// module manifest no longer has the saved jack) for the UI banner.
 #[tauri::command]
-fn load_patch_by_name(state: State<AppState>, name: String) -> CmdResult<()> {
+fn load_patch_by_name(state: State<AppState>, name: String) -> CmdResult<Vec<String>> {
     if !valid_patch_name(&name) {
         return Err(CmdError::invalid(format!("invalid patch name: {name:?}")));
     }
-    load_patch_dir(&state, &patches_dir().join(&name))?;
+    let warnings = load_patch_dir(&state, &patches_dir().join(&name))?;
     *state.patch_name.lock().map_err(err)? = name;
-    Ok(())
+    Ok(warnings)
 }
 
 #[tauri::command]
@@ -1775,8 +1780,13 @@ fn current_patch(state: State<AppState>) -> CmdResult<String> {
     Ok(state.patch_name.lock().map_err(err)?.clone())
 }
 
-fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<()> {
+/// Returns the engine's non-fatal load warnings (dropped stale wires/params).
+fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>> {
     let mut engine = patch_edit(state, EditKey::Load(&dir.display().to_string()))?;
+    // The loaded engine replaces this one and comes up stopped, so the
+    // pre-load backend must be restarted afterwards — the frontend only
+    // calls engine_start once, at app startup.
+    let backend = engine.backend();
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
     *engine = Engine::load_patch(dir, registry).map_err(err)?;
@@ -1792,7 +1802,8 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<()> {
     for instance in deck_instances {
         apply_deck_metadata(state, &mut engine, &instance)?;
     }
-    Ok(())
+    restart_backend(&mut engine, backend, "patch load")?;
+    Ok(engine.load_warnings.clone())
 }
 
 #[derive(Serialize)]
@@ -1884,9 +1895,17 @@ fn load_patch(
             .collect());
     }
     record_edit(&state, &engine, &EditKey::Load(&dir));
+    // As in load_patch_dir: the replacement engine comes up stopped, so
+    // restart the pre-load backend once the swap is done.
+    let backend = engine.backend();
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
     *engine = Engine::from_doc_with_macros(&doc, registry, lib).map_err(err)?;
+    // This command's return channel carries macro conflicts; non-fatal
+    // load warnings (dropped stale wires) go to the log.
+    for w in &engine.load_warnings {
+        eprintln!("[dj-audio] load_patch: {w}");
+    }
     // Decks: re-apply library-stored DJ metadata (cues/loops/beatgrids)
     // for every loaded deck track (PRD §7 — metadata survives across
     // patches via the library DB, not the patch files).
@@ -1899,6 +1918,7 @@ fn load_patch(
     for instance in deck_instances {
         apply_deck_metadata(&state, &mut engine, &instance)?;
     }
+    restart_backend(&mut engine, backend, "patch load")?;
     Ok(Vec::new())
 }
 

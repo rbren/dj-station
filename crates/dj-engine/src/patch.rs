@@ -525,7 +525,14 @@ impl Engine {
 
         for (source, wf) in &doc.wires {
             for w in &wf.wires {
-                engine.connect(source, &w.from_jack, &w.to, &w.to_jack)?;
+                // A wire referencing a jack a newer module manifest no longer
+                // has must not brick the whole patch: drop it and warn.
+                if let Err(e) = engine.connect(source, &w.from_jack, &w.to, &w.to_jack) {
+                    engine.load_warnings.push(format!(
+                        "dropped wire {source}:{} -> {}:{} ({e})",
+                        w.from_jack, w.to, w.to_jack
+                    ));
+                }
             }
         }
         Ok(engine)
@@ -582,10 +589,18 @@ impl Engine {
             deferred_syncs.push((instance_id.to_string(), sync_to.clone()));
         }
         for (param, value) in &mf.params {
-            self.set_param(instance_id, param, *value)?;
+            // A param the module no longer declares: skip it, but warn —
+            // params are user-visible mode state (keylock, stem gains).
+            if self.set_param(instance_id, param, *value).is_err() {
+                self.load_warnings
+                    .push(format!("{instance_id}: dropped saved param {param:?}"));
+            }
         }
         for (jack, state) in &mf.knobs {
-            self.restore_knob(instance_id, jack, state.clone())?;
+            // A knob entry for a jack the module no longer has is just
+            // stale persisted state with nothing user-visible attached
+            // (dropped wires warn separately) — skip it silently.
+            let _ = self.restore_knob(instance_id, jack, state.clone());
         }
         Ok(())
     }

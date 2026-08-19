@@ -1,0 +1,30 @@
+{
+  "seconds": 1.0,
+  "midi": [],
+  "qwerty": [
+    {
+      "instance": "kb1",
+      "frame": 0,
+      "key": "z",
+      "down": true
+    },
+    {
+      "instance": "kb1",
+      "frame": 14400,
+      "key": "v",
+      "down": true
+    },
+    {
+      "instance": "kb1",
+      "frame": 19200,
+      "key": "z",
+      "down": false
+    },
+    {
+      "instance": "kb1",
+      "frame": 28800,
+      "key": "v",
+      "down": false
+    }
+  ]
+}

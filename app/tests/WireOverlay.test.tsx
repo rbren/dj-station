@@ -80,6 +80,41 @@ describe('WireOverlay', () => {
     container.appendChild(document.createElement('div'));
     await waitFor(() => expect(getByTestId(`cable-${KEY}`).getAttribute('y1')).toBe('129'));
   });
+
+  it('ignores telemetry attribute churn (jack glows, knobs, meters)', async () => {
+    const src = addSocket('osc1:output:audio', 100, 20);
+    // The socket sits inside a .jack button, as in the real DOM.
+    const jack = document.createElement('button');
+    jack.className = 'jack';
+    container.appendChild(jack);
+    jack.appendChild(src);
+    addSocket('vca1:input:in', 300, 200);
+    const { getByTestId } = render(<WireOverlay wires={[WIRE]} container={container} />);
+    await waitFor(() => expect(getByTestId(`cable-${KEY}`).getAttribute('y1')).toBe('29'));
+    // A telemetry tick restyles the glow (attribute mutation inside .jack).
+    // Even if the jack had somehow moved, the overlay must NOT re-measure
+    // for it — glow/knob/meter attribute writes happen at 10 Hz across the
+    // whole rack and can never move a socket.
+    src.getBoundingClientRect = () => fakeRect(100, 120);
+    src.setAttribute('style', 'background: red');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(getByTestId(`cable-${KEY}`).getAttribute('y1')).toBe('29');
+  });
+
+  it('measures in rack coordinates: screen deltas divide by zoom', async () => {
+    // Rack zoomed 2×: sockets read at screen (200,40) and (600,400) are at
+    // rack (100,20) and (300,200) — cables must store the rack values so
+    // the container's CSS transform lands them back on the sockets.
+    addSocket('osc1:output:audio', 200, 40);
+    addSocket('vca1:input:in', 600, 400);
+    const { getByTestId } = render(<WireOverlay wires={[WIRE]} container={container} zoom={2} />);
+    await waitFor(() => expect(getByTestId(`cable-${KEY}`)).toBeTruthy());
+    const line = getByTestId(`cable-${KEY}`);
+    expect(line.getAttribute('x1')).toBe('104.5'); // (200 + 18/2) / 2
+    expect(line.getAttribute('y1')).toBe('24.5');
+    expect(line.getAttribute('x2')).toBe('304.5');
+    expect(line.getAttribute('y2')).toBe('204.5');
+  });
 });
 
 describe('wire overlay stacking (CSS-level pin)', () => {

@@ -17,6 +17,7 @@
 
 import { formatDisplay } from '../display';
 import { safeNumber } from '../format';
+import { useLiveJackTelemetry } from '../rackStore';
 import type { DisplaySpec, JackTelemetry, KnobConfig } from '../types';
 
 /** Volatility below this renders as an ordinary value, not an alert. */
@@ -51,20 +52,7 @@ export function indicatorStyle(telemetry: JackTelemetry | undefined): {
   };
 }
 
-export function Jack({
-  instance,
-  id,
-  kind,
-  label,
-  telemetry,
-  display,
-  knob,
-  wired,
-  selected,
-  selectedColor,
-  onClick,
-  showLabel = true,
-}: {
+export interface JackProps {
   instance: string;
   id: string;
   kind: 'input' | 'output';
@@ -81,7 +69,34 @@ export function Jack({
   selectedColor?: string;
   onClick?(shift: boolean): void;
   showLabel?: boolean;
-}) {
+}
+
+/** A Jack subscribed to its own live telemetry: a tick re-renders only the
+ *  jacks that moved, never the panel around them. `telemetry` becomes the
+ *  fallback for storeless renders (docs previews, unit tests). */
+export function LiveJack(props: JackProps) {
+  const telemetry = useLiveJackTelemetry(
+    props.instance,
+    props.kind === 'output' ? `out:${props.id}` : props.id,
+    props.telemetry,
+  );
+  return <Jack {...props} telemetry={telemetry} />;
+}
+
+export function Jack({
+  instance,
+  id,
+  kind,
+  label,
+  telemetry,
+  display,
+  knob,
+  wired,
+  selected,
+  selectedColor,
+  onClick,
+  showLabel = true,
+}: JackProps) {
   // `display` is typed number but crosses IPC as JSON, where a non-finite
   // f32 becomes `null` — read it defensively.
   const style = telemetry ? indicatorStyle(telemetry) : null;

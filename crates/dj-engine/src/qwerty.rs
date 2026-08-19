@@ -6,7 +6,10 @@
 //! convention) for the most recently pressed key: notes ascend in
 //! semitones left to right, bottom row to top row (space is the lowest
 //! note, `0` on the number row the highest), and the value holds until
-//! the next key press (last-note priority, no release action).
+//! the next key press (last-note priority, no release action). The
+//! `gate` output next to it is 10 V while ANY key is held — the
+//! keyboard-wide envelope gate that pairs with `note` for a mono synth
+//! voice.
 //!
 //! Architecturally the Hands module's sibling with an even simpler event
 //! model: key down/up events originate in the webview (the panel's window
@@ -37,11 +40,15 @@ pub const KEYS: [&str; N_QWERTY_JACKS] = [
 
 pub const N_QWERTY_JACKS: usize = 37;
 
-/// Total output jacks: one gate per key plus the shared `note` pitch CV.
-pub const N_QWERTY_OUTS: usize = N_QWERTY_JACKS + 1;
+/// Total output jacks: one gate per key plus the shared `note` pitch CV
+/// and the any-key `gate`.
+pub const N_QWERTY_OUTS: usize = N_QWERTY_JACKS + 2;
 
 /// Output jack index of the `note` pitch CV.
 pub const NOTE_JACK: usize = N_QWERTY_JACKS;
+
+/// Output jack index of the any-key-held `gate`.
+pub const GATE_JACK: usize = N_QWERTY_JACKS + 1;
 
 /// Output jack index for a key, as sent by the webview (`event.key`,
 /// lowercased). Accepts `" "` or `"space"` for the space bar.
@@ -85,17 +92,24 @@ pub fn qwerty_manifest() -> Manifest {
                 },
                 display: None,
             })
-            .chain(std::iter::once(OutputDecl {
-                id: "note".into(),
-                name: "Note".into(),
-                display: Some(DisplaySpec {
-                    unit: Some("Hz".into()),
-                    map: Some(DisplayMap::VoltPerOctave {
-                        base: crate::manifest::default_pitch_base(),
+            .chain([
+                OutputDecl {
+                    id: "note".into(),
+                    name: "Note".into(),
+                    display: Some(DisplaySpec {
+                        unit: Some("Hz".into()),
+                        map: Some(DisplayMap::VoltPerOctave {
+                            base: crate::manifest::default_pitch_base(),
+                        }),
+                        steps: None,
                     }),
-                    steps: None,
-                }),
-            }))
+                },
+                OutputDecl {
+                    id: "gate".into(),
+                    name: "Gate".into(),
+                    display: None,
+                },
+            ])
             .collect(),
         params: vec![],
         ui: None,
@@ -115,11 +129,14 @@ pub struct QwertyEvent {
 /// RT-side module: pops key events from the SPSC ring and renders each
 /// key's gate output (10 V held, 0 V released; the value persists until
 /// the next transition) plus the `note` pitch CV (last key pressed, held
-/// until the next press).
+/// until the next press) and the any-key `gate` (10 V while at least one
+/// key is down — derived from `values` on each transition, so it can
+/// never drift out of sync with the per-key gates).
 pub struct QwertyRtModule {
     consumer: rtrb::Consumer<QwertyEvent>,
     values: [f32; N_QWERTY_JACKS],
     note: f32,
+    gate: f32,
     frame: u64,
 }
 
@@ -133,7 +150,16 @@ impl QwertyRtModule {
             consumer,
             values: [0.0; N_QWERTY_JACKS],
             note: 0.0,
+            gate: 0.0,
             frame: start_frame,
+        }
+    }
+
+    fn any_key_gate(&self) -> f32 {
+        if self.values.iter().any(|v| *v > 0.0) {
+            KEY_GATE_VOLTS
+        } else {
+            0.0
         }
     }
 }
@@ -160,6 +186,7 @@ impl HostModule for QwertyRtModule {
                             if ev.down {
                                 self.note = note_volts(ev.jack as usize);
                             }
+                            self.gate = self.any_key_gate();
                         }
                     }
                     _ => break,
@@ -170,6 +197,9 @@ impl HostModule for QwertyRtModule {
             }
             if let Some(out) = outputs.get_mut(NOTE_JACK) {
                 out[s] = self.note;
+            }
+            if let Some(out) = outputs.get_mut(GATE_JACK) {
+                out[s] = self.gate;
             }
         }
         self.frame = block_start + frames as u64;
@@ -192,6 +222,8 @@ impl HostModule for QwertyRtModule {
         if let Some(chunk) = bytes.chunks_exact(4).nth(N_QWERTY_JACKS) {
             self.note = f32::from_le_bytes(chunk.try_into().unwrap());
         }
+        // `gate` is derived state — recompute rather than persist.
+        self.gate = self.any_key_gate();
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -213,6 +245,7 @@ mod tests {
         assert_eq!(m.outputs[N_QWERTY_JACKS - 1].id, "space");
         assert_eq!(m.outputs[N_QWERTY_JACKS - 1].name, "Space");
         assert_eq!(m.outputs[NOTE_JACK].id, "note");
+        assert_eq!(m.outputs[GATE_JACK].id, "gate");
         assert!(m.inputs.is_empty());
         // 10 digits + 26 letters + space, each exactly once.
         let mut ids: Vec<&str> = KEYS.to_vec();

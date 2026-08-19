@@ -963,13 +963,15 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'cmd/ctrl are ignored). The shared note output turns the keyboard ' +
       'into a melodic instrument: each key has its own pitch (semitones ' +
       'ascending left to right, bottom row to top; space is the lowest ' +
-      'note) and the CV holds the last key pressed. No hardware needed: ' +
+      'note) and the CV holds the last key pressed, while the gate ' +
+      'output is high whenever any key is down. No hardware needed: ' +
       'trigger envelopes, drums and sequencer resets straight from the ' +
       'keys under your fingers.',
     outputs: {
       '#': 'Gate: 10 V while the number-row key is held.',
       space: 'Gate: 10 V while the space bar is held.',
       note: 'Pitch CV (1 V/oct) of the last key pressed; holds until the next press.',
+      gate: '10 V while any key is held; falls when the last key is released.',
     },
     examples: [
       'note -> Oscillator pitch and space -> ADSR gate: play the keyboard like a mono synth.',

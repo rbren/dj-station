@@ -311,8 +311,10 @@ export class EngineClient extends IpcClient {
   listPatches() {
     return this.call<string[]>('list_patches');
   }
+  /** Resolves to non-fatal load warnings (e.g. wires dropped because a
+   *  newer module version no longer has the saved jack). */
   loadPatchByName(name: string) {
-    return this.call<void>('load_patch_by_name', { name });
+    return this.call<string[]>('load_patch_by_name', { name });
   }
   currentPatch() {
     return this.call<string>('current_patch');

@@ -6,6 +6,16 @@
 // handle. The blink is a local rAF loop (the 100 ms telemetry poll is
 // far too coarse to follow an LFO), so it shows the character of the
 // output, not its engine-exact phase.
+//
+// The lamp is MOTION-BLURRED: each frame shows the MEAN brightness over
+// the phase interval the frame spans, not a point sample. Point-sampling
+// a 6–8 Hz blink at 60 fps aliases — the sample lands at a different
+// phase each cycle, so the apparent brightness beats and strobes
+// irregularly (and turns to mush if rAF throttles to 30 fps). Frame
+// averaging is how a real LED looks to the eye (which integrates), it is
+// alias-free by construction, and it degrades honestly: as the rate
+// passes the frame rate the lamp converges on a steady mean-level glow,
+// exactly like a fast-blinking physical LED.
 
 import { useEffect, useRef, useState } from "react";
 
@@ -36,15 +46,32 @@ export const SHAPES = [
 // character of the shape).
 const RND = [0.6, -0.8, 0.2, 0.9, -0.4, -1.0, 0.5, -0.1];
 
-interface View {
+export interface View {
   shape: number;
   pw: number;
   rate: number;
 }
 
-// Above this the blink aliases against the frame rate; clamp so fast
-// settings read as a rapid flicker instead of random strobing.
-const MAX_BLINK_HZ = 20;
+// Sub-samples per frame for the motion-blur integral. 16 keeps the mean
+// accurate to a few percent even when one frame spans a whole cycle.
+const BLUR_TAPS = 16;
+
+/** Mean lamp level (0..1) over the phase interval [p0, p0+span): the
+ *  frame-averaged (motion-blurred) brightness. Exported for tests. */
+export function meanLevel(view: View, p0: number, span: number): number {
+  // Beyond a full cycle per frame the mean is the cycle mean; clamping
+  // also bounds the work per frame at any rate.
+  const width = Math.min(1, Math.max(0, span));
+  if (width === 0) {
+    return (shapeAt(view, p0 % 1) + 1) / 2;
+  }
+  let sum = 0;
+  for (let i = 0; i < BLUR_TAPS; i++) {
+    const p = (p0 + ((i + 0.5) / BLUR_TAPS) * width) % 1;
+    sum += (shapeAt(view, p) + 1) / 2;
+  }
+  return Math.min(1, Math.max(0, sum / BLUR_TAPS));
+}
 
 const readView = (handle: ModuleHandle): View => ({
   shape: Math.min(6, Math.max(0, Math.round(handle.paramValue("shape")))),
@@ -95,21 +122,20 @@ export default function LfoUI({ handle }: { handle: ModuleHandle }) {
 
   // Drive the lamp by mutating a CSS variable directly — no React
   // re-render per frame. Phase accumulates so rate changes speed the
-  // blink up/down without a jump.
+  // blink up/down without a jump; the painted level is the mean over the
+  // phase interval this frame spans (motion blur, see header comment).
   useEffect(() => {
     let raf = 0;
     let phase = 0;
     let last = performance.now();
     const tick = (now: number) => {
       const v = viewRef.current;
-      const hz = Math.min(MAX_BLINK_HZ, Math.max(0, v.rate));
-      phase = (phase + ((now - last) / 1000) * hz) % 1;
+      const hz = Math.max(0, v.rate);
+      const span = ((now - last) / 1000) * hz;
+      const level = meanLevel(v, phase, span);
+      phase = (phase + span) % 1;
       last = now;
-      const level = (shapeAt(v, phase) + 1) / 2;
-      lampRef.current?.style.setProperty(
-        "--lfo-level",
-        Math.min(1, Math.max(0, level)).toFixed(3),
-      );
+      lampRef.current?.style.setProperty("--lfo-level", level.toFixed(3));
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);

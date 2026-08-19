@@ -7,7 +7,7 @@
 // Rendered in a portal at the cursor: module panels clip their content, so
 // an in-flow menu would be cut off at the panel edge.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DEFAULT_UNIT, displayNumber, displayToRaw, noteOptions } from '../display';
 import type { CurveName, DisplaySpec, KnobConfig, KnobStyle } from '../types';
@@ -51,6 +51,19 @@ export function KnobConfigMenu({
 }) {
   const curveName = typeof config.curve === 'string' ? config.curve : 'custom';
   const ref = useRef<HTMLDivElement | null>(null);
+  const valueRef = useRef<HTMLInputElement | null>(null);
+  // While the user is typing, the field shows their raw text instead of the
+  // knob-derived number — otherwise partial input ("", "-", "1e") parses to
+  // NaN, is ignored, and the controlled value snaps the text right back,
+  // making the field impossible to clear or retype.
+  const [draft, setDraft] = useState<string | null>(null);
+
+  // Right-click is a "type a value" gesture: focus the field with its
+  // content selected so typing immediately replaces it.
+  useEffect(() => {
+    valueRef.current?.focus();
+    valueRef.current?.select();
+  }, []);
 
   useEffect(() => {
     // Capture phase so a click that also lands on another control still
@@ -106,16 +119,23 @@ export function KnobConfigMenu({
           <label>
             Value{unit ? ` (${unit})` : ''}
             <input
+              ref={valueRef}
               type="number"
               aria-label="knob value"
               step={0.1}
               min={displayMin}
               max={displayMax}
-              value={Number(value.toFixed(4))}
+              value={draft ?? Number(value.toFixed(4))}
               // valueAsNumber: NaN for empty/partial input (Number('') is 0,
               // which would slam the knob while the user is still typing).
-              onChange={(e) => setValue(e.target.valueAsNumber)}
-              onBlur={() => onRelease?.()}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setValue(e.target.valueAsNumber);
+              }}
+              onBlur={() => {
+                setDraft(null);
+                onRelease?.();
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   onRelease?.();

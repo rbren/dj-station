@@ -232,7 +232,7 @@ fails if it's missing.
 - Frontend rack state lives in `app/src/rackStore.ts` (hand-rolled
   external store read via `useSyncExternalStore`, no zustand), provided
   through `RackStoreContext`; each `RackModule` subscribes to its own
-  node/position/selection/telemetry slice. Telemetry polls one batched
+  node/position/selection slice. Telemetry polls one batched
   `tap_all` IPC command (read-only, mirrors `engine_nodes` keys —
   macro internals hidden, MIDI LED / macro external jacks by name) every
   100 ms — never per-jack `tap` in a loop. App-level tests that mock
@@ -240,6 +240,39 @@ fails if it's missing.
   `app/tests/KnobMath.test.ts` pins the TS knob curve math to
   `knob.rs`; if either side's mapping changes, update both plus that
   table.
+- Telemetry rendering (perf-critical, pinned by
+  `app/tests/RenderCounts.test.tsx`): a telemetry tick must NEVER
+  re-render a `ModulePanel`. `setTelemetry` keeps object identity per
+  instance AND per jack (comparing only display/volatility/is_fast at
+  display resolution); jack glows subscribe per jack (`LiveJack` →
+  `useLiveJackTelemetry`, output keys are `out:<id>`) and custom UIs per
+  instance (`CustomUIHost` → `useLiveInstanceTelemetry` — this is what
+  keeps signalTap-at-render meters/playheads live). ModulePanel's
+  `telemetry` prop is a storeless fallback only. `WireOverlay` renders
+  INSIDE the pan/zoom-transformed `.rack` in unzoomed rack coordinates
+  (zoom prop, non-scaling-stroke) so pan/zoom never re-measure, and its
+  MutationObserver ignores attribute churn under
+  `.jack/.knob/.level-meter/.module-custom-ui`. The dev-only stress
+  harness (`app/src/stress/`, `npm run dev` + `?stress=N&active=F`)
+  measures this path; use it before/after any change to these files.
+- Anti-aliased animation (frontend): the 100 ms telemetry/status poll
+  POINT-SAMPLES clock-driven visuals, which aliases past a few Hz (steps
+  lit for 1-vs-2 ticks semi-randomly, skipped steps) — no poll rate fixes
+  this. Sequencer playheads (step_seq, seq_switch, trig_seq, grid_seq,
+  euclid, ChoreoPanel) are extrapolated client-side by
+  `extensions/ui-lib/stepFollower.ts` (windowed-fit rate estimate with
+  honesty rules: irregular clocks/random dir stay raw, stalls freeze,
+  transport jumps re-lock) via `useStepFollowers` — render shows the
+  prediction, a rAF loop patches the DOM between polls, NEVER React
+  state (RenderCounts discipline). The deck playhead uses the same
+  pattern inline (`useDeckPlayhead` in DeckPanel.tsx: linear pos+rate
+  from the poll's own fields, scrolls `<g class="waveform-scroll">` /
+  moves playhead lines; `zoomWindow` in WaveformView.ts is the one
+  window law). The LFO lamp is MOTION-BLURRED (`meanLevel` in LfoUI:
+  frame-averaged brightness integral, converges to steady glow at fast
+  rates like a real LED). The App.tsx tapAll poll drops stale (out of
+  order) responses so playheads never step backwards. Pinned by
+  `app/tests/StepFollower.test.ts` + `AntiAliasing.test.tsx`.
 - Rack geometry (frontend): module positions are UNZOOMED rack
   coordinates — any pointer math must divide screen deltas by the rack
   zoom (panel drags in `ModulePanel`, drops in `App.onRackDrop`). All

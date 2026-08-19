@@ -255,6 +255,48 @@ describe('Knob', () => {
     expect(onPosition).not.toHaveBeenCalled();
   });
 
+  it('config menu auto-focuses and selects the Value field on open', () => {
+    render(
+      <Knob
+        label="cv"
+        config={LINEAR}
+        position={0.5}
+        onPosition={() => {}}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'cv' }));
+    const field = screen.getByLabelText('knob value') as HTMLInputElement;
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('config menu Value field keeps the typed text while editing', () => {
+    const onPosition = vi.fn();
+    render(
+      <Knob
+        label="cv"
+        config={LINEAR}
+        position={0.5}
+        onPosition={onPosition}
+        onConfigChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'cv' }));
+    const field = screen.getByLabelText('knob value') as HTMLInputElement;
+    // Clearing the field must stick (not snap back to the knob value) so
+    // the user can retype from empty; the knob itself is untouched.
+    fireEvent.change(field, { target: { value: '' } });
+    expect(field.value).toBe('');
+    expect(onPosition).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: '0' } });
+    expect(field.value).toBe('0');
+    expect(onPosition).toHaveBeenCalledTimes(1);
+    expect(onPosition.mock.lastCall![0]).toBeCloseTo(0);
+    // Blur drops the draft and shows the knob-derived value again.
+    fireEvent.blur(field);
+    expect(field.value).toBe('5');
+  });
+
   it('config menu on a wire-style input has no Value field', () => {
     render(
       <Knob

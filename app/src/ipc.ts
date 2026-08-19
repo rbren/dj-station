@@ -7,6 +7,16 @@ import { reportError } from './errors';
 
 export type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
+declare global {
+  interface Window {
+    /** Dev-only rendering stress harness (src/stress/): when set, every
+     *  IPC command routes to the mock engine instead of Tauri. Checked at
+     *  call time (not construction) because the harness installs after the
+     *  module-level client singletons are created. */
+    __DJ_STRESS_INVOKE__?: Invoke;
+  }
+}
+
 async function tauriInvoke(): Promise<Invoke | null> {
   if (!('__TAURI_INTERNALS__' in window)) return null;
   const { invoke } = await import('@tauri-apps/api/core');
@@ -35,6 +45,8 @@ export class IpcClient {
     opts?: { quiet?: boolean },
   ): Promise<T | null> {
     try {
+      const stress = window.__DJ_STRESS_INVOKE__;
+      if (stress) return (await stress(cmd, args)) as T;
       await this.ready;
       if (!this.invoke) return null;
       return (await this.invoke(cmd, args)) as T;

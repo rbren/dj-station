@@ -9,7 +9,7 @@ import { deck as defaultDeck, type DeckApi, type DeckStatus, type SavedLoop } fr
 import { fixed, safeNumber } from '../format';
 import type { Track } from '../library';
 import type { ModuleHandle } from '../types';
-import { WaveformView } from './WaveformView';
+import { WaveformView, WAVEFORM_VIEW_W, zoomWindow } from './WaveformView';
 
 const WAVEFORM_BUCKETS = 800;
 const POLL_MS = 100;
@@ -42,6 +42,80 @@ function fmtTime(secs: number): string {
   return `${m}:${s.toFixed(1).padStart(4, '0')}`;
 }
 
+/** Between-poll deck playhead extrapolation. The 100 ms status poll
+ *  point-samples a continuously moving transport, so the playhead line
+ *  advances in visible ~100 ms lurches (with poll-jitter irregularity on
+ *  top). The transport is exactly predictable from the poll's own fields
+ *  — position + signed rate while playing — so a rAF loop advances it
+ *  linearly and repaints by direct DOM mutation (never React state: a
+ *  frame must not re-render the panel). Each poll-driven render resets
+ *  the DOM to sampled truth, snapping any accumulated error; seeks,
+ *  loops and cue jumps land within one poll. */
+function useDeckPlayhead(rootRef: { current: HTMLDivElement | null }, status: DeckStatus | null) {
+  const anchor = useRef<{ at: number; status: DeckStatus } | null>(null);
+  // Re-anchor on each FRESH status object (each poll builds a new one) —
+  // keying the effect on `status` identity means unrelated re-renders
+  // never rewind the extrapolation to a stale sample time.
+  useEffect(() => {
+    anchor.current = status ? { at: performance.now(), status } : null;
+  }, [status]);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const root = rootRef.current;
+      const a = anchor.current;
+      if (!root || !a || !a.status.playing) return;
+      const st = a.status;
+      const dur = st.duration_secs;
+      if (!(dur > 0)) return;
+      const dt = (performance.now() - a.at) / 1000;
+      const pos = Math.min(dur, Math.max(0, st.position_secs + dt * st.rate));
+
+      // Overview: move the playhead line (full-track window).
+      const over = root.querySelector<SVGLineElement>('[data-testid="waveform-overview-playhead"]');
+      if (over) {
+        const x = (pos / dur) * WAVEFORM_VIEW_W;
+        over.setAttribute('x1', String(x));
+        over.setAttribute('x2', String(x));
+      }
+
+      // Zoom: the playhead line stays centered (React rendered it inside
+      // the window); scroll the content group under it instead, using
+      // the window the strip actually rendered (data-from/data-to).
+      const zoom = root.querySelector<SVGSVGElement>('[data-testid="waveform-zoom"]');
+      const scroll = zoom?.querySelector<SVGGElement>('.waveform-scroll');
+      if (zoom && scroll) {
+        const renderedFrom = Number(zoom.dataset.from);
+        const renderedTo = Number(zoom.dataset.to);
+        const span = renderedTo - renderedFrom;
+        if (span > 0) {
+          const now = zoomWindow(dur, pos);
+          const dx = ((now.from - renderedFrom) / span) * WAVEFORM_VIEW_W;
+          scroll.setAttribute('transform', `translate(${-dx} 0)`);
+          // Keep the line on the (possibly edge-clamped) position.
+          const line = zoom.querySelector<SVGLineElement>('[data-testid="waveform-zoom-playhead"]');
+          if (line) {
+            const x = ((pos / dur - now.from) / span) * WAVEFORM_VIEW_W;
+            line.setAttribute('x1', String(x));
+            line.setAttribute('x2', String(x));
+          }
+        }
+      }
+
+      // Time readout, at display resolution (0.1 s).
+      const time = root.querySelector<HTMLElement>('[data-testid="deck-time"]');
+      if (time) {
+        const shown = `${fmtTime(pos)} / ${fmtTime(dur)}`;
+        if (time.textContent !== shown) time.textContent = shown;
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [rootRef]);
+}
+
 export function DeckPanel(props: DeckPanelProps) {
   const api = props.api ?? defaultDeck;
   const { instanceId } = props;
@@ -50,6 +124,8 @@ export function DeckPanel(props: DeckPanelProps) {
   const [savedLoops, setSavedLoops] = useState<SavedLoop[]>([]);
   const [loopIn, setLoopIn] = useState<number | null>(null);
   const loadedTrack = useRef<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useDeckPlayhead(rootRef, status);
 
   const refreshMeta = useCallback(async () => {
     const wf = await api.waveform(instanceId, WAVEFORM_BUCKETS);
@@ -114,7 +190,7 @@ export function DeckPanel(props: DeckPanelProps) {
   };
 
   return (
-    <div className="deck-panel" data-testid={`deck-${instanceId}`}>
+    <div className="deck-panel" data-testid={`deck-${instanceId}`} ref={rootRef}>
       <div className="deck-row deck-load-row">
         <select
           data-testid="deck-track-select"

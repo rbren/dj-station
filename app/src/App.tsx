@@ -34,6 +34,7 @@ import {
 } from './rackLayout';
 import {
   createRackStore,
+  DAW_INSTANCE,
   loadJson,
   POSITIONS_KEY,
   RackStoreContext,
@@ -82,6 +83,16 @@ export default function App() {
   const [store] = useState(createRackStore);
   const nodes = useStoreSelector(store, (s) => s.nodes);
   const wires = useStoreSelector(store, (s) => s.wires);
+  // Wires are split between two overlays: rack-internal cables live inside
+  // the pan/zoom transform; cables touching the DAW bar span the column.
+  const rackWires = useMemo(
+    () => wires.filter((w) => w.from_instance !== DAW_INSTANCE && w.to_instance !== DAW_INSTANCE),
+    [wires],
+  );
+  const dawWires = useMemo(
+    () => wires.filter((w) => w.from_instance === DAW_INSTANCE || w.to_instance === DAW_INSTANCE),
+    [wires],
+  );
   const positions = useStoreSelector(store, (s) => s.positions);
   const selected = useStoreSelector(store, (s) => s.selected);
   const pending = useStoreSelector(store, (s) => s.pending);
@@ -114,9 +125,13 @@ export default function App() {
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
-  // The wire overlay's container is the column wrapping the rack AND the
-  // DAW bottom bar, so wires can anchor on bar jacks in both collapsed
-  // and expanded states.
+  // The pan/zoom-transformed rack surface: the wire overlay renders inside
+  // it and measures jacks in rack coordinates, so panning/zooming moves
+  // cables via the CSS transform with no re-measure.
+  const [rackInnerEl, setRackInnerEl] = useState<HTMLDivElement | null>(null);
+  // The column wrapping the rack AND the DAW bottom bar: the overlay's
+  // auxiliary jack root, so wires can anchor on bar jacks in both
+  // collapsed and expanded states.
   const [columnEl, setColumnEl] = useState<HTMLDivElement | null>(null);
   // Marquee select: dragging on the rack background sweeps a rectangle
   // (rack coordinates); on release every module whose rect intersects it
@@ -486,7 +501,11 @@ export default function App() {
 
   const loadNamedPatch = useCallback(
     async (name: string) => {
-      await engine.loadPatchByName(name);
+      // Warnings are non-fatal (e.g. a wire dropped because a newer module
+      // version no longer has the saved jack): the patch still loaded, but
+      // the user should know what got dropped.
+      const warnings = (await engine.loadPatchByName(name)) ?? [];
+      for (const w of warnings) reportError(`load ${name}`, w);
       setPatchName(name);
       await refresh();
     },
@@ -566,13 +585,23 @@ export default function App() {
 
   useEffect(() => {
     if (!connected) return;
+    // Ticks race: each interval fires an independent round-trip, so a slow
+    // response can resolve AFTER a fresher one and step playheads (and the
+    // step-follower extrapolation feeding on them) backwards. Tag requests
+    // and drop any response that isn't the newest in flight.
+    let issued = 0;
+    let applied = 0;
     const timer = setInterval(() => {
+      const seq = ++issued;
       void (async () => {
         try {
           // One batched IPC round-trip per tick for the whole rack; the
           // backend acquires the engine lock once and taps every jack.
           const next = await engine.tapAll();
-          if (next) store.setTelemetry(next);
+          if (next && seq > applied) {
+            applied = seq;
+            store.setTelemetry(next);
+          }
         } catch (err) {
           // A broken meter must never stop the rack from rendering.
           reportError('telemetry', err);
@@ -1389,6 +1418,7 @@ export default function App() {
                 <div
                   className="rack"
                   data-testid="rack"
+                  ref={setRackInnerEl}
                   style={{
                     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                     transformOrigin: '0 0',
@@ -1428,6 +1458,19 @@ export default function App() {
                       }}
                     />
                   )}
+                  {/* Inside the transformed rack, in rack coordinates: pan
+                      and zoom move the cables through the CSS transform, so
+                      they are deliberately NOT part of layoutKey. Wires
+                      touching the DAW bar (outside this transform) are
+                      drawn by the column overlay below instead. */}
+                  <WireOverlay
+                    wires={rackWires}
+                    container={rackInnerEl}
+                    colors={wireColors}
+                    pending={pending && pending.instance !== DAW_INSTANCE ? pending : null}
+                    zoom={zoom}
+                    layoutKey={JSON.stringify(positions)}
+                  />
                 </div>
               </div>
               <DawBar
@@ -1438,11 +1481,15 @@ export default function App() {
                 }
                 onChanged={() => void refresh()}
               />
+              {/* Wires with a DAW-bar end span the untransformed column, so
+                  their rack-side sockets move on screen with pan/zoom —
+                  unlike the rack overlay these few cables re-measure via
+                  layoutKey. */}
               <WireOverlay
-                wires={wires}
+                wires={dawWires}
                 container={columnEl}
                 colors={wireColors}
-                pending={pending}
+                pending={pending && pending.instance === DAW_INSTANCE ? pending : null}
                 layoutKey={`${JSON.stringify(positions)}@${zoom}@${pan.x},${pan.y}`}
               />
             </div>
