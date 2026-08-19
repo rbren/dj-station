@@ -48,13 +48,15 @@ export default function TrigSeqUI({ handle }: { handle: ModuleHandle }) {
   );
   const [lengths, setLengths] = useState<number[]>(() => readLengths(handle));
 
-  // Sync from the engine (panel knobs, wires, patch load).
+  // Sync from the engine (panel knobs, wires, patch load). No dep array:
+  // wired inputs read live telemetry through the handle, and telemetry
+  // ticks re-render without changing the handle's identity.
   useEffect(() => {
     const p = readPatterns(handle);
     const l = readLengths(handle);
     setPatterns((prev) => (same(prev, p) ? prev : p));
     setLengths((prev) => (same(prev, l) ? prev : l));
-  }, [handle]);
+  });
 
   const toggle = (track: number, step: number) => {
     setPatterns((prev) => {

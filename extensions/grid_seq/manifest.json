@@ -1,0 +1,183 @@
+{
+  "id": "com.dj.grid_seq",
+  "name": "Grid Sequencer",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Clock & Sequencing",
+  "inputs": [
+    {
+      "id": "clock",
+      "name": "Clock",
+      "default": 0.0,
+      "knob": {
+        "style": "button",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "reset",
+      "name": "Reset",
+      "default": 0.0,
+      "knob": {
+        "style": "button",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "row1",
+      "name": "Row 1",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "row2",
+      "name": "Row 2",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "row3",
+      "name": "Row 3",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "row4",
+      "name": "Row 4",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "row5",
+      "name": "Row 5",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "row6",
+      "name": "Row 6",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "row7",
+      "name": "Row 7",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "row8",
+      "name": "Row 8",
+      "default": 0.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 65535.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "level",
+      "name": "Level",
+      "default": 10.0,
+      "knob": {
+        "style": "continuous",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "mode",
+      "name": "Mode",
+      "default": 0.0,
+      "knob": {
+        "style": "stepped",
+        "min": 0.0,
+        "max": 1.0,
+        "curve": "linear",
+        "steps": 2
+      },
+      "display": { "steps": ["gate", "scale"] }
+    }
+  ],
+  "outputs": [
+    {
+      "id": "out1",
+      "name": "Out 1"
+    },
+    {
+      "id": "out2",
+      "name": "Out 2"
+    },
+    {
+      "id": "out3",
+      "name": "Out 3"
+    },
+    {
+      "id": "out4",
+      "name": "Out 4"
+    },
+    {
+      "id": "out5",
+      "name": "Out 5"
+    },
+    {
+      "id": "out6",
+      "name": "Out 6"
+    },
+    {
+      "id": "out7",
+      "name": "Out 7"
+    },
+    {
+      "id": "out8",
+      "name": "Out 8"
+    },
+    {
+      "id": "pos",
+      "name": "Position"
+    }
+  ],
+  "ui": "ui.js",
+  "latency_samples": 0
+}

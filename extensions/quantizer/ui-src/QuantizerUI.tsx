@@ -88,7 +88,9 @@ const readState = (handle: ModuleHandle): State => {
 export default function QuantizerUI({ handle }: { handle: ModuleHandle }) {
   const [state, setState] = useState<State>(() => readState(handle));
 
-  // Sync from the engine (panel knobs, wires, patch load).
+  // Sync from the engine (panel knobs, wires, patch load). No dep array:
+  // wired inputs read live telemetry through the handle, and telemetry
+  // ticks re-render without changing the handle's identity.
   useEffect(() => {
     const next = readState(handle);
     setState((prev) =>
@@ -98,7 +100,7 @@ export default function QuantizerUI({ handle }: { handle: ModuleHandle }) {
         ? prev
         : next,
     );
-  }, [handle]);
+  });
 
   const { scale, root, mask } = state;
   // Active mask relative to the root: presets from the table, custom from

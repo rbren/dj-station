@@ -8,28 +8,22 @@
 //! wants it on — is a property of the machine and the moment, not of the
 //! patch.
 //!
-//! The DSP side is a buffered pass-through (`in` -> `thru`), so the panel
-//! can sit inline in a signal chain like the scope does without altering
-//! the audio.
+//! The DSP side is empty — no jacks at all. The module exists purely to
+//! host the panel UI (and the hand-tracking feed it produces).
 
 use dj_module_sdk::{export_module, InitCtx, Module, ProcessIo};
 
 pub struct Camera;
 
 impl Module for Camera {
-    const N_INPUTS: usize = 1;
-    const N_OUTPUTS: usize = 1;
+    const N_INPUTS: usize = 0;
+    const N_OUTPUTS: usize = 0;
 
     fn new(_ctx: &InitCtx) -> Self {
         Camera
     }
 
-    fn process(&mut self, io: &mut ProcessIo) {
-        let n = io.outputs[0].len();
-        for s in 0..n {
-            io.outputs[0][s] = io.inputs[0][s];
-        }
-    }
+    fn process(&mut self, _io: &mut ProcessIo) {}
 }
 
 export_module!(Camera);

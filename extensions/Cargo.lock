@@ -87,6 +87,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-grid-seq"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-lfo"
 version = "0.1.0"
 dependencies = [

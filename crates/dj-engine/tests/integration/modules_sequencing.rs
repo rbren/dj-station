@@ -571,6 +571,126 @@ fn trig_seq_pos_output_counts_clocks() {
 }
 
 // ---------------------------------------------------------------------------
+// Grid sequencer
+// ---------------------------------------------------------------------------
+
+fn grid_engine(bpm: f32) -> Engine {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("grid", "com.dj.grid_seq").unwrap();
+    e.set_knob_value("clk", "bpm", bpm).unwrap();
+    e.connect("clk", "clock", "grid", "clock").unwrap();
+    e
+}
+
+#[test]
+fn grid_seq_rows_gate_on_their_columns_at_10v() {
+    let mut e = grid_engine(240.0); // 0.25 s per column
+                                    // Row 1 on columns 1 and 3; row 2 on column 2 (bit 0 = column 1).
+    e.set_knob_value("grid", "row1", 0b101 as f32).unwrap();
+    e.set_knob_value("grid", "row2", 0b010 as f32).unwrap();
+    probe(&mut e, 0, "grid", "out1");
+    probe(&mut e, 1, "grid", "out2");
+    let out = e.render_offline((1.1 * SR) as usize).unwrap();
+    assert_edges_near(&rising_edges(&out[0]), &[0.0, 0.5], 2, "row 1 columns 1+3");
+    assert_edges_near(&rising_edges(&out[1]), &[0.25], 2, "row 2 column 2");
+    // Default level: on cells read 10 V while the gate window is open.
+    assert_eq!(out[0][(0.005 * SR) as usize], 10.0, "gate level");
+    assert_eq!(out[1][(0.005 * SR) as usize], 0.0, "off cell stays low");
+}
+
+#[test]
+fn grid_seq_level_sets_the_gate_voltage() {
+    let mut e = grid_engine(240.0);
+    e.set_knob_value("grid", "row1", 1.0).unwrap();
+    e.set_knob_value("grid", "level", 6.0).unwrap();
+    probe(&mut e, 0, "grid", "out1");
+    let out = e.render_offline((0.2 * SR) as usize).unwrap();
+    assert!(
+        (out[0][(0.005 * SR) as usize] - 6.0).abs() < 1e-4,
+        "level knob sets the on-cell voltage"
+    );
+}
+
+#[test]
+fn grid_seq_scale_mode_emits_c_major_pitches() {
+    let mut e = grid_engine(240.0);
+    set_stepped(&mut e, "grid", "mode", 1.0); // scale
+                                              // Rows 1 (root C), 3 (E) and 8 (octave C) on column 1.
+    e.set_knob_value("grid", "row1", 1.0).unwrap();
+    e.set_knob_value("grid", "row3", 1.0).unwrap();
+    e.set_knob_value("grid", "row8", 1.0).unwrap();
+    probe(&mut e, 0, "grid", "out3");
+    probe(&mut e, 1, "grid", "out8");
+    let out = e.render_offline((0.2 * SR) as usize).unwrap();
+    let at = (0.005 * SR) as usize;
+    assert!(
+        (out[0][at] - 4.0 / 12.0).abs() < 1e-4,
+        "row 3 = E, 4 semitones up"
+    );
+    assert!((out[1][at] - 1.0).abs() < 1e-4, "row 8 = C an octave up");
+}
+
+#[test]
+fn grid_seq_wraps_at_16_and_reset_rephases() {
+    // 240 BPM x4 = 0.0625 s per column: 1 s per 16-column lap.
+    let mut e = grid_engine(240.0);
+    e.disconnect("clk", "clock", "grid", "clock").unwrap();
+    e.connect("clk", "mul4", "grid", "clock").unwrap();
+    e.set_knob_value("grid", "row1", 1.0).unwrap(); // column 1 only
+    probe(&mut e, 0, "grid", "pos");
+    probe(&mut e, 1, "grid", "out1");
+    let out = e.render_offline((2.1 * SR) as usize).unwrap();
+    // pos counts clocks; out1 fires when pos % 16 == 0, i.e. once per lap
+    // (the wraps at 1 s and 2 s prove the 16-column cycle).
+    assert_edges_near(
+        &rising_edges(&out[1]),
+        &[0.0, 1.0, 2.0],
+        3,
+        "column 1 once per lap",
+    );
+    // Sample pos inside the rail (the probe wire clips at ±10 V).
+    let pos_at = |t: f32| out[0][(t * SR) as usize];
+    assert_eq!(pos_at(0.03), 0.0);
+    assert_eq!(pos_at(0.53), 8.0, "pos counts clocks: column 9 mid-lap");
+}
+
+// ---------------------------------------------------------------------------
+// Step sequencer cvgate output
+// ---------------------------------------------------------------------------
+
+#[test]
+fn step_seq_cvgate_is_cv_anded_with_the_gate() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("seq", "com.dj.step_seq").unwrap();
+    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 0.25 s per step
+    e.connect("clk", "clock", "seq", "clock").unwrap();
+    set_stepped(&mut e, "seq", "length", 4.0);
+    // Steps: cv 2/3/4/5 with gates on/off/on/off.
+    for (i, cv) in [2.0f32, 3.0, 4.0, 5.0].iter().enumerate() {
+        e.set_knob_value("seq", &format!("cv{}", i + 1), *cv)
+            .unwrap();
+        e.set_knob_position(
+            "seq",
+            &format!("gate{}", i + 1),
+            ((i % 2) == 0) as i32 as f32,
+        )
+        .unwrap();
+    }
+    probe(&mut e, 0, "seq", "cvgate");
+    let out = e.render_offline((1.0 * SR) as usize).unwrap();
+    // Gate is high for the first half of each step (the first step's
+    // window is the 20 ms default interval, so sample it early).
+    let at = |t: f32| out[0][(t * SR) as usize];
+    assert!((at(0.005) - 2.0).abs() < 1e-4, "step 1 on: cv passes");
+    assert_eq!(at(0.30), 0.0, "step 2 gated off: 0 V");
+    assert!((at(0.55) - 4.0).abs() < 1e-4, "step 3 on: cv passes");
+    assert_eq!(at(0.80), 0.0, "step 4 gated off: 0 V");
+    assert_eq!(at(0.20), 0.0, "gate low half of an on step: 0 V");
+}
+
+// ---------------------------------------------------------------------------
 // Euclidean generator
 // ---------------------------------------------------------------------------
 

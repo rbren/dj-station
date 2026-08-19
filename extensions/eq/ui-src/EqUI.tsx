@@ -116,11 +116,13 @@ export default function EqUI({ handle }: { handle: ModuleHandle }) {
   } | null>(null);
 
   // Sync from the engine (panel knobs, patch load, wires) unless mid-drag.
+  // No dep array: wired inputs read live telemetry through the handle, and
+  // telemetry ticks re-render without changing the handle's identity.
   useEffect(() => {
     if (drag.current) return;
     const next = readBands(handle);
     setBands((prev) => (sameBands(prev, next) ? prev : next));
-  }, [handle]);
+  });
 
   const apply = useCallback(
     (index: number, next: BandState) => {

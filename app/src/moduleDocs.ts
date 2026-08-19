@@ -479,6 +479,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
         'The active step\u2019s CV value \u2014 through a Quantizer into an ' +
         'oscillator pitch is the classic melody path.',
       gate: 'Gate output (high on active steps, ratcheted).',
+      cvgate:
+        'CV AND gate: the step CV while the gate is high, 0 V otherwise \u2014 a one-wire melody.',
       eos: 'End-of-sequence trigger.',
       step: 'Playhead position as a rising CV \u2014 drive a second module in lockstep.',
     },
@@ -503,6 +505,30 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       pos: 'Current step position as CV.',
     },
     examples: ['trig1/trig2/trig3 -> Drum kick_trig/snare_trig/hat_trig.'],
+  },
+  'com.dj.grid_seq': {
+    summary:
+      '8x16 grid sequencer: click cells on the panel grid to turn them ' +
+      'on/off; when the playhead reaches a column, every on row emits on ' +
+      'its output. In gate mode all rows emit the level voltage (10 V by ' +
+      'default) \u2014 an instant drum machine. In scale mode each row is a ' +
+      'note on a C major scale (row 1 = C4, ascending to the octave), so ' +
+      'the grid becomes a piano-roll melody writer.',
+    inputs: {
+      clock: 'Advances the playhead one column per rising edge.',
+      reset: 'Trigger: back to column 1.',
+      'row#': 'Row # pattern (bitmask driven by the panel grid).',
+      level: 'Output voltage of an on cell in gate mode (default 10 V).',
+      mode: 'gate: rows emit level volts. scale: rows emit C-major pitches, 1 V/oct.',
+    },
+    outputs: {
+      'out#': 'Row #\u2019s output \u2014 level volts (gate) or its scale pitch (scale).',
+      pos: 'Current column position as CV.',
+    },
+    examples: [
+      'Gate mode: out1/out2/out3 -> Drum kick_trig/snare_trig/hat_trig.',
+      'Scale mode: sum rows through a Mult into an Oscillator pitch for grid melodies.',
+    ],
   },
   'com.dj.euclid': {
     summary:
@@ -870,8 +896,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.camera': {
     summary:
       'Live webcam monitor panel. The video preview is pure app-layer ' +
-      '(getUserMedia); audio passes through in -> thru so the panel can sit ' +
-      'inline in the rack. The camera and hand tracking start automatically ' +
+      '(getUserMedia); the module has no jacks — it exists to host the ' +
+      'panel. The camera and hand tracking start automatically ' +
       'when the module loads (per-session, never saved in the patch \u2014 ' +
       'switching either off sticks for the session). Independent of the ' +
       'Gesture module. Hand ' +
@@ -881,8 +907,6 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'inference cost, latency, active delegate) are toggleable. Good for ' +
       'streaming and recorded performances: keep your framing in view, or ' +
       'watch your hands while learning controller moves.',
-    inputs: { in: 'Audio pass-through input.' },
-    outputs: { thru: 'Unchanged copy of in.' },
     examples: ['Drop it anywhere in the rack to keep an eye on yourself while performing.'],
   },
 
@@ -897,6 +921,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       l: 'Left channel to the audio device.',
       r: 'Right channel to the audio device.',
       channel_offset: 'First hardware output channel (pairs), 0..8.',
+      mute: 'Kill switch: while on (>= 1 V), this output mixes nothing to the device.',
     },
     examples: ['Crossfader out_l/out_r -> l/r is the end of every DJ patch.'],
   },
@@ -935,15 +960,19 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'alphanumeric key plus the space bar, arranged like the physical ' +
       'QWERTY rows. Holding a key holds its jack at 10 V; releasing ' +
       'drops it to 0 V (typing into text fields and app shortcuts with ' +
-      'cmd/ctrl are ignored). No hardware needed: trigger envelopes, ' +
-      'drums and sequencer resets straight from the keys under your ' +
-      'fingers.',
+      'cmd/ctrl are ignored). The shared note output turns the keyboard ' +
+      'into a melodic instrument: each key has its own pitch (semitones ' +
+      'ascending left to right, bottom row to top; space is the lowest ' +
+      'note) and the CV holds the last key pressed. No hardware needed: ' +
+      'trigger envelopes, drums and sequencer resets straight from the ' +
+      'keys under your fingers.',
     outputs: {
       '#': 'Gate: 10 V while the number-row key is held.',
       space: 'Gate: 10 V while the space bar is held.',
+      note: 'Pitch CV (1 V/oct) of the last key pressed; holds until the next press.',
     },
     examples: [
-      'space -> ADSR gate for a playable drone: hold to swell, release to fade.',
+      'note -> Oscillator pitch and space -> ADSR gate: play the keyboard like a mono synth.',
       'z/x/c -> drum trig inputs for finger-drumming a beat.',
       'q -> sequencer reset: tap to restart the pattern on the downbeat.',
     ],

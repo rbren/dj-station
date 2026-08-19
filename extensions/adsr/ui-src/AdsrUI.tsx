@@ -71,12 +71,14 @@ export default function AdsrUI({ handle }: { handle: ModuleHandle }) {
     scale: number; // px per second, captured at pointer-down
   } | null>(null);
 
-  // Sync from the engine (panel knobs, patch load) unless mid-drag.
+  // Sync from the engine (panel knobs, patch load, wires) unless mid-drag.
+  // No dep array: wired inputs read live telemetry through the handle, and
+  // telemetry ticks re-render without changing the handle's identity.
   useEffect(() => {
     if (drag.current) return;
     const next = readEnv(handle);
     setEnv((prev) => (sameEnv(prev, next) ? prev : next));
-  }, [handle]);
+  });
 
   const apply = useCallback(
     (next: Env) => {

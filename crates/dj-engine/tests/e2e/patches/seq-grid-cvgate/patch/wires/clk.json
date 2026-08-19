@@ -1,0 +1,34 @@
+{
+  "wires": [
+    {
+      "from_jack": "bar",
+      "to": "grid",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "bar",
+      "to": "gridm",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "bar",
+      "to": "seq",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "clock",
+      "to": "grid",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "clock",
+      "to": "gridm",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "clock",
+      "to": "seq",
+      "to_jack": "clock"
+    }
+  ]
+}

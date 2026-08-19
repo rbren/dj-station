@@ -65,9 +65,5 @@ export function QwertyPanel({ instance, onKey }: QwertyPanelProps) {
     };
   }, []);
 
-  return (
-    <div className="qwerty-panel" data-testid={`qwerty-panel-${instance}`}>
-      hold a key = 10 V gate on its jack
-    </div>
-  );
+  return <div className="qwerty-panel" data-testid={`qwerty-panel-${instance}`} />;
 }

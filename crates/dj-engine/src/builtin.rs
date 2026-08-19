@@ -119,20 +119,36 @@ pub fn audio_out_manifest() -> Manifest {
                 knob: None,
                 display: None,
             })
-            .chain(std::iter::once(JackDecl {
-                id: "channel_offset".into(),
-                name: "Device Channel Offset".into(),
-                default: 0.0,
-                audio: false,
-                knob: Some(KnobConfig {
-                    style: KnobStyle::Stepped,
-                    min: 0.0,
-                    max: 8.0,
-                    curve: Curve::Linear,
-                    steps: Some(9),
-                }),
-                display: None,
-            }))
+            .chain([
+                JackDecl {
+                    id: "channel_offset".into(),
+                    name: "Device Channel Offset".into(),
+                    default: 0.0,
+                    audio: false,
+                    knob: Some(KnobConfig {
+                        style: KnobStyle::Stepped,
+                        min: 0.0,
+                        max: 8.0,
+                        curve: Curve::Linear,
+                        steps: Some(9),
+                    }),
+                    display: None,
+                },
+                JackDecl {
+                    id: "mute".into(),
+                    name: "Mute".into(),
+                    default: 0.0,
+                    audio: false,
+                    knob: Some(KnobConfig {
+                        style: KnobStyle::Switch,
+                        min: 0.0,
+                        max: 10.0,
+                        curve: Curve::Linear,
+                        steps: None,
+                    }),
+                    display: None,
+                },
+            ])
             .collect(),
         outputs: vec![],
         params: vec![],
@@ -192,20 +208,30 @@ pub fn midi_manifest() -> Manifest {
     }
 }
 
+/// Input jack index of the mute switch (after the audio jacks and
+/// `channel_offset`).
+pub const AUDIO_OUT_MUTE_JACK: usize = AUDIO_OUT_CHANNELS + 1;
+
 /// Audio Output: the graph executor mixes this node's effective inputs into
 /// the master bus; the module itself is a no-op.
 pub struct AudioOutModule {
     pub channel_offset: usize,
+    /// Mute switch state (>= 1 V = muted); the graph skips the master mix.
+    pub muted: bool,
 }
 
 impl HostModule for AudioOutModule {
     fn process(&mut self, i: &[Vec<f32>], _o: &mut [Vec<f32>], _m: u64, f: usize) {
-        // channel_offset is an ordinary input jack (knob or wire); the
-        // graph mixes the audio jacks using the value captured here.
+        // channel_offset / mute are ordinary input jacks (knob or wire);
+        // the graph mixes the audio jacks using the values captured here.
+        if f == 0 {
+            return;
+        }
         if let Some(buf) = i.get(AUDIO_OUT_CHANNELS) {
-            if f > 0 {
-                self.channel_offset = (buf[0].round().max(0.0)) as usize;
-            }
+            self.channel_offset = (buf[0].round().max(0.0)) as usize;
+        }
+        if let Some(buf) = i.get(AUDIO_OUT_MUTE_JACK) {
+            self.muted = buf[0] >= 1.0;
         }
     }
 

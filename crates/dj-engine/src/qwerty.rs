@@ -1,7 +1,12 @@
 //! Built-in QWERTY module (`builtin.qwerty`): the computer keyboard as a
 //! gate source. One output jack per alphanumeric key on a standard QWERTY
 //! keyboard plus the space bar, each emitting 10 V while its key is held
-//! and 0 V when released — play patches with no hardware at all.
+//! and 0 V when released — play patches with no hardware at all. A
+//! separate `note` output carries a pitch CV (1 V/oct, engine pitch
+//! convention) for the most recently pressed key: notes ascend in
+//! semitones left to right, bottom row to top row (space is the lowest
+//! note, `0` on the number row the highest), and the value holds until
+//! the next key press (last-note priority, no release action).
 //!
 //! Architecturally the Hands module's sibling with an even simpler event
 //! model: key down/up events originate in the webview (the panel's window
@@ -11,7 +16,7 @@
 //! Sample-accurate within a block; late/past events apply immediately
 //! (same policy as MIDI/gesture/hands).
 
-use crate::manifest::{categories, Manifest, OutputDecl};
+use crate::manifest::{categories, DisplayMap, DisplaySpec, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 
 pub const QWERTY_ID: &str = "builtin.qwerty";
@@ -32,11 +37,33 @@ pub const KEYS: [&str; N_QWERTY_JACKS] = [
 
 pub const N_QWERTY_JACKS: usize = 37;
 
+/// Total output jacks: one gate per key plus the shared `note` pitch CV.
+pub const N_QWERTY_OUTS: usize = N_QWERTY_JACKS + 1;
+
+/// Output jack index of the `note` pitch CV.
+pub const NOTE_JACK: usize = N_QWERTY_JACKS;
+
 /// Output jack index for a key, as sent by the webview (`event.key`,
 /// lowercased). Accepts `" "` or `"space"` for the space bar.
 pub fn key_index(key: &str) -> Option<usize> {
     let key = if key == " " { "space" } else { key };
     KEYS.iter().position(|k| *k == key)
+}
+
+/// Pitch CV (1 V/oct, 0 V = C4) the `note` output takes when `jack`'s key
+/// is pressed. Notes ascend in semitones left to right, bottom to top:
+/// space is C4 (0 V), then z..m, a..l, q..p and finally the number row —
+/// `0` tops out three octaves up.
+pub fn note_volts(jack: usize) -> f32 {
+    // KEYS is ordered top row first; rank rows bottom-up for the pitch.
+    let semitone = match jack {
+        36 => 0,              // space
+        29..=35 => jack - 28, // z..m -> 1..7
+        20..=28 => jack - 12, // a..l -> 8..16
+        10..=19 => jack + 7,  // q..p -> 17..26
+        _ => jack + 27,       // 1..0 -> 27..36
+    };
+    semitone as f32 / 12.0
 }
 
 pub fn qwerty_manifest() -> Manifest {
@@ -58,6 +85,17 @@ pub fn qwerty_manifest() -> Manifest {
                 },
                 display: None,
             })
+            .chain(std::iter::once(OutputDecl {
+                id: "note".into(),
+                name: "Note".into(),
+                display: Some(DisplaySpec {
+                    unit: Some("Hz".into()),
+                    map: Some(DisplayMap::VoltPerOctave {
+                        base: crate::manifest::default_pitch_base(),
+                    }),
+                    steps: None,
+                }),
+            }))
             .collect(),
         params: vec![],
         ui: None,
@@ -76,10 +114,12 @@ pub struct QwertyEvent {
 
 /// RT-side module: pops key events from the SPSC ring and renders each
 /// key's gate output (10 V held, 0 V released; the value persists until
-/// the next transition).
+/// the next transition) plus the `note` pitch CV (last key pressed, held
+/// until the next press).
 pub struct QwertyRtModule {
     consumer: rtrb::Consumer<QwertyEvent>,
     values: [f32; N_QWERTY_JACKS],
+    note: f32,
     frame: u64,
 }
 
@@ -92,6 +132,7 @@ impl QwertyRtModule {
         QwertyRtModule {
             consumer,
             values: [0.0; N_QWERTY_JACKS],
+            note: 0.0,
             frame: start_frame,
         }
     }
@@ -116,6 +157,9 @@ impl HostModule for QwertyRtModule {
                         if (ev.jack as usize) < N_QWERTY_JACKS {
                             self.values[ev.jack as usize] =
                                 if ev.down { KEY_GATE_VOLTS } else { 0.0 };
+                            if ev.down {
+                                self.note = note_volts(ev.jack as usize);
+                            }
                         }
                     }
                     _ => break,
@@ -124,21 +168,29 @@ impl HostModule for QwertyRtModule {
             for (o, out) in outputs.iter_mut().enumerate().take(N_QWERTY_JACKS) {
                 out[s] = self.values[o];
             }
+            if let Some(out) = outputs.get_mut(NOTE_JACK) {
+                out[s] = self.note;
+            }
         }
         self.frame = block_start + frames as u64;
     }
 
     fn save_state(&mut self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(N_QWERTY_JACKS * 4);
+        let mut bytes = Vec::with_capacity((N_QWERTY_JACKS + 1) * 4);
         for v in &self.values {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
+        bytes.extend_from_slice(&self.note.to_le_bytes());
         bytes
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
         for (i, chunk) in bytes.chunks_exact(4).enumerate().take(N_QWERTY_JACKS) {
             self.values[i] = f32::from_le_bytes(chunk.try_into().unwrap());
+        }
+        // `note` was appended to the state blob; older snapshots omit it.
+        if let Some(chunk) = bytes.chunks_exact(4).nth(N_QWERTY_JACKS) {
+            self.note = f32::from_le_bytes(chunk.try_into().unwrap());
         }
     }
 
@@ -154,18 +206,43 @@ mod tests {
     #[test]
     fn manifest_matches_key_table() {
         let m = qwerty_manifest();
-        assert_eq!(m.outputs.len(), N_QWERTY_JACKS);
+        assert_eq!(m.outputs.len(), N_QWERTY_OUTS);
         assert_eq!(m.outputs[0].id, "1");
         assert_eq!(m.outputs[10].id, "q");
         assert_eq!(m.outputs[10].name, "Q");
         assert_eq!(m.outputs[N_QWERTY_JACKS - 1].id, "space");
         assert_eq!(m.outputs[N_QWERTY_JACKS - 1].name, "Space");
+        assert_eq!(m.outputs[NOTE_JACK].id, "note");
         assert!(m.inputs.is_empty());
         // 10 digits + 26 letters + space, each exactly once.
         let mut ids: Vec<&str> = KEYS.to_vec();
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), N_QWERTY_JACKS);
+    }
+
+    #[test]
+    fn note_volts_ascend_left_to_right_bottom_to_top() {
+        // Space is the floor; each row ascends left to right; every row
+        // sits above the row below it. 37 keys = 37 distinct semitones.
+        let semis: Vec<i32> = (0..N_QWERTY_JACKS)
+            .map(|j| (note_volts(j) * 12.0).round() as i32)
+            .collect();
+        assert_eq!(semis[key_index("space").unwrap()], 0);
+        let mut sorted = semis.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), N_QWERTY_JACKS, "notes must be distinct");
+        assert_eq!(sorted, (0..N_QWERTY_JACKS as i32).collect::<Vec<_>>());
+        // Row order: z < m < a < l < q < p < 1 < 0.
+        let s = |k: &str| semis[key_index(k).unwrap()];
+        assert!(s("z") < s("m"));
+        assert!(s("m") < s("a"));
+        assert!(s("a") < s("l"));
+        assert!(s("l") < s("q"));
+        assert!(s("q") < s("p"));
+        assert!(s("p") < s("1"));
+        assert!(s("1") < s("0"));
     }
 
     #[test]

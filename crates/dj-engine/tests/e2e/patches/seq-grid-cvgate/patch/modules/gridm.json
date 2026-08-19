@@ -1,0 +1,66 @@
+{
+  "ext": "com.dj.grid_seq",
+  "knobs": {
+    "clock": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "level": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mode": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row1": {
+      "position": 0.06666667,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row3": {
+      "position": 0.26666668,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row5": {
+      "position": 0.16470589,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row6": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row7": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row8": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

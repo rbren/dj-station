@@ -817,3 +817,26 @@ fn seq_switch_cv_addresses_steps_directly() {
     let tail = render_tail(&mut e, 0.002);
     assert_near(tail[0], 2.0, "6 V of a 2-step range addresses step 2");
 }
+
+// ---------------------------------------------------------------------------
+// Audio Output mute
+// ---------------------------------------------------------------------------
+
+#[test]
+fn audio_out_mute_kills_the_master_mix() {
+    let mut e = probe_engine(2);
+    add_dc(&mut e, "dc", 3.0);
+    probe(&mut e, "dc", "out1", 0);
+
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 3.0, "unmuted output mixes to master");
+
+    // Mute is a switch knob: position 1 = on.
+    e.set_knob_position("probe0", "mute", 1.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 0.0, "muted output mixes nothing");
+
+    e.set_knob_position("probe0", "mute", 0.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 3.0, "unmuting restores the mix");
+}

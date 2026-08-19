@@ -63,10 +63,12 @@ const same = (a: Ring[], b: Ring[]) =>
 export default function EuclidUI({ handle }: { handle: ModuleHandle }) {
   const [rings, setRings] = useState<Ring[]>(() => readRings(handle));
 
+  // No dep array: wired inputs read live telemetry through the handle,
+  // and telemetry ticks re-render without changing the handle's identity.
   useEffect(() => {
     const next = readRings(handle);
     setRings((prev) => (same(prev, next) ? prev : next));
-  }, [handle]);
+  });
 
   return (
     <div className="euclid-ui" data-testid="euclid-ui">

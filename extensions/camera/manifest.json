@@ -5,11 +5,7 @@
   "abi": "wasm-1",
   "category": "Analysis & I/O",
   "ui": "ui.js",
-  "inputs": [
-    { "id": "in", "name": "In", "default": 0.0 }
-  ],
-  "outputs": [
-    { "id": "thru", "name": "Thru" }
-  ],
+  "inputs": [],
+  "outputs": [],
   "latency_samples": 0
 }

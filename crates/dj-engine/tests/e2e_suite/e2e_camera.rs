@@ -2,9 +2,9 @@
 //!
 //! The camera's video feed is pure app-layer (getUserMedia in the panel
 //! UI, ephemeral enablement — nothing camera-related persists in the
-//! patch), so on the DSP side the module is a buffered pass-through:
-//! this case puts it inline between an oscillator and a VCA and asserts
-//! the audio is unchanged by its presence. It also proves the module
+//! patch), so on the DSP side the module is jackless and inert: this
+//! case parks it next to an oscillator -> VCA voice and asserts the
+//! audio is unchanged by its presence. It also proves the module
 //! round-trips through patch save/load like any other node.
 
 use crate::common::e2e::{check_case, regen, write_events, EventsFile};
@@ -21,13 +21,13 @@ fn regen_camera_thru() {
     )
     .unwrap();
 
-    // Osc -> camera (inline pass-through) -> VCA (half gain) -> out.
+    // Osc -> VCA (half gain) -> out, with an inert (jackless) camera
+    // node parked in the rack alongside.
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("cam1", "com.dj.camera").unwrap();
     e.add_module("vca1", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.connect("osc1", "audio", "cam1", "in").unwrap();
-    e.connect("cam1", "thru", "vca1", "in").unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
     e.connect("vca1", "out", "out1", "l").unwrap();
     e.set_knob_position("vca1", "cv", 0.5).unwrap();
 

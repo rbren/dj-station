@@ -297,12 +297,15 @@ impl Graph {
             // Mix audio-out nodes into the master bus (hard clip happens at
             // the device/file boundary, not here).
             if gn.audio_out {
-                let offset = gn
+                let (offset, muted) = gn
                     .module
                     .as_any()
                     .downcast_ref::<AudioOutModule>()
-                    .map(|m| m.channel_offset)
-                    .unwrap_or(0);
+                    .map(|m| (m.channel_offset, m.muted))
+                    .unwrap_or((0, false));
+                if muted {
+                    continue;
+                }
                 // Only the audio jacks mix to master; the trailing
                 // channel_offset input jack is control, not audio.
                 for jack in 0..n_in.min(crate::builtin::AUDIO_OUT_CHANNELS) {

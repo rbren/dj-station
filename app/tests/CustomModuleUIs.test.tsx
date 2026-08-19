@@ -10,6 +10,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import EqUI from '../../extensions/eq/ui-src/EqUI';
 import EuclidUI from '../../extensions/euclid/ui-src/EuclidUI';
+import GridSeqUI from '../../extensions/grid_seq/ui-src/GridSeqUI';
 import LfoUI from '../../extensions/lfo/ui-src/LfoUI';
 import QuantizerUI from '../../extensions/quantizer/ui-src/QuantizerUI';
 import SeqSwitchUI from '../../extensions/seq_switch/ui-src/SeqSwitchUI';
@@ -80,6 +81,51 @@ describe('TrigSeqUI', () => {
     const handle = handleWith({ len1: 16 }, { 'out:pos': -1 });
     const { container } = render(<TrigSeqUI handle={handle} />);
     expect(container.querySelector('.trigseq-cell.playing')).toBeNull();
+  });
+});
+
+describe('GridSeqUI', () => {
+  it('renders an 8x16 grid reflecting the row bitmasks', () => {
+    // row1 = 0b101 -> columns 1 and 3 on.
+    const handle = handleWith({ row1: 5 });
+    render(<GridSeqUI handle={handle} />);
+    expect(screen.getByTestId('gridseq-cell-1-1').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('gridseq-cell-1-2').getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByTestId('gridseq-cell-1-3').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('gridseq-cell-8-16')).toBeTruthy();
+  });
+
+  it('clicking a cell toggles that bit via setParam and ends the edit', () => {
+    const handle = handleWith({ row2: 0 });
+    render(<GridSeqUI handle={handle} />);
+    fireEvent.click(screen.getByTestId('gridseq-cell-2-4'));
+    expect(handle.setParam).toHaveBeenCalledWith('row2', 8); // bit 3
+    expect(handle.endEdit).toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('gridseq-cell-2-4'));
+    expect(handle.setParam).toHaveBeenLastCalledWith('row2', 0);
+  });
+
+  it('lights the playhead column from the pos output, mod 16', () => {
+    const handle = handleWith({}, { 'out:pos': 17 }); // wraps to column 2
+    render(<GridSeqUI handle={handle} />);
+    expect(screen.getByTestId('gridseq-cell-1-2').className).toContain('playing');
+    expect(screen.getByTestId('gridseq-cell-8-2').className).toContain('playing');
+    expect(screen.getByTestId('gridseq-cell-1-1').className).not.toContain('playing');
+  });
+
+  it('shows no playhead before the first clock (pos = -1)', () => {
+    const handle = handleWith({}, { 'out:pos': -1 });
+    const { container } = render(<GridSeqUI handle={handle} />);
+    expect(container.querySelector('.trigseq-cell.playing')).toBeNull();
+  });
+
+  it('labels rows with scale notes in scale mode', () => {
+    const handle = handleWith({ mode: 1 });
+    const { container } = render(<GridSeqUI handle={handle} />);
+    const labels = [...container.querySelectorAll('.trigseq-track-label')].map(
+      (el) => el.textContent,
+    );
+    expect(labels).toEqual(['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C']);
   });
 });
 

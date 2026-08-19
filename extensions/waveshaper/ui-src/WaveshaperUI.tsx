@@ -75,10 +75,12 @@ function transfer(shape: Shape, x: number): number {
 export default function WaveshaperUI({ handle }: { handle: ModuleHandle }) {
   const [shape, setShape] = useState<Shape>(() => readShape(handle));
 
+  // No dep array: wired inputs read live telemetry through the handle,
+  // and telemetry ticks re-render without changing the handle's identity.
   useEffect(() => {
     const next = readShape(handle);
     setShape((prev) => (same(prev, next) ? prev : next));
-  }, [handle]);
+  });
 
   const bias01 = shape.bias / RAIL; // normalized input offset
   const pts: string[] = [];

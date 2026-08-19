@@ -624,6 +624,10 @@
     {
       "id": "step",
       "name": "Step"
+    },
+    {
+      "id": "cvgate",
+      "name": "CV & Gate"
     }
   ],
   "latency_samples": 0

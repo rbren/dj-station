@@ -1,9 +1,9 @@
 {
   "wires": [
     {
-      "from_jack": "audio",
+      "from_jack": "env",
       "to": "vca1",
-      "to_jack": "in"
+      "to_jack": "cv"
     }
   ]
 }

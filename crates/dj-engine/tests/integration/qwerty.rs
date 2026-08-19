@@ -3,7 +3,9 @@
 //! inputs, unknown keys are ignored, and the node round-trips through the
 //! patch directory format.
 
-use dj_engine::qwerty::{key_index, KEYS, KEY_GATE_VOLTS, N_QWERTY_JACKS};
+use dj_engine::qwerty::{
+    key_index, note_volts, KEYS, KEY_GATE_VOLTS, N_QWERTY_JACKS, N_QWERTY_OUTS,
+};
 use dj_engine::Engine;
 
 /// A qwerty node with a scope on a few representative key jacks so gate
@@ -50,6 +52,33 @@ fn key_gates_land_at_wired_inputs() {
 }
 
 #[test]
+fn note_output_holds_last_pressed_key_pitch() {
+    let mut engine = rigged_engine(&["note"]);
+
+    engine.qwerty_key("kb1", 0, "q", true).unwrap();
+    engine.process_blocks(2).unwrap();
+    let q_volts = note_volts(key_index("q").unwrap());
+    assert_eq!(read(&engine, "note"), q_volts);
+
+    // Releasing does NOT clear the note (last-note priority, held CV).
+    engine
+        .qwerty_key("kb1", engine.current_frame(), "q", false)
+        .unwrap();
+    engine.process_blocks(2).unwrap();
+    assert_eq!(read(&engine, "note"), q_volts, "note holds after release");
+
+    // The next press moves the CV.
+    engine
+        .qwerty_key("kb1", engine.current_frame(), " ", true)
+        .unwrap();
+    engine.process_blocks(2).unwrap();
+    assert_eq!(
+        read(&engine, "note"),
+        note_volts(key_index("space").unwrap())
+    );
+}
+
+#[test]
 fn unknown_keys_are_ignored_and_wrong_module_errors() {
     let mut engine = rigged_engine(&[]);
     // Escape/F-keys/etc. are not jacks; the panel forwards everything.
@@ -62,7 +91,7 @@ fn unknown_keys_are_ignored_and_wrong_module_errors() {
 #[test]
 fn manifest_covers_all_alnum_keys_plus_space() {
     let m = dj_engine::qwerty::qwerty_manifest();
-    assert_eq!(m.outputs.len(), N_QWERTY_JACKS);
+    assert_eq!(m.outputs.len(), N_QWERTY_OUTS);
     for c in "abcdefghijklmnopqrstuvwxyz0123456789".chars() {
         assert!(
             key_index(&c.to_string()).is_some(),

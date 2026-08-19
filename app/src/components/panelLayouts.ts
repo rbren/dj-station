@@ -240,6 +240,28 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
+  // The cell grid itself is the custom GridSeqUI; the row bitmask jacks
+  // stay wireable as jack-only cells, level/mode keep their knobs.
+  'com.dj.grid_seq': () => ({
+    groups: [
+      { title: 'transport', inputs: ['clock', 'reset'] },
+      {
+        title: 'row cv',
+        kind: 'grid',
+        columns: 8,
+        inputs: seq('row', 1, 8, { control: 'jack' }).map((c, i) => ({
+          ...c,
+          label: `r${i + 1}`,
+        })),
+      },
+      { title: 'output', inputs: ['level', 'mode'] },
+    ],
+    outputGroups: [
+      { title: 'rows', outputs: seqIds('out', 1, 8), columns: 8 },
+      { outputs: ['pos'] },
+    ],
+  }),
+
   // The step grid itself is the custom TrigSeqUI; the pattern jacks stay
   // wireable as jack-only cells and the lengths keep their knobs.
   'com.dj.trig_seq': () => ({
@@ -597,8 +619,8 @@ const LAYOUTS: Record<string, LayoutFactory> = {
   }),
 
   'com.dj.camera': () => ({
-    groups: [{ inputs: ['in'] }],
-    outputGroups: [{ outputs: ['thru'] }],
+    groups: [],
+    outputGroups: [],
   }),
 
   'com.dj.gain_native': () => ({
@@ -636,7 +658,7 @@ const LAYOUTS: Record<string, LayoutFactory> = {
           { jack: 'r', label: 'R' },
         ],
       },
-      { title: 'device', inputs: [{ jack: 'channel_offset', label: 'chan' }] },
+      { title: 'device', inputs: [{ jack: 'channel_offset', label: 'chan' }, 'mute'] },
     ],
   }),
 
@@ -715,6 +737,7 @@ const LAYOUTS: Record<string, LayoutFactory> = {
       },
       { outputs: ['z', 'x', 'c', 'v', 'b', 'n', 'm'], break: true, indent: 38 },
       { outputs: ['space'], break: true, indent: 110 },
+      { title: 'note', outputs: ['note'], break: true },
     ],
   }),
 };

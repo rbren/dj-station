@@ -8,6 +8,7 @@ import AdsrUI from '../../../extensions/adsr/ui-src/AdsrUI';
 import CameraUI from '../../../extensions/camera/ui-src/CameraUI';
 import EqUI from '../../../extensions/eq/ui-src/EqUI';
 import EuclidUI from '../../../extensions/euclid/ui-src/EuclidUI';
+import GridSeqUI from '../../../extensions/grid_seq/ui-src/GridSeqUI';
 import LfoUI from '../../../extensions/lfo/ui-src/LfoUI';
 import QuantizerUI from '../../../extensions/quantizer/ui-src/QuantizerUI';
 import ScopeUI from '../../../extensions/scope/ui-src/ScopeUI';
@@ -38,6 +39,7 @@ const CUSTOM_UIS: Record<string, ComponentType<{ handle: ModuleHandle; instanceI
   'com.dj.eq': EqUI,
   'com.dj.euclid': EuclidUI,
   'com.dj.filter': FilterUI,
+  'com.dj.grid_seq': GridSeqUI,
   'com.dj.lfo': LfoUI,
   'com.dj.mixer': MixerUI,
   'com.dj.quantizer': QuantizerUI,
@@ -212,7 +214,10 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
 });
 
 /** Custom UIs address inputs and params uniformly through the handle;
- *  input ids resolve to their knob (mapped through the knob config). */
+ *  input ids resolve to their knob (mapped through the knob config). A
+ *  WIRED input reads its live post-blend telemetry instead of the knob
+ *  baseline, so every visual (EQ curve, ADSR envelope, LFO preview...)
+ *  follows the modulation the wire applies, just like the DSP does. */
 function makeHandle(
   node: NodeSnapshot,
   refresh: () => Promise<void>,
@@ -226,10 +231,17 @@ function makeHandle(
       input.knob ?? { style: 'continuous', min: 0, max: 10, curve: 'linear' }
     );
   };
+  const wired = new Set(node.wired_inputs);
   return {
     paramValue: (id) => {
       const cfg = inputKnobConfig(id);
-      if (cfg) return mapPosition(cfg, node.knobs[id]?.position ?? 0);
+      if (cfg) {
+        if (wired.has(id)) {
+          const t = liveTelemetry()?.[id];
+          if (t) return t.display;
+        }
+        return mapPosition(cfg, node.knobs[id]?.position ?? 0);
+      }
       const live = node.params[id];
       if (typeof live === 'number') return live;
       const p = node.manifest.params.find((p) => p.id === id);

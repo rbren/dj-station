@@ -86,10 +86,12 @@ export default function LfoUI({ handle }: { handle: ModuleHandle }) {
   viewRef.current = view;
   const lampRef = useRef<HTMLSpanElement>(null);
 
+  // No dep array: wired inputs read live telemetry through the handle,
+  // and telemetry ticks re-render without changing the handle's identity.
   useEffect(() => {
     const next = readView(handle);
     setView((prev) => (same(prev, next) ? prev : next));
-  }, [handle]);
+  });
 
   // Drive the lamp by mutating a CSS variable directly — no React
   // re-render per frame. Phase accumulates so rate changes speed the

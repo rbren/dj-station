@@ -540,7 +540,10 @@ impl Engine {
     /// Instantiate a module for a node (initial add or hot reload).
     fn instantiate(&self, ext_id: &str, manifest: &Manifest) -> Result<Box<dyn HostModule>> {
         match BuiltinKind::from_ext_id(ext_id) {
-            Some(BuiltinKind::AudioOut) => Ok(Box::new(AudioOutModule { channel_offset: 0 })),
+            Some(BuiltinKind::AudioOut) => Ok(Box::new(AudioOutModule {
+                channel_offset: 0,
+                muted: false,
+            })),
             Some(BuiltinKind::Crossfader) => Ok(Box::new(CrossfaderModule)),
             Some(
                 BuiltinKind::Midi
