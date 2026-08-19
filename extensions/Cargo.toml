@@ -2,8 +2,9 @@
 resolver = "2"
 # Every extension folder is a member; new modules need no edit here.
 # `gain-native` is a standalone workspace (host-target cdylib, own target/).
+# `ui-lib` is TypeScript-only (shared panel helpers), not a crate.
 members = ["*"]
-exclude = ["gain-native", "target"]
+exclude = ["gain-native", "target", "ui-lib"]
 
 [workspace.dependencies]
 dj-module-sdk = { path = "../crates/dj-module-sdk" }
