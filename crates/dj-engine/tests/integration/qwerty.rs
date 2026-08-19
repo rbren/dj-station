@@ -79,6 +79,34 @@ fn note_output_holds_last_pressed_key_pitch() {
 }
 
 #[test]
+fn gate_output_high_while_any_key_held() {
+    let mut engine = rigged_engine(&["gate"]);
+    assert_eq!(read(&engine, "gate"), 0.0);
+
+    // Two keys down: gate rises and stays up until BOTH are released.
+    engine.qwerty_key("kb1", 0, "z", true).unwrap();
+    engine.qwerty_key("kb1", 0, "v", true).unwrap();
+    engine.process_blocks(2).unwrap();
+    assert_eq!(read(&engine, "gate"), KEY_GATE_VOLTS);
+
+    engine
+        .qwerty_key("kb1", engine.current_frame(), "z", false)
+        .unwrap();
+    engine.process_blocks(2).unwrap();
+    assert_eq!(
+        read(&engine, "gate"),
+        KEY_GATE_VOLTS,
+        "gate must hold while another key is still down"
+    );
+
+    engine
+        .qwerty_key("kb1", engine.current_frame(), "v", false)
+        .unwrap();
+    engine.process_blocks(2).unwrap();
+    assert_eq!(read(&engine, "gate"), 0.0, "all keys up: gate falls");
+}
+
+#[test]
 fn unknown_keys_are_ignored_and_wrong_module_errors() {
     let mut engine = rigged_engine(&[]);
     // Escape/F-keys/etc. are not jacks; the panel forwards everything.
