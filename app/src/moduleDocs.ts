@@ -329,7 +329,9 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'the attack without dropping the gate. The standard way to give ' +
       'notes shape: snappy settings make plucks and percussion, slow ones ' +
       'make pads and swells \u2014 aim it at a VCA for loudness or a ' +
-      'filter cutoff for tone.',
+      'filter cutoff for tone. A playhead dot rides the drawn curve while ' +
+      'a gate is open, so you can see which stage the envelope is in; it ' +
+      'dims when the envelope retriggers too fast to follow.',
     inputs: {
       gate: 'Gate input: high (>= 1 V) opens the envelope.',
       retrig: 'Trigger: rising edge restarts the attack phase.',

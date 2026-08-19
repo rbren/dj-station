@@ -280,9 +280,19 @@ fails if it's missing.
   moves playhead lines; `zoomWindow` in WaveformView.ts is the one
   window law). The LFO lamp is MOTION-BLURRED (`meanLevel` in LfoUI:
   frame-averaged brightness integral, converges to steady glow at fast
-  rates like a real LED). The App.tsx tapAll poll drops stale (out of
+  rates like a real LED). The ADSR gate playhead is a third variant
+  (`usePlayhead` in `extensions/adsr/ui-src/AdsrUI.tsx`): envelope
+  segments are milliseconds long, so it REPLAYS the module's stage
+  machine (`stepEnvelope`/`applyGate` mirror `extensions/adsr/src/lib.rs`
+  — change both together) from the observed `gate`/`retrig`
+  `instantaneous` taps, and treats the `out:env` tap as ground truth only
+  for RE-LOCKING (`relock`: a gate pulse shorter than the poll is
+  invisible otherwise), never for per-frame level correction. `is_fast`
+  on `out:env` means no sample can pin the phase — the dot dims instead
+  of lying. The App.tsx tapAll poll drops stale (out of
   order) responses so playheads never step backwards. Pinned by
-  `app/tests/StepFollower.test.ts` + `AntiAliasing.test.tsx`.
+  `app/tests/StepFollower.test.ts` + `AntiAliasing.test.tsx` +
+  `AdsrUI.test.tsx`.
 - Rack geometry (frontend): module positions are UNZOOMED rack
   coordinates — any pointer math must divide screen deltas by the rack
   zoom (panel drags in `ModulePanel`, drops in `App.onRackDrop`). All

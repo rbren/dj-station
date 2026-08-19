@@ -555,10 +555,46 @@ body {
   stroke-width: 1.5;
 }
 
+/* Playhead: the part of the curve already traversed, plus the dot at the
+   live position. Both are moved by the rAF loop in AdsrUI, so they must
+   not carry CSS transitions — a transition would lag the frame updates. */
+.adsr-trail {
+  stroke: #b9f0ff;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-opacity: 0.9;
+  pointer-events: none;
+}
+
+.adsr-playhead {
+  fill: #fff;
+  stroke: #62d0ff;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px rgb(98 208 255 / 95%));
+  pointer-events: none;
+}
+
+/* Retriggering faster than the display bandwidth: the position can't be
+   known, so the dot dims rather than pretending. Dims via fill/stroke
+   opacity, never `opacity` — that is the attribute the rAF loop writes to
+   show and hide the playhead. */
+.adsr-playhead-uncertain {
+  fill-opacity: 0.35;
+  stroke-opacity: 0.35;
+  filter: none;
+}
+
 .adsr-readout {
   font-size: 0.75rem;
   color: #8a93a2;
   padding: 4px 0;
+}
+
+.adsr-stage {
+  float: right;
+  color: #62d0ff;
+  font-variant-numeric: tabular-nums;
 }
 
 /* --- Trigger Sequencer step grid ---------------------------------- */
