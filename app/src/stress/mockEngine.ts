@@ -80,7 +80,7 @@ function makeNodes(n: number): NodeSnapshot[] {
     const manifest = MANIFESTS[i % MANIFESTS.length];
     const knobs: NodeSnapshot['knobs'] = {};
     for (const input of manifest.inputs) {
-      if (input.knob) knobs[input.id] = { position: 0.5, atten: 0, offset: 0 };
+      if (input.knob) knobs[input.id] = { position: 0.5, atten: 0, offset: 0, wire_style: 'cv' };
     }
     return {
       instance_id: `stress-${i}-${manifest.id.replace(/^com\.dj\./, '')}`,

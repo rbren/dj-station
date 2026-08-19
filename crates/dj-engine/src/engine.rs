@@ -698,9 +698,7 @@ impl Engine {
             let position = position_for_value(&cfg, input.default);
             knobs.push(KnobState {
                 position,
-                atten: 1.0,
-                offset: 0.0,
-                config: None,
+                ..KnobState::default()
             });
         }
         let mut params = BTreeMap::new();
@@ -1041,6 +1039,83 @@ impl Engine {
         self.push_knob_rt(node, jack)
     }
 
+    /// Set a wired input's blend mode: CV (signal modulates the knob
+    /// baseline) or Override (signal IS the value, knob inert). Per-patch
+    /// state; the app also sets it automatically at wire time when both
+    /// ends carry a `volt_per_octave` display map (`wire_is_pitch_pair`).
+    pub fn set_knob_wire_style(
+        &mut self,
+        instance_id: &str,
+        jack_id: &str,
+        style: crate::knob::WireStyle,
+    ) -> Result<()> {
+        let (node, jack) = self.in_jack_indices(instance_id, jack_id)?;
+        self.nodes[node].knobs[jack].wire_style = style;
+        self.push_knob_rt(node, jack)
+    }
+
+    /// True when both ends of a prospective wire carry a `volt_per_octave`
+    /// display map — pitch flowing into pitch, the auto-Override case.
+    pub fn wire_is_pitch_pair(
+        &self,
+        from_id: &str,
+        from_jack: &str,
+        to_id: &str,
+        to_jack: &str,
+    ) -> Result<bool> {
+        use crate::manifest::DisplayMap;
+        let is_voct = |d: &Option<crate::manifest::DisplaySpec>| {
+            d.as_ref()
+                .and_then(|d| d.map.as_ref())
+                .is_some_and(|m| matches!(m, DisplayMap::VoltPerOctave { .. }))
+        };
+        let (from_id, from_jack) = self.resolve_out_jack(from_id, from_jack)?;
+        let (to_id, to_jack) = self.resolve_in_jack(to_id, to_jack)?;
+        let from_node = self.node_idx(&from_id)?;
+        let to_node = self.node_idx(&to_id)?;
+        let from_jack = self.out_jack_index(from_node, &from_jack)?;
+        let to_jack = self.jack_index(to_node, &to_jack)?;
+        Ok(
+            is_voct(&self.nodes[from_node].manifest.outputs[from_jack].display)
+                && is_voct(&self.nodes[to_node].manifest.inputs[to_jack].display),
+        )
+    }
+
+    /// Number of wires currently arriving at an input jack.
+    pub fn input_wire_count(&self, instance_id: &str, jack_id: &str) -> Result<usize> {
+        let (node, jack) = self.in_jack_indices(instance_id, jack_id)?;
+        Ok(self
+            .wires
+            .iter()
+            .filter(|w| w.to_node == node && w.to_jack == jack)
+            .count())
+    }
+
+    /// User wire-time auto blend mode (called by the app right after
+    /// `connect`): the FIRST wire into a jack decides — pitch into pitch
+    /// (v/oct on both ends) flips to Override so a keyboard note wire SETS
+    /// the oscillator's pitch, anything else resets to CV so a stale
+    /// Override never captures an LFO. Extra wires sum without touching
+    /// the mode (vibrato on top of a note CV). Patch load and undo restore
+    /// the saved field instead of re-deriving it.
+    pub fn auto_wire_style_on_connect(
+        &mut self,
+        from_id: &str,
+        from_jack: &str,
+        to_id: &str,
+        to_jack: &str,
+    ) -> Result<()> {
+        if self.input_wire_count(to_id, to_jack)? != 1 {
+            return Ok(());
+        }
+        let style = if self.wire_is_pitch_pair(from_id, from_jack, to_id, to_jack)? {
+            crate::knob::WireStyle::Override
+        } else {
+            crate::knob::WireStyle::Cv
+        };
+        self.set_knob_wire_style(to_id, to_jack, style)
+    }
+
     /// Reset one input knob to its default *value*: position back to the
     /// manifest default, wire atten/offset back to `KnobState` defaults.
     /// A per-patch config override (style/range/curve) is a deliberate
@@ -1065,6 +1140,9 @@ impl Engine {
             KnobState {
                 position: position_for_value(&cfg, decl.default),
                 config,
+                // The blend mode belongs to the wire, not the value — a
+                // double-click value reset must not flip Override off.
+                wire_style: self.nodes[node].knobs[jack].wire_style,
                 ..KnobState::default()
             }
         });

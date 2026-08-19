@@ -11,10 +11,16 @@ export interface KnobConfig {
   steps?: number;
 }
 
+/** How a wired input treats the incoming signal (knob.rs docs):
+ *  'cv' (default) blends it with the knob baseline; 'override' makes the
+ *  signal the value (knob inert), clamped to the knob's range. */
+export type WireStyle = 'cv' | 'override';
+
 export interface KnobState {
   position: number;
   atten: number;
   offset: number;
+  wire_style?: WireStyle;
   config?: KnobConfig | null;
 }
 

@@ -255,3 +255,39 @@ fn stale_jacks_from_older_module_versions_load_with_warnings() {
     let clean_reload = Engine::load_patch(dir2.path(), crate::common::registry()).unwrap();
     assert!(clean_reload.load_warnings.is_empty());
 }
+
+/// The Override wire style round-trips through patch save/load, and the
+/// default CV style is omitted from the saved JSON entirely — patches
+/// written before the field existed and patches that never use Override
+/// stay byte-identical to the old format.
+#[test]
+fn wire_style_roundtrips_and_default_is_omitted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
+    engine
+        .set_knob_wire_style("osc1", "pitch", dj_engine::WireStyle::Override)
+        .unwrap();
+    engine.save_patch(dir.path(), "test").unwrap();
+
+    let reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+    let knob = reloaded.knob_state("osc1", "pitch").unwrap();
+    assert_eq!(knob.wire_style, dj_engine::WireStyle::Override);
+
+    // Every other knob defaulted to CV: their files must not mention the
+    // field (old-format compatibility), while osc1's must.
+    let files = snapshot(dir.path());
+    let osc1 = &files["modules/osc1.json"];
+    assert!(
+        osc1.contains("wire_style"),
+        "osc1 saves its override: {osc1}"
+    );
+    for (path, content) in &files {
+        if path != "modules/osc1.json" {
+            assert!(
+                !content.contains("wire_style"),
+                "default CV must serialize to nothing in {path}"
+            );
+        }
+    }
+}

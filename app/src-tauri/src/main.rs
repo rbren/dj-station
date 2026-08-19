@@ -7,7 +7,7 @@
 use dj_engine::{
     Backend, Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle,
     MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroResolution, Manifest, MidiMapKind,
-    PatchDoc, UndoHistory,
+    PatchDoc, UndoHistory, WireStyle,
 };
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
@@ -102,6 +102,7 @@ enum EditKey<'a> {
     KnobConfig(&'a str, &'a str),
     KnobReset(&'a str, &'a str),
     AttenOffset(&'a str, &'a str),
+    WireStyle(&'a str, &'a str),
     ModuleReset(&'a str),
     ModuleResetMany,
     Param(&'a str, &'a str),
@@ -138,6 +139,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::KnobConfig(i, j) => write!(f, "knobcfg:{i}:{j}"),
             EditKey::KnobReset(i, j) => write!(f, "knobreset:{i}:{j}"),
             EditKey::AttenOffset(i, j) => write!(f, "attoff:{i}:{j}"),
+            EditKey::WireStyle(i, j) => write!(f, "wirestyle:{i}:{j}"),
             EditKey::ModuleReset(i) => write!(f, "modreset:{i}"),
             EditKey::ModuleResetMany => write!(f, "modreset_many"),
             EditKey::Param(i, p) => write!(f, "param:{i}:{p}"),
@@ -327,6 +329,7 @@ struct KnobSnapshot {
     position: f32,
     atten: f32,
     offset: f32,
+    wire_style: WireStyle,
     config: Option<KnobConfig>,
 }
 
@@ -484,6 +487,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                             position: k.position,
                             atten: k.atten,
                             offset: k.offset,
+                            wire_style: k.wire_style,
                             config: k.config.clone(),
                         },
                     )
@@ -539,6 +543,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                                     position: k.position,
                                     atten: k.atten,
                                     offset: k.offset,
+                                    wire_style: k.wire_style,
                                     config: k.config.clone(),
                                 },
                             )
@@ -611,8 +616,30 @@ fn connect_wire(
     )?;
     with_stopped(&mut engine, |e| {
         e.connect(&from_instance, &from_jack, &to_instance, &to_jack)
+            .map_err(err)?;
+        // First-wire auto blend mode (pitch pair => Override, else CV);
+        // same undo step as the connect. See the engine method's docs.
+        e.auto_wire_style_on_connect(&from_instance, &from_jack, &to_instance, &to_jack)
             .map_err(err)
     })
+}
+
+#[tauri::command]
+fn set_knob_wire_style(
+    state: State<AppState>,
+    instance: String,
+    jack: String,
+    style: String,
+) -> CmdResult<()> {
+    let style = match style.as_str() {
+        "cv" => WireStyle::Cv,
+        "override" => WireStyle::Override,
+        other => return Err(err(format!("unknown wire style {other:?}"))),
+    };
+    let mut engine = patch_edit(&state, EditKey::WireStyle(&instance, &jack))?;
+    engine
+        .set_knob_wire_style(&instance, &jack, style)
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -2505,6 +2532,7 @@ fn main() {
             set_knob_position,
             set_knob_config,
             set_knob_atten_offset,
+            set_knob_wire_style,
             reset_knob,
             reset_module,
             reset_modules,

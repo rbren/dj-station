@@ -17,6 +17,16 @@
 //!   directly onto the mapped baseline, `knob_value + signal * atten +
 //!   offset`, hard-clipped to the ±10 V rails — audio and gate pass-through
 //!   paths must never be squeezed through a knob range.
+//! - Wired, `wire_style = Override`: the signal IS the value — knob
+//!   position, atten and offset are ignored and the summed wire value is
+//!   clamped to the knob's configured range in VALUE space (never squeezed
+//!   through the curve — a v/oct pitch CV must pass through untouched).
+//!   This is what a pitch wire into a pitch input wants: the keyboard sets
+//!   the note, the knob doesn't add to it. The app flips a jack to
+//!   Override automatically when both wire ends carry a `volt_per_octave`
+//!   display map; the mode is per-patch state a user can change in the
+//!   knob menu. Unwired, an Override jack falls back to its knob value
+//!   like any other jack (the mode only matters while wired).
 //!
 //! Knob config is data, not code. Per-patch overrides are stored in the patch.
 
@@ -153,6 +163,17 @@ impl KnobConfig {
     }
 }
 
+/// How a wired input treats the incoming signal (module docs above).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WireStyle {
+    /// The signal modulates the knob baseline (positional or additive law).
+    #[default]
+    Cv,
+    /// The signal IS the value; the knob is inert while wired.
+    Override,
+}
+
 /// Per-patch, per-input knob state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KnobState {
@@ -162,9 +183,17 @@ pub struct KnobState {
     pub atten: f32,
     /// Offset added to the incoming signal when wired.
     pub offset: f32,
+    /// CV (default) or Override blending while wired. Old patches omit
+    /// the field and load as CV — behavior-identical to before it existed.
+    #[serde(default, skip_serializing_if = "is_default_wire_style")]
+    pub wire_style: WireStyle,
     /// Per-patch config override (None = use the manifest's knob config).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<KnobConfig>,
+}
+
+fn is_default_wire_style(w: &WireStyle) -> bool {
+    *w == WireStyle::Cv
 }
 
 impl Default for KnobState {
@@ -173,6 +202,7 @@ impl Default for KnobState {
             position: 0.0,
             atten: 1.0,
             offset: 0.0,
+            wire_style: WireStyle::Cv,
             config: None,
         }
     }
@@ -280,6 +310,9 @@ pub enum BlendRt {
     Additive,
     /// Knob-backed: `curve(clamp01(base_pos + signal · atten / 10 + offset))`.
     Positional { base_pos: f32, curve: CurveRt },
+    /// The signal IS the value, clamped to the knob's range in value
+    /// space (atten/offset/position ignored) — see the module docs.
+    Override { min: f32, max: f32 },
 }
 
 /// Precomputed RT-side values for one input jack (no allocation on RT path).
@@ -315,7 +348,21 @@ impl JackRt {
         // manifest default; callers set position from the default via
         // `position_for_value` when creating nodes.
         let _ = default;
-        let blend = if plain || cfg.style == KnobStyle::Wire {
+        let blend = if state.wire_style == WireStyle::Override {
+            // Plain jacks have no meaningful configured range (the default
+            // 0..10 would squash bipolar signals) — clamp to the rails.
+            if plain {
+                BlendRt::Override {
+                    min: -10.0,
+                    max: 10.0,
+                }
+            } else {
+                BlendRt::Override {
+                    min: cfg.min.min(cfg.max),
+                    max: cfg.min.max(cfg.max),
+                }
+            }
+        } else if plain || cfg.style == KnobStyle::Wire {
             BlendRt::Additive
         } else {
             BlendRt::Positional {

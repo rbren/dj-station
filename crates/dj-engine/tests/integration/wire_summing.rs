@@ -202,3 +202,144 @@ fn positional_blend_clamps_to_the_knob_travel() {
         "cv is a 0..10 knob: -9 V past the bottom must clamp to 0, not -4: {t:?}"
     );
 }
+
+/// Override wire style: the signal IS the value — knob baseline, atten
+/// and offset are all ignored (a pitch wire sets the note; the knob does
+/// not add to it).
+#[test]
+fn override_wire_style_passes_the_signal_through() {
+    let mut e = crate::common::default_engine();
+    e.add_module("att1", "com.dj.attenuverter").unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.set_knob_value("att1", "offset1", 2.0).unwrap();
+    e.connect("att1", "out1", "osc1", "pitch").unwrap();
+    // A knob baseline and a scaled-down atten that would matter under CV:
+    e.set_knob_value("osc1", "pitch", 1.0).unwrap();
+    e.set_knob_atten_offset("osc1", "pitch", 0.5, 0.3).unwrap();
+    e.set_knob_wire_style("osc1", "pitch", dj_engine::WireStyle::Override)
+        .unwrap();
+    e.render_offline((0.3 * SR) as usize).unwrap();
+    let t = e.tap("osc1", "pitch").unwrap();
+    assert!(
+        (t.display - 2.0).abs() < 1e-3,
+        "override must pass 2 V through untouched (knob/atten/offset ignored): {t:?}"
+    );
+}
+
+/// Override clamps the summed signal to the knob's configured range in
+/// VALUE space — never squeezed through the knob's curve.
+#[test]
+fn override_clamps_to_knob_range_in_value_space() {
+    let mut e = crate::common::default_engine();
+    e.add_module("att1", "com.dj.attenuverter").unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    // pitch knob range is -5..5; drive 8 V at it.
+    e.set_knob_value("att1", "offset1", 8.0).unwrap();
+    e.connect("att1", "out1", "osc1", "pitch").unwrap();
+    e.set_knob_wire_style("osc1", "pitch", dj_engine::WireStyle::Override)
+        .unwrap();
+    e.render_offline((0.3 * SR) as usize).unwrap();
+    let t = e.tap("osc1", "pitch").unwrap();
+    assert!(
+        (t.display - 5.0).abs() < 1e-3,
+        "8 V must clamp to the pitch knob's +5 V max: {t:?}"
+    );
+}
+
+/// Multiple wires into an Override input still sum before the clamp
+/// (note CV + small vibrato works; the clamp guards the extremes).
+#[test]
+fn override_sums_multiple_wires_before_clamping() {
+    let mut e = crate::common::default_engine();
+    e.add_module("att1", "com.dj.attenuverter").unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.set_knob_value("att1", "offset1", 2.0).unwrap();
+    e.set_knob_value("att1", "offset2", 1.0).unwrap();
+    e.connect("att1", "out1", "osc1", "pitch").unwrap();
+    e.connect("att1", "out2", "osc1", "pitch").unwrap();
+    e.set_knob_wire_style("osc1", "pitch", dj_engine::WireStyle::Override)
+        .unwrap();
+    e.render_offline((0.3 * SR) as usize).unwrap();
+    let t = e.tap("osc1", "pitch").unwrap();
+    assert!(
+        (t.display - 3.0).abs() < 1e-3,
+        "override input must sum its wires: {t:?}"
+    );
+}
+
+/// Unwired, an Override jack still reads its knob value — the mode only
+/// matters while a wire is present.
+#[test]
+fn override_unwired_falls_back_to_the_knob() {
+    let mut e = crate::common::default_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.set_knob_value("osc1", "pitch", 1.5).unwrap();
+    e.set_knob_wire_style("osc1", "pitch", dj_engine::WireStyle::Override)
+        .unwrap();
+    e.render_offline((0.3 * SR) as usize).unwrap();
+    let t = e.tap("osc1", "pitch").unwrap();
+    assert!(
+        (t.display - 1.5).abs() < 1e-3,
+        "unwired override jack must read the knob: {t:?}"
+    );
+}
+
+/// `wire_is_pitch_pair`: v/oct output into v/oct input is the auto-
+/// Override case; anything else (LFO into pitch, pitch into a plain CV
+/// input) is not.
+#[test]
+fn pitch_pair_detection_requires_voct_on_both_ends() {
+    let mut e = crate::common::default_engine();
+    e.add_module("kb1", "builtin.qwerty").unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    assert!(e
+        .wire_is_pitch_pair("kb1", "note", "osc1", "pitch")
+        .unwrap());
+    assert!(!e.wire_is_pitch_pair("lfo1", "bi", "osc1", "pitch").unwrap());
+    assert!(!e.wire_is_pitch_pair("kb1", "note", "vca1", "cv").unwrap());
+    assert!(!e.wire_is_pitch_pair("kb1", "z", "osc1", "pitch").unwrap());
+}
+
+/// The wire-time auto mode: the first wire decides (pitch pair =>
+/// Override, anything else => CV, clearing a stale Override); later
+/// wires never touch the mode.
+#[test]
+fn auto_wire_style_first_wire_decides_later_wires_keep_it() {
+    use dj_engine::WireStyle;
+    let mut e = crate::common::default_engine();
+    e.add_module("kb1", "builtin.qwerty").unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+
+    // First wire is pitch into pitch: Override.
+    e.connect("kb1", "note", "osc1", "pitch").unwrap();
+    e.auto_wire_style_on_connect("kb1", "note", "osc1", "pitch")
+        .unwrap();
+    assert_eq!(
+        e.knob_state("osc1", "pitch").unwrap().wire_style,
+        WireStyle::Override
+    );
+
+    // Second wire (vibrato LFO on top) must not flip the mode back.
+    e.connect("lfo1", "bi", "osc1", "pitch").unwrap();
+    e.auto_wire_style_on_connect("lfo1", "bi", "osc1", "pitch")
+        .unwrap();
+    assert_eq!(
+        e.knob_state("osc1", "pitch").unwrap().wire_style,
+        WireStyle::Override
+    );
+
+    // Unplug everything; a fresh first wire from the LFO is plain CV and
+    // must clear the stale Override.
+    e.disconnect("kb1", "note", "osc1", "pitch").unwrap();
+    e.disconnect("lfo1", "bi", "osc1", "pitch").unwrap();
+    e.connect("lfo1", "bi", "osc1", "pitch").unwrap();
+    e.auto_wire_style_on_connect("lfo1", "bi", "osc1", "pitch")
+        .unwrap();
+    assert_eq!(
+        e.knob_state("osc1", "pitch").unwrap().wire_style,
+        WireStyle::Cv
+    );
+}

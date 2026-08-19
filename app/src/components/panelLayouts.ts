@@ -47,6 +47,11 @@ export interface OutputGroupSpec {
   break?: boolean;
   /** Left inset in px (e.g. the QWERTY module's staggered key rows). */
   indent?: number;
+  /** Render as a column beside the module's custom UI instead of in the
+   *  output strip, one jack per UI row (e.g. the grid sequencer's row
+   *  outputs next to their grid rows). Falls back to the strip when the
+   *  panel has no custom UI, so jacks are never lost. */
+  besideUI?: boolean;
 }
 
 export interface PanelLayout {
@@ -268,7 +273,9 @@ const LAYOUTS: Record<string, LayoutFactory> = {
       { title: 'output', inputs: ['level', 'mode'] },
     ],
     outputGroups: [
-      { title: 'rows', outputs: seqIds('out', 1, 8), columns: 8 },
+      // Row outputs sit beside the grid, one jack aligned per grid row
+      // (.gridseq-outputs row pitch mirrors .gridseq-ui in styles.css).
+      { outputs: seqIds('out', 1, 8), besideUI: true },
       { outputs: ['pos'] },
     ],
   }),

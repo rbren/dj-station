@@ -278,6 +278,14 @@ impl Graph {
                                 *x = curve.at(base + *x * scale);
                             }
                         }
+                        // Override: the summed signal IS the value, clamped
+                        // to the knob's range in value space (never mapped
+                        // through the curve — a v/oct CV passes untouched).
+                        BlendRt::Override { min, max } => {
+                            for x in dst.iter_mut().take(frames) {
+                                *x = x.clamp(min, max);
+                            }
+                        }
                     }
                 }
                 self.analyzers[node][jack].update(&self.in_bufs[node][jack][..frames]);

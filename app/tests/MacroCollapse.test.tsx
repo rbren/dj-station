@@ -62,6 +62,7 @@ const fakeEngine = {
   setKnobPosition: vi.fn(async () => {}),
   setKnobConfig: vi.fn(async () => {}),
   setAttenOffset: vi.fn(async () => {}),
+  setKnobWireStyle: vi.fn(async () => {}),
   connectWire: vi.fn(async () => {}),
   disconnectWire: vi.fn(async () => {}),
   currentPatch: vi.fn(async () => 'demo'),

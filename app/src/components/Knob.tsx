@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDisplay, stepLabel } from '../display';
-import type { DisplaySpec, KnobConfig } from '../types';
+import type { DisplaySpec, KnobConfig, WireStyle } from '../types';
 import { KnobConfigMenu } from './KnobConfigMenu';
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -200,6 +200,10 @@ export interface KnobProps {
   atten?: number;
   offset?: number;
   onAttenOffset?(atten: number, offset: number): void;
+  /** Wired blend mode ('cv' default): under 'override' the signal IS the
+   *  value, so the spread arc and cmd-drag wire gesture are suppressed. */
+  wireStyle?: WireStyle;
+  onWireStyle?(style: WireStyle): void;
   /** Layout-chosen control look: default dial, or a slider ('fader'
    *  vertical / 'hfader' horizontal) for mixer-style channels. */
   appearance?: 'fader' | 'hfader';
@@ -284,6 +288,8 @@ export function Knob(props: KnobProps) {
       atten={props.atten}
       offset={props.offset}
       onAttenOffset={onAttenOffset}
+      wireStyle={props.wireStyle}
+      onWireStyle={props.onWireStyle}
       display={display}
     />
   );
@@ -353,10 +359,14 @@ export function Knob(props: KnobProps) {
     );
   }
 
+  // Under override the wire IS the value: the knob baseline and spread are
+  // inert, so the spread arc, cmd-drag gesture and tooltip range all drop.
+  const overridden = !!wired && props.wireStyle === 'override';
+
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
     // cmd/ctrl-drag retargets the gesture at the wire amount.
-    const wire = !!wired && (e.metaKey || e.ctrlKey) && !!onAttenOffset;
+    const wire = !!wired && !overridden && (e.metaKey || e.ctrlKey) && !!onAttenOffset;
     drag.current = {
       startX: e.clientX,
       startY: e.clientY,
@@ -410,7 +420,7 @@ export function Knob(props: KnobProps) {
     );
   }
 
-  const spread = wired ? spreadRange(config, position, atten, offset, plain) : null;
+  const spread = wired && !overridden ? spreadRange(config, position, atten, offset, plain) : null;
   // Arc endpoints in knob-position space: the positional blend already
   // works there; the additive law inverts its value range back.
   const arc = !spread
@@ -428,7 +438,9 @@ export function Knob(props: KnobProps) {
         spread.max,
         config,
       )})`
-    : `${label}: ${shown}`;
+    : overridden
+      ? `${label}: wire sets value`
+      : `${label}: ${shown}`;
   // Stepped selectors with declared labels show the current step inline —
   // the one case where the value beats the tooltip (you can't tell "major"
   // from "dorian" by needle angle).
@@ -449,7 +461,7 @@ export function Knob(props: KnobProps) {
         </svg>
       )}
       <div
-        className="knob-dial"
+        className={`knob-dial${overridden ? ' knob-dial-overridden' : ''}`}
         role="slider"
         aria-label={label}
         aria-valuemin={config.min}

@@ -16,7 +16,14 @@ import {
   type ReactNode,
 } from 'react';
 import { useLiveInstanceTelemetry } from '../rackStore';
-import type { JackTelemetry, KnobConfig, KnobState, Manifest, ModuleHandle } from '../types';
+import type {
+  JackTelemetry,
+  KnobConfig,
+  KnobState,
+  Manifest,
+  ModuleHandle,
+  WireStyle,
+} from '../types';
 import { InputCell } from './InputCell';
 import { LiveJack } from './Jack';
 import { resolveLayout } from './panelLayouts';
@@ -88,6 +95,7 @@ export interface ModulePanelProps {
   onKnobPosition(jackId: string, position: number): void;
   onKnobConfig(jackId: string, config: KnobConfig): void;
   onAttenOffset(jackId: string, atten: number, offset: number): void;
+  onWireStyle?(jackId: string, style: WireStyle): void;
   /** Double-click knob reset to the default value (incl. wire spread). */
   onKnobReset?(jackId: string): void;
 }
@@ -133,6 +141,29 @@ export function ModulePanel(props: ModulePanelProps) {
       : undefined;
   const CustomUI = props.customUI;
   const layout = useMemo(() => resolveLayout(manifest), [manifest]);
+  // besideUI groups render next to the custom UI; without one they fall
+  // back to the strip so jacks are never lost.
+  const besideGroups = CustomUI ? layout.outputGroups.filter((g) => g.besideUI) : [];
+  const stripGroups = CustomUI
+    ? layout.outputGroups.filter((g) => !g.besideUI)
+    : layout.outputGroups;
+  const renderOutputJack = (id: string) => (
+    <LiveJack
+      key={id}
+      instance={instanceId}
+      id={id}
+      kind="output"
+      telemetry={telemetry?.[`out:${id}`]}
+      display={manifest.outputs.find((o) => o.id === id)?.display}
+      selected={
+        pendingSource?.kind === 'output' &&
+        pendingSource.instance === instanceId &&
+        pendingSource.jack === id
+      }
+      selectedColor={pendingColor}
+      onClick={(shift) => props.onJackClick?.('output', id, shift)}
+    />
+  );
   const accent = CATEGORY_ACCENTS[manifest.category ?? ''] ?? '#8a93a2';
   const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(
     null,
@@ -264,9 +295,21 @@ export function ModulePanel(props: ModulePanelProps) {
             </button>
           )}
         </header>
-        {CustomUI && (
-          <CustomUIHost instanceId={instanceId} handle={props.handle} CustomUI={CustomUI} />
-        )}
+        {CustomUI &&
+          (besideGroups.length > 0 ? (
+            // Output jacks aligned row-for-row beside the custom UI (e.g.
+            // the grid sequencer's row outs next to their grid rows).
+            <div className="custom-ui-with-outputs">
+              <CustomUIHost instanceId={instanceId} handle={props.handle} CustomUI={CustomUI} />
+              {besideGroups.map((group, gi) => (
+                <div className="beside-ui-outputs" key={group.title ?? gi}>
+                  {group.outputs.map(renderOutputJack)}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <CustomUIHost instanceId={instanceId} handle={props.handle} CustomUI={CustomUI} />
+          ))}
         {props.extra}
         {layout.groups.length > 0 && (
           <div className="module-inputs">
@@ -341,6 +384,9 @@ export function ModulePanel(props: ModulePanelProps) {
                         onKnobPosition={(p) => props.onKnobPosition(cell.jack, p)}
                         onKnobConfig={(c) => props.onKnobConfig(cell.jack, c)}
                         onAttenOffset={(a, o) => props.onAttenOffset(cell.jack, a, o)}
+                        onWireStyle={
+                          props.onWireStyle ? (s) => props.onWireStyle?.(cell.jack, s) : undefined
+                        }
                         onKnobReset={
                           props.onKnobReset ? () => props.onKnobReset?.(cell.jack) : undefined
                         }

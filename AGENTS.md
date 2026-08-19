@@ -217,7 +217,17 @@ fails if it's missing.
   resampled to a 33-entry table); the TS twin is
   `spreadRange`/`attenOffsetForSpread(…, plain)` in Knob.tsx, `plain`
   derived in InputCell. wire_summing.rs and KnobMath.test.ts pin both
-  laws on both sides — change all four together.
+  laws on both sides — change all four together. Third mode:
+  `WireStyle::Override` (per-jack `KnobState.wire_style`, default `cv`
+  omitted from saved JSON) makes the summed signal the value, clamped
+  to the knob's range in VALUE space (never through the curve; plain
+  jacks clamp to the rails), knob/atten/offset inert. The app auto-picks
+  it for the FIRST wire into a jack when both ends' manifests carry
+  `volt_per_octave` displays (`Engine::auto_wire_style_on_connect`,
+  called by the `connect_wire` command; extra wires never touch the
+  mode) — pitch wires SET the note, an LFO into pitch stays CV. UI:
+  "Wire mode" select in KnobConfigMenu, spread arc/cmd-drag/spread
+  fields suppressed and dial dimmed under override.
 - App save/load lives in the native File menu (Tauri `MenuItemBuilder`
   in `app/src-tauri/src/main.rs`); the frontend listens via
   `onMenuAction` in `src/engine.ts` (menu events re-dispatched as

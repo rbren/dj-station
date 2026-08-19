@@ -4,7 +4,7 @@
 // grids. The label can be hidden and the control swapped for a fader or
 // suppressed entirely ('jack') by the layout.
 
-import type { DisplaySpec, JackTelemetry, KnobConfig, KnobState } from '../types';
+import type { DisplaySpec, JackTelemetry, KnobConfig, KnobState, WireStyle } from '../types';
 import type { CellSpec } from './panelLayouts';
 import { LiveJack } from './Jack';
 import { Knob } from './Knob';
@@ -30,6 +30,7 @@ export interface InputCellProps {
   onKnobPosition(position: number): void;
   onKnobConfig(config: KnobConfig): void;
   onAttenOffset(atten: number, offset: number): void;
+  onWireStyle?(style: WireStyle): void;
   /** Double-click reset to the default value (incl. wire spread). */
   onKnobReset?(): void;
   onEditEnd?(): void;
@@ -74,9 +75,11 @@ export function InputCell(props: InputCellProps) {
           plain={plain}
           atten={state?.atten}
           offset={state?.offset}
+          wireStyle={state?.wire_style}
           onPosition={props.onKnobPosition}
           onConfigChange={props.onKnobConfig}
           onAttenOffset={props.onAttenOffset}
+          onWireStyle={props.onWireStyle}
           onReset={props.onKnobReset}
           onRelease={props.onEditEnd}
         />

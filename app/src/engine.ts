@@ -3,7 +3,7 @@
 // headless.
 
 import { IpcClient } from './ipc';
-import type { JackTelemetry, KnobConfig, Manifest } from './types';
+import type { JackTelemetry, KnobConfig, Manifest, WireStyle } from './types';
 
 /** Subscribe to native File-menu actions ("saved" | "save-as" | "open").
  *  Also listens for `dj-menu` DOM CustomEvents so tests / the dev browser
@@ -43,7 +43,13 @@ export interface NodeSnapshot {
   manifest: Manifest;
   knobs: Record<
     string,
-    { position: number; atten: number; offset: number; config?: KnobConfig | null }
+    {
+      position: number;
+      atten: number;
+      offset: number;
+      wire_style: WireStyle;
+      config?: KnobConfig | null;
+    }
   >;
   params: Record<string, number>;
   wired_inputs: string[];
@@ -191,6 +197,11 @@ export class EngineClient extends IpcClient {
   }
   setAttenOffset(instance: string, jack: string, atten: number, offset: number) {
     return this.call<void>('set_knob_atten_offset', { instance, jack, atten, offset });
+  }
+  /** Wired-input blend mode: 'cv' (signal modulates the knob) or
+   *  'override' (signal IS the value, knob inert while wired). */
+  setKnobWireStyle(instance: string, jack: string, style: WireStyle) {
+    return this.call<void>('set_knob_wire_style', { instance, jack, style });
   }
   /** Double-click knob reset: position to the manifest default, wire
    *  atten/offset back to defaults. */

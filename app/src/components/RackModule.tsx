@@ -209,6 +209,9 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         onAttenOffset={(jack, atten, offset) => {
           void engine.setAttenOffset(instanceId, jack, atten, offset).then(refresh);
         }}
+        onWireStyle={(jack, style) => {
+          void engine.setKnobWireStyle(instanceId, jack, style).then(refresh);
+        }}
         onKnobReset={(jack) => {
           void engine.resetKnob(instanceId, jack).then(refresh);
         }}

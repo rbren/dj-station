@@ -495,6 +495,109 @@ describe('Knob', () => {
     expect(offset).toBeCloseTo(0.15, 5);
   });
 
+  it('override wire mode: no spread arc, inert-knob tooltip, dimmed dial', () => {
+    render(
+      <Knob
+        label="pitch"
+        config={LINEAR}
+        position={0.5}
+        onPosition={() => {}}
+        onAttenOffset={() => {}}
+        wired={true}
+        wireStyle="override"
+        atten={0.4}
+        offset={0}
+      />,
+    );
+    expect(screen.queryByTestId('knob-spread-pitch')).toBeNull();
+    const dial = screen.getByRole('slider', { name: 'pitch' });
+    expect(dial.getAttribute('data-tip')).toBe('pitch: wire sets value');
+    expect(dial.className).toContain('knob-dial-overridden');
+  });
+
+  it('override wire mode: cmd-drag no longer targets the wire amount', () => {
+    const onPosition = vi.fn();
+    const onAttenOffset = vi.fn();
+    render(
+      <Knob
+        label="pitch"
+        config={LINEAR}
+        position={0.5}
+        onPosition={onPosition}
+        onAttenOffset={onAttenOffset}
+        wired={true}
+        wireStyle="override"
+        atten={0.2}
+        offset={0}
+      />,
+    );
+    fireEvent.mouseDown(screen.getByRole('slider', { name: 'pitch' }), {
+      clientY: 100,
+      metaKey: true,
+    });
+    fireEvent.mouseMove(window, { clientY: 70 });
+    fireEvent.mouseUp(window);
+    expect(onAttenOffset).not.toHaveBeenCalled();
+    expect(onPosition).toHaveBeenCalled();
+  });
+
+  it('wired: menu offers the wire mode selector and reports changes', () => {
+    const onWireStyle = vi.fn();
+    render(
+      <Knob
+        label="pitch"
+        config={LINEAR}
+        position={0.5}
+        onPosition={() => {}}
+        onConfigChange={() => {}}
+        onAttenOffset={() => {}}
+        onWireStyle={onWireStyle}
+        wired={true}
+        wireStyle="cv"
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    const select = screen.getByLabelText('wire mode') as HTMLSelectElement;
+    expect(select.value).toBe('cv');
+    fireEvent.change(select, { target: { value: 'override' } });
+    expect(onWireStyle).toHaveBeenCalledWith('override');
+  });
+
+  it('override wire mode: menu hides the (inert) wire spread fields', () => {
+    render(
+      <Knob
+        label="pitch"
+        config={LINEAR}
+        position={0.5}
+        onPosition={() => {}}
+        onConfigChange={() => {}}
+        onAttenOffset={() => {}}
+        onWireStyle={() => {}}
+        wired={true}
+        wireStyle="override"
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    expect((screen.getByLabelText('wire mode') as HTMLSelectElement).value).toBe('override');
+    expect(screen.queryByLabelText('wire spread min')).toBeNull();
+  });
+
+  it('unwired: menu has no wire mode selector', () => {
+    render(
+      <Knob
+        label="pitch"
+        config={LINEAR}
+        position={0}
+        onPosition={() => {}}
+        onConfigChange={() => {}}
+        onWireStyle={() => {}}
+        wired={false}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    expect(screen.queryByLabelText('wire mode')).toBeNull();
+  });
+
   it('unwired: menu has no wire spread controls', () => {
     render(
       <Knob

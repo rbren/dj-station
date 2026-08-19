@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DEFAULT_UNIT, displayNumber, displayToRaw, noteOptions } from '../display';
-import type { CurveName, DisplaySpec, KnobConfig, KnobStyle } from '../types';
+import type { CurveName, DisplaySpec, KnobConfig, KnobStyle, WireStyle } from '../types';
 import { attenOffsetForSpread, mapPosition, positionForValue, spreadRange } from './Knob';
 
 export function KnobConfigMenu({
@@ -26,6 +26,8 @@ export function KnobConfigMenu({
   atten,
   offset,
   onAttenOffset,
+  wireStyle,
+  onWireStyle,
   display,
 }: {
   config: KnobConfig;
@@ -44,6 +46,10 @@ export function KnobConfigMenu({
   atten?: number;
   offset?: number;
   onAttenOffset?(atten: number, offset: number): void;
+  /** Wired blend mode: 'cv' (signal modulates the knob baseline) or
+   *  'override' (signal IS the value — auto-picked for pitch wires). */
+  wireStyle?: WireStyle;
+  onWireStyle?(style: WireStyle): void;
   /** Manifest display spec: the Value field is entered in DISPLAY units
    *  (the same numbers the tooltip shows), converted back through the
    *  spec's map. Hz units additionally get a note picker. */
@@ -229,7 +235,20 @@ export function KnobConfigMenu({
           {curveName === 'custom' && <option value="custom">custom</option>}
         </select>
       </label>
-      {wired && onAttenOffset && (
+      {wired && onWireStyle && (
+        <label>
+          Wire mode
+          <select
+            aria-label="wire mode"
+            value={wireStyle ?? 'cv'}
+            onChange={(e) => onWireStyle(e.target.value as WireStyle)}
+          >
+            <option value="cv">CV (adds to knob)</option>
+            <option value="override">override (sets value)</option>
+          </select>
+        </label>
+      )}
+      {wired && onAttenOffset && wireStyle !== 'override' && (
         <>
           <div className="knob-config-section">Wire spread</div>
           <label>

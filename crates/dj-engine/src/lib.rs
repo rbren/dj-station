@@ -38,7 +38,7 @@ pub use dj_gesture;
 pub use engine::{Backend, Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE};
 pub use gesture::{GestureMappingInfo, GestureState, GESTURE_ID};
 pub use history::UndoHistory;
-pub use knob::{Curve, KnobConfig, KnobState, KnobStyle};
+pub use knob::{Curve, KnobConfig, KnobState, KnobStyle, WireStyle};
 pub use macros::{
     MacroConflict, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroParam, MacroResolution,
 };

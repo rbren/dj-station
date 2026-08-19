@@ -300,6 +300,11 @@ body {
   cursor: ns-resize;
 }
 
+/* Override wire mode: the wire sets the value, the knob is inert. */
+.knob-dial-overridden {
+  opacity: 0.45;
+}
+
 .knob-pointer {
   position: absolute;
   left: 50%;
