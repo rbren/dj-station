@@ -55,6 +55,8 @@ const fakeEngine = {
   listPatches: vi.fn(async () => ['demo', 'live-set']),
   savePatchAs: vi.fn(async () => {}),
   loadPatchByName: vi.fn(async (): Promise<string[]> => []),
+  newPatch: vi.fn(async () => {}),
+  patchDirty: vi.fn(async () => false),
   removeModule: vi.fn(async () => {}),
   endEdit: vi.fn(async () => {}),
 };
@@ -167,6 +169,75 @@ describe('file menu patch save/load', () => {
     await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
     expect(fakeEngine.savePatchAs).not.toHaveBeenCalled();
     expect(fakeEngine.loadPatchByName).not.toHaveBeenCalled();
+  });
+});
+
+describe('unsaved-changes prompt before destructive actions', () => {
+  it('a clean patch skips the prompt: File > New resets immediately', async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+
+    fireMenu('request-new');
+    await waitFor(() => expect(fakeEngine.newPatch).toHaveBeenCalled());
+    expect(screen.queryByTestId('unsaved-dialog')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('untitled'));
+  });
+
+  it('a dirty patch prompts on File > New; Discard proceeds without saving', async () => {
+    fakeEngine.patchDirty.mockResolvedValueOnce(true);
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+
+    fireMenu('request-new');
+    await screen.findByTestId('unsaved-dialog');
+    expect(fakeEngine.newPatch).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('unsaved-discard'));
+    await waitFor(() => expect(fakeEngine.newPatch).toHaveBeenCalled());
+    expect(fakeEngine.savePatchAs).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByTestId('unsaved-dialog')).toBeNull());
+  });
+
+  it('Save in the prompt saves under the current name, then proceeds', async () => {
+    fakeEngine.patchDirty.mockResolvedValueOnce(true);
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+
+    fireMenu('request-new');
+    await screen.findByTestId('unsaved-dialog');
+    fireEvent.click(screen.getByTestId('unsaved-save'));
+    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo'));
+    await waitFor(() => expect(fakeEngine.newPatch).toHaveBeenCalled());
+  });
+
+  it('Cancel in the prompt aborts the destructive action entirely', async () => {
+    fakeEngine.patchDirty.mockResolvedValueOnce(true);
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+
+    fireMenu('request-new');
+    await screen.findByTestId('unsaved-dialog');
+    fireEvent.click(screen.getByTestId('unsaved-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('unsaved-dialog')).toBeNull());
+    expect(fakeEngine.newPatch).not.toHaveBeenCalled();
+    expect(fakeEngine.savePatchAs).not.toHaveBeenCalled();
+  });
+
+  it('opening another patch while dirty prompts, and Discard loads it', async () => {
+    fakeEngine.patchDirty.mockResolvedValueOnce(true);
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+
+    fireMenu('open');
+    fireEvent.click(await screen.findByTestId('file-dialog-patch-live-set'));
+    // The patch picker closes and the prompt takes its place — no load yet.
+    await screen.findByTestId('unsaved-dialog');
+    expect(screen.queryByTestId('file-dialog')).toBeNull();
+    expect(fakeEngine.loadPatchByName).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('unsaved-discard'));
+    await waitFor(() => expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set'));
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('live-set'));
   });
 });
 

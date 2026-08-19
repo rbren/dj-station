@@ -5,7 +5,8 @@
 import { IpcClient } from './ipc';
 import type { JackTelemetry, KnobConfig, Manifest, WireStyle } from './types';
 
-/** Subscribe to native File-menu actions ("saved" | "save-as" | "open").
+/** Subscribe to native File-menu actions
+ *  ("saved" | "save-as" | "open" | "request-new").
  *  Also listens for `dj-menu` DOM CustomEvents so tests / the dev browser
  *  can drive the same paths. Returns an unsubscribe function. */
 export function onMenuAction(cb: (action: string) => void): () => void {
@@ -270,6 +271,11 @@ export class EngineClient extends IpcClient {
   /** File > New Patch: replace the rack with a fresh empty engine. */
   newPatch() {
     return this.call<void>('new_patch');
+  }
+  /** True when the patch has edits since the last save/load/new — i.e. a
+   *  destructive action (New Patch, Open) should prompt to save first. */
+  patchDirty() {
+    return this.call<boolean>('patch_dirty');
   }
   listPatches() {
     return this.call<string[]>('list_patches');

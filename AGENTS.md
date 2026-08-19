@@ -233,7 +233,14 @@ fails if it's missing.
   `onMenuAction` in `src/engine.ts` (menu events re-dispatched as
   `dj-menu` CustomEvents — tests drive the dialogs by firing those).
   Any test that mocks `../src/engine` must also export `onMenuAction`
-  (stub: `() => () => {}`).
+  (stub: `() => () => {}`). Destructive actions (New Patch, opening a
+  patch) are gated by an unsaved-changes prompt: `patch_dirty` compares
+  the live snapshot to `AppState.last_saved` (set by `mark_saved` after
+  every save/load/new/demo — a fixed snapshot name so renames don't
+  count), the native File > New emits `request-new` instead of acting,
+  and `guardUnsaved` in App.tsx shows the Save/Discard/Cancel dialog
+  (`unsaved-dialog` test ids). Engine mocks in tests need
+  `patchDirty: vi.fn(async () => false)`.
 - `rt_safety.rs`'s realtime stress can flake when run in parallel with
   the rest of the workspace on a loaded 4-core host (proc-deadline
   assert); it passes standalone — rerun

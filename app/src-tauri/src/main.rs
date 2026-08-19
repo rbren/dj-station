@@ -26,6 +26,10 @@ struct AppState {
     patch_name: Mutex<String>,
     /// Last autosaved document, to skip disk writes when nothing changed.
     last_autosave: Mutex<Option<PatchDoc>>,
+    /// Snapshot at the last save/load/new — the clean baseline
+    /// `patch_dirty` compares against so destructive actions (New Patch,
+    /// Open) can prompt to save or discard first.
+    last_saved: Mutex<Option<PatchDoc>>,
     /// Watch-folder scanner; kept alive for the app's lifetime.
     _watcher: dj_library::WatchHandle,
     /// Background analysis worker (M3): drains the library queue so
@@ -159,6 +163,25 @@ fn record_edit(state: &State<AppState>, engine: &Engine, key: &EditKey) {
     if let Ok(mut history) = state.history.lock() {
         history.record(&key.to_string(), engine.snapshot("undo"));
     }
+}
+
+/// Record the current engine state as the clean baseline for
+/// [`patch_dirty`]. Call after every save/load/new; a failure to lock is
+/// never allowed to block the operation itself. The snapshot name is fixed
+/// so the comparison ignores patch renames.
+fn mark_saved(state: &State<AppState>, engine: &Engine) {
+    if let Ok(mut last) = state.last_saved.lock() {
+        *last = Some(engine.snapshot("baseline"));
+    }
+}
+
+/// True when the live patch differs from its last saved/loaded/new state,
+/// i.e. a destructive action (New Patch, Open) would lose work.
+#[tauri::command]
+fn patch_dirty(state: State<AppState>) -> CmdResult<bool> {
+    let engine = engine_lock(&state)?;
+    let last = state.last_saved.lock().map_err(err)?;
+    Ok(last.as_ref() != Some(&engine.snapshot("baseline")))
 }
 
 /// Lock the engine with NO undo snapshot: queries, telemetry taps, backend
@@ -1239,8 +1262,11 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     // The wired envelope adds to the cv knob baseline; close the knob so
     // the envelope alone sets the level (default 10 would drone).
     engine.set_knob_value("vca1", "cv", 0.0).map_err(err)?;
-    // Building the demo patch is startup state, not an undoable edit.
+    // Building the demo patch is startup state, not an undoable edit —
+    // and it is the session's clean baseline for the unsaved-changes
+    // prompt.
     state.history.lock().map_err(err)?.clear();
+    mark_saved(&state, &engine);
     eprintln!(
         "[dj-audio] demo patch loaded: MIDI(note 60) -> ADSR(gate) -> VCA(cv), \
          Osc -> VCA -> Out. NOTE: the VCA is gated by MIDI note 60 — without a \
@@ -1455,7 +1481,11 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
 #[tauri::command]
 fn save_patch(state: State<AppState>, dir: String, name: String) -> CmdResult<()> {
     let engine = engine_lock(&state)?;
-    engine.save_patch(&PathBuf::from(dir), &name).map_err(err)
+    engine
+        .save_patch(&PathBuf::from(dir), &name)
+        .map_err(err)?;
+    mark_saved(&state, &engine);
+    Ok(())
 }
 
 /// Patch names double as directory names under `patches_dir()`; keep them
@@ -1479,6 +1509,7 @@ fn save_patch_as(state: State<AppState>, name: String) -> CmdResult<()> {
     engine
         .save_patch(&patches_dir().join(&name), &name)
         .map_err(err)?;
+    mark_saved(&state, &engine);
     *state.patch_name.lock().map_err(err)? = name;
     Ok(())
 }
@@ -1502,6 +1533,7 @@ fn new_patch(state: State<AppState>) -> CmdResult<()> {
         *e = fresh;
         Ok(())
     })?;
+    mark_saved(&state, &engine);
     *state.patch_name.lock().map_err(err)? = "untitled".into();
     Ok(())
 }
@@ -1560,6 +1592,7 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
         apply_deck_metadata(state, &mut engine, &instance)?;
     }
     restart_backend(&mut engine, backend, "patch load")?;
+    mark_saved(state, &engine);
     Ok(engine.load_warnings.clone())
 }
 
@@ -1676,6 +1709,7 @@ fn load_patch(
         apply_deck_metadata(&state, &mut engine, &instance)?;
     }
     restart_backend(&mut engine, backend, "patch load")?;
+    mark_saved(&state, &engine);
     Ok(Vec::new())
 }
 
@@ -2373,6 +2407,7 @@ fn main() {
             hub,
             patch_name: Mutex::new("untitled".into()),
             last_autosave: Mutex::new(None),
+            last_saved: Mutex::new(None),
             _watcher: watcher,
             analysis,
             gesture_feeds: Mutex::new(BTreeMap::new()),
@@ -2508,14 +2543,11 @@ fn main() {
             "file_open" => {
                 let _ = app.emit("dj-menu", "open");
             }
-            // New Patch runs in the backend; the frontend refreshes its
-            // rack (and patch name) on the "new" notification.
+            // New Patch is destructive: hand it to the frontend, which
+            // prompts to save/discard when there are unsaved changes and
+            // then calls the new_patch command itself.
             "file_new" => {
-                if let Err(e) = new_patch(app.state::<AppState>()) {
-                    eprintln!("[dj-station] new patch failed: {e}");
-                } else {
-                    let _ = app.emit("dj-menu", "new");
-                }
+                let _ = app.emit("dj-menu", "request-new");
             }
             _ => {}
         })
@@ -2545,6 +2577,7 @@ fn main() {
             save_patch,
             save_patch_as,
             new_patch,
+            patch_dirty,
             list_patches,
             load_patch_by_name,
             current_patch,

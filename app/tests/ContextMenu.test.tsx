@@ -47,6 +47,7 @@ const fakeEngine = {
   listPatches: vi.fn(async () => ['demo']),
   savePatchAs: vi.fn(async () => {}),
   newPatch: vi.fn(async () => {}),
+  patchDirty: vi.fn(async () => false),
   removeModule: vi.fn(async () => {}),
   removeModules: vi.fn(async () => {}),
   resetModule: vi.fn(async () => {}),

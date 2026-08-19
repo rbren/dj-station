@@ -97,6 +97,9 @@ export default function App() {
   // File-menu dialogs (Save As… / Open Patch…), driven by native menu events.
   const [fileDialog, setFileDialog] = useState<null | 'save-as' | 'open'>(null);
   const [saveAsName, setSaveAsName] = useState('untitled');
+  // Unsaved-changes prompt: a destructive action (New Patch, Open) found
+  // edits since the last save; `proceed` runs it after Save or Discard.
+  const [confirmDiscard, setConfirmDiscard] = useState<null | { proceed: () => void }>(null);
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   const [collapseName, setCollapseName] = useState<string | null>(null);
   // Right-click menu: over a module (instance set) or the rack background.
@@ -523,6 +526,26 @@ export default function App() {
     await afterNewPatch();
   }, [afterNewPatch]);
 
+  // Gate a destructive action (New Patch, loading another patch) behind
+  // the unsaved-changes prompt: when the live patch has edits since the
+  // last save/load/new, ask to save or discard before running it.
+  const guardUnsaved = useCallback((action: () => void) => {
+    void engine.patchDirty().then((dirty) => {
+      if (dirty) setConfirmDiscard({ proceed: action });
+      else action();
+    });
+  }, []);
+
+  const requestNewPatch = useCallback(
+    () => guardUnsaved(() => void newPatch()),
+    [guardUnsaved, newPatch],
+  );
+
+  const requestLoadPatch = useCallback(
+    (name: string) => guardUnsaved(() => void loadNamedPatch(name)),
+    [guardUnsaved, loadNamedPatch],
+  );
+
   const openSaveAsDialog = useCallback(() => {
     setSaveAsName(patchName);
     setFileDialog('save-as');
@@ -533,8 +556,9 @@ export default function App() {
     setFileDialog('open');
   }, []);
 
-  // Native File menu (New/Save handled fully in the backend; Save As /
-  // Open open in-app dialogs). Tests drive this via `dj-menu` CustomEvents.
+  // Native File menu (Save is handled fully in the backend; Save As /
+  // Open open in-app dialogs; New asks the frontend so the unsaved-changes
+  // prompt can run first). Tests drive this via `dj-menu` CustomEvents.
   useEffect(
     () =>
       onMenuAction((action) => {
@@ -543,15 +567,15 @@ export default function App() {
             if (n) setPatchName(n);
           });
           void engine.listPatches().then((l) => setPatchList(l ?? []));
-        } else if (action === 'new') {
-          void afterNewPatch();
+        } else if (action === 'request-new') {
+          requestNewPatch();
         } else if (action === 'save-as') {
           openSaveAsDialog();
         } else if (action === 'open') {
           openOpenDialog();
         }
       }),
-    [afterNewPatch, openSaveAsDialog, openOpenDialog],
+    [requestNewPatch, openSaveAsDialog, openOpenDialog],
   );
 
   // The File menu as context-menu items: the rack-background right-click
@@ -559,12 +583,12 @@ export default function App() {
   // the native File menu triggers, so the two menus stay in sync.
   const fileMenuItems = useMemo<ContextMenuItem[]>(
     () => [
-      { label: 'New Patch', testId: 'ctx-new-patch', onSelect: () => void newPatch() },
+      { label: 'New Patch', testId: 'ctx-new-patch', onSelect: requestNewPatch },
       { label: 'Save Patch', testId: 'ctx-save', onSelect: () => void savePatch() },
       { label: 'Save Patch As…', testId: 'ctx-save-as', onSelect: openSaveAsDialog },
       { label: 'Open Patch…', testId: 'ctx-open', onSelect: openOpenDialog },
     ],
-    [newPatch, savePatch, openSaveAsDialog, openOpenDialog],
+    [requestNewPatch, savePatch, openSaveAsDialog, openOpenDialog],
   );
 
   useEffect(() => {
@@ -1307,8 +1331,8 @@ export default function App() {
                       <button
                         data-testid={`file-dialog-patch-${n}`}
                         onClick={() => {
-                          void loadNamedPatch(n);
                           setFileDialog(null);
+                          requestLoadPatch(n);
                         }}
                       >
                         {n}
@@ -1322,6 +1346,47 @@ export default function App() {
               className="file-dialog-cancel"
               data-testid="file-dialog-cancel"
               onClick={() => setFileDialog(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {confirmDiscard && (
+        <div
+          className="file-dialog-backdrop"
+          data-testid="unsaved-dialog"
+          onClick={() => setConfirmDiscard(null)}
+        >
+          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Unsaved Changes</h3>
+            <p className="file-dialog-empty">
+              “{patchName}” has unsaved changes. Save them before continuing?
+            </p>
+            <button
+              data-testid="unsaved-save"
+              onClick={() => {
+                const { proceed } = confirmDiscard;
+                setConfirmDiscard(null);
+                void savePatch().then(proceed);
+              }}
+            >
+              Save
+            </button>
+            <button
+              data-testid="unsaved-discard"
+              onClick={() => {
+                const { proceed } = confirmDiscard;
+                setConfirmDiscard(null);
+                proceed();
+              }}
+            >
+              Discard
+            </button>
+            <button
+              className="file-dialog-cancel"
+              data-testid="unsaved-cancel"
+              onClick={() => setConfirmDiscard(null)}
             >
               Cancel
             </button>
