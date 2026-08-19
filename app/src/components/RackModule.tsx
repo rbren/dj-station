@@ -5,56 +5,19 @@
 // subscribe to their own readings (LiveJack / CustomUIHost). Wrapped in
 // React.memo with stable callback props from App.
 
-import { memo, useContext, useMemo, type ComponentType } from 'react';
-import AdsrUI from '../../../extensions/adsr/ui-src/AdsrUI';
-import CameraUI from '../../../extensions/camera/ui-src/CameraUI';
-import EqUI from '../../../extensions/eq/ui-src/EqUI';
-import EuclidUI from '../../../extensions/euclid/ui-src/EuclidUI';
-import GridSeqUI from '../../../extensions/grid_seq/ui-src/GridSeqUI';
-import LfoUI from '../../../extensions/lfo/ui-src/LfoUI';
-import QuantizerUI from '../../../extensions/quantizer/ui-src/QuantizerUI';
-import ScopeUI from '../../../extensions/scope/ui-src/ScopeUI';
-import SeqSwitchUI from '../../../extensions/seq_switch/ui-src/SeqSwitchUI';
-import StepSeqUI from '../../../extensions/step_seq/ui-src/StepSeqUI';
-import TrigSeqUI from '../../../extensions/trig_seq/ui-src/TrigSeqUI';
-import TuringUI from '../../../extensions/turing/ui-src/TuringUI';
-import WaveshaperUI from '../../../extensions/waveshaper/ui-src/WaveshaperUI';
+import { memo, useContext, useMemo } from 'react';
 import { engine, type NodeSnapshot } from '../engine';
 import { defaultPosition, panelStyle } from '../rackLayout';
 import { RackStoreContext, useRackSelector } from '../rackStore';
 import type { JackTelemetry, KnobConfig, ModuleHandle } from '../types';
 import { ChoreoPanel } from './ChoreoPanel';
-import { DeckCustomUI } from './DeckPanel';
+import { CUSTOM_UIS } from './customUIs';
 import { ErrorBoundary } from './ErrorBoundary';
 import { GesturePanel } from './GesturePanel';
-import { CompressorUI, FilterUI, MixerUI, VcaDualUI, VcaUI } from './LevelMeter';
 import { MidiPanel } from './MidiPanel';
 import { ModulePanel } from './ModulePanel';
 import { QwertyPanel } from './QwertyPanel';
 import { mapPosition, positionForValue } from './Knob';
-
-/** Module types with a host-registered custom UI (PRD §5.3). */
-const CUSTOM_UIS: Record<string, ComponentType<{ handle: ModuleHandle; instanceId?: string }>> = {
-  'com.dj.adsr': AdsrUI,
-  'com.dj.camera': CameraUI,
-  'com.dj.compressor': CompressorUI,
-  'com.dj.eq': EqUI,
-  'com.dj.euclid': EuclidUI,
-  'com.dj.filter': FilterUI,
-  'com.dj.grid_seq': GridSeqUI,
-  'com.dj.lfo': LfoUI,
-  'com.dj.mixer': MixerUI,
-  'com.dj.quantizer': QuantizerUI,
-  'com.dj.scope': ScopeUI,
-  'com.dj.seq_switch': SeqSwitchUI,
-  'com.dj.step_seq': StepSeqUI,
-  'com.dj.trig_seq': TrigSeqUI,
-  'com.dj.turing': TuringUI,
-  'com.dj.vca': VcaUI,
-  'com.dj.vca_dual': VcaDualUI,
-  'com.dj.waveshaper': WaveshaperUI,
-  'builtin.deck': DeckCustomUI,
-};
 
 export interface RackModuleProps {
   instanceId: string;

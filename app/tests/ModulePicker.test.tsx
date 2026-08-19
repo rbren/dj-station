@@ -72,6 +72,46 @@ describe('ModulePicker', () => {
     expect(screen.getByTestId('knob-pitch')).toBeTruthy();
   });
 
+  it('previews render the module custom UI against an inert handle', () => {
+    const lfo: Manifest = {
+      id: 'com.dj.lfo',
+      name: 'LFO',
+      version: '0.1.0',
+      abi: 'wasm-1',
+      category: 'Modulation',
+      inputs: [
+        {
+          id: 'rate',
+          name: 'Rate',
+          default: 2,
+          knob: { style: 'continuous', min: 0.01, max: 2000, curve: 'exp' },
+        },
+      ],
+      outputs: [{ id: 'bi', name: 'Bipolar' }],
+      params: [],
+    };
+    render(<ModulePicker modules={[lfo]} onAdd={vi.fn()} onClose={vi.fn()} />);
+    // The LFO's shape preview (its recognizable face) is in the preview.
+    expect(screen.getByTestId('lfo-ui')).toBeTruthy();
+  });
+
+  it('preview-unsafe custom UIs (camera, deck) fall back to the bare panel', () => {
+    const camera: Manifest = {
+      id: 'com.dj.camera',
+      name: 'Camera',
+      version: '0.1.0',
+      abi: 'wasm-1',
+      category: 'Analysis & I/O',
+      inputs: [{ id: 'in', name: 'In' }],
+      outputs: [{ id: 'thru', name: 'Thru' }],
+      params: [],
+    };
+    render(<ModulePicker modules={[camera]} onAdd={vi.fn()} onClose={vi.fn()} />);
+    // No getUserMedia grab from a gallery preview: the custom UI is absent.
+    expect(screen.queryByTestId('camera-ui')).toBeNull();
+    expect(screen.getByTestId('module-preview-com.dj.camera')).toBeTruthy();
+  });
+
   it('clicking an entry requests that module type', () => {
     const { onAdd } = renderPicker();
     fireEvent.click(screen.getByTestId('library-add-com.dj.oscillator'));

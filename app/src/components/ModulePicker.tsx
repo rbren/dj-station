@@ -7,7 +7,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { KnobState, Manifest, ModuleHandle } from '../types';
-import { positionForValue } from './Knob';
+import { previewUI } from './customUIs';
+import { ErrorBoundary } from './ErrorBoundary';
+import { mapPosition, positionForValue } from './Knob';
 import { ModulePanel } from './ModulePanel';
 
 /** dataTransfer type used when dragging a module out of the picker. */
@@ -75,11 +77,15 @@ export function nextInstanceId(typeId: string, taken: Set<string>): string {
 
 const noop = () => {};
 
-/** Inert handle for preview panels: params read their manifest defaults,
- *  taps read silence, nothing writes to the engine. */
+/** Inert handle for preview panels: knob-backed inputs and params read
+ *  their manifest defaults (custom UIs resolve both through paramValue,
+ *  like the live handle in RackModule), taps read silence, nothing
+ *  writes to the engine. */
 function previewHandle(m: Manifest): ModuleHandle {
   return {
     paramValue: (id) => {
+      const input = m.inputs.find((i) => i.id === id);
+      if (input?.knob) return input.default ?? mapPosition(input.knob, 0);
       const d = m.params.find((p) => p.id === id)?.default;
       return typeof d === 'boolean' ? (d ? 1 : 0) : (d ?? 0);
     },
@@ -136,19 +142,23 @@ function PickerEntry({ m, onAdd, onDragging }: PickerEntryProps) {
     >
       <div className="picker-preview">
         <div className="picker-preview-panel" style={{ transform: `scale(${PICKER_SCALE})` }}>
-          {/* Custom UIs are deliberately NOT rendered in previews: several
-              poll the live engine or grab hardware (camera). The base panel
-              (jacks, knobs, layout) is the recognizable silhouette. */}
-          <ModulePanel
-            instanceId={`preview-${m.id}`}
-            manifest={m}
-            knobs={previewKnobs(m)}
-            wired={{}}
-            handle={previewHandle(m)}
-            onKnobPosition={noop}
-            onKnobConfig={noop}
-            onAttenOffset={noop}
-          />
+          {/* The custom UI (when preview-safe — see customUIs.ts) is the
+              module's most recognizable face, so previews render it against
+              the inert handle. A preview crash degrades to just the caption,
+              never takes the gallery down. */}
+          <ErrorBoundary context={`preview ${m.id}`} fallback={() => null}>
+            <ModulePanel
+              instanceId={`preview-${m.id}`}
+              manifest={m}
+              knobs={previewKnobs(m)}
+              wired={{}}
+              handle={previewHandle(m)}
+              customUI={previewUI(m.id)}
+              onKnobPosition={noop}
+              onKnobConfig={noop}
+              onAttenOffset={noop}
+            />
+          </ErrorBoundary>
         </div>
       </div>
       <div className="picker-entry-caption">
