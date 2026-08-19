@@ -11,6 +11,7 @@
 
 pub mod builtin;
 pub mod choreo;
+pub mod daw;
 pub mod deck;
 pub mod engine;
 pub mod gesture;

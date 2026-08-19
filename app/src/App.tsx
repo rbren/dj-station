@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { engine, onMenuAction } from './engine';
 import { library, type Track } from './library';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
+import { DawBar, type DawApi } from './components/DawBar';
 import { DeckUIContext } from './components/DeckPanel';
 import { DocsPanel } from './components/DocsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
@@ -113,6 +114,10 @@ export default function App() {
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
+  // The wire overlay's container is the column wrapping the rack AND the
+  // DAW bottom bar, so wires can anchor on bar jacks in both collapsed
+  // and expanded states.
+  const [columnEl, setColumnEl] = useState<HTMLDivElement | null>(null);
   // Marquee select: dragging on the rack background sweeps a rectangle
   // (rack coordinates); on release every module whose rect intersects it
   // joins the selection (replacing it, or adding with shift/cmd/ctrl).
@@ -1064,6 +1069,28 @@ export default function App() {
     [store, setPositions, setPending, refresh],
   );
 
+  // Stable IPC adapter for the DAW bottom bar (the ChoreoApi pattern).
+  const dawApi = useMemo<DawApi>(
+    () => ({
+      status: () => engine.dawStatus(),
+      addTrack: (n, k, s) => engine.dawAddTrack(n, k, s),
+      removeTrack: (t) => engine.dawRemoveTrack(t),
+      renameTrack: (t, n) => engine.dawRenameTrack(t, n),
+      moveTrack: (f, t) => engine.dawMoveTrack(f, t),
+      importClip: (t, p) => engine.dawImportClip(t, p),
+      clearClip: (t) => engine.dawClearClip(t),
+      play: () => engine.dawPlay(),
+      stop: () => engine.dawStop(),
+      seek: (f) => engine.dawSeek(f),
+      recordStart: (t, s) => engine.dawRecordStart(t, s),
+      recordStop: () => engine.dawRecordStop(),
+      recordCancel: () => engine.dawRecordCancel(),
+      clipPeaks: (t, b) => engine.dawClipPeaks(t, b),
+      endEdit: () => engine.endEdit(),
+    }),
+    [],
+  );
+
   // Shared state for DeckPanel custom UIs (track list, sync candidates,
   // play_gate control) — via context so the panel component stays stable
   // across renders.
@@ -1321,84 +1348,94 @@ export default function App() {
       <div className="app-body" style={view === 'rack' ? undefined : { display: 'none' }}>
         <RackStoreContext.Provider value={store}>
           <DeckUIContext.Provider value={deckUI}>
-            <div
-              className="rack-area"
-              ref={setRackEl}
-              data-testid="rack-area"
-              style={{
-                backgroundPosition: `${pan.x}px ${pan.y}px`,
-                backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
-              }}
-              onDragOver={onRackDragOver}
-              onDrop={onRackDrop}
-              onContextMenu={onRackContextMenu}
-              onMouseDown={(e) => {
-                // Pressing the rack background abandons a pending wire,
-                // clears the selection (unless shift/cmd/ctrl — additive
-                // marquee), and arms a marquee sweep. Mousedown, not click:
-                // selection happens on mousedown too, and the synthetic
-                // click a module drag fires on the rack (mouseup landing
-                // over the background) must not wipe the drag's own
-                // selection.
-                if (e.button !== 0) return;
-                if ((e.target as HTMLElement).closest?.('.module-panel')) return;
-                // The sweep must never double as a native text-selection
-                // drag (a text selection hijacks cmd+C).
-                e.preventDefault();
-                const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-                const { pending, selected } = store.getState();
-                if (pending) setPending(null);
-                if (!additive && selected.length > 0) setSelected([]);
-                const p = toRackCoords(e.clientX, e.clientY);
-                setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
-              }}
-            >
+            <div className="rack-column" ref={setColumnEl} data-testid="rack-column">
               <div
-                className="rack"
-                data-testid="rack"
+                className="rack-area"
+                ref={setRackEl}
+                data-testid="rack-area"
                 style={{
-                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                  transformOrigin: '0 0',
+                  backgroundPosition: `${pan.x}px ${pan.y}px`,
+                  backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
+                }}
+                onDragOver={onRackDragOver}
+                onDrop={onRackDrop}
+                onContextMenu={onRackContextMenu}
+                onMouseDown={(e) => {
+                  // Pressing the rack background abandons a pending wire,
+                  // clears the selection (unless shift/cmd/ctrl — additive
+                  // marquee), and arms a marquee sweep. Mousedown, not click:
+                  // selection happens on mousedown too, and the synthetic
+                  // click a module drag fires on the rack (mouseup landing
+                  // over the background) must not wipe the drag's own
+                  // selection.
+                  if (e.button !== 0) return;
+                  if ((e.target as HTMLElement).closest?.('.module-panel')) return;
+                  // The sweep must never double as a native text-selection
+                  // drag (a text selection hijacks cmd+C).
+                  e.preventDefault();
+                  const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+                  const { pending, selected } = store.getState();
+                  if (pending) setPending(null);
+                  if (!additive && selected.length > 0) setSelected([]);
+                  const p = toRackCoords(e.clientX, e.clientY);
+                  setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
                 }}
               >
-                {nodes.map((node, i) => (
-                  <RackModule
-                    key={node.instance_id}
-                    instanceId={node.instance_id}
-                    index={i}
-                    refresh={refresh}
-                    moveModule={moveModule}
-                    endModuleDrag={endModuleDrag}
-                    zoom={zoom}
-                    removeModule={removeModule}
-                    openDocs={openDocs}
-                    selectModule={selectModule}
-                    onJackClick={onJackClick}
-                    onContextMenu={onModuleContextMenu}
-                  />
-                ))}
-                {nodes.length === 0 && (
-                  <p className="rack-empty">
-                    No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
-                    rack.
-                  </p>
-                )}
-                {marquee && (
-                  <div
-                    className="marquee"
-                    data-testid="marquee"
-                    style={{
-                      left: Math.min(marquee.x0, marquee.x1),
-                      top: Math.min(marquee.y0, marquee.y1),
-                      width: Math.abs(marquee.x1 - marquee.x0),
-                      height: Math.abs(marquee.y1 - marquee.y0),
-                    }}
-                  />
-                )}
+                <div
+                  className="rack"
+                  data-testid="rack"
+                  style={{
+                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                    transformOrigin: '0 0',
+                  }}
+                >
+                  {nodes.map((node, i) => (
+                    <RackModule
+                      key={node.instance_id}
+                      instanceId={node.instance_id}
+                      index={i}
+                      refresh={refresh}
+                      moveModule={moveModule}
+                      endModuleDrag={endModuleDrag}
+                      zoom={zoom}
+                      removeModule={removeModule}
+                      openDocs={openDocs}
+                      selectModule={selectModule}
+                      onJackClick={onJackClick}
+                      onContextMenu={onModuleContextMenu}
+                    />
+                  ))}
+                  {nodes.length === 0 && (
+                    <p className="rack-empty">
+                      No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
+                      rack.
+                    </p>
+                  )}
+                  {marquee && (
+                    <div
+                      className="marquee"
+                      data-testid="marquee"
+                      style={{
+                        left: Math.min(marquee.x0, marquee.x1),
+                        top: Math.min(marquee.y0, marquee.y1),
+                        width: Math.abs(marquee.x1 - marquee.x0),
+                        height: Math.abs(marquee.y1 - marquee.y0),
+                      }}
+                    />
+                  )}
+                </div>
               </div>
+              <DawBar
+                api={dawApi}
+                libraryTracks={libraryTracks}
+                onJackClick={(instance, kind, jack, shift) =>
+                  void onJackClick(instance, kind, jack, shift)
+                }
+                onChanged={() => void refresh()}
+              />
               <WireOverlay
                 wires={wires}
-                container={rackEl}
+                container={columnEl}
                 colors={wireColors}
                 pending={pending}
                 layoutKey={`${JSON.stringify(positions)}@${zoom}@${pan.x},${pan.y}`}

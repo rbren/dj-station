@@ -1433,9 +1433,22 @@ body {
   position: relative;
   flex: 1;
   overflow: hidden;
-  min-height: calc(100vh - 48px);
+  min-height: 0;
   background-image: radial-gradient(circle, #22262d 1px, transparent 1px);
   background-size: 48px 48px;
+}
+
+/* Column holding the rack viewport and the DAW bottom bar: the bar takes
+   layout space at the bottom (the rack shrinks — the bar never floats over
+   module space). position: relative so the wire overlay (now spanning the
+   column, letting cables reach bar jacks) anchors to it. */
+.rack-column {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 48px);
+  min-width: 0;
 }
 
 /* The cable layer must paint above EVERY module panel: panels (and the
@@ -2619,4 +2632,232 @@ body {
 .choreo-empty {
   color: #626b7c;
   padding: 4px 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* DAW bottom bar                                                      */
+/* ------------------------------------------------------------------ */
+
+.daw-bar {
+  flex: none;
+  border-top: 1px solid #2a2f38;
+  background: #14171c;
+  display: flex;
+  flex-direction: column;
+  z-index: 5;
+}
+
+.daw-bar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  min-height: 34px;
+}
+
+.daw-btn {
+  background: #1e232b;
+  border: 1px solid #2f3542;
+  border-radius: 4px;
+  color: #c9d2df;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.daw-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.daw-btn:hover:not(:disabled) {
+  background: #262c37;
+}
+
+.daw-toggle {
+  font-weight: 600;
+}
+
+.daw-transport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.daw-time {
+  font-variant-numeric: tabular-nums;
+  color: #8a93a2;
+  font-size: 12px;
+  min-width: 52px;
+}
+
+.daw-rec-live {
+  color: #e05c5c;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Collapsed strip: every track's jacks in one row so wires stay
+   visibly attached while the bar is shrunk to a single line. */
+.daw-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.daw-strip-track {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.daw-strip-name {
+  color: #8a93a2;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.daw-track-jacks {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.daw-jack-pair {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.daw-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 10px 8px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.daw-lane {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 6px;
+  background: #171b21;
+  border: 1px solid #232833;
+  border-radius: 6px;
+}
+
+.daw-lane-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 300px;
+  flex: none;
+}
+
+.daw-track-name {
+  background: #10131a;
+  border: 1px solid #2a2f38;
+  border-radius: 4px;
+  color: #c9d2df;
+  padding: 2px 6px;
+  font-size: 12px;
+  width: 110px;
+}
+
+.daw-track-kind {
+  color: #667080;
+  font-size: 11px;
+  min-width: 80px;
+}
+
+.daw-lane-order {
+  display: flex;
+  gap: 3px;
+}
+
+.daw-remove:hover:not(:disabled) {
+  background: #3a2026;
+  color: #e05c5c;
+}
+
+.daw-graph {
+  background: #0e1116;
+  border: 1px solid #232833;
+  border-radius: 4px;
+  flex: none;
+  cursor: crosshair;
+}
+
+.daw-graph-zero {
+  stroke: #2a2f38;
+  stroke-width: 1;
+}
+
+.daw-graph-band {
+  fill: #62d0ff;
+  fill-opacity: 0.65;
+  stroke: #62d0ff;
+  stroke-width: 0.5;
+}
+
+.daw-graph-empty {
+  fill: #4a5260;
+  font-size: 10px;
+}
+
+.daw-playhead {
+  stroke: #e6b450;
+  stroke-width: 1.5;
+}
+
+.daw-lane-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.daw-rec {
+  color: #e08a8a;
+}
+
+.daw-rec-stop {
+  color: #e05c5c;
+  border-color: #e05c5c;
+}
+
+.daw-import {
+  background: #10131a;
+  border: 1px solid #2a2f38;
+  border-radius: 4px;
+  color: #c9d2df;
+  font-size: 12px;
+  max-width: 160px;
+}
+
+.daw-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+}
+
+.daw-add select {
+  background: #10131a;
+  border: 1px solid #2a2f38;
+  border-radius: 4px;
+  color: #c9d2df;
+  font-size: 12px;
+}
+
+.daw-stereo {
+  color: #8a93a2;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }

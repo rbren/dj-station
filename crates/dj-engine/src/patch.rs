@@ -19,6 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::choreo::ChoreoState;
+use crate::daw::DawState;
 use crate::engine::{Engine, EngineConfig, MidiMappingInfo};
 use crate::gesture::GestureState;
 use crate::knob::KnobState;
@@ -60,6 +61,10 @@ pub struct ModuleFile {
     /// save/load, jack slots included so wires stay valid).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choreo: Option<ChoreoState>,
+    /// DAW timeline (always-present bottom-bar node): tracks + clip paths.
+    /// Clip sample data lives in library-managed files, not the patch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daw: Option<DawState>,
     /// Track path loaded into a Playback/Deck node (absolute;
     /// library-managed). Deck cues/loops/beatgrids are *not* stored here —
     /// they are track metadata in the library DB (PRD §7) and get
@@ -255,7 +260,23 @@ impl Engine {
             }
             let mut knobs = BTreeMap::new();
             for (jack, state) in info.manifest.inputs.iter().zip(&info.knobs) {
+                // The DAW node preallocates MAX_DAW_JACKS plain inputs;
+                // writing 64 default knob entries would bloat every patch.
+                // Only non-default states (wire atten/offset tweaks) persist.
+                if info.daw.is_some() && *state == KnobState::default() {
+                    continue;
+                }
                 knobs.insert(jack.id.clone(), state.clone());
+            }
+            // An untouched DAW (no tracks, no knob tweaks) stays out of
+            // the document entirely: it always exists in the engine, and
+            // omitting it keeps pre-DAW patches loading byte-identically.
+            if info
+                .daw
+                .as_ref()
+                .is_some_and(|d| d.tracks.is_empty() && knobs.is_empty())
+            {
+                continue;
             }
             modules.insert(
                 info.instance_id.clone(),
@@ -271,6 +292,7 @@ impl Engine {
                         mappings: self.gesture_mappings(&info.instance_id).unwrap_or_default(),
                     }),
                     choreo: info.choreo.clone(),
+                    daw: info.daw.clone(),
                     track: info.track_path.clone(),
                     sync_to: self.deck_sync_to_by_node(node_idx),
                     macro_version: None,
@@ -307,6 +329,7 @@ impl Engine {
                     midi_led_mappings: Vec::new(),
                     gesture: None,
                     choreo: None,
+                    daw: None,
                     track: None,
                     sync_to: None,
                     macro_version: Some(mi.version),
@@ -515,7 +538,16 @@ impl Engine {
         mf: &ModuleFile,
         deferred_syncs: &mut Vec<(String, String)>,
     ) -> Result<()> {
-        self.add_module(instance_id, &mf.ext)?;
+        // The DAW node always exists (created with the engine): restore
+        // its state in place instead of adding a second one.
+        if instance_id != crate::daw::DAW_INSTANCE {
+            self.add_module(instance_id, &mf.ext)?;
+        } else {
+            anyhow::ensure!(
+                mf.ext == crate::daw::DAW_ID,
+                "instance id {instance_id:?} is reserved for the built-in DAW"
+            );
+        }
         for m in &mf.midi_mappings {
             self.add_midi_mapping(instance_id, m.kind, m.num, &m.name)?;
         }
@@ -531,6 +563,9 @@ impl Engine {
         }
         if let Some(c) = &mf.choreo {
             self.choreo_set_state(instance_id, c.clone())?;
+        }
+        if let Some(d) = &mf.daw {
+            self.daw_set_state(d.clone())?;
         }
         if let Some(track) = &mf.track {
             if crate::builtin::BuiltinKind::from_ext_id(&mf.ext)
@@ -598,6 +633,15 @@ impl Engine {
             .collect();
         let mut recreate: Vec<String> = Vec::new();
         for id in &current {
+            // The built-in DAW is never removed/recreated; it diffs in
+            // place below (or resets to default when the doc lacks it —
+            // patches saved before the DAW existed).
+            if id == crate::daw::DAW_INSTANCE {
+                if !doc.modules.contains_key(id) {
+                    self.daw_set_state(crate::daw::DawState::default())?;
+                }
+                continue;
+            }
             match doc.modules.get(id) {
                 None => recreate.push(id.clone()),
                 Some(mf) => {
@@ -753,6 +797,14 @@ impl Engine {
                 }
             }
 
+            // DAW timeline likewise (clips reload only when paths change).
+            if let Some(d) = &mf.daw {
+                let node = self.node_idx(instance_id)?;
+                if self.nodes[node].daw.as_ref() != Some(d) {
+                    self.daw_set_state(d.clone())?;
+                }
+            }
+
             // Track (replace only; unload forces recreate upstream).
             let node = self.node_idx(instance_id)?;
             if let Some(track) = &mf.track {
@@ -785,6 +837,27 @@ impl Engine {
         for (jack, state) in &mf.knobs {
             if &self.knob_state(instance_id, jack)? != state {
                 self.restore_knob(instance_id, jack, state.clone())?;
+            }
+        }
+        // DAW snapshots trim default knob entries (64 preallocated wire
+        // jacks); a knob absent from the doc means "default" and must be
+        // reset, or undoing an atten/offset tweak would not restore it.
+        if instance_id == crate::daw::DAW_INSTANCE {
+            let jacks: Vec<String> = {
+                let node = self.node_idx(instance_id)?;
+                self.nodes[node]
+                    .manifest
+                    .inputs
+                    .iter()
+                    .map(|j| j.id.clone())
+                    .collect()
+            };
+            for jack in jacks {
+                if !mf.knobs.contains_key(&jack)
+                    && self.knob_state(instance_id, &jack)? != KnobState::default()
+                {
+                    self.restore_knob(instance_id, &jack, KnobState::default())?;
+                }
             }
         }
         Ok(())

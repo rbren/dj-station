@@ -1,0 +1,21 @@
+{
+  "ext": "builtin.daw",
+  "knobs": {},
+  "params": {},
+  "daw": {
+    "tracks": [
+      {
+        "name": "tone",
+        "jack": 0,
+        "kind": "audio",
+        "stereo": false
+      },
+      {
+        "name": "swell",
+        "jack": 1,
+        "kind": "continuous",
+        "stereo": false
+      }
+    ]
+  }
+}

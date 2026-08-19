@@ -134,6 +134,35 @@ export interface ChoreoStatus {
   playhead: number;
 }
 
+export interface DawTrack {
+  name: string;
+  /** First jack slot; the track owns `channels` contiguous slots on BOTH
+   *  sides (`i<jack>` input, `t<jack>` output; stereo audio adds +1). */
+  jack: number;
+  kind: 'audio' | 'continuous';
+  stereo: boolean;
+  /** Absolute path of the loaded clip (library/recordings), if any. */
+  clip?: string | null;
+}
+
+export interface DawStatus {
+  tracks: DawTrack[];
+  /** Loaded clip length per track, engine frames (0 = no clip). */
+  clip_frames: number[];
+  /** Transport position, engine frames. */
+  playhead: number;
+  playing: boolean;
+  /** Index of the track being recorded, if any. */
+  recording: number | null;
+  record_frames: number;
+  sample_rate: number;
+  mic_running: boolean;
+}
+
+export function dawTrackChannels(t: DawTrack): number {
+  return t.kind === 'audio' && t.stereo ? 2 : 1;
+}
+
 export interface MacroInfo {
   id: string;
   name: string;
@@ -368,6 +397,50 @@ export class EngineClient extends IpcClient {
       scale,
       baseNote,
     });
+  }
+  /** Polled by the DAW bottom bar; quiet for the same reason as
+   *  choreoStatus (a poll racing an undo is benign). */
+  dawStatus() {
+    return this.call<DawStatus>('daw_status', undefined, { quiet: true });
+  }
+  dawAddTrack(name: string, kind: 'audio' | 'continuous', stereo: boolean) {
+    return this.call<void>('daw_add_track', { name, kind, stereo });
+  }
+  dawRemoveTrack(track: number) {
+    return this.call<void>('daw_remove_track', { track });
+  }
+  dawRenameTrack(track: number, name: string) {
+    return this.call<void>('daw_rename_track', { track, name });
+  }
+  dawMoveTrack(from: number, to: number) {
+    return this.call<void>('daw_move_track', { from, to });
+  }
+  dawImportClip(track: number, path: string) {
+    return this.call<void>('daw_import_clip', { track, path });
+  }
+  dawClearClip(track: number) {
+    return this.call<void>('daw_clear_clip', { track });
+  }
+  dawPlay() {
+    return this.call<void>('daw_play');
+  }
+  dawStop() {
+    return this.call<void>('daw_stop');
+  }
+  dawSeek(frames: number) {
+    return this.call<void>('daw_seek', { frames });
+  }
+  dawRecordStart(track: number, source: 'input' | 'mic') {
+    return this.call<void>('daw_record_start', { track, source });
+  }
+  dawRecordStop() {
+    return this.call<string | null>('daw_record_stop');
+  }
+  dawRecordCancel() {
+    return this.call<void>('daw_record_cancel');
+  }
+  dawClipPeaks(track: number, bins: number) {
+    return this.call<[number, number][]>('daw_clip_peaks', { track, bins }, { quiet: true });
   }
   undo() {
     return this.call<boolean>('undo');

@@ -1,0 +1,14 @@
+{
+  "seconds": 2.0,
+  "midi": [],
+  "daw_clips": [
+    {
+      "track": 0,
+      "file": "tone.wav"
+    },
+    {
+      "track": 1,
+      "file": "swell.wav"
+    }
+  ]
+}

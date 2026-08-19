@@ -42,6 +42,7 @@ const fakeEngine = {
   wires: vi.fn(async () => state.wires),
   tap: vi.fn(async () => null),
   tapAll: vi.fn(async () => ({})),
+  dawStatus: vi.fn(async () => null),
   addModule: vi.fn(async () => {}),
   connectWire: vi.fn(async () => {}),
   disconnectWire: vi.fn(async () => {}),

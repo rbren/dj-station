@@ -28,6 +28,7 @@ use crate::wasm_host::WasmRuntime;
 // Facade modules: additional `impl Engine` blocks grouped by feature area.
 // This file keeps construction, graph editing, knobs and telemetry.
 mod choreo_api;
+mod daw_api;
 mod deck_api;
 mod gesture_api;
 mod hands_api;
@@ -116,6 +117,9 @@ pub struct NodeInfo {
     /// Canonical timeline state for a Choreography node (persisted in the
     /// patch; the RT side plays a compiled copy).
     pub choreo: Option<crate::choreo::ChoreoState>,
+    /// Canonical track state for the always-present DAW node (persisted in
+    /// the patch; the RT side plays a compiled copy).
+    pub daw: Option<crate::daw::DawState>,
     /// Path of the track loaded into a Playback/Deck node (persisted in the
     /// patch).
     pub track_path: Option<String>,
@@ -302,6 +306,12 @@ pub struct Engine {
     qwerty_producers: HashMap<usize, rtrb::Producer<crate::qwerty::QwertyEvent>>,
     /// Compiled-program handoff + playhead per Choreography node.
     choreos: HashMap<usize, crate::choreo::ChoreoControl>,
+    /// Program/transport/capture plumbing for the DAW node (keyed by slot
+    /// like the other side tables, though the DAW is a singleton).
+    daws: HashMap<usize, crate::daw::DawControl>,
+    /// Live mic input stream feeding DAW mic recordings (control-side
+    /// only; the RT graph thread never sees it).
+    mic: Option<daw_api::MicCapture>,
     /// LED feedback messages coming back from the RT thread, per MIDI node.
     midi_out_consumers: HashMap<usize, rtrb::Consumer<MidiOutEvent>>,
     /// Registered macro definitions (engine-side view of the library store).
@@ -389,7 +399,7 @@ impl Engine {
             blocks: blocks.clone(),
             master_analyzers,
         };
-        Ok(Engine {
+        let mut engine = Engine {
             config,
             registry,
             wasm: WasmRuntime::new()?,
@@ -405,6 +415,8 @@ impl Engine {
             hands_producers: HashMap::new(),
             qwerty_producers: HashMap::new(),
             choreos: HashMap::new(),
+            daws: HashMap::new(),
+            mic: None,
             midi_out_consumers: HashMap::new(),
             macros: MacroLibrary::default(),
             macro_instances: BTreeMap::new(),
@@ -419,7 +431,11 @@ impl Engine {
             watch_state: Arc::new(Mutex::new(HashMap::new())),
             watcher_stop: None,
             watcher_join: None,
-        })
+        };
+        // The DAW is part of the instrument, not a rack module: always
+        // present, fixed instance id, never removable (PRD bottom bar).
+        engine.add_plain_module(crate::daw::DAW_INSTANCE, crate::daw::DAW_ID)?;
+        Ok(engine)
     }
 
     pub(crate) fn core_mut(&mut self) -> Result<&mut EngineCore> {
@@ -552,7 +568,8 @@ impl Engine {
                 | BuiltinKind::Gesture
                 | BuiltinKind::Hands
                 | BuiltinKind::Playback
-                | BuiltinKind::Deck,
+                | BuiltinKind::Deck
+                | BuiltinKind::Daw,
             ) => Err(anyhow!("{ext_id} modules are created via add_module")),
             None => {
                 let ext = self
@@ -621,9 +638,20 @@ impl Engine {
         let mut hands_plumbing = None;
         let mut qwerty_plumbing = None;
         let mut choreo_ctl = None;
+        let mut daw_ctl = None;
         let mut playback_plumbing = None;
         let mut deck_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
+            Some(BuiltinKind::Daw) => {
+                // Singleton, created by Engine::new only (reserved id).
+                anyhow::ensure!(
+                    instance_id == crate::daw::DAW_INSTANCE && self.daws.is_empty(),
+                    "the DAW is built in and always present; it cannot be added"
+                );
+                let (ctl, rt) = crate::daw::daw_plumbing();
+                daw_ctl = Some(ctl);
+                Box::new(rt)
+            }
             Some(BuiltinKind::Midi) => {
                 let (tx, rx) = rtrb::RingBuffer::new(4096);
                 let (out_tx, out_rx) = rtrb::RingBuffer::new(4096);
@@ -744,6 +772,11 @@ impl Engine {
             } else {
                 None
             },
+            daw: if BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::Daw) {
+                Some(crate::daw::DawState::default())
+            } else {
+                None
+            },
             track_path: None,
         };
 
@@ -776,6 +809,9 @@ impl Engine {
         if let Some(ctl) = choreo_ctl {
             self.choreos.insert(idx, ctl);
         }
+        if let Some(ctl) = daw_ctl {
+            self.daws.insert(idx, ctl);
+        }
         if let Some((tx, garbage_rx)) = playback_plumbing {
             self.playback_producers.insert(idx, tx);
             self.playback_garbage.insert(idx, garbage_rx);
@@ -798,6 +834,10 @@ impl Engine {
         anyhow::ensure!(
             !instance_id.contains('/'),
             "cannot remove macro-internal node {instance_id:?}"
+        );
+        anyhow::ensure!(
+            instance_id != crate::daw::DAW_INSTANCE,
+            "the DAW is built in and cannot be removed"
         );
         if self.macro_instances.contains_key(instance_id) {
             return self.remove_macro_instance(instance_id);
@@ -828,6 +868,7 @@ impl Engine {
         self.hands_producers.remove(&slot);
         self.qwerty_producers.remove(&slot);
         self.choreos.remove(&slot);
+        self.daws.remove(&slot);
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);
         self.decks.remove(&slot);

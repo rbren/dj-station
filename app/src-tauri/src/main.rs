@@ -98,6 +98,12 @@ enum EditKey<'a> {
     ChoreoTrackSettings(&'a str, usize),
     /// Cell/value edits coalesce per track (drag paints stream updates).
     ChoreoData(&'a str, usize),
+    DawTrackAdd(&'a str),
+    DawTrackRemove(usize),
+    DawTrackRename(usize),
+    DawTrackMove,
+    /// Clip changes (import/clear/finished recording) coalesce per track.
+    DawClip(usize),
     Knob(&'a str, &'a str),
     KnobConfig(&'a str, &'a str),
     KnobReset(&'a str, &'a str),
@@ -134,6 +140,11 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::ChoreoTrackMove(i) => write!(f, "choreo-move:{i}"),
             EditKey::ChoreoTrackSettings(i, t) => write!(f, "choreo-settings:{i}:{t}"),
             EditKey::ChoreoData(i, t) => write!(f, "choreo-data:{i}:{t}"),
+            EditKey::DawTrackAdd(n) => write!(f, "daw-track+:{n}"),
+            EditKey::DawTrackRemove(t) => write!(f, "daw-track-:{t}"),
+            EditKey::DawTrackRename(t) => write!(f, "daw-rename:{t}"),
+            EditKey::DawTrackMove => write!(f, "daw-move"),
+            EditKey::DawClip(t) => write!(f, "daw-clip:{t}"),
             EditKey::Knob(i, j) => write!(f, "knob:{i}:{j}"),
             EditKey::KnobConfig(i, j) => write!(f, "knobcfg:{i}:{j}"),
             EditKey::KnobReset(i, j) => write!(f, "knobreset:{i}:{j}"),
@@ -400,7 +411,9 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
     let mut out: Vec<NodeSnapshot> = engine
         .nodes
         .iter()
-        .filter(|n| !n.instance_id.contains('/')) // macro internals hidden
+        // Macro internals hidden; the built-in DAW renders in the bottom
+        // bar (driven by daw_status), never as a rack panel.
+        .filter(|n| !n.instance_id.contains('/') && n.daw.is_none())
         .map(|n| NodeSnapshot {
             instance_id: n.instance_id.clone(),
             type_id: n.ext_id.clone(),
@@ -1138,6 +1151,171 @@ fn choreo_set_note_settings(
         .map_err(err)
 }
 
+/// Everything the DAW bottom bar needs per poll: tracks, transport, and
+/// recording progress.
+#[derive(Serialize)]
+struct DawStatusSnapshot {
+    tracks: Vec<dj_engine::daw::DawTrack>,
+    /// Loaded clip length per track, engine frames (0 = no clip) — the
+    /// bar's graphs place the playhead with this.
+    clip_frames: Vec<u64>,
+    playhead: u64,
+    playing: bool,
+    recording: Option<usize>,
+    record_frames: u64,
+    sample_rate: f32,
+    mic_running: bool,
+}
+
+#[tauri::command]
+fn daw_status(state: State<AppState>) -> CmdResult<DawStatusSnapshot> {
+    let mut engine = engine_lock(&state)?;
+    let st = engine.daw_status().map_err(err)?;
+    let tracks = engine.daw().map_err(err)?.tracks.clone();
+    let clip_frames = (0..tracks.len())
+        .map(|i| engine.daw_clip_frames(i).unwrap_or(0))
+        .collect();
+    Ok(DawStatusSnapshot {
+        tracks,
+        clip_frames,
+        playhead: st.playhead,
+        playing: st.playing,
+        recording: st.recording,
+        record_frames: st.record_frames,
+        sample_rate: st.sample_rate,
+        mic_running: engine.daw_mic_running(),
+    })
+}
+
+/// Add a track ("audio" | "continuous"); it materializes as 1 (mono /
+/// continuous) or 2 (stereo audio) input+output jack slots on the bar.
+#[tauri::command]
+fn daw_add_track(state: State<AppState>, name: String, kind: String, stereo: bool) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawTrackAdd(&name))?;
+    engine.daw_add_track(&name, &kind, stereo).map(|_| ()).map_err(err)
+}
+
+/// Remove a track. Wires to/from its jacks are disconnected first, which
+/// needs the engine stopped (the choreo-track-removal flow).
+#[tauri::command]
+fn daw_remove_track(state: State<AppState>, track: usize) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawTrackRemove(track))?;
+    with_stopped(&mut engine, |e| e.daw_remove_track(track).map_err(err))
+}
+
+#[tauri::command]
+fn daw_rename_track(state: State<AppState>, track: usize, name: String) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawTrackRename(track))?;
+    engine.daw_rename_track(track, &name).map_err(err)
+}
+
+#[tauri::command]
+fn daw_move_track(state: State<AppState>, from: usize, to: usize) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawTrackMove)?;
+    engine.daw_move_track(from, to).map_err(err)
+}
+
+/// Load an audio file (WAV or anything the library/deck decoder reads)
+/// onto a track as its clip.
+#[tauri::command]
+fn daw_import_clip(state: State<AppState>, track: usize, path: String) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawClip(track))?;
+    engine.daw_import_clip(track, Path::new(&path)).map_err(err)
+}
+
+#[tauri::command]
+fn daw_clear_clip(state: State<AppState>, track: usize) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawClip(track))?;
+    engine.daw_clear_clip(track).map_err(err)
+}
+
+/// Transport controls are performance, not patch edits: not undoable.
+#[tauri::command]
+fn daw_play(state: State<AppState>) -> CmdResult<()> {
+    engine_lock(&state)?.daw_play().map_err(err)
+}
+
+#[tauri::command]
+fn daw_stop(state: State<AppState>) -> CmdResult<()> {
+    engine_lock(&state)?.daw_stop_transport().map_err(err)
+}
+
+#[tauri::command]
+fn daw_seek(state: State<AppState>, frames: u64) -> CmdResult<()> {
+    engine_lock(&state)?.daw_seek(frames).map_err(err)
+}
+
+/// Arm recording on a track from its input jacks ("input") or the mic
+/// ("mic", audio tracks only; starts the cpal input stream). Arming is
+/// not undoable — the finished take (daw_record_stop) is the edit.
+#[tauri::command]
+fn daw_record_start(state: State<AppState>, track: usize, source: String) -> CmdResult<()> {
+    let src = match source.as_str() {
+        "input" => dj_engine::daw::DawRecordSource::Input,
+        "mic" => dj_engine::daw::DawRecordSource::Mic,
+        other => return Err(CmdError::invalid(format!("unknown source {other:?}"))),
+    };
+    let mut engine = engine_lock(&state)?;
+    if src == dj_engine::daw::DawRecordSource::Mic {
+        engine.daw_mic_start().map_err(err)?;
+    }
+    engine.daw_record_start(track, src).map_err(err)
+}
+
+/// Finish a recording: the take lands as a WAV under
+/// `<data_dir>/recordings/`, becomes the track's clip, and is imported
+/// into the library. Returns the file path (None = empty take).
+#[tauri::command]
+fn daw_record_stop(state: State<AppState>) -> CmdResult<Option<String>> {
+    let dir = dj_library::default_data_dir().join("recordings");
+    let path = {
+        let recording = {
+            let mut engine = engine_lock(&state)?;
+            let track = engine.daw_status().map_err(err)?.recording;
+            engine.daw_mic_stop();
+            track
+        };
+        let Some(track) = recording else {
+            return Err(CmdError::invalid("no recording in progress"));
+        };
+        let mut engine = patch_edit(&state, EditKey::DawClip(track))?;
+        engine.daw_record_stop(&dir).map_err(err)?
+    };
+    if let Some(p) = &path {
+        // Recordings are library tracks like any import; failure to index
+        // is non-fatal (the clip on the track is already good).
+        let opts = dj_library::ImportOptions {
+            source: "recording".into(),
+            ..Default::default()
+        };
+        if let Err(e) = state.library.import_file(p, opts) {
+            eprintln!("[dj-daw] library import of recording failed: {e}");
+        }
+    }
+    Ok(path.map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn daw_record_cancel(state: State<AppState>) -> CmdResult<()> {
+    let mut engine = engine_lock(&state)?;
+    engine.daw_mic_stop();
+    engine.daw_record_cancel().map_err(err)
+}
+
+/// Min/max per bin over a track's clip, in Volts — the bar's graphs
+/// (waveform for audio, ±10 V value trace for continuous) draw from this.
+#[tauri::command]
+fn daw_clip_peaks(state: State<AppState>, track: usize, bins: usize) -> CmdResult<Vec<(f32, f32)>> {
+    engine_lock(&state)?
+        .daw_clip_peaks(track, bins.min(4096))
+        .map_err(err)
+}
+
+#[tauri::command]
+fn daw_clip_frames(state: State<AppState>, track: usize) -> CmdResult<u64> {
+    engine_lock(&state)?.daw_clip_frames(track).map_err(err)
+}
+
 /// One tracked camera frame into a Hands node (the camera panel calls
 /// this at camera rate while tracking is on). Pure live control data —
 /// nothing persists, so `engine_lock`, not `patch_edit`. Errors are
@@ -1160,7 +1338,13 @@ fn hands_feed(
 fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     {
         let engine = engine_lock(&state)?;
-        if !engine.nodes.is_empty() {
+        // The built-in DAW node always exists; "empty" means no rack
+        // modules beyond it.
+        if engine
+            .nodes
+            .iter()
+            .any(|n| n.instance_id != dj_engine::daw::DAW_INSTANCE)
+        {
             return Ok(());
         }
     }
@@ -1389,6 +1573,19 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
                 // the stable `t<slot>` ids the snapshot exposes.
                 for t in &c.tracks {
                     for j in t.jack..t.jack + t.data.jack_count() {
+                        if let Some(slot) = n.out_telemetry.get(j) {
+                            jacks.insert(format!("out:t{j}"), slot.read());
+                        }
+                    }
+                }
+            } else if let Some(d) = &n.daw {
+                // DAW jacks are dynamic on both sides, 1-2 slots per track.
+                jacks.clear();
+                for t in &d.tracks {
+                    for j in t.jack..t.jack + t.channels() {
+                        if let Some(slot) = n.telemetry.get(j) {
+                            jacks.insert(format!("i{j}"), slot.read());
+                        }
                         if let Some(slot) = n.out_telemetry.get(j) {
                             jacks.insert(format!("out:t{j}"), slot.read());
                         }
@@ -2527,6 +2724,21 @@ fn main() {
             choreo_set_values,
             choreo_set_note,
             choreo_set_note_settings,
+            daw_status,
+            daw_add_track,
+            daw_remove_track,
+            daw_rename_track,
+            daw_move_track,
+            daw_import_clip,
+            daw_clear_clip,
+            daw_play,
+            daw_stop,
+            daw_seek,
+            daw_record_start,
+            daw_record_stop,
+            daw_record_cancel,
+            daw_clip_peaks,
+            daw_clip_frames,
             hands_feed,
             undo,
             redo,

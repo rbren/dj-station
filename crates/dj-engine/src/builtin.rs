@@ -23,6 +23,7 @@ pub enum BuiltinKind {
     Playback,
     Deck,
     Crossfader,
+    Daw,
 }
 
 impl BuiltinKind {
@@ -37,6 +38,7 @@ impl BuiltinKind {
             crate::playback::PLAYBACK_ID => Some(BuiltinKind::Playback),
             crate::deck::DECK_ID => Some(BuiltinKind::Deck),
             crate::mixer::CROSSFADER_ID => Some(BuiltinKind::Crossfader),
+            crate::daw::DAW_ID => Some(BuiltinKind::Daw),
             _ => None,
         }
     }
@@ -52,6 +54,7 @@ impl BuiltinKind {
             BuiltinKind::Playback => crate::playback::PLAYBACK_ID,
             BuiltinKind::Deck => crate::deck::DECK_ID,
             BuiltinKind::Crossfader => crate::mixer::CROSSFADER_ID,
+            BuiltinKind::Daw => crate::daw::DAW_ID,
         }
     }
 
@@ -66,6 +69,7 @@ impl BuiltinKind {
             BuiltinKind::Playback => crate::playback::playback_manifest(),
             BuiltinKind::Deck => crate::deck::deck_manifest(),
             BuiltinKind::Crossfader => crate::mixer::crossfader_manifest(),
+            BuiltinKind::Daw => crate::daw::daw_manifest(),
         }
     }
 }

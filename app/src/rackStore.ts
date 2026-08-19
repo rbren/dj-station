@@ -15,6 +15,9 @@ import type { JackTelemetry } from './types';
 
 export type Positions = Record<string, { x: number; y: number }>;
 
+/** Reserved instance id of the always-present bottom-bar DAW node. */
+export const DAW_INSTANCE = 'daw';
+
 /** A jack armed as one end of a wire, with the selected cable color. */
 export interface PendingWire {
   instance: string;
@@ -116,6 +119,9 @@ export function createRackStore(): RackStore {
         return prev && JSON.stringify(prev) === JSON.stringify(n) ? prev : n;
       });
       const live = new Set(stabilized.map((n) => n.instance_id));
+      // The built-in DAW is not a rack node (it lives in the bottom bar)
+      // but its jacks are wireable — a pending wire from it must survive.
+      live.add(DAW_INSTANCE);
       const selected = state.selected.filter((id) => live.has(id));
       const pending = state.pending && !live.has(state.pending.instance) ? null : state.pending;
       const unchanged =

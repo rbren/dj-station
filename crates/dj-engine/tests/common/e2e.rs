@@ -82,6 +82,18 @@ pub struct QwertyEventSpec {
     pub down: bool,
 }
 
+/// A clip imported onto a DAW track before rendering (clip paths are
+/// absolute/library-managed at runtime, so committed cases carry the file
+/// case-relative in the sidecar like deck tracks/stems). The DAW transport
+/// starts playing from 0 at render start.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DawClipSpec {
+    /// Track index.
+    pub track: usize,
+    /// Audio file, relative to the case directory.
+    pub file: String,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EventsFile {
     pub seconds: f32,
@@ -97,6 +109,8 @@ pub struct EventsFile {
     pub gestures: Vec<GestureTraceSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hands: Vec<HandsTraceSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub daw_clips: Vec<DawClipSpec>,
 }
 
 impl EventsFile {
@@ -204,6 +218,15 @@ fn render_case(case: &str) -> PathBuf {
     for h in &events.hands {
         let trace = dj_engine::hands::HandsTrace::load(&case_dir.join(&h.trace)).unwrap();
         engine.hands_feed_trace(&h.instance, &trace, 0).unwrap();
+    }
+    if !events.daw_clips.is_empty() {
+        for c in &events.daw_clips {
+            engine
+                .daw_import_clip(c.track, &case_dir.join(&c.file))
+                .unwrap();
+        }
+        engine.daw_seek(0).unwrap();
+        engine.daw_play().unwrap();
     }
     let frames = (events.seconds * engine.config.sample_rate) as usize;
     let out = std::env::temp_dir().join(format!("dj-e2e-{case}.wav"));

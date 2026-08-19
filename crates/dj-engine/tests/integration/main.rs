@@ -19,6 +19,7 @@ mod analysis_sync;
 mod choreo;
 mod clipboard;
 mod conformance;
+mod daw;
 mod deck;
 mod deck_library;
 mod deck_stems;

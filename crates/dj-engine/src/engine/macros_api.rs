@@ -417,6 +417,7 @@ impl Engine {
                 midi_led_mappings: Vec::new(),
                 gesture: None,
                 choreo: None,
+                daw: None,
                 track: None,
                 sync_to: None,
                 macro_version: Some(1),
