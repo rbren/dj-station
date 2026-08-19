@@ -4,6 +4,7 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearErrors } from '../src/errors';
 import type { Manifest } from '../src/types';
 
 const OSC: Manifest = {
@@ -52,7 +53,7 @@ const fakeEngine = {
   currentPatch: vi.fn(async () => 'demo'),
   listPatches: vi.fn(async () => ['demo', 'live-set']),
   savePatchAs: vi.fn(async () => {}),
-  loadPatchByName: vi.fn(async () => {}),
+  loadPatchByName: vi.fn(async (): Promise<string[]> => []),
   removeModule: vi.fn(async () => {}),
   endEdit: vi.fn(async () => {}),
 };
@@ -85,6 +86,7 @@ function node(instance: string, manifest: Manifest, wired: string[] = []) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  clearErrors();
   localStorage.clear();
   state.nodes = [node('osc1', OSC), node('vca1', VCA)];
   state.wires = [];
@@ -134,6 +136,24 @@ describe('file menu patch save/load', () => {
     await waitFor(() => expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set'));
     await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
     await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('live-set'));
+    // A clean load raises no warnings.
+    expect(screen.queryByTestId('error-banner')).toBeNull();
+  });
+
+  it('non-fatal load warnings (dropped stale wires) surface in the banner', async () => {
+    fakeEngine.loadPatchByName.mockResolvedValueOnce([
+      'dropped wire osc1:audio -> camera1:in (no input jack "in" on camera1)',
+    ]);
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+
+    fireMenu('open');
+    fireEvent.click(await screen.findByTestId('file-dialog-patch-live-set'));
+    // The patch still loads (name updates) AND the warning is visible.
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('live-set'));
+    const banner = await screen.findByTestId('error-banner');
+    expect(banner.textContent).toContain('dropped wire');
+    expect(banner.textContent).toContain('camera1');
   });
 
   it('the dialog cancel button closes without saving or loading', async () => {

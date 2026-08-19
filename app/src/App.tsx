@@ -481,7 +481,11 @@ export default function App() {
 
   const loadNamedPatch = useCallback(
     async (name: string) => {
-      await engine.loadPatchByName(name);
+      // Warnings are non-fatal (e.g. a wire dropped because a newer module
+      // version no longer has the saved jack): the patch still loaded, but
+      // the user should know what got dropped.
+      const warnings = (await engine.loadPatchByName(name)) ?? [];
+      for (const w of warnings) reportError(`load ${name}`, w);
       setPatchName(name);
       await refresh();
     },

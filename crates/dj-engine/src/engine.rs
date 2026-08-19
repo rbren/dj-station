@@ -328,6 +328,11 @@ pub struct Engine {
     watch_state: Arc<Mutex<HashMap<String, std::time::SystemTime>>>,
     watcher_stop: Option<Arc<AtomicBool>>,
     watcher_join: Option<std::thread::JoinHandle<()>>,
+    /// Non-fatal problems from the last patch load (`from_doc*`): wires the
+    /// saved patch referenced but a newer module manifest no longer supports
+    /// were dropped instead of failing the whole load. Surface these to the
+    /// user; an empty vec means the patch loaded exactly as saved.
+    pub load_warnings: Vec<String>,
 }
 
 const CMD_QUEUE_CAP: usize = 1024;
@@ -419,6 +424,7 @@ impl Engine {
             watch_state: Arc::new(Mutex::new(HashMap::new())),
             watcher_stop: None,
             watcher_join: None,
+            load_warnings: Vec::new(),
         })
     }
 
