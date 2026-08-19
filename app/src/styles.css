@@ -2638,13 +2638,16 @@ body {
 /* DAW bottom bar                                                      */
 /* ------------------------------------------------------------------ */
 
+/* Above the .wire-overlay (z-index 10): cables must never paint over the
+   tracks — they visually plug into the bar's top edge instead. */
 .daw-bar {
+  position: relative;
   flex: none;
   border-top: 1px solid #2a2f38;
   background: #14171c;
   display: flex;
   flex-direction: column;
-  z-index: 5;
+  z-index: 20;
 }
 
 .daw-bar-header {
@@ -2759,12 +2762,19 @@ body {
   min-width: 100%;
 }
 
+/* min/max-width pin the flex item to EXACTLY the spacer's width (the
+   default min-width:auto would let min-content widen it past the ruler
+   row's empty spacer — the old misalignment); overflow keeps controls
+   from spilling into the timeline. */
 .daw-side {
   position: sticky;
   left: 0;
   z-index: 3;
   flex: none;
   width: var(--daw-side-w);
+  min-width: var(--daw-side-w);
+  max-width: var(--daw-side-w);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2788,6 +2798,17 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+
+.daw-side-top .daw-track-name {
+  flex: 1 1 60px;
+  min-width: 0;
+}
+
+.daw-side-top .daw-lane-order {
+  flex: none;
+  margin-left: auto;
 }
 
 .daw-lane {
@@ -2893,6 +2914,10 @@ body {
   font-size: 12px;
 }
 
+.daw-length {
+  width: 58px;
+}
+
 .daw-zoom {
   display: flex;
   gap: 3px;
@@ -2937,7 +2962,7 @@ body {
 .daw-track-kind {
   color: #667080;
   font-size: 11px;
-  min-width: 80px;
+  flex: none;
 }
 
 .daw-lane-order {

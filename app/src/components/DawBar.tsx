@@ -73,6 +73,9 @@ export interface DawBarProps {
 const COLLAPSED_KEY = 'dj-daw-collapsed';
 const ZOOM_KEY = 'dj-daw-zoom';
 const SNAP_KEY = 'dj-daw-snap';
+const LENGTH_KEY = 'dj-daw-length-beats';
+
+const DEFAULT_LENGTH_BEATS = 16;
 
 export const GRAPH_H = 52;
 const VMAX = 10;
@@ -377,6 +380,9 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
   const [addStereo, setAddStereo] = useState(false);
   const [zoom, setZoom] = useState<number>(() => loadJson(ZOOM_KEY, DEFAULT_ZOOM));
   const [snap, setSnap] = useState<string>(() => loadJson(SNAP_KEY, '1/4'));
+  const [lengthBeats, setLengthBeats] = useState<number>(() =>
+    loadJson(LENGTH_KEY, DEFAULT_LENGTH_BEATS),
+  );
   const pending = useRackSelector((s) => s.pending);
   const wires = useRackSelector((s) => s.wires);
   const telemetry = useRackSelector((s) => s.telemetry[DAW_INSTANCE]);
@@ -403,9 +409,10 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
   const framesPerBeat = (rate * 60) / bpm;
   const snapBeats = SNAP_OPTIONS.find((o) => o.label === snap)?.beats ?? 1;
 
-  // Timeline extent: the longest clip / last note, at least 16 beats,
-  // rounded up to a whole 4-beat bar with one bar of headroom.
-  let contentBeats = 16;
+  // Timeline extent: the user-set total length, stretched if content
+  // (longest clip / last note / playhead) runs past it, rounded up to a
+  // whole 4-beat bar.
+  let contentBeats = 0;
   if (status) {
     for (let i = 0; i < status.tracks.length; i++) {
       const t = status.tracks[i];
@@ -414,8 +421,17 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
     }
     contentBeats = Math.max(contentBeats, status.playhead / framesPerBeat);
   }
-  const totalBeats = (Math.floor(contentBeats / 4) + 1) * 4;
+  const totalBeats = Math.max(
+    Math.ceil(lengthBeats / 4) * 4,
+    contentBeats > 0 ? (Math.floor(contentBeats / 4) + 1) * 4 : 0,
+  );
   const timelineW = totalBeats * pxPerBeat;
+
+  const setLength = (beats: number) => {
+    const b = Math.max(1, Math.round(beats));
+    saveJson(LENGTH_KEY, b);
+    setLengthBeats(b);
+  };
 
   // Re-fetch a lane's graph when its clip identity or the zoom level
   // changes (bins scale with the rendered width so zooming in adds
@@ -550,6 +566,48 @@ export function DawBar({ api, libraryTracks, onJackClick, onChanged, pollMs = 15
             </option>
           ))}
         </select>
+      </label>
+      <label className="daw-bpm-label">
+        beats
+        <input
+          className="daw-bpm daw-length"
+          data-testid="daw-length-beats"
+          type="number"
+          min={1}
+          key={`b${lengthBeats}`}
+          defaultValue={lengthBeats}
+          data-tip="total timeline length in beats (grows if content runs past it)"
+          onBlur={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v) && v >= 1 && Math.round(v) !== lengthBeats) setLength(v);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+        />
+      </label>
+      <label className="daw-bpm-label">
+        secs
+        <input
+          className="daw-bpm daw-length"
+          data-testid="daw-length-secs"
+          type="number"
+          min={0.1}
+          step={0.1}
+          key={`s${lengthBeats}:${bpm}`}
+          defaultValue={Number(((lengthBeats * 60) / bpm).toFixed(1))}
+          data-tip="total timeline length in seconds (converted to beats at the current BPM)"
+          onBlur={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v) && v > 0) {
+              const beats = Math.round((v * bpm) / 60);
+              if (beats >= 1 && beats !== lengthBeats) setLength(beats);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+        />
       </label>
       <span className="daw-zoom">
         <button

@@ -403,6 +403,34 @@ describe('timeline', () => {
     await waitFor(() => expect(api.seek).toHaveBeenCalledWith(72000));
   });
 
+  it('sets the total length in beats (rounded up to whole bars)', async () => {
+    renderBar(makeApi());
+    fireEvent.click(await screen.findByTestId('daw-toggle'));
+    const beats = await screen.findByTestId('daw-length-beats');
+    fireEvent.change(beats, { target: { value: '30' } });
+    fireEvent.blur(beats);
+    // 30 beats → 32 (whole 4-beat bars) × default zoom 40 px.
+    await waitFor(() =>
+      expect(Number(screen.getByTestId('daw-ruler').getAttribute('width'))).toBe(32 * 40),
+    );
+    expect(JSON.parse(localStorage.getItem('dj-daw-length-beats')!)).toBe(30);
+  });
+
+  it('sets the total length in seconds, converted at the current BPM', async () => {
+    renderBar(makeApi());
+    fireEvent.click(await screen.findByTestId('daw-toggle'));
+    const secs = await screen.findByTestId('daw-length-secs');
+    // Default 16 beats at 120 BPM shows 8 s.
+    expect((secs as HTMLInputElement).value).toBe('8');
+    // 20 s at 120 BPM = 40 beats.
+    fireEvent.change(secs, { target: { value: '20' } });
+    fireEvent.blur(secs);
+    await waitFor(() =>
+      expect(Number(screen.getByTestId('daw-ruler').getAttribute('width'))).toBe(40 * 40),
+    );
+    expect(JSON.parse(localStorage.getItem('dj-daw-length-beats')!)).toBe(40);
+  });
+
   it('renders a recordable knob on every non-MIDI input jack', async () => {
     renderBar(makeApi());
     fireEvent.click(await screen.findByTestId('daw-toggle'));
