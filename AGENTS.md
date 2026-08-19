@@ -255,6 +255,24 @@ fails if it's missing.
   `.jack/.knob/.level-meter/.module-custom-ui`. The dev-only stress
   harness (`app/src/stress/`, `npm run dev` + `?stress=N&active=F`)
   measures this path; use it before/after any change to these files.
+- Anti-aliased animation (frontend): the 100 ms telemetry/status poll
+  POINT-SAMPLES clock-driven visuals, which aliases past a few Hz (steps
+  lit for 1-vs-2 ticks semi-randomly, skipped steps) — no poll rate fixes
+  this. Sequencer playheads (step_seq, seq_switch, trig_seq, grid_seq,
+  euclid, ChoreoPanel) are extrapolated client-side by
+  `extensions/ui-lib/stepFollower.ts` (windowed-fit rate estimate with
+  honesty rules: irregular clocks/random dir stay raw, stalls freeze,
+  transport jumps re-lock) via `useStepFollowers` — render shows the
+  prediction, a rAF loop patches the DOM between polls, NEVER React
+  state (RenderCounts discipline). The deck playhead uses the same
+  pattern inline (`useDeckPlayhead` in DeckPanel.tsx: linear pos+rate
+  from the poll's own fields, scrolls `<g class="waveform-scroll">` /
+  moves playhead lines; `zoomWindow` in WaveformView.ts is the one
+  window law). The LFO lamp is MOTION-BLURRED (`meanLevel` in LfoUI:
+  frame-averaged brightness integral, converges to steady glow at fast
+  rates like a real LED). The App.tsx tapAll poll drops stale (out of
+  order) responses so playheads never step backwards. Pinned by
+  `app/tests/StepFollower.test.ts` + `AntiAliasing.test.tsx`.
 - Rack geometry (frontend): module positions are UNZOOMED rack
   coordinates — any pointer math must divide screen deltas by the rack
   zoom (panel drags in `ModulePanel`, drops in `App.onRackDrop`). All

@@ -569,13 +569,23 @@ export default function App() {
 
   useEffect(() => {
     if (!connected) return;
+    // Ticks race: each interval fires an independent round-trip, so a slow
+    // response can resolve AFTER a fresher one and step playheads (and the
+    // step-follower extrapolation feeding on them) backwards. Tag requests
+    // and drop any response that isn't the newest in flight.
+    let issued = 0;
+    let applied = 0;
     const timer = setInterval(() => {
+      const seq = ++issued;
       void (async () => {
         try {
           // One batched IPC round-trip per tick for the whole rack; the
           // backend acquires the engine lock once and taps every jack.
           const next = await engine.tapAll();
-          if (next) store.setTelemetry(next);
+          if (next && seq > applied) {
+            applied = seq;
+            store.setTelemetry(next);
+          }
         } catch (err) {
           // A broken meter must never stop the rack from rendering.
           reportError('telemetry', err);

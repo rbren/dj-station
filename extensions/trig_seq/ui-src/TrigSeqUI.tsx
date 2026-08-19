@@ -4,8 +4,15 @@
 // step's bit; the len1..len8 jacks dim the steps beyond each track's
 // length. Values flow through the host handle, so panel knobs, wires and
 // patch load all stay in sync with the grid.
+//
+// The playheads are EXTRAPOLATED between polls (useStepFollowers on the
+// monotonic `pos` counter; each track derives `pos mod len`): the 100 ms
+// poll aliases against clock rates past a few Hz — see
+// extensions/ui-lib/stepFollower.ts.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { counterCycle } from "../../ui-lib/stepFollower";
+import { useStepFollowers } from "../../ui-lib/useStepFollower";
 
 // Structural copy of the host's ModuleHandle (extensions compile standalone).
 interface ModuleHandle {
@@ -17,19 +24,8 @@ interface ModuleHandle {
 
 const TRACKS = 8;
 const STEPS = 16;
-
-/** Current step per track from the `pos` output (clocks since reset,
- *  -1 before the first clock); each track wraps at its own length. */
-const playhead = (
-  handle: ModuleHandle,
-  lengths: number[],
-): (number | null)[] => {
-  // `instantaneous`, not `display`: the smoothed display sweeps through
-  // phantom steps on the wrap back to step 1.
-  const pos = handle.signalTap?.("out:pos")?.instantaneous ?? -1;
-  if (pos < 0) return Array.from({ length: TRACKS }, () => null);
-  return lengths.map((len) => Math.round(pos) % len);
-};
+/** `pos` wrap point, mirroring the DSP (lcm(1..16), f32-exact). */
+const POS_WRAP = 720_720;
 
 const readPatterns = (handle: ModuleHandle): number[] =>
   Array.from(
@@ -44,11 +40,17 @@ const readLengths = (handle: ModuleHandle): number[] =>
 
 const same = (a: number[], b: number[]) => a.every((v, i) => v === b[i]);
 
+/** Per-track playing step from a (possibly extrapolated) `pos` counter. */
+const stepsOf = (pos: number | null, lengths: number[]): (number | null)[] =>
+  lengths.map((len) => (pos === null ? null : pos % len));
+
 export default function TrigSeqUI({ handle }: { handle: ModuleHandle }) {
   const [patterns, setPatterns] = useState<number[]>(() =>
     readPatterns(handle),
   );
   const [lengths, setLengths] = useState<number[]>(() => readLengths(handle));
+  const lengthsRef = useRef(lengths);
+  lengthsRef.current = lengths;
 
   // Sync from the engine (panel knobs, wires, patch load). No dep array:
   // wired inputs read live telemetry through the handle, and telemetry
@@ -70,11 +72,35 @@ export default function TrigSeqUI({ handle }: { handle: ModuleHandle }) {
     handle.endEdit?.();
   };
 
-  // Live playhead, re-read on every telemetry-driven render.
-  const current = playhead(handle, lengths);
+  // `instantaneous`, not `display`: the smoothed display sweeps through
+  // phantom steps on the wrap back to step 1.
+  const raw = handle.signalTap?.("out:pos")?.instantaneous ?? -1;
+  const sampled = raw >= 0 ? Math.round(raw) % POS_WRAP : null;
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [pos] = useStepFollowers(
+    [{ cycle: counterCycle(POS_WRAP), sampled }],
+    rootRef,
+    (root, values) => {
+      const steps = stepsOf(values[0], lengthsRef.current);
+      // Cell markup below: root > .trigseq-track > [label, 16 buttons].
+      for (let t = 0; t < root.children.length; t++) {
+        const cells = root.children[t].children;
+        for (let s = 1; s < cells.length; s++) {
+          const cell = cells[s];
+          const playing =
+            steps[t] === s - 1 && !cell.classList.contains("beyond");
+          cell.classList.toggle("playing", playing);
+          if (playing) cell.setAttribute("data-playing", "true");
+          else cell.removeAttribute("data-playing");
+        }
+      }
+    },
+  );
+  const current = stepsOf(pos, lengths);
 
   return (
-    <div className="trigseq-ui" data-testid="trigseq-ui">
+    <div className="trigseq-ui" data-testid="trigseq-ui" ref={rootRef}>
       {patterns.map((pattern, t) => (
         <div className="trigseq-track" key={t}>
           <span className="trigseq-track-label">{t + 1}</span>

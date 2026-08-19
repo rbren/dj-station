@@ -1,14 +1,40 @@
 // Deck waveform: full-track overview + zoomed strip around the playhead.
 // Pure SVG (testable in jsdom): peaks polygon, playhead line, hot-cue
 // markers, loop region. Clicking either view seeks.
+//
+// React renders from the 100 ms status poll; between polls DeckPanel's
+// rAF loop extrapolates the transport (position + rate) and moves the
+// playhead lines / scrolls the zoom window by direct DOM mutation — the
+// track content of each strip is wrapped in <g class="waveform-scroll">
+// exactly so that scroll is a single transform write, and the strip
+// exposes its rendered window via data-from/data-to for the loop to
+// compute against (see useDeckPlayhead in DeckPanel.tsx). A poll-driven
+// re-render resets the mutations to the freshly-sampled truth.
 
 import type { MouseEvent as ReactMouseEvent } from 'react';
 
-const W = 1000; // viewBox width (all x positions are fractions of this)
+/** viewBox width — all x positions are fractions of this. Exported for
+ *  DeckPanel's rAF extrapolation, which computes in the same units. */
+export const WAVEFORM_VIEW_W = 1000;
+const W = WAVEFORM_VIEW_W;
 const OVERVIEW_H = 80;
 const ZOOM_H = 60;
-/// Zoomed strip window, seconds around the playhead.
-const ZOOM_WINDOW_SECS = 8;
+/** Zoomed strip window, seconds around the playhead. Exported for
+ *  DeckPanel's rAF extrapolation, which recomputes the same window. */
+export const ZOOM_WINDOW_SECS = 8;
+
+/** Zoom window (track fractions) centered on `positionSecs`, clamped
+ *  inside the track — the one window law, shared between the React
+ *  render and DeckPanel's between-poll extrapolation. */
+export function zoomWindow(
+  durationSecs: number,
+  positionSecs: number,
+): { from: number; to: number } {
+  if (durationSecs <= ZOOM_WINDOW_SECS) return { from: 0, to: 1 };
+  const half = ZOOM_WINDOW_SECS / 2 / durationSecs;
+  const center = Math.min(1 - half, Math.max(half, positionSecs / durationSecs));
+  return { from: center - half, to: center + half };
+}
 
 export interface WaveformViewProps {
   /** Peak per bucket, 0..=1, spanning the whole track. */
@@ -77,39 +103,43 @@ function Strip(props: StripProps) {
       className="waveform-strip"
       viewBox={`0 0 ${W} ${height}`}
       preserveAspectRatio="none"
+      data-from={from}
+      data-to={to}
       onClick={seek}
     >
-      {(loopX0 !== null || loopX1 !== null) && loopStart !== null && loopEnd !== null && (
-        <rect
-          data-testid={`${props.testId}-loop`}
-          className={props.loopEnabled ? 'waveform-loop enabled' : 'waveform-loop'}
-          x={loopX0 ?? 0}
-          y={0}
-          width={(loopX1 ?? W) - (loopX0 ?? 0)}
-          height={height}
-        />
-      )}
-      <path className="waveform-peaks" d={peaksPath(props.peaks, from, to, height)} />
-      {(props.cues ?? []).map((pos, slot) => {
-        if (pos === null) return null;
-        const x = xOf(pos);
-        if (x === null) return null;
-        return (
-          <g key={slot}>
-            <line
-              data-testid={`${props.testId}-cue-${slot + 1}`}
-              className="waveform-cue"
-              x1={x}
-              x2={x}
-              y1={0}
-              y2={height}
-            />
-            <text className="waveform-cue-label" x={x + 3} y={12}>
-              {slot + 1}
-            </text>
-          </g>
-        );
-      })}
+      <g className="waveform-scroll">
+        {(loopX0 !== null || loopX1 !== null) && loopStart !== null && loopEnd !== null && (
+          <rect
+            data-testid={`${props.testId}-loop`}
+            className={props.loopEnabled ? 'waveform-loop enabled' : 'waveform-loop'}
+            x={loopX0 ?? 0}
+            y={0}
+            width={(loopX1 ?? W) - (loopX0 ?? 0)}
+            height={height}
+          />
+        )}
+        <path className="waveform-peaks" d={peaksPath(props.peaks, from, to, height)} />
+        {(props.cues ?? []).map((pos, slot) => {
+          if (pos === null) return null;
+          const x = xOf(pos);
+          if (x === null) return null;
+          return (
+            <g key={slot}>
+              <line
+                data-testid={`${props.testId}-cue-${slot + 1}`}
+                className="waveform-cue"
+                x1={x}
+                x2={x}
+                y1={0}
+                y2={height}
+              />
+              <text className="waveform-cue-label" x={x + 3} y={12}>
+                {slot + 1}
+              </text>
+            </g>
+          );
+        })}
+      </g>
       {playX !== null && (
         <line
           data-testid={`${props.testId}-playhead`}
@@ -125,16 +155,7 @@ function Strip(props: StripProps) {
 }
 
 export function WaveformView(props: WaveformViewProps) {
-  const dur = props.durationSecs;
-  // Zoom window centered on the playhead, clamped inside the track.
-  let zoomFrom = 0;
-  let zoomTo = 1;
-  if (dur > ZOOM_WINDOW_SECS) {
-    const half = ZOOM_WINDOW_SECS / 2 / dur;
-    const center = Math.min(1 - half, Math.max(half, props.positionSecs / dur));
-    zoomFrom = center - half;
-    zoomTo = center + half;
-  }
+  const { from: zoomFrom, to: zoomTo } = zoomWindow(props.durationSecs, props.positionSecs);
   return (
     <div className="waveform" data-testid="waveform">
       <Strip {...props} testId="waveform-overview" height={OVERVIEW_H} from={0} to={1} />

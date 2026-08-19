@@ -4,8 +4,14 @@
 // step1..step4 outputs via the batched telemetry tap. The steps/fill/rot
 // knobs below stay the controls; the rings re-render as their values (and
 // the playhead) change via the handle.
+//
+// Ring playheads are EXTRAPOLATED between polls (useStepFollowers, one
+// forward cycle per ring): the 100 ms poll aliases against clock rates
+// past a few Hz — see extensions/ui-lib/stepFollower.ts.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { forwardCycle } from "../../ui-lib/stepFollower";
+import { useStepFollowers } from "../../ui-lib/useStepFollower";
 
 // Structural copy of the host's ModuleHandle (extensions compile standalone).
 interface ModuleHandle {
@@ -60,6 +66,23 @@ const same = (a: Ring[], b: Ring[]) =>
       r.steps === b[i].steps && r.fill === b[i].fill && r.rot === b[i].rot,
   );
 
+/** Move each ring's halo by direct DOM mutation — must mirror the dot
+ *  markup below (playing dots swell to r 4.6, on dots 3.2, rests 1.4). */
+function applyPlayheads(root: HTMLDivElement, values: (number | null)[]) {
+  const svgs = root.querySelectorAll("svg");
+  values.forEach((step, c) => {
+    const dots = svgs[c]?.querySelectorAll(".euclid-dot") ?? [];
+    dots.forEach((dot, i) => {
+      const playing = step === i;
+      dot.classList.toggle("playing", playing);
+      if (playing) dot.setAttribute("data-playing", "true");
+      else dot.removeAttribute("data-playing");
+      const on = dot.classList.contains("on");
+      dot.setAttribute("r", playing ? "4.6" : on ? "3.2" : "1.4");
+    });
+  });
+}
+
 export default function EuclidUI({ handle }: { handle: ModuleHandle }) {
   const [rings, setRings] = useState<Ring[]>(() => readRings(handle));
 
@@ -70,18 +93,30 @@ export default function EuclidUI({ handle }: { handle: ModuleHandle }) {
     setRings((prev) => (same(prev, next) ? prev : next));
   });
 
+  // Live playheads from the module's stepN outputs (-1 = not running).
+  // `instantaneous`, not `display`: the smoothed display sweeps through
+  // phantom steps on the wrap back to step 1.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const currents = useStepFollowers(
+    rings.map((ring, c) => {
+      const raw = handle.signalTap?.(`out:step${c + 1}`)?.instantaneous ?? -1;
+      return {
+        cycle: forwardCycle(ring.steps),
+        sampled: raw >= 0 ? Math.round(raw) % ring.steps : null,
+      };
+    }),
+    rootRef,
+    applyPlayheads,
+  );
+
   return (
-    <div className="euclid-ui" data-testid="euclid-ui">
+    <div className="euclid-ui" data-testid="euclid-ui" ref={rootRef}>
       {rings.map((ring, c) => {
         const base = euclid(ring.steps, ring.fill);
         const pattern = base.map((_, i) => base[(i + ring.rot) % ring.steps]);
         const cx = BOX / 2;
         const cy = BOX / 2;
-        // Live playhead from the module's stepN output (-1 = not running).
-        // `instantaneous`, not `display`: the smoothed display sweeps
-        // through phantom steps on the wrap back to step 1.
-        const raw = handle.signalTap?.(`out:step${c + 1}`)?.instantaneous ?? -1;
-        const current = raw >= 0 ? Math.round(raw) % ring.steps : null;
+        const current = currents[c];
         return (
           <svg
             key={c}
