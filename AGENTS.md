@@ -232,7 +232,7 @@ fails if it's missing.
 - Frontend rack state lives in `app/src/rackStore.ts` (hand-rolled
   external store read via `useSyncExternalStore`, no zustand), provided
   through `RackStoreContext`; each `RackModule` subscribes to its own
-  node/position/selection/telemetry slice. Telemetry polls one batched
+  node/position/selection slice. Telemetry polls one batched
   `tap_all` IPC command (read-only, mirrors `engine_nodes` keys —
   macro internals hidden, MIDI LED / macro external jacks by name) every
   100 ms — never per-jack `tap` in a loop. App-level tests that mock
@@ -240,6 +240,21 @@ fails if it's missing.
   `app/tests/KnobMath.test.ts` pins the TS knob curve math to
   `knob.rs`; if either side's mapping changes, update both plus that
   table.
+- Telemetry rendering (perf-critical, pinned by
+  `app/tests/RenderCounts.test.tsx`): a telemetry tick must NEVER
+  re-render a `ModulePanel`. `setTelemetry` keeps object identity per
+  instance AND per jack (comparing only display/volatility/is_fast at
+  display resolution); jack glows subscribe per jack (`LiveJack` →
+  `useLiveJackTelemetry`, output keys are `out:<id>`) and custom UIs per
+  instance (`CustomUIHost` → `useLiveInstanceTelemetry` — this is what
+  keeps signalTap-at-render meters/playheads live). ModulePanel's
+  `telemetry` prop is a storeless fallback only. `WireOverlay` renders
+  INSIDE the pan/zoom-transformed `.rack` in unzoomed rack coordinates
+  (zoom prop, non-scaling-stroke) so pan/zoom never re-measure, and its
+  MutationObserver ignores attribute churn under
+  `.jack/.knob/.level-meter/.module-custom-ui`. The dev-only stress
+  harness (`app/src/stress/`, `npm run dev` + `?stress=N&active=F`)
+  measures this path; use it before/after any change to these files.
 - Rack geometry (frontend): module positions are UNZOOMED rack
   coordinates — any pointer math must divide screen deltas by the rack
   zoom (panel drags in `ModulePanel`, drops in `App.onRackDrop`). All
