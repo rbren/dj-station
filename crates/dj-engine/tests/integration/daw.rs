@@ -60,7 +60,10 @@ fn track_crud_allocates_stable_jacks() {
         e.daw_add_track("voice", "audio", false).is_err(),
         "dup name"
     );
-    assert!(e.daw_add_track("x", "midi", false).is_err(), "unknown kind");
+    assert!(
+        e.daw_add_track("x", "wavetable", false).is_err(),
+        "unknown kind"
+    );
 
     // Removing the mono track frees slot 0; a stereo track needs two
     // contiguous slots so it skips it, a mono one reuses it.
@@ -397,4 +400,153 @@ fn apply_doc_diffs_daw_in_place() {
     assert!(created.is_empty());
     assert_eq!(e.daw().unwrap().tracks.len(), 1);
     assert_eq!(e.daw_clip_frames(0).unwrap(), 480);
+}
+
+#[test]
+fn midi_track_renders_pitch_and_gate_on_the_beat_grid() {
+    use dj_engine::daw::DawNote;
+    let mut e = engine();
+    // 120 BPM at 48 kHz = 24_000 frames per beat.
+    let j = e.daw_add_track("keys", "midi", false).unwrap();
+    assert_eq!(j, 0);
+    assert_eq!(e.daw().unwrap().tracks[0].channels(), 2);
+
+    // C4 (0 V) for one beat at beat 0; E5 (16/12 V) half-velocity at beat 1.
+    e.daw_add_note(
+        0,
+        DawNote {
+            beat: 0.0,
+            len: 1.0,
+            pitch: 60,
+            velocity: 1.0,
+        },
+    )
+    .unwrap();
+    e.daw_add_note(
+        0,
+        DawNote {
+            beat: 1.0,
+            len: 0.5,
+            pitch: 76,
+            velocity: 0.5,
+        },
+    )
+    .unwrap();
+
+    e.daw_play().unwrap();
+    e.process_blocks(1).unwrap(); // inside note 1
+    assert!(out_v(&e, "t0").abs() < 1e-4, "C4 pitch = 0 V");
+    assert!((out_v(&e, "t1") - 10.0).abs() < 1e-4, "full velocity gate");
+
+    // Jump into the second note.
+    e.daw_seek(24_000 + 100).unwrap();
+    e.process_blocks(1).unwrap();
+    assert!((out_v(&e, "t0") - 16.0 / 12.0).abs() < 1e-3, "E5 pitch");
+    assert!((out_v(&e, "t1") - 5.0).abs() < 1e-3, "half velocity gate");
+
+    // Past the second note's end: gate falls, pitch holds (last note).
+    e.daw_seek(24_000 + 12_000 + 100).unwrap();
+    e.process_blocks(1).unwrap();
+    assert!((out_v(&e, "t0") - 16.0 / 12.0).abs() < 1e-3, "pitch holds");
+    assert!(out_v(&e, "t1").abs() < 1e-4, "gate closed");
+
+    // Remove the second note; re-render reflects it.
+    e.daw_remove_note(0, 1.0, 76).unwrap();
+    e.daw_seek(24_000 + 100).unwrap();
+    e.process_blocks(1).unwrap();
+    assert!(out_v(&e, "t1").abs() < 1e-4, "removed note no longer gates");
+
+    // MIDI tracks reject clips and recordings.
+    assert!(e.daw_import_clip(0, Path::new("/nonexistent.wav")).is_err());
+    assert!(e.daw_record_start(0, DawRecordSource::Input).is_err());
+    assert!(e.daw_record_start(0, DawRecordSource::Mic).is_err());
+    // Non-MIDI tracks reject notes.
+    e.daw_add_track("voice", "audio", false).unwrap();
+    assert!(e
+        .daw_add_note(
+            1,
+            DawNote {
+                beat: 0.0,
+                len: 1.0,
+                pitch: 60,
+                velocity: 1.0
+            }
+        )
+        .is_err());
+}
+
+#[test]
+fn bpm_rescales_midi_note_frames() {
+    use dj_engine::daw::DawNote;
+    let mut e = engine();
+    e.daw_add_track("keys", "midi", false).unwrap();
+    e.daw_add_note(
+        0,
+        DawNote {
+            beat: 1.0,
+            len: 1.0,
+            pitch: 72,
+            velocity: 1.0,
+        },
+    )
+    .unwrap();
+
+    // At 120 BPM the note starts at frame 24_000; block 0-128 is silent.
+    e.daw_play().unwrap();
+    e.process_blocks(1).unwrap();
+    assert!(out_v(&e, "t1").abs() < 1e-4);
+
+    // At 480 BPM (extreme, legal) beat 1 = frame 6_000. Seek to frame
+    // 6_050: gate high.
+    e.daw_set_bpm(480.0).unwrap();
+    e.daw_seek(6_050).unwrap();
+    e.process_blocks(1).unwrap();
+    assert!(
+        (out_v(&e, "t1") - 10.0).abs() < 1e-4,
+        "gate at rescaled beat"
+    );
+    assert!((out_v(&e, "t0") - 1.0).abs() < 1e-3, "C5 = 1 V");
+
+    // Out-of-range BPM is rejected.
+    assert!(e.daw_set_bpm(0.0).is_err());
+    assert!(e.daw_set_bpm(f32::NAN).is_err());
+}
+
+#[test]
+fn bpm_and_notes_roundtrip_through_save_load() {
+    use dj_engine::daw::DawNote;
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let mut e = engine();
+        e.daw_set_bpm(174.0).unwrap();
+        e.daw_add_track("keys", "midi", false).unwrap();
+        e.daw_add_note(
+            0,
+            DawNote {
+                beat: 2.0,
+                len: 0.5,
+                pitch: 67,
+                velocity: 0.8,
+            },
+        )
+        .unwrap();
+        e.save_patch(dir.path(), "midi-patch").unwrap();
+    }
+    let loaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+    let st = loaded.daw().unwrap();
+    assert_eq!(st.bpm, 174.0);
+    assert_eq!(st.tracks[0].kind, DawTrackKind::Midi);
+    assert_eq!(st.tracks[0].notes.len(), 1);
+    assert_eq!(st.tracks[0].notes[0].pitch, 67);
+
+    // A BPM tweak alone (no tracks) also persists.
+    let dir2 = tempfile::tempdir().unwrap();
+    {
+        let mut e = engine();
+        e.daw_set_bpm(90.0).unwrap();
+        e.save_patch(dir2.path(), "bpm-only").unwrap();
+    }
+    assert!(dir2.path().join("modules/daw.json").exists());
+    let loaded = Engine::load_patch(dir2.path(), crate::common::registry()).unwrap();
+    assert_eq!(loaded.daw().unwrap().bpm, 90.0);
 }

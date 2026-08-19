@@ -10,8 +10,9 @@
 
 use super::*;
 use crate::daw::{
-    adapt_channels, alloc_jacks, resample_linear, ClipData, DawCmd, DawProgram, DawProgramTrack,
-    DawRecordSource, DawState, DawTrack, DawTrackKind, PendingRecord, DAW_INSTANCE,
+    adapt_channels, alloc_jacks, midi_note_to_volts, resample_linear, ClipData, DawCmd, DawNote,
+    DawProgram, DawProgramTrack, DawRecordSource, DawState, DawTrack, DawTrackKind, PendingRecord,
+    RtNote, DAW_INSTANCE,
 };
 
 /// Mic capture stream state: a dedicated thread owns the cpal input stream
@@ -59,11 +60,13 @@ impl Engine {
     }
 
     /// Compile the current state + loaded clips and ship it to the RT
-    /// module. Every clip/track edit funnels through here.
+    /// module. Every clip/track/note/BPM edit funnels through here (MIDI
+    /// notes are precompiled to frames at the current BPM).
     fn daw_push_program(&mut self) -> Result<()> {
         let node = self.daw_node()?;
         let state = self.nodes[node].daw.as_ref().unwrap();
         let ctl = self.daws.get(&node).unwrap();
+        let frames_per_beat = self.config.sample_rate as f64 * 60.0 / state.bpm.max(1.0) as f64;
         let tracks = state
             .tracks
             .iter()
@@ -71,6 +74,25 @@ impl Engine {
                 jack: t.jack as u16,
                 channels: t.channels() as u8,
                 clip: ctl.clips.get(&t.jack).map(|(_, c)| c.clone()),
+                notes: {
+                    let mut notes: Vec<RtNote> = t
+                        .notes
+                        .iter()
+                        .map(|n| {
+                            let start = (n.beat as f64 * frames_per_beat).round() as u64;
+                            let end =
+                                ((n.beat + n.len.max(0.0)) as f64 * frames_per_beat).round() as u64;
+                            RtNote {
+                                start,
+                                end: end.max(start + 1),
+                                volts: midi_note_to_volts(n.pitch),
+                                gate: n.velocity.clamp(0.0, 1.0) * crate::graph::SIGNAL_MAX,
+                            }
+                        })
+                        .collect();
+                    notes.sort_by_key(|n| n.start);
+                    notes
+                },
             })
             .collect();
         self.daws
@@ -79,13 +101,63 @@ impl Engine {
             .send(DawCmd::Program(Arc::new(DawProgram { tracks })))
     }
 
-    /// Add a track ("audio" | "continuous"; `stereo` applies to audio
-    /// only). Returns the allocated jack slot (both `i<slot>`/`t<slot>`).
+    /// Set the timeline tempo. Re-schedules MIDI notes (beat -> frame
+    /// mapping); audio/CV clips are frame-based and unaffected.
+    pub fn daw_set_bpm(&mut self, bpm: f32) -> Result<()> {
+        anyhow::ensure!(
+            bpm.is_finite() && (20.0..=999.0).contains(&bpm),
+            "BPM must be in 20..=999"
+        );
+        let node = self.daw_node()?;
+        self.nodes[node].daw.as_mut().unwrap().bpm = bpm;
+        self.daw_push_program()
+    }
+
+    /// Add a note to a MIDI track's grid (beats). Replaces any existing
+    /// note with the same start beat and pitch.
+    pub fn daw_add_note(&mut self, index: usize, note: DawNote) -> Result<()> {
+        anyhow::ensure!(
+            note.beat.is_finite() && note.beat >= 0.0 && note.len.is_finite() && note.len > 0.0,
+            "note beat/len out of range"
+        );
+        let node = self.daw_node()?;
+        let state = self.nodes[node].daw.as_mut().unwrap();
+        let t = state
+            .tracks
+            .get_mut(index)
+            .ok_or_else(|| anyhow!("no track {index}"))?;
+        anyhow::ensure!(t.kind == DawTrackKind::Midi, "track {index} is not MIDI");
+        t.notes
+            .retain(|n| !(n.beat == note.beat && n.pitch == note.pitch));
+        t.notes.push(note);
+        t.notes.sort_by(|a, b| a.beat.total_cmp(&b.beat));
+        self.daw_push_program()
+    }
+
+    /// Remove the note starting at `beat` with `pitch` from a MIDI track.
+    pub fn daw_remove_note(&mut self, index: usize, beat: f32, pitch: u8) -> Result<()> {
+        let node = self.daw_node()?;
+        let state = self.nodes[node].daw.as_mut().unwrap();
+        let t = state
+            .tracks
+            .get_mut(index)
+            .ok_or_else(|| anyhow!("no track {index}"))?;
+        anyhow::ensure!(t.kind == DawTrackKind::Midi, "track {index} is not MIDI");
+        let before = t.notes.len();
+        t.notes.retain(|n| !(n.beat == beat && n.pitch == pitch));
+        anyhow::ensure!(t.notes.len() < before, "no note at {beat} pitch {pitch}");
+        self.daw_push_program()
+    }
+
+    /// Add a track ("audio" | "continuous" | "midi"; `stereo` applies to
+    /// audio only). Returns the allocated jack slot (both
+    /// `i<slot>`/`t<slot>`; MIDI tracks own two: pitch + gate).
     pub fn daw_add_track(&mut self, name: &str, kind: &str, stereo: bool) -> Result<usize> {
         anyhow::ensure!(!name.trim().is_empty(), "track name must not be empty");
         let kind = match kind {
             "audio" => DawTrackKind::Audio,
             "continuous" => DawTrackKind::Continuous,
+            "midi" => DawTrackKind::Midi,
             other => anyhow::bail!("unknown track kind {other:?}"),
         };
         let node = self.daw_node()?;
@@ -101,6 +173,7 @@ impl Engine {
             kind,
             stereo: kind == DawTrackKind::Audio && stereo,
             clip: None,
+            notes: Vec::new(),
         };
         let slot = {
             let n = track.channels();
@@ -172,6 +245,10 @@ impl Engine {
                 .tracks
                 .get(index)
                 .ok_or_else(|| anyhow!("no track {index}"))?;
+            anyhow::ensure!(
+                t.kind != DawTrackKind::Midi,
+                "MIDI tracks hold notes, not clips"
+            );
             t.channels()
         };
         let decoded = decode_file(path)?;
@@ -313,6 +390,10 @@ impl Engine {
             anyhow::ensure!(
                 source != DawRecordSource::Mic || t.kind == DawTrackKind::Audio,
                 "mic recording requires an audio track"
+            );
+            anyhow::ensure!(
+                t.kind != DawTrackKind::Midi,
+                "MIDI tracks hold notes, not recordings"
             );
             (t.jack, t.channels())
         };

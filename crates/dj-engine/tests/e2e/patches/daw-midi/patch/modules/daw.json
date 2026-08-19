@@ -1,0 +1,30 @@
+{
+  "ext": "builtin.daw",
+  "knobs": {},
+  "params": {},
+  "daw": {
+    "tracks": [
+      {
+        "name": "keys",
+        "jack": 0,
+        "kind": "midi",
+        "stereo": false,
+        "notes": [
+          {
+            "beat": 0.0,
+            "len": 1.0,
+            "pitch": 60,
+            "velocity": 1.0
+          },
+          {
+            "beat": 2.0,
+            "len": 1.0,
+            "pitch": 67,
+            "velocity": 0.5
+          }
+        ]
+      }
+    ],
+    "bpm": 150.0
+  }
+}

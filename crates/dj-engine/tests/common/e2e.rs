@@ -111,6 +111,10 @@ pub struct EventsFile {
     pub hands: Vec<HandsTraceSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub daw_clips: Vec<DawClipSpec>,
+    /// Start the DAW transport at render start even without clips (MIDI
+    /// tracks carry their notes in the patch itself).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub daw_play: bool,
 }
 
 impl EventsFile {
@@ -219,7 +223,7 @@ fn render_case(case: &str) -> PathBuf {
         let trace = dj_engine::hands::HandsTrace::load(&case_dir.join(&h.trace)).unwrap();
         engine.hands_feed_trace(&h.instance, &trace, 0).unwrap();
     }
-    if !events.daw_clips.is_empty() {
+    if !events.daw_clips.is_empty() || events.daw_play {
         for c in &events.daw_clips {
             engine
                 .daw_import_clip(c.track, &case_dir.join(&c.file))

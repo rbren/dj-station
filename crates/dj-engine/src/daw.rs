@@ -50,6 +50,30 @@ const CAPTURE_RING_CAP: usize = 1 << 21;
 pub enum DawTrackKind {
     Audio,
     Continuous,
+    /// Beat-grid note track: no clip file — notes live in the patch
+    /// ([`DawNote`]) and render on two jacks (pitch 1 V/oct + gate, the
+    /// choreo note-track convention).
+    Midi,
+}
+
+/// One note on a MIDI track's beat grid. Times are in BEATS (1 beat =
+/// one quarter note at the timeline BPM), converted to frames when the
+/// program is compiled.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DawNote {
+    /// Start position in beats from timeline zero.
+    pub beat: f32,
+    /// Length in beats.
+    pub len: f32,
+    /// MIDI note number (60 = C4 = 0 V on the pitch jack).
+    pub pitch: u8,
+    /// 0..1; scales the gate jack's 0..10 V output.
+    pub velocity: f32,
+}
+
+/// 1 V/oct voltage of a MIDI note number (0 V = MIDI 60 = C4).
+pub fn midi_note_to_volts(pitch: u8) -> f32 {
+    (pitch as f32 - 60.0) / 12.0
 }
 
 /// One DAW track as persisted in the patch and shown in the UI.
@@ -68,22 +92,45 @@ pub struct DawTrack {
     /// like a deck's `track` — the sample data itself is not in the patch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip: Option<String>,
+    /// MIDI tracks only: the note grid (beats; sorted by `beat`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<DawNote>,
 }
 
 impl DawTrack {
     pub fn channels(&self) -> usize {
-        if self.kind == DawTrackKind::Audio && self.stereo {
-            2
-        } else {
-            1
+        match self.kind {
+            DawTrackKind::Audio if self.stereo => 2,
+            // Pitch + gate, contiguous (the choreo note-track pattern).
+            DawTrackKind::Midi => 2,
+            _ => 1,
         }
     }
 }
 
+pub const DEFAULT_BPM: f32 = 120.0;
+
+fn default_bpm() -> f32 {
+    DEFAULT_BPM
+}
+
 /// DAW state, canonical on the control side and persisted in the patch.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DawState {
     pub tracks: Vec<DawTrack>,
+    /// Timeline tempo; the beat grid and MIDI-note scheduling derive from
+    /// it (audio/CV clips are frame-based and unaffected).
+    #[serde(default = "default_bpm")]
+    pub bpm: f32,
+}
+
+impl Default for DawState {
+    fn default() -> Self {
+        DawState {
+            tracks: Vec::new(),
+            bpm: DEFAULT_BPM,
+        }
+    }
 }
 
 /// Find a free contiguous run of `n` jack slots (shared by tracks' input
@@ -146,11 +193,26 @@ impl ClipData {
     }
 }
 
+/// One MIDI note precompiled to engine frames for the RT module.
+#[derive(Debug, Clone, Copy)]
+pub struct RtNote {
+    pub start: u64,
+    pub end: u64,
+    /// 1 V/oct pitch voltage.
+    pub volts: f32,
+    /// Gate level while active (velocity × 10 V).
+    pub gate: f32,
+}
+
 /// One track of the compiled program the RT module plays.
 pub struct DawProgramTrack {
     pub jack: u16,
     pub channels: u8,
     pub clip: Option<Arc<ClipData>>,
+    /// MIDI tracks: notes precompiled to frames, sorted by `start`.
+    /// Rendered on `jack` (pitch, holds the last started note) and
+    /// `jack + 1` (gate; overlapping notes: last started wins).
+    pub notes: Vec<RtNote>,
 }
 
 /// The immutable program shipped to the RT module on every edit.
@@ -347,6 +409,37 @@ impl HostModule for DawRtModule {
         if self.playing {
             if let Some(program) = self.program.as_ref() {
                 for t in &program.tracks {
+                    if !t.notes.is_empty() {
+                        // MIDI track: pitch on `jack` (holds the last
+                        // started note), gate on `jack + 1`.
+                        let j0 = t.jack as usize;
+                        // Last note started at or before the block start
+                        // sets the initial held pitch.
+                        let mut next = t.notes.partition_point(|n| n.start <= self.pos);
+                        let mut held = next.checked_sub(1).map(|i| t.notes[i].volts);
+                        let (pitch_out, rest) = outputs[j0..].split_first_mut().unwrap();
+                        let gate_out = &mut rest[0];
+                        for s in 0..frames {
+                            let p = self.pos + s as u64;
+                            while next < t.notes.len() && t.notes[next].start <= p {
+                                held = Some(t.notes[next].volts);
+                                next += 1;
+                            }
+                            // Gate: the LAST-started note still active at
+                            // p wins (reverse scan of started notes; note
+                            // counts are UI-scale, so this stays cheap).
+                            let mut gate = 0.0;
+                            for n in t.notes[..next].iter().rev() {
+                                if n.end > p {
+                                    gate = n.gate;
+                                    break;
+                                }
+                            }
+                            pitch_out[s] = held.unwrap_or(0.0);
+                            gate_out[s] = gate;
+                        }
+                        continue;
+                    }
                     let Some(clip) = &t.clip else { continue };
                     let j0 = t.jack as usize;
                     for ch in 0..t.channels as usize {

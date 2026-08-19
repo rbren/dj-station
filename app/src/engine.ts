@@ -3,7 +3,7 @@
 // headless.
 
 import { IpcClient } from './ipc';
-import type { JackTelemetry, KnobConfig, Manifest } from './types';
+import type { JackTelemetry, KnobConfig, KnobState, Manifest } from './types';
 
 /** Subscribe to native File-menu actions ("saved" | "save-as" | "open").
  *  Also listens for `dj-menu` DOM CustomEvents so tests / the dev browser
@@ -134,21 +134,38 @@ export interface ChoreoStatus {
   playhead: number;
 }
 
+/** One note on a DAW MIDI track's beat grid (times in beats). */
+export interface DawNote {
+  beat: number;
+  len: number;
+  /** MIDI note number (60 = C4 = 0 V on the pitch jack). */
+  pitch: number;
+  /** 0..1; scales the gate jack's 0..10 V output. */
+  velocity: number;
+}
+
 export interface DawTrack {
   name: string;
   /** First jack slot; the track owns `channels` contiguous slots on BOTH
-   *  sides (`i<jack>` input, `t<jack>` output; stereo audio adds +1). */
+   *  sides (`i<jack>` input, `t<jack>` output; stereo audio and MIDI
+   *  pitch+gate add +1). */
   jack: number;
-  kind: 'audio' | 'continuous';
+  kind: 'audio' | 'continuous' | 'midi';
   stereo: boolean;
   /** Absolute path of the loaded clip (library/recordings), if any. */
   clip?: string | null;
+  /** MIDI tracks: the note grid (absent/empty otherwise). */
+  notes?: DawNote[];
 }
 
 export interface DawStatus {
   tracks: DawTrack[];
   /** Loaded clip length per track, engine frames (0 = no clip). */
   clip_frames: number[];
+  /** Knob state per track-owned input jack, keyed by jack id (`i<n>`). */
+  knobs: Record<string, KnobState>;
+  /** Timeline tempo (beat grid + MIDI note scheduling). */
+  bpm: number;
   /** Transport position, engine frames. */
   playhead: number;
   playing: boolean;
@@ -160,7 +177,7 @@ export interface DawStatus {
 }
 
 export function dawTrackChannels(t: DawTrack): number {
-  return t.kind === 'audio' && t.stereo ? 2 : 1;
+  return (t.kind === 'audio' && t.stereo) || t.kind === 'midi' ? 2 : 1;
 }
 
 export interface MacroInfo {
@@ -403,8 +420,17 @@ export class EngineClient extends IpcClient {
   dawStatus() {
     return this.call<DawStatus>('daw_status', undefined, { quiet: true });
   }
-  dawAddTrack(name: string, kind: 'audio' | 'continuous', stereo: boolean) {
+  dawAddTrack(name: string, kind: 'audio' | 'continuous' | 'midi', stereo: boolean) {
     return this.call<void>('daw_add_track', { name, kind, stereo });
+  }
+  dawSetBpm(bpm: number) {
+    return this.call<void>('daw_set_bpm', { bpm });
+  }
+  dawAddNote(track: number, beat: number, len: number, pitch: number, velocity: number) {
+    return this.call<void>('daw_add_note', { track, beat, len, pitch, velocity });
+  }
+  dawRemoveNote(track: number, beat: number, pitch: number) {
+    return this.call<void>('daw_remove_note', { track, beat, pitch });
   }
   dawRemoveTrack(track: number) {
     return this.call<void>('daw_remove_track', { track });

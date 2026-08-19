@@ -104,6 +104,9 @@ enum EditKey<'a> {
     DawTrackMove,
     /// Clip changes (import/clear/finished recording) coalesce per track.
     DawClip(usize),
+    DawBpm,
+    /// MIDI note grid edits coalesce per track (click-painting).
+    DawNotes(usize),
     Knob(&'a str, &'a str),
     KnobConfig(&'a str, &'a str),
     KnobReset(&'a str, &'a str),
@@ -145,6 +148,8 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::DawTrackRename(t) => write!(f, "daw-rename:{t}"),
             EditKey::DawTrackMove => write!(f, "daw-move"),
             EditKey::DawClip(t) => write!(f, "daw-clip:{t}"),
+            EditKey::DawBpm => write!(f, "daw-bpm"),
+            EditKey::DawNotes(t) => write!(f, "daw-notes:{t}"),
             EditKey::Knob(i, j) => write!(f, "knob:{i}:{j}"),
             EditKey::KnobConfig(i, j) => write!(f, "knobcfg:{i}:{j}"),
             EditKey::KnobReset(i, j) => write!(f, "knobreset:{i}:{j}"),
@@ -1151,14 +1156,18 @@ fn choreo_set_note_settings(
         .map_err(err)
 }
 
-/// Everything the DAW bottom bar needs per poll: tracks, transport, and
-/// recording progress.
+/// Everything the DAW bottom bar needs per poll: tracks, transport, tempo,
+/// input-knob states, and recording progress.
 #[derive(Serialize)]
 struct DawStatusSnapshot {
     tracks: Vec<dj_engine::daw::DawTrack>,
     /// Loaded clip length per track, engine frames (0 = no clip) — the
     /// bar's graphs place the playhead with this.
     clip_frames: Vec<u64>,
+    /// Knob state per track-owned input jack, keyed by jack id (`i<n>`) —
+    /// the bar renders a recordable knob on each input.
+    knobs: std::collections::BTreeMap<String, dj_engine::knob::KnobState>,
+    bpm: f32,
     playhead: u64,
     playing: bool,
     recording: Option<usize>,
@@ -1171,13 +1180,26 @@ struct DawStatusSnapshot {
 fn daw_status(state: State<AppState>) -> CmdResult<DawStatusSnapshot> {
     let mut engine = engine_lock(&state)?;
     let st = engine.daw_status().map_err(err)?;
-    let tracks = engine.daw().map_err(err)?.tracks.clone();
+    let daw = engine.daw().map_err(err)?;
+    let tracks = daw.tracks.clone();
+    let bpm = daw.bpm;
     let clip_frames = (0..tracks.len())
         .map(|i| engine.daw_clip_frames(i).unwrap_or(0))
         .collect();
+    let mut knobs = std::collections::BTreeMap::new();
+    for t in &tracks {
+        for c in 0..t.channels() {
+            let jack = format!("i{}", t.jack + c);
+            if let Ok(k) = engine.knob_state("daw", &jack) {
+                knobs.insert(jack, k);
+            }
+        }
+    }
     Ok(DawStatusSnapshot {
         tracks,
         clip_frames,
+        knobs,
+        bpm,
         playhead: st.playhead,
         playing: st.playing,
         recording: st.recording,
@@ -1187,8 +1209,47 @@ fn daw_status(state: State<AppState>) -> CmdResult<DawStatusSnapshot> {
     })
 }
 
-/// Add a track ("audio" | "continuous"); it materializes as 1 (mono /
-/// continuous) or 2 (stereo audio) input+output jack slots on the bar.
+/// Set the timeline tempo (beat grid + MIDI note scheduling).
+#[tauri::command]
+fn daw_set_bpm(state: State<AppState>, bpm: f32) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawBpm)?;
+    engine.daw_set_bpm(bpm).map_err(err)
+}
+
+/// Add (or replace) a note on a MIDI track's beat grid.
+#[tauri::command]
+fn daw_add_note(
+    state: State<AppState>,
+    track: usize,
+    beat: f32,
+    len: f32,
+    pitch: u8,
+    velocity: f32,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawNotes(track))?;
+    engine
+        .daw_add_note(
+            track,
+            dj_engine::daw::DawNote {
+                beat,
+                len,
+                pitch,
+                velocity,
+            },
+        )
+        .map_err(err)
+}
+
+/// Remove the note at `beat`/`pitch` from a MIDI track.
+#[tauri::command]
+fn daw_remove_note(state: State<AppState>, track: usize, beat: f32, pitch: u8) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DawNotes(track))?;
+    engine.daw_remove_note(track, beat, pitch).map_err(err)
+}
+
+/// Add a track ("audio" | "continuous" | "midi"); it materializes as 1
+/// (mono / continuous) or 2 (stereo audio, MIDI pitch+gate) input+output
+/// jack slots on the bar.
 #[tauri::command]
 fn daw_add_track(state: State<AppState>, name: String, kind: String, stereo: bool) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::DawTrackAdd(&name))?;
@@ -2739,6 +2800,9 @@ fn main() {
             daw_record_cancel,
             daw_clip_peaks,
             daw_clip_frames,
+            daw_set_bpm,
+            daw_add_note,
+            daw_remove_note,
             hands_feed,
             undo,
             redo,

@@ -2732,31 +2732,196 @@ body {
   gap: 4px;
 }
 
-.daw-lanes {
+.daw-body {
+  --daw-side-w: 240px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 4px 10px 8px;
-  max-height: 40vh;
+  max-height: 46vh;
   overflow-y: auto;
 }
 
-.daw-lane {
+/* One shared horizontal scroller: sticky side stacks on the left, the
+   beat-aligned timeline extending indefinitely to the right. */
+.daw-scroll {
+  position: relative;
+  overflow-x: auto;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 6px;
-  background: #171b21;
-  border: 1px solid #232833;
-  border-radius: 6px;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.daw-lane-side {
+.daw-row {
+  display: flex;
+  align-items: stretch;
+  width: max-content;
+  min-width: 100%;
+}
+
+.daw-side {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  flex: none;
+  width: var(--daw-side-w);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 8px 4px 6px;
+  background: #171b21;
+  border: 1px solid #232833;
+  border-radius: 6px 0 0 6px;
+}
+
+.daw-side-spacer {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.daw-ruler-row {
+  height: 18px;
+}
+
+.daw-side-top {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 300px;
+}
+
+.daw-lane {
+  background: #14171c;
+}
+
+.daw-timeline {
+  position: relative;
   flex: none;
+  background: #0e1116;
+  border: 1px solid #232833;
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.daw-gridlines {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  pointer-events: none;
+}
+
+.daw-grid-beat {
+  stroke: #2a2f38;
+  stroke-width: 1;
+}
+
+.daw-grid-snap {
+  stroke: #1d222b;
+  stroke-width: 1;
+}
+
+.daw-ruler {
+  display: block;
+  cursor: pointer;
+  background: #12151b;
+}
+
+.daw-ruler-bar {
+  stroke: #4a5260;
+  stroke-width: 1;
+}
+
+.daw-ruler-beat {
+  stroke: #333a46;
+  stroke-width: 1;
+}
+
+.daw-ruler-snap {
+  stroke: #232833;
+  stroke-width: 1;
+}
+
+.daw-ruler-label {
+  fill: #667080;
+  font-size: 9px;
+}
+
+.daw-playhead-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  background: #e6b450;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.daw-timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.daw-bpm-label,
+.daw-snap-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #8a93a2;
+  font-size: 11px;
+}
+
+.daw-bpm {
+  width: 52px;
+  background: #10131a;
+  border: 1px solid #2a2f38;
+  border-radius: 4px;
+  color: #c9d2df;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.daw-snap {
+  background: #10131a;
+  border: 1px solid #2a2f38;
+  border-radius: 4px;
+  color: #c9d2df;
+  font-size: 12px;
+}
+
+.daw-zoom {
+  display: flex;
+  gap: 3px;
+}
+
+.daw-in-cell {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.daw-midi-grid {
+  display: block;
+  cursor: pointer;
+}
+
+.daw-midi-blackrow {
+  fill: #12151b;
+}
+
+.daw-midi-octave {
+  stroke: #2f3542;
+  stroke-width: 1;
+}
+
+.daw-midi-note {
+  fill: #62d0ff;
+  stroke: #8adfff;
+  stroke-width: 0.5;
 }
 
 .daw-track-name {
@@ -2785,11 +2950,12 @@ body {
   color: #e05c5c;
 }
 
+/* Embedded in the shared timeline: no chrome of its own. */
 .daw-graph {
-  background: #0e1116;
-  border: 1px solid #232833;
-  border-radius: 4px;
+  display: block;
   flex: none;
+  position: relative;
+  z-index: 1;
   cursor: crosshair;
 }
 
@@ -2808,11 +2974,6 @@ body {
 .daw-graph-empty {
   fill: #4a5260;
   font-size: 10px;
-}
-
-.daw-playhead {
-  stroke: #e6b450;
-  stroke-width: 1.5;
 }
 
 .daw-lane-actions {

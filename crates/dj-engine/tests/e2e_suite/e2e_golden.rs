@@ -179,6 +179,7 @@ fn regen_patches() {
                 gestures: vec![],
                 hands: vec![],
                 daw_clips: vec![],
+                daw_play: false,
             },
         );
     }
@@ -224,6 +225,7 @@ fn regen_deck_patches() {
                 gestures: vec![],
                 hands: vec![],
                 daw_clips: vec![],
+                daw_play: false,
             },
         );
     }
@@ -289,6 +291,7 @@ fn regen_deck_patches() {
                 gestures: vec![],
                 hands: vec![],
                 daw_clips: vec![],
+                daw_play: false,
             },
         );
     }
@@ -361,6 +364,7 @@ fn regen_stem_patches() {
                 gestures: vec![],
                 hands: vec![],
                 daw_clips: vec![],
+                daw_play: false,
             },
         );
     }

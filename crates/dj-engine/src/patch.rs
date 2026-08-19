@@ -268,14 +268,13 @@ impl Engine {
                 }
                 knobs.insert(jack.id.clone(), state.clone());
             }
-            // An untouched DAW (no tracks, no knob tweaks) stays out of
-            // the document entirely: it always exists in the engine, and
-            // omitting it keeps pre-DAW patches loading byte-identically.
-            if info
-                .daw
-                .as_ref()
-                .is_some_and(|d| d.tracks.is_empty() && knobs.is_empty())
-            {
+            // An untouched DAW (no tracks, default BPM, no knob tweaks)
+            // stays out of the document entirely: it always exists in the
+            // engine, and omitting it keeps pre-DAW patches loading
+            // byte-identically.
+            if info.daw.as_ref().is_some_and(|d| {
+                d.tracks.is_empty() && d.bpm == crate::daw::DEFAULT_BPM && knobs.is_empty()
+            }) {
                 continue;
             }
             modules.insert(

@@ -78,3 +78,69 @@ fn daw_tracks_case() {
     }
     check_case("daw-tracks");
 }
+
+/// DAW MIDI track: a two-note beat-grid melody at 150 BPM drives an
+/// oscillator (pitch jack, 1 V/oct) gated through a VCA (gate jack).
+/// Notes live in the serialized patch itself — the sidecar only starts
+/// the transport (`daw_play`).
+fn regen_daw_midi() {
+    use dj_engine::daw::DawNote;
+    let dir = crate::common::e2e::case_dir("daw-midi");
+    let mut e = Engine::new(
+        EngineConfig {
+            master_channels: 1,
+            ..EngineConfig::default()
+        },
+        crate::common::registry(),
+    )
+    .unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    e.daw_set_bpm(150.0).unwrap();
+    e.daw_add_track("keys", "midi", false).unwrap(); // t0 pitch, t1 gate
+    e.daw_add_note(
+        0,
+        DawNote {
+            beat: 0.0,
+            len: 1.0,
+            pitch: 60,
+            velocity: 1.0,
+        },
+    )
+    .unwrap();
+    e.daw_add_note(
+        0,
+        DawNote {
+            beat: 2.0,
+            len: 1.0,
+            pitch: 67,
+            velocity: 0.5,
+        },
+    )
+    .unwrap();
+
+    e.connect("daw", "t0", "osc1", "pitch").unwrap();
+    e.connect("daw", "t1", "vca1", "cv").unwrap();
+    e.set_knob_value("vca1", "cv", 0.0).unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "daw-midi").unwrap();
+    write_events(
+        &dir,
+        &EventsFile {
+            daw_play: true,
+            ..EventsFile::seconds(2.0)
+        },
+    );
+}
+
+#[test]
+fn daw_midi_case() {
+    if regen() {
+        regen_daw_midi();
+    }
+    check_case("daw-midi");
+}
