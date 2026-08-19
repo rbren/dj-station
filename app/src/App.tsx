@@ -113,6 +113,10 @@ export default function App() {
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
+  // The pan/zoom-transformed rack surface: the wire overlay renders inside
+  // it and measures jacks in rack coordinates, so panning/zooming moves
+  // cables via the CSS transform with no re-measure.
+  const [rackInnerEl, setRackInnerEl] = useState<HTMLDivElement | null>(null);
   // Marquee select: dragging on the rack background sweeps a rectangle
   // (rack coordinates); on release every module whose rect intersects it
   // joins the selection (replacing it, or adding with shift/cmd/ctrl).
@@ -1360,6 +1364,7 @@ export default function App() {
               <div
                 className="rack"
                 data-testid="rack"
+                ref={setRackInnerEl}
                 style={{
                   transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                   transformOrigin: '0 0',
@@ -1399,14 +1404,18 @@ export default function App() {
                     }}
                   />
                 )}
+                {/* Inside the transformed rack, in rack coordinates: pan
+                    and zoom move the cables through the CSS transform, so
+                    they are deliberately NOT part of layoutKey. */}
+                <WireOverlay
+                  wires={wires}
+                  container={rackInnerEl}
+                  colors={wireColors}
+                  pending={pending}
+                  zoom={zoom}
+                  layoutKey={JSON.stringify(positions)}
+                />
               </div>
-              <WireOverlay
-                wires={wires}
-                container={rackEl}
-                colors={wireColors}
-                pending={pending}
-                layoutKey={`${JSON.stringify(positions)}@${zoom}@${pan.x},${pan.y}`}
-              />
             </div>
           </DeckUIContext.Provider>
         </RackStoreContext.Provider>

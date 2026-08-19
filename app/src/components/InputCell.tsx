@@ -6,7 +6,7 @@
 
 import type { DisplaySpec, JackTelemetry, KnobConfig, KnobState } from '../types';
 import type { CellSpec } from './panelLayouts';
-import { Jack } from './Jack';
+import { LiveJack } from './Jack';
 import { Knob } from './Knob';
 
 const DEFAULT_KNOB: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'linear' };
@@ -50,7 +50,7 @@ export function InputCell(props: InputCellProps) {
       className={`input-cell${appearance ? ` input-cell-${appearance}` : ''}`}
       data-testid={`input-cell-${cell.jack}`}
     >
-      <Jack
+      <LiveJack
         instance={props.instance}
         id={cell.jack}
         kind="input"

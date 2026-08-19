@@ -1,7 +1,9 @@
-// One rack slot: subscribes to its own node snapshot, position, selection
-// and telemetry slice from the rack store, so a telemetry tick or a knob
-// drag re-renders only the panels whose slice actually changed — not the
-// whole rack. Wrapped in React.memo with stable callback props from App.
+// One rack slot: subscribes to its own node snapshot, position and
+// selection from the rack store, so a knob drag or structural edit
+// re-renders only the panels whose slice actually changed — not the whole
+// rack. Telemetry stays OUT of this component: jacks and custom UIs
+// subscribe to their own readings (LiveJack / CustomUIHost). Wrapped in
+// React.memo with stable callback props from App.
 
 import { memo, useContext, useMemo, type ComponentType } from 'react';
 import AdsrUI from '../../../extensions/adsr/ui-src/AdsrUI';
@@ -88,7 +90,10 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
   const position = useRackSelector((s) => s.positions[instanceId]);
   const selected = useRackSelector((s) => s.selected.includes(instanceId));
   const pending = useRackSelector((s) => s.pending);
-  const telemetry = useRackSelector((s) => s.telemetry[instanceId]);
+  // Deliberately NOT subscribed to telemetry: jack glows subscribe per jack
+  // (LiveJack) and custom UIs per instance (CustomUIHost), so a telemetry
+  // tick never re-renders whole panels — the difference between 22 fps and
+  // 60 fps on a two-dozen-module rack (see src/stress/).
 
   // Handle identity follows the node snapshot, not the telemetry tick:
   // signalTap reads the live slice from the store on demand.
@@ -123,7 +128,6 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         manifest={node.manifest}
         knobs={node.knobs}
         wired={Object.fromEntries(node.wired_inputs.map((j) => [j, true]))}
-        telemetry={telemetry}
         handle={handle}
         customUI={CUSTOM_UIS[node.type_id]}
         extra={

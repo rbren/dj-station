@@ -1,5 +1,14 @@
 // SVG cable layer: draws a straight wire for every connection between jack
 // socket positions (sockets carry data-jack="instance:kind:jack").
+//
+// The overlay lives INSIDE the pan/zoom-transformed rack element and works
+// in UNZOOMED rack coordinates (screen measurements divided by `zoom`), so
+// panning/zooming moves the cables for free via the CSS transform — no
+// re-measure, no re-render. Re-measures happen only when jacks can actually
+// move: module add/remove/drag (childList mutations, layoutKey), panel
+// growth (ResizeObserver), or window resize. Attribute mutations from
+// telemetry visuals (jack glows, knob dials, meter fills — 10 Hz across the
+// whole rack) are explicitly ignored.
 
 import { useLayoutEffect, useState } from 'react';
 import type { WireSnapshot } from '../engine';
@@ -31,6 +40,7 @@ interface Cable {
 function jackCenter(
   root: HTMLElement,
   origin: DOMRect,
+  zoom: number,
   instance: string,
   kind: 'output' | 'input',
   jack: string,
@@ -38,7 +48,37 @@ function jackCenter(
   const el = root.querySelector(`[data-jack="${instance}:${kind}:${jack}"]`);
   if (!el) return null;
   const r = (el as HTMLElement).getBoundingClientRect();
-  return { x: r.left + r.width / 2 - origin.left, y: r.top + r.height / 2 - origin.top };
+  // Screen px → unzoomed rack coordinates (the container is scaled by
+  // `zoom` around origin 0 0, so its own rect already includes the pan).
+  return {
+    x: (r.left + r.width / 2 - origin.left) / zoom,
+    y: (r.top + r.height / 2 - origin.top) / zoom,
+  };
+}
+
+/** Telemetry-driven visuals mutate attributes at 10 Hz all over the rack
+ *  (glow styles, knob dial rotations, meter fills, canvas sizes) but can
+ *  never move a jack socket — only these mutations may trigger a
+ *  re-measure. */
+function mayMoveJacks(records: MutationRecord[]): boolean {
+  return records.some((r) => {
+    const el = r.target as Element;
+    if (el.closest?.('.wire-overlay')) return false;
+    if (r.type !== 'attributes') return true;
+    return !el.closest?.('.jack, .knob, .level-meter, .module-custom-ui');
+  });
+}
+
+function cablesEqual(a: Cable[], b: Cable[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x.key !== y.key || x.x1 !== y.x1 || x.y1 !== y.y1 || x.x2 !== y.x2 || x.y2 !== y.y2) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export interface PendingEnd {
@@ -54,8 +94,10 @@ export function WireOverlay({
   colors,
   pending,
   layoutKey,
+  zoom = 1,
 }: {
   wires: WireSnapshot[];
+  /** The pan/zoom-transformed rack element the overlay renders inside. */
   container: HTMLElement | null;
   /** Wire key → WIRE_COLORS index. */
   colors?: Record<string, number>;
@@ -64,6 +106,10 @@ export function WireOverlay({
   /** Any string that changes when jack positions may have moved
    *  (e.g. serialized module positions) to trigger a re-measure. */
   layoutKey?: string;
+  /** The rack scale factor, to convert screen measurements to rack
+   *  coordinates. Pan/zoom changes need no re-measure: cables are stored
+   *  unzoomed and the container's CSS transform moves them. */
+  zoom?: number;
 }) {
   const [cables, setCables] = useState<Cable[]>([]);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
@@ -74,20 +120,21 @@ export function WireOverlay({
     if (!pending || !container) return;
     const onMove = (e: MouseEvent) => {
       const origin = container.getBoundingClientRect();
-      setCursor({ x: e.clientX - origin.left, y: e.clientY - origin.top });
+      setCursor({ x: (e.clientX - origin.left) / zoom, y: (e.clientY - origin.top) / zoom });
     };
     window.addEventListener('mousemove', onMove);
     return () => {
       window.removeEventListener('mousemove', onMove);
       setCursor(null);
     };
-  }, [pending, container]);
+  }, [pending, container, zoom]);
 
   const pendingStart =
     pending && container
       ? jackCenter(
           container,
           container.getBoundingClientRect(),
+          zoom,
           pending.instance,
           pending.kind,
           pending.jack,
@@ -101,15 +148,15 @@ export function WireOverlay({
       const origin = container.getBoundingClientRect();
       const next: Cable[] = [];
       for (const w of wires) {
-        const a = jackCenter(container, origin, w.from_instance, 'output', w.from_jack);
-        const b = jackCenter(container, origin, w.to_instance, 'input', w.to_jack);
+        const a = jackCenter(container, origin, zoom, w.from_instance, 'output', w.from_jack);
+        const b = jackCenter(container, origin, zoom, w.to_instance, 'input', w.to_jack);
         if (a && b) {
           next.push({ key: wireKey(w), x1: a.x, y1: a.y, x2: b.x, y2: b.y });
         }
       }
       // Only update state on real changes so observer-triggered measures
       // don't loop through our own SVG re-render.
-      setCables((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+      setCables((prev) => (cablesEqual(prev, next) ? prev : next));
     };
     const schedule = () => {
       cancelAnimationFrame(raf);
@@ -119,16 +166,15 @@ export function WireOverlay({
     window.addEventListener('resize', schedule);
     // Panels are absolutely positioned, so the container itself never
     // resizes when a panel grows (e.g. deck waveform loading in) — observe
-    // every panel, and any DOM mutation outside the overlay itself.
+    // every panel, and jack-moving DOM mutations (mayMoveJacks filters out
+    // the 10 Hz telemetry attribute churn).
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
     ro?.observe(container);
     container.querySelectorAll('.module-panel').forEach((p) => ro?.observe(p));
     const mo =
       typeof MutationObserver !== 'undefined'
         ? new MutationObserver((records) => {
-            if (records.some((r) => !(r.target as Element).closest?.('.wire-overlay'))) {
-              schedule();
-            }
+            if (mayMoveJacks(records)) schedule();
           })
         : null;
     mo?.observe(container, { subtree: true, childList: true, attributes: true });
@@ -138,7 +184,7 @@ export function WireOverlay({
       ro?.disconnect();
       mo?.disconnect();
     };
-  }, [wires, container, layoutKey]);
+  }, [wires, container, layoutKey, zoom]);
 
   return (
     <svg className="wire-overlay" data-testid="wire-overlay">
@@ -151,6 +197,7 @@ export function WireOverlay({
           x2={c.x2}
           y2={c.y2}
           className="wire-cable"
+          vectorEffect="non-scaling-stroke"
           style={{ stroke: WIRE_COLORS[(colors?.[c.key] ?? 0) % WIRE_COLORS.length] }}
         />
       ))}
@@ -162,6 +209,7 @@ export function WireOverlay({
           x2={cursor?.x ?? pendingStart.x}
           y2={cursor?.y ?? pendingStart.y}
           className="wire-cable wire-cable-pending"
+          vectorEffect="non-scaling-stroke"
           style={{ stroke: WIRE_COLORS[pending.color % WIRE_COLORS.length] }}
         />
       )}

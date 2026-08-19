@@ -43,8 +43,10 @@ export interface RackStore {
    *  selections can never survive an engine-side change (undo, patch load,
    *  collapse, paste). */
   setNodes(nodes: NodeSnapshot[]): void;
-  /** Replace telemetry, keeping per-instance slice identity when nothing
-   *  moved (an idle rack causes zero re-renders). */
+  /** Replace telemetry, keeping object identity per instance slice AND per
+   *  jack when a reading is visually unchanged, so per-jack subscribers
+   *  (useLiveJackTelemetry) re-render only for jacks that actually moved
+   *  (an idle rack causes zero re-renders). */
   setTelemetry(telemetry: RackTelemetry): void;
   subscribe(listener: () => void): () => void;
 }
@@ -68,27 +70,24 @@ export function saveJson(key: string, value: unknown) {
   }
 }
 
-function telemetrySliceEqual(
-  a: Record<string, JackTelemetry>,
-  b: Record<string, JackTelemetry>,
-): boolean {
-  const aKeys = Object.keys(a);
-  if (aKeys.length !== Object.keys(b).length) return false;
-  for (const k of aKeys) {
-    const x = a[k];
-    const y = b[k];
-    if (!y) return false;
-    if (
-      x.instantaneous !== y.instantaneous ||
-      x.rms_100ms !== y.rms_100ms ||
-      x.display !== y.display ||
-      x.volatility !== y.volatility ||
-      x.is_fast !== y.is_fast
-    ) {
-      return false;
-    }
-  }
-  return true;
+/** Equality at DISPLAY resolution: readings are compared quantized to what
+ *  the UI can actually show (indicator hue steps ~0.1 V, tooltips 2–3
+ *  decimals), so a slowly-drifting-but-visually-steady signal is a no-op
+ *  tick instead of a re-render. 0.005 V / 0.005 volatility grains are well
+ *  below anything the glow or tooltip can resolve. */
+const VALUE_GRAIN = 0.005;
+
+function jackTelemetryEqual(x: JackTelemetry, y: JackTelemetry): boolean {
+  const q = (v: number) => Math.round(v / VALUE_GRAIN);
+  // Only the fields something renders (glow color, tooltips, meters, custom
+  // UIs read display/volatility/is_fast) participate: `instantaneous` is a
+  // raw sample that differs every tick on any live audio jack and nothing
+  // in the UI shows it, so comparing it would force re-renders for
+  // invisible changes. A stale `instantaneous` inside a kept object is
+  // harmless for the same reason.
+  return (
+    q(x.display) === q(y.display) && q(x.volatility) === q(y.volatility) && x.is_fast === y.is_fast
+  );
 }
 
 export function createRackStore(): RackStore {
@@ -133,10 +132,30 @@ export function createRackStore(): RackStore {
       let allSame = Object.keys(prev).length === Object.keys(next).length;
       for (const [id, jacks] of Object.entries(next)) {
         const p = prev[id];
-        if (p && telemetrySliceEqual(p, jacks)) {
+        if (!p) {
+          out[id] = jacks;
+          allSame = false;
+          continue;
+        }
+        // Rebuild the instance slice reusing the previous object for every
+        // jack that reads the same, so per-jack subscribers skip; if every
+        // jack was reused (and none disappeared), reuse the slice itself.
+        const jackIds = Object.keys(jacks);
+        let sliceSame = jackIds.length === Object.keys(p).length;
+        const slice: Record<string, JackTelemetry> = {};
+        for (const k of jackIds) {
+          const x = p[k];
+          if (x && jackTelemetryEqual(x, jacks[k])) {
+            slice[k] = x;
+          } else {
+            slice[k] = jacks[k];
+            sliceSame = false;
+          }
+        }
+        if (sliceSame) {
           out[id] = p;
         } else {
-          out[id] = jacks;
+          out[id] = slice;
           allSame = false;
         }
       }
@@ -165,4 +184,38 @@ export function useRackSelector<T>(selector: (s: RackState) => T): T {
   const store = useContext(RackStoreContext);
   if (!store) throw new Error('useRackSelector outside RackStoreContext');
   return useStoreSelector(store, selector);
+}
+
+const noopSubscribe = () => () => {};
+
+/** One jack's live telemetry: subscribes to exactly that reading, so a
+ *  telemetry tick re-renders only the jacks that moved — never the panel
+ *  around them. Outside a RackStoreContext (docs previews, storeless unit
+ *  tests) it returns `fallback` and never re-renders. `key` is the tap_all
+ *  telemetry key: the input jack id, or `out:<id>` for outputs. */
+export function useLiveJackTelemetry(
+  instance: string,
+  key: string,
+  fallback?: JackTelemetry,
+): JackTelemetry | undefined {
+  const store = useContext(RackStoreContext);
+  return useSyncExternalStore(
+    store ? store.subscribe : noopSubscribe,
+    store ? () => store.getState().telemetry[instance]?.[key] ?? fallback : () => fallback,
+  );
+}
+
+/** A module's whole live telemetry slice (identity-stable across unchanged
+ *  ticks): re-renders the caller whenever ANY of the module's jacks moved.
+ *  Used by the custom-UI host so meters/playheads that read
+ *  `handle.signalTap()` at render time stay live without the whole panel
+ *  re-rendering. Outside a store: undefined, never re-renders. */
+export function useLiveInstanceTelemetry(
+  instance: string,
+): Record<string, JackTelemetry> | undefined {
+  const store = useContext(RackStoreContext);
+  return useSyncExternalStore(
+    store ? store.subscribe : noopSubscribe,
+    store ? () => store.getState().telemetry[instance] : () => undefined,
+  );
 }

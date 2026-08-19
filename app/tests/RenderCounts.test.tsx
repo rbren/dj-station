@@ -1,9 +1,11 @@
-// Rendering-efficiency invariants (the contract rackStore's slice identity
-// exists to provide): a telemetry tick where nothing moved re-renders NO
-// module panel, and a tick where one module's jack moved re-renders ONLY
-// that panel. If these break, every 100 ms tap_all poll re-renders the
-// whole rack and large racks get choppy — see src/stress/ for the
-// interactive harness that measures the same path in real time.
+// Rendering-efficiency invariants (the contract rackStore's per-jack
+// identity + LiveJack subscriptions exist to provide): a telemetry tick
+// NEVER re-renders a ModulePanel — not even the panel whose jack moved.
+// Only the moved jack itself re-renders (its glow/tooltip update), and a
+// visually-unchanged tick re-renders nothing at all. If these break, every
+// 100 ms tap_all poll re-renders whole panels and large racks get choppy —
+// see src/stress/ for the interactive harness that measures the same path
+// in real time.
 
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,8 +21,11 @@ const OSC: Manifest = {
   params: [],
 };
 
+// Real VCA type id: RackModule mounts its custom UI (the meterUI level
+// meters), which must stay live through CustomUIHost's subscription even
+// though the panel itself no longer re-renders on telemetry ticks.
 const VCA: Manifest = {
-  id: 'com.dj.vca2',
+  id: 'com.dj.vca',
   name: 'VCA',
   version: '0.1.0',
   abi: 'wasm-1',
@@ -49,12 +54,13 @@ function tele(display: number): JackTelemetry {
   return { instantaneous: display, rms_100ms: 0, display, volatility: 0, is_fast: false };
 }
 
+// Output jacks are keyed `out:<id>` in tap_all responses.
 const state = {
   nodes: [node('osc-1', OSC), node('osc-2', OSC), node('vca-1', VCA)],
   telemetry: {
-    'osc-1': { pitch: tele(0), audio: tele(1) },
-    'osc-2': { pitch: tele(0), audio: tele(2) },
-    'vca-1': { in: tele(0), cv: tele(0), out: tele(3) },
+    'osc-1': { pitch: tele(0), 'out:audio': tele(1) },
+    'osc-2': { pitch: tele(0), 'out:audio': tele(2) },
+    'vca-1': { in: tele(0), cv: tele(0), 'out:out': tele(3) },
   } as Record<string, Record<string, JackTelemetry>>,
 };
 
@@ -135,15 +141,35 @@ describe('telemetry tick render counts', () => {
     expect(renderCounts).toEqual({});
   });
 
-  it('re-renders only the panel whose jack moved', async () => {
+  it('re-renders no panel when a jack moves — only the jack updates', async () => {
     await mount();
+    const glow = () =>
+      screen
+        .getByTestId('module-osc-2')
+        .querySelector('[data-testid="jack-glow-audio"]')
+        ?.getAttribute('data-indicator');
+    const before = glow();
     state.telemetry = {
       ...state.telemetry,
-      'osc-2': { ...state.telemetry['osc-2'], audio: tele(7) },
+      'osc-2': { ...state.telemetry['osc-2'], 'out:audio': tele(7) },
     };
     await tick(100);
-    expect(renderCounts['osc-2']).toBe(1);
-    expect(renderCounts['osc-1']).toBeUndefined();
-    expect(renderCounts['vca-1']).toBeUndefined();
+    // The moved jack's indicator followed the new reading...
+    expect(glow()).not.toBe(before);
+    // ...but no ModulePanel re-rendered to make that happen.
+    expect(renderCounts).toEqual({});
+  });
+
+  it('keeps custom-UI meters live without re-rendering the panel', async () => {
+    await mount();
+    const meter = () => screen.getByTestId('meter-value-cv').textContent;
+    expect(meter()).toBe('0.00 V');
+    state.telemetry = {
+      ...state.telemetry,
+      'vca-1': { ...state.telemetry['vca-1'], cv: tele(4.2) },
+    };
+    await tick(100);
+    expect(meter()).toBe('4.20 V');
+    expect(renderCounts).toEqual({});
   });
 });
