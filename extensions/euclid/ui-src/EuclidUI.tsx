@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 // Structural copy of the host's ModuleHandle (extensions compile standalone).
 interface ModuleHandle {
   paramValue(id: string): number;
-  signalTap?(jackId: string): { display: number };
+  signalTap?(jackId: string): { instantaneous: number };
 }
 
 const CHANNELS = 4;
@@ -78,7 +78,9 @@ export default function EuclidUI({ handle }: { handle: ModuleHandle }) {
         const cx = BOX / 2;
         const cy = BOX / 2;
         // Live playhead from the module's stepN output (-1 = not running).
-        const raw = handle.signalTap?.(`out:step${c + 1}`)?.display ?? -1;
+        // `instantaneous`, not `display`: the smoothed display sweeps
+        // through phantom steps on the wrap back to step 1.
+        const raw = handle.signalTap?.(`out:step${c + 1}`)?.instantaneous ?? -1;
         const current = raw >= 0 ? Math.round(raw) % ring.steps : null;
         return (
           <svg

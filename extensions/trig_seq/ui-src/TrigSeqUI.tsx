@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 interface ModuleHandle {
   paramValue(id: string): number;
   setParam(id: string, v: number): void;
-  signalTap?(jackId: string): { display: number };
+  signalTap?(jackId: string): { instantaneous: number };
   endEdit?(): void;
 }
 
@@ -24,7 +24,9 @@ const playhead = (
   handle: ModuleHandle,
   lengths: number[],
 ): (number | null)[] => {
-  const pos = handle.signalTap?.("out:pos")?.display ?? -1;
+  // `instantaneous`, not `display`: the smoothed display sweeps through
+  // phantom steps on the wrap back to step 1.
+  const pos = handle.signalTap?.("out:pos")?.instantaneous ?? -1;
   if (pos < 0) return Array.from({ length: TRACKS }, () => null);
   return lengths.map((len) => Math.round(pos) % len);
 };

@@ -6,7 +6,7 @@
 // Structural copy of the host's ModuleHandle (extensions compile standalone).
 interface ModuleHandle {
   paramValue(id: string): number;
-  signalTap?(jackId: string): { display: number };
+  signalTap?(jackId: string): { instantaneous: number };
 }
 
 const MAX_STEPS = 8;
@@ -16,7 +16,9 @@ export default function SeqSwitchUI({ handle }: { handle: ModuleHandle }) {
     MAX_STEPS,
     Math.max(2, Math.round(handle.paramValue("steps"))),
   );
-  const cv = handle.signalTap?.("out:step_cv")?.display ?? 0;
+  // `instantaneous`, not `display`: the smoothed display sweeps through
+  // phantom steps on the wrap back to step 1.
+  const cv = handle.signalTap?.("out:step_cv")?.instantaneous ?? 0;
   const current = Math.min(
     steps - 1,
     Math.max(0, Math.floor((cv / 10) * steps)),

@@ -6,12 +6,15 @@
 // com.dj.step_seq layout in panelLayouts.ts), so lamp N sits directly
 // above step column N. The step index comes from the module's `step`
 // output via the batched telemetry tap (out:step); -1 (armed, no clock
-// yet) shows no playhead.
+// yet) shows no playhead. Discrete indices must read the tap's
+// `instantaneous` field, never `display`: display is 100 ms low-pass
+// smoothed, so the 15->0 wrap sweeps through every intermediate value
+// and briefly lights a phantom step.
 
 // Structural copy of the host's ModuleHandle (extensions compile standalone).
 interface ModuleHandle {
   paramValue(id: string): number;
-  signalTap?(jackId: string): { display: number };
+  signalTap?(jackId: string): { instantaneous: number };
 }
 
 const STEPS = 16;
@@ -21,7 +24,7 @@ export default function StepSeqUI({ handle }: { handle: ModuleHandle }) {
     STEPS,
     Math.max(1, Math.round(handle.paramValue("length"))),
   );
-  const raw = handle.signalTap?.("out:step")?.display ?? -1;
+  const raw = handle.signalTap?.("out:step")?.instantaneous ?? -1;
   const current = raw >= 0 ? Math.round(raw) % STEPS : null;
 
   return (

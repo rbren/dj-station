@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 interface ModuleHandle {
   paramValue(id: string): number;
   setParam(id: string, v: number): void;
-  signalTap?(jackId: string): { display: number };
+  signalTap?(jackId: string): { instantaneous: number };
   endEdit?(): void;
 }
 
@@ -52,7 +52,9 @@ export default function GridSeqUI({ handle }: { handle: ModuleHandle }) {
   };
 
   // Live playhead column from the `pos` output (-1 = armed, no clock yet).
-  const raw = handle.signalTap?.("out:pos")?.display ?? -1;
+  // `instantaneous`, not `display`: the smoothed display sweeps through
+  // phantom columns on the wrap back to column 1.
+  const raw = handle.signalTap?.("out:pos")?.instantaneous ?? -1;
   const current = raw >= 0 ? Math.round(raw) % COLS : null;
 
   return (

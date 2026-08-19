@@ -21,7 +21,15 @@ import WaveshaperUI from '../../extensions/waveshaper/ui-src/WaveshaperUI';
 import { CompressorUI, VcaUI } from '../src/components/LevelMeter';
 import type { ModuleHandle } from '../src/types';
 
-function handleWith(values: Record<string, number>, taps: Record<string, number> = {}) {
+// `smoothed` overrides the tap's low-pass-smoothed fields (display/RMS)
+// independently of `instantaneous` — playhead UIs must ignore them, since
+// on a step wrap (15 -> 0) the smoothed value sweeps through every
+// intermediate step and lights a phantom lamp.
+function handleWith(
+  values: Record<string, number>,
+  taps: Record<string, number> = {},
+  smoothed: Record<string, number> = {},
+) {
   return {
     paramValue: (id: string) => values[id] ?? 0,
     setParam: vi.fn((id: string, v: number) => {
@@ -29,8 +37,8 @@ function handleWith(values: Record<string, number>, taps: Record<string, number>
     }),
     signalTap: (jackId: string) => ({
       instantaneous: taps[jackId] ?? 0,
-      rms_100ms: taps[jackId] ?? 0,
-      display: taps[jackId] ?? 0,
+      rms_100ms: smoothed[jackId] ?? taps[jackId] ?? 0,
+      display: smoothed[jackId] ?? taps[jackId] ?? 0,
       volatility: 0,
       is_fast: false,
     }),
@@ -143,6 +151,16 @@ describe('StepSeqUI', () => {
     const handle = handleWith({ length: 16 }, { 'out:step': -1 });
     const { container } = render(<StepSeqUI handle={handle} />);
     expect(container.querySelector('.stepseq-lamp.playing')).toBeNull();
+  });
+
+  it('ignores the smoothed display value mid-wrap (no phantom step)', () => {
+    // Wrapping 15 -> 0 at 16 steps: the 100 ms-smoothed display is still
+    // decaying through ~4.6 while the instantaneous step is already 0.
+    // The old display-based read briefly lit lamp 5.
+    const handle = handleWith({ length: 16 }, { 'out:step': 0 }, { 'out:step': 4.6 });
+    render(<StepSeqUI handle={handle} />);
+    expect(screen.getByTestId('stepseq-lamp-1').className).toContain('playing');
+    expect(screen.getByTestId('stepseq-lamp-5').className).not.toContain('playing');
   });
 });
 
