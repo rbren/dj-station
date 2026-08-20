@@ -343,7 +343,10 @@ export function ModulePanel(props: ModulePanelProps) {
         >
           <ModuleName
             instanceId={instanceId}
-            name={props.displayName || instanceId}
+            // Macro members' ids are "<macro>/<name>" — the macro box
+            // already shows the macro name, so the panel title drops the
+            // prefix (display only; ids and persistence keep the full form).
+            name={props.displayName || instanceId.slice(instanceId.lastIndexOf('/') + 1)}
             onRename={props.onRename}
           />
           <span className="module-instance">{manifest.name}</span>

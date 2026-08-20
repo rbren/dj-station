@@ -109,7 +109,7 @@ export function MacroBoxes({
               }}
               onContextMenu={(e) => onContextMenu(g, e)}
             >
-              {g.name}
+              <span className="macro-box-name">{g.name}</span>
               <span className="macro-box-instance">{g.instance}</span>
             </span>
           </div>

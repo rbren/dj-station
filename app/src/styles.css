@@ -40,7 +40,10 @@ body {
   min-width: 1500px;
 }
 
-.module-panel-placed {
+/* Extra specificity: .module-panel below is position: relative (the
+   absolutely-positioned title bar's containing block) and would win the
+   cascade otherwise. */
+.module-panel.module-panel-placed {
   position: absolute;
 }
 
@@ -60,6 +63,10 @@ body {
    custom property from its library category. */
 .module-panel {
   --accent: #8a93a2;
+  /* Containing block for the absolutely-positioned .module-title, which
+     is out of flow so a long name can NEVER widen the panel (it elides)
+     and the bar always spans the full snapped panel width. */
+  position: relative;
   /* Shared cell geometry: input cells and any custom-UI strip that must
      align with them (e.g. the step sequencer playhead strip) size their
      columns from the same tokens. */
@@ -81,7 +88,9 @@ body {
 }
 
 .module-panel-content {
-  padding: 8px 10px 10px;
+  /* Top padding clears the absolute 56px title bar plus the former 8px
+     header gap, so measured heights are unchanged. */
+  padding: 64px 10px 10px;
   width: max-content;
   min-width: 140px;
 }
@@ -94,35 +103,45 @@ body {
   user-select: text;
 }
 
+/* Out of flow (absolute over the panel top): the bar spans the full
+   snapped panel width and a long title can never widen the module — the
+   name and type elide instead. Keep the 56px height in sync with the
+   .module-panel-content top padding. */
 .module-title {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  box-sizing: border-box;
   font-weight: 600;
-  /* The name nearly fills the 56px bar: a 44px em box (line-height 1)
-     leaves ~5px of air above and below. */
-  font-size: 2.75rem;
+  font-size: 1.9rem;
   line-height: 1;
   letter-spacing: 0.02em;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin: -8px -10px 8px;
   padding: 0 10px;
-  box-sizing: border-box;
-  min-height: 56px;
   border-bottom: 1px solid #262b33;
   background: rgba(0, 0, 0, 0.18);
   color: color-mix(in srgb, var(--accent) 60%, #e6e6e6);
 }
 
+/* Module type: same size as the title, dimmer, elides like it. */
 .module-instance {
   color: #6b7482;
   font-weight: 400;
-  font-size: 0.85rem;
-  line-height: 1.2;
+  font-size: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The module's (renameable) name — the header's prominent element. */
 .module-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2163,8 +2182,8 @@ body {
   border-bottom: 1px solid rgba(143, 127, 224, 0.65);
   border-radius: 6px 6px 0 0;
   color: #cdc4ff;
-  /* Nearly fills the 44px bar, same proportion as .module-title. */
-  font-size: 2.1rem;
+  /* Same proportion of its 44px bar as .module-title's of its 56px. */
+  font-size: 1.5rem;
   line-height: 1;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -2177,11 +2196,21 @@ body {
   cursor: grabbing;
 }
 
+.macro-box-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .macro-box-instance {
   color: #8f86c9;
   font-weight: 400;
-  font-size: 0.85rem;
-  line-height: 1.2;
+  font-size: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Marquee select: the swept rectangle shown while dragging on the rack
