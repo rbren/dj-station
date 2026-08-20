@@ -367,3 +367,17 @@ fails if it's missing.
   shows the display name prominently with the type name secondary, and
   `App.renameModule` remaps positions/selection to the returned id — a
   backend rejection resolves null (error banner) and the refresh reverts.
+- VCA `cv` ("Gain / CV") input default is 0.0 (closed/silent) in
+  `extensions/vca/manifest.json` — the manifest is the single source of
+  truth for module defaults (engine derives initial knob position via
+  `position_for_value`; frontend imports the same manifest). Defaults only
+  affect freshly added modules: patches serialize explicit knob positions,
+  so goldens are unaffected by default tweaks.
+- Structural edits (add/remove module, wire changes, paste) go through the
+  Tauri shell's `with_stopped` wrapper: engine.stop() → edit →
+  restart_backend(). This causes an audible blip (~50–150 ms hard-cut
+  silence on add): wasmtime compiles the module inside the stopped window
+  (no per-path compile cache), and the dj-cpal monitor thread polls the
+  stop flag only every 50 ms. The RT graph itself edits in ~2 ms. Staged
+  fix options (compile hoisting/cache, faster stop poll, keeping the cpal
+  stream alive across edits) are in the ticket-44cd9510c3e3 diagnosis.
