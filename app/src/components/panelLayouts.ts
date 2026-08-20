@@ -209,6 +209,22 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     })),
   }),
 
+  // The single-channel attenuverter: the same short column, just one of it.
+  'com.dj.attenuverter1': () => ({
+    groups: [
+      {
+        title: '1',
+        kind: 'column',
+        inputs: [
+          { jack: 'in', label: 'in' },
+          { jack: 'atten', label: 'atten' },
+          { jack: 'offset', label: 'offset' },
+          { jack: 'out', label: 'out', output: true },
+        ],
+      },
+    ],
+  }),
+
   'com.dj.clock': () => ({
     groups: [
       { title: 'tempo', inputs: ['bpm', 'swing', 'beats'] },

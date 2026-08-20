@@ -210,6 +210,39 @@ fn attenuverter_scales_audio_sample_accurately() {
     assert!(peak > 4.9, "expected a ±5 source, got {peak}");
 }
 
+#[test]
+fn attenuverter1_single_channel_matches_the_eight_channel_law() {
+    let mut e = probe_engine(4);
+    for (i, id) in ["unity", "inverted", "offset_only", "scaled"]
+        .iter()
+        .enumerate()
+    {
+        e.add_module(id, "com.dj.attenuverter1").unwrap();
+        e.set_knob_value(id, "in", 5.0).unwrap();
+        probe(&mut e, id, "out", i);
+    }
+
+    // "unity" keeps the shipped defaults (atten = +1, offset = 0).
+    e.set_knob_value("inverted", "atten", -1.0).unwrap();
+    e.set_knob_value("offset_only", "atten", 0.0).unwrap();
+    e.set_knob_value("offset_only", "offset", 2.5).unwrap();
+    e.set_knob_value("scaled", "atten", 0.5).unwrap();
+    e.set_knob_value("scaled", "offset", -4.0).unwrap();
+
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 5.0, "default is unity with no offset");
+    assert_near(tail[1], -5.0, "inverted unity");
+    assert_near(tail[2], 2.5, "muted input passes offset only");
+    assert_near(tail[3], -1.5, "half gain plus offset");
+
+    // The output clamps at the ±10 V rails.
+    e.set_knob_value("unity", "offset", 10.0).unwrap();
+    e.set_knob_value("inverted", "offset", -10.0).unwrap();
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 10.0, "5 V + 10 V offset clamps at the rail");
+    assert_near(tail[1], -10.0, "-5 V - 10 V offset clamps at the rail");
+}
+
 // ---------------------------------------------------------------------------
 // Mult / merge / split
 // ---------------------------------------------------------------------------

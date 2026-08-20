@@ -218,6 +218,23 @@ describe('ModulePanel with layouts', () => {
       expect(group!.querySelector(`[data-jack="att1:input:in${ch}"]`)).toBeTruthy();
     }
   });
+
+  it('the single-channel attenuverter is the same column, just one of it', () => {
+    const m = manifest('com.dj.attenuverter1', ['in', 'atten', 'offset'], ['out']);
+    const layout = resolveLayout(m);
+    expect(layout.groups).toHaveLength(1);
+    const g = layout.groups[0];
+    expect(g.kind).toBe('column');
+    expect(g.cells.map((c) => c.jack)).toEqual(['in', 'atten', 'offset', 'out']);
+    expect(g.cells[3].output).toBe(true);
+    expect(layout.outputGroups).toHaveLength(0);
+
+    render(<ModulePanel {...baseProps} instanceId="att1" manifest={m} />);
+    const out = screen.getByTestId('jack-output-out');
+    const group = out.closest('.input-group');
+    expect(group).toBeTruthy();
+    expect(group!.querySelector('[data-jack="att1:input:in"]')).toBeTruthy();
+  });
 });
 
 // The playhead strip (custom StepSeqUI) must line up with the per-step

@@ -9,6 +9,9 @@
 //! - `utilities-mixer-stereo-pan`: two oscillators panned apart on the
 //!   stereo mixer (one modulated by an LFO wired into the pan jack),
 //!   rendered to a stereo master.
+//! - `utilities-attenuverter1-vibrato`: a sine LFO tamed by the
+//!   single-channel attenuverter (small atten, offset carrying the base
+//!   pitch) into an oscillator's pitch — a vibrato around E4.
 //!
 //! The shared harness lives in `tests/common/e2e.rs`.
 
@@ -135,6 +138,33 @@ fn regen_mixer_stereo_pan() {
     write_events(&dir, &EventsFile::seconds(0.5));
 }
 
+fn regen_attenuverter1_vibrato() {
+    let dir = crate::common::e2e::case_dir("utilities-attenuverter1-vibrato");
+    let mut e = mono_engine();
+    e.add_module("lfo", "com.dj.oscillator").unwrap();
+    e.add_module("att", "com.dj.attenuverter1").unwrap();
+    e.add_module("voice", "com.dj.oscillator").unwrap();
+    e.add_module("mix", "com.dj.mixer").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    // Sine LFO at ~6 Hz, shrunk to a subtle vibrato depth; the offset
+    // carries the base pitch (E4 in 1V/oct).
+    e.set_knob_value("lfo", "pitch", -5.4).unwrap();
+    e.connect("lfo", "audio", "att", "in").unwrap();
+    e.set_knob_value("att", "atten", 0.02).unwrap();
+    e.set_knob_value("att", "offset", 4.0 / 12.0).unwrap();
+    e.connect("att", "out", "voice", "pitch").unwrap();
+
+    e.connect("voice", "audio", "mix", "in1_l").unwrap();
+    e.set_knob_value("mix", "lvl1", 10.0).unwrap();
+    e.set_knob_value("mix", "master", 5.0).unwrap();
+    e.connect("mix", "out_l", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-utilities-attenuverter1-vibrato")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(0.5));
+}
+
 #[test]
 fn e2e_utilities_quantized_voice() {
     if regen() {
@@ -157,4 +187,12 @@ fn e2e_utilities_mixer_stereo_pan() {
         regen_mixer_stereo_pan();
     }
     check_case("utilities-mixer-stereo-pan");
+}
+
+#[test]
+fn e2e_utilities_attenuverter1_vibrato() {
+    if regen() {
+        regen_attenuverter1_vibrato();
+    }
+    check_case("utilities-attenuverter1-vibrato");
 }

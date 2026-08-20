@@ -1,0 +1,19 @@
+{
+  "id": "com.dj.attenuverter1",
+  "name": "Attenuverter",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Utilities",
+  "inputs": [
+    { "id": "in", "name": "In", "default": 0.0 },
+    { "id": "atten", "name": "Atten", "default": 1.0,
+      "knob": { "style": "continuous", "min": -1.0, "max": 1.0, "curve": "linear" } },
+    { "id": "offset", "name": "Offset", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Out" }
+  ],
+  "params": [],
+  "latency_samples": 0
+}

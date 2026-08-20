@@ -33,7 +33,7 @@ export function getModuleDoc(typeId: string, abi?: string): ModuleDoc | undefine
 export const MACRO_DOC: ModuleDoc = {
   summary:
     'A user macro: a saved sub-patch collapsed into a single module ' +
-    '(select modules, then "Collapse to Module"). Its jacks are the ' +
+    '(select modules, then "Collapse to Macro"). Its jacks are the ' +
     'promoted boundary connections of the modules inside; definitions ' +
     'live in the library database and patches pin the version they used. ' +
     'Good for taming rack sprawl and building a personal instrument ' +
@@ -758,6 +758,24 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     examples: [
       'Sum a three-oscillator stack before one Filter.',
       'Pan two voices apart for instant stereo width.',
+    ],
+  },
+  'com.dj.attenuverter1': {
+    summary:
+      'Single-channel attenuverter/offset: scales its input by -1..+1 ' +
+      '(inverting below zero) and adds a DC offset — the one-column ' +
+      'version of the Attenuverter 8 for when a patch needs just one ' +
+      'channel. Unpatched, it outputs just the offset, making it a ' +
+      'compact manual CV source too.',
+    inputs: {
+      in: 'Signal input.',
+      atten: 'Gain, -1..+1 (negative inverts).',
+      offset: 'DC offset, volts.',
+    },
+    outputs: { out: 'Output: in x atten + offset.' },
+    examples: [
+      'Tame an LFO to +-1 V before a pitch input.',
+      'Leave in unpatched and use offset as a manual CV source.',
     ],
   },
   'com.dj.attenuverter': {
