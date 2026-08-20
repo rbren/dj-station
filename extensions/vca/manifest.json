@@ -6,7 +6,7 @@
   "category": "Shaping",
   "inputs": [
     { "id": "in", "name": "In", "default": 0.0 },
-    { "id": "cv", "name": "Gain / CV", "default": 10.0,
+    { "id": "cv", "name": "Gain / CV", "default": 0.0,
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } }
   ],
   "outputs": [

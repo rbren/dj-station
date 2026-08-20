@@ -168,20 +168,21 @@ fn reset_knob_restores_default_value_and_wire_spread() {
     let mut e = crate::common::default_engine();
     e.add_module("vca1", "com.dj.vca").unwrap();
 
-    // cv default is 10.0 on a 0..10 knob => position 1.0.
+    // cv default is 0.0 on a 0..10 knob => position 0.0.
     e.set_knob_position("vca1", "cv", 0.3).unwrap();
     e.set_knob_atten_offset("vca1", "cv", -0.5, 2.0).unwrap();
     e.reset_knob("vca1", "cv").unwrap();
     let s = e.knob_state("vca1", "cv").unwrap();
-    assert_eq!(s.position, 1.0);
+    assert_eq!(s.position, 0.0);
     assert_eq!(s.atten, 1.0);
     assert_eq!(s.offset, 0.0);
     assert!(s.config.is_none());
 
     // A config override is a customization, not a value: it stays, and the
-    // default value maps through it (default 10 on a 0..20 knob => 0.5).
+    // default value maps through it (default 0 on a -10..10 knob => 0.5).
     let cfg = dj_engine::KnobConfig {
-        max: 20.0,
+        min: -10.0,
+        max: 10.0,
         ..Default::default()
     };
     e.set_knob_config("vca1", "cv", Some(cfg.clone())).unwrap();

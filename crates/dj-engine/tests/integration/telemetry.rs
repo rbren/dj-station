@@ -207,7 +207,8 @@ fn output_tap_reports_module_output_level() {
     engine.add_module("osc1", "com.dj.oscillator").unwrap();
     engine.add_module("vca1", "com.dj.vca").unwrap();
     engine.connect("osc1", "audio", "vca1", "in").unwrap();
-    // cv knob fully open (default 10) -> unity gain.
+    // cv defaults to 0 (closed): open the gain knob fully for unity gain.
+    engine.set_knob_value("vca1", "cv", 10.0).unwrap();
     engine.render_offline((0.5 * SR) as usize).unwrap();
 
     // The oscillator's own output jack — even though nothing taps `audio`
