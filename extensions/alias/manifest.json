@@ -1,0 +1,15 @@
+{
+  "id": "com.dj.alias",
+  "name": "Alias",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Utilities",
+  "inputs": [
+    { "id": "in", "name": "In", "default": 0.0 }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Out" }
+  ],
+  "params": [],
+  "latency_samples": 0
+}

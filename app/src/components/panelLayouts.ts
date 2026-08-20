@@ -209,6 +209,20 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     })),
   }),
 
+  // The alias pass-through: just in -> out on one row, so the panel is
+  // as small as a panel gets — the title bar carries the user's name.
+  'com.dj.alias': () => ({
+    groups: [
+      {
+        kind: 'row',
+        inputs: [
+          { jack: 'in', label: 'in' },
+          { jack: 'out', label: 'out', output: true },
+        ],
+      },
+    ],
+  }),
+
   // The single-channel attenuverter: one row, signal flowing left to
   // right (in -> atten -> offset -> out), so the panel stays short.
   'com.dj.attenuverter1': () => ({

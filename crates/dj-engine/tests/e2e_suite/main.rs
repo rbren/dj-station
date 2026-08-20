@@ -8,6 +8,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod e2e_alias;
 mod e2e_camera;
 mod e2e_choreo;
 mod e2e_effects;

@@ -10,6 +10,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-alias"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-attenuverter"
 version = "0.1.0"
 dependencies = [

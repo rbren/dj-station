@@ -1,0 +1,12 @@
+{
+  "ext": "com.dj.alias",
+  "name": "To Mixer",
+  "knobs": {
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

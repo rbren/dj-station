@@ -852,6 +852,50 @@ fn seq_switch_cv_addresses_steps_directly() {
 }
 
 // ---------------------------------------------------------------------------
+// Alias
+// ---------------------------------------------------------------------------
+
+#[test]
+fn alias_is_a_bit_identical_pass_through() {
+    let mut e = probe_engine(2);
+    e.add_module("osc", "com.dj.oscillator").unwrap();
+    e.add_module("al", "com.dj.alias").unwrap();
+
+    // The same oscillator output feeds channel 0 directly and channel 1
+    // through the alias; the render must match sample for sample.
+    probe(&mut e, "osc", "audio", 0);
+    e.connect("osc", "audio", "al", "in").unwrap();
+    probe(&mut e, "al", "out", 1);
+
+    let out = e.render_offline((0.05 * SR) as usize).unwrap();
+    let peak = out[0].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(peak > 4.9, "expected a ±5 source, got {peak}");
+    assert_eq!(out[0], out[1], "alias must be bit-identical to its input");
+}
+
+#[test]
+fn alias_renames_without_touching_the_audio() {
+    let mut e = probe_engine(1);
+    add_dc(&mut e, "dc", 3.0);
+    e.add_module("al", "com.dj.alias").unwrap();
+    e.connect("dc", "out1", "al", "in").unwrap();
+    probe(&mut e, "al", "out", 0);
+
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 3.0, "alias passes the DC source through");
+
+    // The point of the module: give the pass-through a user-typed name.
+    // The rename is control-side only, so the signal keeps flowing.
+    let id = e.rename_module("al", "Kick Bus").unwrap();
+    assert_eq!(id, "kick_bus");
+    let info = e.nodes.iter().find(|n| n.instance_id == id).unwrap();
+    assert_eq!(info.display_name.as_deref(), Some("Kick Bus"));
+
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 3.0, "renamed alias still passes the source");
+}
+
+// ---------------------------------------------------------------------------
 // Audio Output mute
 // ---------------------------------------------------------------------------
 

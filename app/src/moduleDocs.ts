@@ -760,6 +760,19 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Pan two voices apart for instant stereo width.',
     ],
   },
+  'com.dj.alias': {
+    summary:
+      'A nameable pass-through: one input, one output, audio bit-identical. ' +
+      'Double-click the title to rename it, then drop it inline to label a ' +
+      'signal — "kick bus", "to filter" — or park it as a named patch point ' +
+      'so long wires read like a schematic. It never changes the sound.',
+    inputs: { in: 'Signal input (any signal: audio, CV, gates).' },
+    outputs: { out: 'The input, passed through unchanged.' },
+    examples: [
+      'Name the drum submix "kick bus" where three wires converge.',
+      'Park one at the rack edge as a labelled patch point for a send.',
+    ],
+  },
   'com.dj.attenuverter1': {
     summary:
       'Single-channel attenuverter/offset: scales its input by -1..+1 ' +
