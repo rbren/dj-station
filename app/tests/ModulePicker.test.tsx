@@ -276,6 +276,114 @@ describe('ModulePicker', () => {
   });
 });
 
+describe('ModulePicker macro management', () => {
+  const macro: Manifest = {
+    id: 'macro.tone',
+    name: 'Tone Stack',
+    version: '3',
+    abi: 'macro-1',
+    inputs: [],
+    outputs: [{ id: 'out', name: 'Out' }],
+    params: [],
+  };
+
+  function renderWithMacro(overrides: Partial<Parameters<typeof ModulePicker>[0]> = {}) {
+    const onAdd = vi.fn();
+    const onRenameMacro = vi.fn();
+    const onDeleteMacro = vi.fn();
+    render(
+      <ModulePicker
+        modules={[...MODULES, macro]}
+        onAdd={onAdd}
+        onClose={vi.fn()}
+        onRenameMacro={onRenameMacro}
+        onDeleteMacro={onDeleteMacro}
+        {...overrides}
+      />,
+    );
+    return { onAdd, onRenameMacro, onDeleteMacro };
+  }
+
+  /** The full right-button gesture as the Tauri webview delivers it:
+   *  unlike Chrome/Firefox (which fire `auxclick` for non-primary
+   *  buttons), WebKit follows `contextmenu` with a `click` on the same
+   *  target — and React delivers it to onClick like any left click, so
+   *  without the gesture guard the entry adds the module. There is no
+   *  fresh button-0 mousedown in this stream; that's what distinguishes
+   *  it from a real left click. */
+  function rightClick(el: HTMLElement) {
+    fireEvent.mouseDown(el, { button: 2 });
+    fireEvent.contextMenu(el, { clientX: 40, clientY: 50 });
+    fireEvent.mouseUp(el, { button: 2 });
+    fireEvent.click(el);
+  }
+
+  it('right-clicking a macro opens the manage menu and does NOT add it', () => {
+    const { onAdd } = renderWithMacro();
+    rightClick(screen.getByTestId('library-add-macro.tone'));
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.getByTestId('context-menu')).toBeTruthy();
+    expect(screen.getByTestId('picker-macro-rename')).toBeTruthy();
+    expect(screen.getByTestId('picker-macro-delete')).toBeTruthy();
+  });
+
+  it('left-clicking a macro still adds it, including after a menu gesture', () => {
+    const { onAdd } = renderWithMacro();
+    const entry = screen.getByTestId('library-add-macro.tone');
+    fireEvent.mouseDown(entry, { button: 0 });
+    fireEvent.mouseUp(entry, { button: 0 });
+    fireEvent.click(entry, { button: 0 });
+    expect(onAdd).toHaveBeenCalledWith('macro.tone');
+
+    // A right-click (menu) followed by a fresh left-click: the guard that
+    // swallows WebKit's paired click must not eat the next real click.
+    onAdd.mockClear();
+    rightClick(entry);
+    expect(onAdd).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'Escape' }); // dismiss the menu
+    fireEvent.mouseDown(entry, { button: 0 });
+    fireEvent.mouseUp(entry, { button: 0 });
+    fireEvent.click(entry, { button: 0 });
+    expect(onAdd).toHaveBeenCalledWith('macro.tone');
+  });
+
+  it("right-clicking a non-macro entry doesn't add it either", () => {
+    const { onAdd } = renderWithMacro();
+    rightClick(screen.getByTestId('library-add-com.dj.oscillator'));
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('context-menu')).toBeNull();
+  });
+
+  it('right-click without macro management wired opens no menu and adds nothing', () => {
+    const { onAdd } = renderWithMacro({ onRenameMacro: undefined, onDeleteMacro: undefined });
+    rightClick(screen.getByTestId('library-add-macro.tone'));
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('context-menu')).toBeNull();
+  });
+
+  it('Rename Macro… prompts for a name and calls onRenameMacro', () => {
+    const { onRenameMacro } = renderWithMacro();
+    rightClick(screen.getByTestId('library-add-macro.tone'));
+    fireEvent.click(screen.getByTestId('picker-macro-rename'));
+    const input = screen.getByTestId('macro-rename-input') as HTMLInputElement;
+    expect(input.value).toBe('Tone Stack');
+    fireEvent.change(input, { target: { value: 'Warm Tone' } });
+    fireEvent.click(screen.getByTestId('macro-rename-confirm'));
+    expect(onRenameMacro).toHaveBeenCalledWith('macro.tone', 'Warm Tone');
+    expect(screen.queryByTestId('macro-rename-dialog')).toBeNull();
+  });
+
+  it('Delete Macro… confirms before calling onDeleteMacro', () => {
+    const { onDeleteMacro } = renderWithMacro();
+    rightClick(screen.getByTestId('library-add-macro.tone'));
+    fireEvent.click(screen.getByTestId('picker-macro-delete'));
+    expect(onDeleteMacro).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('macro-delete-confirm'));
+    expect(onDeleteMacro).toHaveBeenCalledWith('macro.tone');
+    expect(screen.queryByTestId('macro-delete-dialog')).toBeNull();
+  });
+});
+
 describe('nextInstanceId', () => {
   it('derives a short prefix from the type id and counts up', () => {
     expect(nextInstanceId('com.dj.oscillator', new Set())).toBe('oscillat1');

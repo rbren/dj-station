@@ -231,6 +231,14 @@ function MacroPreview({ m }: { m: Manifest }) {
 }
 
 function PickerEntry({ m, onAdd, onDragging, onMacroMenu }: PickerEntryProps) {
+  // WebKit (the Tauri webview) follows `contextmenu` with a `click` on the
+  // same target — Chrome/Firefox fire `auxclick` instead — so without a
+  // guard a right-click falls through to the add-on-click handler and the
+  // macro lands in the rack instead of showing its manage menu. The
+  // contextmenu handler marks the gesture and the paired click is
+  // swallowed; a genuine left click starts with a fresh button-0 mousedown,
+  // which clears the mark first.
+  const menuGesture = useRef(false);
   return (
     <div
       className="picker-entry"
@@ -245,16 +253,22 @@ function PickerEntry({ m, onAdd, onDragging, onMacroMenu }: PickerEntryProps) {
         onDragging(true);
       }}
       onDragEnd={() => onDragging(false)}
-      onClick={() => onAdd(m.id)}
-      onContextMenu={
-        m.abi === 'macro-1' && onMacroMenu
-          ? (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onMacroMenu(m, e.clientX, e.clientY);
-            }
-          : undefined
-      }
+      onMouseDown={(e) => {
+        if (e.button === 0) menuGesture.current = false;
+      }}
+      onClick={(e) => {
+        if (menuGesture.current || e.button !== 0) {
+          menuGesture.current = false;
+          return;
+        }
+        onAdd(m.id);
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        menuGesture.current = true;
+        if (m.abi === 'macro-1') onMacroMenu?.(m, e.clientX, e.clientY);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') onAdd(m.id);
       }}
