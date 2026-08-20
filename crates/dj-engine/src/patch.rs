@@ -587,14 +587,14 @@ impl Engine {
     /// the undo/redo/structural-edit restore path; loading a patch into a
     /// fresh engine is [`Engine::from_doc`].
     ///
-    /// The engine must be stopped (structural edit). The doc's header must
-    /// match the engine's config — undo history never changes it.
+    /// Works while running (edits land at block boundaries; audio never
+    /// stops) or stopped. The doc's header must match the engine's config —
+    /// undo history never changes it.
     ///
     /// Returns the instance ids that were (re)created from scratch (missing
     /// from the live engine, or whose shape changed) — their fresh state may
     /// need app-layer re-application (deck metadata, stems).
     pub fn apply_doc(&mut self, doc: &PatchDoc) -> Result<Vec<String>> {
-        self.core_mut()?; // must be stopped
         anyhow::ensure!(
             doc.header.format == PATCH_FORMAT,
             "unsupported patch format"

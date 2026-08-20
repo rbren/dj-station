@@ -14,7 +14,7 @@ use crate::builtin::{
 };
 use crate::deck::{DeckCmd, DeckControl, DeckModule, DeckStatus, N_CUES};
 use crate::gesture::{GestureEvent, GestureMappingInfo, GestureRtModule};
-use crate::graph::{Graph, GraphNode, WireSpec};
+use crate::graph::{compute_plan, Graph, GraphEdit, GraphNode, GrowStorage, NodeStorage, WireSpec};
 use crate::knob::{position_for_value, JackRt, KnobConfig, KnobState};
 use crate::macros::{MacroDef, MacroInstance, MacroInterface, MacroLibrary, MacroPreviewNode};
 use crate::manifest::Manifest;
@@ -87,6 +87,18 @@ pub enum Command {
         node: usize,
         module: Box<dyn HostModule>,
     },
+    /// Structural graph edit (module add/remove, wire changes), fully
+    /// pre-allocated on the control thread. Applied at a block boundary —
+    /// audio never stops — and the same box travels back over the garbage
+    /// ring carrying the replaced allocations.
+    Edit(Box<GraphEdit>),
+}
+
+/// Replaced state shipped from the RT thread back to the control thread
+/// for dropping (module hot-swap and structural edits).
+pub enum RtGarbage {
+    Module(Box<dyn HostModule>),
+    Edit(Box<GraphEdit>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -217,7 +229,7 @@ impl<'a> IntoIterator for &'a NodeSlots {
 pub struct EngineCore {
     pub graph: Graph,
     cmd_rx: rtrb::Consumer<Command>,
-    garbage_tx: rtrb::Producer<Box<dyn HostModule>>,
+    garbage_tx: rtrb::Producer<RtGarbage>,
     pub master: Vec<Vec<f32>>,
     blocks: Arc<AtomicU64>,
     master_analyzers: Vec<crate::telemetry::JackAnalyzer>,
@@ -237,7 +249,15 @@ impl EngineCore {
                     let old = self.graph.swap_module(node, module);
                     // Ship the old instance back for off-RT drop; if the ring
                     // is full we must drop here (bounded, reload-only path).
-                    let _ = self.garbage_tx.push(old);
+                    let _ = self.garbage_tx.push(RtGarbage::Module(old));
+                }
+                Command::Edit(mut edit) => {
+                    // Live structural edit: swap the new state in; the box
+                    // comes back out carrying the replaced allocations and
+                    // ships back for the control-side drop (if the ring is
+                    // full we must drop here — bounded, edit-only path).
+                    self.graph.apply_edit(&mut edit);
+                    let _ = self.garbage_tx.push(RtGarbage::Edit(edit));
                 }
             }
         }
@@ -292,8 +312,14 @@ pub struct Engine {
     node_by_id: HashMap<String, usize>,
     /// Control-side copy of the wire list (graph itself may be on the RT thread).
     wires: Vec<WireSpec>,
+    /// Mirror of the RT graph's slot-vector length. Grows when an add
+    /// can't reuse a recycled slot (the growth ships with the edit).
+    graph_slots: usize,
+    /// Recycled graph slots, LIFO — the control thread owns slot
+    /// allocation so structural edits can be planned without the graph.
+    free_slots: Vec<usize>,
     cmd_tx: Arc<Mutex<rtrb::Producer<Command>>>,
-    garbage_rx: rtrb::Consumer<Box<dyn HostModule>>,
+    garbage_rx: rtrb::Consumer<RtGarbage>,
     midi_producers: HashMap<usize, rtrb::Producer<MidiEvent>>,
     /// Gesture value events toward the RT thread, per gesture node.
     gesture_producers: HashMap<usize, rtrb::Producer<GestureEvent>>,
@@ -411,6 +437,8 @@ impl Engine {
             nodes: NodeSlots::default(),
             node_by_id: HashMap::new(),
             wires: Vec::new(),
+            graph_slots: 0,
+            free_slots: Vec::new(),
             cmd_tx: Arc::new(Mutex::new(cmd_tx)),
             garbage_rx,
             midi_producers: HashMap::new(),
@@ -441,6 +469,63 @@ impl Engine {
             EngineState::Stopped(core) => Ok(core),
             _ => Err(anyhow!("engine is running; stop it first")),
         }
+    }
+
+    /// Input-jack count per graph slot (`None` = tombstone) — the shape
+    /// [`compute_plan`] needs, taken from the control-side mirror.
+    fn n_inputs_by_slot(&self) -> Vec<Option<usize>> {
+        let mut v = vec![None; self.graph_slots];
+        for (slot, info) in self.nodes.iter_slots() {
+            v[slot] = Some(info.manifest.inputs.len());
+        }
+        v
+    }
+
+    /// Apply a structural edit: directly when stopped, over the RT command
+    /// ring when running (applied at the next block boundary — audio never
+    /// stops). The ring is drained every block, so a full ring only means
+    /// the RT thread is severely behind; bounded retry, then error.
+    fn dispatch_edit(&mut self, mut edit: GraphEdit) -> Result<()> {
+        match &mut self.state {
+            EngineState::Stopped(core) => {
+                core.graph.apply_edit(&mut edit);
+                // The replaced allocations inside `edit` drop here, on the
+                // control thread.
+                Ok(())
+            }
+            _ => {
+                let mut cmd = Command::Edit(Box::new(edit));
+                let tx = self.cmd_tx.clone();
+                let mut tx = tx.lock().unwrap();
+                let deadline = Instant::now() + Duration::from_millis(500);
+                loop {
+                    match tx.push(cmd) {
+                        Ok(()) => return Ok(()),
+                        Err(rtrb::PushError::Full(c)) => {
+                            anyhow::ensure!(
+                                Instant::now() < deadline,
+                                "RT command queue full (edit dropped)"
+                            );
+                            cmd = c;
+                            std::thread::sleep(Duration::from_micros(200));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Remove every wire matching `pred`: one plan swap on the RT thread,
+    /// control mirror updated on success. No-op when nothing matches.
+    pub(crate) fn remove_wires_where(&mut self, pred: impl Fn(&WireSpec) -> bool) -> Result<()> {
+        let wires: Vec<WireSpec> = self.wires.iter().copied().filter(|w| !pred(w)).collect();
+        if wires.len() == self.wires.len() {
+            return Ok(());
+        }
+        let plan = compute_plan(&self.n_inputs_by_slot(), &wires);
+        self.dispatch_edit(GraphEdit::Replan { plan })?;
+        self.wires = wires;
+        Ok(())
     }
 
     pub fn is_running(&self) -> bool {
@@ -598,9 +683,12 @@ impl Engine {
         }
     }
 
-    /// Add a module instance. Only valid while stopped. If `ext_id` names a
+    /// Add a module instance. Works while running (the edit lands at a
+    /// block boundary; audio never stops) or stopped. If `ext_id` names a
     /// registered macro, its subgraph is expanded (PRD §6).
     pub fn add_module(&mut self, instance_id: &str, ext_id: &str) -> Result<()> {
+        // Opportunistic drop point for state prior live edits shipped back.
+        self.drain_garbage();
         anyhow::ensure!(
             !instance_id.contains('/'),
             "instance ids may not contain '/' (reserved for macro internals)"
@@ -760,18 +848,51 @@ impl Engine {
             track_path: None,
         };
 
+        // Apply default params before the module ships to the RT thread.
+        let mut module = module;
+        for (i, p) in manifest.params.iter().enumerate() {
+            module.on_param(i as u32, params[&p.id]);
+        }
+        let n_in = manifest.inputs.len();
+        let n_out = manifest.outputs.len();
         let node = GraphNode {
             module,
-            n_in: manifest.inputs.len(),
-            n_out: manifest.outputs.len(),
+            n_in,
+            n_out,
             audio_out: BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::AudioOut),
         };
-        let core = self.core_mut()?;
-        let idx = core.graph.add_node(node, jack_rt, analyzers, out_analyzers);
-        // Apply default params.
-        for (i, p) in manifest.params.iter().enumerate() {
-            core.graph.module_mut(idx).on_param(i as u32, params[&p.id]);
+        // Allocate the graph slot control-side: recycle a tombstone (LIFO,
+        // like the old in-graph free list) or grow the storage by one.
+        let recycled = !self.free_slots.is_empty();
+        let idx = self.free_slots.pop().unwrap_or(self.graph_slots);
+        let grow = (!recycled).then(|| GrowStorage::with_len(idx + 1));
+        let storage = NodeStorage::for_node(
+            n_in,
+            n_out,
+            self.config.block_size,
+            jack_rt,
+            analyzers,
+            out_analyzers,
+        );
+        let mut n_inputs = self.n_inputs_by_slot();
+        if idx >= n_inputs.len() {
+            n_inputs.resize(idx + 1, None);
         }
+        n_inputs[idx] = Some(n_in);
+        let plan = compute_plan(&n_inputs, &self.wires);
+        if let Err(e) = self.dispatch_edit(GraphEdit::AddNode {
+            slot: idx,
+            node: Some(node),
+            storage,
+            grow,
+            plan,
+        }) {
+            if recycled {
+                self.free_slots.push(idx);
+            }
+            return Err(e);
+        }
+        self.graph_slots = self.graph_slots.max(idx + 1);
         if let Some((tx, out_rx)) = midi_plumbing {
             self.midi_producers.insert(idx, tx);
             self.midi_out_consumers.insert(idx, out_rx);
@@ -805,9 +926,11 @@ impl Engine {
     /// entries and graph slot go; every OTHER node keeps its module state,
     /// telemetry windows and slot index — nothing else resets. Accepts a
     /// top-level plain module or a macro instance (whose expanded internal
-    /// nodes are all removed). Only valid while stopped, like the other
-    /// structural edits.
+    /// nodes are all removed). Works while running (the edit lands at a
+    /// block boundary; audio never stops) or stopped.
     pub fn remove_module(&mut self, instance_id: &str) -> Result<()> {
+        // Opportunistic drop point for state prior live edits shipped back.
+        self.drain_garbage();
         anyhow::ensure!(
             !instance_id.contains('/'),
             "cannot remove macro-internal node {instance_id:?}"
@@ -824,17 +947,40 @@ impl Engine {
 
     /// Remove one concrete engine node (plain module or macro internal).
     pub(super) fn remove_node(&mut self, instance_id: &str) -> Result<()> {
-        // Drain pending RT commands before the slot can be recycled, so a
-        // stale knob/param command can't land on the slot's next occupant.
-        let core = self.core_mut()?;
-        core.apply_commands();
+        // Stopped: drain pending RT commands before the slot can be
+        // recycled, so a stale knob/param command can't land on the slot's
+        // next occupant. (Running: the command ring is FIFO, so an earlier
+        // command always applies before this remove.)
+        if let EngineState::Stopped(core) = &mut self.state {
+            core.apply_commands();
+        }
         let slot = *self
             .node_by_id
             .get(instance_id)
             .ok_or_else(|| anyhow!("no such module instance: {instance_id}"))?;
 
-        self.wires
-            .retain(|w| w.from_node != slot && w.to_node != slot);
+        // Plan the post-removal graph and ship the edit first — the
+        // control mirrors are only updated once it is accepted.
+        let mut n_inputs = self.n_inputs_by_slot();
+        n_inputs[slot] = None;
+        let wires: Vec<WireSpec> = self
+            .wires
+            .iter()
+            .copied()
+            .filter(|w| w.from_node != slot && w.to_node != slot)
+            .collect();
+        let plan = compute_plan(&n_inputs, &wires);
+        self.dispatch_edit(GraphEdit::RemoveNode {
+            slot,
+            plan,
+            module: None,
+            storage: NodeStorage::default(),
+        })?;
+        // While running, the module (which may own wasm stores or track
+        // data) comes back over the garbage ring and drops on the control
+        // thread at the next drain; while stopped it dropped just now.
+
+        self.wires = wires;
         self.midi_producers.remove(&slot);
         self.midi_out_consumers.remove(&slot);
         self.gesture_producers.remove(&slot);
@@ -852,9 +998,7 @@ impl Engine {
         }
         self.node_by_id.remove(instance_id);
         self.nodes.remove(slot);
-        // The module (which may own wasm stores or track data) drops here,
-        // on the control thread — the engine is stopped, so this is safe.
-        let _module = self.core_mut()?.graph.remove_node(slot);
+        self.free_slots.push(slot);
         Ok(())
     }
 
@@ -895,8 +1039,11 @@ impl Engine {
             to_node,
             to_jack,
         };
-        self.core_mut()?.graph.add_wire(spec);
-        self.wires.push(spec);
+        let mut wires = self.wires.clone();
+        wires.push(spec);
+        let plan = compute_plan(&self.n_inputs_by_slot(), &wires);
+        self.dispatch_edit(GraphEdit::Replan { plan })?;
+        self.wires = wires;
         Ok(())
     }
 
@@ -920,9 +1067,7 @@ impl Engine {
             to_jack,
         };
         anyhow::ensure!(self.wires.contains(&spec), "no such wire");
-        self.core_mut()?.graph.remove_wire(spec);
-        self.wires.retain(|w| *w != spec);
-        Ok(())
+        self.remove_wires_where(|w| *w == spec)
     }
 
     /// Control-side wire list (valid regardless of run state).

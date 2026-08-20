@@ -359,6 +359,13 @@ impl Engine {
             }
             other => self.state = other,
         }
+        // Drain commands the RT thread didn't get to before exiting: the
+        // ring must be empty whenever the engine is stopped, because
+        // stopped-mode edits apply directly and must not be reordered
+        // behind queued ones.
+        if let EngineState::Stopped(core) = &mut self.state {
+            core.apply_commands();
+        }
         self.drain_garbage();
         Ok(())
     }

@@ -352,21 +352,32 @@ fails if it's missing.
   Raw `state.engine.lock()` in a command body is a review smell. Undo
   coalescing keys are the `EditKey` enum's `Display` strings — keep
   them stable.
-- Structural edits are INCREMENTAL — never rebuild the engine. Node
-  indices are stable slots: `Graph.nodes`/`Engine.nodes` are slot vectors
-  with tombstones + a free-list (`NodeSlots`; iterate via `.iter()` /
-  `.iter_slots()`, never assume dense indices), and engine side tables
-  (midi/gesture/playback producers, decks) are keyed by slot.
-  `Engine::remove_module` removes one module (or a whole macro instance)
-  in place; `Engine::apply_doc` morphs the live engine to a `PatchDoc` by
-  diffing (the undo/redo restore path in the app's `restore_doc`,
-  returning the ids it had to recreate so deck metadata can be
-  re-applied). Untouched modules keep DSP state AND telemetry across
-  edits (`modules_sequencing` + `graph_edit` tests pin this), and a
-  remove-while-running audio gap is ~1 ms vs the ~250 ms a from_doc
-  rebuild costs — `Engine::from_doc` is ONLY for loading patches into a
-  fresh engine. `PatchDoc::remove_module` edits the document, not a live
-  engine.
+- Structural edits are INCREMENTAL and LIVE — never rebuild the engine,
+  never stop the backend. `add_module`/`remove_module`/`connect`/
+  `disconnect`/`apply_doc` work while the RT backend runs: the control
+  thread pre-allocates a `GraphEdit` (new node storage + a full
+  `compute_plan` result; the engine owns slot allocation via
+  `graph_slots`/`free_slots` mirrors) and ships it over the command ring;
+  `Graph::apply_edit` swaps it in at a block boundary with moves only and
+  the same box returns on the garbage ring (`RtGarbage`) carrying every
+  replaced allocation for a control-side drop (drained in `tap_all`'s
+  100 ms poll, on stop, and on the next edit). Zero audio gap — the old
+  stop -> edit -> restart `with_stopped` cycle in main.rs remains ONLY
+  for whole-engine swaps (New Patch, macro collapse/update rebuilds).
+  `Engine::stop` drains the command ring so stopped-mode edits (applied
+  directly) can never reorder behind queued ones. Node indices are stable
+  slots: `Graph.nodes`/`Engine.nodes` are slot vectors with tombstones +
+  a free-list (`NodeSlots`; iterate via `.iter()` / `.iter_slots()`,
+  never assume dense indices), and engine side tables (midi/gesture/
+  playback producers, decks) are keyed by slot. `Engine::remove_module`
+  removes one module (or a whole macro instance) in place;
+  `Engine::apply_doc` morphs the live engine to a `PatchDoc` by diffing
+  (the undo/redo restore path in the app's `restore_doc`, returning the
+  ids it had to recreate so deck metadata can be re-applied). Untouched
+  modules keep DSP state AND telemetry across edits (`modules_sequencing`
+  + `graph_edit` tests pin this; `live_edit` pins the running-edit path)
+  — `Engine::from_doc` is ONLY for loading patches into a fresh engine.
+  `PatchDoc::remove_module` edits the document, not a live engine.
 - Module renaming (`engine/rename.rs`): instance ids ARE normalized names
   (`normalize_module_name`: lowercase ASCII alphanumerics, other runs
   collapse to one `_`). `Engine::rename_module` takes the user-typed form,

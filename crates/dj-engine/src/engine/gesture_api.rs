@@ -137,20 +137,7 @@ impl Engine {
             .unwrap()
             .remove_mapping(name)
             .ok_or_else(|| anyhow!("no gesture mapping {name:?} on {instance_id:?}"))?;
-        let doomed: Vec<WireSpec> = self
-            .wires
-            .iter()
-            .copied()
-            .filter(|w| w.from_node == node && w.from_jack == jack)
-            .collect();
-        if !doomed.is_empty() {
-            let core = self.core_mut()?;
-            for w in &doomed {
-                core.graph.remove_wire(*w);
-            }
-            self.wires
-                .retain(|w| !(w.from_node == node && w.from_jack == jack));
-        }
+        self.remove_wires_where(|w| w.from_node == node && w.from_jack == jack)?;
         // Zero the RT-side value so a reused slot doesn't leak stale state
         // (frame 0 = apply immediately).
         if let Some(tx) = self.gesture_producers.get_mut(&node) {

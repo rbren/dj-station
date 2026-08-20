@@ -99,20 +99,7 @@ impl Engine {
             .position(|m| m.name == name)
             .ok_or_else(|| anyhow!("no MIDI mapping {name:?} on {instance_id:?}"))?;
         let jack = self.nodes[node].midi_mappings[pos].jack;
-        let doomed: Vec<WireSpec> = self
-            .wires
-            .iter()
-            .copied()
-            .filter(|w| w.from_node == node && w.from_jack == jack)
-            .collect();
-        if !doomed.is_empty() {
-            let core = self.core_mut()?;
-            for w in &doomed {
-                core.graph.remove_wire(*w);
-            }
-            self.wires
-                .retain(|w| !(w.from_node == node && w.from_jack == jack));
-        }
+        self.remove_wires_where(|w| w.from_node == node && w.from_jack == jack)?;
         self.nodes[node].midi_mappings.remove(pos);
         if let Some(shared) = self.nodes[node].midi_shared.as_ref() {
             shared.remove_mapping(jack);
@@ -168,20 +155,7 @@ impl Engine {
             .position(|m| m.name == name)
             .ok_or_else(|| anyhow!("no LED mapping {name:?} on {instance_id:?}"))?;
         let jack = self.nodes[node].midi_led_mappings[pos].jack;
-        let doomed: Vec<WireSpec> = self
-            .wires
-            .iter()
-            .copied()
-            .filter(|w| w.to_node == node && w.to_jack == jack)
-            .collect();
-        if !doomed.is_empty() {
-            let core = self.core_mut()?;
-            for w in &doomed {
-                core.graph.remove_wire(*w);
-            }
-            self.wires
-                .retain(|w| !(w.to_node == node && w.to_jack == jack));
-        }
+        self.remove_wires_where(|w| w.to_node == node && w.to_jack == jack)?;
         self.nodes[node].midi_led_mappings.remove(pos);
         if let Some(shared) = self.nodes[node].midi_shared.as_ref() {
             shared.remove_led_mapping(jack);

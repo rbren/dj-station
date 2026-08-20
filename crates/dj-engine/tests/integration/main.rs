@@ -27,6 +27,7 @@ mod envelope;
 mod gesture;
 mod graph_edit;
 mod hands;
+mod live_edit;
 mod macros;
 mod midi_led;
 mod midi_poly;

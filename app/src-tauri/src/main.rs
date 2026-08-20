@@ -213,20 +213,19 @@ fn patch_edit<'a>(
 /// backend. `apply_doc` diffs instead of rebuilding, so modules untouched
 /// by the edit keep their DSP state AND telemetry — nothing visibly resets.
 fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> CmdResult<()> {
-    with_stopped(engine, |e| {
-        let recreated = e.apply_doc(doc).map_err(err)?;
-        // Deck metadata (grids/cues/loops) is canonical in the library DB;
-        // re-apply it to decks apply_doc had to recreate.
-        for instance in recreated {
-            if e.nodes
-                .iter()
-                .any(|n| n.instance_id == instance && n.is_deck())
-            {
-                apply_deck_metadata(state, e, &instance)?;
-            }
+    let recreated = engine.apply_doc(doc).map_err(err)?;
+    // Deck metadata (grids/cues/loops) is canonical in the library DB;
+    // re-apply it to decks apply_doc had to recreate.
+    for instance in recreated {
+        if engine
+            .nodes
+            .iter()
+            .any(|n| n.instance_id == instance && n.is_deck())
+        {
+            apply_deck_metadata(state, engine, &instance)?;
         }
-        Ok(())
-    })
+    }
+    Ok(())
 }
 
 /// Restart the backend that was running before a stop/mutate cycle. A cpal
@@ -270,10 +269,9 @@ fn undo(state: State<AppState>) -> CmdResult<bool> {
 #[tauri::command]
 fn remove_module(state: State<AppState>, instance: String) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::Remove(&instance))?;
-    with_stopped(&mut engine, |e| {
-        e.remove_module(&instance)
-            .map_err(|e| CmdError::not_found(e.to_string()))
-    })
+    engine
+        .remove_module(&instance)
+        .map_err(|e| CmdError::not_found(e.to_string()))
 }
 
 /// Rename a module (undoable). The typed name keeps caps/spaces for
@@ -389,9 +387,12 @@ struct WireSnapshot {
     to_jack: String,
 }
 
-/// Structural graph edits need a stopped engine; wrap them in
+/// Wrap an edit that genuinely needs a stopped engine (whole-engine swaps
+/// like New Patch, or macro collapse/update rebuilds) in
 /// stop -> edit -> restart-same-backend (the cpal backend hands the graph
-/// back on stop, so audio resumes with the edit applied).
+/// back on stop, so audio resumes with the edit applied). Ordinary
+/// structural edits (module add/remove, wires) no longer need this: the
+/// engine applies them live at a block boundary.
 fn with_stopped<T>(
     engine: &mut Engine,
     f: impl FnOnce(&mut Engine) -> CmdResult<T>,
@@ -683,9 +684,7 @@ fn macro_preview(
 #[tauri::command]
 fn add_module(state: State<AppState>, instance: String, type_id: String) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::Add(&instance))?;
-    with_stopped(&mut engine, |e| {
-        e.add_module(&instance, &type_id).map_err(err)
-    })
+    engine.add_module(&instance, &type_id).map_err(err)
 }
 
 #[tauri::command]
@@ -700,14 +699,14 @@ fn connect_wire(
         &state,
         EditKey::WireAdd(&from_instance, &from_jack, &to_instance, &to_jack),
     )?;
-    with_stopped(&mut engine, |e| {
-        e.connect(&from_instance, &from_jack, &to_instance, &to_jack)
-            .map_err(err)?;
-        // First-wire auto blend mode (pitch pair => Override, else CV);
-        // same undo step as the connect. See the engine method's docs.
-        e.auto_wire_style_on_connect(&from_instance, &from_jack, &to_instance, &to_jack)
-            .map_err(err)
-    })
+    engine
+        .connect(&from_instance, &from_jack, &to_instance, &to_jack)
+        .map_err(err)?;
+    // First-wire auto blend mode (pitch pair => Override, else CV);
+    // same undo step as the connect. See the engine method's docs.
+    engine
+        .auto_wire_style_on_connect(&from_instance, &from_jack, &to_instance, &to_jack)
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -740,23 +739,23 @@ fn disconnect_wire(
         &state,
         EditKey::WireRemove(&from_instance, &from_jack, &to_instance, &to_jack),
     )?;
-    with_stopped(&mut engine, |e| {
-        e.disconnect(&from_instance, &from_jack, &to_instance, &to_jack)
-            .map_err(err)?;
-        // Legacy patches from before wired-input blending saved an automatic
-        // wire-style override; undo it so the knob comes back (only when it
-        // is still set to wire — respect manual choices).
-        if let Ok(k) = e.knob_state(&to_instance, &to_jack) {
-            if k.config
-                .as_ref()
-                .is_some_and(|c| c.style == KnobStyle::Wire)
-            {
-                e.set_knob_config(&to_instance, &to_jack, None)
-                    .map_err(err)?;
-            }
+    engine
+        .disconnect(&from_instance, &from_jack, &to_instance, &to_jack)
+        .map_err(err)?;
+    // Legacy patches from before wired-input blending saved an automatic
+    // wire-style override; undo it so the knob comes back (only when it
+    // is still set to wire — respect manual choices).
+    if let Ok(k) = engine.knob_state(&to_instance, &to_jack) {
+        if k.config
+            .as_ref()
+            .is_some_and(|c| c.style == KnobStyle::Wire)
+        {
+            engine
+                .set_knob_config(&to_instance, &to_jack, None)
+                .map_err(err)?;
         }
-        Ok(())
-    })
+    }
+    Ok(())
 }
 
 /// Map a MIDI control (note/cc) to a new output jack. Safe while running:
@@ -797,21 +796,22 @@ fn remove_midi_mapping(state: State<AppState>, instance: String, name: String) -
             )
         })
         .collect();
-    with_stopped(&mut engine, |e| {
-        for (to_instance, to_jack) in &doomed {
-            e.disconnect(&instance, &name, to_instance, to_jack)
-                .map_err(err)?;
-            if let Ok(k) = e.knob_state(to_instance, to_jack) {
-                if k.config
-                    .as_ref()
-                    .is_some_and(|c| c.style == KnobStyle::Wire)
-                {
-                    e.set_knob_config(to_instance, to_jack, None).map_err(err)?;
-                }
+    for (to_instance, to_jack) in &doomed {
+        engine
+            .disconnect(&instance, &name, to_instance, to_jack)
+            .map_err(err)?;
+        if let Ok(k) = engine.knob_state(to_instance, to_jack) {
+            if k.config
+                .as_ref()
+                .is_some_and(|c| c.style == KnobStyle::Wire)
+            {
+                engine
+                    .set_knob_config(to_instance, to_jack, None)
+                    .map_err(err)?;
             }
         }
-        e.remove_midi_mapping(&instance, &name).map_err(err)
-    })
+    }
+    engine.remove_midi_mapping(&instance, &name).map_err(err)
 }
 
 /// Add a MIDI LED feedback mapping (M4, PRD §7.1): the named input jack
@@ -832,8 +832,8 @@ fn add_midi_led_mapping(
         .map_err(err)
 }
 
-/// Remove a MIDI LED mapping. The engine drops wires into its jack, which
-/// is a structural edit and needs the engine stopped.
+/// Remove a MIDI LED mapping. The engine drops wires into its jack (a
+/// live structural edit; audio keeps running).
 #[tauri::command]
 fn remove_midi_led_mapping(
     state: State<AppState>,
@@ -841,9 +841,9 @@ fn remove_midi_led_mapping(
     name: String,
 ) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::LedRemove(&instance, &name))?;
-    with_stopped(&mut engine, |e| {
-        e.remove_midi_led_mapping(&instance, &name).map_err(err)
-    })
+    engine
+        .remove_midi_led_mapping(&instance, &name)
+        .map_err(err)
 }
 
 // ---------------------------------------------------------------------------
@@ -954,21 +954,22 @@ fn gesture_remove_mapping(state: State<AppState>, instance: String, name: String
             )
         })
         .collect();
-    with_stopped(&mut engine, |e| {
-        for (to_instance, to_jack) in &doomed {
-            e.disconnect(&instance, &name, to_instance, to_jack)
-                .map_err(err)?;
-            if let Ok(k) = e.knob_state(to_instance, to_jack) {
-                if k.config
-                    .as_ref()
-                    .is_some_and(|c| c.style == KnobStyle::Wire)
-                {
-                    e.set_knob_config(to_instance, to_jack, None).map_err(err)?;
-                }
+    for (to_instance, to_jack) in &doomed {
+        engine
+            .disconnect(&instance, &name, to_instance, to_jack)
+            .map_err(err)?;
+        if let Ok(k) = engine.knob_state(to_instance, to_jack) {
+            if k.config
+                .as_ref()
+                .is_some_and(|c| c.style == KnobStyle::Wire)
+            {
+                engine
+                    .set_knob_config(to_instance, to_jack, None)
+                    .map_err(err)?;
             }
         }
-        e.remove_gesture_mapping(&instance, &name).map_err(err)
-    })
+    }
+    engine.remove_gesture_mapping(&instance, &name).map_err(err)
 }
 
 /// Arm the learn flow: the next detection is offered to the active mode.
@@ -1151,21 +1152,22 @@ fn choreo_remove_track(state: State<AppState>, instance: String, track: usize) -
     if doomed.is_empty() {
         return engine.choreo_remove_track(&instance, track).map_err(err);
     }
-    with_stopped(&mut engine, |e| {
-        for (from_jack, to_instance, to_jack) in &doomed {
-            e.disconnect(&instance, from_jack, to_instance, to_jack)
-                .map_err(err)?;
-            if let Ok(k) = e.knob_state(to_instance, to_jack) {
-                if k.config
-                    .as_ref()
-                    .is_some_and(|c| c.style == KnobStyle::Wire)
-                {
-                    e.set_knob_config(to_instance, to_jack, None).map_err(err)?;
-                }
+    for (from_jack, to_instance, to_jack) in &doomed {
+        engine
+            .disconnect(&instance, from_jack, to_instance, to_jack)
+            .map_err(err)?;
+        if let Ok(k) = engine.knob_state(to_instance, to_jack) {
+            if k.config
+                .as_ref()
+                .is_some_and(|c| c.style == KnobStyle::Wire)
+            {
+                engine
+                    .set_knob_config(to_instance, to_jack, None)
+                    .map_err(err)?;
             }
         }
-        e.choreo_remove_track(&instance, track).map_err(err)
-    })
+    }
+    engine.choreo_remove_track(&instance, track).map_err(err)
 }
 
 #[tauri::command]
@@ -1430,10 +1432,7 @@ fn paste_modules(state: State<AppState>, clipboard: String) -> CmdResult<BTreeMa
     let mut engine = patch_edit(&state, EditKey::Paste)?;
     let mut doc = engine.snapshot("paste");
     let renames = doc.paste(&clip);
-    with_stopped(&mut engine, |e| {
-        e.apply_doc(&doc).map_err(err)?;
-        Ok(())
-    })?;
+    engine.apply_doc(&doc).map_err(err)?;
     Ok(renames)
 }
 
@@ -1441,13 +1440,12 @@ fn paste_modules(state: State<AppState>, clipboard: String) -> CmdResult<BTreeMa
 #[tauri::command]
 fn remove_modules(state: State<AppState>, instances: Vec<String>) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::RemoveMany)?;
-    with_stopped(&mut engine, |eng| {
-        for instance in &instances {
-            eng.remove_module(instance)
-                .map_err(|e| CmdError::not_found(e.to_string()))?;
-        }
-        Ok(())
-    })
+    for instance in &instances {
+        engine
+            .remove_module(instance)
+            .map_err(|e| CmdError::not_found(e.to_string()))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1471,7 +1469,11 @@ fn tap(state: State<AppState>, instance: String, jack: String) -> CmdResult<Jack
 /// can never collide with an input of the same name.
 #[tauri::command]
 fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String, JackTelemetry>>> {
-    let engine = engine_lock(&state)?;
+    let mut engine = engine_lock(&state)?;
+    // Live structural edits ship replaced modules/buffers back over the
+    // garbage ring; this 100 ms poll is the periodic control-side drop
+    // point (a removed deck can hold a whole decoded track).
+    engine.drain_garbage();
     let mut out: BTreeMap<String, BTreeMap<String, JackTelemetry>> = BTreeMap::new();
     for n in &engine.nodes {
         let jacks = out.entry(n.instance_id.clone()).or_default();

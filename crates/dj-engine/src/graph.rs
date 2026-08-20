@@ -3,13 +3,19 @@
 //! - Cycles are allowed: back edges (detected at plan time) read the source's
 //!   *previous* block output (one-block delay), feed-forward edges read the
 //!   current block.
-//! - All buffers are allocated at edit/plan time; `process_block` performs no
-//!   allocation and takes no locks.
+//! - All buffers and the execution [`Plan`] are allocated on the CONTROL
+//!   thread; `process_block` performs no allocation and takes no locks.
+//! - Structural edits arrive as pre-allocated [`GraphEdit`]s.
+//!   [`Graph::apply_edit`] installs the new state with moves/swaps only and
+//!   leaves every replaced allocation *inside* the edit, so the same box can
+//!   ship back over the garbage ring for a control-thread drop — the graph
+//!   can therefore be edited live at a block boundary with zero RT
+//!   allocation and zero audible gap.
 //! - Node slots are STABLE: removing a node leaves a tombstone (`None`) and
-//!   the slot goes on a free-list for reuse by the next add. Slot indices in
-//!   `WireSpec`s, RT command queues and the engine's side tables therefore
-//!   never shift, which is what makes remove-module an incremental edit
-//!   instead of a rebuild-the-world event.
+//!   the slot is recycled by the next add (the engine owns the free-list).
+//!   Slot indices in `WireSpec`s, RT command queues and the engine's side
+//!   tables therefore never shift, which is what makes add/remove-module an
+//!   incremental edit instead of a rebuild-the-world event.
 
 use crate::builtin::AudioOutModule;
 use crate::knob::{BlendRt, JackRt};
@@ -37,14 +43,188 @@ pub struct GraphNode {
     pub audio_out: bool,
 }
 
-pub struct Graph {
-    /// Stable node slots; `None` is a tombstone left by `remove_node`
-    /// (reused by the next `add_node`). Indices never shift.
-    nodes: Vec<Option<GraphNode>>,
-    free: Vec<usize>,
-    pub wires: Vec<WireSpec>,
+/// Derived execution state: node order, per-jack incoming wire lists and
+/// connected masks. Computed on the control thread by [`compute_plan`];
+/// installed on the graph by swap, never mutated in place.
+#[derive(Default)]
+pub struct Plan {
+    order: Vec<usize>,
+    incoming: Vec<Vec<Vec<Incoming>>>,
+    connected_mask: Vec<u64>,
+}
 
-    // Per slot, per jack buffers (allocated at edit/plan time).
+/// Compute the plan for a graph shape: `n_inputs[slot]` is the input-jack
+/// count of the node living in `slot` (`None` = tombstone). Control thread
+/// only (allocates). The DFS mirrors the original in-graph replan exactly so
+/// execution order — and therefore back-edge placement and golden audio —
+/// is unchanged.
+pub fn compute_plan(n_inputs: &[Option<usize>], wires: &[WireSpec]) -> Plan {
+    let n = n_inputs.len();
+    // DFS computing reverse postorder; edges to gray nodes are back edges.
+    let mut adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n]; // node -> (target, wire idx)
+    for (wi, w) in wires.iter().enumerate() {
+        adj[w.from_node].push((w.to_node, wi));
+    }
+    let mut color = vec![0u8; n]; // 0 white, 1 gray, 2 black
+    let mut postorder = Vec::with_capacity(n);
+    let mut back_edge = vec![false; wires.len()];
+
+    // Iterative DFS.
+    for start in 0..n {
+        if color[start] != 0 || n_inputs[start].is_none() {
+            continue;
+        }
+        let mut stack: Vec<(usize, usize)> = vec![(start, 0)];
+        color[start] = 1;
+        while let Some(&mut (node, ref mut ei)) = stack.last_mut() {
+            if *ei < adj[node].len() {
+                let (tgt, wi) = adj[node][*ei];
+                *ei += 1;
+                match color[tgt] {
+                    0 => {
+                        color[tgt] = 1;
+                        stack.push((tgt, 0));
+                    }
+                    1 => back_edge[wi] = true,
+                    _ => {}
+                }
+            } else {
+                color[node] = 2;
+                postorder.push(node);
+                stack.pop();
+            }
+        }
+    }
+    postorder.reverse();
+
+    let mut incoming: Vec<Vec<Vec<Incoming>>> = n_inputs
+        .iter()
+        .map(|n_in| vec![Vec::new(); n_in.unwrap_or(0)])
+        .collect();
+    let mut connected_mask = vec![0u64; n];
+    for (wi, w) in wires.iter().enumerate() {
+        incoming[w.to_node][w.to_jack].push((w.from_node, w.from_jack, back_edge[wi]));
+        connected_mask[w.to_node] |= 1u64 << w.to_jack;
+    }
+    Plan {
+        order: postorder,
+        incoming,
+        connected_mask,
+    }
+}
+
+/// One node slot's per-jack storage. Fully populated on the control thread
+/// for an add; emptied by moves into a remove edit for a control-side drop.
+#[derive(Default)]
+pub struct NodeStorage {
+    pub in_bufs: Vec<Vec<f32>>,
+    pub out_curr: Vec<Vec<f32>>,
+    pub out_prev: Vec<Vec<f32>>,
+    pub jack_rt: Vec<JackRt>,
+    pub analyzers: Vec<JackAnalyzer>,
+    pub out_analyzers: Vec<JackAnalyzer>,
+}
+
+impl NodeStorage {
+    /// Buffers and per-jack state for a fresh node (control thread).
+    pub fn for_node(
+        n_in: usize,
+        n_out: usize,
+        block_size: usize,
+        jack_rt: Vec<JackRt>,
+        analyzers: Vec<JackAnalyzer>,
+        out_analyzers: Vec<JackAnalyzer>,
+    ) -> Self {
+        NodeStorage {
+            in_bufs: vec![vec![0.0; block_size]; n_in],
+            out_curr: vec![vec![0.0; block_size]; n_out],
+            out_prev: vec![vec![0.0; block_size]; n_out],
+            jack_rt,
+            analyzers,
+            out_analyzers,
+        }
+    }
+}
+
+/// Pre-allocated replacement outer slot-vectors for growing the graph to a
+/// new slot count (a fresh slot beyond the current storage). The RT side
+/// swaps each existing element over (moves only) and leaves the old outer
+/// vectors here for the control-side drop.
+pub struct GrowStorage {
+    nodes: Vec<Option<GraphNode>>,
+    in_bufs: Vec<Vec<Vec<f32>>>,
+    out_curr: Vec<Vec<Vec<f32>>>,
+    out_prev: Vec<Vec<Vec<f32>>>,
+    jack_rt: Vec<Vec<JackRt>>,
+    analyzers: Vec<Vec<JackAnalyzer>>,
+    out_analyzers: Vec<Vec<JackAnalyzer>>,
+}
+
+impl GrowStorage {
+    /// Placeholder-filled vectors of `len` slots (control thread).
+    pub fn with_len(len: usize) -> Self {
+        GrowStorage {
+            nodes: std::iter::repeat_with(|| None).take(len).collect(),
+            in_bufs: vec![Vec::new(); len],
+            out_curr: vec![Vec::new(); len],
+            out_prev: vec![Vec::new(); len],
+            jack_rt: vec![Vec::new(); len],
+            analyzers: std::iter::repeat_with(Vec::new).take(len).collect(),
+            out_analyzers: std::iter::repeat_with(Vec::new).take(len).collect(),
+        }
+    }
+}
+
+/// A structural edit, fully pre-allocated on the control thread. Applying
+/// it (RT or stopped) swaps the new state in and parks every replaced
+/// allocation back inside this value, which then travels the garbage ring
+/// so the drop happens off the RT thread.
+pub enum GraphEdit {
+    AddNode {
+        slot: usize,
+        /// In: the node. Out: `None`.
+        node: Option<GraphNode>,
+        /// In: the slot's buffers/analyzers. Out: emptied.
+        storage: NodeStorage,
+        /// Present when `slot` is beyond current storage. Out: the old
+        /// outer vectors.
+        grow: Option<GrowStorage>,
+        /// In: the new plan. Out: the old plan.
+        plan: Plan,
+    },
+    RemoveNode {
+        slot: usize,
+        /// In: the new plan. Out: the old plan.
+        plan: Plan,
+        /// In: `None`. Out: the removed module, for control-side drop.
+        module: Option<Box<dyn HostModule>>,
+        /// In: empty. Out: the slot's buffers/analyzers.
+        storage: NodeStorage,
+    },
+    /// Wire add/remove: only the derived plan changes.
+    Replan {
+        /// In: the new plan. Out: the old plan.
+        plan: Plan,
+    },
+}
+
+/// Move all of `cur`'s elements into the (longer, placeholder-filled)
+/// `incoming` vector and swap the vectors, leaving the old allocation in
+/// `incoming`. Moves and swaps only — RT-safe.
+fn migrate<T>(cur: &mut Vec<T>, incoming: &mut Vec<T>) {
+    debug_assert!(incoming.len() >= cur.len());
+    for (i, v) in cur.iter_mut().enumerate() {
+        std::mem::swap(v, &mut incoming[i]);
+    }
+    std::mem::swap(cur, incoming);
+}
+
+pub struct Graph {
+    /// Stable node slots; `None` is a tombstone left by a remove edit
+    /// (reused by the next add). Indices never shift.
+    nodes: Vec<Option<GraphNode>>,
+
+    // Per slot, per jack buffers (allocated at edit time, control side).
     in_bufs: Vec<Vec<Vec<f32>>>,
     out_curr: Vec<Vec<Vec<f32>>>,
     out_prev: Vec<Vec<Vec<f32>>>,
@@ -52,9 +232,7 @@ pub struct Graph {
     analyzers: Vec<Vec<JackAnalyzer>>,
     out_analyzers: Vec<Vec<JackAnalyzer>>,
 
-    incoming: Vec<Vec<Vec<Incoming>>>,
-    connected_mask: Vec<u64>,
-    order: Vec<usize>,
+    plan: Plan,
 
     block_size: usize,
     pub frames_processed: u64,
@@ -64,17 +242,13 @@ impl Graph {
     pub fn new(block_size: usize) -> Self {
         Graph {
             nodes: Vec::new(),
-            free: Vec::new(),
-            wires: Vec::new(),
             in_bufs: Vec::new(),
             out_curr: Vec::new(),
             out_prev: Vec::new(),
             jack_rt: Vec::new(),
             analyzers: Vec::new(),
             out_analyzers: Vec::new(),
-            incoming: Vec::new(),
-            connected_mask: Vec::new(),
-            order: Vec::new(),
+            plan: Plan::default(),
             block_size,
             frames_processed: 0,
         }
@@ -94,133 +268,63 @@ impl Graph {
             .as_mut()
     }
 
-    /// Add a node into a free slot (or a new one). `jack_rt` and
-    /// `analyzers` must have one entry per input; `out_analyzers` one per
-    /// output. Returns the slot index, stable for the node's lifetime.
-    pub fn add_node(
-        &mut self,
-        node: GraphNode,
-        jack_rt: Vec<JackRt>,
-        analyzers: Vec<JackAnalyzer>,
-        out_analyzers: Vec<JackAnalyzer>,
-    ) -> usize {
-        let n_in = node.n_in;
-        let n_out = node.n_out;
-        let idx = if let Some(idx) = self.free.pop() {
-            self.in_bufs[idx] = vec![vec![0.0; self.block_size]; n_in];
-            self.out_curr[idx] = vec![vec![0.0; self.block_size]; n_out];
-            self.out_prev[idx] = vec![vec![0.0; self.block_size]; n_out];
-            self.jack_rt[idx] = jack_rt;
-            self.analyzers[idx] = analyzers;
-            self.out_analyzers[idx] = out_analyzers;
-            self.incoming[idx] = vec![Vec::new(); n_in];
-            self.connected_mask[idx] = 0;
-            self.nodes[idx] = Some(node);
-            idx
-        } else {
-            self.in_bufs.push(vec![vec![0.0; self.block_size]; n_in]);
-            self.out_curr.push(vec![vec![0.0; self.block_size]; n_out]);
-            self.out_prev.push(vec![vec![0.0; self.block_size]; n_out]);
-            self.jack_rt.push(jack_rt);
-            self.analyzers.push(analyzers);
-            self.out_analyzers.push(out_analyzers);
-            self.incoming.push(vec![Vec::new(); n_in]);
-            self.connected_mask.push(0);
-            self.nodes.push(Some(node));
-            self.nodes.len() - 1
-        };
-        self.replan();
-        idx
-    }
-
-    /// Remove a node: drop every wire touching it, tombstone the slot and
-    /// recycle it. Other slots (and their buffers, analyzers and module
-    /// state) are untouched. Returns the removed module for off-thread drop.
-    pub fn remove_node(&mut self, slot: usize) -> Box<dyn HostModule> {
-        let node = self.nodes[slot].take().expect("dead graph slot");
-        self.wires
-            .retain(|w| w.from_node != slot && w.to_node != slot);
-        // Free the slot's buffers now; add_node re-sizes them for the
-        // next occupant.
-        self.in_bufs[slot] = Vec::new();
-        self.out_curr[slot] = Vec::new();
-        self.out_prev[slot] = Vec::new();
-        self.jack_rt[slot] = Vec::new();
-        self.analyzers[slot] = Vec::new();
-        self.out_analyzers[slot] = Vec::new();
-        self.incoming[slot] = Vec::new();
-        self.connected_mask[slot] = 0;
-        self.free.push(slot);
-        self.replan();
-        node.module
-    }
-
-    pub fn add_wire(&mut self, w: WireSpec) {
-        self.wires.push(w);
-        self.replan();
-    }
-
-    pub fn remove_wire(&mut self, w: WireSpec) {
-        self.wires.retain(|x| *x != w);
-        self.replan();
-    }
-
-    /// Recompute execution order, back edges, incoming lists, and masks.
-    /// Called on the control thread only. Tombstoned slots never enter the
-    /// execution order (wires touching them are removed with the node).
-    fn replan(&mut self) {
-        let n = self.nodes.len();
-        // DFS computing reverse postorder; edges to gray nodes are back edges.
-        let mut adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n]; // node -> (target, wire idx)
-        for (wi, w) in self.wires.iter().enumerate() {
-            adj[w.from_node].push((w.to_node, wi));
-        }
-        let mut color = vec![0u8; n]; // 0 white, 1 gray, 2 black
-        let mut postorder = Vec::with_capacity(n);
-        let mut back_edge = vec![false; self.wires.len()];
-
-        // Iterative DFS.
-        for start in 0..n {
-            if color[start] != 0 || self.nodes[start].is_none() {
-                continue;
-            }
-            let mut stack: Vec<(usize, usize)> = vec![(start, 0)];
-            color[start] = 1;
-            while let Some(&mut (node, ref mut ei)) = stack.last_mut() {
-                if *ei < adj[node].len() {
-                    let (tgt, wi) = adj[node][*ei];
-                    *ei += 1;
-                    match color[tgt] {
-                        0 => {
-                            color[tgt] = 1;
-                            stack.push((tgt, 0));
-                        }
-                        1 => back_edge[wi] = true,
-                        _ => {}
-                    }
-                } else {
-                    color[node] = 2;
-                    postorder.push(node);
-                    stack.pop();
+    /// Apply a structural edit at a block boundary. RT-safe: moves and
+    /// swaps only; every replaced allocation is parked back inside `edit`
+    /// for a control-side drop (see [`GraphEdit`]).
+    pub fn apply_edit(&mut self, edit: &mut GraphEdit) {
+        match edit {
+            GraphEdit::AddNode {
+                slot,
+                node,
+                storage,
+                grow,
+                plan,
+            } => {
+                if let Some(g) = grow {
+                    self.grow(g);
                 }
+                let slot = *slot;
+                debug_assert!(self.nodes[slot].is_none(), "add into live slot {slot}");
+                self.nodes[slot] = node.take();
+                // The slot's entries are empty (fresh growth or a prior
+                // remove shipped them out), so these drop nothing.
+                self.in_bufs[slot] = std::mem::take(&mut storage.in_bufs);
+                self.out_curr[slot] = std::mem::take(&mut storage.out_curr);
+                self.out_prev[slot] = std::mem::take(&mut storage.out_prev);
+                self.jack_rt[slot] = std::mem::take(&mut storage.jack_rt);
+                self.analyzers[slot] = std::mem::take(&mut storage.analyzers);
+                self.out_analyzers[slot] = std::mem::take(&mut storage.out_analyzers);
+                std::mem::swap(&mut self.plan, plan);
             }
+            GraphEdit::RemoveNode {
+                slot,
+                plan,
+                module,
+                storage,
+            } => {
+                let slot = *slot;
+                *module = self.nodes[slot].take().map(|n| n.module);
+                debug_assert!(module.is_some(), "remove of dead slot {slot}");
+                storage.in_bufs = std::mem::take(&mut self.in_bufs[slot]);
+                storage.out_curr = std::mem::take(&mut self.out_curr[slot]);
+                storage.out_prev = std::mem::take(&mut self.out_prev[slot]);
+                storage.jack_rt = std::mem::take(&mut self.jack_rt[slot]);
+                storage.analyzers = std::mem::take(&mut self.analyzers[slot]);
+                storage.out_analyzers = std::mem::take(&mut self.out_analyzers[slot]);
+                std::mem::swap(&mut self.plan, plan);
+            }
+            GraphEdit::Replan { plan } => std::mem::swap(&mut self.plan, plan),
         }
-        postorder.reverse();
-        self.order = postorder;
+    }
 
-        for node in 0..n {
-            let Some(gn) = &self.nodes[node] else {
-                continue;
-            };
-            for jack in 0..gn.n_in {
-                self.incoming[node][jack].clear();
-            }
-            self.connected_mask[node] = 0;
-        }
-        for (wi, w) in self.wires.iter().enumerate() {
-            self.incoming[w.to_node][w.to_jack].push((w.from_node, w.from_jack, back_edge[wi]));
-            self.connected_mask[w.to_node] |= 1u64 << w.to_jack;
-        }
+    fn grow(&mut self, g: &mut GrowStorage) {
+        migrate(&mut self.nodes, &mut g.nodes);
+        migrate(&mut self.in_bufs, &mut g.in_bufs);
+        migrate(&mut self.out_curr, &mut g.out_curr);
+        migrate(&mut self.out_prev, &mut g.out_prev);
+        migrate(&mut self.jack_rt, &mut g.jack_rt);
+        migrate(&mut self.analyzers, &mut g.analyzers);
+        migrate(&mut self.out_analyzers, &mut g.out_analyzers);
     }
 
     /// Process one block. `master` is the pre-allocated master bus
@@ -231,21 +335,21 @@ impl Graph {
             ch[..frames].fill(0.0);
         }
 
-        for oi in 0..self.order.len() {
-            let node = self.order[oi];
+        for oi in 0..self.plan.order.len() {
+            let node = self.plan.order[oi];
             // Order only contains live slots (replan skips tombstones).
             let n_in = self.nodes[node].as_ref().unwrap().n_in;
 
             // Gather effective inputs.
             for jack in 0..n_in {
                 let rt = self.jack_rt[node][jack];
-                let wired = !self.incoming[node][jack].is_empty();
+                let wired = !self.plan.incoming[node][jack].is_empty();
                 if !wired {
                     self.in_bufs[node][jack][..frames].fill(rt.unwired_value);
                 } else {
                     self.in_bufs[node][jack][..frames].fill(0.0);
-                    for k in 0..self.incoming[node][jack].len() {
-                        let (src, sjack, prev) = self.incoming[node][jack][k];
+                    for k in 0..self.plan.incoming[node][jack].len() {
+                        let (src, sjack, prev) = self.plan.incoming[node][jack][k];
                         let src_buf = if prev {
                             &self.out_prev[src][sjack]
                         } else {
@@ -292,7 +396,7 @@ impl Graph {
             }
 
             // Run the module.
-            let mask = self.connected_mask[node];
+            let mask = self.plan.connected_mask[node];
             let gn = self.nodes[node].as_mut().unwrap();
             gn.module
                 .process(&self.in_bufs[node], &mut self.out_curr[node], mask, frames);
@@ -322,7 +426,7 @@ impl Graph {
                         break;
                     }
                     // Skip unwired inputs so silent jacks don't add DC.
-                    if self.incoming[node][jack].is_empty() {
+                    if self.plan.incoming[node][jack].is_empty() {
                         continue;
                     }
                     let src = &self.in_bufs[node][jack];
