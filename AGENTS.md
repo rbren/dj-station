@@ -338,7 +338,13 @@ fails if it's missing.
   `z-index`, `overflow: visible` and `pointer-events: none`
   (WireOverlay.test.tsx pins it); knob right-clicks stopPropagation so
   the module context menu never opens over a knob
-  (ContextMenu.test.tsx pins it).
+  (ContextMenu.test.tsx pins it). The Tauri webview is WebKit: a
+  right-click is followed by a `click` on the same target (not
+  `auxclick` like Chrome/Firefox), so any surface with both an
+  add/activate onClick and an onContextMenu must swallow the paired
+  click (gesture flag cleared by a fresh button-0 mousedown — see
+  PickerEntry in ModulePicker.tsx; its "macro management" tests pin
+  the full right-click event stream).
 - Module layout (post-refactor): `engine.rs` keeps core types,
   construction, graph editing, knobs and telemetry; feature-area
   `impl Engine` blocks live under `src/engine/` (`midi`, `gesture_api`,
