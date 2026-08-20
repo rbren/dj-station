@@ -22,9 +22,11 @@ interface ModuleHandle {
 export const FFT_SIZE = 1024;
 export const SAMPLE_RATE = 48000;
 
-const W = 224;
-const TRACE_H = 56;
-const SPEC_H = 72;
+// Sized to fill the condensed one-row I/O strip below (3 input + 6 output
+// cells, see panelLayouts.ts) so the display is the panel's main surface.
+const W = 400;
+const TRACE_H = 96;
+const SPEC_H = 120;
 const PAD = 4;
 
 /** Log-frequency display range and bar count for the spectrum. */

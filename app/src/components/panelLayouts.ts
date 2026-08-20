@@ -643,13 +643,26 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
+  // The display is the module's main surface, so the I/O is condensed to
+  // one row under it: the 3 inputs beside all 6 outputs as inline output
+  // cells — no separate output strip eating a line of its own.
   'com.dj.scope': () => ({
     groups: [
-      { inputs: ['in', { jack: 'hysteresis', label: 'hyst' }, { jack: 'window', label: 'win' }] },
-    ],
-    outputGroups: [
-      { title: 'signal', outputs: ['thru', 'trig'] },
-      { title: 'measure', outputs: ['pitch', 'hz', 'peak', 'rms'] },
+      {
+        title: 'in',
+        inputs: ['in', { jack: 'hysteresis', label: 'hyst' }, { jack: 'window', label: 'win' }],
+      },
+      {
+        title: 'out',
+        inputs: [
+          { jack: 'thru', output: true },
+          { jack: 'trig', output: true },
+          { jack: 'pitch', output: true },
+          { jack: 'hz', output: true },
+          { jack: 'peak', output: true },
+          { jack: 'rms', output: true },
+        ],
+      },
     ],
   }),
 
