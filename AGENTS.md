@@ -321,7 +321,10 @@ fails if it's missing.
   title bars are 56px min-height; macro labels are full-width 44px title
   bars styled like module ones — `MACRO_LABEL_H` in `rackLayout.ts` must
   match the macro-label CSS height or collision/placement geometry drifts
-  (module panels self-measure, so their CSS can change freely). The
+  (module panels self-measure, so their CSS can change freely). Title
+  fonts (926ebb9) nearly fill the bars: `.module-title` 2.75rem,
+  `.macro-box-label` 2.1rem, both `line-height: 1` — resize fonts, not
+  bar heights, to keep geometry constants valid. The
   `.wire-overlay` CSS must keep
   `z-index`, `overflow: visible` and `pointer-events: none`
   (WireOverlay.test.tsx pins it); knob right-clicks stopPropagation so
