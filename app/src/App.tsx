@@ -26,6 +26,7 @@ import { WIRE_COLORS, WireOverlay } from './components/WireOverlay';
 import {
   boundingBox,
   defaultPosition,
+  macroBoxRect,
   moduleRect,
   nearestFreeSpot,
   rectsOverlap,
@@ -253,6 +254,61 @@ export default function App() {
     if (dragBump.current?.dragged === instance) dragBump.current = null;
   }, []);
 
+  // Collision rects for everything outside `exclude`: macro groups count
+  // as ONE solid rect — their full bounding box, border padding and label
+  // tab included — exactly like a module's own footprint (nothing may park
+  // inside another macro's box). Macro entries are marked so the
+  // co-operative bump skips them (a box has no single position to write).
+  const collisionRects = useCallback(
+    (exclude: Set<string>, posOf: (id: string) => { x: number; y: number }) => {
+      const nodes = store.getState().nodes;
+      const out: { id: string; rect: Rect; isMacro: boolean }[] = [];
+      const seen = new Set<string>();
+      for (const n of nodes) {
+        const id = n.instance_id;
+        if (exclude.has(id)) continue;
+        const g = macroOwner.get(id);
+        if (!g) {
+          out.push({ id, rect: moduleRect(id, posOf(id)), isMacro: false });
+          continue;
+        }
+        if (seen.has(g.instance)) continue;
+        seen.add(g.instance);
+        const memberRects = g.members
+          .filter((m) => !exclude.has(m) && nodes.some((nn) => nn.instance_id === m))
+          .map((m) => moduleRect(m, posOf(m)));
+        if (memberRects.length === 0) continue;
+        out.push({ id: g.instance, rect: macroBoxRect(boundingBox(memberRects)), isMacro: true });
+      }
+      return out;
+    },
+    [store, macroOwner],
+  );
+
+  /** Footprint of a moving set: fully-included macro groups contribute
+   *  their solid box rect (padding + label), loose modules their panel
+   *  rect — so two macros can never overlap and modules keep out of a
+   *  macro's frame while it drags. */
+  const groupFootprint = useCallback(
+    (group: string[], posOf: (id: string) => { x: number; y: number }) => {
+      const inGroup = new Set(group);
+      const rects: Rect[] = [];
+      const seen = new Set<string>();
+      for (const id of group) {
+        const g = macroOwner.get(id);
+        if (g && g.members.every((m) => inGroup.has(m))) {
+          if (seen.has(g.instance)) continue;
+          seen.add(g.instance);
+          rects.push(macroBoxRect(boundingBox(g.members.map((m) => moduleRect(m, posOf(m))))));
+        } else {
+          rects.push(moduleRect(id, posOf(id)));
+        }
+      }
+      return boundingBox(rects);
+    },
+    [macroOwner],
+  );
+
   // Group drag: dragging any member of a multi-selection moves the whole
   // selection rigidly (relative arrangement preserved). Collision is the
   // group's bounding box against every non-member (simpler than per-member
@@ -269,10 +325,8 @@ export default function App() {
         const currentPos = posOf(instance);
         if (x === currentPos.x && y === currentPos.y) return prev;
         const memberRects = group.map((id) => moduleRect(id, posOf(id)));
-        const bbox = boundingBox(memberRects);
-        const others = nodes
-          .filter((n) => !group.includes(n.instance_id))
-          .map((n) => moduleRect(n.instance_id, posOf(n.instance_id)));
+        const bbox = groupFootprint(group, posOf);
+        const others = collisionRects(new Set(group), posOf).map((o) => o.rect);
         // The drag reports the grabbed member's position; the bbox moves by
         // the same delta and the push-out resolves in bbox space.
         const dx = x - currentPos.x;
@@ -301,7 +355,7 @@ export default function App() {
         return next;
       });
     },
-    [store, setPositions],
+    [store, setPositions, collisionRects, groupFootprint],
   );
 
   const moveModule = useCallback(
@@ -324,15 +378,44 @@ export default function App() {
         const bump = dragBump.current?.dragged === instance ? dragBump.current : null;
         // Two views of the neighbours: `others` virtually reverts an active
         // bump (the bump only survives if this move still needs it), while
-        // `realRects` reflects what is actually on screen.
-        const others: { id: string; pos: { x: number; y: number }; rect: Rect }[] = [];
+        // `realRects` reflects what is actually on screen. Macro groups are
+        // one solid box rect (frame + label) and never bump (a box has no
+        // single position to displace).
+        const others: {
+          id: string;
+          pos: { x: number; y: number };
+          rect: Rect;
+          bumpable: boolean;
+        }[] = [];
         const realRects: Rect[] = [];
+        const seenMacros = new Set<string>();
         for (const [i, node] of nodes.entries()) {
           const id = node.instance_id;
           if (id === instance) continue;
+          const g = macroOwner.get(id);
+          if (g) {
+            if (seenMacros.has(g.instance)) continue;
+            seenMacros.add(g.instance);
+            const memberRects = g.members
+              .filter((m) => nodes.some((nn) => nn.instance_id === m))
+              .map((m) => {
+                const mi = nodes.findIndex((nn) => nn.instance_id === m);
+                return moduleRect(m, prev[m] ?? defaultPosition(Math.max(mi, 0)));
+              });
+            if (memberRects.length === 0) continue;
+            const box = macroBoxRect(boundingBox(memberRects));
+            others.push({
+              id: g.instance,
+              pos: { x: box.x, y: box.y },
+              rect: box,
+              bumpable: false,
+            });
+            realRects.push(box);
+            continue;
+          }
           const realPos = prev[id] ?? defaultPosition(i);
           const pos = bump && bump.bumped === id ? bump.from : realPos;
-          others.push({ id, pos, rect: moduleRect(id, pos) });
+          others.push({ id, pos, rect: moduleRect(id, pos), bumpable: true });
           realRects.push(moduleRect(id, realPos));
         }
         const rectAt = (pos: { x: number; y: number }) => moduleRect(instance, pos);
@@ -384,6 +467,7 @@ export default function App() {
           );
           if (passed.length !== 1) return null;
           const hit = passed[0];
+          if (!hit.bumpable) return null;
           const r = hit.rect;
           // Only bump when the normal jump over that neighbour is blocked.
           const far =
@@ -482,16 +566,51 @@ export default function App() {
   // module that overlaps an earlier one to the nearest free grid spot (same
   // search as drop placement, so corrections stay near the intended point).
   // Covers click-to-add, drops estimated with fallback sizes, and stale
-  // saved layouts.
+  // saved layouts. Macro groups are one rigid unit here too: the whole
+  // group relocates by its solid box footprint (padding + label) and its
+  // internal arrangement is never disturbed.
   useEffect(() => {
     const timer = setTimeout(() => {
       setPositions((prev) => {
         const placed: Rect[] = [];
         const next: Positions = { ...prev };
         let changed = false;
+        const posOf = (id: string, i: number) => next[id] ?? defaultPosition(i);
+        const seenMacros = new Set<string>();
         for (const [i, node] of nodes.entries()) {
           const id = node.instance_id;
-          let pos = next[id] ?? defaultPosition(i);
+          const g = macroOwner.get(id);
+          if (g) {
+            if (seenMacros.has(g.instance)) continue;
+            seenMacros.add(g.instance);
+            const members = g.members.filter((m) => nodes.some((n) => n.instance_id === m));
+            if (members.length === 0) continue;
+            const rects = members.map((m) =>
+              moduleRect(
+                m,
+                posOf(
+                  m,
+                  Math.max(
+                    nodes.findIndex((n) => n.instance_id === m),
+                    0,
+                  ),
+                ),
+              ),
+            );
+            const box = macroBoxRect(boundingBox(rects));
+            const spot = nearestFreeSpot({ x: box.x, y: box.y }, { w: box.w, h: box.h }, placed);
+            const dx = spot ? spot.x - box.x : 0;
+            const dy = spot ? spot.y - box.y : 0;
+            if (dx !== 0 || dy !== 0) {
+              for (const [mi, m] of members.entries()) {
+                next[m] = { x: rects[mi].x + dx, y: rects[mi].y + dy };
+              }
+              changed = true;
+            }
+            placed.push({ x: box.x + dx, y: box.y + dy, w: box.w, h: box.h });
+            continue;
+          }
+          let pos = posOf(id, i);
           const size = moduleRect(id, pos);
           pos = nearestFreeSpot(pos, { w: size.w, h: size.h }, placed) ?? pos;
           if (next[id]?.x !== pos.x || next[id]?.y !== pos.y) {
@@ -506,7 +625,7 @@ export default function App() {
       });
     }, 0);
     return () => clearTimeout(timer);
-  }, [nodes, setPositions]);
+  }, [nodes, setPositions, macroOwner]);
 
   const refresh = useCallback(async () => {
     const snapshot = await engine.nodes();
@@ -532,14 +651,27 @@ export default function App() {
       const entries = Object.entries(layout);
       if (entries.length === 0) return;
       const { nodes, positions: prev } = store.getState();
-      const placed: Rect[] = nodes
-        .filter((n) => !n.instance_id.startsWith(`${instance}/`))
-        .map((n, i) => moduleRect(n.instance_id, prev[n.instance_id] ?? defaultPosition(i)));
+      const exclude = new Set(
+        nodes.map((n) => n.instance_id).filter((id) => id.startsWith(`${instance}/`)),
+      );
+      const placed = collisionRects(
+        exclude,
+        (id) =>
+          prev[id] ??
+          defaultPosition(
+            Math.max(
+              nodes.findIndex((n) => n.instance_id === id),
+              0,
+            ),
+          ),
+      ).map((o) => o.rect);
       const rels = entries.map(([id, [x, y]]) => ({
         id: `${instance}/${id}`,
         rect: moduleRect(`${instance}/${id}`, { x, y }),
       }));
-      const bbox = boundingBox(rels.map((r) => r.rect));
+      // Search with the group's SOLID box footprint (frame + label) so the
+      // new macro lands clear of other macro boxes, not just their panels.
+      const bbox = macroBoxRect(boundingBox(rels.map((r) => r.rect)));
       const want = at ?? prev[instance] ?? { x: GRID, y: GRID };
       const spot = nearestFreeSpot(want, { w: bbox.w, h: bbox.h }, placed) ?? want;
       setPositions((p) => {
@@ -554,7 +686,7 @@ export default function App() {
         return next;
       });
     },
-    [store, setPositions],
+    [store, setPositions, collisionRects],
   );
 
   /** Lay out any macro group whose members have no stored positions yet
@@ -1507,7 +1639,7 @@ export default function App() {
             data-testid="collapse-macro-btn"
             onClick={() => setCollapseName('')}
           >
-            Collapse to Module ({selected.length})
+            Collapse to Macro ({selected.length})
           </button>
         )}
         {collapseName !== null && (

@@ -13,7 +13,7 @@ import {
 import type { MacroPreviewNode } from '../src/engine';
 import type { Manifest } from '../src/types';
 
-const macroPreview = vi.fn(async (): Promise<MacroPreviewNode[] | null> => null);
+const macroPreview = vi.fn(async (_id: string): Promise<MacroPreviewNode[] | null> => null);
 vi.mock('../src/engine', () => ({
   engine: { macroPreview: (id: string) => macroPreview(id) },
   onMenuAction: () => () => {},

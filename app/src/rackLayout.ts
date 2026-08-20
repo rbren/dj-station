@@ -50,6 +50,23 @@ export function boundingBox(rects: Rect[]): Rect {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
+/** Breathing room between a macro's member panels and its box border. */
+export const MACRO_PAD = 10;
+/** Space above a macro box for its name tab. */
+export const MACRO_LABEL_H = 22;
+
+/** The full on-screen rect of a macro's bounding box (member bbox plus
+ *  padding and the label tab). Macro groups collide as this one solid
+ *  rect — exactly like a module's own bounding box. */
+export function macroBoxRect(members: Rect): Rect {
+  return {
+    x: members.x - MACRO_PAD,
+    y: members.y - MACRO_PAD - MACRO_LABEL_H,
+    w: members.w + MACRO_PAD * 2,
+    h: members.h + MACRO_PAD * 2 + MACRO_LABEL_H,
+  };
+}
+
 /** Drag push-out: when a `size` footprint requested at `requested` overlaps
  *  neighbours, find the nearest free grid spot along the drag's dominant
  *  axis (near-side pushes stop the panel against its neighbour; far-side

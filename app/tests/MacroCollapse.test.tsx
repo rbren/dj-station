@@ -1,5 +1,5 @@
 // Collapse-to-macro UI flow (M4, PRD §6): shift-click multi-select,
-// "Collapse to Module" naming form calling the engine bridge, and the
+// "Collapse to Macro" naming form calling the engine bridge, and the
 // macro library section instantiating macros by id.
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -243,6 +243,55 @@ describe('expanded macro view', () => {
     expect(item.textContent).toContain('Tone');
     fireEvent.click(item);
     await waitFor(() => expect(fakeEngine.breakMacro).toHaveBeenCalledWith('tone1'));
+  });
+
+  it('macro boxes collide as solid rects — dragging one onto another pushes out', async () => {
+    // Two single-member macros side by side (jsdom panels fall back to the
+    // nominal 192×96 footprint; box rects add padding + the label tab).
+    state.nodes = [node('tone1/osc1', OSC), node('tone2/osc1', OSC)];
+    fakeEngine.macroGroups.mockResolvedValue([
+      { instance: 'tone1', macro_id: 'macro.tone', name: 'Tone', members: ['tone1/osc1'] },
+      { instance: 'tone2', macro_id: 'macro.tone', name: 'Tone', members: ['tone2/osc1'] },
+    ]);
+    localStorage.setItem(
+      'dj-rack-positions',
+      JSON.stringify({ 'tone1/osc1': { x: 48, y: 48 }, 'tone2/osc1': { x: 480, y: 48 } }),
+    );
+    render(<App />);
+    await screen.findByTestId('macro-box-tone2');
+    // Drag tone1's label right on top of tone2's panel.
+    const label = screen.getByTestId('macro-box-label-tone1');
+    fireEvent.mouseDown(label, { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: 432, clientY: 0 });
+    fireEvent.mouseUp(window);
+    // jsdom layout rects are zero — assert via the stored positions.
+    const pos = JSON.parse(localStorage.getItem('dj-rack-positions')!) as Record<
+      string,
+      { x: number; y: number }
+    >;
+    // Solid box rects: |x1 - x2| must be at least a full box width
+    // (192 panel + 2*10 padding = 212, grid-snapped upward), so the panels
+    // (and their frames) cannot overlap.
+    const gap = Math.abs(pos['tone2/osc1'].x - pos['tone1/osc1'].x);
+    expect(gap).toBeGreaterThanOrEqual(212);
+  });
+
+  it('label drag moves the group, ends on mouseup and never arms a marquee', async () => {
+    setupMacroRack();
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    const label = await screen.findByTestId('macro-box-label-tone1');
+    // Mousedown on the label must not bubble into the rack background
+    // (which would arm a marquee sweep on top of the drag).
+    fireEvent.mouseDown(label, { button: 0, clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(window, { clientX: 140, clientY: 120 });
+    expect(screen.queryByTestId('marquee')).toBeNull();
+    const before = screen.getByTestId('module-tone1/osc1').style.left;
+    fireEvent.mouseUp(window, { clientX: 140, clientY: 120 });
+    // The drag is over: further pointer movement must not keep moving the
+    // group (the old symptom — click once, group follows the mouse).
+    fireEvent.mouseMove(window, { clientX: 400, clientY: 400 });
+    expect(screen.getByTestId('module-tone1/osc1').style.left).toBe(before);
   });
 
   it('right-click on the bounding-box label also offers Break Macro', async () => {

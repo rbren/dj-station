@@ -7,14 +7,9 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import type { MacroGroup } from '../engine';
-import { boundingBox, defaultPosition, moduleRect } from '../rackLayout';
+import { boundingBox, defaultPosition, MACRO_LABEL_H, MACRO_PAD, moduleRect } from '../rackLayout';
 import { useRackSelector } from '../rackStore';
 import { snap } from './ModulePanel';
-
-/** Breathing room between the members' bounding box and the border. */
-const PAD = 10;
-/** Space above the box for the name tab. */
-const LABEL_H = 22;
 
 export interface MacroBoxesProps {
   groups: MacroGroup[];
@@ -35,42 +30,46 @@ export function MacroBoxes({
 }: MacroBoxesProps) {
   const positions = useRackSelector((s) => s.positions);
   const nodes = useRackSelector((s) => s.nodes);
-  const drag = useRef<null | {
-    anchor: string;
-    members: string[];
-    startX: number;
-    startY: number;
-    origX: number;
-    origY: number;
-  }>(null);
-
-  const onDragMove = useCallback(
-    (e: MouseEvent) => {
-      const d = drag.current;
-      if (!d) return;
-      onMoveGroup(
-        d.anchor,
-        snap(d.origX + (e.clientX - d.startX) / zoom),
-        snap(d.origY + (e.clientY - d.startY) / zoom),
-        d.members,
-      );
-    },
-    [onMoveGroup, zoom],
-  );
-  const onDragEnd = useCallback(() => {
-    if (drag.current) {
-      drag.current = null;
-      onMoveEnd?.();
-    }
-  }, [onMoveEnd]);
+  // Latest props for the drag closures (the gesture must survive App
+  // re-renders mid-drag without re-registering listeners).
+  const propsRef = useRef({ zoom, onMoveGroup, onMoveEnd });
   useEffect(() => {
-    window.addEventListener('mousemove', onDragMove);
-    window.addEventListener('mouseup', onDragEnd);
-    return () => {
-      window.removeEventListener('mousemove', onDragMove);
-      window.removeEventListener('mouseup', onDragEnd);
-    };
-  }, [onDragMove, onDragEnd]);
+    propsRef.current = { zoom, onMoveGroup, onMoveEnd };
+  });
+  // The active gesture's teardown — one drag at a time; unmount cancels.
+  const cancelDrag = useRef<null | (() => void)>(null);
+  useEffect(() => () => cancelDrag.current?.(), []);
+
+  // Per-gesture window listeners (registered on mousedown, removed on
+  // mouseup): the closures live exactly as long as the gesture, so React
+  // re-renders during the drag can never drop the mouseup and leave the
+  // group glued to the pointer.
+  const startDrag = useCallback(
+    (e: React.MouseEvent, anchor: string, members: string[], orig: { x: number; y: number }) => {
+      cancelDrag.current?.();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const onMove = (ev: MouseEvent) => {
+        const p = propsRef.current;
+        p.onMoveGroup(
+          anchor,
+          snap(orig.x + (ev.clientX - startX) / p.zoom),
+          snap(orig.y + (ev.clientY - startY) / p.zoom),
+          members,
+        );
+      };
+      const end = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', end);
+        cancelDrag.current = null;
+        propsRef.current.onMoveEnd?.();
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', end);
+      cancelDrag.current = end;
+    },
+    [],
+  );
 
   const posOf = (id: string) => {
     if (positions[id]) return positions[id];
@@ -90,29 +89,23 @@ export function MacroBoxes({
             className="macro-box"
             data-testid={`macro-box-${g.instance}`}
             style={{
-              left: box.x - PAD,
-              top: box.y - PAD - LABEL_H,
-              width: box.w + PAD * 2,
-              height: box.h + PAD * 2 + LABEL_H,
+              left: box.x - MACRO_PAD,
+              top: box.y - MACRO_PAD - MACRO_LABEL_H,
+              width: box.w + MACRO_PAD * 2,
+              height: box.h + MACRO_PAD * 2 + MACRO_LABEL_H,
             }}
           >
             <span
               className="macro-box-label"
               data-testid={`macro-box-label-${g.instance}`}
-              data-tip="Drag to move the macro; right-click to break or delete it"
               onMouseDown={(e) => {
                 if (e.button !== 0) return;
                 e.preventDefault();
-                const anchor = members[0];
-                const p = posOf(anchor);
-                drag.current = {
-                  anchor,
-                  members,
-                  startX: e.clientX,
-                  startY: e.clientY,
-                  origX: p.x,
-                  origY: p.y,
-                };
+                // The label sits directly on the rack background — without
+                // this the rack's own mousedown would also arm a marquee
+                // sweep on top of the drag.
+                e.stopPropagation();
+                startDrag(e, members[0], members, posOf(members[0]));
               }}
               onContextMenu={(e) => onContextMenu(g, e)}
             >
