@@ -317,7 +317,12 @@ fails if it's missing.
   provisional co-operative bump — a neighbour displaced to open a slot,
   reverted if the drag moves on, finalized on release via
   `endModuleDrag`). Behavior is pinned by
-  `app/tests/RackCollision.test.tsx`. The `.wire-overlay` CSS must keep
+  `app/tests/RackCollision.test.tsx`. Title-bar sizing (78b9e15): module
+  title bars are 56px min-height; macro labels are full-width 44px title
+  bars styled like module ones — `MACRO_LABEL_H` in `rackLayout.ts` must
+  match the macro-label CSS height or collision/placement geometry drifts
+  (module panels self-measure, so their CSS can change freely). The
+  `.wire-overlay` CSS must keep
   `z-index`, `overflow: visible` and `pointer-events: none`
   (WireOverlay.test.tsx pins it); knob right-clicks stopPropagation so
   the module context menu never opens over a knob
