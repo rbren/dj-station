@@ -27,6 +27,34 @@ failure.
 Prerequisites: Rust (rustup; `wasm32-unknown-unknown` target is added
 automatically), Node ≥ 20, and on Linux `libasound2-dev` (ALSA headers).
 
+## State & saves — `custom/`
+
+All persistent state lives in **`custom/` inside this checkout** (the repo
+`./run.sh` runs from), so saves travel with the repo:
+
+| Path | What |
+|---|---|
+| `custom/patches/` | named saved patches (directory trees of JSON) |
+| `custom/autosave/` | crash-recovery autosave of the live patch |
+| `custom/library.sqlite` | track DB, DJ metadata (cues/loops/grids), user macros, watch folders |
+| `custom/downloads/` | provider downloads |
+| `custom/stems/<hash>/` | FLAC stem-separation cache |
+
+Set **`DJ_STATION_DATA_DIR`** to put state somewhere else
+(`DJ_STATION_DATA` is honored as the older spelling). If no checkout can be
+located — a packaged bundle, say — the app falls back to `custom/` under
+its working directory.
+
+`custom/` is tracked in git on purpose; its committed `.gitignore` excludes
+only machine-local churn (`stems/`, `downloads/`, `autosave/`, the SQLite
+WAL sidecars and the migration marker) — regenerable caches, not saves.
+
+**Migration.** The first launch that uses `custom/` **copies** the old
+platform data dir (`~/.local/share/dj-station`, `~/Library/Application
+Support/dj-station`) into it — nothing is moved or deleted. A `.migrated`
+marker in `custom/` makes this one-shot: later launches never re-copy, and
+a `custom/` that already holds state is left alone even without a marker.
+
 ## Tests
 
 ```sh
@@ -42,10 +70,9 @@ them after an intentional DSP change with `./scripts/regen-goldens.sh`.
 
 ## Library & acquisition (M1)
 
-The sound library lives in a single per-user data directory (PRD §3):
-`$DJ_STATION_DATA` if set, else the platform data dir + `dj-station`
-(e.g. `~/.local/share/dj-station` on Linux, `~/Library/Application
-Support/dj-station` on macOS). It contains `library.sqlite` (tracks, content
+The sound library lives in the single data directory described under
+[State & saves](#state--saves--custom) — `custom/` in the checkout, or
+`$DJ_STATION_DATA_DIR`. It contains `library.sqlite` (tracks, content
 hashes, licenses, tags, crates, watch folders) and `downloads/` (provider
 downloads).
 

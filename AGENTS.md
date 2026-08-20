@@ -42,6 +42,19 @@ fails if it's missing.
 
 ## Conventions
 
+- ALL persistent state roots in ONE directory resolved by
+  `dj_library::paths` (`crates/dj-library/src/paths.rs`): `custom/` in the
+  repo checkout (`run.sh` + `.git` found by walking up from the cwd, then
+  from the exe), overridable with `DJ_STATION_DATA_DIR` (`DJ_STATION_DATA`
+  is the legacy spelling), falling back to `./custom` with no checkout.
+  New state goes UNDER that dir (`Library::data_dir()` /
+  `default_data_dir()`) — never a fresh platform-dir lookup. The app calls
+  `init_data_dir()` once in `main()`, which runs the one-shot COPY of the
+  old platform data dir (never move/delete), guarded by the `.migrated`
+  marker plus a presence check on the target. `custom/` is tracked in git
+  (saves travel with the repo); its committed `.gitignore` excludes only
+  machine-local churn (stems, downloads, autosave, SQLite WAL sidecars,
+  the marker). Pinned by `crates/dj-library/tests/data_dir.rs`.
 - Every new module/engine feature ships with a serialized-patch E2E golden
   audio case (see `crates/dj-engine/tests/e2e_suite/`). Existing goldens
   stay byte-identical unless intentionally regenerated and documented.

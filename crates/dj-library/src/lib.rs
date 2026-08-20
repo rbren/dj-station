@@ -10,12 +10,14 @@
 
 pub mod db;
 pub mod import;
+pub mod paths;
 pub mod providers;
 pub mod rekordbox;
 pub mod watch;
 
 pub use db::{Beatgrid, CuePoint, Library, MacroRecord, SavedLoop, Track};
 pub use import::{ImportOptions, ImportOutcome, AUDIO_EXTENSIONS};
+pub use paths::{default_data_dir, init_data_dir, legacy_data_dir, migrate_legacy_data, Migration};
 pub use providers::{
     Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, FilterOption, FilterSpec,
     ProviderInfo, Query, TrackResult,
@@ -24,7 +26,6 @@ pub use rekordbox::{parse_rekordbox_xml, RekordboxReport, RekordboxTrack};
 pub use watch::{start_watcher, WatchHandle};
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// Per-track license info (PRD §8.3): stored in the library, shown in the
 /// browser. `kind` is a coarse machine-readable class ("cc-by", "cc-by-sa",
@@ -90,15 +91,4 @@ impl LicenseInfo {
             attribution: attribution.into(),
         }
     }
-}
-
-/// The single per-user data directory (PRD §3). Override with
-/// `DJ_STATION_DATA`; defaults to the platform data dir + `dj-station`.
-pub fn default_data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("DJ_STATION_DATA") {
-        return PathBuf::from(dir);
-    }
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("dj-station")
 }

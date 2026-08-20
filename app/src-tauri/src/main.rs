@@ -47,7 +47,8 @@ struct GestureFeedHandle {
     source: String,
 }
 
-/// Named patches live under the single user data dir (PRD §3).
+/// Named patches live under the single data dir (PRD §3) — `custom/` in
+/// the repo checkout unless `DJ_STATION_DATA_DIR` overrides it.
 fn patches_dir() -> PathBuf {
     dj_library::default_data_dir().join("patches")
 }
@@ -2590,8 +2591,11 @@ fn main() {
 
     // Library under the single user data dir (PRD §3); watch folders +
     // provider hub (keyed providers enabled via env, see README).
-    let library =
-        Arc::new(Library::open(&dj_library::default_data_dir()).expect("library open failed"));
+    // `custom/` in the repo checkout unless DJ_STATION_DATA_DIR says
+    // otherwise; the first run there copies any pre-`custom/` platform
+    // data dir across (see dj_library::paths).
+    let data_dir = dj_library::init_data_dir().expect("data dir setup failed");
+    let library = Arc::new(Library::open(&data_dir).expect("library open failed"));
     // User-library macros are instantiable from the start (PRD §6).
     match db_macro_library(&library) {
         Ok(lib) => {

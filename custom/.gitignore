@@ -1,0 +1,9 @@
+# dj-station's state directory. It is deliberately TRACKED in git — saved
+# patches, the library DB and user macros travel with the checkout.
+# Only machine-local caches and scratch are ignored:
+stems/
+downloads/
+autosave/
+library.sqlite-wal
+library.sqlite-shm
+.migrated
