@@ -102,6 +102,10 @@ impl MacroLibrary {
         self.defs.get(id)
     }
 
+    pub fn unregister(&mut self, id: &str) -> Option<MacroDef> {
+        self.defs.remove(id)
+    }
+
     pub fn list(&self) -> Vec<&MacroDef> {
         self.defs.values().collect()
     }

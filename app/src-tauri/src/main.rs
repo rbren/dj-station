@@ -117,6 +117,7 @@ enum EditKey<'a> {
     RemoveMany,
     CollapseMacro,
     BreakMacro(&'a str),
+    RenameMacro(&'a str),
     Track(&'a str),
 }
 
@@ -156,6 +157,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::RemoveMany => write!(f, "remove_many"),
             EditKey::CollapseMacro => write!(f, "collapse_macro"),
             EditKey::BreakMacro(i) => write!(f, "break_macro:{i}"),
+            EditKey::RenameMacro(m) => write!(f, "rename_macro:{m}"),
             EditKey::Track(i) => write!(f, "track:{i}"),
         }
     }
@@ -1617,7 +1619,16 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     let backend = engine.backend();
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
-    *engine = Engine::load_patch(dir, registry).map_err(err)?;
+    // Seed the replacement engine's macro library from the user DB so every
+    // stored macro stays instantiable regardless of what the patch itself
+    // uses (macros are canonical in the library, PRD §6; the patch's
+    // embedded copies still win for the macros it does use). Without this,
+    // an engine swap silently dropped every macro the patch didn't embed —
+    // e.g. break the last instance, quit, restart: the autosave restore
+    // came up knowing no macros at all.
+    let doc = PatchDoc::read(dir).map_err(err)?;
+    let lib = db_macro_library(&state.library)?;
+    *engine = Engine::from_doc_with_macros(&doc, registry, lib).map_err(err)?;
     // Decks: re-apply library-stored DJ metadata (cues/loops/beatgrids)
     // for every loaded deck track (PRD §7 — metadata survives across
     // patches via the library DB, not the patch files).
@@ -1890,28 +1901,52 @@ fn auto_interface(engine: &Engine, selection: &[String]) -> MacroInterface {
 /// `positions` carries each selected module's rack position so the
 /// definition remembers the arrangement (stored relative to the group's
 /// top-left corner).
+///
+/// The outcome is either the new instance id, or — when a macro with the
+/// same name already exists and `overwrite` wasn't set — the existing
+/// definition's info so the UI can ask before clobbering it.
+#[derive(Serialize)]
+struct CollapseOutcome {
+    instance: Option<String>,
+    conflict: Option<MacroInfo>,
+}
+
 #[tauri::command]
 fn collapse_macro(
     state: State<AppState>,
     selection: Vec<String>,
     name: String,
     positions: Option<BTreeMap<String, (f32, f32)>>,
-) -> CmdResult<String> {
+    overwrite: Option<bool>,
+) -> CmdResult<CollapseOutcome> {
     if selection.is_empty() {
         return Err(CmdError::invalid("empty selection"));
     }
-    let mut engine = patch_edit(&state, EditKey::CollapseMacro)?;
+    let mut engine = engine_lock(&state)?;
     let slug: String = name
         .to_lowercase()
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect();
-    let mut macro_id = format!("macro.{slug}");
-    let mut n = 2;
-    while engine.macros.get(&macro_id).is_some() {
-        macro_id = format!("macro.{slug}-{n}");
-        n += 1;
+    // Same name ⇒ same id (the id IS the name's slug): saving under an
+    // existing name means overwriting that macro, which needs the caller's
+    // explicit consent. Checked before record_edit so a declined overwrite
+    // leaves no phantom undo entry.
+    let macro_id = format!("macro.{slug}");
+    let existing = engine.macros.get(&macro_id).cloned();
+    if let Some(old) = &existing {
+        if overwrite != Some(true) {
+            return Ok(CollapseOutcome {
+                instance: None,
+                conflict: Some(MacroInfo {
+                    id: old.id.clone(),
+                    name: old.name.clone(),
+                    version: old.version,
+                }),
+            });
+        }
     }
+    record_edit(&state, &engine, &EditKey::CollapseMacro);
     let taken: std::collections::BTreeSet<String> = engine
         .nodes
         .iter()
@@ -1926,8 +1961,13 @@ fn collapse_macro(
     let interface = auto_interface(&engine, &selection);
     let sel_refs: Vec<&str> = selection.iter().map(|s| s.as_str()).collect();
     let mut def = with_stopped(&mut engine, |e| {
-        e.collapse_to_macro(&sel_refs, &instance, &macro_id, &name, interface)
-            .map_err(err)
+        if existing.is_some() {
+            e.recollapse_macro(&sel_refs, &instance, &macro_id, &name, interface)
+                .map_err(err)
+        } else {
+            e.collapse_to_macro(&sel_refs, &instance, &macro_id, &name, interface)
+                .map_err(err)
+        }
     })?;
     // Remember the arrangement: positions normalized to the group's
     // top-left corner so a fresh instance lays out the same shape anywhere.
@@ -1950,7 +1990,42 @@ fn collapse_macro(
         }
     }
     persist_macro(&state.library, &def)?;
-    Ok(instance)
+    Ok(CollapseOutcome {
+        instance: Some(instance),
+        conflict: None,
+    })
+}
+
+/// Rename a user-library macro (stable id, display name only). Undoable —
+/// the version bump touches live instances' saved state.
+#[tauri::command]
+fn rename_macro(state: State<AppState>, macro_id: String, name: String) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::RenameMacro(&macro_id))?;
+    let def = engine.rename_macro(&macro_id, &name).map_err(err)?;
+    persist_macro(&state.library, &def)
+}
+
+/// Delete a macro from the user library. Refused while any rack instance
+/// still uses it (break or delete the instances first) — a live instance
+/// with no definition couldn't re-save or re-expand. Not undoable: the
+/// definition is library state, not patch state (like DJ metadata).
+#[tauri::command]
+fn delete_macro(state: State<AppState>, macro_id: String) -> CmdResult<()> {
+    let mut engine = engine_lock(&state)?;
+    if let Some(mi) = engine
+        .macro_instances()
+        .iter()
+        .find(|(_, mi)| mi.macro_id == macro_id)
+    {
+        return Err(CmdError::invalid(format!(
+            "macro is in use by instance {:?} — break or delete it first",
+            mi.0
+        )));
+    }
+    engine
+        .unregister_macro(&macro_id)
+        .ok_or_else(|| CmdError::invalid(format!("unknown macro {macro_id:?}")))?;
+    state.library.delete_macro(&macro_id).map_err(err)
 }
 
 #[tauri::command]
@@ -2648,6 +2723,8 @@ fn main() {
             load_patch,
             list_macros,
             collapse_macro,
+            rename_macro,
+            delete_macro,
             macro_groups,
             macro_layout,
             macro_preview,

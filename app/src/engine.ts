@@ -150,6 +150,13 @@ export interface MacroInfo {
   version: number;
 }
 
+/** `collapse_macro`'s outcome: the fresh instance id, or the existing
+ *  same-named macro the caller must confirm overwriting. */
+export interface CollapseOutcome {
+  instance: string | null;
+  conflict: MacroInfo | null;
+}
+
 /** One concrete internal node a fresh macro instance expands to (nested
  *  macros flattened) — the module picker's composite thumbnail. */
 export interface MacroPreviewNode {
@@ -291,11 +298,32 @@ export class EngineClient extends IpcClient {
   listMacros() {
     return this.call<MacroInfo[]>('list_macros');
   }
-  /** Collapse the selected modules into a new macro; returns the new
-   *  instance id. `positions` records the selection's rack arrangement in
-   *  the definition so fresh instances lay out the same shape. */
-  collapseMacro(selection: string[], name: string, positions?: Record<string, [number, number]>) {
-    return this.call<string>('collapse_macro', { selection, name, positions });
+  /** Collapse the selected modules into a new macro. `positions` records
+   *  the selection's rack arrangement in the definition so fresh instances
+   *  lay out the same shape. Returns either the fresh instance id or, when
+   *  a macro with the same name exists and `overwrite` wasn't set, that
+   *  macro's info so the UI can confirm before clobbering it. */
+  collapseMacro(
+    selection: string[],
+    name: string,
+    positions?: Record<string, [number, number]>,
+    overwrite?: boolean,
+  ) {
+    return this.call<CollapseOutcome>('collapse_macro', {
+      selection,
+      name,
+      positions,
+      overwrite,
+    });
+  }
+  /** Rename a user-library macro (stable id; display name only). */
+  renameMacro(macroId: string, name: string) {
+    return this.call<null>('rename_macro', { macroId, name });
+  }
+  /** Delete a macro from the user library. Fails while rack instances
+   *  still use it. */
+  deleteMacro(macroId: string) {
+    return this.call<null>('delete_macro', { macroId });
   }
   /** Macro instance groupings for the rack's bounding-box overlay. */
   macroGroups() {

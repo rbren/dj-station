@@ -9,7 +9,7 @@
 // and knob drags re-render only the affected panels.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { engine, onMenuAction, type MacroGroup } from './engine';
+import { engine, onMenuAction, type MacroGroup, type MacroInfo } from './engine';
 import { library, type Track } from './library';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MacroBoxes } from './components/MacroBoxes';
@@ -104,6 +104,8 @@ export default function App() {
   const [confirmDiscard, setConfirmDiscard] = useState<null | { proceed: () => void }>(null);
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   const [collapseName, setCollapseName] = useState<string | null>(null);
+  // Collapse hit an existing same-named macro: confirm before overwriting.
+  const [macroOverwrite, setMacroOverwrite] = useState<MacroInfo | null>(null);
   // Expanded macro instances (bounding-box overlay + grouping semantics).
   const [macroGroups, setMacroGroups] = useState<MacroGroup[]>([]);
 
@@ -1053,7 +1055,7 @@ export default function App() {
   );
 
   const collapseToMacro = useCallback(
-    async (name: string) => {
+    async (name: string, overwrite?: boolean) => {
       const selected = store.getState().selected;
       if (!name.trim() || selected.length === 0) return;
       // The selection may contain macro members; the engine collapses
@@ -1077,7 +1079,14 @@ export default function App() {
           defPositions[id] = [p.x, p.y];
         }
       }
-      const instance = await engine.collapseMacro(topIds, name.trim(), defPositions);
+      const outcome = await engine.collapseMacro(topIds, name.trim(), defPositions, overwrite);
+      // A same-named macro already exists: keep the form up and ask before
+      // overwriting (retried with overwrite=true from the confirm dialog).
+      if (outcome?.conflict) {
+        setMacroOverwrite(outcome.conflict);
+        return;
+      }
+      const instance = outcome?.instance ?? null;
       setSelected([]);
       setCollapseName(null);
       const modules = await engine.listModules();
@@ -1107,6 +1116,25 @@ export default function App() {
     },
     [store, refresh, setSelected, toTopLevel, macroGroups, setPositions],
   );
+
+  // Right-click actions on macro entries in the module picker. Rename
+  // keeps the id (references and instances stay valid); delete refuses
+  // while instances are on the rack (the shell enforces it — errors
+  // surface through the standard toast path).
+  const renameMacroDef = useCallback(
+    async (macroId: string, name: string) => {
+      await engine.renameMacro(macroId, name);
+      const modules = await engine.listModules();
+      if (modules) setModuleLib(modules);
+      await refresh();
+    },
+    [refresh],
+  );
+  const deleteMacroDef = useCallback(async (macroId: string) => {
+    await engine.deleteMacro(macroId);
+    const modules = await engine.listModules();
+    if (modules) setModuleLib(modules);
+  }, []);
 
   // Right-click "Break Macro": internals become ordinary modules in place;
   // positions carry over through the returned rename map so nothing moves.
@@ -1142,6 +1170,7 @@ export default function App() {
         store.set({ pending: null });
         setSelected([]);
         setCollapseName(null);
+        setMacroOverwrite(null);
         return;
       }
       if (e.key === 'Backspace' && !isEditableTarget(e.target)) {
@@ -1796,12 +1825,46 @@ export default function App() {
           </div>
         </div>
       )}
+      {macroOverwrite && (
+        <div
+          className="file-dialog-backdrop"
+          data-testid="macro-overwrite-dialog"
+          onClick={() => setMacroOverwrite(null)}
+        >
+          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Overwrite Macro?</h3>
+            <p className="file-dialog-empty">
+              A macro named “{macroOverwrite.name}” already exists. Saving will replace it — every
+              rack instance updates to the new definition.
+            </p>
+            <button
+              data-testid="macro-overwrite-confirm"
+              onClick={() => {
+                const name = collapseName;
+                setMacroOverwrite(null);
+                if (name) void collapseToMacro(name, true);
+              }}
+            >
+              Overwrite
+            </button>
+            <button
+              className="file-dialog-cancel"
+              data-testid="macro-overwrite-cancel"
+              onClick={() => setMacroOverwrite(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {view === 'library' && <LibraryView client={library} />}
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}
           onAdd={addFromPicker}
           onClose={() => setPickerOpen(false)}
+          onRenameMacro={renameMacroDef}
+          onDeleteMacro={deleteMacroDef}
         />
       )}
       <div className="app-body" style={view === 'rack' ? undefined : { display: 'none' }}>

@@ -13,6 +13,39 @@ impl Engine {
         self.macros.register(def);
     }
 
+    /// Remove a macro definition from the engine's library. Plain removal —
+    /// callers deleting a user-library macro must first ensure no rack
+    /// instance still references it (a saved patch would silently lose the
+    /// instance's embedded definition); the overwrite-by-recollapse flow
+    /// removes and immediately re-registers under the same id instead.
+    pub fn unregister_macro(&mut self, macro_id: &str) -> Option<MacroDef> {
+        self.macros.unregister(macro_id)
+    }
+
+    /// Rename a macro definition (stable id, display name only). Bumps the
+    /// version — the name is part of the definition patches embed, so old
+    /// patches resolve the change through the usual update-vs-fork prompt —
+    /// and stamps live instances with the new version (nothing structural
+    /// changed). Returns the updated definition for persisting.
+    pub fn rename_macro(&mut self, macro_id: &str, new_name: &str) -> Result<MacroDef> {
+        let new_name = new_name.trim();
+        anyhow::ensure!(!new_name.is_empty(), "macro name must not be empty");
+        let mut def = self
+            .macros
+            .get(macro_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
+        def.name = new_name.to_string();
+        def.version += 1;
+        for mi in self.macro_instances.values_mut() {
+            if mi.macro_id == macro_id {
+                mi.version = def.version;
+            }
+        }
+        self.macros.register(def.clone());
+        Ok(def)
+    }
+
     /// Expanded macro instances (nested ones use `/`-prefixed ids).
     pub fn macro_instances(&self) -> &BTreeMap<String, MacroInstance> {
         &self.macro_instances
@@ -291,6 +324,54 @@ impl Engine {
             },
         );
         Ok(())
+    }
+
+    /// Collapse a selection onto an EXISTING macro id, replacing its
+    /// definition (the "save over macro 'X'?" flow). The new definition
+    /// keeps the stable id, takes `name`, and bumps the version past the
+    /// old one; every other live instance of the macro re-expands to the
+    /// new definition (update semantics, PRD §6 — per-instance promoted
+    /// state survives only for interface jacks the new definition still
+    /// has). Returns the definition for persisting.
+    pub fn recollapse_macro(
+        &mut self,
+        selection: &[&str],
+        new_instance_id: &str,
+        macro_id: &str,
+        name: &str,
+        interface: MacroInterface,
+    ) -> Result<MacroDef> {
+        let old = self
+            .macros
+            .get(macro_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
+        // Collapse under a scratch id (collapse_to_macro refuses existing
+        // ids), then rewrite to the real id. The scratch id never persists:
+        // it lives only inside this call's intermediate engine state.
+        let scratch = format!("{macro_id}\u{1f}overwrite");
+        anyhow::ensure!(
+            self.macros.get(&scratch).is_none(),
+            "scratch id in use — retry"
+        );
+        let mut def =
+            self.collapse_to_macro(selection, new_instance_id, &scratch, name, interface)?;
+        self.macros.unregister(&scratch);
+        def.id = macro_id.to_string();
+        def.version = old.version + 1;
+        self.macros.register(def.clone());
+        // Re-point the fresh instance and re-expand every other instance of
+        // the macro from the new definition.
+        let mut doc = self.snapshot("overwrite-macro");
+        for mf in doc.modules.values_mut() {
+            if mf.ext == scratch || mf.ext == macro_id {
+                mf.ext = macro_id.to_string();
+                mf.macro_version = Some(def.version);
+            }
+        }
+        doc.macros.clear(); // rebuild carries self.macros
+        self.rebuild(&doc)?;
+        Ok(def)
     }
 
     /// Collapse a selection of top-level instances into a new macro

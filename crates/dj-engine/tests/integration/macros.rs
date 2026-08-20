@@ -837,3 +837,140 @@ fn macro_preview_exposes_internal_nodes() {
 
     assert!(e.macro_preview("macro.nope").is_err());
 }
+
+/// Breaking an instance dissolves the grouping but must leave the macro
+/// DEFINITION registered and instantiable (PRD §6: macros live in the
+/// library, instances are just uses).
+#[test]
+fn breaking_an_instance_leaves_the_definition_available() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    e.break_macro("tone1").unwrap();
+    assert!(e.macro_instances().is_empty());
+    assert!(e.macros.get("macro.tone").is_some(), "definition lost");
+    // Still instantiable.
+    e.add_module("tone2", "macro.tone").unwrap();
+    assert!(e.macro_instances().contains_key("tone2"));
+}
+
+/// Renaming a macro keeps the id, changes the display name, bumps the
+/// version, and stamps live instances (nothing structural changes).
+#[test]
+fn rename_macro_updates_name_version_and_instances() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    let def = e.rename_macro("macro.tone", "Fat Tone").unwrap();
+    assert_eq!(def.id, "macro.tone");
+    assert_eq!(def.name, "Fat Tone");
+    assert_eq!(def.version, 2);
+    assert_eq!(e.macro_instances()["tone1"].version, 2);
+    // Internals untouched: still renders.
+    assert!(peak(&render(&mut e, 0.1)) > 1.0);
+    assert!(e.rename_macro("macro.tone", "  ").is_err());
+    assert!(e.rename_macro("macro.nope", "X").is_err());
+}
+
+/// unregister_macro removes the definition; instantiation then fails.
+#[test]
+fn unregister_macro_removes_the_definition() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    e.break_macro("tone1").unwrap();
+    assert!(e.unregister_macro("macro.tone").is_some());
+    assert!(e.unregister_macro("macro.tone").is_none());
+    assert!(e.add_module("tone2", "macro.tone").is_err());
+}
+
+/// recollapse_macro overwrites an existing definition under its stable id:
+/// the version moves past the old one and OTHER live instances re-expand
+/// to the new internals.
+#[test]
+fn recollapse_overwrites_definition_and_updates_other_instances() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+
+    // A second, louder selection to save over the same name.
+    e.add_module("osc2", "com.dj.oscillator").unwrap();
+    e.add_module("vca2", "com.dj.vca").unwrap();
+    e.connect("osc2", "audio", "vca2", "in").unwrap();
+    e.set_knob_position("vca2", "cv", 1.0).unwrap();
+    let interface = MacroInterface {
+        inputs: vec![MacroJack {
+            id: "level".into(),
+            node: "vca2".into(),
+            jack: "cv".into(),
+        }],
+        outputs: vec![MacroJack {
+            id: "out".into(),
+            node: "vca2".into(),
+            jack: "out".into(),
+        }],
+        params: vec![],
+    };
+    let def = e
+        .recollapse_macro(&["osc2", "vca2"], "tone2", "macro.tone", "Tone", interface)
+        .unwrap();
+    assert_eq!(def.id, "macro.tone");
+    assert_eq!(def.version, 2, "overwrite must bump past the old version");
+    assert_eq!(e.macros.get("macro.tone").unwrap().version, 2);
+    // No scratch artifacts left behind.
+    assert_eq!(e.macros.list().len(), 1);
+
+    // BOTH instances now use the new definition (update semantics): each
+    // has the new 2-module internals and reports the new version.
+    for inst in ["tone1", "tone2"] {
+        let mi = &e.macro_instances()[inst];
+        assert_eq!(mi.version, 2, "{inst} not updated");
+        assert!(
+            e.nodes
+                .iter()
+                .any(|n| n.instance_id == format!("{inst}/osc2")),
+            "{inst} kept old internals"
+        );
+    }
+    // The engine still renders (out1 lost its wire to the old vca1 node —
+    // boundary wires to replaced internals drop like any stale wire).
+    render(&mut e, 0.05);
+
+    assert!(e
+        .recollapse_macro(
+            &["nope"],
+            "x1",
+            "macro.nope",
+            "Nope",
+            MacroInterface::default()
+        )
+        .is_err());
+}

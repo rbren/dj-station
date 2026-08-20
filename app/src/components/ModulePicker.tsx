@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { engine, type MacroPreviewNode } from '../engine';
 import type { KnobState, Manifest, ModuleHandle } from '../types';
+import { ContextMenu } from './ContextMenu';
 import { previewUI } from './customUIs';
 import { ErrorBoundary } from './ErrorBoundary';
 import { mapPosition, positionForValue } from './Knob';
@@ -229,7 +230,7 @@ function MacroPreview({ m }: { m: Manifest }) {
   );
 }
 
-function PickerEntry({ m, onAdd, onDragging }: PickerEntryProps) {
+function PickerEntry({ m, onAdd, onDragging, onMacroMenu }: PickerEntryProps) {
   return (
     <div
       className="picker-entry"
@@ -245,6 +246,15 @@ function PickerEntry({ m, onAdd, onDragging }: PickerEntryProps) {
       }}
       onDragEnd={() => onDragging(false)}
       onClick={() => onAdd(m.id)}
+      onContextMenu={
+        m.abi === 'macro-1' && onMacroMenu
+          ? (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onMacroMenu(m, e.clientX, e.clientY);
+            }
+          : undefined
+      }
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') onAdd(m.id);
       }}
@@ -292,20 +302,32 @@ interface PickerEntryProps {
   /** Entry drag started/ended — the modal hides itself while true so the
    *  canvas underneath can receive the drop. */
   onDragging(dragging: boolean): void;
+  /** Right-click on a macro entry (undefined for non-macros / when the
+   *  host wires no macro management). */
+  onMacroMenu?(m: Manifest, x: number, y: number): void;
 }
 
 export function ModulePicker({
   modules,
   onAdd,
   onClose,
+  onRenameMacro,
+  onDeleteMacro,
 }: {
   modules: Manifest[];
   onAdd(typeId: string): void;
   onClose(): void;
+  onRenameMacro?(macroId: string, name: string): Promise<void> | void;
+  onDeleteMacro?(macroId: string): Promise<void> | void;
 }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Right-clicked macro entry: menu position + which dialog is up.
+  const [macroMenu, setMacroMenu] = useState<null | { m: Manifest; x: number; y: number }>(null);
+  const [renaming, setRenaming] = useState<null | { m: Manifest; name: string }>(null);
+  const [deleting, setDeleting] = useState<Manifest | null>(null);
+  const manageMacros = Boolean(onRenameMacro || onDeleteMacro);
 
   const allGroups = useMemo(() => groupByCategory(modules), [modules]);
   const categories = allGroups.map(([c]) => c);
@@ -314,18 +336,26 @@ export function ModulePicker({
     return groupByCategory(category ? matched.filter((m) => categoryOf(m) === category) : matched);
   }, [modules, query, category]);
 
+  const dialogUp = macroMenu !== null || renaming !== null || deleting !== null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        // Peel one layer at a time: menu/dialog first, then the picker.
+        if (dialogUp) {
+          setMacroMenu(null);
+          setRenaming(null);
+          setDeleting(null);
+        } else {
+          onClose();
+        }
       }
     };
     // Capture phase so the app's global Escape handler (clear selection /
     // pending wire) doesn't also fire while the picker is up.
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  }, [onClose, dialogUp]);
 
   return (
     <div
@@ -379,7 +409,15 @@ export function ModulePicker({
               <h3 className="picker-group-title">{cat}</h3>
               <div className="picker-grid">
                 {entries.map((m) => (
-                  <PickerEntry key={m.id} m={m} onAdd={onAdd} onDragging={setDragging} />
+                  <PickerEntry
+                    key={m.id}
+                    m={m}
+                    onAdd={onAdd}
+                    onDragging={setDragging}
+                    onMacroMenu={
+                      manageMacros ? (mm, x, y) => setMacroMenu({ m: mm, x, y }) : undefined
+                    }
+                  />
                 ))}
               </div>
             </section>
@@ -391,6 +429,92 @@ export function ModulePicker({
             </p>
           )}
         </div>
+        {macroMenu && (
+          <ContextMenu
+            x={macroMenu.x}
+            y={macroMenu.y}
+            onClose={() => setMacroMenu(null)}
+            items={[
+              {
+                label: 'Rename Macro…',
+                testId: 'picker-macro-rename',
+                disabled: !onRenameMacro,
+                onSelect: () => setRenaming({ m: macroMenu.m, name: macroMenu.m.name }),
+              },
+              {
+                label: 'Delete Macro…',
+                testId: 'picker-macro-delete',
+                disabled: !onDeleteMacro,
+                onSelect: () => setDeleting(macroMenu.m),
+              },
+            ]}
+          />
+        )}
+        {renaming && (
+          <div
+            className="file-dialog-backdrop"
+            data-testid="macro-rename-dialog"
+            onClick={() => setRenaming(null)}
+          >
+            <form
+              className="file-dialog"
+              onClick={(e) => e.stopPropagation()}
+              onSubmit={(e) => {
+                e.preventDefault();
+                const { m, name } = renaming;
+                if (!name.trim()) return;
+                setRenaming(null);
+                void onRenameMacro?.(m.id, name.trim());
+              }}
+            >
+              <h3>Rename Macro</h3>
+              <input
+                autoFocus
+                data-testid="macro-rename-input"
+                value={renaming.name}
+                onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
+              />
+              <button type="submit" data-testid="macro-rename-confirm">
+                Rename
+              </button>
+              <button
+                type="button"
+                className="file-dialog-cancel"
+                onClick={() => setRenaming(null)}
+              >
+                Cancel
+              </button>
+            </form>
+          </div>
+        )}
+        {deleting && (
+          <div
+            className="file-dialog-backdrop"
+            data-testid="macro-delete-dialog"
+            onClick={() => setDeleting(null)}
+          >
+            <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+              <h3>Delete Macro?</h3>
+              <p className="file-dialog-empty">
+                Permanently delete “{deleting.name}” from your library? Patches that already use it
+                keep their own copy; racks with live instances block deletion.
+              </p>
+              <button
+                data-testid="macro-delete-confirm"
+                onClick={() => {
+                  const m = deleting;
+                  setDeleting(null);
+                  void onDeleteMacro?.(m.id);
+                }}
+              >
+                Delete
+              </button>
+              <button className="file-dialog-cancel" onClick={() => setDeleting(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

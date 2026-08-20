@@ -5,7 +5,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Manifest } from '../src/types';
-import type { MacroGroup } from '../src/engine';
+import type { CollapseOutcome, MacroGroup } from '../src/engine';
 
 const OSC: Manifest = {
   id: 'com.dj.oscillator',
@@ -61,7 +61,12 @@ const fakeEngine = {
   macroLayout: vi.fn(async () => ({})),
   breakMacro: vi.fn(async () => ({})),
   addModule: vi.fn(async () => {}),
-  collapseMacro: vi.fn(async () => 'my-tone'),
+  collapseMacro: vi.fn(async (): Promise<CollapseOutcome> => ({
+    instance: 'my-tone',
+    conflict: null,
+  })),
+  renameMacro: vi.fn(async () => null),
+  deleteMacro: vi.fn(async () => null),
   setParam: vi.fn(async () => {}),
   setKnobPosition: vi.fn(async () => {}),
   setKnobConfig: vi.fn(async () => {}),
@@ -159,6 +164,7 @@ describe('collapse-to-macro UI', () => {
           osc1: [expect.any(Number), expect.any(Number)],
           vca1: [expect.any(Number), expect.any(Number)],
         }),
+        undefined,
       ),
     );
     // Selection cleared and the module library refetched (macros appear).
@@ -188,6 +194,87 @@ describe('collapse-to-macro UI', () => {
         'macro.tone',
       ),
     );
+  });
+
+  it('same-named macro prompts before overwriting; confirm retries with overwrite', async () => {
+    fakeEngine.collapseMacro.mockResolvedValueOnce({
+      instance: null,
+      conflict: { id: 'macro.my-tone', name: 'My Tone', version: 3 },
+    });
+    await selectBoth();
+    fireEvent.click(screen.getByTestId('collapse-macro-btn'));
+    fireEvent.change(screen.getByTestId('collapse-macro-name'), {
+      target: { value: 'My Tone' },
+    });
+    fireEvent.click(screen.getByTestId('collapse-macro-confirm'));
+    // Conflict: confirm dialog appears, nothing collapsed yet, the naming
+    // form stays up behind it.
+    await screen.findByTestId('macro-overwrite-dialog');
+    expect(screen.getByTestId('collapse-macro-form')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('macro-overwrite-confirm'));
+    await waitFor(() =>
+      expect(fakeEngine.collapseMacro).toHaveBeenLastCalledWith(
+        ['osc1', 'vca1'],
+        'My Tone',
+        expect.any(Object),
+        true,
+      ),
+    );
+    await waitFor(() => expect(screen.queryByTestId('macro-overwrite-dialog')).toBeNull());
+  });
+
+  it('cancelling the overwrite prompt keeps the macro and the naming form', async () => {
+    fakeEngine.collapseMacro.mockResolvedValueOnce({
+      instance: null,
+      conflict: { id: 'macro.my-tone', name: 'My Tone', version: 3 },
+    });
+    await selectBoth();
+    fireEvent.click(screen.getByTestId('collapse-macro-btn'));
+    fireEvent.change(screen.getByTestId('collapse-macro-name'), {
+      target: { value: 'My Tone' },
+    });
+    fireEvent.click(screen.getByTestId('collapse-macro-confirm'));
+    await screen.findByTestId('macro-overwrite-dialog');
+    fireEvent.click(screen.getByTestId('macro-overwrite-cancel'));
+    expect(screen.queryByTestId('macro-overwrite-dialog')).toBeNull();
+    // Only the initial (non-overwrite) attempt happened.
+    expect(fakeEngine.collapseMacro).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('collapse-macro-form')).toBeTruthy();
+  });
+
+  it('right-clicking a picker macro offers rename and delete', async () => {
+    state.modules = [OSC, VCA, TONE_MACRO];
+    render(<App />);
+    await screen.findByTestId('add-module-btn');
+    fireEvent.click(screen.getByTestId('add-module-btn'));
+    await screen.findByTestId('picker-category-Macros');
+
+    // Rename: prefilled with the current name; submit hits the engine.
+    fireEvent.contextMenu(screen.getByTestId('library-add-macro.tone'));
+    fireEvent.click(await screen.findByTestId('picker-macro-rename'));
+    const input = await screen.findByTestId<HTMLInputElement>('macro-rename-input');
+    expect(input.value).toBe('Tone');
+    fireEvent.change(input, { target: { value: 'Fat Tone' } });
+    fireEvent.click(screen.getByTestId('macro-rename-confirm'));
+    await waitFor(() =>
+      expect(fakeEngine.renameMacro).toHaveBeenCalledWith('macro.tone', 'Fat Tone'),
+    );
+
+    // Delete: confirm dialog, then the engine call.
+    fireEvent.contextMenu(screen.getByTestId('library-add-macro.tone'));
+    fireEvent.click(await screen.findByTestId('picker-macro-delete'));
+    fireEvent.click(await screen.findByTestId('macro-delete-confirm'));
+    await waitFor(() => expect(fakeEngine.deleteMacro).toHaveBeenCalledWith('macro.tone'));
+  });
+
+  it('right-click on a non-macro picker entry opens no menu', async () => {
+    state.modules = [OSC, VCA, TONE_MACRO];
+    render(<App />);
+    await screen.findByTestId('add-module-btn');
+    fireEvent.click(screen.getByTestId('add-module-btn'));
+    await screen.findByTestId('picker-category-Macros');
+    fireEvent.contextMenu(screen.getByTestId('library-add-com.dj.oscillator'));
+    expect(screen.queryByTestId('picker-macro-rename')).toBeNull();
   });
 });
 
