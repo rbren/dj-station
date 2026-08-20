@@ -219,12 +219,12 @@ describe('ModulePanel with layouts', () => {
     }
   });
 
-  it('the single-channel attenuverter is the same column, just one of it', () => {
+  it('the single-channel attenuverter is one in->atten->offset->out row', () => {
     const m = manifest('com.dj.attenuverter1', ['in', 'atten', 'offset'], ['out']);
     const layout = resolveLayout(m);
     expect(layout.groups).toHaveLength(1);
     const g = layout.groups[0];
-    expect(g.kind).toBe('column');
+    expect(g.kind).toBe('row');
     expect(g.cells.map((c) => c.jack)).toEqual(['in', 'atten', 'offset', 'out']);
     expect(g.cells[3].output).toBe(true);
     expect(layout.outputGroups).toHaveLength(0);

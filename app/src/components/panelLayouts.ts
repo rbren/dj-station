@@ -209,12 +209,13 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     })),
   }),
 
-  // The single-channel attenuverter: the same short column, just one of it.
+  // The single-channel attenuverter: one row, signal flowing left to
+  // right (in -> atten -> offset -> out), so the panel stays short.
   'com.dj.attenuverter1': () => ({
     groups: [
       {
-        title: '1',
-        kind: 'column',
+        title: 'channel',
+        kind: 'row',
         inputs: [
           { jack: 'in', label: 'in' },
           { jack: 'atten', label: 'atten' },
