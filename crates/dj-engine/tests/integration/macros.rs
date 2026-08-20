@@ -586,3 +586,177 @@ fn promoted_params_and_macro_manifest_work() {
     let out = render(&mut e, 0.25);
     assert!(peak(&out) > 0.0);
 }
+
+/// Break-macro (the UI's right-click "Break Macro"): internals become
+/// ordinary top-level modules in place — same wires, same DSP state, audio
+/// byte-identical — and the instance record dissolves. The definition
+/// stays registered.
+#[test]
+fn break_macro_lifts_internals_to_top_level_without_audio_change() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone-brk",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    let golden = render(&mut e, 0.25);
+    assert!(peak(&golden) > 1.0);
+
+    let renames = e.break_macro("tone1").unwrap();
+    assert_eq!(renames["tone1/osc1"], "osc1");
+    assert_eq!(renames["tone1/vca1"], "vca1");
+    assert!(!e.macro_instances().contains_key("tone1"));
+    assert!(e.nodes.iter().all(|n| !n.instance_id.contains('/')));
+    assert!(e.macros.get("macro.tone-brk").is_some());
+
+    // Same graph, same audio (DSP state was reset by neither collapse nor
+    // break — compare a fresh flat render at the same point in time).
+    let mut flat = mono_engine();
+    build_tone_patch(&mut flat);
+    render(&mut flat, 0.25);
+    assert_eq!(render(&mut flat, 0.25), render(&mut e, 0.25));
+
+    // Post-break snapshot round-trips as a plain flat patch.
+    let doc = e.snapshot("broken");
+    assert!(doc.modules.contains_key("osc1"));
+    assert!(doc.modules["osc1"].macro_version.is_none());
+    let mut reloaded = Engine::from_doc(&doc, crate::common::registry()).unwrap();
+    let mut flat2 = mono_engine();
+    build_tone_patch(&mut flat2);
+    assert_eq!(render(&mut flat2, 0.25), render(&mut reloaded, 0.25));
+}
+
+/// Breaking a macro renames colliding internals to fresh top-level ids and
+/// lifts directly-nested macro instances to top level.
+#[test]
+fn break_macro_avoids_collisions_and_lifts_nested_instances() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone-brk2",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    // A top-level module that will collide with the lifted internal.
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+
+    // Nest: collapse the instance together with an LFO into an outer macro.
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.connect("lfo1", "uni", "tone1", "level").unwrap();
+    e.collapse_to_macro(
+        &["tone1", "lfo1"],
+        "outer1",
+        "macro.outer-brk",
+        "Outer",
+        MacroInterface {
+            inputs: vec![],
+            outputs: vec![MacroJack {
+                id: "out".into(),
+                node: "tone1".into(),
+                jack: "out".into(),
+            }],
+            params: vec![],
+        },
+    )
+    .unwrap();
+    assert!(e.macro_instances().contains_key("outer1/tone1"));
+
+    let renames = e.break_macro("outer1").unwrap();
+    // lfo1 lifts back to its old name; the nested instance lifts whole.
+    assert_eq!(renames["outer1/lfo1"], "lfo1");
+    assert_eq!(renames["outer1/tone1"], "tone1");
+    assert_eq!(renames["outer1/tone1/osc1"], "tone1/osc1");
+    assert!(e.macro_instances().contains_key("tone1"));
+    assert!(!e.macro_instances().contains_key("outer1"));
+
+    // Now break the inner instance: its osc1 collides with the top-level
+    // osc1 and gets a fresh id.
+    let renames = e.break_macro("tone1").unwrap();
+    let lifted_osc = &renames["tone1/osc1"];
+    assert_ne!(lifted_osc, "osc1");
+    assert!(!lifted_osc.contains('/'));
+    assert!(e.nodes.iter().any(|n| &n.instance_id == lifted_osc));
+    assert!(e.macro_instances().is_empty());
+    // Wire endpoints survived the renames: still renders.
+    assert!(peak(&render(&mut e, 0.25)) > 0.0);
+}
+
+/// Definition positions: UI passthrough metadata on the def (saved and
+/// loaded with it, no version bump) exposed per fresh instance through
+/// macro_layout — nested macros flatten with their own offset.
+#[test]
+fn macro_positions_persist_and_flatten_through_macro_layout() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone-pos",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    let def = e
+        .set_macro_positions(
+            "macro.tone-pos",
+            [
+                ("osc1".to_string(), (0.0, 0.0)),
+                ("vca1".to_string(), (180.0, 20.0)),
+            ]
+            .into(),
+        )
+        .unwrap();
+    assert_eq!(def.version, 1, "positions must not bump the version");
+
+    let layout = e.macro_layout("macro.tone-pos").unwrap();
+    assert_eq!(layout["osc1"], (0.0, 0.0));
+    assert_eq!(layout["vca1"], (180.0, 20.0));
+
+    // Positions survive a save/load round-trip of the patch document.
+    let doc = e.snapshot("pos");
+    let e2 = Engine::from_doc(&doc, crate::common::registry()).unwrap();
+    assert_eq!(
+        e2.macro_layout("macro.tone-pos").unwrap()["vca1"],
+        (180.0, 20.0)
+    );
+
+    // Nest it and give the outer def its own positions: the inner layout
+    // flattens offset by the nested entry's position.
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.collapse_to_macro(
+        &["tone1", "lfo1"],
+        "outer1",
+        "macro.outer-pos",
+        "Outer",
+        MacroInterface {
+            inputs: vec![],
+            outputs: vec![MacroJack {
+                id: "out".into(),
+                node: "tone1".into(),
+                jack: "out".into(),
+            }],
+            params: vec![],
+        },
+    )
+    .unwrap();
+    e.set_macro_positions(
+        "macro.outer-pos",
+        [
+            ("tone1".to_string(), (40.0, 300.0)),
+            ("lfo1".to_string(), (0.0, 0.0)),
+        ]
+        .into(),
+    )
+    .unwrap();
+    let layout = e.macro_layout("macro.outer-pos").unwrap();
+    assert_eq!(layout["lfo1"], (0.0, 0.0));
+    assert_eq!(layout["tone1/osc1"], (40.0, 300.0));
+    assert_eq!(layout["tone1/vca1"], (220.0, 320.0));
+}

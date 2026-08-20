@@ -76,6 +76,9 @@ const fakeEngine = {
   tapAll: vi.fn(async () =>
     Object.fromEntries(Object.entries(state.telemetry).map(([id, jacks]) => [id, { ...jacks }])),
   ),
+  macroGroups: vi.fn(async () => []),
+  macroLayout: vi.fn(async () => ({})),
+  breakMacro: vi.fn(async () => ({})),
   currentPatch: vi.fn(async () => null),
   listPatches: vi.fn(async () => []),
   endEdit: vi.fn(async () => {}),

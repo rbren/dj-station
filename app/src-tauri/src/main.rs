@@ -85,6 +85,7 @@ fn autosave_now(state: &AppState) {
 enum EditKey<'a> {
     Add(&'a str),
     Remove(&'a str),
+    Rename(&'a str),
     WireAdd(&'a str, &'a str, &'a str, &'a str),
     WireRemove(&'a str, &'a str, &'a str, &'a str),
     MidiAdd(&'a str, &'a str),
@@ -115,6 +116,7 @@ enum EditKey<'a> {
     Paste,
     RemoveMany,
     CollapseMacro,
+    BreakMacro(&'a str),
     Track(&'a str),
 }
 
@@ -123,6 +125,7 @@ impl std::fmt::Display for EditKey<'_> {
         match self {
             EditKey::Add(i) => write!(f, "add:{i}"),
             EditKey::Remove(i) => write!(f, "remove:{i}"),
+            EditKey::Rename(i) => write!(f, "rename:{i}"),
             EditKey::WireAdd(fi, fj, ti, tj) => write!(f, "wire+:{fi}:{fj}->{ti}:{tj}"),
             EditKey::WireRemove(fi, fj, ti, tj) => write!(f, "wire-:{fi}:{fj}->{ti}:{tj}"),
             EditKey::MidiAdd(i, n) => write!(f, "midi+:{i}:{n}"),
@@ -152,6 +155,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::Paste => write!(f, "paste"),
             EditKey::RemoveMany => write!(f, "remove_many"),
             EditKey::CollapseMacro => write!(f, "collapse_macro"),
+            EditKey::BreakMacro(i) => write!(f, "break_macro:{i}"),
             EditKey::Track(i) => write!(f, "track:{i}"),
         }
     }
@@ -268,6 +272,25 @@ fn remove_module(state: State<AppState>, instance: String) -> CmdResult<()> {
         e.remove_module(&instance)
             .map_err(|e| CmdError::not_found(e.to_string()))
     })
+}
+
+/// Rename a module (undoable). The typed name keeps caps/spaces for
+/// display; its normalized form becomes the new instance id, which is
+/// returned. Rejected without side effects (InvalidInput) when the
+/// normalized name is empty or collides with another module — the history
+/// is recorded only on success so a rejected rename never adds a no-op
+/// undo step.
+#[tauri::command]
+fn rename_module(state: State<AppState>, instance: String, name: String) -> CmdResult<String> {
+    let mut engine = engine_lock(&state)?;
+    let pre = engine.snapshot("undo");
+    let new_id = engine
+        .rename_module(&instance, &name)
+        .map_err(|e| CmdError::invalid(e.to_string()))?;
+    if let Ok(mut history) = state.history.lock() {
+        history.record(&EditKey::Rename(&instance).to_string(), pre);
+    }
+    Ok(new_id)
 }
 
 /// Mark the end of an edit gesture (pointer-up after a knob/segment drag)
@@ -390,6 +413,8 @@ struct MidiMappingSnapshot {
 #[derive(Serialize)]
 struct NodeSnapshot {
     instance_id: String,
+    /// User-typed display name; `None` displays as the instance id.
+    display_name: Option<String>,
     type_id: String,
     manifest: Manifest,
     knobs: BTreeMap<String, KnobSnapshot>,
@@ -414,21 +439,22 @@ fn list_extensions(state: State<AppState>) -> CmdResult<Vec<Manifest>> {
 #[tauri::command]
 fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
     let engine = engine_lock(&state)?;
-    // Macro-aware view: the snapshot document already collapses macro
-    // internals into their instances and rewrites wires to external jacks.
-    let doc = engine.snapshot("ui");
-    let mut wired: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    for wf in doc.wires.values() {
-        for w in &wf.wires {
-            wired.entry(&w.to).or_default().push(w.to_jack.clone());
-        }
+    // Fully expanded view: macro internals render as ordinary panels (the
+    // macro grouping travels separately via `macro_groups`), so wired
+    // inputs come from the raw wire list, not the macro-collapsed patch
+    // snapshot.
+    let mut wired: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for w in engine.wire_specs() {
+        let to = engine.nodes[w.to_node].instance_id.clone();
+        let jack = engine.input_jack_name(w.to_node, w.to_jack);
+        wired.entry(to).or_default().push(jack);
     }
-    let mut out: Vec<NodeSnapshot> = engine
+    let out: Vec<NodeSnapshot> = engine
         .nodes
         .iter()
-        .filter(|n| !n.instance_id.contains('/')) // macro internals hidden
         .map(|n| NodeSnapshot {
             instance_id: n.instance_id.clone(),
+            display_name: n.display_name.clone(),
             type_id: n.ext_id.clone(),
             manifest: {
                 let mut m = n.manifest.clone();
@@ -541,45 +567,6 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                 .collect(),
         })
         .collect();
-    // Macro instances render like any other module panel, using their
-    // synthesized external manifest and promoted knob/param state.
-    for (iid, mi) in engine.macro_instances() {
-        if iid.contains('/') {
-            continue;
-        }
-        let Some(manifest) = engine.macro_manifest(&mi.macro_id) else {
-            continue;
-        };
-        let mf = doc.modules.get(iid);
-        out.push(NodeSnapshot {
-            instance_id: iid.clone(),
-            type_id: mi.macro_id.clone(),
-            manifest,
-            knobs: mf
-                .map(|m| {
-                    m.knobs
-                        .iter()
-                        .map(|(id, k)| {
-                            (
-                                id.clone(),
-                                KnobSnapshot {
-                                    position: k.position,
-                                    atten: k.atten,
-                                    offset: k.offset,
-                                    wire_style: k.wire_style,
-                                    config: k.config.clone(),
-                                },
-                            )
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-            params: mf.map(|m| m.params.clone()).unwrap_or_default(),
-            wired_inputs: wired.get(iid.as_str()).cloned().unwrap_or_default(),
-            midi_mappings: Vec::new(),
-            midi_led_mappings: Vec::new(),
-        });
-    }
     Ok(out)
 }
 
@@ -600,21 +587,83 @@ fn list_modules(state: State<AppState>) -> CmdResult<Vec<Manifest>> {
 #[tauri::command]
 fn engine_wires(state: State<AppState>) -> CmdResult<Vec<WireSnapshot>> {
     let engine = engine_lock(&state)?;
-    // Snapshot wires are macro-aware: internal wires are hidden and
-    // boundary wires appear at the instance's promoted external jacks.
-    let doc = engine.snapshot("ui");
-    Ok(doc
-        .wires
+    // Raw, fully expanded wires: with macro internals rendered as real
+    // panels, every wire (including macro-internal ones) draws between the
+    // concrete nodes it actually connects.
+    Ok(engine
+        .wire_specs()
         .iter()
-        .flat_map(|(src, wf)| {
-            wf.wires.iter().map(|w| WireSnapshot {
-                from_instance: src.clone(),
-                from_jack: w.from_jack.clone(),
-                to_instance: w.to.clone(),
-                to_jack: w.to_jack.clone(),
-            })
+        .map(|w| WireSnapshot {
+            from_instance: engine.nodes[w.from_node].instance_id.clone(),
+            from_jack: engine.output_jack_name(w.from_node, w.from_jack),
+            to_instance: engine.nodes[w.to_node].instance_id.clone(),
+            to_jack: engine.input_jack_name(w.to_node, w.to_jack),
         })
         .collect())
+}
+
+#[derive(Serialize)]
+struct MacroGroup {
+    /// Top-level macro instance id (the UI's bounding-box label anchor).
+    instance: String,
+    macro_id: String,
+    name: String,
+    /// Concrete engine nodes expanded under this instance (nested macros
+    /// flattened) — the members of the bounding box.
+    members: Vec<String>,
+}
+
+/// Macro instance groupings for the rack's bounding-box overlay. Only
+/// top-level instances are reported; nested macros are part of their
+/// owner's box.
+#[tauri::command]
+fn macro_groups(state: State<AppState>) -> CmdResult<Vec<MacroGroup>> {
+    let engine = engine_lock(&state)?;
+    Ok(engine
+        .macro_instances()
+        .iter()
+        .filter(|(iid, _)| !iid.contains('/'))
+        .map(|(iid, mi)| {
+            let prefix = format!("{iid}/");
+            MacroGroup {
+                instance: iid.clone(),
+                macro_id: mi.macro_id.clone(),
+                name: engine
+                    .macros
+                    .get(&mi.macro_id)
+                    .map(|d| d.name.clone())
+                    .unwrap_or_else(|| mi.macro_id.clone()),
+                members: engine
+                    .nodes
+                    .iter()
+                    .filter(|n| n.instance_id.starts_with(&prefix))
+                    .map(|n| n.instance_id.clone())
+                    .collect(),
+            }
+        })
+        .collect())
+}
+
+/// Right-click "Break Macro": the instance's expanded internal modules
+/// become ordinary top-level modules in place (wires, DSP state and
+/// positions survive); the macro definition stays in the library. Returns
+/// old id -> new id so the frontend can remap positions.
+#[tauri::command]
+fn break_macro(state: State<AppState>, instance: String) -> CmdResult<BTreeMap<String, String>> {
+    let mut engine = patch_edit(&state, EditKey::BreakMacro(&instance))?;
+    engine.break_macro(&instance).map_err(err)
+}
+
+/// Saved definition layout for a macro: relative rack positions for the
+/// concrete nodes a fresh instance expands to (empty for macros saved
+/// before positions were recorded).
+#[tauri::command]
+fn macro_layout(
+    state: State<AppState>,
+    macro_id: String,
+) -> CmdResult<BTreeMap<String, (f32, f32)>> {
+    let engine = engine_lock(&state)?;
+    engine.macro_layout(&macro_id).map_err(err)
 }
 
 #[tauri::command]
@@ -1079,7 +1128,9 @@ fn choreo_remove_track(state: State<AppState>, instance: String, track: usize) -
             (
                 engine.output_jack_name(w.from_node, w.from_jack),
                 engine.nodes[w.to_node].instance_id.clone(),
-                engine.nodes[w.to_node].manifest.inputs[w.to_jack].id.clone(),
+                engine.nodes[w.to_node].manifest.inputs[w.to_jack]
+                    .id
+                    .clone(),
             )
         })
         .collect();
@@ -1359,10 +1410,7 @@ fn copy_modules(state: State<AppState>, instances: Vec<String>) -> CmdResult<Str
 /// wires remapped). One undo step; returns copied id -> created id so the
 /// frontend can place each paste near its source module.
 #[tauri::command]
-fn paste_modules(
-    state: State<AppState>,
-    clipboard: String,
-) -> CmdResult<BTreeMap<String, String>> {
+fn paste_modules(state: State<AppState>, clipboard: String) -> CmdResult<BTreeMap<String, String>> {
     let clip: PatchDoc = serde_json::from_str(&clipboard)
         .map_err(|e| CmdError::invalid(format!("bad clipboard: {e}")))?;
     let mut engine = patch_edit(&state, EditKey::Paste)?;
@@ -1402,19 +1450,16 @@ fn tap(state: State<AppState>, instance: String, jack: String) -> CmdResult<Jack
 
 /// Batched telemetry for the UI's 100 ms poll: one lock acquisition and one
 /// IPC round-trip for the whole rack instead of one `tap` per jack. Keys
-/// mirror the `engine_nodes` snapshot the UI renders from: macro internals
-/// are hidden, MIDI nodes expose their LED-mapping input jacks and mapped
-/// output jacks by name, gesture nodes their mapping outputs, and macro
-/// instances their external jacks. Output jacks are namespaced as
-/// `out:<jack>` so they can never collide with an input of the same name.
+/// mirror the `engine_nodes` snapshot the UI renders from: every concrete
+/// node (macro internals included), MIDI nodes expose their LED-mapping
+/// input jacks and mapped output jacks by name, gesture nodes their
+/// mapping outputs. Output jacks are namespaced as `out:<jack>` so they
+/// can never collide with an input of the same name.
 #[tauri::command]
 fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String, JackTelemetry>>> {
     let engine = engine_lock(&state)?;
     let mut out: BTreeMap<String, BTreeMap<String, JackTelemetry>> = BTreeMap::new();
     for n in &engine.nodes {
-        if n.instance_id.contains('/') {
-            continue; // macro internals hidden, as in engine_nodes
-        }
         let jacks = out.entry(n.instance_id.clone()).or_default();
         if n.is_midi() {
             for m in &n.midi_led_mappings {
@@ -1459,31 +1504,13 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
             }
         }
     }
-    for (iid, mi) in engine.macro_instances() {
-        if iid.contains('/') {
-            continue;
-        }
-        let jacks = out.entry(iid.clone()).or_default();
-        for (ext_jack, node, jack) in &mi.inputs {
-            if let Ok(t) = engine.tap(node, jack) {
-                jacks.insert(ext_jack.clone(), t);
-            }
-        }
-        for (ext_jack, node, jack) in &mi.outputs {
-            if let Ok(t) = engine.tap_out(node, jack) {
-                jacks.insert(format!("out:{ext_jack}"), t);
-            }
-        }
-    }
     Ok(out)
 }
 
 #[tauri::command]
 fn save_patch(state: State<AppState>, dir: String, name: String) -> CmdResult<()> {
     let engine = engine_lock(&state)?;
-    engine
-        .save_patch(&PathBuf::from(dir), &name)
-        .map_err(err)?;
+    engine.save_patch(&PathBuf::from(dir), &name).map_err(err)?;
     mark_saved(&state, &engine);
     Ok(())
 }
@@ -1848,11 +1875,15 @@ fn auto_interface(engine: &Engine, selection: &[String]) -> MacroInterface {
 
 /// Collapse the selected rack modules into a new macro (PRD §6). Returns
 /// the new instance's id; the definition lands in the user library DB.
+/// `positions` carries each selected module's rack position so the
+/// definition remembers the arrangement (stored relative to the group's
+/// top-left corner).
 #[tauri::command]
 fn collapse_macro(
     state: State<AppState>,
     selection: Vec<String>,
     name: String,
+    positions: Option<BTreeMap<String, (f32, f32)>>,
 ) -> CmdResult<String> {
     if selection.is_empty() {
         return Err(CmdError::invalid("empty selection"));
@@ -1882,10 +1913,30 @@ fn collapse_macro(
     }
     let interface = auto_interface(&engine, &selection);
     let sel_refs: Vec<&str> = selection.iter().map(|s| s.as_str()).collect();
-    let def = with_stopped(&mut engine, |e| {
+    let mut def = with_stopped(&mut engine, |e| {
         e.collapse_to_macro(&sel_refs, &instance, &macro_id, &name, interface)
             .map_err(err)
     })?;
+    // Remember the arrangement: positions normalized to the group's
+    // top-left corner so a fresh instance lays out the same shape anywhere.
+    if let Some(positions) = positions {
+        let x0 = positions
+            .values()
+            .map(|p| p.0)
+            .fold(f32::INFINITY, f32::min);
+        let y0 = positions
+            .values()
+            .map(|p| p.1)
+            .fold(f32::INFINITY, f32::min);
+        let rel: BTreeMap<String, (f32, f32)> = positions
+            .into_iter()
+            .filter(|(id, _)| def.modules.contains_key(id))
+            .map(|(id, (x, y))| (id, (x - x0, y - y0)))
+            .collect();
+        if !rel.is_empty() {
+            def = engine.set_macro_positions(&macro_id, rel).map_err(err)?;
+        }
+    }
     persist_macro(&state.library, &def)?;
     Ok(instance)
 }
@@ -2558,6 +2609,7 @@ fn main() {
             engine_wires,
             add_module,
             remove_module,
+            rename_module,
             connect_wire,
             disconnect_wire,
             load_demo_patch,
@@ -2584,6 +2636,9 @@ fn main() {
             load_patch,
             list_macros,
             collapse_macro,
+            macro_groups,
+            macro_layout,
+            break_macro,
             inject_midi,
             qwerty_key,
             add_midi_mapping,

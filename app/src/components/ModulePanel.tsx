@@ -56,6 +56,8 @@ export const snapUpToGrid = (px: number) => Math.max(GRID, Math.ceil(px / GRID) 
 
 export interface ModulePanelProps {
   instanceId: string;
+  /** User-typed module name; falls back to the instance id. */
+  displayName?: string | null;
   manifest: Manifest;
   knobs: Record<string, KnobState>;
   wired: Record<string, boolean>;
@@ -78,6 +80,10 @@ export interface ModulePanelProps {
   zoom?: number;
   /** Delete this module instance (renders a ✕ button in the corner). */
   onRemove?(): void;
+  /** Rename this module (double-click the title). The backend normalizes
+   *  the typed name and may reject it (duplicate/empty), in which case the
+   *  refreshed snapshot reverts the display. */
+  onRename?(name: string): void;
   /** Open this module's documentation (renders a ? button in the title bar). */
   onDocs?(): void;
   /** Called on pointer-up after knob/param drags (undo gesture boundary). */
@@ -98,6 +104,9 @@ export interface ModulePanelProps {
   onWireStyle?(jackId: string, style: WireStyle): void;
   /** Double-click knob reset to the default value (incl. wire spread). */
   onKnobReset?(jackId: string): void;
+  /** User-chosen cosmetic input colors (jack id → WIRE_COLORS index). */
+  inputColors?: Record<string, number>;
+  onInputColor?(jackId: string, color: number | null): void;
 }
 
 /** Hosts a module's custom UI, subscribing to the module's telemetry slice
@@ -118,6 +127,65 @@ function CustomUIHost({
     <div className="module-custom-ui">
       <CustomUI handle={handle} instanceId={instanceId} />
     </div>
+  );
+}
+
+/** The header's module name: prominent, double-click to rename. Edits are
+ *  committed on Enter/blur and cancelled on Escape; the backend normalizes
+ *  and may reject (duplicate/empty), in which case the refreshed snapshot
+ *  reverts what's shown. */
+function ModuleName({
+  instanceId,
+  name,
+  onRename,
+}: {
+  instanceId: string;
+  name: string;
+  onRename?: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  if (!editing) {
+    return (
+      <span
+        className="module-name"
+        data-testid={`module-name-${instanceId}`}
+        data-tip={onRename ? 'Double-click to rename' : undefined}
+        onDoubleClick={
+          onRename
+            ? (e) => {
+                e.stopPropagation();
+                setDraft(name);
+                setEditing(true);
+              }
+            : undefined
+        }
+      >
+        {name}
+      </span>
+    );
+  }
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (next && next !== name) onRename?.(next);
+  };
+  return (
+    <input
+      className="module-name-input"
+      data-testid={`module-rename-${instanceId}`}
+      value={draft}
+      autoFocus
+      spellCheck={false}
+      onChange={(e) => setDraft(e.target.value)}
+      onMouseDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') commit();
+        else if (e.key === 'Escape') setEditing(false);
+      }}
+      onBlur={commit}
+    />
   );
 }
 
@@ -270,8 +338,12 @@ export function ModulePanel(props: ModulePanelProps) {
             };
           }}
         >
-          {manifest.name}
-          <span className="module-instance">{instanceId}</span>
+          <ModuleName
+            instanceId={instanceId}
+            name={props.displayName || instanceId}
+            onRename={props.onRename}
+          />
+          <span className="module-instance">{manifest.name}</span>
           {props.onDocs && (
             <button
               className="module-docs-btn"
@@ -380,6 +452,10 @@ export function ModulePanel(props: ModulePanelProps) {
                           pendingSource.jack === cell.jack
                         }
                         selectedColor={pendingColor}
+                        color={props.inputColors?.[cell.jack] ?? null}
+                        onColor={
+                          props.onInputColor ? (c) => props.onInputColor?.(cell.jack, c) : undefined
+                        }
                         onJackClick={(shift) => props.onJackClick?.('input', cell.jack, shift)}
                         onKnobPosition={(p) => props.onKnobPosition(cell.jack, p)}
                         onKnobConfig={(c) => props.onKnobConfig(cell.jack, c)}

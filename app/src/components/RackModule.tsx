@@ -30,6 +30,9 @@ export interface RackModuleProps {
   /** Rack scale factor, forwarded so drags convert px to rack coords. */
   zoom?: number;
   removeModule(instance: string): Promise<void>;
+  /** Rename: normalized backend id may differ from the typed name; App
+   *  remaps positions/selection to the returned id. */
+  renameModule(instance: string, name: string): Promise<void>;
   /** Open the documentation panel for this module (? in the title bar). */
   openDocs?(instance: string): void;
   /** Click-to-select: `additive` toggles membership (shift/cmd/ctrl-click),
@@ -53,6 +56,9 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
   const position = useRackSelector((s) => s.positions[instanceId]);
   const selected = useRackSelector((s) => s.selected.includes(instanceId));
   const pending = useRackSelector((s) => s.pending);
+  // Whole record (stable identity, changes only on an explicit user pick);
+  // narrowed to this instance's jacks below.
+  const allInputColors = useRackSelector((s) => s.inputColors);
   // Deliberately NOT subscribed to telemetry: jack glows subscribe per jack
   // (LiveJack) and custom UIs per instance (CustomUIHost), so a telemetry
   // tick never re-renders whole panels — the difference between 22 fps and
@@ -64,6 +70,15 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
     if (!node) return null;
     return makeHandle(node, refresh, () => store.getState().telemetry[instanceId]);
   }, [node, refresh, store, instanceId]);
+
+  const inputColors = useMemo(() => {
+    const prefix = `${instanceId}:`;
+    const out: Record<string, number> = {};
+    for (const [key, color] of Object.entries(allInputColors)) {
+      if (key.startsWith(prefix)) out[key.slice(prefix.length)] = color;
+    }
+    return out;
+  }, [allInputColors, instanceId]);
 
   if (!node || !handle) return null;
   const pos = position ?? defaultPosition(index);
@@ -88,6 +103,7 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
     >
       <ModulePanel
         instanceId={instanceId}
+        displayName={node.display_name}
         manifest={node.manifest}
         knobs={node.knobs}
         wired={Object.fromEntries(node.wired_inputs.map((j) => [j, true]))}
@@ -156,6 +172,7 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         onMoveEnd={() => props.endModuleDrag?.(instanceId)}
         zoom={props.zoom}
         onRemove={() => void removeModule(instanceId)}
+        onRename={(name) => void props.renameModule(instanceId, name)}
         onDocs={props.openDocs && (() => props.openDocs?.(instanceId))}
         onContextMenu={(e) => props.onContextMenu?.(instanceId, e)}
         onEditEnd={() => void engine.endEdit()}
@@ -178,6 +195,8 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         onKnobReset={(jack) => {
           void engine.resetKnob(instanceId, jack).then(refresh);
         }}
+        inputColors={inputColors}
+        onInputColor={(jack, color) => store.setInputColor(instanceId, jack, color)}
       />
     </ErrorBoundary>
   );

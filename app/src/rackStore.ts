@@ -32,6 +32,10 @@ export interface RackState {
   positions: Positions;
   selected: string[];
   pending: PendingWire | null;
+  /** User-chosen input jack colors (`instance:jack` → WIRE_COLORS index).
+   *  Absent = no color. App-layer cosmetic state persisted in localStorage,
+   *  like wire colors — never part of the patch. */
+  inputColors: Record<string, number>;
 }
 
 export interface RackStore {
@@ -48,10 +52,13 @@ export interface RackStore {
    *  (useLiveJackTelemetry) re-render only for jacks that actually moved
    *  (an idle rack causes zero re-renders). */
   setTelemetry(telemetry: RackTelemetry): void;
+  /** Set (or clear, with null) an input jack's color. */
+  setInputColor(instance: string, jack: string, color: number | null): void;
   subscribe(listener: () => void): () => void;
 }
 
 export const POSITIONS_KEY = 'dj-rack-positions';
+export const INPUT_COLORS_KEY = 'dj-input-colors';
 
 export function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -98,6 +105,7 @@ export function createRackStore(): RackStore {
     positions: loadJson<Positions>(POSITIONS_KEY, {}),
     selected: [],
     pending: null,
+    inputColors: loadJson<Record<string, number>>(INPUT_COLORS_KEY, {}),
   };
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((l) => l());
@@ -161,6 +169,15 @@ export function createRackStore(): RackStore {
       }
       if (allSame) return;
       state = { ...state, telemetry: out };
+      notify();
+    },
+    setInputColor(instance, jack, color) {
+      const key = `${instance}:${jack}`;
+      const inputColors = { ...state.inputColors };
+      if (color === null) delete inputColors[key];
+      else inputColors[key] = color;
+      saveJson(INPUT_COLORS_KEY, inputColors);
+      state = { ...state, inputColors };
       notify();
     },
     subscribe(listener) {

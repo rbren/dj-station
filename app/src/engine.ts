@@ -40,6 +40,9 @@ export interface MidiMapping {
 
 export interface NodeSnapshot {
   instance_id: string;
+  /** User-typed display name (caps/spaces); absent/null displays as the
+   *  instance id. Its normalized form IS the instance id. */
+  display_name?: string | null;
   type_id: string;
   manifest: Manifest;
   knobs: Record<
@@ -147,6 +150,15 @@ export interface MacroInfo {
   version: number;
 }
 
+/** One expanded macro instance on the rack: the members of its bounding
+ *  box (concrete node ids, nested macros flattened). */
+export interface MacroGroup {
+  instance: string;
+  macro_id: string;
+  name: string;
+  members: string[];
+}
+
 /** A macro whose patch-saved version disagrees with the library (PRD §6). */
 export interface MacroConflict {
   macro_id: string;
@@ -170,6 +182,13 @@ export class EngineClient extends IpcClient {
   }
   addModule(instance: string, typeId: string) {
     return this.call<void>('add_module', { instance, typeId });
+  }
+  /** Rename a module. The typed name keeps caps/spaces for display; its
+   *  normalized form becomes the new instance id (returned). Rejects —
+   *  reporting to the error banner and resolving null — when the
+   *  normalized name is empty or already taken. */
+  renameModule(instance: string, name: string) {
+    return this.call<string>('rename_module', { instance, name });
   }
   connectWire(from: { instance: string; jack: string }, to: { instance: string; jack: string }) {
     return this.call<void>('connect_wire', {
@@ -261,9 +280,23 @@ export class EngineClient extends IpcClient {
     return this.call<MacroInfo[]>('list_macros');
   }
   /** Collapse the selected modules into a new macro; returns the new
-   *  instance id. */
-  collapseMacro(selection: string[], name: string) {
-    return this.call<string>('collapse_macro', { selection, name });
+   *  instance id. `positions` records the selection's rack arrangement in
+   *  the definition so fresh instances lay out the same shape. */
+  collapseMacro(selection: string[], name: string, positions?: Record<string, [number, number]>) {
+    return this.call<string>('collapse_macro', { selection, name, positions });
+  }
+  /** Macro instance groupings for the rack's bounding-box overlay. */
+  macroGroups() {
+    return this.call<MacroGroup[]>('macro_groups');
+  }
+  /** Saved relative layout for a macro's expanded nodes (may be empty). */
+  macroLayout(macroId: string) {
+    return this.call<Record<string, [number, number]>>('macro_layout', { macroId });
+  }
+  /** Break a macro instance apart: internals become ordinary top-level
+   *  modules in place. Returns old id -> new id. */
+  breakMacro(instance: string) {
+    return this.call<Record<string, string>>('break_macro', { instance });
   }
   savePatchAs(name: string) {
     return this.call<void>('save_patch_as', { name });

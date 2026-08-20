@@ -4,10 +4,13 @@
 // grids. The label can be hidden and the control swapped for a fader or
 // suppressed entirely ('jack') by the layout.
 
+import { useState } from 'react';
 import type { DisplaySpec, JackTelemetry, KnobConfig, KnobState, WireStyle } from '../types';
 import type { CellSpec } from './panelLayouts';
 import { LiveJack } from './Jack';
 import { Knob } from './Knob';
+import { KnobConfigMenu } from './KnobConfigMenu';
+import { WIRE_COLORS } from './WireOverlay';
 
 const DEFAULT_KNOB: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'linear' };
 
@@ -26,6 +29,10 @@ export interface InputCellProps {
   selected: boolean;
   /** Outline color while armed — the pending wire's cable color. */
   selectedColor?: string;
+  /** User-chosen cosmetic color (WIRE_COLORS index; null/undefined = none):
+   *  renders a prominent rounded border around the cell. */
+  color?: number | null;
+  onColor?(color: number | null): void;
   onJackClick?(shift: boolean): void;
   onKnobPosition(position: number): void;
   onKnobConfig(config: KnobConfig): void;
@@ -46,10 +53,31 @@ export function InputCell(props: InputCellProps) {
   const control = props.audio ? 'jack' : (cell.control ?? 'auto');
   const label = cell.label ?? cell.jack;
   const appearance = control === 'fader' ? 'fader' : control === 'hfader' ? 'hfader' : undefined;
+  const cellColor =
+    props.color !== null && props.color !== undefined
+      ? WIRE_COLORS[props.color % WIRE_COLORS.length]
+      : undefined;
+  // Right-click on the cell (jack, label, or a jack-only cell's body)
+  // opens a color-only config menu. The knob handles its own right-click
+  // (full config menu, which includes the same Color row) and stops
+  // propagation, so this never fires on the dial itself.
+  const [colorMenuAt, setColorMenuAt] = useState<{ x: number; y: number } | null>(null);
   return (
     <div
-      className={`input-cell${appearance ? ` input-cell-${appearance}` : ''}`}
+      className={`input-cell${appearance ? ` input-cell-${appearance}` : ''}${
+        cellColor ? ' input-cell-colored' : ''
+      }`}
       data-testid={`input-cell-${cell.jack}`}
+      style={cellColor ? { borderColor: cellColor } : undefined}
+      onContextMenu={
+        props.onColor
+          ? (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setColorMenuAt({ x: e.clientX, y: e.clientY });
+            }
+          : undefined
+      }
     >
       <LiveJack
         instance={props.instance}
@@ -82,6 +110,19 @@ export function InputCell(props: InputCellProps) {
           onWireStyle={props.onWireStyle}
           onReset={props.onKnobReset}
           onRelease={props.onEditEnd}
+          jackColor={props.color}
+          onJackColor={props.onColor}
+        />
+      )}
+      {colorMenuAt && props.onColor && (
+        <KnobConfigMenu
+          config={config}
+          at={colorMenuAt}
+          onChange={() => {}}
+          onClose={() => setColorMenuAt(null)}
+          colorOnly
+          jackColor={props.color}
+          onJackColor={props.onColor}
         />
       )}
       {!cell.hideLabel && (

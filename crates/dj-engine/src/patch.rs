@@ -43,6 +43,11 @@ pub struct PatchHeader {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleFile {
     pub ext: String,
+    /// User-typed display name (caps/spaces preserved). The map key is its
+    /// normalized form ([`crate::engine::normalize_module_name`]); absent
+    /// when the module displays as its instance id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(default)]
     pub knobs: BTreeMap<String, KnobState>,
     #[serde(default)]
@@ -211,6 +216,9 @@ impl PatchDoc {
         for (old, mf) in &clipboard.modules {
             let mut mf = mf.clone();
             mf.sync_to = mf.sync_to.and_then(|s| renames.get(&s).cloned());
+            // The copy gets a fresh id; carrying the display name over
+            // would break its normalized-form == id invariant.
+            mf.name = None;
             self.modules.insert(renames[old].clone(), mf);
         }
         for (src, wf) in &clipboard.wires {
@@ -261,6 +269,7 @@ impl Engine {
                 info.instance_id.clone(),
                 ModuleFile {
                     ext: info.ext_id.clone(),
+                    name: info.display_name.clone(),
                     knobs,
                     params: info.params.clone(),
                     midi_mappings: info.midi_mappings.clone(),
@@ -301,6 +310,7 @@ impl Engine {
                 iid.clone(),
                 ModuleFile {
                     ext: mi.macro_id.clone(),
+                    name: mi.display_name.clone(),
                     knobs,
                     params,
                     midi_mappings: Vec::new(),
@@ -523,6 +533,9 @@ impl Engine {
         deferred_syncs: &mut Vec<(String, String)>,
     ) -> Result<()> {
         self.add_module(instance_id, &mf.ext)?;
+        if mf.name.is_some() {
+            self.set_display_name(instance_id, mf.name.clone())?;
+        }
         for m in &mf.midi_mappings {
             self.add_midi_mapping(instance_id, m.kind, m.num, &m.name)?;
         }
@@ -695,6 +708,10 @@ impl Engine {
         mf: &ModuleFile,
         deferred_syncs: &mut Vec<(String, String)>,
     ) -> Result<()> {
+        // Display name (covers undo/redo of renames; ids that changed
+        // recreate the module upstream, keys being the ids).
+        self.set_display_name(instance_id, mf.name.clone())?;
+
         // MIDI mappings: rebuilt wholesale when the set differs (jack
         // allocation is order-dependent; wires re-resolve by name later).
         if self.macro_instances().get(instance_id).is_none() {

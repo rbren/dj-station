@@ -70,8 +70,16 @@ fails if it's missing.
   definitions under `macros/` as a lockfile for the version-mismatch
   update-vs-fork flow (`PatchDoc::macro_conflicts` /
   `resolve_macro_conflict`). Expanded internal nodes use `/`-prefixed
-  instance ids, so `/` is reserved in user instance ids and UI snapshots
-  filter internals via `Engine::snapshot`.
+  instance ids, so `/` is reserved in user instance ids. Macros are NOT
+  collapsed in the UI: every internal renders as an ordinary module panel
+  and the instance is a pure UI grouping (`MacroBoxes` bounding box fed by
+  the `macro_groups` command; all-or-nothing select/drag/copy/delete in
+  App.tsx). `MacroDef.positions` stores the members' relative rack layout
+  (UI passthrough, `skip_serializing_if empty` so old goldens stay
+  byte-stable; `Engine::macro_layout` flattens nested defs for placement).
+  Right-click "Break Macro" -> `Engine::break_macro`: in-place control-side
+  rename lifting internals to fresh top-level ids (slots/wires/DSP state
+  untouched; nested instances lift whole), instance record dissolves.
 - Native (dylib) modules (M4, PRD §5): `abi = "native-1"`, loaded by
   `native_host.rs` via libloading through a versioned C vtable. They are
   UNSANDBOXED trusted code (trust model documented in `native_host.rs`).
@@ -344,3 +352,18 @@ fails if it's missing.
   rebuild costs — `Engine::from_doc` is ONLY for loading patches into a
   fresh engine. `PatchDoc::remove_module` edits the document, not a live
   engine.
+- Module renaming (`engine/rename.rs`): instance ids ARE normalized names
+  (`normalize_module_name`: lowercase ASCII alphanumerics, other runs
+  collapse to one `_`). `Engine::rename_module` takes the user-typed form,
+  keeps it as `display_name` (`NodeInfo`/`MacroInstance`; `None` when it
+  equals the id) and renames the instance to the normalized form —
+  rejecting empty/duplicate normalized names WITHOUT side effects. Renames
+  are control-side only (wires reference slots); macro instances remap
+  their `/`-prefixed internals and deck `sync_to` strings follow. Patches
+  persist the typed form as `ModuleFile.name` (skip-if-none, so goldens
+  are untouched); the paste path drops it (fresh id ≠ normalized name).
+  The Tauri `rename_module` command records undo history only on success;
+  the frontend (`ModuleName` in ModulePanel.tsx, double-click to edit)
+  shows the display name prominently with the type name secondary, and
+  `App.renameModule` remaps positions/selection to the returned id — a
+  backend rejection resolves null (error banner) and the refresh reverts.

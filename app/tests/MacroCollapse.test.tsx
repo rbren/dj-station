@@ -5,6 +5,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Manifest } from '../src/types';
+import type { MacroGroup } from '../src/engine';
 
 const OSC: Manifest = {
   id: 'com.dj.oscillator',
@@ -56,6 +57,9 @@ const fakeEngine = {
   wires: vi.fn(async () => state.wires),
   tap: vi.fn(async () => null),
   tapAll: vi.fn(async () => ({})),
+  macroGroups: vi.fn<() => Promise<MacroGroup[]>>(async () => []),
+  macroLayout: vi.fn(async () => ({})),
+  breakMacro: vi.fn(async () => ({})),
   addModule: vi.fn(async () => {}),
   collapseMacro: vi.fn(async () => 'my-tone'),
   setParam: vi.fn(async () => {}),
@@ -70,6 +74,9 @@ const fakeEngine = {
   savePatchAs: vi.fn(async () => {}),
   loadPatchByName: vi.fn(async () => {}),
   removeModule: vi.fn(async () => {}),
+  removeModules: vi.fn(async () => {}),
+  copyModules: vi.fn(async () => 'clipboard'),
+  resetModules: vi.fn(async () => {}),
   endEdit: vi.fn(async () => {}),
 };
 
@@ -98,6 +105,10 @@ beforeEach(() => {
   state.nodes = [node('osc1', OSC), node('vca1', VCA)];
   state.wires = [];
   state.modules = [OSC, VCA];
+  // clearAllMocks keeps mockResolvedValue overrides; restore defaults.
+  fakeEngine.macroGroups.mockResolvedValue([]);
+  fakeEngine.macroLayout.mockResolvedValue({});
+  fakeEngine.breakMacro.mockResolvedValue({});
 });
 
 async function selectBoth() {
@@ -139,7 +150,16 @@ describe('collapse-to-macro UI', () => {
     });
     fireEvent.click(screen.getByTestId('collapse-macro-confirm'));
     await waitFor(() =>
-      expect(fakeEngine.collapseMacro).toHaveBeenCalledWith(['osc1', 'vca1'], 'My Tone'),
+      expect(fakeEngine.collapseMacro).toHaveBeenCalledWith(
+        ['osc1', 'vca1'],
+        'My Tone',
+        // Each collapsed module's rack position rides along so the macro
+        // definition remembers the arrangement.
+        expect.objectContaining({
+          osc1: [expect.any(Number), expect.any(Number)],
+          vca1: [expect.any(Number), expect.any(Number)],
+        }),
+      ),
     );
     // Selection cleared and the module library refetched (macros appear).
     await waitFor(() => expect(screen.queryByTestId('collapse-macro-btn')).toBeNull());
@@ -168,5 +188,102 @@ describe('collapse-to-macro UI', () => {
         'macro.tone',
       ),
     );
+  });
+});
+
+// The engine keeps macro internals as ordinary expanded nodes; the UI shows
+// them all, with a bounding box standing in for the old collapsed panel.
+describe('expanded macro view', () => {
+  function setupMacroRack() {
+    state.nodes = [node('tone1/osc1', OSC), node('tone1/vca1', VCA), node('osc2', OSC)];
+    fakeEngine.macroGroups.mockResolvedValue([
+      {
+        instance: 'tone1',
+        macro_id: 'macro.tone',
+        name: 'Tone',
+        members: ['tone1/osc1', 'tone1/vca1'],
+      },
+    ]);
+  }
+
+  it('renders every internal module as a normal panel plus a bounding box', async () => {
+    setupMacroRack();
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    expect(screen.getByTestId('module-tone1/vca1')).toBeTruthy();
+    // No synthesized collapsed panel for the instance itself.
+    expect(screen.queryByTestId('module-tone1')).toBeNull();
+    const box = await screen.findByTestId('macro-box-tone1');
+    expect(box.textContent).toContain('Tone');
+    expect(box.textContent).toContain('tone1');
+  });
+
+  it('selecting one member selects the whole group', async () => {
+    setupMacroRack();
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    await screen.findByTestId('macro-box-tone1');
+    fireEvent.mouseDown(screen.getByTestId('module-header-tone1/osc1'), { button: 0 });
+    expect(screen.getByTestId('module-tone1/osc1').dataset.selected).toBe('true');
+    expect(screen.getByTestId('module-tone1/vca1').dataset.selected).toBe('true');
+    expect(screen.getByTestId('module-osc2').dataset.selected).toBeUndefined();
+  });
+
+  it('right-click on a member offers Break Macro, which calls the engine', async () => {
+    setupMacroRack();
+    fakeEngine.breakMacro.mockResolvedValue({
+      'tone1/osc1': 'osc1',
+      'tone1/vca1': 'vca1',
+    });
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    await screen.findByTestId('macro-box-tone1');
+    fireEvent.contextMenu(screen.getByTestId('module-tone1/osc1'));
+    const item = await screen.findByTestId('ctx-break-macro');
+    expect(item.textContent).toContain('Tone');
+    fireEvent.click(item);
+    await waitFor(() => expect(fakeEngine.breakMacro).toHaveBeenCalledWith('tone1'));
+  });
+
+  it('right-click on the bounding-box label also offers Break Macro', async () => {
+    setupMacroRack();
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    fireEvent.contextMenu(await screen.findByTestId('macro-box-label-tone1'));
+    expect(await screen.findByTestId('ctx-break-macro')).toBeTruthy();
+    // The whole group got selected for the menu's Copy/Delete actions.
+    expect(screen.getByTestId('module-tone1/osc1').dataset.selected).toBe('true');
+    expect(screen.getByTestId('module-tone1/vca1').dataset.selected).toBe('true');
+  });
+
+  it('deleting a member deletes the whole instance via its top-level id', async () => {
+    setupMacroRack();
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    await screen.findByTestId('macro-box-tone1');
+    fireEvent.contextMenu(screen.getByTestId('module-tone1/vca1'));
+    fireEvent.click(await screen.findByTestId('ctx-delete'));
+    await waitFor(() => expect(fakeEngine.removeModules).toHaveBeenCalledWith(['tone1']));
+  });
+
+  it('instantiating a macro lays members out from the definition layout', async () => {
+    state.modules = [OSC, VCA, TONE_MACRO];
+    fakeEngine.macroLayout.mockResolvedValue({ osc1: [0, 0], vca1: [180, 20] });
+    render(<App />);
+    await screen.findByTestId('add-module-btn');
+    fireEvent.click(screen.getByTestId('add-module-btn'));
+    await screen.findByTestId('picker-category-Macros');
+    fireEvent.click(screen.getByTestId('library-add-macro.tone'));
+    await waitFor(() => expect(fakeEngine.macroLayout).toHaveBeenCalledWith('macro.tone'));
+    // Relative offsets from the definition survive into the stored layout.
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem('dj-rack-positions') ?? '{}');
+      const ids = Object.keys(saved).filter((k) => k.startsWith('tone'));
+      expect(ids.some((k) => k.endsWith('/osc1'))).toBe(true);
+      const osc = saved[ids.find((k) => k.endsWith('/osc1'))!];
+      const vca = saved[ids.find((k) => k.endsWith('/vca1'))!];
+      expect(vca.x - osc.x).toBe(180);
+      expect(vca.y - osc.y).toBe(20);
+    });
   });
 });

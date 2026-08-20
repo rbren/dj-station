@@ -65,7 +65,9 @@ function mayMoveJacks(records: MutationRecord[]): boolean {
     const el = r.target as Element;
     if (el.closest?.('.wire-overlay')) return false;
     if (r.type !== 'attributes') return true;
-    return !el.closest?.('.jack, .knob, .level-meter, .module-custom-ui');
+    // .macro-box: no jacks inside — it only moves when member panels move,
+    // and those panels' own mutations already schedule a re-measure.
+    return !el.closest?.('.jack, .knob, .level-meter, .module-custom-ui, .macro-box');
   });
 }
 

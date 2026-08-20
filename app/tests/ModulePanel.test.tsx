@@ -297,3 +297,116 @@ describe('grid-conforming panel size', () => {
     expect(onDocs).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('module rename', () => {
+  it('shows the display name prominently with the type as secondary text', () => {
+    render(<ModulePanel {...baseProps} displayName="Wobble LFO" />);
+    expect(screen.getByTestId('module-name-osc1').textContent).toBe('Wobble LFO');
+    expect(screen.getByText('Oscillator')).toBeTruthy();
+  });
+
+  it('falls back to the instance id when no display name is set', () => {
+    render(<ModulePanel {...baseProps} />);
+    expect(screen.getByTestId('module-name-osc1').textContent).toBe('osc1');
+  });
+
+  it('double-click edits; Enter commits the typed name', () => {
+    const onRename = vi.fn();
+    render(<ModulePanel {...baseProps} onRename={onRename} />);
+    fireEvent.doubleClick(screen.getByTestId('module-name-osc1'));
+    const input = screen.getByTestId('module-rename-osc1') as HTMLInputElement;
+    expect(input.value).toBe('osc1');
+    fireEvent.change(input, { target: { value: 'Main Osc' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onRename).toHaveBeenCalledWith('Main Osc');
+    // Editor closed again.
+    expect(screen.queryByTestId('module-rename-osc1')).toBeNull();
+  });
+
+  it('Escape cancels without renaming; unchanged/empty commits are no-ops', () => {
+    const onRename = vi.fn();
+    render(<ModulePanel {...baseProps} onRename={onRename} />);
+    fireEvent.doubleClick(screen.getByTestId('module-name-osc1'));
+    let input = screen.getByTestId('module-rename-osc1') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'Something Else' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('module-rename-osc1')).toBeNull();
+    // Committing the unchanged name is a no-op.
+    fireEvent.doubleClick(screen.getByTestId('module-name-osc1'));
+    input = screen.getByTestId('module-rename-osc1') as HTMLInputElement;
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onRename).not.toHaveBeenCalled();
+    // As is committing whitespace only.
+    fireEvent.doubleClick(screen.getByTestId('module-name-osc1'));
+    input = screen.getByTestId('module-rename-osc1') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.blur(input);
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it('without onRename the name is inert (docs previews)', () => {
+    render(<ModulePanel {...baseProps} />);
+    fireEvent.doubleClick(screen.getByTestId('module-name-osc1'));
+    expect(screen.queryByTestId('module-rename-osc1')).toBeNull();
+  });
+});
+
+describe('input jack colors', () => {
+  it('a chosen color renders a border on the input cell; none by default', () => {
+    const { rerender } = render(<ModulePanel {...baseProps} />);
+    const cell = screen.getByTestId('input-cell-pitch');
+    expect(cell.classList.contains('input-cell-colored')).toBe(false);
+    expect(cell.style.borderColor).toBe('');
+    rerender(<ModulePanel {...baseProps} inputColors={{ pitch: 1 }} />);
+    expect(cell.classList.contains('input-cell-colored')).toBe(true);
+    expect(cell.style.borderColor).toBe('rgb(224, 92, 92)'); // WIRE_COLORS[1] = #e05c5c
+    // Other inputs stay uncolored.
+    expect(screen.getByTestId('input-cell-fm').classList.contains('input-cell-colored')).toBe(
+      false,
+    );
+  });
+
+  it('knob config menu offers the wire colors plus none and reports the pick', () => {
+    const onInputColor = vi.fn();
+    render(<ModulePanel {...baseProps} onInputColor={onInputColor} />);
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    const swatches = screen.getAllByRole('radio');
+    expect(swatches).toHaveLength(9); // none + the 8 wire colors
+    // Default is none.
+    expect(screen.getByRole('radio', { name: 'no color' }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    fireEvent.click(screen.getByRole('radio', { name: 'color 3' }));
+    expect(onInputColor).toHaveBeenCalledWith('pitch', 2);
+  });
+
+  it('clicking none clears the color', () => {
+    const onInputColor = vi.fn();
+    render(<ModulePanel {...baseProps} inputColors={{ pitch: 2 }} onInputColor={onInputColor} />);
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    expect(screen.getByRole('radio', { name: 'color 3' }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    fireEvent.click(screen.getByRole('radio', { name: 'no color' }));
+    expect(onInputColor).toHaveBeenCalledWith('pitch', null);
+  });
+
+  it('right-click on a jack-only input opens a color-only menu', () => {
+    const onInputColor = vi.fn();
+    render(<ModulePanel {...baseProps} onInputColor={onInputColor} />);
+    // 'sync' declares no knob: right-click the cell itself.
+    fireEvent.contextMenu(screen.getByTestId('input-cell-sync'));
+    // Color-only: swatches present, knob fields absent.
+    expect(screen.queryByLabelText('knob style')).toBeNull();
+    expect(screen.queryByLabelText('knob value')).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: 'color 1' }));
+    expect(onInputColor).toHaveBeenCalledWith('sync', 0);
+  });
+
+  it('without onInputColor no color picker renders', () => {
+    render(<ModulePanel {...baseProps} />);
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    expect(screen.queryByRole('radio')).toBeNull();
+  });
+});

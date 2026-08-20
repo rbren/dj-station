@@ -226,6 +226,7 @@ impl Engine {
             MacroInstance {
                 macro_id: def.id.clone(),
                 version: def.version,
+                display_name: None,
                 inputs,
                 outputs,
                 params,
@@ -384,6 +385,7 @@ impl Engine {
             modules: def_modules,
             wires: def_wires,
             interface,
+            positions: BTreeMap::new(),
         };
         self.macros.register(def.clone());
 
@@ -411,6 +413,7 @@ impl Engine {
             new_instance_id.to_string(),
             crate::patch::ModuleFile {
                 ext: macro_id.to_string(),
+                name: None,
                 knobs,
                 params,
                 midi_mappings: Vec::new(),
@@ -430,6 +433,158 @@ impl Engine {
         };
         self.rebuild(&new_doc)?;
         Ok(def)
+    }
+
+    /// Record the saved rack positions of a macro's internal modules
+    /// (UI passthrough metadata — no version bump, instances unaffected).
+    pub fn set_macro_positions(
+        &mut self,
+        macro_id: &str,
+        positions: BTreeMap<String, (f32, f32)>,
+    ) -> Result<MacroDef> {
+        let def = self
+            .macros
+            .defs
+            .get_mut(macro_id)
+            .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
+        def.positions = positions;
+        Ok(def.clone())
+    }
+
+    /// Saved positions for every concrete node a fresh instance of
+    /// `macro_id` would expand to, keyed by the id path relative to the
+    /// instance (nested macros flattened, offset by the nested entry's own
+    /// position). Modules the definition has no position for are omitted
+    /// (the UI's placement fixup finds them a spot).
+    pub fn macro_layout(&self, macro_id: &str) -> Result<BTreeMap<String, (f32, f32)>> {
+        let def = self
+            .macros
+            .get(macro_id)
+            .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
+        let mut out = BTreeMap::new();
+        for (inner, mf) in &def.modules {
+            let Some(&(x, y)) = def.positions.get(inner) else {
+                continue;
+            };
+            if self.macros.get(&mf.ext).is_some() {
+                for (sub, (sx, sy)) in self.macro_layout(&mf.ext)? {
+                    out.insert(format!("{inner}/{sub}"), (x + sx, y + sy));
+                }
+            } else {
+                out.insert(inner.clone(), (x, y));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Break a macro instance apart (the UI's right-click "Break Macro"):
+    /// its expanded internal nodes stay in the graph exactly as they are —
+    /// same slots, same DSP state, same wires — but become ordinary
+    /// top-level modules (direct nested macro instances become top-level
+    /// macro instances). Pure control-side renaming: no RT interaction, so
+    /// the engine may keep running. Returns old id -> new id for every
+    /// renamed node and nested instance.
+    pub fn break_macro(&mut self, instance_id: &str) -> Result<BTreeMap<String, String>> {
+        anyhow::ensure!(
+            !instance_id.contains('/'),
+            "cannot break nested macro instance {instance_id:?}"
+        );
+        anyhow::ensure!(
+            self.macro_instances.contains_key(instance_id),
+            "no macro instance {instance_id:?}"
+        );
+        let prefix = format!("{instance_id}/");
+
+        // Fresh top-level names for the direct children, avoiding every
+        // existing top-level id (the broken instance's own name frees up).
+        let mut taken: std::collections::BTreeSet<String> = self
+            .node_by_id
+            .keys()
+            .chain(self.macro_instances.keys())
+            .filter(|id| !id.contains('/') && id.as_str() != instance_id)
+            .cloned()
+            .collect();
+        let mut seg_renames: BTreeMap<String, String> = BTreeMap::new();
+        let segments: std::collections::BTreeSet<String> = self
+            .node_by_id
+            .keys()
+            .chain(self.macro_instances.keys())
+            .filter_map(|id| id.strip_prefix(&prefix))
+            .map(|rest| rest.split('/').next().unwrap().to_string())
+            .collect();
+        for seg in segments {
+            let fresh = std::iter::once(seg.clone())
+                .chain((2..).map(|n| format!("{seg}{n}")))
+                .find(|c| !taken.contains(c))
+                .unwrap();
+            taken.insert(fresh.clone());
+            seg_renames.insert(seg, fresh);
+        }
+        let rename = |id: &str| -> Option<String> {
+            let rest = id.strip_prefix(&prefix)?;
+            let (seg, tail) = match rest.split_once('/') {
+                Some((s, t)) => (s, Some(t)),
+                None => (rest, None),
+            };
+            let fresh = &seg_renames[seg];
+            Some(match tail {
+                Some(t) => format!("{fresh}/{t}"),
+                None => fresh.clone(),
+            })
+        };
+
+        let mut renames: BTreeMap<String, String> = BTreeMap::new();
+
+        // Node table: keys and NodeInfo ids (slots untouched — wires and
+        // every slot-keyed side table stay valid).
+        let node_ids: Vec<String> = self
+            .node_by_id
+            .keys()
+            .filter(|id| id.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for old in node_ids {
+            let new_id = rename(&old).unwrap();
+            let slot = self.node_by_id.remove(&old).unwrap();
+            self.nodes[slot].instance_id = new_id.clone();
+            self.node_by_id.insert(new_id.clone(), slot);
+            renames.insert(old, new_id);
+        }
+        // Deck sync partners are stored as instance ids.
+        for ctl in self.decks.values_mut() {
+            if let Some(sync) = &ctl.sync_to {
+                if let Some(new_id) = rename(sync) {
+                    ctl.sync_to = Some(new_id);
+                }
+            }
+        }
+        // Nested macro instances lift to top level; their resolved jack
+        // tables point at concrete (renamed) nodes.
+        let instances = std::mem::take(&mut self.macro_instances);
+        for (id, mut mi) in instances {
+            if id == instance_id {
+                continue; // the broken instance itself dissolves
+            }
+            let new_key = match rename(&id) {
+                Some(new_key) => {
+                    renames.insert(id, new_key.clone());
+                    new_key
+                }
+                None => id, // unrelated instance: untouched
+            };
+            for (_, node, _) in mi
+                .inputs
+                .iter_mut()
+                .chain(mi.outputs.iter_mut())
+                .chain(mi.params.iter_mut())
+            {
+                if let Some(new_node) = rename(node) {
+                    *node = new_node;
+                }
+            }
+            self.macro_instances.insert(new_key, mi);
+        }
+        Ok(renames)
     }
 
     /// Replace a macro's definition and re-expand every instance in memory

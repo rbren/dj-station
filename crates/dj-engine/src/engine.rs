@@ -36,6 +36,9 @@ mod lifecycle;
 mod macros_api;
 mod midi;
 mod qwerty_api;
+mod rename;
+
+pub use rename::normalize_module_name;
 
 pub const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
 pub const DEFAULT_BLOCK_SIZE: usize = 128;
@@ -100,6 +103,11 @@ use serde::{Deserialize, Serialize};
 /// Control-side metadata for one node.
 pub struct NodeInfo {
     pub instance_id: String,
+    /// User-facing name as typed (caps/spaces preserved). `None` means the
+    /// module was never renamed (or was renamed to exactly its normalized
+    /// form) and displays as its instance id. Invariant when set:
+    /// `normalize_module_name(display_name) == instance_id`.
+    pub display_name: Option<String>,
     pub ext_id: String,
     pub manifest: Manifest,
     pub knobs: Vec<KnobState>,
@@ -733,6 +741,7 @@ impl Engine {
 
         let info = NodeInfo {
             instance_id: instance_id.to_string(),
+            display_name: None,
             ext_id: ext_id.to_string(),
             manifest: manifest.clone(),
             knobs,

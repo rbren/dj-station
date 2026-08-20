@@ -115,6 +115,26 @@ body {
   font-size: 0.68rem;
 }
 
+/* The module's (renameable) name — the header's prominent element. */
+.module-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-name-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, #3a4150);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin: -1px 0;
+  outline: none;
+}
+
 /* --- Input cells: wire jack stacked directly on the control ---------- */
 
 /* Groups flow left-to-right and wrap; 'break' groups start a new line. */
@@ -171,6 +191,19 @@ body {
   align-items: center;
   gap: 1px;
   width: var(--cell-w);
+  /* Transparent by default (and border-box) so picking a color never
+     shifts layout: the border eats inward instead of widening the cell,
+     which must stay exactly --cell-w for the strip's column grid. */
+  box-sizing: border-box;
+  border: 2px solid transparent;
+  border-radius: 8px;
+}
+
+/* User-picked jack color (right-click menu): a prominent rounded border
+   in the chosen wire color. The color itself arrives inline via
+   style.borderColor. */
+.input-cell-colored {
+  border-style: solid;
 }
 
 .input-cell-label {
@@ -496,6 +529,34 @@ body {
   font-size: 0.72rem;
   white-space: nowrap;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* Jack color picker in the knob config menu: one row of wire-color
+   swatches plus a "none" slot (crossed-out outline). */
+.jack-color-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.jack-color-swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid #3c424c;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.jack-color-none {
+  background:
+    linear-gradient(to top right, transparent 44%, #e05c5c 46%, #e05c5c 54%, transparent 56%),
+    #23272e;
+}
+
+.jack-color-selected {
+  outline: 2px solid #c8ccd4;
+  outline-offset: 1px;
 }
 
 .knob-config-section {
@@ -2055,6 +2116,52 @@ body {
   outline-offset: -3px;
   box-shadow: 0 0 12px 2px rgba(77, 216, 255, 0.55);
   z-index: 1;
+}
+
+/* Macro bounding box: a labeled dashed frame around an expanded macro
+   instance's member panels. The box itself is pointer-transparent (wiring
+   and panel drags pass through); only the name tab takes the pointer
+   (drag = move group, right-click = macro menu). */
+.macro-box {
+  position: absolute;
+  border: 2px dashed rgba(143, 127, 224, 0.65);
+  border-radius: 8px;
+  background: rgba(143, 127, 224, 0.05);
+  pointer-events: none;
+}
+
+.macro-box-label {
+  position: absolute;
+  top: 0;
+  left: 8px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 10px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: #2a2454;
+  border: 1px solid rgba(143, 127, 224, 0.65);
+  border-radius: 0 0 6px 6px;
+  border-top: none;
+  color: #cdc4ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+}
+
+.macro-box-label:active {
+  cursor: grabbing;
+}
+
+.macro-box-instance {
+  color: #8f86c9;
+  font-weight: 400;
+  font-size: 0.65rem;
 }
 
 /* Marquee select: the swept rectangle shown while dragging on the rack

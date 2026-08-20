@@ -149,6 +149,7 @@ function PickerEntry({ m, onAdd, onDragging }: PickerEntryProps) {
           <ErrorBoundary context={`preview ${m.id}`} fallback={() => null}>
             <ModulePanel
               instanceId={`preview-${m.id}`}
+              displayName={m.name}
               manifest={m}
               knobs={previewKnobs(m)}
               wired={{}}

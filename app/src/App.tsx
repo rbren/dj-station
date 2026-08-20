@@ -9,9 +9,10 @@
 // and knob drags re-render only the affected panels.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { engine, onMenuAction } from './engine';
+import { engine, onMenuAction, type MacroGroup } from './engine';
 import { library, type Track } from './library';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
+import { MacroBoxes } from './components/MacroBoxes';
 import { DeckUIContext } from './components/DeckPanel';
 import { DocsPanel } from './components/DocsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
@@ -102,8 +103,59 @@ export default function App() {
   const [confirmDiscard, setConfirmDiscard] = useState<null | { proceed: () => void }>(null);
   const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   const [collapseName, setCollapseName] = useState<string | null>(null);
-  // Right-click menu: over a module (instance set) or the rack background.
-  const [ctxMenu, setCtxMenu] = useState<null | { x: number; y: number; instance?: string }>(null);
+  // Expanded macro instances (bounding-box overlay + grouping semantics).
+  const [macroGroups, setMacroGroups] = useState<MacroGroup[]>([]);
+
+  // Instance id -> owning top-level macro group. Macro members act as one
+  // unit for selection/copy/delete/drag; per-member knob and wire edits
+  // stay individual.
+  const macroOwner = useMemo(() => {
+    const map = new Map<string, MacroGroup>();
+    for (const g of macroGroups) {
+      for (const m of g.members) map.set(m, g);
+    }
+    return map;
+  }, [macroGroups]);
+
+  /** Expand a set of instance ids so macro groups are all-or-nothing. */
+  const expandGroups = useCallback(
+    (ids: string[]) => {
+      const out = new Set<string>();
+      for (const id of ids) {
+        const g = macroOwner.get(id);
+        if (g) for (const m of g.members) out.add(m);
+        else out.add(id);
+      }
+      return [...out];
+    },
+    [macroOwner],
+  );
+
+  /** Engine-facing ids: macro members map to their instance id (which the
+   *  engine's copy/remove/reset accept), plain modules pass through. */
+  const toTopLevel = useCallback(
+    (ids: string[]) => {
+      const out: string[] = [];
+      const seen = new Set<string>();
+      for (const id of ids) {
+        const top = macroOwner.get(id)?.instance ?? id;
+        if (!seen.has(top)) {
+          seen.add(top);
+          out.push(top);
+        }
+      }
+      return out;
+    },
+    [macroOwner],
+  );
+  // Right-click menu: over a module (instance set), a macro box (group) or
+  // the rack background.
+  const [ctxMenu, setCtxMenu] = useState<null | {
+    x: number;
+    y: number;
+    instance?: string;
+    macroGroup?: MacroGroup;
+  }>(null);
   // In-app module documentation (opened from the module context menu).
   const [docs, setDocs] = useState<null | { typeId: string; manifest: Manifest }>(null);
   // Cmd+M module picker modal.
@@ -258,6 +310,14 @@ export default function App() {
       if (selected.length > 1 && selected.includes(instance)) {
         dragBump.current = null;
         moveGroup(instance, x, y, selected);
+        return;
+      }
+      // Dragging any macro member moves its whole group rigidly: a macro
+      // is one unit on the rack (the bounding box goes along for free).
+      const owner = macroOwner.get(instance);
+      if (owner) {
+        dragBump.current = null;
+        moveGroup(instance, x, y, owner.members);
         return;
       }
       setPositions((prev) => {
@@ -415,7 +475,7 @@ export default function App() {
         return next;
       });
     },
-    [store, setPositions, moveGroup],
+    [store, setPositions, moveGroup, macroOwner],
   );
 
   // Post-render placement pass: with real panel sizes in the DOM, move any
@@ -454,9 +514,69 @@ export default function App() {
     if (snapshot) store.setNodes(snapshot);
     const wireList = await engine.wires();
     if (wireList) store.set({ wires: wireList });
+    const groups = await engine.macroGroups();
+    if (groups) setMacroGroups(groups);
     const tracks = await library.tracks();
     if (tracks) setLibraryTracks(tracks);
   }, [store]);
+
+  /** Place a macro instance's expanded members using the definition's
+   *  saved arrangement (relative positions), anchored at `at` (falling
+   *  back to any position stored under the instance id — e.g. a layout
+   *  saved by the old collapsed view — then to a spot near the origin).
+   *  Members the definition has no position for are left to the post-
+   *  render placement fixup. */
+  const placeMacroGroup = useCallback(
+    async (instance: string, macroId: string, at?: { x: number; y: number }) => {
+      const layout = (await engine.macroLayout(macroId)) ?? {};
+      const entries = Object.entries(layout);
+      if (entries.length === 0) return;
+      const { nodes, positions: prev } = store.getState();
+      const placed: Rect[] = nodes
+        .filter((n) => !n.instance_id.startsWith(`${instance}/`))
+        .map((n, i) => moduleRect(n.instance_id, prev[n.instance_id] ?? defaultPosition(i)));
+      const rels = entries.map(([id, [x, y]]) => ({
+        id: `${instance}/${id}`,
+        rect: moduleRect(`${instance}/${id}`, { x, y }),
+      }));
+      const bbox = boundingBox(rels.map((r) => r.rect));
+      const want = at ?? prev[instance] ?? { x: GRID, y: GRID };
+      const spot = nearestFreeSpot(want, { w: bbox.w, h: bbox.h }, placed) ?? want;
+      setPositions((p) => {
+        const next = { ...p };
+        // A paste/legacy layout may have parked a position under the
+        // instance id itself; the members replace it.
+        delete next[instance];
+        for (const r of rels) {
+          next[r.id] = { x: spot.x + (r.rect.x - bbox.x), y: spot.y + (r.rect.y - bbox.y) };
+        }
+        saveJson(POSITIONS_KEY, next);
+        return next;
+      });
+    },
+    [store, setPositions],
+  );
+
+  /** Lay out any macro group whose members have no stored positions yet
+   *  (fresh patch load on this machine, pasted/recreated instances). */
+  const placeUnplacedMacros = useCallback(
+    async (groups?: MacroGroup[]) => {
+      const list = groups ?? (await engine.macroGroups()) ?? [];
+      for (const g of list) {
+        const prev = store.getState().positions;
+        if (g.members.some((m) => prev[m])) continue;
+        await placeMacroGroup(g.instance, g.macro_id);
+      }
+    },
+    [store, placeMacroGroup],
+  );
+
+  // Whatever brought a macro group in (patch load, undo/redo recreation,
+  // startup) — if its members have no saved positions on this machine,
+  // lay them out from the definition's arrangement.
+  useEffect(() => {
+    if (macroGroups.length > 0) void placeUnplacedMacros(macroGroups);
+  }, [macroGroups, placeUnplacedMacros]);
 
   useEffect(() => {
     void (async () => {
@@ -625,7 +745,12 @@ export default function App() {
       const taken = new Set(nodes.map((n) => n.instance_id));
       const instance = nextInstanceId(typeId, taken);
       await engine.addModule(instance, typeId);
-      if (at) {
+      const isMacro = moduleLib.find((m) => m.id === typeId)?.abi === 'macro-1';
+      if (isMacro) {
+        // A macro expands to a group of panels: lay them out from the
+        // definition's saved arrangement, anchored at the drop point.
+        await placeMacroGroup(instance, typeId, at);
+      } else if (at) {
         // Deterministic, near-the-cursor placement: the drop point itself
         // when free, otherwise the nearest free grid spot (ring search) —
         // never a far-away jump.
@@ -638,30 +763,35 @@ export default function App() {
       }
       await refresh();
     },
-    [store, refresh, moveModule],
+    [store, refresh, moveModule, moduleLib, placeMacroGroup],
   );
 
   // Selection model (standard desktop semantics): a plain click on a module
   // selects exactly that module, shift/cmd/ctrl-click toggles membership,
   // a rack-background click or Escape clears, cmd/ctrl+A selects all.
-  // Engine refreshes prune ids that no longer exist (rackStore.setNodes),
-  // so a selection can never outlive its modules.
+  // Macro members select as a group (all-or-nothing), so a macro always
+  // moves/copies/deletes as one unit. Engine refreshes prune ids that no
+  // longer exist (rackStore.setNodes), so a selection can never outlive
+  // its modules.
   const selectModule = useCallback(
     (instance: string, additive: boolean) => {
       const prev = store.getState().selected;
+      const unit = expandGroups([instance]);
       if (!additive) {
         // Pressing an already-selected module keeps the whole selection
         // (selection happens on mousedown, so a header drag of one member
         // must not collapse the group).
-        if (!prev.includes(instance)) setSelected([instance]);
+        if (!prev.includes(instance)) setSelected(unit);
         else window.getSelection()?.removeAllRanges();
         return;
       }
       setSelected(
-        prev.includes(instance) ? prev.filter((i) => i !== instance) : [...prev, instance],
+        prev.includes(instance)
+          ? prev.filter((i) => !unit.includes(i))
+          : [...new Set([...prev, ...unit])],
       );
     },
-    [store, setSelected],
+    [store, setSelected, expandGroups],
   );
 
   // Module clipboard: an opaque engine payload (modules + wires internal
@@ -677,19 +807,27 @@ export default function App() {
   const copyModules = useCallback(
     async (instances: string[]) => {
       if (instances.length === 0) return;
-      const payload = await engine.copyModules(instances);
+      // The engine's clipboard speaks top-level ids: macro members copy as
+      // their whole instance (a macro is all-or-nothing).
+      const topIds = toTopLevel(instances);
+      const payload = await engine.copyModules(topIds);
       if (!payload) return;
       const { nodes, positions } = store.getState();
-      const rects: Record<string, Rect> = {};
-      for (const id of instances) {
+      const posOf = (id: string) => {
         const idx = nodes.findIndex((n) => n.instance_id === id);
-        const pos = positions[id] ?? defaultPosition(Math.max(idx, 0));
-        rects[id] = moduleRect(id, pos);
+        return positions[id] ?? defaultPosition(Math.max(idx, 0));
+      };
+      const rects: Record<string, Rect> = {};
+      for (const id of topIds) {
+        const group = macroGroups.find((g) => g.instance === id);
+        rects[id] = group
+          ? boundingBox(group.members.map((m) => moduleRect(m, posOf(m))))
+          : moduleRect(id, posOf(id));
       }
       clipboard.current = { payload, rects };
       setClipboardFilled(true);
     },
-    [store],
+    [store, toTopLevel, macroGroups],
   );
 
   // Last pointer position over the rack, in unzoomed rack coordinates —
@@ -750,39 +888,117 @@ export default function App() {
     // nodes in — setNodes prunes selection against the live node list, so
     // selecting first would race the prune.
     await refresh();
-    setSelected(Object.values(renames));
-  }, [setPositions, refresh, setSelected]);
+    // Pasted macro instances arrive with unplaced internals: lay each out
+    // from its definition, anchored where the paste put the group.
+    await placeUnplacedMacros();
+    const pasted = (await engine.macroGroups()) ?? [];
+    setSelected(
+      Object.values(renames).flatMap(
+        (id) => pasted.find((g) => g.instance === id)?.members ?? [id],
+      ),
+    );
+  }, [setPositions, refresh, setSelected, placeUnplacedMacros]);
 
   const removeModules = useCallback(
     async (instances: string[]) => {
       if (instances.length === 0) return;
-      await engine.removeModules(instances);
+      // Macro members delete as their whole instance (all-or-nothing).
+      const topIds = toTopLevel(instances);
+      const gone = expandGroups(instances);
+      await engine.removeModules(topIds);
       setPositions((prev) => {
         const next = { ...prev };
-        for (const id of instances) delete next[id];
+        for (const id of gone) delete next[id];
         saveJson(POSITIONS_KEY, next);
         return next;
       });
       const { pending, selected } = store.getState();
-      setSelected(selected.filter((i) => !instances.includes(i)));
-      if (pending && instances.includes(pending.instance)) setPending(null);
+      setSelected(selected.filter((i) => !gone.includes(i)));
+      if (pending && gone.includes(pending.instance)) setPending(null);
       await refresh();
     },
-    [store, setPositions, setPending, refresh, setSelected],
+    [store, setPositions, setPending, refresh, setSelected, toTopLevel, expandGroups],
   );
 
   const collapseToMacro = useCallback(
     async (name: string) => {
       const selected = store.getState().selected;
       if (!name.trim() || selected.length === 0) return;
-      await engine.collapseMacro(selected, name.trim());
+      // The selection may contain macro members; the engine collapses
+      // top-level ids (nested macros collapse whole).
+      const topIds = toTopLevel(selected);
+      // Definition positions: each collapsed unit's current rack position
+      // (a nested macro's is its group bounding-box corner).
+      const { nodes, positions: prev } = store.getState();
+      const posOf = (id: string) => {
+        const idx = nodes.findIndex((n) => n.instance_id === id);
+        return prev[id] ?? defaultPosition(Math.max(idx, 0));
+      };
+      const defPositions: Record<string, [number, number]> = {};
+      for (const id of topIds) {
+        const group = macroGroups.find((g) => g.instance === id);
+        if (group) {
+          const box = boundingBox(group.members.map((m) => moduleRect(m, posOf(m))));
+          defPositions[id] = [box.x, box.y];
+        } else {
+          const p = posOf(id);
+          defPositions[id] = [p.x, p.y];
+        }
+      }
+      const instance = await engine.collapseMacro(topIds, name.trim(), defPositions);
       setSelected([]);
       setCollapseName(null);
       const modules = await engine.listModules();
       if (modules) setModuleLib(modules);
+      // The engine rebuilt the selection as <instance>/<old id> nodes
+      // (nested macro members gain the same prefix): carry every panel's
+      // position over so nothing moves on screen.
+      if (instance) {
+        setPositions((p) => {
+          const next = { ...p };
+          for (const id of topIds) {
+            for (const key of Object.keys(next)) {
+              if (key === id || key.startsWith(`${id}/`)) {
+                next[`${instance}/${key}`] = next[key];
+                delete next[key];
+              }
+            }
+            if (!next[`${instance}/${id}`] && !macroGroups.some((g) => g.instance === id)) {
+              next[`${instance}/${id}`] = posOf(id);
+            }
+          }
+          saveJson(POSITIONS_KEY, next);
+          return next;
+        });
+      }
       await refresh();
     },
-    [store, refresh, setSelected],
+    [store, refresh, setSelected, toTopLevel, macroGroups, setPositions],
+  );
+
+  // Right-click "Break Macro": internals become ordinary modules in place;
+  // positions carry over through the returned rename map so nothing moves.
+  const breakMacro = useCallback(
+    async (group: MacroGroup) => {
+      const renames = await engine.breakMacro(group.instance);
+      if (renames) {
+        setPositions((prev) => {
+          const next = { ...prev };
+          for (const [oldId, newId] of Object.entries(renames)) {
+            if (next[oldId]) {
+              next[newId] = next[oldId];
+              delete next[oldId];
+            }
+          }
+          delete next[group.instance];
+          saveJson(POSITIONS_KEY, next);
+          return next;
+        });
+      }
+      setSelected([]);
+      await refresh();
+    },
+    [refresh, setPositions, setSelected],
   );
 
   // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z),
@@ -1041,8 +1257,10 @@ export default function App() {
       // setSelected (not a raw store.set): the sweep drags across text
       // outside the panels and leaves a native text selection behind,
       // which would make the next cmd+C silently copy text instead of
-      // the swept modules.
-      setSelected(m.additive ? [...new Set([...selected, ...hit])] : hit);
+      // the swept modules. Sweeping any macro member pulls in its whole
+      // group (all-or-nothing selection).
+      const hitAll = expandGroups(hit);
+      setSelected(m.additive ? [...new Set([...selected, ...hitAll])] : hitAll);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -1050,7 +1268,7 @@ export default function App() {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [marqueeActive, toRackCoords, store, setSelected]);
+  }, [marqueeActive, toRackCoords, store, setSelected, expandGroups]);
 
   // Right-click never shows the browser/Tauri context menu anywhere in the
   // app; specific surfaces (modules, rack background) open the app-styled
@@ -1066,14 +1284,26 @@ export default function App() {
       e.preventDefault();
       e.stopPropagation();
       // Right-clicking outside the current selection retargets it to the
-      // clicked module (standard desktop behavior); inside it, the menu
-      // acts on the whole group.
+      // clicked module (standard desktop behavior — macro members retarget
+      // to their whole group); inside it, the menu acts on the whole group.
       if (!store.getState().selected.includes(instance)) {
-        setSelected([instance]);
+        setSelected(expandGroups([instance]));
       }
-      setCtxMenu({ x: e.clientX, y: e.clientY, instance });
+      setCtxMenu({ x: e.clientX, y: e.clientY, instance, macroGroup: macroOwner.get(instance) });
     },
-    [store, setSelected],
+    [store, setSelected, expandGroups, macroOwner],
+  );
+
+  // Right-click on a macro bounding box (its label): macro menu for that
+  // group, selection retargeted to its members.
+  const onMacroBoxContextMenu = useCallback(
+    (group: MacroGroup, e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setSelected(group.members);
+      setCtxMenu({ x: e.clientX, y: e.clientY, instance: group.members[0], macroGroup: group });
+    },
+    [setSelected],
   );
 
   const openDocs = useCallback(
@@ -1091,6 +1321,12 @@ export default function App() {
 
   const removeModule = useCallback(
     async (instance: string) => {
+      // A macro member's ✕ deletes the whole instance (all-or-nothing);
+      // removeModules already routes through toTopLevel/expandGroups.
+      if (macroOwner.has(instance)) {
+        await removeModules([instance]);
+        return;
+      }
       await engine.removeModule(instance);
       setPositions((prev) => {
         if (!(instance in prev)) return prev;
@@ -1103,7 +1339,30 @@ export default function App() {
       if (pending?.instance === instance) setPending(null);
       await refresh();
     },
-    [store, setPositions, setPending, refresh],
+    [store, setPositions, setPending, refresh, macroOwner, removeModules],
+  );
+
+  const renameModule = useCallback(
+    async (instance: string, name: string) => {
+      // The backend normalizes the typed name into the new instance id and
+      // rejects duplicates/empty names — a rejection reports to the error
+      // banner, resolves null, and the refresh below reverts the display.
+      const newId = await engine.renameModule(instance, name);
+      if (newId && newId !== instance) {
+        setPositions((prev) => {
+          if (!(instance in prev)) return prev;
+          const next = { ...prev, [newId]: prev[instance] };
+          delete next[instance];
+          saveJson(POSITIONS_KEY, next);
+          return next;
+        });
+        setSelected(store.getState().selected.map((id) => (id === instance ? newId : id)));
+        const pending = store.getState().pending;
+        if (pending?.instance === instance) setPending(null);
+      }
+      await refresh();
+    },
+    [store, setPositions, setSelected, setPending, refresh],
   );
 
   // Shared state for DeckPanel custom UIs (track list, sync candidates,
@@ -1146,6 +1405,7 @@ export default function App() {
     // other module it acts on just that module.
     const group = selected.includes(instance) && selected.length > 1 ? selected : [instance];
     const suffix = group.length > 1 ? ` (${group.length} modules)` : '';
+    const macroGroup = ctxMenu.macroGroup;
     return [
       {
         label: `Copy${suffix}`,
@@ -1158,6 +1418,15 @@ export default function App() {
         testId: 'ctx-delete',
         onSelect: () => void removeModules(group),
       },
+      ...(macroGroup
+        ? [
+            {
+              label: `Break Macro "${macroGroup.name}"`,
+              testId: 'ctx-break-macro',
+              onSelect: () => void breakMacro(macroGroup),
+            },
+          ]
+        : []),
       ...(group.length === 1
         ? [
             {
@@ -1171,7 +1440,7 @@ export default function App() {
         label: `Reset to defaults${suffix}`,
         testId: 'ctx-reset',
         onSelect: () => {
-          void engine.resetModules(group).then(refresh);
+          void engine.resetModules(toTopLevel(group)).then(refresh);
         },
       },
     ];
@@ -1183,8 +1452,10 @@ export default function App() {
     copyModules,
     pasteModules,
     removeModules,
+    breakMacro,
     openDocs,
     refresh,
+    toTopLevel,
   ]);
 
   return (
@@ -1445,6 +1716,12 @@ export default function App() {
                   transformOrigin: '0 0',
                 }}
               >
+                <MacroBoxes
+                  groups={macroGroups}
+                  zoom={zoom}
+                  onMoveGroup={(anchor, x, y, members) => moveGroup(anchor, x, y, members)}
+                  onContextMenu={onMacroBoxContextMenu}
+                />
                 {nodes.map((node, i) => (
                   <RackModule
                     key={node.instance_id}
@@ -1455,6 +1732,7 @@ export default function App() {
                     endModuleDrag={endModuleDrag}
                     zoom={zoom}
                     removeModule={removeModule}
+                    renameModule={renameModule}
                     openDocs={openDocs}
                     selectModule={selectModule}
                     onJackClick={onJackClick}

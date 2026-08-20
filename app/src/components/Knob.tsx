@@ -207,6 +207,10 @@ export interface KnobProps {
   /** Layout-chosen control look: default dial, or a slider ('fader'
    *  vertical / 'hfader' horizontal) for mixer-style channels. */
   appearance?: 'fader' | 'hfader';
+  /** Cosmetic jack color (WIRE_COLORS index; null/undefined = none),
+   *  editable from the config menu when onJackColor is provided. */
+  jackColor?: number | null;
+  onJackColor?(color: number | null): void;
 }
 
 export function Knob(props: KnobProps) {
@@ -291,6 +295,8 @@ export function Knob(props: KnobProps) {
       wireStyle={props.wireStyle}
       onWireStyle={props.onWireStyle}
       display={display}
+      jackColor={props.jackColor}
+      onJackColor={props.onJackColor}
     />
   );
 

@@ -12,6 +12,7 @@ import { createPortal } from 'react-dom';
 import { DEFAULT_UNIT, displayNumber, displayToRaw, noteOptions } from '../display';
 import type { CurveName, DisplaySpec, KnobConfig, KnobStyle, WireStyle } from '../types';
 import { attenOffsetForSpread, mapPosition, positionForValue, spreadRange } from './Knob';
+import { WIRE_COLORS } from './WireOverlay';
 
 export function KnobConfigMenu({
   config,
@@ -29,6 +30,9 @@ export function KnobConfigMenu({
   wireStyle,
   onWireStyle,
   display,
+  jackColor,
+  onJackColor,
+  colorOnly,
 }: {
   config: KnobConfig;
   /** Viewport coordinates to anchor the menu at (the right-click point). */
@@ -54,6 +58,13 @@ export function KnobConfigMenu({
    *  (the same numbers the tooltip shows), converted back through the
    *  spec's map. Hz units additionally get a note picker. */
   display?: DisplaySpec | null;
+  /** Cosmetic jack color (WIRE_COLORS index; null/undefined = none). */
+  jackColor?: number | null;
+  onJackColor?(color: number | null): void;
+  /** Color-only mode: hides every knob field, leaving just the color
+   *  picker — used for jack-only inputs (audio pass-throughs) that have
+   *  no knob to configure. */
+  colorOnly?: boolean;
 }) {
   const curveName = typeof config.curve === 'string' ? config.curve : 'custom';
   const ref = useRef<HTMLDivElement | null>(null);
@@ -120,7 +131,7 @@ export function KnobConfigMenu({
       aria-label="Knob configuration"
       style={at ? { position: 'fixed', left: at.x, top: at.y } : undefined}
     >
-      {onPosition && config.style !== 'wire' && (
+      {!colorOnly && onPosition && config.style !== 'wire' && (
         <>
           <label>
             Value{unit ? ` (${unit})` : ''}
@@ -177,100 +188,134 @@ export function KnobConfigMenu({
           )}
         </>
       )}
-      <label>
-        Style
-        <select
-          aria-label="knob style"
-          value={config.style}
-          onChange={(e) => onChange({ ...config, style: e.target.value as KnobStyle })}
-        >
-          <option value="continuous">continuous</option>
-          <option value="stepped">stepped</option>
-          <option value="switch">switch</option>
-          <option value="button">button</option>
-          <option value="wire">wire</option>
-        </select>
-      </label>
-      {config.style === 'stepped' && (
-        <label>
-          Steps
-          <input
-            type="number"
-            aria-label="knob steps"
-            min={2}
-            value={config.steps ?? 2}
-            onChange={(e) => onChange({ ...config, steps: Number(e.target.value) })}
-          />
-        </label>
-      )}
-      <label>
-        Min
-        <input
-          type="number"
-          aria-label="knob min"
-          value={config.min}
-          onChange={(e) => onChange({ ...config, min: Number(e.target.value) })}
-        />
-      </label>
-      <label>
-        Max
-        <input
-          type="number"
-          aria-label="knob max"
-          value={config.max}
-          onChange={(e) => onChange({ ...config, max: Number(e.target.value) })}
-        />
-      </label>
-      <label>
-        Curve
-        <select
-          aria-label="knob curve"
-          value={curveName}
-          disabled={curveName === 'custom'}
-          onChange={(e) => onChange({ ...config, curve: e.target.value as CurveName })}
-        >
-          <option value="linear">linear</option>
-          <option value="exp">exp</option>
-          <option value="log">log</option>
-          {curveName === 'custom' && <option value="custom">custom</option>}
-        </select>
-      </label>
-      {wired && onWireStyle && (
-        <label>
-          Wire mode
-          <select
-            aria-label="wire mode"
-            value={wireStyle ?? 'cv'}
-            onChange={(e) => onWireStyle(e.target.value as WireStyle)}
-          >
-            <option value="cv">CV (adds to knob)</option>
-            <option value="override">override (sets value)</option>
-          </select>
-        </label>
-      )}
-      {wired && onAttenOffset && wireStyle !== 'override' && (
+      {!colorOnly && (
         <>
-          <div className="knob-config-section">Wire spread</div>
           <label>
-            Spread min
+            Style
+            <select
+              aria-label="knob style"
+              value={config.style}
+              onChange={(e) => onChange({ ...config, style: e.target.value as KnobStyle })}
+            >
+              <option value="continuous">continuous</option>
+              <option value="stepped">stepped</option>
+              <option value="switch">switch</option>
+              <option value="button">button</option>
+              <option value="wire">wire</option>
+            </select>
+          </label>
+          {config.style === 'stepped' && (
+            <label>
+              Steps
+              <input
+                type="number"
+                aria-label="knob steps"
+                min={2}
+                value={config.steps ?? 2}
+                onChange={(e) => onChange({ ...config, steps: Number(e.target.value) })}
+              />
+            </label>
+          )}
+          <label>
+            Min
             <input
               type="number"
-              aria-label="wire spread min"
-              step={0.1}
-              value={Number(spread.min.toFixed(4))}
-              onChange={(e) => setSpread(Number(e.target.value), spread.max)}
+              aria-label="knob min"
+              value={config.min}
+              onChange={(e) => onChange({ ...config, min: Number(e.target.value) })}
             />
           </label>
           <label>
-            Spread max
+            Max
             <input
               type="number"
-              aria-label="wire spread max"
-              step={0.1}
-              value={Number(spread.max.toFixed(4))}
-              onChange={(e) => setSpread(spread.min, Number(e.target.value))}
+              aria-label="knob max"
+              value={config.max}
+              onChange={(e) => onChange({ ...config, max: Number(e.target.value) })}
             />
           </label>
+          <label>
+            Curve
+            <select
+              aria-label="knob curve"
+              value={curveName}
+              disabled={curveName === 'custom'}
+              onChange={(e) => onChange({ ...config, curve: e.target.value as CurveName })}
+            >
+              <option value="linear">linear</option>
+              <option value="exp">exp</option>
+              <option value="log">log</option>
+              {curveName === 'custom' && <option value="custom">custom</option>}
+            </select>
+          </label>
+          {wired && onWireStyle && (
+            <label>
+              Wire mode
+              <select
+                aria-label="wire mode"
+                value={wireStyle ?? 'cv'}
+                onChange={(e) => onWireStyle(e.target.value as WireStyle)}
+              >
+                <option value="cv">CV (adds to knob)</option>
+                <option value="override">override (sets value)</option>
+              </select>
+            </label>
+          )}
+          {wired && onAttenOffset && wireStyle !== 'override' && (
+            <>
+              <div className="knob-config-section">Wire spread</div>
+              <label>
+                Spread min
+                <input
+                  type="number"
+                  aria-label="wire spread min"
+                  step={0.1}
+                  value={Number(spread.min.toFixed(4))}
+                  onChange={(e) => setSpread(Number(e.target.value), spread.max)}
+                />
+              </label>
+              <label>
+                Spread max
+                <input
+                  type="number"
+                  aria-label="wire spread max"
+                  step={0.1}
+                  value={Number(spread.max.toFixed(4))}
+                  onChange={(e) => setSpread(spread.min, Number(e.target.value))}
+                />
+              </label>
+            </>
+          )}
+        </>
+      )}
+      {onJackColor && (
+        <>
+          <div className="knob-config-section">Color</div>
+          <div className="jack-color-row" role="radiogroup" aria-label="jack color">
+            <button
+              type="button"
+              className={`jack-color-swatch jack-color-none${
+                jackColor === null || jackColor === undefined ? ' jack-color-selected' : ''
+              }`}
+              role="radio"
+              aria-checked={jackColor === null || jackColor === undefined}
+              aria-label="no color"
+              title="none"
+              onClick={() => onJackColor(null)}
+            />
+            {WIRE_COLORS.map((c, i) => (
+              <button
+                key={c}
+                type="button"
+                className={`jack-color-swatch${jackColor === i ? ' jack-color-selected' : ''}`}
+                role="radio"
+                aria-checked={jackColor === i}
+                aria-label={`color ${i + 1}`}
+                style={{ background: c }}
+                onClick={() => onJackColor(i)}
+              />
+            ))}
+          </div>
         </>
       )}
       <button onClick={onClose}>Close</button>

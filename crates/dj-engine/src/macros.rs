@@ -63,6 +63,12 @@ pub struct MacroDef {
     #[serde(default)]
     pub wires: BTreeMap<String, WireFile>,
     pub interface: MacroInterface,
+    /// Saved rack positions of the internal modules, keyed by internal
+    /// instance id, relative to the group's top-left corner. Pure UI
+    /// passthrough (the engine never computes on it); empty for macros
+    /// saved before positions were recorded.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub positions: BTreeMap<String, (f32, f32)>,
 }
 
 /// An in-memory collection of macro definitions (the engine-side view of
@@ -93,6 +99,9 @@ impl MacroLibrary {
 pub struct MacroInstance {
     pub macro_id: String,
     pub version: u32,
+    /// User-facing name as typed; same invariant as
+    /// [`crate::engine::NodeInfo::display_name`].
+    pub display_name: Option<String>,
     /// (external jack id, concrete node instance id, concrete jack id)
     pub inputs: Vec<(String, String, String)>,
     pub outputs: Vec<(String, String, String)>,

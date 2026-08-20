@@ -43,6 +43,9 @@ const fakeEngine = {
   wires: vi.fn(async () => state.wires),
   tap: vi.fn(async () => null),
   tapAll: vi.fn(async () => ({})),
+  macroGroups: vi.fn(async () => []),
+  macroLayout: vi.fn(async () => ({})),
+  breakMacro: vi.fn(async () => ({})),
   addModule: vi.fn(async () => {}),
   connectWire: vi.fn(async () => {}),
   disconnectWire: vi.fn(async () => {}),
@@ -58,6 +61,7 @@ const fakeEngine = {
   newPatch: vi.fn(async () => {}),
   patchDirty: vi.fn(async () => false),
   removeModule: vi.fn(async () => {}),
+  renameModule: vi.fn(async (): Promise<string | null> => null),
   endEdit: vi.fn(async () => {}),
 };
 
@@ -251,6 +255,50 @@ describe('module delete button', () => {
     await waitFor(() => expect(fakeEngine.removeModule).toHaveBeenCalledWith('osc1'));
     // Removal refreshes the graph from the engine.
     await waitFor(() => expect(fakeEngine.nodes.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+});
+
+describe('module rename', () => {
+  it('commits a typed name and remaps the saved position to the new id', async () => {
+    localStorage.setItem(
+      'dj-rack-positions',
+      JSON.stringify({ osc1: { x: 96, y: 48 }, vca1: { x: 480, y: 48 } }),
+    );
+    fakeEngine.renameModule.mockResolvedValueOnce('main_osc');
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+
+    fireEvent.doubleClick(screen.getByTestId('module-name-osc1'));
+    const input = screen.getByTestId('module-rename-osc1') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'Main Osc' } });
+    // The backend renames and the next nodes() reflects the new id + name.
+    state.nodes = [{ ...node('main_osc', OSC), display_name: 'Main Osc' }, node('vca1', VCA)];
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(fakeEngine.renameModule).toHaveBeenCalledWith('osc1', 'Main Osc'));
+    await waitFor(() => expect(screen.getByTestId('module-main_osc')).toBeTruthy());
+    // Prominent display name; the saved rack position followed the id.
+    expect(screen.getByTestId('module-name-main_osc').textContent).toBe('Main Osc');
+    const positions = JSON.parse(localStorage.getItem('dj-rack-positions')!);
+    expect(positions.main_osc).toEqual({ x: 96, y: 48 });
+    expect(positions.osc1).toBeUndefined();
+  });
+
+  it('a rejected rename (duplicate) reverts the display after refresh', async () => {
+    // The engine bridge resolves null on a backend rejection (the error
+    // banner reports it); the panel just refreshes back to the old state.
+    fakeEngine.renameModule.mockResolvedValueOnce(null);
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+
+    fireEvent.doubleClick(screen.getByTestId('module-name-osc1'));
+    const input = screen.getByTestId('module-rename-osc1') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'VCA1' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(fakeEngine.renameModule).toHaveBeenCalledWith('osc1', 'VCA1'));
+    // Still the old id/name; nothing was remapped.
+    await waitFor(() => expect(screen.getByTestId('module-name-osc1').textContent).toBe('osc1'));
   });
 });
 
