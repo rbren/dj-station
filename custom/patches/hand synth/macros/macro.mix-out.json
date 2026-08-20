@@ -1,0 +1,484 @@
+{
+  "id": "macro.mix-out",
+  "name": "Mix Out",
+  "version": 1,
+  "modules": {
+    "audioout1": {
+      "ext": "builtin.audio_out",
+      "knobs": {
+        "channel_offset": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "mute": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "left_scope": {
+      "ext": "com.dj.scope",
+      "name": "left scope",
+      "knobs": {
+        "hysteresis": {
+          "position": 0.22413793,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "window": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "mixer1": {
+      "ext": "com.dj.mixer",
+      "knobs": {
+        "in1_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in1_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in2_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in2_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in3_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in3_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in4_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in4_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in5_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in5_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in6_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in6_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl1": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl2": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl3": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl4": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl5": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl6": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "master": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan1": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan2": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan3": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan4": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan5": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan6": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "right_scope": {
+      "ext": "com.dj.scope",
+      "name": "right scope",
+      "knobs": {
+        "hysteresis": {
+          "position": 0.22413793,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "window": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    }
+  },
+  "wires": {
+    "mixer1": {
+      "wires": [
+        {
+          "from_jack": "out_l",
+          "to": "audioout1",
+          "to_jack": "l"
+        },
+        {
+          "from_jack": "out_l",
+          "to": "left_scope",
+          "to_jack": "in"
+        },
+        {
+          "from_jack": "out_r",
+          "to": "audioout1",
+          "to_jack": "r"
+        },
+        {
+          "from_jack": "out_r",
+          "to": "right_scope",
+          "to_jack": "in"
+        }
+      ]
+    }
+  },
+  "interface": {
+    "inputs": [
+      {
+        "id": "channel_offset",
+        "node": "audioout1",
+        "jack": "channel_offset"
+      },
+      {
+        "id": "mute",
+        "node": "audioout1",
+        "jack": "mute"
+      },
+      {
+        "id": "hysteresis",
+        "node": "right_scope",
+        "jack": "hysteresis"
+      },
+      {
+        "id": "window",
+        "node": "right_scope",
+        "jack": "window"
+      },
+      {
+        "id": "left_scope_hysteresis",
+        "node": "left_scope",
+        "jack": "hysteresis"
+      },
+      {
+        "id": "left_scope_window",
+        "node": "left_scope",
+        "jack": "window"
+      },
+      {
+        "id": "in1_l",
+        "node": "mixer1",
+        "jack": "in1_l"
+      },
+      {
+        "id": "in1_r",
+        "node": "mixer1",
+        "jack": "in1_r"
+      },
+      {
+        "id": "lvl1",
+        "node": "mixer1",
+        "jack": "lvl1"
+      },
+      {
+        "id": "pan1",
+        "node": "mixer1",
+        "jack": "pan1"
+      },
+      {
+        "id": "in2_l",
+        "node": "mixer1",
+        "jack": "in2_l"
+      },
+      {
+        "id": "in2_r",
+        "node": "mixer1",
+        "jack": "in2_r"
+      },
+      {
+        "id": "lvl2",
+        "node": "mixer1",
+        "jack": "lvl2"
+      },
+      {
+        "id": "pan2",
+        "node": "mixer1",
+        "jack": "pan2"
+      },
+      {
+        "id": "in3_l",
+        "node": "mixer1",
+        "jack": "in3_l"
+      },
+      {
+        "id": "in3_r",
+        "node": "mixer1",
+        "jack": "in3_r"
+      },
+      {
+        "id": "lvl3",
+        "node": "mixer1",
+        "jack": "lvl3"
+      },
+      {
+        "id": "pan3",
+        "node": "mixer1",
+        "jack": "pan3"
+      },
+      {
+        "id": "in4_l",
+        "node": "mixer1",
+        "jack": "in4_l"
+      },
+      {
+        "id": "in4_r",
+        "node": "mixer1",
+        "jack": "in4_r"
+      },
+      {
+        "id": "lvl4",
+        "node": "mixer1",
+        "jack": "lvl4"
+      },
+      {
+        "id": "pan4",
+        "node": "mixer1",
+        "jack": "pan4"
+      },
+      {
+        "id": "in5_l",
+        "node": "mixer1",
+        "jack": "in5_l"
+      },
+      {
+        "id": "in5_r",
+        "node": "mixer1",
+        "jack": "in5_r"
+      },
+      {
+        "id": "lvl5",
+        "node": "mixer1",
+        "jack": "lvl5"
+      },
+      {
+        "id": "pan5",
+        "node": "mixer1",
+        "jack": "pan5"
+      },
+      {
+        "id": "in6_l",
+        "node": "mixer1",
+        "jack": "in6_l"
+      },
+      {
+        "id": "in6_r",
+        "node": "mixer1",
+        "jack": "in6_r"
+      },
+      {
+        "id": "lvl6",
+        "node": "mixer1",
+        "jack": "lvl6"
+      },
+      {
+        "id": "pan6",
+        "node": "mixer1",
+        "jack": "pan6"
+      },
+      {
+        "id": "master",
+        "node": "mixer1",
+        "jack": "master"
+      }
+    ],
+    "outputs": [
+      {
+        "id": "thru",
+        "node": "right_scope",
+        "jack": "thru"
+      },
+      {
+        "id": "pitch",
+        "node": "right_scope",
+        "jack": "pitch"
+      },
+      {
+        "id": "hz",
+        "node": "right_scope",
+        "jack": "hz"
+      },
+      {
+        "id": "peak",
+        "node": "right_scope",
+        "jack": "peak"
+      },
+      {
+        "id": "rms",
+        "node": "right_scope",
+        "jack": "rms"
+      },
+      {
+        "id": "trig",
+        "node": "right_scope",
+        "jack": "trig"
+      },
+      {
+        "id": "left_scope_thru",
+        "node": "left_scope",
+        "jack": "thru"
+      },
+      {
+        "id": "left_scope_pitch",
+        "node": "left_scope",
+        "jack": "pitch"
+      },
+      {
+        "id": "left_scope_hz",
+        "node": "left_scope",
+        "jack": "hz"
+      },
+      {
+        "id": "left_scope_peak",
+        "node": "left_scope",
+        "jack": "peak"
+      },
+      {
+        "id": "left_scope_rms",
+        "node": "left_scope",
+        "jack": "rms"
+      },
+      {
+        "id": "left_scope_trig",
+        "node": "left_scope",
+        "jack": "trig"
+      },
+      {
+        "id": "out_l",
+        "node": "mixer1",
+        "jack": "out_l"
+      },
+      {
+        "id": "out_r",
+        "node": "mixer1",
+        "jack": "out_r"
+      }
+    ],
+    "params": []
+  },
+  "positions": {
+    "audioout1": [
+      432.0,
+      384.0
+    ],
+    "left_scope": [
+      0.0,
+      0.0
+    ],
+    "mixer1": [
+      0.0,
+      384.0
+    ],
+    "right_scope": [
+      432.0,
+      0.0
+    ]
+  }
+}

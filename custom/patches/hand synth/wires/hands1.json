@@ -1,0 +1,19 @@
+{
+  "wires": [
+    {
+      "from_jack": "r_pinch",
+      "to": "attenuve2",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "rx",
+      "to": "synth21",
+      "to_jack": "adsr12_attack"
+    },
+    {
+      "from_jack": "ry",
+      "to": "attenuve1",
+      "to_jack": "in"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "synth21",
+      "to_jack": "atten1"
+    }
+  ]
+}

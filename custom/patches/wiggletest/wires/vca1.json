@@ -1,0 +1,19 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "out1",
+      "to_jack": "l"
+    },
+    {
+      "from_jack": "out",
+      "to": "out1",
+      "to_jack": "r"
+    },
+    {
+      "from_jack": "out",
+      "to": "scope1",
+      "to_jack": "in"
+    }
+  ]
+}

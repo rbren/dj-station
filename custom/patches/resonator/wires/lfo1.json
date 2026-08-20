@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "bi",
+      "to": "resonato1",
+      "to_jack": "pitch"
+    },
+    {
+      "from_jack": "bi",
+      "to": "resonato1",
+      "to_jack": "structure"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "C4",
+      "to": "adsr1",
+      "to_jack": "gate"
+    },
+    {
+      "from_jack": "C4",
+      "to": "adsr2",
+      "to_jack": "gate"
+    }
+  ]
+}

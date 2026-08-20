@@ -1,0 +1,19 @@
+{
+  "wires": [
+    {
+      "from_jack": "out1",
+      "to": "quantize1",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "out2",
+      "to": "vca2",
+      "to_jack": "cv"
+    },
+    {
+      "from_jack": "out3",
+      "to": "osc1",
+      "to_jack": "pitch"
+    }
+  ]
+}

@@ -1,0 +1,131 @@
+{
+  "ext": "com.dj.mixer",
+  "knobs": {
+    "in1_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in1_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in2_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in2_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in3_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in3_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in4_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in4_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in5_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in5_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in6_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in6_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl1": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl2": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl3": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl4": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl5": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl6": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "master": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan1": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan2": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan3": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan4": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan5": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan6": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

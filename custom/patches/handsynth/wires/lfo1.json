@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "bi",
+      "to": "drum1",
+      "to_jack": "kick_tune"
+    }
+  ]
+}

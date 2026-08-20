@@ -1,0 +1,41 @@
+{
+  "ext": "com.dj.function",
+  "knobs": {
+    "curve": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "cycle": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "fall": {
+      "position": 0.60498536,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gate": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rise": {
+      "position": 0.46500486,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "trig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

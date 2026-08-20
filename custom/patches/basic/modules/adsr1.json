@@ -1,0 +1,27 @@
+{
+  "ext": "com.dj.adsr",
+  "knobs": {
+    "gate": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0,
+      "config": {
+        "style": "wire",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    "retrig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {
+    "attack": 0.01,
+    "decay": 0.1,
+    "release": 0.2,
+    "sustain": 0.7
+  }
+}

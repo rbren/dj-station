@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "lx",
+      "to": "attenuve1",
+      "to_jack": "in1"
+    }
+  ]
+}

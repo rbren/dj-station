@@ -1,0 +1,34 @@
+{
+  "wires": [
+    {
+      "from_jack": "l_pinch",
+      "to": "reverb1",
+      "to_jack": "mix"
+    },
+    {
+      "from_jack": "lx",
+      "to": "attenuve1",
+      "to_jack": "in3"
+    },
+    {
+      "from_jack": "ly",
+      "to": "vca1",
+      "to_jack": "cv"
+    },
+    {
+      "from_jack": "r_pinch",
+      "to": "attenuve1",
+      "to_jack": "in2"
+    },
+    {
+      "from_jack": "rx",
+      "to": "mixer1",
+      "to_jack": "pan2"
+    },
+    {
+      "from_jack": "ry",
+      "to": "attenuve1",
+      "to_jack": "in1"
+    }
+  ]
+}

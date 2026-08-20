@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "lp",
+      "to": "vca12",
+      "to_jack": "in"
+    }
+  ]
+}

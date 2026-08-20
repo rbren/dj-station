@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "env",
+      "to": "attenuve1",
+      "to_jack": "in2"
+    },
+    {
+      "from_jack": "env",
+      "to": "vca12",
+      "to_jack": "cv"
+    }
+  ]
+}

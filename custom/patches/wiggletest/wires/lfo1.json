@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "bi",
+      "to": "stepseq1",
+      "to_jack": "clock"
+    }
+  ]
+}

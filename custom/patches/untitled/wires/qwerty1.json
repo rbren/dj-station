@@ -1,0 +1,24 @@
+{
+  "wires": [
+    {
+      "from_jack": "gate",
+      "to": "synth-2",
+      "to_jack": "adsr12_gate"
+    },
+    {
+      "from_jack": "gate",
+      "to": "synth-2",
+      "to_jack": "gate"
+    },
+    {
+      "from_jack": "note",
+      "to": "synth-2",
+      "to_jack": "in3"
+    },
+    {
+      "from_jack": "note",
+      "to": "synth-2",
+      "to_jack": "pitch"
+    }
+  ]
+}

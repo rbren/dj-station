@@ -1,0 +1,19 @@
+{
+  "wires": [
+    {
+      "from_jack": "gate",
+      "to": "synth21",
+      "to_jack": "adsr12_gate"
+    },
+    {
+      "from_jack": "gate",
+      "to": "synth21",
+      "to_jack": "gate"
+    },
+    {
+      "from_jack": "note",
+      "to": "synth21",
+      "to_jack": "pitch"
+    }
+  ]
+}

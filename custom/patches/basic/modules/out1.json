@@ -1,0 +1,30 @@
+{
+  "ext": "builtin.audio_out",
+  "knobs": {
+    "l": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0,
+      "config": {
+        "style": "wire",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    },
+    "r": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0,
+      "config": {
+        "style": "wire",
+        "min": 0.0,
+        "max": 10.0,
+        "curve": "linear"
+      }
+    }
+  },
+  "params": {
+    "channel_offset": 0.0
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "ext": "com.dj.drum",
+  "knobs": {
+    "hat_decay": {
+      "position": 0.451545,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "hat_tone": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "hat_trig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "hat_tune": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "kick_decay": {
+      "position": 0.5956347,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "kick_tone": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "kick_trig": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "kick_tune": {
+      "position": 0.6,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "snare_decay": {
+      "position": 0.54198647,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "snare_tone": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "snare_trig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "snare_tune": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

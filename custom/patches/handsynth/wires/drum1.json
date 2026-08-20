@@ -1,0 +1,24 @@
+{
+  "wires": [
+    {
+      "from_jack": "kick",
+      "to": "mixer1",
+      "to_jack": "in3_l"
+    },
+    {
+      "from_jack": "kick",
+      "to": "mixer1",
+      "to_jack": "in3_r"
+    },
+    {
+      "from_jack": "snare",
+      "to": "mixer1",
+      "to_jack": "in4_l"
+    },
+    {
+      "from_jack": "snare",
+      "to": "mixer1",
+      "to_jack": "in4_r"
+    }
+  ]
+}

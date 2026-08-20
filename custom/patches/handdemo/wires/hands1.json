@@ -1,0 +1,24 @@
+{
+  "wires": [
+    {
+      "from_jack": "l_pinch",
+      "to": "eq1",
+      "to_jack": "gain3"
+    },
+    {
+      "from_jack": "l_rot",
+      "to": "reverb1",
+      "to_jack": "mix"
+    },
+    {
+      "from_jack": "lx",
+      "to": "oscillat1",
+      "to_jack": "pitch"
+    },
+    {
+      "from_jack": "ly",
+      "to": "vca1",
+      "to_jack": "cv"
+    }
+  ]
+}

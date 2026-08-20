@@ -1,0 +1,31 @@
+{
+  "ext": "com.dj.filter",
+  "knobs": {
+    "cutoff": {
+      "position": 0.5833333,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "drive": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "res": {
+      "position": 0.15,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "topology": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "b",
+      "to": "drum1",
+      "to_jack": "snare_trig"
+    },
+    {
+      "from_jack": "v",
+      "to": "drum1",
+      "to_jack": "kick_trig"
+    }
+  ]
+}

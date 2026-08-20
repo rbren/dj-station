@@ -1,0 +1,94 @@
+{
+  "ext": "builtin.midi",
+  "knobs": {
+    "led0": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led10": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led11": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led12": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led13": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led14": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led15": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led6": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led7": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led8": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "led9": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {},
+  "midi_mappings": [
+    {
+      "name": "C4",
+      "kind": "note",
+      "num": 60,
+      "jack": 0
+    }
+  ]
+}
