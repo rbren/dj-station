@@ -1,7 +1,6 @@
 {
   "id": "macro.mix-out",
   "name": "Mix Out",
-  "version": 1,
   "modules": {
     "audioout1": {
       "ext": "builtin.audio_out",
@@ -31,7 +30,6 @@
     },
     "left_scope": {
       "ext": "com.dj.scope",
-      "name": "left scope",
       "knobs": {
         "hysteresis": {
           "position": 0.22413793,
@@ -184,7 +182,6 @@
     },
     "right_scope": {
       "ext": "com.dj.scope",
-      "name": "right scope",
       "knobs": {
         "hysteresis": {
           "position": 0.22413793,
@@ -234,6 +231,11 @@
   "interface": {
     "inputs": [
       {
+        "id": "in1_l",
+        "node": "mixer1",
+        "jack": "in1_l"
+      },
+      {
         "id": "channel_offset",
         "node": "audioout1",
         "jack": "channel_offset"
@@ -245,28 +247,13 @@
       },
       {
         "id": "hysteresis",
-        "node": "right_scope",
+        "node": "left_scope",
         "jack": "hysteresis"
       },
       {
         "id": "window",
-        "node": "right_scope",
-        "jack": "window"
-      },
-      {
-        "id": "left_scope_hysteresis",
-        "node": "left_scope",
-        "jack": "hysteresis"
-      },
-      {
-        "id": "left_scope_window",
         "node": "left_scope",
         "jack": "window"
-      },
-      {
-        "id": "in1_l",
-        "node": "mixer1",
-        "jack": "in1_l"
       },
       {
         "id": "in1_r",
@@ -387,66 +374,46 @@
         "id": "master",
         "node": "mixer1",
         "jack": "master"
+      },
+      {
+        "id": "right_scope_hysteresis",
+        "node": "right_scope",
+        "jack": "hysteresis"
+      },
+      {
+        "id": "right_scope_window",
+        "node": "right_scope",
+        "jack": "window"
       }
     ],
     "outputs": [
       {
         "id": "thru",
-        "node": "right_scope",
+        "node": "left_scope",
         "jack": "thru"
       },
       {
         "id": "pitch",
-        "node": "right_scope",
+        "node": "left_scope",
         "jack": "pitch"
       },
       {
         "id": "hz",
-        "node": "right_scope",
+        "node": "left_scope",
         "jack": "hz"
       },
       {
         "id": "peak",
-        "node": "right_scope",
+        "node": "left_scope",
         "jack": "peak"
       },
       {
         "id": "rms",
-        "node": "right_scope",
+        "node": "left_scope",
         "jack": "rms"
       },
       {
         "id": "trig",
-        "node": "right_scope",
-        "jack": "trig"
-      },
-      {
-        "id": "left_scope_thru",
-        "node": "left_scope",
-        "jack": "thru"
-      },
-      {
-        "id": "left_scope_pitch",
-        "node": "left_scope",
-        "jack": "pitch"
-      },
-      {
-        "id": "left_scope_hz",
-        "node": "left_scope",
-        "jack": "hz"
-      },
-      {
-        "id": "left_scope_peak",
-        "node": "left_scope",
-        "jack": "peak"
-      },
-      {
-        "id": "left_scope_rms",
-        "node": "left_scope",
-        "jack": "rms"
-      },
-      {
-        "id": "left_scope_trig",
         "node": "left_scope",
         "jack": "trig"
       },
@@ -459,6 +426,36 @@
         "id": "out_r",
         "node": "mixer1",
         "jack": "out_r"
+      },
+      {
+        "id": "right_scope_thru",
+        "node": "right_scope",
+        "jack": "thru"
+      },
+      {
+        "id": "right_scope_pitch",
+        "node": "right_scope",
+        "jack": "pitch"
+      },
+      {
+        "id": "right_scope_hz",
+        "node": "right_scope",
+        "jack": "hz"
+      },
+      {
+        "id": "right_scope_peak",
+        "node": "right_scope",
+        "jack": "peak"
+      },
+      {
+        "id": "right_scope_rms",
+        "node": "right_scope",
+        "jack": "rms"
+      },
+      {
+        "id": "right_scope_trig",
+        "node": "right_scope",
+        "jack": "trig"
       }
     ],
     "params": []
@@ -466,7 +463,7 @@
   "positions": {
     "audioout1": [
       432.0,
-      384.0
+      432.0
     ],
     "left_scope": [
       0.0,
@@ -474,7 +471,7 @@
     ],
     "mixer1": [
       0.0,
-      384.0
+      432.0
     ],
     "right_scope": [
       432.0,

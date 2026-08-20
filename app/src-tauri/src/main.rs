@@ -6,8 +6,8 @@
 
 use dj_engine::{
     Backend, Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle,
-    MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroResolution, Manifest, MidiMapKind,
-    PatchDoc, UndoHistory, WireStyle,
+    MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroStore, Manifest, MidiMapKind, PatchDoc,
+    UndoHistory, WireStyle, MACROS_DIR_NAME,
 };
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
@@ -121,7 +121,8 @@ enum EditKey<'a> {
     RemoveMany,
     CollapseMacro,
     BreakMacro(&'a str),
-    RenameMacro(&'a str),
+    PullMacro(&'a str),
+    ResetMacro(&'a str),
     Track(&'a str),
 }
 
@@ -162,7 +163,8 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::RemoveMany => write!(f, "remove_many"),
             EditKey::CollapseMacro => write!(f, "collapse_macro"),
             EditKey::BreakMacro(i) => write!(f, "break_macro:{i}"),
-            EditKey::RenameMacro(m) => write!(f, "rename_macro:{m}"),
+            EditKey::PullMacro(i) => write!(f, "pull_macro:{i}"),
+            EditKey::ResetMacro(i) => write!(f, "reset_macro:{i}"),
             EditKey::Track(i) => write!(f, "track:{i}"),
         }
     }
@@ -1636,13 +1638,8 @@ fn new_patch(state: State<AppState>) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::NewPatch)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
     let mut fresh = Engine::new(EngineConfig::default(), registry).map_err(err)?;
-    match db_macro_library(&state.library) {
-        Ok(lib) => {
-            for def in lib.defs.into_values() {
-                fresh.register_macro(def);
-            }
-        }
-        Err(e) => eprintln!("[dj-macros] loading macro library failed: {e}"),
+    for def in store_macro_library().defs.into_values() {
+        fresh.register_macro(def);
     }
     with_stopped(&mut engine, |e| {
         *e = fresh;
@@ -1693,16 +1690,14 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     let backend = engine.backend();
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
-    // Seed the replacement engine's macro library from the user DB so every
-    // stored macro stays instantiable regardless of what the patch itself
-    // uses (macros are canonical in the library, PRD §6; the patch's
-    // embedded copies still win for the macros it does use). Without this,
-    // an engine swap silently dropped every macro the patch didn't embed —
-    // e.g. break the last instance, quit, restart: the autosave restore
-    // came up knowing no macros at all.
+    // Seed the replacement engine's view of the macro store so every
+    // published macro stays instantiable regardless of what the patch
+    // itself uses (the patch's own per-instance copies are what its
+    // instances run). Without this, an engine swap silently dropped every
+    // macro the patch didn't use — e.g. break the last instance, quit,
+    // restart: the autosave restore came up knowing no macros at all.
     let doc = PatchDoc::read(dir).map_err(err)?;
-    let lib = db_macro_library(&state.library)?;
-    *engine = Engine::from_doc_with_macros(&doc, registry, lib).map_err(err)?;
+    *engine = Engine::from_doc_with_macros(&doc, registry, store_macro_library()).map_err(err)?;
     // Decks: re-apply library-stored DJ metadata (cues/loops/beatgrids)
     // for every loaded deck track (PRD §7 — metadata survives across
     // patches via the library DB, not the patch files).
@@ -1720,131 +1715,86 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     Ok(engine.load_warnings.clone())
 }
 
-#[derive(Serialize)]
-struct MacroConflictInfo {
-    macro_id: String,
-    name: String,
-    patch_version: u32,
-    library_version: u32,
+/// The global macro store: `<data_dir>/macros/`, a sibling of `patches/`.
+fn macro_store() -> MacroStore {
+    MacroStore::new(dj_library::default_data_dir().join(MACROS_DIR_NAME))
 }
 
-/// Macro definitions stored in the user library DB, as an engine-side
-/// `MacroLibrary`.
-fn db_macro_library(library: &Library) -> CmdResult<MacroLibrary> {
-    let mut lib = MacroLibrary::default();
-    for r in library.macros().map_err(err)? {
-        match serde_json::from_str::<MacroDef>(&r.definition) {
-            Ok(def) => lib.register(def),
-            Err(e) => eprintln!("[dj-macros] bad stored definition for {}: {e}", r.id),
+/// Every published macro, as an engine-side `MacroLibrary`. A store that
+/// cannot be read is logged and treated as empty — a broken definition
+/// file must not stop the app from opening a patch.
+fn store_macro_library() -> MacroLibrary {
+    match macro_store().load() {
+        Ok(lib) => lib,
+        Err(e) => {
+            eprintln!("[dj-macros] loading the macro store failed: {e:#}");
+            MacroLibrary::default()
         }
     }
-    Ok(lib)
 }
 
-fn persist_macro(library: &Library, def: &MacroDef) -> CmdResult<()> {
-    library
-        .save_macro(&dj_library::MacroRecord {
-            id: def.id.clone(),
-            name: def.name.clone(),
-            version: def.version as i64,
-            definition: serde_json::to_string(def).map_err(err)?,
-        })
-        .map_err(err)
+fn persist_macro(def: &MacroDef) -> CmdResult<()> {
+    macro_store().save(def).map_err(err)
 }
 
-/// Load a patch, resolving macro version mismatches (PRD §6). When the
-/// patch's embedded macro definitions disagree with the library and no
-/// `resolutions` decide them yet, the engine is left untouched and the
-/// conflicts are returned so the UI can prompt (update vs fork) and call
-/// again. `resolutions` entries are `(macro_id, "update" | "fork")`.
-#[tauri::command]
-fn load_patch(
-    state: State<AppState>,
-    dir: String,
-    resolutions: Option<Vec<(String, String)>>,
-) -> CmdResult<Vec<MacroConflictInfo>> {
-    let mut engine = engine_lock(&state)?;
-    let mut doc = PatchDoc::read(Path::new(&dir)).map_err(err)?;
-    let mut lib = db_macro_library(&state.library)?;
-    for (macro_id, action) in resolutions.unwrap_or_default() {
-        let resolution = match action.as_str() {
-            "update" => MacroResolution::UpdateToLibrary,
-            "fork" => {
-                let mut new_id = format!("{macro_id}-fork");
-                let mut n = 2;
-                while lib.get(&new_id).is_some() || doc.macros.contains_key(&new_id) {
-                    new_id = format!("{macro_id}-fork-{n}");
-                    n += 1;
+/// One-shot migration to the global macro store, run at startup: patches
+/// that embedded one shared definition per macro id get per-instance
+/// copies, and macros left in the retired `macros` DB table move into the
+/// store. Idempotent, and never fatal — a failure just leaves the old
+/// state in place.
+fn migrate_macros_to_store(library: &Library) {
+    let store = macro_store();
+    match library.legacy_macros() {
+        Ok(rows) => {
+            let mut moved = 0;
+            for row in &rows {
+                match serde_json::from_str::<MacroDef>(&row.definition) {
+                    Ok(def) => match store.save(&def) {
+                        Ok(()) => moved += 1,
+                        Err(e) => eprintln!("[dj-macros] storing {}: {e:#}", row.id),
+                    },
+                    Err(e) => eprintln!("[dj-macros] bad stored definition for {}: {e}", row.id),
                 }
-                MacroResolution::Fork { new_id }
             }
-            other => {
-                return Err(CmdError::invalid(format!(
-                    "unknown macro resolution {other:?}"
-                )))
-            }
-        };
-        doc.resolve_macro_conflict(&macro_id, &resolution, &mut lib)
-            .map_err(err)?;
-        if let MacroResolution::Fork { new_id } = &resolution {
-            if let Some(def) = lib.get(new_id) {
-                persist_macro(&state.library, def)?;
+            if moved == rows.len() && !rows.is_empty() {
+                if let Err(e) = library.drop_legacy_macros() {
+                    eprintln!("[dj-macros] dropping the legacy macros table: {e:#}");
+                } else {
+                    println!("[dj-macros] moved {moved} macro(s) out of the library DB");
+                }
             }
         }
+        Err(e) => eprintln!("[dj-macros] reading the legacy macros table: {e:#}"),
     }
-    let conflicts = doc.macro_conflicts(&lib);
-    if !conflicts.is_empty() {
-        return Ok(conflicts
-            .into_iter()
-            .map(|c| MacroConflictInfo {
-                name: doc
-                    .macros
-                    .get(&c.macro_id)
-                    .map(|d| d.name.clone())
-                    .unwrap_or_else(|| c.macro_id.clone()),
-                macro_id: c.macro_id,
-                patch_version: c.patch_version,
-                library_version: c.library_version,
-            })
-            .collect());
+    match store.import_patch_macros(&patches_dir()) {
+        Ok(report) if report.is_empty() => {}
+        Ok(report) => println!(
+            "[dj-macros] migrated {} patch instance(s) to per-instance copies; \
+             published {} macro(s) ({} duplicate definition(s) collapsed)",
+            report.instances.len(),
+            report.bases.len(),
+            report.deduped
+        ),
+        Err(e) => eprintln!("[dj-macros] migrating patch macros: {e:#}"),
     }
-    record_edit(&state, &engine, &EditKey::Load(&dir));
-    // As in load_patch_dir: the replacement engine comes up stopped, so
-    // restart the pre-load backend once the swap is done.
-    let backend = engine.backend();
-    engine.stop().map_err(err)?;
-    let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
-    *engine = Engine::from_doc_with_macros(&doc, registry, lib).map_err(err)?;
-    // This command's return channel carries macro conflicts; non-fatal
-    // load warnings (dropped stale wires) go to the log.
-    for w in &engine.load_warnings {
-        eprintln!("[dj-audio] load_patch: {w}");
-    }
-    // Decks: re-apply library-stored DJ metadata (cues/loops/beatgrids)
-    // for every loaded deck track (PRD §7 — metadata survives across
-    // patches via the library DB, not the patch files).
-    let deck_instances: Vec<String> = engine
-        .nodes
-        .iter()
-        .filter(|n| n.is_deck())
-        .map(|n| n.instance_id.clone())
-        .collect();
-    for instance in deck_instances {
-        apply_deck_metadata(&state, &mut engine, &instance)?;
-    }
-    restart_backend(&mut engine, backend, "patch load")?;
-    mark_saved(&state, &engine);
-    Ok(Vec::new())
+}
+
+/// Load a patch from an arbitrary directory. Patches are self-contained
+/// (each macro instance carries its own definition), so this is a plain
+/// load; the macro store only seeds the bases for the picker.
+/// Returns non-fatal load warnings for the UI banner.
+#[tauri::command]
+fn load_patch(state: State<AppState>, dir: String) -> CmdResult<Vec<String>> {
+    load_patch_dir(&state, Path::new(&dir))
 }
 
 #[derive(Serialize)]
 struct MacroInfo {
     id: String,
     name: String,
-    version: u32,
 }
 
-/// Macros available for instantiation (user library, PRD §6).
+/// Macros available for instantiation (the global store, PRD §6).
 #[tauri::command]
 fn list_macros(state: State<AppState>) -> CmdResult<Vec<MacroInfo>> {
     let engine = engine_lock(&state)?;
@@ -1855,7 +1805,6 @@ fn list_macros(state: State<AppState>) -> CmdResult<Vec<MacroInfo>> {
         .map(|d| MacroInfo {
             id: d.id.clone(),
             name: d.name.clone(),
-            version: d.version,
         })
         .collect())
 }
@@ -2015,7 +1964,6 @@ fn collapse_macro(
                 conflict: Some(MacroInfo {
                     id: old.id.clone(),
                     name: old.name.clone(),
-                    version: old.version,
                 }),
             });
         }
@@ -2063,25 +2011,65 @@ fn collapse_macro(
             def = engine.set_macro_positions(&macro_id, rel).map_err(err)?;
         }
     }
-    persist_macro(&state.library, &def)?;
+    persist_macro(&def)?;
     Ok(CollapseOutcome {
         instance: Some(instance),
         conflict: None,
     })
 }
 
-/// Rename a user-library macro (stable id, display name only). Undoable —
-/// the version bump touches live instances' saved state.
+/// *Pull latest* on one macro instance: replace its private copy of the
+/// definition with the current published one and re-expand it. DESTRUCTIVE
+/// — every edit made inside this instance is discarded — so the UI warns
+/// first. Returns the wires the new interface could not keep (empty when
+/// the instance already matched the base, which is a no-op).
 #[tauri::command]
-fn rename_macro(state: State<AppState>, macro_id: String, name: String) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::RenameMacro(&macro_id))?;
-    let def = engine.rename_macro(&macro_id, &name).map_err(err)?;
-    persist_macro(&state.library, &def)
+fn pull_macro_instance(state: State<AppState>, instance: String) -> CmdResult<Vec<String>> {
+    let mut engine = patch_edit(&state, EditKey::PullMacro(&instance))?;
+    let mut warnings = Vec::new();
+    with_stopped(&mut engine, |e| {
+        warnings = e.pull_macro_instance(&instance).map_err(err)?;
+        Ok(())
+    })?;
+    Ok(warnings)
 }
 
-/// Delete a macro from the user library. Refused while any rack instance
+/// *Save macro*: publish this instance's current state as the macro's new
+/// definition. Other instances keep what they have until they pull.
+/// Returns false when nothing had changed.
+#[tauri::command]
+fn save_macro_instance(state: State<AppState>, instance: String) -> CmdResult<bool> {
+    let mut engine = engine_lock(&state)?;
+    let Some(def) = engine.save_macro_instance(&instance).map_err(err)? else {
+        return Ok(false);
+    };
+    persist_macro(&def)?;
+    Ok(true)
+}
+
+/// *Reset to defaults*: discard local edits inside one instance, back to
+/// the copy of the definition it was adopted with. Undoable.
+#[tauri::command]
+fn reset_macro_instance(state: State<AppState>, instance: String) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::ResetMacro(&instance))?;
+    with_stopped(&mut engine, |e| {
+        e.reset_macro_instance(&instance).map_err(err)
+    })
+}
+
+/// Rename a published macro (stable id, display name only). Library
+/// state, not patch state (so not undoable, like [`delete_macro`]):
+/// instances keep their own copies, so this only retitles the base.
+#[tauri::command]
+fn rename_macro(state: State<AppState>, macro_id: String, name: String) -> CmdResult<()> {
+    let mut engine = engine_lock(&state)?;
+    let def = engine.rename_macro(&macro_id, &name).map_err(err)?;
+    persist_macro(&def)
+}
+
+/// Delete a macro from the global store. Refused while any rack instance
 /// still uses it (break or delete the instances first) — a live instance
-/// with no definition couldn't re-save or re-expand. Not undoable: the
+/// with no base couldn't re-publish or be pulled again. Not undoable: the
 /// definition is library state, not patch state (like DJ metadata).
 #[tauri::command]
 fn delete_macro(state: State<AppState>, macro_id: String) -> CmdResult<()> {
@@ -2099,7 +2087,8 @@ fn delete_macro(state: State<AppState>, macro_id: String) -> CmdResult<()> {
     engine
         .unregister_macro(&macro_id)
         .ok_or_else(|| CmdError::invalid(format!("unknown macro {macro_id:?}")))?;
-    state.library.delete_macro(&macro_id).map_err(err)
+    macro_store().remove(&macro_id).map_err(err)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -2596,14 +2585,10 @@ fn main() {
     // data dir across (see dj_library::paths).
     let data_dir = dj_library::init_data_dir().expect("data dir setup failed");
     let library = Arc::new(Library::open(&data_dir).expect("library open failed"));
-    // User-library macros are instantiable from the start (PRD §6).
-    match db_macro_library(&library) {
-        Ok(lib) => {
-            for def in lib.defs.into_values() {
-                engine.register_macro(def);
-            }
-        }
-        Err(e) => eprintln!("[dj-macros] loading macro library failed: {e}"),
+    // Published macros are instantiable from the start (PRD §6).
+    migrate_macros_to_store(&library);
+    for def in store_macro_library().defs.into_values() {
+        engine.register_macro(def);
     }
     let watcher =
         dj_library::start_watcher(library.clone(), dj_library::watch::DEFAULT_POLL_INTERVAL);
@@ -2802,6 +2787,9 @@ fn main() {
             collapse_macro,
             rename_macro,
             delete_macro,
+            pull_macro_instance,
+            save_macro_instance,
+            reset_macro_instance,
             macro_groups,
             macro_layout,
             macro_preview,

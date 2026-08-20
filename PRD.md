@@ -145,9 +145,9 @@ interface ModuleHandle {
 ## 6. Patch Graph & Macro Modules
 
 - The patch is a directed graph of module instances and wires. Cycles allowed with a one-block delay inserted automatically (standard modular behavior).
-- **Macro modules:** select modules → "Collapse to Module". User picks which internal jacks/params are promoted to the macro's external interface. Result is **pure data**: a saved subgraph + interface mapping, stored in the user library with a stable ID.
-- Instances reference the macro by ID. **Editing a macro's internals edits every instance** across all patches. (Patch save records macro version; on version mismatch at load, prompt: update or fork.)
-- Macros nest arbitrarily.
+- **Macro modules:** select modules → "Collapse to Module". User picks which internal jacks/params are promoted to the macro's external interface. Result is **pure data**: a saved subgraph + interface mapping. Macros are **global objects** with a stable ID, stored one file per macro in `<data dir>/macros/`, a sibling of `patches/`.
+- Adopting a macro gives the patch its **own copy** of the definition, saved with the patch. **Editing an instance's internals changes only that instance**, and a patch always plays what it was saved with — no versions, no load-time prompts. Three explicit verbs exchange state with the global definition: *save macro* (publish this instance as the definition), *pull latest* (re-adopt the definition, discarding this instance's edits) and *reset to defaults* (back to the copy this instance adopted).
+- Macros do not nest: a selection containing a macro instance cannot be collapsed.
 
 ### Graph engine API (internal, sketch)
 
@@ -353,7 +353,7 @@ On-device analysis pipeline: BPM/key/auto-beatgrid (Essentia/ONNX), demucs stems
 Collapse-to-macro with library storage and edit propagation, native dylib module backend, rekordbox import, MIDI LED feedback, perf pass against §10 targets.
 
 **Acceptance:**
-- [x] **[A]** Collapse a selection to a macro via API; instantiate it twice; edit internals; both instances reflect the change; version-mismatch prompt logic covered by tests. *(Verified: `crates/dj-engine/tests/macros.rs` — collapse renders byte-identically, two instances both adopt an internal edit in memory and on reload, update-vs-fork prompt logic tested both ways; macros nest; definitions live in the library DB; E2E golden `macro-tone-collapse`. See reports/M4_REPORT.md.)*
+- [x] **[A]** Collapse a selection to a macro via API; instantiate it twice; edit one instance's internals; the other is untouched until it pulls; the three instance verbs covered by tests. *(Verified: `crates/dj-engine/tests/integration/{macros,macro_store}.rs` — collapse renders byte-identically, an instance keeps the copy it adopted when the base moves on, save/pull/reset round-trip through the patch, nesting is rejected; definitions live in `<data dir>/macros/`; E2E golden `macro-tone-collapse`. See reports/M4_REPORT.md.)*
 - [x] **[A]** A native (dylib) module loads through the same manifest, passes the same conformance suite as WASM modules, and runs on the RT thread. *(Verified: `crates/dj-engine/tests/conformance.rs` runs identical batteries over `com.dj.vca` (wasm-1) and `com.dj.gain_native` (native-1, libloading + versioned C vtable), including the RT allocation tripwire and a null-realtime run. Native modules are unsandboxed trusted code — trust model in `native_host.rs`.)*
 - [ ] **[A]** Perf: 4 decks with stems + 50 WASM modules, 10-minute offline-and-live stress run, zero xruns on M4 hardware. *(Partially verified: `crates/dj-engine/tests/perf_m4.rs` builds exactly this patch and runs a scalable offline stress (STRESS_SECONDS; CI = 600 s ≙ the 10-minute equivalent, faster than realtime, zero xruns) plus a short live null-backend segment and the RT allocation tripwire. The literal 10-minute wall-clock, zero-xrun run on M4 hardware with a real audio device remains open — this environment is headless with no audio device.)*
 - [ ] **[H]** Overall feel pass: latency, UI responsiveness, and stability during a real 30-minute mixed set.

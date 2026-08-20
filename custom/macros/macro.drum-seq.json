@@ -1,7 +1,6 @@
 {
   "id": "macro.drum-seq",
   "name": "drum seq",
-  "version": 1,
   "modules": {
     "drum1": {
       "ext": "com.dj.drum",

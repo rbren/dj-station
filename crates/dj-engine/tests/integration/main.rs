@@ -28,6 +28,7 @@ mod gesture;
 mod graph_edit;
 mod hands;
 mod live_edit;
+mod macro_store;
 mod macros;
 mod midi_led;
 mod midi_poly;

@@ -1,7 +1,6 @@
 {
   "id": "macro.synth-2",
   "name": "Synth 2",
-  "version": 2,
   "modules": {
     "adsr1": {
       "ext": "com.dj.adsr",

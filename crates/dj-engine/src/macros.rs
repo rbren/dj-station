@@ -1,19 +1,30 @@
 //! Macro modules (PRD §6): collapse a selection of nodes+wires into a
 //! reusable module. A macro is **pure data** — a saved subgraph plus an
-//! interface mapping (which internal jacks/params are promoted) — stored in
-//! the user library with a stable ID and a version.
+//! interface mapping (which internal jacks/params are promoted).
 //!
-//! - Instantiating a macro by ID *expands* its subgraph into the engine
-//!   graph; internal nodes are named `<instance>/<internal>` (the `/`
-//!   separator is reserved — top-level instance ids may not contain it).
-//! - Instances reference the macro by ID. Editing a macro's internals
-//!   (`Engine::update_macro`) re-expands every instance in memory; patches
-//!   record the version they were saved with plus an embedded copy of the
-//!   definition, so a version mismatch at load can be resolved as *update*
-//!   (use the library version) or *fork* (keep the patch's copy under a new
-//!   ID) — see [`crate::patch::PatchDoc::macro_conflicts`].
-//! - Macros nest arbitrarily: an internal module's `ext` may itself be a
-//!   macro ID.
+//! Definitions live in two places, and the split is the whole design:
+//!
+//! - The **base** is the global object in the macro store
+//!   (`<data_dir>/macros/<id>.json`, a sibling of `patches/` — see
+//!   [`crate::macro_store`]). There is exactly one current base per id; it
+//!   has no version history, it just gets updated.
+//! - Every **instance** owns a private **copy** of the definition it was
+//!   adopted with ([`MacroInstance::def`]), persisted inside the patch. A
+//!   patch therefore never changes because someone edited the base, and one
+//!   patch can hold several instances of the same id adopted at different
+//!   times.
+//!
+//! Three explicit verbs move definitions between the two (`Engine::`
+//! `pull_macro_instance` / `save_macro_instance` / `reset_macro_instance`):
+//! *pull latest* replaces the instance's copy with the base (destructive —
+//! the UI warns), *save macro* publishes the instance's current state as
+//! the new base, and *reset to defaults* discards live edits back to the
+//! adopted copy. Each is a no-op when the two sides already agree.
+//!
+//! Instantiating a macro *expands* its subgraph into the engine graph;
+//! internal nodes are named `<instance>/<internal>` (the `/` separator is
+//! reserved — top-level instance ids may not contain it). Macros do NOT
+//! nest: a definition whose internal module is itself a macro is rejected.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -52,13 +63,14 @@ pub struct MacroInterface {
 }
 
 /// A macro module definition: saved subgraph + interface mapping.
+///
+/// Definitions carry no version counter: the base is simply the current
+/// one, and instances hold their own copy (see the module docs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MacroDef {
     /// Stable ID (e.g. `"macro.my-rig"`). Also what instances reference.
     pub id: String,
     pub name: String,
-    /// Bumped on every edit; patches record the version they saved with.
-    pub version: u32,
     /// Internal subgraph, keyed by internal instance id.
     pub modules: BTreeMap<String, ModuleFile>,
     /// Internal wires, one bundle per internal source instance.
@@ -73,10 +85,10 @@ pub struct MacroDef {
     pub positions: BTreeMap<String, (f32, f32)>,
 }
 
-/// One concrete internal node of a macro definition, as a UI thumbnail
-/// sees it (see `Engine::macro_preview`): nested macros flattened, id
-/// relative to a would-be instance, position relative to the group's
-/// top-left corner (`None` when the definition saved none).
+/// One internal node of a macro definition, as a UI thumbnail sees it
+/// (see `Engine::macro_preview`): id relative to a would-be instance,
+/// position relative to the group's top-left corner (`None` when the
+/// definition saved none).
 #[derive(Debug, Clone, Serialize)]
 pub struct MacroPreviewNode {
     pub id: String,
@@ -86,8 +98,10 @@ pub struct MacroPreviewNode {
     pub position: Option<(f32, f32)>,
 }
 
-/// An in-memory collection of macro definitions (the engine-side view of
-/// the user library's macro store; the app persists defs to SQLite).
+/// The base definitions: the engine-side view of the global macro store
+/// (`<data_dir>/macros/`), one current definition per id. This is what the
+/// module picker offers and what *pull latest* / *save macro* read and
+/// write; it is NOT what live instances run (they own their copies).
 #[derive(Debug, Clone, Default)]
 pub struct MacroLibrary {
     pub defs: BTreeMap<String, MacroDef>,
@@ -112,12 +126,16 @@ impl MacroLibrary {
 }
 
 /// Control-side state of one expanded macro instance. External jacks are
-/// stored fully resolved to concrete engine nodes (nesting flattened at
-/// expansion time), so wiring/knob/param access is a plain lookup.
+/// stored fully resolved to concrete engine nodes, so wiring/knob/param
+/// access is a plain lookup.
 #[derive(Debug, Clone)]
 pub struct MacroInstance {
+    /// Base id this instance was adopted from (`def.id`). The base may have
+    /// moved on, or be gone entirely — the instance runs `def` regardless.
     pub macro_id: String,
-    pub version: u32,
+    /// The instance's own copy of the definition: what it was adopted with,
+    /// what *reset to defaults* restores, and what patches persist.
+    pub def: MacroDef,
     /// User-facing name as typed; same invariant as
     /// [`crate::engine::NodeInfo::display_name`].
     pub display_name: Option<String>,
@@ -126,24 +144,4 @@ pub struct MacroInstance {
     pub outputs: Vec<(String, String, String)>,
     /// (external param id, concrete node instance id, concrete param id)
     pub params: Vec<(String, String, String)>,
-}
-
-/// A macro version mismatch found when loading a patch against a library.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MacroConflict {
-    pub macro_id: String,
-    /// Version embedded in the patch.
-    pub patch_version: u32,
-    /// Version currently in the library.
-    pub library_version: u32,
-}
-
-/// How to resolve a [`MacroConflict`] (the "prompt" of PRD §6 — the UI
-/// surfaces a dialog; this is the logic behind its two buttons).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MacroResolution {
-    /// Use the library's (newer) definition; instances adopt it.
-    UpdateToLibrary,
-    /// Keep the patch's saved definition, registered under a new ID.
-    Fork { new_id: String },
 }

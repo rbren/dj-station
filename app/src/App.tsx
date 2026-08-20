@@ -106,6 +106,7 @@ export default function App() {
   const [collapseName, setCollapseName] = useState<string | null>(null);
   // Collapse hit an existing same-named macro: confirm before overwriting.
   const [macroOverwrite, setMacroOverwrite] = useState<MacroInfo | null>(null);
+  const [macroPull, setMacroPull] = useState<MacroGroup | null>(null);
   // Expanded macro instances (bounding-box overlay + grouping semantics).
   const [macroGroups, setMacroGroups] = useState<MacroGroup[]>([]);
 
@@ -1218,6 +1219,37 @@ export default function App() {
     if (modules) setModuleLib(modules);
   }, []);
 
+  // The three macro-instance verbs (PRD §6). Each instance owns its copy
+  // of the definition, so these are the only ways a definition and an
+  // instance exchange state: publish up, re-adopt down, or revert to the
+  // copy this instance was adopted with.
+  const saveMacroInstance = useCallback(
+    async (group: MacroGroup) => {
+      const published = await engine.saveMacroInstance(group.instance);
+      if (published === false) return;
+      const modules = await engine.listModules();
+      if (modules) setModuleLib(modules);
+      await refresh();
+    },
+    [refresh],
+  );
+  const pullMacroInstance = useCallback(
+    async (group: MacroGroup) => {
+      const warnings = (await engine.pullMacroInstance(group.instance)) ?? [];
+      for (const w of warnings) reportError(`pull ${group.name}`, w);
+      setSelected([]);
+      await refresh();
+    },
+    [refresh, setSelected],
+  );
+  const resetMacroInstance = useCallback(
+    async (group: MacroGroup) => {
+      await engine.resetMacroInstance(group.instance);
+      await refresh();
+    },
+    [refresh],
+  );
+
   // Right-click "Break Macro": internals become ordinary modules in place;
   // positions carry over through the returned rename map so nothing moves.
   const breakMacro = useCallback(
@@ -1668,6 +1700,21 @@ export default function App() {
               testId: 'ctx-break-macro',
               onSelect: () => void breakMacro(macroGroup),
             },
+            {
+              label: `Save Macro "${macroGroup.name}"`,
+              testId: 'ctx-save-macro',
+              onSelect: () => void saveMacroInstance(macroGroup),
+            },
+            {
+              label: `Pull Latest "${macroGroup.name}"`,
+              testId: 'ctx-pull-macro',
+              onSelect: () => setMacroPull(macroGroup),
+            },
+            {
+              label: `Reset Macro "${macroGroup.name}"`,
+              testId: 'ctx-reset-macro',
+              onSelect: () => void resetMacroInstance(macroGroup),
+            },
           ]
         : []),
       ...(group.length === 1
@@ -1696,6 +1743,8 @@ export default function App() {
     pasteModules,
     removeModules,
     breakMacro,
+    saveMacroInstance,
+    resetMacroInstance,
     openDocs,
     refresh,
     toTopLevel,
@@ -1916,8 +1965,8 @@ export default function App() {
           <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
             <h3>Overwrite Macro?</h3>
             <p className="file-dialog-empty">
-              A macro named “{macroOverwrite.name}” already exists. Saving will replace it — every
-              rack instance updates to the new definition.
+              A macro named “{macroOverwrite.name}” already exists. Saving will replace its
+              definition — rack instances keep their own copies until they pull it.
             </p>
             <button
               data-testid="macro-overwrite-confirm"
@@ -1933,6 +1982,38 @@ export default function App() {
               className="file-dialog-cancel"
               data-testid="macro-overwrite-cancel"
               onClick={() => setMacroOverwrite(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {macroPull && (
+        <div
+          className="file-dialog-backdrop"
+          data-testid="macro-pull-dialog"
+          onClick={() => setMacroPull(null)}
+        >
+          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Pull Latest?</h3>
+            <p className="file-dialog-empty">
+              “{macroPull.name}” goes back to the saved definition. Every edit made inside this
+              instance is discarded.
+            </p>
+            <button
+              data-testid="macro-pull-confirm"
+              onClick={() => {
+                const group = macroPull;
+                setMacroPull(null);
+                void pullMacroInstance(group);
+              }}
+            >
+              Pull Latest
+            </button>
+            <button
+              className="file-dialog-cancel"
+              data-testid="macro-pull-cancel"
+              onClick={() => setMacroPull(null)}
             >
               Cancel
             </button>

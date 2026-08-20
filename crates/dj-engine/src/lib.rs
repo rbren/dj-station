@@ -18,6 +18,7 @@ pub mod graph;
 pub mod hands;
 pub mod history;
 pub mod knob;
+pub mod macro_store;
 pub mod macros;
 pub mod manifest;
 pub mod mixer;
@@ -41,12 +42,10 @@ pub use engine::{
 pub use gesture::{GestureMappingInfo, GestureState, GESTURE_ID};
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle, WireStyle};
-pub use macros::{
-    MacroConflict, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroParam, MacroPreviewNode,
-    MacroResolution,
-};
+pub use macro_store::{MacroImport, MacroStore, MACROS_DIR_NAME};
+pub use macros::{MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroParam, MacroPreviewNode};
 pub use manifest::Manifest;
-pub use patch::PatchDoc;
+pub use patch::{MacroInstanceFile, PatchDoc};
 pub use registry::ExtensionRegistry;
 pub use telemetry::JackTelemetry;
 

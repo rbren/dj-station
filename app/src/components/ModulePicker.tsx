@@ -243,7 +243,7 @@ function PickerEntry({ m, onAdd, onDragging, onMacroMenu }: PickerEntryProps) {
     <div
       className="picker-entry"
       data-testid={`library-add-${m.id}`}
-      data-tip={`${m.id} v${m.version}`}
+      data-tip={m.id}
       role="button"
       tabIndex={0}
       draggable

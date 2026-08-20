@@ -60,6 +60,9 @@ const fakeEngine = {
   macroGroups: vi.fn<() => Promise<MacroGroup[]>>(async () => []),
   macroLayout: vi.fn(async () => ({})),
   breakMacro: vi.fn(async () => ({})),
+  saveMacroInstance: vi.fn(async () => true),
+  pullMacroInstance: vi.fn<(instance: string) => Promise<string[]>>(async () => []),
+  resetMacroInstance: vi.fn(async () => null),
   addModule: vi.fn(async () => {}),
   collapseMacro: vi.fn(async (): Promise<CollapseOutcome> => ({
     instance: 'my-tone',
@@ -116,6 +119,7 @@ beforeEach(() => {
   fakeEngine.macroGroups.mockResolvedValue([]);
   fakeEngine.macroLayout.mockResolvedValue({});
   fakeEngine.breakMacro.mockResolvedValue({});
+  fakeEngine.pullMacroInstance.mockResolvedValue([]);
 });
 
 async function selectBoth() {
@@ -201,7 +205,7 @@ describe('collapse-to-macro UI', () => {
   it('same-named macro prompts before overwriting; confirm retries with overwrite', async () => {
     fakeEngine.collapseMacro.mockResolvedValueOnce({
       instance: null,
-      conflict: { id: 'macro.my-tone', name: 'My Tone', version: 3 },
+      conflict: { id: 'macro.my-tone', name: 'My Tone' },
     });
     await selectBoth();
     fireEvent.click(screen.getByTestId('collapse-macro-btn'));
@@ -228,7 +232,7 @@ describe('collapse-to-macro UI', () => {
   it('cancelling the overwrite prompt keeps the macro and the naming form', async () => {
     fakeEngine.collapseMacro.mockResolvedValueOnce({
       instance: null,
-      conflict: { id: 'macro.my-tone', name: 'My Tone', version: 3 },
+      conflict: { id: 'macro.my-tone', name: 'My Tone' },
     });
     await selectBoth();
     fireEvent.click(screen.getByTestId('collapse-macro-btn'));
@@ -332,6 +336,49 @@ describe('expanded macro view', () => {
     expect(item.textContent).toContain('Tone');
     fireEvent.click(item);
     await waitFor(() => expect(fakeEngine.breakMacro).toHaveBeenCalledWith('tone1'));
+  });
+
+  // The three instance verbs (PRD §6): each instance owns its copy of the
+  // definition, so publishing up and re-adopting down are explicit.
+  it('right-click offers Save Macro, which publishes this instance', async () => {
+    setupMacroRack();
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    await screen.findByTestId('macro-box-tone1');
+    fireEvent.contextMenu(screen.getByTestId('module-tone1/osc1'));
+    fireEvent.click(await screen.findByTestId('ctx-save-macro'));
+    await waitFor(() => expect(fakeEngine.saveMacroInstance).toHaveBeenCalledWith('tone1'));
+  });
+
+  it('Pull Latest warns before discarding the instance edits', async () => {
+    setupMacroRack();
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    await screen.findByTestId('macro-box-tone1');
+    fireEvent.contextMenu(screen.getByTestId('module-tone1/osc1'));
+    fireEvent.click(await screen.findByTestId('ctx-pull-macro'));
+    // Destructive: nothing happens until the dialog is confirmed.
+    await screen.findByTestId('macro-pull-dialog');
+    expect(fakeEngine.pullMacroInstance).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('macro-pull-cancel'));
+    expect(screen.queryByTestId('macro-pull-dialog')).toBeNull();
+    expect(fakeEngine.pullMacroInstance).not.toHaveBeenCalled();
+
+    fireEvent.contextMenu(screen.getByTestId('module-tone1/osc1'));
+    fireEvent.click(await screen.findByTestId('ctx-pull-macro'));
+    fireEvent.click(await screen.findByTestId('macro-pull-confirm'));
+    await waitFor(() => expect(fakeEngine.pullMacroInstance).toHaveBeenCalledWith('tone1'));
+    await waitFor(() => expect(screen.queryByTestId('macro-pull-dialog')).toBeNull());
+  });
+
+  it('Reset Macro reverts the instance to its adopted copy', async () => {
+    setupMacroRack();
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    await screen.findByTestId('macro-box-tone1');
+    fireEvent.contextMenu(screen.getByTestId('module-tone1/osc1'));
+    fireEvent.click(await screen.findByTestId('ctx-reset-macro'));
+    await waitFor(() => expect(fakeEngine.resetMacroInstance).toHaveBeenCalledWith('tone1'));
   });
 
   it('macro boxes collide as solid rects — dragging one onto another pushes out', async () => {

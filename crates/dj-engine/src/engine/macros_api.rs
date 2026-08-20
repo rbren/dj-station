@@ -7,26 +7,23 @@ impl Engine {
     // Macro modules (PRD §6)
     // ------------------------------------------------------------------
 
-    /// Register (or replace) a macro definition in the engine's library
-    /// view. Does not touch existing instances — see [`Self::update_macro`].
+    /// Register (or replace) a base definition in the engine's view of the
+    /// macro store. Never touches live instances: they run their own copies
+    /// until someone pulls (see [`Self::pull_macro_instance`]).
     pub fn register_macro(&mut self, def: MacroDef) {
         self.macros.register(def);
     }
 
-    /// Remove a macro definition from the engine's library. Plain removal —
-    /// callers deleting a user-library macro must first ensure no rack
-    /// instance still references it (a saved patch would silently lose the
-    /// instance's embedded definition); the overwrite-by-recollapse flow
-    /// removes and immediately re-registers under the same id instead.
+    /// Remove a base definition from the engine's view of the store. Live
+    /// instances keep working — their copy is in the patch — they just have
+    /// nothing left to pull from.
     pub fn unregister_macro(&mut self, macro_id: &str) -> Option<MacroDef> {
         self.macros.unregister(macro_id)
     }
 
-    /// Rename a macro definition (stable id, display name only). Bumps the
-    /// version — the name is part of the definition patches embed, so old
-    /// patches resolve the change through the usual update-vs-fork prompt —
-    /// and stamps live instances with the new version (nothing structural
-    /// changed). Returns the updated definition for persisting.
+    /// Rename a base definition (stable id, display name only). Existing
+    /// instances keep the name they adopted. Returns the updated definition
+    /// for persisting to the store.
     pub fn rename_macro(&mut self, macro_id: &str, new_name: &str) -> Result<MacroDef> {
         let new_name = new_name.trim();
         anyhow::ensure!(!new_name.is_empty(), "macro name must not be empty");
@@ -36,29 +33,34 @@ impl Engine {
             .cloned()
             .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
         def.name = new_name.to_string();
-        def.version += 1;
-        for mi in self.macro_instances.values_mut() {
-            if mi.macro_id == macro_id {
-                mi.version = def.version;
-            }
-        }
         self.macros.register(def.clone());
         Ok(def)
     }
 
-    /// Expanded macro instances (nested ones use `/`-prefixed ids).
+    /// Expanded macro instances, keyed by instance id.
     pub fn macro_instances(&self) -> &BTreeMap<String, MacroInstance> {
         &self.macro_instances
     }
 
-    /// A synthesized manifest for a macro (external interface as jacks) —
-    /// lets UIs render macro instances like any other module panel.
+    /// A synthesized manifest for a base definition (external interface as
+    /// jacks) — lets UIs render macros like any other module panel.
     pub fn macro_manifest(&self, macro_id: &str) -> Option<Manifest> {
-        let def = self.macros.get(macro_id)?;
-        Some(Manifest {
+        Some(Self::manifest_for_def(self.macros.get(macro_id)?))
+    }
+
+    /// The same, for one live instance: its own copy's interface, which may
+    /// differ from the base's by now.
+    pub fn macro_instance_manifest(&self, instance_id: &str) -> Option<Manifest> {
+        Some(Self::manifest_for_def(
+            &self.macro_instances.get(instance_id)?.def,
+        ))
+    }
+
+    fn manifest_for_def(def: &MacroDef) -> Manifest {
+        Manifest {
             id: def.id.clone(),
             name: def.name.clone(),
-            version: def.version.to_string(),
+            version: String::new(),
             abi: "macro-1".into(),
             category: crate::manifest::categories::MACROS.into(),
             inputs: def
@@ -99,70 +101,38 @@ impl Engine {
                 .collect(),
             ui: None,
             latency_samples: 0,
-        })
+        }
     }
 
     /// Everything a UI needs to draw a thumbnail of what a fresh instance
-    /// of `macro_id` expands to: each concrete internal node's type,
-    /// manifest, definition-saved knob states and saved relative position
-    /// (nested macros flattened with their entry's offset, like
-    /// [`Self::macro_layout`]; `None` position when the definition saved
-    /// none). Purely a read of the definition — no instantiation. Knob
-    /// states are each level's own saved values; an outer definition's
-    /// overrides of a *nested* macro's promoted jacks are not resolved
-    /// down (invisible at thumbnail scale, and instantiation handles them
-    /// properly via `expand_macro_def`).
+    /// of `macro_id` expands to: each internal node's type, manifest,
+    /// definition-saved knob states and saved relative position (`None`
+    /// when the definition saved none). Purely a read of the base
+    /// definition — no instantiation.
     pub fn macro_preview(&self, macro_id: &str) -> Result<Vec<MacroPreviewNode>> {
         let def = self
             .macros
             .get(macro_id)
             .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
-        let mut out = Vec::new();
-        self.collect_macro_preview(def, "", Some((0.0, 0.0)), &mut out)?;
-        Ok(out)
-    }
-
-    fn collect_macro_preview(
-        &self,
-        def: &MacroDef,
-        prefix: &str,
-        offset: Option<(f32, f32)>,
-        out: &mut Vec<MacroPreviewNode>,
-    ) -> Result<()> {
-        for (inner, mf) in &def.modules {
-            let id = if prefix.is_empty() {
-                inner.clone()
-            } else {
-                format!("{prefix}/{inner}")
-            };
-            // A node is only placeable when every level down to it saved a
-            // position (same rule as macro_layout).
-            let pos = match (offset, def.positions.get(inner)) {
-                (Some((ox, oy)), Some(&(x, y))) => Some((ox + x, oy + y)),
-                _ => None,
-            };
-            if let Some(inner_def) = self.macros.get(&mf.ext) {
-                self.collect_macro_preview(inner_def, &id, pos, out)?;
-            } else {
-                let manifest = self
-                    .registry
-                    .manifest(&mf.ext)
-                    .ok_or_else(|| anyhow!("unknown module type {:?} in macro", mf.ext))?;
-                out.push(MacroPreviewNode {
-                    id,
+        def.modules
+            .iter()
+            .map(|(inner, mf)| {
+                Ok(MacroPreviewNode {
+                    id: inner.clone(),
                     ext: mf.ext.clone(),
-                    manifest,
+                    manifest: self
+                        .registry
+                        .manifest(&mf.ext)
+                        .ok_or_else(|| anyhow!("unknown module type {:?} in macro", mf.ext))?,
                     knobs: mf.knobs.clone(),
-                    position: pos,
-                });
-            }
-        }
-        Ok(())
+                    position: def.positions.get(inner).copied(),
+                })
+            })
+            .collect()
     }
 
     /// The knob state a fresh instantiation of `def` would give an internal
-    /// jack: the state saved in the definition (recursing through nested
-    /// macros), or `None` when the definition saved nothing for it (the
+    /// jack, or `None` when the definition saved nothing for it (the
     /// concrete jack's manifest default applies).
     pub(crate) fn macro_default_knob(
         &self,
@@ -170,13 +140,7 @@ impl Engine {
         node: &str,
         jack: &str,
     ) -> Option<KnobState> {
-        let mf = def.modules.get(node)?;
-        if let Some(saved) = mf.knobs.get(jack) {
-            return Some(saved.clone());
-        }
-        let inner = self.macros.get(&mf.ext)?;
-        let ij = inner.interface.inputs.iter().find(|j| j.id == jack)?;
-        self.macro_default_knob(inner, &ij.node, &ij.jack)
+        def.modules.get(node)?.knobs.get(jack).cloned()
     }
 
     /// Reset a macro instance's expanded internal nodes to the state a
@@ -186,11 +150,7 @@ impl Engine {
     pub(super) fn reset_macro_state(&mut self, prefix: &str, def: &MacroDef) -> Result<()> {
         for (inner, mf) in &def.modules {
             let full = format!("{prefix}/{inner}");
-            if let Some(inner_def) = self.macros.get(&mf.ext).cloned() {
-                self.reset_macro_state(&full, &inner_def)?;
-            } else {
-                self.reset_node_to_manifest(&full)?;
-            }
+            self.reset_node_to_manifest(&full)?;
             for (param, value) in &mf.params {
                 self.set_param(&full, param, *value)?;
             }
@@ -213,32 +173,65 @@ impl Engine {
         Ok((id.to_string(), param.to_string()))
     }
 
-    /// Expand a macro definition as instance `instance_id`. Only valid
-    /// while stopped (structural edit, like `add_module`).
+    /// Adopt the current base definition of `macro_id` as a new instance:
+    /// the instance gets its own copy, unaffected by later edits to the
+    /// base. Only valid while stopped (structural edit, like `add_module`).
     pub(super) fn instantiate_macro(&mut self, instance_id: &str, macro_id: &str) -> Result<()> {
-        anyhow::ensure!(
-            !self.node_by_id.contains_key(instance_id)
-                && !self.macro_instances.contains_key(instance_id),
-            "duplicate instance id {instance_id:?}"
-        );
         let def = self
             .macros
             .get(macro_id)
             .cloned()
             .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
-        self.expand_macro_def(instance_id, &def)
+        self.adopt_macro(
+            instance_id,
+            &crate::patch::MacroInstanceFile { def, state: None },
+        )
     }
 
-    fn expand_macro_def(&mut self, prefix: &str, def: &MacroDef) -> Result<()> {
-        // 1. Internal modules (nested macros recurse; their instances are
-        //    registered before any state referencing them is applied).
+    /// Expand one instance from its own copy: `file.def` becomes the
+    /// instance's adopted baseline (what *reset to defaults* restores) and
+    /// `file.effective()` — its live state, when it has drifted — is what
+    /// actually goes into the graph.
+    pub(crate) fn adopt_macro(
+        &mut self,
+        instance_id: &str,
+        file: &crate::patch::MacroInstanceFile,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            !self.node_by_id.contains_key(instance_id)
+                && !self.macro_instances.contains_key(instance_id),
+            "duplicate instance id {instance_id:?}"
+        );
+        anyhow::ensure!(
+            !instance_id.contains('/'),
+            "macro instances may not nest ({instance_id:?})"
+        );
+        self.ensure_no_nesting(&file.def)?;
+        self.ensure_no_nesting(file.effective())?;
+        self.expand_macro_def(instance_id, file.effective(), file.def.clone())
+    }
+
+    /// Macros are flat: an internal module may not itself be a macro.
+    fn ensure_no_nesting(&self, def: &MacroDef) -> Result<()> {
+        for (inner, mf) in &def.modules {
+            anyhow::ensure!(
+                self.macros.get(&mf.ext).is_none() && self.registry.manifest(&mf.ext).is_some(),
+                "macro {:?} nests macro {:?} as {inner:?} — macros may not nest",
+                def.id,
+                mf.ext
+            );
+        }
+        Ok(())
+    }
+
+    fn expand_macro_def(&mut self, prefix: &str, def: &MacroDef, adopted: MacroDef) -> Result<()> {
+        // 1. Internal modules.
         let mut deferred_syncs: Vec<(String, String)> = Vec::new();
         for (inner, mf) in &def.modules {
             let full = format!("{prefix}/{inner}");
-            if self.macros.get(&mf.ext).is_some() {
-                self.instantiate_macro(&full, &mf.ext)?;
-            } else {
-                self.add_plain_module(&full, &mf.ext)?;
+            self.add_plain_module(&full, &mf.ext)?;
+            if mf.name.is_some() {
+                self.set_display_name(&full, mf.name.clone())?;
             }
             for m in &mf.midi_mappings {
                 self.add_midi_mapping(&full, m.kind, m.num, &m.name)?;
@@ -252,6 +245,9 @@ impl Engine {
                 for m in &g.mappings {
                     self.restore_gesture_mapping(&full, m)?;
                 }
+            }
+            if let Some(c) = &mf.choreo {
+                self.choreo_set_state(&full, c.clone())?;
             }
             if let Some(track) = &mf.track {
                 if BuiltinKind::from_ext_id(&mf.ext) == Some(BuiltinKind::Deck) {
@@ -286,8 +282,7 @@ impl Engine {
             }
         }
 
-        // 3. Resolve the external interface to concrete nodes (through
-        //    nested macro instances, which are registered by now).
+        // 3. Resolve the external interface to concrete nodes.
         let mut inputs = Vec::new();
         for j in &def.interface.inputs {
             let (n, jj) = self.resolve_in_jack(&format!("{prefix}/{}", j.node), &j.jack)?;
@@ -315,8 +310,8 @@ impl Engine {
         self.macro_instances.insert(
             prefix.to_string(),
             MacroInstance {
-                macro_id: def.id.clone(),
-                version: def.version,
+                macro_id: adopted.id.clone(),
+                def: adopted,
                 display_name: None,
                 inputs,
                 outputs,
@@ -326,13 +321,11 @@ impl Engine {
         Ok(())
     }
 
-    /// Collapse a selection onto an EXISTING macro id, replacing its
-    /// definition (the "save over macro 'X'?" flow). The new definition
-    /// keeps the stable id, takes `name`, and bumps the version past the
-    /// old one; every other live instance of the macro re-expands to the
-    /// new definition (update semantics, PRD §6 — per-instance promoted
-    /// state survives only for interface jacks the new definition still
-    /// has). Returns the definition for persisting.
+    /// Collapse a selection onto an EXISTING macro id, replacing its base
+    /// definition (the "save over macro 'X'?" flow). The new instance
+    /// adopts the new definition; every OTHER live instance keeps the copy
+    /// it was adopted with until it pulls. Returns the definition for
+    /// persisting to the store.
     pub fn recollapse_macro(
         &mut self,
         selection: &[&str],
@@ -341,11 +334,10 @@ impl Engine {
         name: &str,
         interface: MacroInterface,
     ) -> Result<MacroDef> {
-        let old = self
-            .macros
-            .get(macro_id)
-            .cloned()
-            .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
+        anyhow::ensure!(
+            self.macros.get(macro_id).is_some(),
+            "unknown macro {macro_id:?}"
+        );
         // Collapse under a scratch id (collapse_to_macro refuses existing
         // ids), then rewrite to the real id. The scratch id never persists:
         // it lives only inside this call's intermediate engine state.
@@ -358,18 +350,15 @@ impl Engine {
             self.collapse_to_macro(selection, new_instance_id, &scratch, name, interface)?;
         self.macros.unregister(&scratch);
         def.id = macro_id.to_string();
-        def.version = old.version + 1;
         self.macros.register(def.clone());
-        // Re-point the fresh instance and re-expand every other instance of
-        // the macro from the new definition.
         let mut doc = self.snapshot("overwrite-macro");
-        for mf in doc.modules.values_mut() {
-            if mf.ext == scratch || mf.ext == macro_id {
-                mf.ext = macro_id.to_string();
-                mf.macro_version = Some(def.version);
-            }
+        if let Some(mf) = doc.modules.get_mut(new_instance_id) {
+            mf.ext = macro_id.to_string();
         }
-        doc.macros.clear(); // rebuild carries self.macros
+        if let Some(file) = doc.macros.get_mut(new_instance_id) {
+            file.def = def.clone();
+            file.state = None;
+        }
         self.rebuild(&doc)?;
         Ok(def)
     }
@@ -402,9 +391,11 @@ impl Engine {
         for id in &sel {
             anyhow::ensure!(!id.contains('/'), "cannot collapse internal node {id:?}");
             anyhow::ensure!(
-                self.node_by_id.contains_key(id) || self.macro_instances.contains_key(id),
-                "no instance {id:?}"
+                !self.macro_instances.contains_key(id),
+                "cannot collapse macro instance {id:?} — macros may not nest \
+                 (break it apart first)"
             );
+            anyhow::ensure!(self.node_by_id.contains_key(id), "no instance {id:?}");
         }
         for j in &interface.inputs {
             anyhow::ensure!(
@@ -520,7 +511,6 @@ impl Engine {
         let def = MacroDef {
             id: macro_id.to_string(),
             name: name.to_string(),
-            version: 1,
             modules: def_modules,
             wires: def_wires,
             interface,
@@ -561,7 +551,6 @@ impl Engine {
                 choreo: None,
                 track: None,
                 sync_to: None,
-                macro_version: Some(1),
             },
         );
         // Rack layout survives the rebuild: collapsed members keep their
@@ -572,19 +561,29 @@ impl Engine {
                 layout.insert(format!("{new_instance_id}/{id}"), p);
             }
         }
+        // The fresh instance adopts the definition it was just made from;
+        // definitions of untouched instances ride along unchanged.
+        let mut new_macros = doc.macros.clone();
+        new_macros.insert(
+            new_instance_id.to_string(),
+            crate::patch::MacroInstanceFile {
+                def: def.clone(),
+                state: None,
+            },
+        );
         let new_doc = crate::patch::PatchDoc {
             header: doc.header.clone(),
             modules: new_modules,
             wires: new_wires,
-            macros: BTreeMap::new(), // rebuild carries self.macros
+            macros: new_macros,
             layout,
         };
         self.rebuild(&new_doc)?;
         Ok(def)
     }
 
-    /// Record the saved rack positions of a macro's internal modules
-    /// (UI passthrough metadata — no version bump, instances unaffected).
+    /// Record the saved rack positions of a base definition's internal
+    /// modules (UI passthrough metadata; instances unaffected).
     pub fn set_macro_positions(
         &mut self,
         macro_id: &str,
@@ -599,30 +598,20 @@ impl Engine {
         Ok(def.clone())
     }
 
-    /// Saved positions for every concrete node a fresh instance of
-    /// `macro_id` would expand to, keyed by the id path relative to the
-    /// instance (nested macros flattened, offset by the nested entry's own
-    /// position). Modules the definition has no position for are omitted
-    /// (the UI's placement fixup finds them a spot).
+    /// Saved positions for every node a fresh instance of `macro_id` would
+    /// expand to, keyed by the id relative to the instance. Modules the
+    /// definition has no position for are omitted (the UI's placement fixup
+    /// finds them a spot).
     pub fn macro_layout(&self, macro_id: &str) -> Result<BTreeMap<String, (f32, f32)>> {
         let def = self
             .macros
             .get(macro_id)
             .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
-        let mut out = BTreeMap::new();
-        for (inner, mf) in &def.modules {
-            let Some(&(x, y)) = def.positions.get(inner) else {
-                continue;
-            };
-            if self.macros.get(&mf.ext).is_some() {
-                for (sub, (sx, sy)) in self.macro_layout(&mf.ext)? {
-                    out.insert(format!("{inner}/{sub}"), (x + sx, y + sy));
-                }
-            } else {
-                out.insert(inner.clone(), (x, y));
-            }
-        }
-        Ok(out)
+        Ok(def
+            .modules
+            .keys()
+            .filter_map(|inner| Some((inner.clone(), *def.positions.get(inner)?)))
+            .collect())
     }
 
     /// Break a macro instance apart (the UI's right-click "Break Macro"):
@@ -735,19 +724,113 @@ impl Engine {
         Ok(renames)
     }
 
-    /// Replace a macro's definition and re-expand every instance in memory
-    /// (PRD §6: editing a macro's internals edits every instance). The
-    /// engine must be stopped (structural edit).
-    pub fn update_macro(&mut self, def: MacroDef) -> Result<()> {
+    /// One instance's current internal state as a definition — what *save
+    /// macro* would publish and what the UI compares to decide whether the
+    /// verbs are no-ops.
+    pub fn macro_instance_state(&self, instance_id: &str) -> Result<MacroDef> {
+        let mut def = self.snapshot("macro-state");
+        def.macros
+            .remove(instance_id)
+            .map(|file| file.state.unwrap_or(file.def))
+            .ok_or_else(|| anyhow!("no macro instance {instance_id:?}"))
+    }
+
+    /// *Pull latest*: replace one instance's copy with the current base and
+    /// re-expand it. DESTRUCTIVE — every edit made inside the instance is
+    /// discarded, and wires into external jacks the new definition no
+    /// longer has are dropped (returned as load warnings, so callers can
+    /// surface them). No-op when the instance already matches the base.
+    /// The engine must be stopped (structural edit).
+    pub fn pull_macro_instance(&mut self, instance_id: &str) -> Result<Vec<String>> {
         self.core_mut()?;
-        anyhow::ensure!(
-            self.macros.get(&def.id).is_some(),
-            "unknown macro {:?}",
-            def.id
-        );
-        self.macros.register(def);
-        let doc = self.snapshot("update-macro");
+        let mi = self
+            .macro_instances
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("no macro instance {instance_id:?}"))?;
+        let base = self
+            .macros
+            .get(&mi.macro_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("macro {:?} is not in the store", mi.macro_id))?;
+        let mut doc = self.snapshot("pull-macro");
+        let file = doc
+            .macros
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("no macro instance {instance_id:?}"))?;
+        if file.def == base && file.state.is_none() {
+            return Ok(Vec::new());
+        }
+        file.def = base;
+        file.state = None;
+        reset_promoted_state(&mut doc, instance_id);
+        self.rebuild(&doc)?;
+        Ok(self.load_warnings.clone())
+    }
+
+    /// *Save macro*: publish one instance's current state (internal knobs,
+    /// params, wires, names — plus the members' current relative layout as
+    /// the definition's saved positions) as the new base. The instance
+    /// itself becomes clean: its copy IS the published definition, so
+    /// *reset to defaults* now returns here. Returns the definition to
+    /// persist to the store, or `None` when nothing changed.
+    pub fn save_macro_instance(&mut self, instance_id: &str) -> Result<Option<MacroDef>> {
+        let mut def = self.macro_instance_state(instance_id)?;
+        def.positions = self.instance_relative_layout(instance_id);
+        if self.macros.get(&def.id) == Some(&def) {
+            return Ok(None);
+        }
+        self.macros.register(def.clone());
+        let mi = self
+            .macro_instances
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("no macro instance {instance_id:?}"))?;
+        mi.def = def.clone();
+        Ok(Some(def))
+    }
+
+    /// *Reset to defaults*: discard everything edited inside one instance
+    /// since it was adopted, back to ITS copy of the definition (not the
+    /// base, and not the internal modules' own manifest defaults). No-op
+    /// when the instance has not drifted. The engine must be stopped
+    /// (structural edit: internal wiring is restored too).
+    pub fn reset_macro_instance(&mut self, instance_id: &str) -> Result<()> {
+        self.core_mut()?;
+        let mut doc = self.snapshot("reset-macro");
+        let before = doc.clone();
+        doc.macros
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("no macro instance {instance_id:?}"))?
+            .state = None;
+        reset_promoted_state(&mut doc, instance_id);
+        if doc == before {
+            return Ok(());
+        }
         self.rebuild(&doc)
+    }
+
+    /// Members' rack positions relative to the group's top-left corner, for
+    /// the definition's `positions` (empty unless every member is placed).
+    fn instance_relative_layout(&self, instance_id: &str) -> BTreeMap<String, (f32, f32)> {
+        let prefix = format!("{instance_id}/");
+        let placed: Vec<(&str, (f32, f32))> = self
+            .nodes
+            .iter()
+            .filter_map(|n| Some((n.instance_id.strip_prefix(&prefix)?, n.position?)))
+            .collect();
+        let members = self
+            .nodes
+            .iter()
+            .filter(|n| n.instance_id.starts_with(&prefix))
+            .count();
+        if placed.is_empty() || placed.len() != members {
+            return BTreeMap::new();
+        }
+        let ox = placed.iter().map(|(_, p)| p.0).fold(f32::MAX, f32::min);
+        let oy = placed.iter().map(|(_, p)| p.1).fold(f32::MAX, f32::min);
+        placed
+            .into_iter()
+            .map(|(id, (x, y))| (id.to_string(), (x - ox, y - oy)))
+            .collect()
     }
 
     /// Rebuild this engine from a patch document, carrying over the full
@@ -760,4 +843,35 @@ impl Engine {
         // already stopped (structural edits require a stopped engine).
         Ok(())
     }
+}
+
+/// Put an instance's promoted knobs/params (its module entry, which the
+/// load path applies ON TOP of the expansion) back to what its definition
+/// saves for them, so *pull* and *reset* also undo twiddles made from the
+/// outside of the macro.
+fn reset_promoted_state(doc: &mut crate::patch::PatchDoc, instance_id: &str) {
+    let Some(def) = doc.macros.get(instance_id).map(|f| f.effective().clone()) else {
+        return;
+    };
+    let Some(mf) = doc.modules.get_mut(instance_id) else {
+        return;
+    };
+    mf.knobs = def
+        .interface
+        .inputs
+        .iter()
+        .filter_map(|j| {
+            let state = def.modules.get(&j.node)?.knobs.get(&j.jack)?;
+            Some((j.id.clone(), state.clone()))
+        })
+        .collect();
+    mf.params = def
+        .interface
+        .params
+        .iter()
+        .filter_map(|p| {
+            let value = def.modules.get(&p.node)?.params.get(&p.param)?;
+            Some((p.id.clone(), *value))
+        })
+        .collect();
 }

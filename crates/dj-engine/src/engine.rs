@@ -1312,9 +1312,8 @@ impl Engine {
     pub fn reset_knob(&mut self, instance_id: &str, jack_id: &str) -> Result<()> {
         let (node, jack) = self.in_jack_indices(instance_id, jack_id)?;
         let saved = self.macro_instances.get(instance_id).and_then(|mi| {
-            let def = self.macros.get(&mi.macro_id)?;
-            let ij = def.interface.inputs.iter().find(|ij| ij.id == jack_id)?;
-            self.macro_default_knob(def, &ij.node, &ij.jack)
+            let ij = mi.def.interface.inputs.iter().find(|ij| ij.id == jack_id)?;
+            self.macro_default_knob(&mi.def, &ij.node, &ij.jack)
         });
         let state = saved.unwrap_or_else(|| {
             let decl = &self.nodes[node].manifest.inputs[jack];
@@ -1338,17 +1337,16 @@ impl Engine {
 
     /// Reset every input knob and every param of a module to defaults —
     /// the state a freshly added module of this type would have. For a
-    /// macro instance that is the definition's saved internal state.
-    /// Non-structural: wires, MIDI/gesture mappings and loaded tracks are
-    /// untouched.
+    /// macro instance that is the saved internal state of ITS OWN copy of
+    /// the definition (see [`Engine::reset_macro_instance`], which also
+    /// restores internal wiring). Non-structural: wires, MIDI/gesture
+    /// mappings and loaded tracks are untouched.
     pub fn reset_module(&mut self, instance_id: &str) -> Result<()> {
-        if self.macro_instances.contains_key(instance_id) {
-            let macro_id = self.macro_instances[instance_id].macro_id.clone();
-            let def = self
-                .macros
-                .get(&macro_id)
-                .cloned()
-                .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
+        if let Some(def) = self
+            .macro_instances
+            .get(instance_id)
+            .map(|mi| mi.def.clone())
+        {
             return self.reset_macro_state(instance_id, &def);
         }
         self.node_idx(instance_id)?;

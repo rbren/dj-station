@@ -22,7 +22,7 @@ use crate::choreo::ChoreoState;
 use crate::engine::{Engine, EngineConfig, MidiMappingInfo};
 use crate::gesture::GestureState;
 use crate::knob::KnobState;
-use crate::macros::{MacroConflict, MacroDef, MacroLibrary, MacroResolution};
+use crate::macros::{MacroDef, MacroInstance, MacroLibrary};
 use crate::registry::ExtensionRegistry;
 
 pub const PATCH_FORMAT: &str = "djpatch-1";
@@ -74,11 +74,6 @@ pub struct ModuleFile {
     /// Deck instance this deck is beat-synced to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_to: Option<String>,
-    /// For macro instances (`ext` is a macro id): the macro version this
-    /// entry was saved with. Version mismatches against the library are
-    /// surfaced by [`PatchDoc::macro_conflicts`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub macro_version: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -93,6 +88,28 @@ pub struct WireFile {
     pub wires: Vec<WireEntry>,
 }
 
+/// One macro instance's private definition, saved as
+/// `macros/<instance>.json` inside the patch tree.
+///
+/// `def` is the copy the instance was adopted with — the "defaults" that
+/// *reset to defaults* restores and that survive edits to the global base.
+/// `state` is the instance's current subgraph (internal knobs, params,
+/// wires, names) when it has drifted from `def`; absent means "unmodified".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MacroInstanceFile {
+    pub def: MacroDef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<MacroDef>,
+}
+
+impl MacroInstanceFile {
+    /// What the instance actually runs: its live state, or the adopted
+    /// copy when it has none.
+    pub fn effective(&self) -> &MacroDef {
+        self.state.as_ref().unwrap_or(&self.def)
+    }
+}
+
 /// A complete patch as an in-memory document — exactly what `save_patch`
 /// writes to disk. Cheap to clone/compare; used for undo/redo snapshots.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,10 +119,11 @@ pub struct PatchDoc {
     pub modules: BTreeMap<String, ModuleFile>,
     /// One wire bundle per source instance.
     pub wires: BTreeMap<String, WireFile>,
-    /// Embedded copies of every macro definition used by this patch (the
-    /// patch's "lockfile"; enables fork-on-version-mismatch, PRD §6).
+    /// Per-INSTANCE macro definitions, keyed by instance id: every macro
+    /// instance carries its own copy, so a patch is self-contained and
+    /// never changes when a global base does (PRD §6).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub macros: BTreeMap<String, MacroDef>,
+    pub macros: BTreeMap<String, MacroInstanceFile>,
     /// Rack layout: node instance id (macro members' `/`-prefixed ids
     /// included) -> unzoomed rack position. Pure UI passthrough
     /// ([`crate::engine::NodeInfo::position`]); saved as `layout.json`
@@ -116,14 +134,14 @@ pub struct PatchDoc {
     pub layout: BTreeMap<String, (f32, f32)>,
 }
 
-fn to_pretty(value: &impl Serialize) -> Result<String> {
+pub(crate) fn to_pretty(value: &impl Serialize) -> Result<String> {
     let mut s = serde_json::to_string_pretty(value)?;
     s.push('\n');
     Ok(s)
 }
 
 /// Write only if content differs (keeps diffs and mtimes minimal).
-fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
+pub(crate) fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
     if let Ok(existing) = std::fs::read_to_string(path) {
         if existing == content {
             return Ok(false);
@@ -142,6 +160,7 @@ impl PatchDoc {
         if self.modules.remove(instance).is_none() {
             return false;
         }
+        self.macros.remove(instance);
         self.wires.remove(instance);
         for wf in self.wires.values_mut() {
             wf.wires.retain(|w| w.to != instance);
@@ -198,8 +217,8 @@ impl PatchDoc {
         let macros = self
             .macros
             .iter()
-            .filter(|(id, _)| modules.values().any(|m| &m.ext == *id))
-            .map(|(id, def)| (id.clone(), def.clone()))
+            .filter(|(instance_id, _)| modules.contains_key(*instance_id))
+            .map(|(instance_id, file)| (instance_id.clone(), file.clone()))
             .collect();
         PatchDoc {
             header: self.header.clone(),
@@ -226,8 +245,10 @@ impl PatchDoc {
                 .unwrap();
             renames.insert(old.clone(), fresh);
         }
-        for (id, def) in &clipboard.macros {
-            self.macros.entry(id.clone()).or_insert_with(|| def.clone());
+        // Each pasted instance brings its own copy of the definition along
+        // under its fresh id.
+        for (old, file) in &clipboard.macros {
+            self.macros.insert(renames[old].clone(), file.clone());
         }
         for (old, mf) in &clipboard.modules {
             let mut mf = mf.clone();
@@ -272,42 +293,17 @@ impl Engine {
         };
         let mut modules = BTreeMap::new();
         for (node_idx, info) in self.nodes.iter_slots() {
-            // Macro-internal nodes are part of the macro definition, not
-            // the patch document.
+            // Macro-internal nodes ride in their instance's own entry
+            // (`PatchDoc::macros`), not in the patch's module list.
             if info.instance_id.contains('/') {
                 continue;
             }
-            let mut knobs = BTreeMap::new();
-            for (jack, state) in info.manifest.inputs.iter().zip(&info.knobs) {
-                knobs.insert(jack.id.clone(), state.clone());
-            }
-            modules.insert(
-                info.instance_id.clone(),
-                ModuleFile {
-                    ext: info.ext_id.clone(),
-                    name: info.display_name.clone(),
-                    knobs,
-                    params: info.params.clone(),
-                    midi_mappings: info.midi_mappings.clone(),
-                    midi_led_mappings: info.midi_led_mappings.clone(),
-                    gesture: info.gesture.as_ref().map(|g| GestureState {
-                        mode: g.active_mode().to_string(),
-                        wheels: *g.wheels(),
-                        mappings: self.gesture_mappings(&info.instance_id).unwrap_or_default(),
-                    }),
-                    choreo: info.choreo.clone(),
-                    track: info.track_path.clone(),
-                    sync_to: self.deck_sync_to_by_node(node_idx),
-                    macro_version: None,
-                },
-            );
+            modules.insert(info.instance_id.clone(), self.module_file(node_idx, info));
         }
-        // Top-level macro instances persist as references (macro id +
-        // version) plus their promoted knob/param state.
+        // Macro instances persist as a reference (the macro id) plus their
+        // promoted knob/param state; the definition itself is a per-instance
+        // copy in `macros`.
         for (iid, mi) in self.macro_instances() {
-            if iid.contains('/') {
-                continue;
-            }
             let mut knobs = BTreeMap::new();
             for (ext, node, jack) in &mi.inputs {
                 if let Ok(state) = self.knob_state(node, jack) {
@@ -335,10 +331,26 @@ impl Engine {
                     choreo: None,
                     track: None,
                     sync_to: None,
-                    macro_version: Some(mi.version),
                 },
             );
         }
+        // Per-instance definitions: the adopted copy plus, when the
+        // instance has drifted from it, its current internal state.
+        let macros = self
+            .macro_instances()
+            .iter()
+            .map(|(iid, mi)| {
+                let live = self.instance_state(iid, mi);
+                let state = (live != mi.def).then_some(live);
+                (
+                    iid.clone(),
+                    MacroInstanceFile {
+                        def: mi.def.clone(),
+                        state,
+                    },
+                )
+            })
+            .collect();
         let wires = self
             .wire_entries()
             .into_iter()
@@ -347,14 +359,6 @@ impl Engine {
                 (source, WireFile { wires: entries })
             })
             .collect();
-        // Embed the definitions of every macro in use (nested included —
-        // nested instances appear in macro_instances too).
-        let mut macros = BTreeMap::new();
-        for mi in self.macro_instances().values() {
-            if let Some(def) = self.macros.get(&mi.macro_id) {
-                macros.insert(def.id.clone(), def.clone());
-            }
-        }
         // Rack layout: every placed node, macro members included (their
         // `/`-prefixed ids are how a macro-delete undo restores the whole
         // group's arrangement).
@@ -369,6 +373,84 @@ impl Engine {
             wires,
             macros,
             layout,
+        }
+    }
+
+    /// One node's persisted control state.
+    fn module_file(&self, node_idx: usize, info: &crate::engine::NodeInfo) -> ModuleFile {
+        let mut knobs = BTreeMap::new();
+        for (jack, state) in info.manifest.inputs.iter().zip(&info.knobs) {
+            knobs.insert(jack.id.clone(), state.clone());
+        }
+        ModuleFile {
+            ext: info.ext_id.clone(),
+            name: info.display_name.clone(),
+            knobs,
+            params: info.params.clone(),
+            midi_mappings: info.midi_mappings.clone(),
+            midi_led_mappings: info.midi_led_mappings.clone(),
+            gesture: info.gesture.as_ref().map(|g| GestureState {
+                mode: g.active_mode().to_string(),
+                wheels: *g.wheels(),
+                mappings: self.gesture_mappings(&info.instance_id).unwrap_or_default(),
+            }),
+            choreo: info.choreo.clone(),
+            track: info.track_path.clone(),
+            sync_to: self.deck_sync_to_by_node(node_idx),
+        }
+    }
+
+    /// One macro instance's CURRENT subgraph as a definition: its internal
+    /// modules (knobs, params, mappings, display names) and the wires
+    /// between them, under ids relative to the instance.
+    ///
+    /// Interface and saved positions come from the adopted copy: the
+    /// interface only changes by re-collapsing, and member layout is UI
+    /// state that rides in `PatchDoc::layout` (it reaches a definition only
+    /// through an explicit *save macro*).
+    fn instance_state(&self, instance_id: &str, mi: &MacroInstance) -> MacroDef {
+        let prefix = format!("{instance_id}/");
+        let mut modules = BTreeMap::new();
+        for (node_idx, info) in self.nodes.iter_slots() {
+            let Some(inner) = info.instance_id.strip_prefix(&prefix) else {
+                continue;
+            };
+            let mut mf = self.module_file(node_idx, info);
+            mf.sync_to = mf
+                .sync_to
+                .and_then(|s| s.strip_prefix(&prefix).map(str::to_string));
+            modules.insert(inner.to_string(), mf);
+        }
+        // Internal wires come straight off the graph: `wire_entries` hides
+        // them precisely because they belong to a definition.
+        let mut wires: BTreeMap<String, WireFile> = BTreeMap::new();
+        for w in self.wire_specs() {
+            let (Some(src), Some(dst)) = (
+                self.nodes[w.from_node].instance_id.strip_prefix(&prefix),
+                self.nodes[w.to_node].instance_id.strip_prefix(&prefix),
+            ) else {
+                continue;
+            };
+            wires
+                .entry(src.to_string())
+                .or_insert_with(|| WireFile { wires: Vec::new() })
+                .wires
+                .push(WireEntry {
+                    from_jack: self.output_jack_name(w.from_node, w.from_jack),
+                    to: dst.to_string(),
+                    to_jack: self.input_jack_name(w.to_node, w.to_jack),
+                });
+        }
+        for wf in wires.values_mut() {
+            wf.wires.sort();
+        }
+        MacroDef {
+            id: mi.def.id.clone(),
+            name: mi.def.name.clone(),
+            modules,
+            wires,
+            interface: mi.def.interface.clone(),
+            positions: mi.def.positions.clone(),
         }
     }
 
@@ -395,13 +477,13 @@ impl Engine {
             keep_wires.insert(fname);
         }
 
-        // Embedded macro definitions (only when the patch uses macros).
+        // Per-instance macro definitions (only when the patch uses macros).
         if !doc.macros.is_empty() {
             std::fs::create_dir_all(dir.join("macros"))?;
         }
-        for (macro_id, def) in &doc.macros {
-            let fname = format!("{macro_id}.json");
-            write_if_changed(&dir.join("macros").join(&fname), &to_pretty(def)?)?;
+        for (instance_id, file) in &doc.macros {
+            let fname = format!("{instance_id}.json");
+            write_if_changed(&dir.join("macros").join(&fname), &to_pretty(file)?)?;
             keep_macros.insert(fname);
         }
 
@@ -507,12 +589,11 @@ impl Engine {
         Engine::from_doc_with_macros(doc, registry, MacroLibrary::default())
     }
 
-    /// Build a fresh engine from a patch document, seeding the engine's
-    /// macro library from `macros` (typically the user library store).
-    /// Definitions embedded in the document win over the seeded library so
-    /// the patch loads exactly as saved; run
-    /// [`PatchDoc::macro_conflicts`]/[`PatchDoc::resolve_macro_conflict`]
-    /// first to apply an update-vs-fork decision.
+    /// Build a fresh engine from a patch document, seeding the BASE macro
+    /// library from `macros` (the global store). The bases only feed the
+    /// picker and *pull latest*: every instance expands from its own copy
+    /// in the document, so the patch sounds exactly as it was saved
+    /// whatever the store now holds.
     pub fn from_doc_with_macros(
         doc: &PatchDoc,
         registry: ExtensionRegistry,
@@ -529,16 +610,18 @@ impl Engine {
         };
         let mut engine = Engine::new(config, registry)?;
         engine.macros = macros;
-        for def in doc.macros.values() {
-            engine.macros.register(def.clone());
-        }
 
         // Modules in BTreeMap (instance id) order for determinism. Deck sync
         // targets are applied after every module exists (the master deck may
         // sort after its follower).
         let mut deferred_syncs: Vec<(String, String)> = Vec::new();
         for (instance_id, mf) in &doc.modules {
-            engine.add_module_from_file(instance_id, mf, &mut deferred_syncs)?;
+            engine.add_module_from_file(
+                instance_id,
+                mf,
+                doc.macros.get(instance_id),
+                &mut deferred_syncs,
+            )?;
         }
         for (instance, master) in &deferred_syncs {
             engine.deck_sync(instance, Some(master))?;
@@ -575,9 +658,15 @@ impl Engine {
         &mut self,
         instance_id: &str,
         mf: &ModuleFile,
+        macro_file: Option<&MacroInstanceFile>,
         deferred_syncs: &mut Vec<(String, String)>,
     ) -> Result<()> {
-        self.add_module(instance_id, &mf.ext)?;
+        match macro_file {
+            // A macro instance expands from its own copy, never from the
+            // base of the same id.
+            Some(file) => self.adopt_macro(instance_id, file)?,
+            None => self.add_module(instance_id, &mf.ext)?,
+        }
         if mf.name.is_some() {
             self.set_display_name(instance_id, mf.name.clone())?;
         }
@@ -650,13 +739,9 @@ impl Engine {
                 && doc.header.master_channels == self.config.master_channels,
             "apply_doc cannot change the engine config (load a fresh patch instead)"
         );
-        for def in doc.macros.values() {
-            self.macros.register(def.clone());
-        }
-
         // Which top-level instances must be (re)created: missing, different
-        // ext, macro version bump, or a track that can't be un-loaded
-        // in place.
+        // ext, a macro instance whose definition changed, or a track that
+        // can't be un-loaded in place.
         let current: Vec<String> = self
             .nodes
             .iter()
@@ -674,7 +759,7 @@ impl Engine {
             match doc.modules.get(id) {
                 None => recreate.push(id.clone()),
                 Some(mf) => {
-                    if !self.module_matches_shape(id, mf) {
+                    if !self.module_matches_shape(id, mf, doc.macros.get(id)) {
                         recreate.push(id.clone());
                     }
                 }
@@ -689,7 +774,12 @@ impl Engine {
         let mut deferred_syncs: Vec<(String, String)> = Vec::new();
         for (instance_id, mf) in &doc.modules {
             if recreate.iter().any(|r| r == instance_id) || (!self.has_instance(instance_id)) {
-                self.add_module_from_file(instance_id, mf, &mut deferred_syncs)?;
+                self.add_module_from_file(
+                    instance_id,
+                    mf,
+                    doc.macros.get(instance_id),
+                    &mut deferred_syncs,
+                )?;
                 created.push(instance_id.clone());
             } else {
                 self.diff_module_in_place(instance_id, mf, &mut deferred_syncs)?;
@@ -730,11 +820,23 @@ impl Engine {
         self.macro_instances().contains_key(id) || self.nodes.iter().any(|n| n.instance_id == id)
     }
 
-    /// Can `id` be morphed into `mf` in place? Same ext, same macro
-    /// version, and no track unload (tracks can be replaced, not removed).
-    fn module_matches_shape(&self, id: &str, mf: &ModuleFile) -> bool {
+    /// Can `id` be morphed into `mf` in place? Same ext, an unchanged macro
+    /// definition (adopted copy AND live internals — internal edits are
+    /// invisible to the module/wire diff, so they re-expand), and no track
+    /// unload (tracks can be replaced, not removed).
+    fn module_matches_shape(
+        &self,
+        id: &str,
+        mf: &ModuleFile,
+        macro_file: Option<&MacroInstanceFile>,
+    ) -> bool {
         if let Some(mi) = self.macro_instances().get(id) {
-            return mi.macro_id == mf.ext && Some(mi.version) == mf.macro_version;
+            let Some(file) = macro_file else {
+                return false;
+            };
+            return mi.macro_id == mf.ext
+                && file.def == mi.def
+                && *file.effective() == self.instance_state(id, mi);
         }
         let Some(info) = self.nodes.iter().find(|n| n.instance_id == id) else {
             return false;
@@ -871,10 +973,10 @@ impl Engine {
         Ok(())
     }
 
-    /// Load a patch directory into a fresh engine (macros expand from the
-    /// definitions embedded in the patch). For update-vs-fork prompting
-    /// against a library, use [`PatchDoc::read`] + `macro_conflicts` +
-    /// `resolve_macro_conflict` + [`Engine::from_doc_with_macros`].
+    /// Load a patch directory into a fresh engine. Patches are
+    /// self-contained — each macro instance expands from its own copy — so
+    /// no macro store is needed; [`Engine::from_doc_with_macros`] seeds the
+    /// bases too, for the picker and *pull latest*.
     pub fn load_patch(dir: &Path, registry: ExtensionRegistry) -> Result<Engine> {
         Engine::from_doc(&PatchDoc::read(dir)?, registry)
     }
@@ -918,9 +1020,11 @@ impl PatchDoc {
             for entry in std::fs::read_dir(&macros_dir)? {
                 let path = entry?.path();
                 if path.extension().map(|x| x == "json").unwrap_or(false) {
-                    let def: MacroDef = serde_json::from_str(&std::fs::read_to_string(&path)?)
-                        .with_context(|| format!("reading {}", path.display()))?;
-                    macros.insert(def.id.clone(), def);
+                    let instance_id = path.file_stem().unwrap().to_string_lossy().to_string();
+                    let file: MacroInstanceFile =
+                        serde_json::from_str(&std::fs::read_to_string(&path)?)
+                            .with_context(|| format!("reading {}", path.display()))?;
+                    macros.insert(instance_id, file);
                 }
             }
         }
@@ -940,86 +1044,5 @@ impl PatchDoc {
             macros,
             layout,
         })
-    }
-
-    /// Version mismatches between this patch's embedded macro definitions
-    /// and a library (PRD §6: prompt update-or-fork at load).
-    pub fn macro_conflicts(&self, lib: &MacroLibrary) -> Vec<MacroConflict> {
-        self.macros
-            .values()
-            .filter_map(|d| {
-                lib.get(&d.id).and_then(|l| {
-                    (l.version != d.version).then(|| MacroConflict {
-                        macro_id: d.id.clone(),
-                        patch_version: d.version,
-                        library_version: l.version,
-                    })
-                })
-            })
-            .collect()
-    }
-
-    /// Apply an update-vs-fork decision for one conflicted macro. This is
-    /// the logic behind the UI prompt's two buttons:
-    ///
-    /// - [`MacroResolution::UpdateToLibrary`]: the patch adopts the
-    ///   library's definition (instances re-expand with the new version).
-    /// - [`MacroResolution::Fork`]: the patch's embedded definition is
-    ///   registered in the library under a new id (version 1) and every
-    ///   reference in the patch (including nested ones inside other
-    ///   embedded macros) is rewritten to the fork.
-    pub fn resolve_macro_conflict(
-        &mut self,
-        macro_id: &str,
-        resolution: &MacroResolution,
-        lib: &mut MacroLibrary,
-    ) -> Result<()> {
-        match resolution {
-            MacroResolution::UpdateToLibrary => {
-                let def = lib
-                    .get(macro_id)
-                    .ok_or_else(|| anyhow::anyhow!("macro {macro_id:?} not in library"))?
-                    .clone();
-                let version = def.version;
-                self.macros.insert(macro_id.to_string(), def);
-                for mf in self.modules.values_mut() {
-                    if mf.ext == macro_id {
-                        mf.macro_version = Some(version);
-                    }
-                }
-            }
-            MacroResolution::Fork { new_id } => {
-                anyhow::ensure!(
-                    lib.get(new_id).is_none() && !self.macros.contains_key(new_id),
-                    "macro id {new_id:?} already exists"
-                );
-                let mut def = self
-                    .macros
-                    .remove(macro_id)
-                    .ok_or_else(|| anyhow::anyhow!("macro {macro_id:?} not in patch"))?;
-                def.id = new_id.clone();
-                def.version = 1;
-                def.name = format!("{} (fork)", def.name);
-                lib.register(def.clone());
-                self.macros.insert(new_id.clone(), def);
-                for mf in self.modules.values_mut() {
-                    if mf.ext == macro_id {
-                        mf.ext = new_id.clone();
-                        mf.macro_version = Some(1);
-                    }
-                }
-                // Nested references inside other embedded definitions keep
-                // the patch's saved sound by pointing at the fork too.
-                for def in self.macros.values_mut() {
-                    for mf in def.modules.values_mut() {
-                        if mf.ext == macro_id {
-                            mf.ext = new_id.clone();
-                            mf.macro_version = Some(1);
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 }

@@ -81,14 +81,6 @@ CREATE TABLE IF NOT EXISTS track_beatgrids (
     bpm         REAL NOT NULL,
     anchor_secs REAL NOT NULL DEFAULT 0
 );
-
-CREATE TABLE IF NOT EXISTS macros (
-    id         TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    version    INTEGER NOT NULL,
-    definition TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
 ";
 
 /// A library track row. `bpm`/`musical_key`/`analysis_status` are the
@@ -579,42 +571,19 @@ impl Library {
     }
 
     // ------------------------------------------------------------------
-    // Macro modules (M4, PRD §6): the library is the canonical store for
-    // macro definitions — stable ID, version, and the definition itself
-    // as engine-format JSON (the engine's `MacroDef`).
+    // Macro modules (PRD §6). Macros are global objects in the macro
+    // store (`<data_dir>/macros/`), not library rows; the DB only still
+    // knows how to hand over — and forget — what older builds kept here.
     // ------------------------------------------------------------------
 
-    /// Insert or update a macro definition.
-    pub fn save_macro(&self, record: &MacroRecord) -> Result<()> {
+    /// Macro definitions left in the retired `macros` table, sorted by id.
+    /// Empty when the table is gone (every DB created since the macro
+    /// store landed).
+    pub fn legacy_macros(&self) -> Result<Vec<MacroRecord>> {
         self.with_conn(|c| {
-            c.execute(
-                "INSERT INTO macros (id, name, version, definition, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-                 ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
-                    version = excluded.version,
-                    definition = excluded.definition,
-                    updated_at = excluded.updated_at",
-                params![record.id, record.name, record.version, record.definition],
-            )?;
-            Ok(())
-        })
-    }
-
-    pub fn macro_by_id(&self, id: &str) -> Result<Option<MacroRecord>> {
-        self.with_conn(|c| {
-            Ok(c.query_row(
-                "SELECT id, name, version, definition FROM macros WHERE id = ?1",
-                params![id],
-                macro_from_row,
-            )
-            .optional()?)
-        })
-    }
-
-    /// All stored macros, sorted by id.
-    pub fn macros(&self) -> Result<Vec<MacroRecord>> {
-        self.with_conn(|c| {
+            if !table_exists(c, "macros")? {
+                return Ok(Vec::new());
+            }
             let mut stmt =
                 c.prepare("SELECT id, name, version, definition FROM macros ORDER BY id")?;
             let rows = stmt.query_map([], macro_from_row)?;
@@ -622,16 +591,28 @@ impl Library {
         })
     }
 
-    pub fn delete_macro(&self, id: &str) -> Result<()> {
+    /// Drop the retired table once its contents are in the macro store.
+    pub fn drop_legacy_macros(&self) -> Result<()> {
         self.with_conn(|c| {
-            c.execute("DELETE FROM macros WHERE id = ?1", params![id])?;
+            c.execute("DROP TABLE IF EXISTS macros", [])?;
             Ok(())
         })
     }
 }
 
-/// A stored macro module (PRD §6/§8.1). `definition` is the engine's
-/// `MacroDef` serialized as JSON — the library treats it as opaque.
+fn table_exists(c: &Connection, name: &str) -> rusqlite::Result<bool> {
+    c.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        params![name],
+        |_| Ok(true),
+    )
+    .optional()
+    .map(|found| found.unwrap_or(false))
+}
+
+/// A macro definition as older builds stored it: `definition` is the
+/// engine's `MacroDef` as JSON, `version` the counter the file store no
+/// longer keeps. Only used while migrating.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MacroRecord {
     pub id: String,

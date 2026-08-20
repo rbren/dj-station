@@ -158,7 +158,6 @@ export interface ChoreoStatus {
 export interface MacroInfo {
   id: string;
   name: string;
-  version: number;
 }
 
 /** `collapse_macro`'s outcome: the fresh instance id, or the existing
@@ -168,8 +167,8 @@ export interface CollapseOutcome {
   conflict: MacroInfo | null;
 }
 
-/** One concrete internal node a fresh macro instance expands to (nested
- *  macros flattened) — the module picker's composite thumbnail. */
+/** One internal node a fresh macro instance expands to — the module
+ *  picker's composite thumbnail. */
 export interface MacroPreviewNode {
   id: string;
   ext: string;
@@ -181,20 +180,12 @@ export interface MacroPreviewNode {
 }
 
 /** One expanded macro instance on the rack: the members of its bounding
- *  box (concrete node ids, nested macros flattened). */
+ *  box (concrete node ids). */
 export interface MacroGroup {
   instance: string;
   macro_id: string;
   name: string;
   members: string[];
-}
-
-/** A macro whose patch-saved version disagrees with the library (PRD §6). */
-export interface MacroConflict {
-  macro_id: string;
-  name: string;
-  patch_version: number;
-  library_version: number;
 }
 
 export class EngineClient extends IpcClient {
@@ -300,11 +291,11 @@ export class EngineClient extends IpcClient {
   savePatch(dir: string, name: string) {
     return this.call<void>('save_patch', { dir, name });
   }
-  /** Loads a patch. A non-empty result is the list of macro version
-   *  conflicts (PRD §6): the engine was left untouched and the caller
-   *  should prompt update-vs-fork and retry with `resolutions`. */
-  loadPatch(dir: string, resolutions?: [string, 'update' | 'fork'][]) {
-    return this.call<MacroConflict[]>('load_patch', { dir, resolutions });
+  /** Loads a patch. Patches are self-contained — each macro instance
+   *  carries its own copy of the definition — so this never prompts;
+   *  the result is the list of non-fatal load warnings. */
+  loadPatch(dir: string) {
+    return this.call<string[]>('load_patch', { dir });
   }
   listMacros() {
     return this.call<MacroInfo[]>('list_macros');
@@ -327,11 +318,28 @@ export class EngineClient extends IpcClient {
       overwrite,
     });
   }
-  /** Rename a user-library macro (stable id; display name only). */
+  /** *Pull latest* on one macro instance: re-adopt the published
+   *  definition, DISCARDING every edit made inside this instance (the
+   *  caller confirms first). Returns wires the new interface dropped. */
+  pullMacroInstance(instance: string) {
+    return this.call<string[]>('pull_macro_instance', { instance });
+  }
+  /** *Save macro*: publish this instance's current state as the macro's
+   *  definition. Other instances keep their own copies until they pull.
+   *  False when nothing had changed. */
+  saveMacroInstance(instance: string) {
+    return this.call<boolean>('save_macro_instance', { instance });
+  }
+  /** *Reset to defaults*: drop local edits inside one instance, back to
+   *  the copy of the definition it was adopted with. */
+  resetMacroInstance(instance: string) {
+    return this.call<null>('reset_macro_instance', { instance });
+  }
+  /** Rename a published macro (stable id; display name only). */
   renameMacro(macroId: string, name: string) {
     return this.call<null>('rename_macro', { macroId, name });
   }
-  /** Delete a macro from the user library. Fails while rack instances
+  /** Delete a macro from the global store. Fails while rack instances
    *  still use it. */
   deleteMacro(macroId: string) {
     return this.call<null>('delete_macro', { macroId });

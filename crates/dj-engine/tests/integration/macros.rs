@@ -1,10 +1,9 @@
 //! Collapse-to-macro (PRD §6, M4 acceptance): collapse a selection to a
-//! macro via API; instantiate it twice; edit internals; both instances
-//! reflect the change; version-mismatch prompt logic covered by tests.
+//! macro via API; instantiate it twice;every instance keeps its own copy of
+//! the definition. The store-side verbs (pull/save/reset) and the
+//! pre-store migration live in `macro_store.rs`.
 
-use dj_engine::{
-    Engine, EngineConfig, MacroInterface, MacroJack, MacroParam, MacroResolution, PatchDoc,
-};
+use dj_engine::{Engine, EngineConfig, MacroInterface, MacroJack, MacroParam, PatchDoc};
 
 const SR: f32 = 48_000.0;
 
@@ -87,7 +86,6 @@ fn collapsed_macro_renders_identically_to_the_flat_patch() {
             tone_interface(),
         )
         .unwrap();
-    assert_eq!(def.version, 1);
     assert_eq!(def.modules.len(), 2);
     // Internal wire (osc->vca) lives in the def; boundary wire got
     // rewritten to the instance's external jack.
@@ -166,85 +164,70 @@ fn reset_on_a_macro_instance_restores_the_definition_state() {
     assert!(e.nodes.iter().any(|n| n.instance_id == "tone1/osc1"));
 }
 
+/// Every instance owns the definition it adopted: editing the base leaves
+/// live instances alone, and adopting it again gives the second instance a
+/// different copy — both live side by side in one patch and survive a
+/// round-trip (the "v1 and v2 in the same patch" case).
 #[test]
-fn instantiate_twice_and_edit_internals_updates_both_instances() {
-    // Build, collapse, then wire TWO instances of the macro to the output.
+fn instances_keep_the_copy_they_adopted_when_the_base_changes() {
     let mut e = mono_engine();
     build_tone_patch(&mut e);
-    let def = e
-        .collapse_to_macro(
-            &["osc1", "vca1"],
-            "tone1",
-            "macro.tone",
-            "Tone",
-            tone_interface(),
-        )
-        .unwrap();
-    e.add_module("tone2", "macro.tone").unwrap();
-    e.connect("tone2", "out", "out1", "l").unwrap();
-    assert_eq!(
-        e.macro_instances().len(),
-        2,
-        "two instances: {:?}",
-        e.macro_instances().keys()
-    );
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    let adopted = e.knob_state("tone1/osc1", "waveform").unwrap().position;
 
-    // Per-instance state: drop instance 2's level so the mix is
-    // distinguishable from a doubled instance 1.
-    e.set_knob_position("tone2", "level", 0.25).unwrap();
-    let before = render(&mut e, 0.25);
-    assert!(peak(&before) > 1.0);
-
-    // Edit the macro's internals: version 2 halves the internal VCA level.
-    let mut def2 = def.clone();
-    def2.version = 2;
-    def2.modules
-        .get_mut("vca1")
-        .unwrap()
-        .knobs
-        .get_mut("cv")
-        .unwrap()
-        .position = 0.25;
-    e.update_macro(def2).unwrap();
-
-    // Both instances reflect the change...
-    for inst in ["tone1", "tone2"] {
-        let mi = &e.macro_instances()[inst];
-        assert_eq!(mi.version, 2, "{inst} still at version {}", mi.version);
-    }
-    // ...but *instance-level* promoted knob state survives the update:
-    // the "level" knob was promoted, so each instance keeps its own value
-    // (tone1 at 0.5, tone2 at 0.25) rather than adopting the def's 0.25.
-    let k1 = e.knob_state("tone1", "level").unwrap();
-    let k2 = e.knob_state("tone2", "level").unwrap();
-    assert_eq!(k1.position, 0.5);
-    assert_eq!(k2.position, 0.25);
-
-    // A non-promoted internal edit *does* propagate to both instances:
-    // change the internal waveform knob on one def edit instead.
-    let mut def3 = e.macros.get("macro.tone").unwrap().clone();
-    def3.version = 3;
-    def3.modules
+    // The base moves on to a square wave; the live instance must not.
+    let mut next = e.macros.get("macro.tone").unwrap().clone();
+    next.modules
         .get_mut("osc1")
         .unwrap()
         .knobs
         .get_mut("waveform")
         .unwrap()
-        .position = wave_pos(2.0); // square
-    e.update_macro(def3).unwrap();
-    let after = render(&mut e, 0.25);
-    assert_ne!(before, after, "internal edit must change every instance");
-    // Square wave has a higher RMS than sine at the same peak; both
-    // instances switching waveform is audible in the mix.
-    for inst in ["tone1", "tone2"] {
-        assert_eq!(e.macro_instances()[inst].version, 3);
-        let node = format!("{inst}/osc1");
-        let k = e.knob_state(&node, "waveform").unwrap();
-        assert!(
-            (k.position - wave_pos(2.0)).abs() < 1e-6,
-            "{inst} waveform not updated"
-        );
-    }
+        .position = wave_pos(2.0);
+    e.register_macro(next);
+    assert_eq!(
+        e.knob_state("tone1/osc1", "waveform").unwrap().position,
+        adopted,
+        "an existing instance followed a base edit"
+    );
+
+    // A fresh instance adopts the current base instead.
+    e.add_module("tone2", "macro.tone").unwrap();
+    e.connect("tone2", "out", "out1", "l").unwrap();
+    let second = e.knob_state("tone2/osc1", "waveform").unwrap().position;
+    assert!((second - wave_pos(2.0)).abs() < 1e-6);
+    assert_ne!(adopted, second);
+
+    // Both copies are in the patch, one file per instance.
+    let dir = tempfile::tempdir().unwrap();
+    e.save_patch(dir.path(), "two-copies").unwrap();
+    let doc = PatchDoc::read(dir.path()).unwrap();
+    assert_eq!(doc.macros["tone1"].def.id, "macro.tone");
+    assert_eq!(doc.macros["tone2"].def.id, "macro.tone");
+    assert_ne!(doc.macros["tone1"].def, doc.macros["tone2"].def);
+
+    let loaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+    assert_eq!(
+        loaded
+            .knob_state("tone1/osc1", "waveform")
+            .unwrap()
+            .position,
+        adopted
+    );
+    assert_eq!(
+        loaded
+            .knob_state("tone2/osc1", "waveform")
+            .unwrap()
+            .position,
+        second
+    );
 }
 
 #[test]
@@ -265,8 +248,8 @@ fn macro_patches_roundtrip_save_load_byte_stable() {
         golden = render(&mut e, 0.25);
         e.save_patch(dir.path(), "macro-patch").unwrap();
     }
-    // The macro definition is embedded in the patch tree.
-    assert!(dir.path().join("macros/macro.tone.json").exists());
+    // The instance's own copy of the definition rides in the patch tree.
+    assert!(dir.path().join("macros/tone1.json").exists());
     assert!(dir.path().join("modules/tone1.json").exists());
     assert!(
         !dir.path().join("modules/tone1/osc1.json").exists()
@@ -291,99 +274,11 @@ fn macro_patches_roundtrip_save_load_byte_stable() {
     }
 }
 
+/// Macros are flat: a selection containing a macro instance cannot be
+/// collapsed, and a definition that references another macro is refused at
+/// expansion.
 #[test]
-fn version_mismatch_prompt_logic_update_and_fork() {
-    // Save a patch with macro v1, then bump the library to v2 (louder
-    // internals). Loading must surface a conflict with both resolutions.
-    let dir = tempfile::tempdir().unwrap();
-    let v1_sound;
-    {
-        let mut e = mono_engine();
-        build_tone_patch(&mut e);
-        e.collapse_to_macro(
-            &["osc1", "vca1"],
-            "tone1",
-            "macro.tone",
-            "Tone",
-            tone_interface(),
-        )
-        .unwrap();
-        v1_sound = render(&mut e, 0.25);
-        e.save_patch(dir.path(), "macro-patch").unwrap();
-    }
-
-    // The library has since moved to v2 with a different waveform.
-    let mut lib = dj_engine::MacroLibrary::default();
-    {
-        let doc = PatchDoc::read(dir.path()).unwrap();
-        let mut def2 = doc.macros["macro.tone"].clone();
-        def2.version = 2;
-        def2.modules
-            .get_mut("osc1")
-            .unwrap()
-            .knobs
-            .get_mut("waveform")
-            .unwrap()
-            .position = wave_pos(1.0); // saw
-        lib.register(def2);
-    }
-
-    // 1. Conflict detection.
-    let doc = PatchDoc::read(dir.path()).unwrap();
-    let conflicts = doc.macro_conflicts(&lib);
-    assert_eq!(conflicts.len(), 1);
-    assert_eq!(conflicts[0].macro_id, "macro.tone");
-    assert_eq!(conflicts[0].patch_version, 1);
-    assert_eq!(conflicts[0].library_version, 2);
-
-    // 2. Resolution: UPDATE -> instances adopt the library definition.
-    let mut doc_up = doc.clone();
-    doc_up
-        .resolve_macro_conflict("macro.tone", &MacroResolution::UpdateToLibrary, &mut lib)
-        .unwrap();
-    assert!(doc_up.macro_conflicts(&lib).is_empty());
-    let mut updated =
-        Engine::from_doc_with_macros(&doc_up, crate::common::registry(), lib.clone()).unwrap();
-    assert_eq!(updated.macro_instances()["tone1"].version, 2);
-    let updated_sound = render(&mut updated, 0.25);
-    assert_ne!(updated_sound, v1_sound, "update must adopt v2 internals");
-
-    // 3. Resolution: FORK -> patch keeps its saved sound under a new id;
-    //    the fork lands in the library at version 1.
-    let mut doc_fork = doc.clone();
-    doc_fork
-        .resolve_macro_conflict(
-            "macro.tone",
-            &MacroResolution::Fork {
-                new_id: "macro.tone-fork".into(),
-            },
-            &mut lib,
-        )
-        .unwrap();
-    assert!(doc_fork.macro_conflicts(&lib).is_empty());
-    assert_eq!(lib.get("macro.tone-fork").unwrap().version, 1);
-    assert_eq!(lib.get("macro.tone").unwrap().version, 2);
-    assert_eq!(doc_fork.modules["tone1"].ext, "macro.tone-fork");
-    let mut forked =
-        Engine::from_doc_with_macros(&doc_fork, crate::common::registry(), lib.clone()).unwrap();
-    assert_eq!(
-        forked.macro_instances()["tone1"].macro_id,
-        "macro.tone-fork"
-    );
-    let forked_sound = render(&mut forked, 0.25);
-    assert_eq!(forked_sound, v1_sound, "fork must keep the saved sound");
-
-    // 4. No conflict when versions match.
-    let doc_clean = PatchDoc::read(dir.path()).unwrap();
-    let mut same_lib = dj_engine::MacroLibrary::default();
-    same_lib.register(doc_clean.macros["macro.tone"].clone());
-    assert!(doc_clean.macro_conflicts(&same_lib).is_empty());
-}
-
-#[test]
-fn macros_nest_arbitrarily() {
-    // Collapse osc+vca -> macro.tone; then collapse [tone1] + a second vca
-    // -> macro.duo (a macro containing a macro instance).
+fn macros_may_not_nest() {
     let mut e = mono_engine();
     build_tone_patch(&mut e);
     e.collapse_to_macro(
@@ -398,106 +293,55 @@ fn macros_nest_arbitrarily() {
     e.disconnect("tone1", "out", "out1", "l").unwrap();
     e.connect("tone1", "out", "vca2", "in").unwrap();
     e.connect("vca2", "out", "out1", "l").unwrap();
-    e.set_knob_position("vca2", "cv", 1.0).unwrap();
-    let flat = render(&mut e, 0.25);
-    assert!(peak(&flat) > 1.0);
 
-    let outer_interface = MacroInterface {
-        inputs: vec![MacroJack {
-            id: "trim".into(),
-            node: "vca2".into(),
-            jack: "cv".into(),
-        }],
-        outputs: vec![MacroJack {
-            id: "out".into(),
-            node: "vca2".into(),
-            jack: "out".into(),
-        }],
-        params: vec![],
-    };
-    e.collapse_to_macro(
-        &["tone1", "vca2"],
-        "duo1",
-        "macro.duo",
-        "Duo",
-        outer_interface,
-    )
-    .unwrap();
-    assert!(e.macro_instances().contains_key("duo1"));
-    assert!(
-        e.macro_instances().contains_key("duo1/tone1"),
-        "nested instance missing: {:?}",
-        e.macro_instances().keys()
-    );
-    assert!(e.nodes.iter().any(|n| n.instance_id == "duo1/tone1/osc1"));
-    assert_eq!(render(&mut e, 0.25), flat, "nesting changed the audio");
-
-    // Editing the INNER macro propagates through the outer instance.
-    let mut inner2 = e.macros.get("macro.tone").unwrap().clone();
-    inner2.version = 2;
-    inner2
-        .modules
-        .get_mut("osc1")
-        .unwrap()
-        .knobs
-        .get_mut("waveform")
-        .unwrap()
-        .position = wave_pos(2.0);
-    e.update_macro(inner2).unwrap();
-
-    // Save before rendering: update_macro rebuilt the engine (fresh
-    // oscillator phase), so the first post-edit render is comparable with
-    // a freshly loaded engine's first render.
-    let dir = tempfile::tempdir().unwrap();
-    e.save_patch(dir.path(), "nested").unwrap();
-    assert!(dir.path().join("macros/macro.duo.json").exists());
-    assert!(dir.path().join("macros/macro.tone.json").exists());
-
-    let edited = render(&mut e, 0.25);
-    assert_ne!(edited, flat, "inner edit must propagate");
-
-    // And a nested-macro patch round-trips.
-    let mut loaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
-    assert_eq!(render(&mut loaded, 0.25), edited);
-}
-
-#[test]
-fn macro_defs_roundtrip_through_the_sqlite_library_store() {
-    // Collapse -> persist the def to the library DB (as the app does) ->
-    // fresh engine seeds its macro library from the DB -> instantiate.
-    let dir = tempfile::tempdir().unwrap();
-    let lib = dj_library::Library::open(dir.path()).unwrap();
-
-    let mut e = mono_engine();
-    build_tone_patch(&mut e);
-    let def = e
+    let err = e
         .collapse_to_macro(
-            &["osc1", "vca1"],
-            "tone1",
-            "macro.tone",
-            "Tone",
-            tone_interface(),
+            &["tone1", "vca2"],
+            "duo1",
+            "macro.duo",
+            "Duo",
+            MacroInterface {
+                inputs: vec![],
+                outputs: vec![MacroJack {
+                    id: "out".into(),
+                    node: "vca2".into(),
+                    jack: "out".into(),
+                }],
+                params: vec![],
+            },
         )
-        .unwrap();
-    let sound = render(&mut e, 0.25);
-    lib.save_macro(&dj_library::MacroRecord {
-        id: def.id.clone(),
-        name: def.name.clone(),
-        version: def.version as i64,
-        definition: serde_json::to_string(&def).unwrap(),
-    })
-    .unwrap();
+        .unwrap_err();
+    assert!(
+        format!("{err:#}").contains("may not nest"),
+        "unexpected error: {err:#}"
+    );
+    assert!(e.macros.get("macro.duo").is_none());
+    assert!(e.macro_instances().contains_key("tone1"));
 
-    // A brand-new engine, seeded only from the DB, can instantiate it.
-    let mut fresh = mono_engine();
-    for rec in lib.macros().unwrap() {
-        let def: dj_engine::MacroDef = serde_json::from_str(&rec.definition).unwrap();
-        fresh.register_macro(def);
-    }
-    fresh.add_module("t1", "macro.tone").unwrap();
-    fresh.add_module("out1", "builtin.audio_out").unwrap();
-    fresh.connect("t1", "out", "out1", "l").unwrap();
-    assert_eq!(render(&mut fresh, 0.25), sound);
+    // A hand-written definition nesting another macro is refused too.
+    let mut nested = e.macros.get("macro.tone").unwrap().clone();
+    nested.id = "macro.nested".into();
+    nested.modules.insert(
+        "inner".into(),
+        dj_engine::patch::ModuleFile {
+            ext: "macro.tone".into(),
+            name: None,
+            knobs: Default::default(),
+            params: Default::default(),
+            midi_mappings: Vec::new(),
+            midi_led_mappings: Vec::new(),
+            gesture: None,
+            choreo: None,
+            track: None,
+            sync_to: None,
+        },
+    );
+    e.register_macro(nested);
+    let err = e.add_module("nest1", "macro.nested").unwrap_err();
+    assert!(
+        format!("{err:#}").contains("may not nest"),
+        "unexpected error: {err:#}"
+    );
 }
 
 #[test]
@@ -623,17 +467,20 @@ fn break_macro_lifts_internals_to_top_level_without_audio_change() {
     // Post-break snapshot round-trips as a plain flat patch.
     let doc = e.snapshot("broken");
     assert!(doc.modules.contains_key("osc1"));
-    assert!(doc.modules["osc1"].macro_version.is_none());
+    assert!(
+        doc.macros.is_empty(),
+        "no instance copies left after a break"
+    );
     let mut reloaded = Engine::from_doc(&doc, crate::common::registry()).unwrap();
     let mut flat2 = mono_engine();
     build_tone_patch(&mut flat2);
     assert_eq!(render(&mut flat2, 0.25), render(&mut reloaded, 0.25));
 }
 
-/// Breaking a macro renames colliding internals to fresh top-level ids and
-/// lifts directly-nested macro instances to top level.
+/// Breaking a macro renames internals that would collide with existing
+/// top-level ids.
 #[test]
-fn break_macro_avoids_collisions_and_lifts_nested_instances() {
+fn break_macro_avoids_collisions() {
     let mut e = mono_engine();
     build_tone_patch(&mut e);
     e.collapse_to_macro(
@@ -647,37 +494,6 @@ fn break_macro_avoids_collisions_and_lifts_nested_instances() {
     // A top-level module that will collide with the lifted internal.
     e.add_module("osc1", "com.dj.oscillator").unwrap();
 
-    // Nest: collapse the instance together with an LFO into an outer macro.
-    e.add_module("lfo1", "com.dj.lfo").unwrap();
-    e.connect("lfo1", "uni", "tone1", "level").unwrap();
-    e.collapse_to_macro(
-        &["tone1", "lfo1"],
-        "outer1",
-        "macro.outer-brk",
-        "Outer",
-        MacroInterface {
-            inputs: vec![],
-            outputs: vec![MacroJack {
-                id: "out".into(),
-                node: "tone1".into(),
-                jack: "out".into(),
-            }],
-            params: vec![],
-        },
-    )
-    .unwrap();
-    assert!(e.macro_instances().contains_key("outer1/tone1"));
-
-    let renames = e.break_macro("outer1").unwrap();
-    // lfo1 lifts back to its old name; the nested instance lifts whole.
-    assert_eq!(renames["outer1/lfo1"], "lfo1");
-    assert_eq!(renames["outer1/tone1"], "tone1");
-    assert_eq!(renames["outer1/tone1/osc1"], "tone1/osc1");
-    assert!(e.macro_instances().contains_key("tone1"));
-    assert!(!e.macro_instances().contains_key("outer1"));
-
-    // Now break the inner instance: its osc1 collides with the top-level
-    // osc1 and gets a fresh id.
     let renames = e.break_macro("tone1").unwrap();
     let lifted_osc = &renames["tone1/osc1"];
     assert_ne!(lifted_osc, "osc1");
@@ -689,10 +505,9 @@ fn break_macro_avoids_collisions_and_lifts_nested_instances() {
 }
 
 /// Definition positions: UI passthrough metadata on the def (saved and
-/// loaded with it, no version bump) exposed per fresh instance through
-/// macro_layout — nested macros flatten with their own offset.
+/// loaded with it) exposed per fresh instance through macro_layout.
 #[test]
-fn macro_positions_persist_and_flatten_through_macro_layout() {
+fn macro_positions_persist_through_macro_layout() {
     let mut e = mono_engine();
     build_tone_patch(&mut e);
     e.collapse_to_macro(
@@ -713,57 +528,26 @@ fn macro_positions_persist_and_flatten_through_macro_layout() {
             .into(),
         )
         .unwrap();
-    assert_eq!(def.version, 1, "positions must not bump the version");
+    assert_eq!(def.positions.len(), 2);
 
     let layout = e.macro_layout("macro.tone-pos").unwrap();
     assert_eq!(layout["osc1"], (0.0, 0.0));
     assert_eq!(layout["vca1"], (180.0, 20.0));
 
-    // Positions survive a save/load round-trip of the patch document.
+    // Positions live on the base, so they survive a rebuild that carries
+    // the library (patches themselves hold per-instance copies only).
     let doc = e.snapshot("pos");
-    let e2 = Engine::from_doc(&doc, crate::common::registry()).unwrap();
+    let e2 =
+        Engine::from_doc_with_macros(&doc, crate::common::registry(), e.macros.clone()).unwrap();
     assert_eq!(
         e2.macro_layout("macro.tone-pos").unwrap()["vca1"],
         (180.0, 20.0)
     );
-
-    // Nest it and give the outer def its own positions: the inner layout
-    // flattens offset by the nested entry's position.
-    e.add_module("lfo1", "com.dj.lfo").unwrap();
-    e.collapse_to_macro(
-        &["tone1", "lfo1"],
-        "outer1",
-        "macro.outer-pos",
-        "Outer",
-        MacroInterface {
-            inputs: vec![],
-            outputs: vec![MacroJack {
-                id: "out".into(),
-                node: "tone1".into(),
-                jack: "out".into(),
-            }],
-            params: vec![],
-        },
-    )
-    .unwrap();
-    e.set_macro_positions(
-        "macro.outer-pos",
-        [
-            ("tone1".to_string(), (40.0, 300.0)),
-            ("lfo1".to_string(), (0.0, 0.0)),
-        ]
-        .into(),
-    )
-    .unwrap();
-    let layout = e.macro_layout("macro.outer-pos").unwrap();
-    assert_eq!(layout["lfo1"], (0.0, 0.0));
-    assert_eq!(layout["tone1/osc1"], (40.0, 300.0));
-    assert_eq!(layout["tone1/vca1"], (220.0, 320.0));
 }
 
-/// macro_preview — the picker-thumbnail view of a definition: concrete
-/// internal nodes with their manifests, definition-saved knobs and
-/// flattened positions, read purely from the definition (no instance).
+/// macro_preview — the picker-thumbnail view of a definition: internal
+/// nodes with their manifests, definition-saved knobs and saved positions,
+/// read purely from the definition (no instance).
 #[test]
 fn macro_preview_exposes_internal_nodes() {
     let mut e = mono_engine();
@@ -798,43 +582,6 @@ fn macro_preview_exposes_internal_nodes() {
     assert_eq!(vca.position, Some((180.0, 20.0)));
     assert_eq!(vca.knobs["cv"].position, 0.5);
 
-    // Nesting flattens with the outer entry's offset; an outer def with
-    // no positions yields None for every node under it.
-    e.add_module("lfo1", "com.dj.lfo").unwrap();
-    e.collapse_to_macro(
-        &["tone1", "lfo1"],
-        "outer1",
-        "macro.outer-prev",
-        "Outer",
-        MacroInterface {
-            inputs: vec![],
-            outputs: vec![MacroJack {
-                id: "out".into(),
-                node: "tone1".into(),
-                jack: "out".into(),
-            }],
-            params: vec![],
-        },
-    )
-    .unwrap();
-    let preview = e.macro_preview("macro.outer-prev").unwrap();
-    assert_eq!(preview.len(), 3);
-    let osc = preview.iter().find(|n| n.id == "tone1/osc1").unwrap();
-    assert_eq!(osc.position, None);
-    e.set_macro_positions(
-        "macro.outer-prev",
-        [
-            ("tone1".to_string(), (40.0, 300.0)),
-            ("lfo1".to_string(), (0.0, 0.0)),
-        ]
-        .into(),
-    )
-    .unwrap();
-    let preview = e.macro_preview("macro.outer-prev").unwrap();
-    let vca = preview.iter().find(|n| n.id == "tone1/vca1").unwrap();
-    assert_eq!(vca.position, Some((220.0, 320.0)));
-    assert_eq!(vca.knobs["cv"].position, 0.5);
-
     assert!(e.macro_preview("macro.nope").is_err());
 }
 
@@ -861,10 +608,10 @@ fn breaking_an_instance_leaves_the_definition_available() {
     assert!(e.macro_instances().contains_key("tone2"));
 }
 
-/// Renaming a macro keeps the id, changes the display name, bumps the
-/// version, and stamps live instances (nothing structural changes).
+/// Renaming a macro changes the base's display name under its stable id.
+/// Live instances keep the name they adopted until they pull.
 #[test]
-fn rename_macro_updates_name_version_and_instances() {
+fn rename_macro_changes_the_base_name() {
     let mut e = mono_engine();
     build_tone_patch(&mut e);
     e.collapse_to_macro(
@@ -878,8 +625,8 @@ fn rename_macro_updates_name_version_and_instances() {
     let def = e.rename_macro("macro.tone", "Fat Tone").unwrap();
     assert_eq!(def.id, "macro.tone");
     assert_eq!(def.name, "Fat Tone");
-    assert_eq!(def.version, 2);
-    assert_eq!(e.macro_instances()["tone1"].version, 2);
+    assert_eq!(e.macros.get("macro.tone").unwrap().name, "Fat Tone");
+    assert_eq!(e.macro_instances()["tone1"].def.name, "Tone");
     // Internals untouched: still renders.
     assert!(peak(&render(&mut e, 0.1)) > 1.0);
     assert!(e.rename_macro("macro.tone", "  ").is_err());
@@ -905,11 +652,11 @@ fn unregister_macro_removes_the_definition() {
     assert!(e.add_module("tone2", "macro.tone").is_err());
 }
 
-/// recollapse_macro overwrites an existing definition under its stable id:
-/// the version moves past the old one and OTHER live instances re-expand
-/// to the new internals.
+/// recollapse_macro overwrites the base under its stable id. The instance
+/// it was saved from adopts the new definition; other live instances keep
+/// the copy they already had.
 #[test]
-fn recollapse_overwrites_definition_and_updates_other_instances() {
+fn recollapse_overwrites_the_base_and_leaves_other_instances_alone() {
     let mut e = mono_engine();
     build_tone_patch(&mut e);
     e.collapse_to_macro(
@@ -943,25 +690,16 @@ fn recollapse_overwrites_definition_and_updates_other_instances() {
         .recollapse_macro(&["osc2", "vca2"], "tone2", "macro.tone", "Tone", interface)
         .unwrap();
     assert_eq!(def.id, "macro.tone");
-    assert_eq!(def.version, 2, "overwrite must bump past the old version");
-    assert_eq!(e.macros.get("macro.tone").unwrap().version, 2);
+    assert_eq!(e.macros.get("macro.tone"), Some(&def));
     // No scratch artifacts left behind.
     assert_eq!(e.macros.list().len(), 1);
 
-    // BOTH instances now use the new definition (update semantics): each
-    // has the new 2-module internals and reports the new version.
-    for inst in ["tone1", "tone2"] {
-        let mi = &e.macro_instances()[inst];
-        assert_eq!(mi.version, 2, "{inst} not updated");
-        assert!(
-            e.nodes
-                .iter()
-                .any(|n| n.instance_id == format!("{inst}/osc2")),
-            "{inst} kept old internals"
-        );
-    }
-    // The engine still renders (out1 lost its wire to the old vca1 node —
-    // boundary wires to replaced internals drop like any stale wire).
+    // The saved-from instance runs the new internals...
+    assert!(e.nodes.iter().any(|n| n.instance_id == "tone2/osc2"));
+    // ...and the older instance still runs the copy it adopted.
+    assert!(e.nodes.iter().any(|n| n.instance_id == "tone1/osc1"));
+    assert!(e.nodes.iter().all(|n| n.instance_id != "tone1/osc2"));
+    assert_ne!(e.macro_instances()["tone1"].def, def);
     render(&mut e, 0.05);
 
     assert!(e

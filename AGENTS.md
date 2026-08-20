@@ -77,22 +77,37 @@ fails if it's missing.
   test gates on `DJ_STEMS_ONNX_MODEL` (unset/empty ⇒ skip). The tested
   default separator is the deterministic DSP `BandSeparator` — don't make
   CI depend on model files.
-- Macros (M4, PRD §6): definitions are canonical in the library DB
-  (`macros` table, JSON `MacroDef`); patches persist instances as
-  `ext = <macro id>` + `macro_version` references and embed the used
-  definitions under `macros/` as a lockfile for the version-mismatch
-  update-vs-fork flow (`PatchDoc::macro_conflicts` /
-  `resolve_macro_conflict`). Expanded internal nodes use `/`-prefixed
-  instance ids, so `/` is reserved in user instance ids. Macros are NOT
-  collapsed in the UI: every internal renders as an ordinary module panel
-  and the instance is a pure UI grouping (`MacroBoxes` bounding box fed by
-  the `macro_groups` command; all-or-nothing select/drag/copy/delete in
-  App.tsx). `MacroDef.positions` stores the members' relative rack layout
-  (UI passthrough, `skip_serializing_if empty` so old goldens stay
-  byte-stable; `Engine::macro_layout` flattens nested defs for placement).
-  Right-click "Break Macro" -> `Engine::break_macro`: in-place control-side
-  rename lifting internals to fresh top-level ids (slots/wires/DSP state
-  untouched; nested instances lift whole), instance record dissolves.
+- Macros (M4, PRD §6): macros are GLOBAL objects in the macro store —
+  `<data_dir>/macros/<macro id>.json`, a sibling of `patches/`
+  (`crates/dj-engine/src/macro_store.rs`, `MACROS_DIR_NAME`). One file per
+  id holds the current **base** definition; there are no version counters
+  and no conflict prompts. Every macro INSTANCE owns a private copy of the
+  definition it adopted, saved in the patch as
+  `<patch>/macros/<instance id>.json` = `MacroInstanceFile { def, state }`
+  (`def` = the adopted copy, `state` = the drifted subgraph, absent when
+  unmodified). Loading a patch never consults the store: patches are
+  self-contained, so a base edit can never change how a saved patch
+  sounds. Three explicit verbs move definitions between the two:
+  `save_macro_instance` (publish this instance as the base),
+  `pull_macro_instance` (destructive re-adopt of the base) and
+  `reset_macro_instance` (drop live edits back to the adopted copy) —
+  each a no-op when the two sides already agree. Macros do NOT nest:
+  `collapse_to_macro` rejects selections containing macro instances.
+  `MacroStore::import_patch_macros` migrates pre-store patches in place
+  (newest embedded definition per id seeds the base, every instance gets
+  a copy, retired `macro_version` keys are dropped); it runs at app
+  startup along with the one-shot move of the retired `macros` DB table
+  (`Library::legacy_macros` / `drop_legacy_macros`). Expanded internal
+  nodes use `/`-prefixed instance ids, so `/` is reserved in user
+  instance ids. Macros are NOT collapsed in the UI: every internal
+  renders as an ordinary module panel and the instance is a pure UI
+  grouping (`MacroBoxes` bounding box fed by the `macro_groups` command;
+  all-or-nothing select/drag/copy/delete in App.tsx). `MacroDef.positions`
+  stores the members' relative rack layout (UI passthrough,
+  `skip_serializing_if empty` so old goldens stay byte-stable). Right-click
+  "Break Macro" -> `Engine::break_macro`: in-place control-side rename
+  lifting internals to fresh top-level ids (slots/wires/DSP state
+  untouched), instance record dissolves.
 - Native (dylib) modules (M4, PRD §5): `abi = "native-1"`, loaded by
   `native_host.rs` via libloading through a versioned C vtable. They are
   UNSANDBOXED trusted code (trust model documented in `native_host.rs`).
