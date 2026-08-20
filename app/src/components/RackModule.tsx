@@ -59,6 +59,7 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
   // Whole record (stable identity, changes only on an explicit user pick);
   // narrowed to this instance's jacks below.
   const allInputColors = useRackSelector((s) => s.inputColors);
+  const allInputLabels = useRackSelector((s) => s.inputLabels);
   // Deliberately NOT subscribed to telemetry: jack glows subscribe per jack
   // (LiveJack) and custom UIs per instance (CustomUIHost), so a telemetry
   // tick never re-renders whole panels — the difference between 22 fps and
@@ -79,6 +80,15 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
     }
     return out;
   }, [allInputColors, instanceId]);
+
+  const inputLabels = useMemo(() => {
+    const prefix = `${instanceId}:`;
+    const out: Record<string, string> = {};
+    for (const [key, label] of Object.entries(allInputLabels)) {
+      if (key.startsWith(prefix)) out[key.slice(prefix.length)] = label;
+    }
+    return out;
+  }, [allInputLabels, instanceId]);
 
   if (!node || !handle) return null;
   const pos = position ?? defaultPosition(index);
@@ -197,6 +207,8 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         }}
         inputColors={inputColors}
         onInputColor={(jack, color) => store.setInputColor(instanceId, jack, color)}
+        inputLabels={inputLabels}
+        onInputLabel={(jack, label) => store.setInputLabel(instanceId, jack, label)}
       />
     </ErrorBoundary>
   );

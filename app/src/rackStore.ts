@@ -36,6 +36,9 @@ export interface RackState {
    *  Absent = no color. App-layer cosmetic state persisted in localStorage,
    *  like wire colors — never part of the patch. */
   inputColors: Record<string, number>;
+  /** User-typed input jack labels (`instance:jack` → text). Absent = the
+   *  layout/manifest default. Same cosmetic-state story as inputColors. */
+  inputLabels: Record<string, string>;
 }
 
 export interface RackStore {
@@ -54,11 +57,14 @@ export interface RackStore {
   setTelemetry(telemetry: RackTelemetry): void;
   /** Set (or clear, with null) an input jack's color. */
   setInputColor(instance: string, jack: string, color: number | null): void;
+  /** Set (or clear, with null/empty) an input jack's custom label. */
+  setInputLabel(instance: string, jack: string, label: string | null): void;
   subscribe(listener: () => void): () => void;
 }
 
 export const POSITIONS_KEY = 'dj-rack-positions';
 export const INPUT_COLORS_KEY = 'dj-input-colors';
+export const INPUT_LABELS_KEY = 'dj-input-labels';
 
 export function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -106,6 +112,7 @@ export function createRackStore(): RackStore {
     selected: [],
     pending: null,
     inputColors: loadJson<Record<string, number>>(INPUT_COLORS_KEY, {}),
+    inputLabels: loadJson<Record<string, string>>(INPUT_LABELS_KEY, {}),
   };
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((l) => l());
@@ -178,6 +185,16 @@ export function createRackStore(): RackStore {
       else inputColors[key] = color;
       saveJson(INPUT_COLORS_KEY, inputColors);
       state = { ...state, inputColors };
+      notify();
+    },
+    setInputLabel(instance, jack, label) {
+      const key = `${instance}:${jack}`;
+      const inputLabels = { ...state.inputLabels };
+      const next = label?.trim();
+      if (!next) delete inputLabels[key];
+      else inputLabels[key] = next;
+      saveJson(INPUT_LABELS_KEY, inputLabels);
+      state = { ...state, inputLabels };
       notify();
     },
     subscribe(listener) {

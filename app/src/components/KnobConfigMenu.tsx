@@ -32,6 +32,9 @@ export function KnobConfigMenu({
   display,
   jackColor,
   onJackColor,
+  jackLabel,
+  jackLabelDefault,
+  onJackLabel,
   colorOnly,
 }: {
   config: KnobConfig;
@@ -61,9 +64,14 @@ export function KnobConfigMenu({
   /** Cosmetic jack color (WIRE_COLORS index; null/undefined = none). */
   jackColor?: number | null;
   onJackColor?(color: number | null): void;
-  /** Color-only mode: hides every knob field, leaving just the color
-   *  picker — used for jack-only inputs (audio pass-throughs) that have
-   *  no knob to configure. */
+  /** Custom jack label (null/undefined = the layout/manifest default,
+   *  shown as the field's placeholder). Cleared by emptying the field. */
+  jackLabel?: string | null;
+  jackLabelDefault?: string;
+  onJackLabel?(label: string | null): void;
+  /** Cosmetic-only mode: hides every knob field, leaving just the color
+   *  picker and label — used for jack-only inputs (audio pass-throughs)
+   *  that have no knob to configure. */
   colorOnly?: boolean;
 }) {
   const curveName = typeof config.curve === 'string' ? config.curve : 'custom';
@@ -74,6 +82,14 @@ export function KnobConfigMenu({
   // NaN, is ignored, and the controlled value snaps the text right back,
   // making the field impossible to clear or retype.
   const [draft, setDraft] = useState<string | null>(null);
+  // Label edits commit on Enter/blur (empty = revert to the default), so
+  // half-typed text never flickers onto the panel.
+  const [labelDraft, setLabelDraft] = useState<string | null>(null);
+  const commitLabel = () => {
+    if (labelDraft === null) return;
+    onJackLabel?.(labelDraft.trim() || null);
+    setLabelDraft(null);
+  };
 
   // Right-click is a "type a value" gesture: focus the field with its
   // content selected so typing immediately replaces it.
@@ -287,6 +303,26 @@ export function KnobConfigMenu({
             </>
           )}
         </>
+      )}
+      {onJackLabel && (
+        <label>
+          Label
+          <input
+            type="text"
+            aria-label="jack label"
+            placeholder={jackLabelDefault}
+            value={labelDraft ?? jackLabel ?? ''}
+            onChange={(e) => setLabelDraft(e.target.value)}
+            onBlur={commitLabel}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitLabel();
+              else if (e.key === 'Escape') {
+                e.stopPropagation();
+                setLabelDraft(null);
+              }
+            }}
+          />
+        </label>
       )}
       {onJackColor && (
         <>

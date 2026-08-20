@@ -107,6 +107,9 @@ export interface ModulePanelProps {
   /** User-chosen cosmetic input colors (jack id → WIRE_COLORS index). */
   inputColors?: Record<string, number>;
   onInputColor?(jackId: string, color: number | null): void;
+  /** User-typed cosmetic input labels (jack id → text). */
+  inputLabels?: Record<string, string>;
+  onInputLabel?(jackId: string, label: string | null): void;
 }
 
 /** Hosts a module's custom UI, subscribing to the module's telemetry slice
@@ -455,6 +458,10 @@ export function ModulePanel(props: ModulePanelProps) {
                         color={props.inputColors?.[cell.jack] ?? null}
                         onColor={
                           props.onInputColor ? (c) => props.onInputColor?.(cell.jack, c) : undefined
+                        }
+                        customLabel={props.inputLabels?.[cell.jack] ?? null}
+                        onLabel={
+                          props.onInputLabel ? (l) => props.onInputLabel?.(cell.jack, l) : undefined
                         }
                         onJackClick={(shift) => props.onJackClick?.('input', cell.jack, shift)}
                         onKnobPosition={(p) => props.onKnobPosition(cell.jack, p)}

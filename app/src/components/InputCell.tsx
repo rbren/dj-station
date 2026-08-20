@@ -33,6 +33,10 @@ export interface InputCellProps {
    *  renders a prominent rounded border around the cell. */
   color?: number | null;
   onColor?(color: number | null): void;
+  /** User-typed label override (null/undefined = the layout/manifest
+   *  default). Edited from the same right-click menu as the color. */
+  customLabel?: string | null;
+  onLabel?(label: string | null): void;
   onJackClick?(shift: boolean): void;
   onKnobPosition(position: number): void;
   onKnobConfig(config: KnobConfig): void;
@@ -51,7 +55,8 @@ export function InputCell(props: InputCellProps) {
   const plain = !state?.config && !props.manifestKnob;
   // Audio jacks carry sound, not a settable signal: jack only.
   const control = props.audio ? 'jack' : (cell.control ?? 'auto');
-  const label = cell.label ?? cell.jack;
+  const defaultLabel = cell.label ?? cell.jack;
+  const label = props.customLabel ?? defaultLabel;
   const appearance = control === 'fader' ? 'fader' : control === 'hfader' ? 'hfader' : undefined;
   const cellColor =
     props.color !== null && props.color !== undefined
@@ -112,6 +117,9 @@ export function InputCell(props: InputCellProps) {
           onRelease={props.onEditEnd}
           jackColor={props.color}
           onJackColor={props.onColor}
+          jackLabel={props.customLabel}
+          jackLabelDefault={defaultLabel}
+          onJackLabel={props.onLabel}
         />
       )}
       {colorMenuAt && props.onColor && (
@@ -123,6 +131,9 @@ export function InputCell(props: InputCellProps) {
           colorOnly
           jackColor={props.color}
           onJackColor={props.onColor}
+          jackLabel={props.customLabel}
+          jackLabelDefault={defaultLabel}
+          onJackLabel={props.onLabel}
         />
       )}
       {!cell.hideLabel && (

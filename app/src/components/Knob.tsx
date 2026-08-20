@@ -211,6 +211,11 @@ export interface KnobProps {
    *  editable from the config menu when onJackColor is provided. */
   jackColor?: number | null;
   onJackColor?(color: number | null): void;
+  /** Custom jack label (default label as placeholder), editable from the
+   *  config menu when onJackLabel is provided. */
+  jackLabel?: string | null;
+  jackLabelDefault?: string;
+  onJackLabel?(label: string | null): void;
 }
 
 export function Knob(props: KnobProps) {
@@ -297,6 +302,9 @@ export function Knob(props: KnobProps) {
       display={display}
       jackColor={props.jackColor}
       onJackColor={props.onJackColor}
+      jackLabel={props.jackLabel}
+      jackLabelDefault={props.jackLabelDefault}
+      onJackLabel={props.onJackLabel}
     />
   );
 

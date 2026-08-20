@@ -410,3 +410,62 @@ describe('input jack colors', () => {
     expect(screen.queryByRole('radio')).toBeNull();
   });
 });
+
+describe('custom input labels', () => {
+  it('a custom label replaces the default text; others keep theirs', () => {
+    const { rerender } = render(<ModulePanel {...baseProps} />);
+    expect(screen.getByTestId('input-cell-pitch').textContent).toContain('pitch');
+    rerender(<ModulePanel {...baseProps} inputLabels={{ pitch: 'bass note' }} />);
+    expect(screen.getByTestId('input-cell-pitch').textContent).toContain('bass note');
+    expect(screen.getByTestId('input-cell-fm').textContent).toContain('fm');
+  });
+
+  it('config menu Label field commits on Enter; empty clears back to default', () => {
+    const onInputLabel = vi.fn();
+    render(<ModulePanel {...baseProps} onInputLabel={onInputLabel} />);
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    const field = screen.getByLabelText('jack label') as HTMLInputElement;
+    // Default label surfaces as the placeholder, not as text to edit.
+    expect(field.placeholder).toBe('pitch');
+    expect(field.value).toBe('');
+    fireEvent.change(field, { target: { value: 'bass note' } });
+    expect(onInputLabel).not.toHaveBeenCalled(); // not while typing
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(onInputLabel).toHaveBeenCalledWith('pitch', 'bass note');
+    // Clearing the field reverts to the default.
+    fireEvent.change(field, { target: { value: '   ' } });
+    fireEvent.blur(field);
+    expect(onInputLabel).toHaveBeenLastCalledWith('pitch', null);
+  });
+
+  it('Escape cancels the draft without committing', () => {
+    const onInputLabel = vi.fn();
+    render(
+      <ModulePanel {...baseProps} inputLabels={{ pitch: 'old' }} onInputLabel={onInputLabel} />,
+    );
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    const field = screen.getByLabelText('jack label') as HTMLInputElement;
+    expect(field.value).toBe('old');
+    fireEvent.change(field, { target: { value: 'typo' } });
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(field.value).toBe('old');
+    fireEvent.blur(field);
+    expect(onInputLabel).not.toHaveBeenCalled();
+  });
+
+  it('jack-only inputs get the Label field in their color-only menu', () => {
+    const onInputLabel = vi.fn();
+    render(<ModulePanel {...baseProps} onInputColor={() => {}} onInputLabel={onInputLabel} />);
+    fireEvent.contextMenu(screen.getByTestId('input-cell-sync'));
+    const field = screen.getByLabelText('jack label');
+    fireEvent.change(field, { target: { value: 'clock in' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(onInputLabel).toHaveBeenCalledWith('sync', 'clock in');
+  });
+
+  it('without onInputLabel no Label field renders', () => {
+    render(<ModulePanel {...baseProps} />);
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'pitch' }));
+    expect(screen.queryByLabelText('jack label')).toBeNull();
+  });
+});
