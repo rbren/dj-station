@@ -760,3 +760,80 @@ fn macro_positions_persist_and_flatten_through_macro_layout() {
     assert_eq!(layout["tone1/osc1"], (40.0, 300.0));
     assert_eq!(layout["tone1/vca1"], (220.0, 320.0));
 }
+
+/// macro_preview — the picker-thumbnail view of a definition: concrete
+/// internal nodes with their manifests, definition-saved knobs and
+/// flattened positions, read purely from the definition (no instance).
+#[test]
+fn macro_preview_exposes_internal_nodes() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    // The collapsed vca carries a non-default knob (cv @ 0.5, set by
+    // build_tone_patch) that the preview must surface.
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone-prev",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    e.set_macro_positions(
+        "macro.tone-prev",
+        [
+            ("osc1".to_string(), (0.0, 0.0)),
+            ("vca1".to_string(), (180.0, 20.0)),
+        ]
+        .into(),
+    )
+    .unwrap();
+
+    let preview = e.macro_preview("macro.tone-prev").unwrap();
+    assert_eq!(preview.len(), 2);
+    let osc = preview.iter().find(|n| n.id == "osc1").unwrap();
+    assert_eq!(osc.ext, "com.dj.oscillator");
+    assert_eq!(osc.manifest.id, "com.dj.oscillator");
+    assert_eq!(osc.position, Some((0.0, 0.0)));
+    let vca = preview.iter().find(|n| n.id == "vca1").unwrap();
+    assert_eq!(vca.position, Some((180.0, 20.0)));
+    assert_eq!(vca.knobs["cv"].position, 0.5);
+
+    // Nesting flattens with the outer entry's offset; an outer def with
+    // no positions yields None for every node under it.
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.collapse_to_macro(
+        &["tone1", "lfo1"],
+        "outer1",
+        "macro.outer-prev",
+        "Outer",
+        MacroInterface {
+            inputs: vec![],
+            outputs: vec![MacroJack {
+                id: "out".into(),
+                node: "tone1".into(),
+                jack: "out".into(),
+            }],
+            params: vec![],
+        },
+    )
+    .unwrap();
+    let preview = e.macro_preview("macro.outer-prev").unwrap();
+    assert_eq!(preview.len(), 3);
+    let osc = preview.iter().find(|n| n.id == "tone1/osc1").unwrap();
+    assert_eq!(osc.position, None);
+    e.set_macro_positions(
+        "macro.outer-prev",
+        [
+            ("tone1".to_string(), (40.0, 300.0)),
+            ("lfo1".to_string(), (0.0, 0.0)),
+        ]
+        .into(),
+    )
+    .unwrap();
+    let preview = e.macro_preview("macro.outer-prev").unwrap();
+    let vca = preview.iter().find(|n| n.id == "tone1/vca1").unwrap();
+    assert_eq!(vca.position, Some((220.0, 320.0)));
+    assert_eq!(vca.knobs["cv"].position, 0.5);
+
+    assert!(e.macro_preview("macro.nope").is_err());
+}

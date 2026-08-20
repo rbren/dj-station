@@ -1555,6 +1555,12 @@ body {
   width: max-content;
 }
 
+/* Composite macro preview: internal panels are absolutely positioned by
+   the definition's saved layout (like the rack), scale-to-fit. */
+.picker-preview-macro {
+  position: relative;
+}
+
 .picker-entry-caption {
   display: flex;
   align-items: baseline;

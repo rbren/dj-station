@@ -16,7 +16,7 @@ use crate::deck::{DeckCmd, DeckControl, DeckModule, DeckStatus, N_CUES};
 use crate::gesture::{GestureEvent, GestureMappingInfo, GestureRtModule};
 use crate::graph::{Graph, GraphNode, WireSpec};
 use crate::knob::{position_for_value, JackRt, KnobConfig, KnobState};
-use crate::macros::{MacroDef, MacroInstance, MacroInterface, MacroLibrary};
+use crate::macros::{MacroDef, MacroInstance, MacroInterface, MacroLibrary, MacroPreviewNode};
 use crate::manifest::Manifest;
 use crate::mixer::CrossfaderModule;
 use crate::module_host::HostModule;

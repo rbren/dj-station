@@ -2,7 +2,7 @@
 // zoomed-out rendered panel, filterable by category and search; click or
 // drag entries onto the canvas.
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   MODULE_DRAG_TYPE,
@@ -10,7 +10,14 @@ import {
   nextInstanceId,
   PICKER_SCALE,
 } from '../src/components/ModulePicker';
+import type { MacroPreviewNode } from '../src/engine';
 import type { Manifest } from '../src/types';
+
+const macroPreview = vi.fn(async (): Promise<MacroPreviewNode[] | null> => null);
+vi.mock('../src/engine', () => ({
+  engine: { macroPreview: (id: string) => macroPreview(id) },
+  onMenuAction: () => () => {},
+}));
 
 const MODULES: Manifest[] = [
   {
@@ -110,6 +117,88 @@ describe('ModulePicker', () => {
     // No getUserMedia grab from a gallery preview: the custom UI is absent.
     expect(screen.queryByTestId('camera-ui')).toBeNull();
     expect(screen.getByTestId('module-preview-com.dj.camera')).toBeTruthy();
+  });
+
+  it('macro entries render a composite preview of their internal panels', async () => {
+    const macro: Manifest = {
+      id: 'macro.tone',
+      name: 'Tone',
+      version: '1',
+      abi: 'macro-1',
+      category: 'Macros',
+      inputs: [{ id: 'pitch', name: 'pitch' }],
+      outputs: [{ id: 'out', name: 'out' }],
+      params: [],
+    };
+    macroPreview.mockResolvedValueOnce([
+      {
+        id: 'osc1',
+        ext: 'com.dj.lfo',
+        manifest: {
+          id: 'com.dj.lfo',
+          name: 'LFO',
+          version: '0.1.0',
+          abi: 'wasm-1',
+          category: 'Modulation',
+          inputs: [
+            {
+              id: 'rate',
+              name: 'Rate',
+              default: 2,
+              knob: { style: 'continuous', min: 0.01, max: 2000, curve: 'exp' },
+            },
+          ],
+          outputs: [{ id: 'bi', name: 'Bipolar' }],
+          params: [],
+        },
+        knobs: { rate: { position: 0.5, atten: 1, offset: 0 } },
+        position: [0, 0],
+      },
+      {
+        id: 'vca1',
+        ext: 'com.dj.vca',
+        manifest: {
+          id: 'com.dj.vca',
+          name: 'VCA',
+          version: '0.1.0',
+          abi: 'wasm-1',
+          category: 'Shaping',
+          inputs: [{ id: 'in', name: 'In' }],
+          outputs: [{ id: 'out', name: 'Out' }],
+          params: [],
+        },
+        knobs: {},
+        position: [180, 20],
+      },
+    ]);
+    render(<ModulePicker modules={[macro]} onAdd={vi.fn()} onClose={vi.fn()} />);
+    // The composite replaces the synthesized interface panel: both
+    // internal panels render (custom UIs included), laid out by the
+    // definition's saved positions.
+    await waitFor(() => expect(screen.getByTestId('macro-preview-macro.tone')).toBeTruthy());
+    expect(macroPreview).toHaveBeenCalledWith('macro.tone');
+    expect(screen.getByTestId('lfo-ui')).toBeTruthy();
+    const vca = screen.getByTestId('module-preview-macro.tone/vca1');
+    expect(vca.style.left).toBe('180px');
+    expect(vca.style.top).toBe('20px');
+    expect(screen.queryByTestId('module-preview-macro.tone')).toBeNull();
+  });
+
+  it('macro entries fall back to the interface panel when no preview is available', async () => {
+    const macro: Manifest = {
+      id: 'macro.empty',
+      name: 'Empty',
+      version: '1',
+      abi: 'macro-1',
+      category: 'Macros',
+      inputs: [{ id: 'in', name: 'in' }],
+      outputs: [],
+      params: [],
+    };
+    macroPreview.mockResolvedValueOnce(null); // headless / engine unavailable
+    render(<ModulePicker modules={[macro]} onAdd={vi.fn()} onClose={vi.fn()} />);
+    await waitFor(() => expect(macroPreview).toHaveBeenCalledWith('macro.empty'));
+    expect(screen.getByTestId('module-preview-macro.empty')).toBeTruthy();
   });
 
   it('clicking an entry requests that module type', () => {

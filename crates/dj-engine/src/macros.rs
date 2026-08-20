@@ -18,6 +18,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::knob::KnobState;
+use crate::manifest::Manifest;
 use crate::patch::{ModuleFile, WireFile};
 
 /// A promoted jack: `id` is the macro's external jack name; `node`/`jack`
@@ -69,6 +71,19 @@ pub struct MacroDef {
     /// saved before positions were recorded.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub positions: BTreeMap<String, (f32, f32)>,
+}
+
+/// One concrete internal node of a macro definition, as a UI thumbnail
+/// sees it (see `Engine::macro_preview`): nested macros flattened, id
+/// relative to a would-be instance, position relative to the group's
+/// top-left corner (`None` when the definition saved none).
+#[derive(Debug, Clone, Serialize)]
+pub struct MacroPreviewNode {
+    pub id: String,
+    pub ext: String,
+    pub manifest: Manifest,
+    pub knobs: BTreeMap<String, KnobState>,
+    pub position: Option<(f32, f32)>,
 }
 
 /// An in-memory collection of macro definitions (the engine-side view of

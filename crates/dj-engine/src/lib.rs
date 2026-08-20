@@ -42,7 +42,8 @@ pub use gesture::{GestureMappingInfo, GestureState, GESTURE_ID};
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle, WireStyle};
 pub use macros::{
-    MacroConflict, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroParam, MacroResolution,
+    MacroConflict, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroParam, MacroPreviewNode,
+    MacroResolution,
 };
 pub use manifest::Manifest;
 pub use patch::PatchDoc;

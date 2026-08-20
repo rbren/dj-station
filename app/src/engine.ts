@@ -3,7 +3,7 @@
 // headless.
 
 import { IpcClient } from './ipc';
-import type { JackTelemetry, KnobConfig, Manifest, WireStyle } from './types';
+import type { JackTelemetry, KnobConfig, KnobState, Manifest, WireStyle } from './types';
 
 /** Subscribe to native File-menu actions
  *  ("saved" | "save-as" | "open" | "request-new").
@@ -150,6 +150,18 @@ export interface MacroInfo {
   version: number;
 }
 
+/** One concrete internal node a fresh macro instance expands to (nested
+ *  macros flattened) — the module picker's composite thumbnail. */
+export interface MacroPreviewNode {
+  id: string;
+  ext: string;
+  manifest: Manifest;
+  knobs: Record<string, KnobState>;
+  /** Definition-saved position relative to the group's top-left corner;
+   *  null when the definition saved none (thumbnail tiles it instead). */
+  position: [number, number] | null;
+}
+
 /** One expanded macro instance on the rack: the members of its bounding
  *  box (concrete node ids, nested macros flattened). */
 export interface MacroGroup {
@@ -292,6 +304,10 @@ export class EngineClient extends IpcClient {
   /** Saved relative layout for a macro's expanded nodes (may be empty). */
   macroLayout(macroId: string) {
     return this.call<Record<string, [number, number]>>('macro_layout', { macroId });
+  }
+  /** What a fresh macro instance expands to (picker thumbnail). */
+  macroPreview(macroId: string) {
+    return this.call<MacroPreviewNode[]>('macro_preview', { macroId });
   }
   /** Break a macro instance apart: internals become ordinary top-level
    *  modules in place. Returns old id -> new id. */

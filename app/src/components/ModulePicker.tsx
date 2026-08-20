@@ -5,7 +5,8 @@
 // the drag so the rack underneath can take the drop). Includes a category
 // filter and a search box.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { engine, type MacroPreviewNode } from '../engine';
 import type { KnobState, Manifest, ModuleHandle } from '../types';
 import { previewUI } from './customUIs';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -120,6 +121,114 @@ function previewKnobs(m: Manifest): Record<string, KnobState> {
 /** How far previews are zoomed out. */
 export const PICKER_SCALE = 0.55;
 
+/** Preview handle for a macro's internal node: knob-backed inputs read
+ *  the definition-saved knob state when there is one, otherwise the
+ *  manifest default (same resolution a fresh instantiation applies). */
+function macroNodeHandle(n: MacroPreviewNode): ModuleHandle {
+  const base = previewHandle(n.manifest);
+  return {
+    ...base,
+    paramValue: (id) => {
+      const input = n.manifest.inputs.find((i) => i.id === id);
+      const saved = n.knobs[id];
+      if (input?.knob && saved) return mapPosition(saved.config ?? input.knob, saved.position);
+      return base.paramValue(id);
+    },
+  };
+}
+
+/** Fallback tiling for definitions saved before positions were recorded. */
+function tilePosition(index: number): { x: number; y: number } {
+  return { x: (index % 2) * 240, y: Math.floor(index / 2) * 260 };
+}
+
+/** Composite preview of a macro: the panels a fresh instance expands to,
+ *  arranged by the definition's saved layout and scaled to fit the preview
+ *  window (a mini screenshot of the group, rendered live). Falls back to
+ *  the synthesized interface panel while loading or when the engine is
+ *  unavailable (headless tests). */
+function MacroPreview({ m }: { m: Manifest }) {
+  const [nodes, setNodes] = useState<MacroPreviewNode[] | null>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(PICKER_SCALE);
+
+  useEffect(() => {
+    let live = true;
+    void engine.macroPreview(m.id).then((n) => {
+      if (live && n && n.length > 0) setNodes(n);
+    });
+    return () => {
+      live = false;
+    };
+  }, [m.id]);
+
+  // Scale-to-fit: measure the placed panels' bounding box (transform does
+  // not affect offset geometry, so this never feeds back) and shrink the
+  // group to the preview window; never zoom past the single-module scale.
+  useLayoutEffect(() => {
+    const inner = innerRef.current;
+    const avail = inner?.parentElement;
+    if (!inner || !avail || !nodes) return;
+    let w = 0;
+    let h = 0;
+    for (const child of inner.children) {
+      const el = child as HTMLElement;
+      w = Math.max(w, el.offsetLeft + el.offsetWidth);
+      h = Math.max(h, el.offsetTop + el.offsetHeight);
+    }
+    if (w > 0 && h > 0) {
+      const pad = 16; // .picker-preview padding, both sides
+      setScale(
+        Math.min(PICKER_SCALE, (avail.clientWidth - pad) / w, (avail.clientHeight - pad) / h),
+      );
+    }
+  }, [nodes]);
+
+  if (!nodes) {
+    return (
+      <div className="picker-preview-panel" style={{ transform: `scale(${PICKER_SCALE})` }}>
+        <ModulePanel
+          instanceId={`preview-${m.id}`}
+          manifest={m}
+          knobs={previewKnobs(m)}
+          wired={{}}
+          handle={previewHandle(m)}
+          onKnobPosition={noop}
+          onKnobConfig={noop}
+          onAttenOffset={noop}
+        />
+      </div>
+    );
+  }
+  return (
+    <div
+      className="picker-preview-panel picker-preview-macro"
+      data-testid={`macro-preview-${m.id}`}
+      ref={innerRef}
+      style={{ transform: `scale(${scale})` }}
+    >
+      {nodes.map((n, i) => {
+        const pos = n.position ? { x: n.position[0], y: n.position[1] } : tilePosition(i);
+        return (
+          <ModulePanel
+            key={n.id}
+            instanceId={`preview-${m.id}/${n.id}`}
+            manifest={n.manifest}
+            knobs={{ ...previewKnobs(n.manifest), ...n.knobs }}
+            wired={{}}
+            handle={macroNodeHandle(n)}
+            customUI={previewUI(n.ext)}
+            position={pos}
+            onKnobPosition={noop}
+            onKnobConfig={noop}
+            onAttenOffset={noop}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function PickerEntry({ m, onAdd, onDragging }: PickerEntryProps) {
   return (
     <div
@@ -141,26 +250,31 @@ function PickerEntry({ m, onAdd, onDragging }: PickerEntryProps) {
       }}
     >
       <div className="picker-preview">
-        <div className="picker-preview-panel" style={{ transform: `scale(${PICKER_SCALE})` }}>
-          {/* The custom UI (when preview-safe — see customUIs.ts) is the
-              module's most recognizable face, so previews render it against
-              the inert handle. A preview crash degrades to just the caption,
-              never takes the gallery down. */}
-          <ErrorBoundary context={`preview ${m.id}`} fallback={() => null}>
-            <ModulePanel
-              instanceId={`preview-${m.id}`}
-              displayName={m.name}
-              manifest={m}
-              knobs={previewKnobs(m)}
-              wired={{}}
-              handle={previewHandle(m)}
-              customUI={previewUI(m.id)}
-              onKnobPosition={noop}
-              onKnobConfig={noop}
-              onAttenOffset={noop}
-            />
-          </ErrorBoundary>
-        </div>
+        {/* The custom UI (when preview-safe — see customUIs.ts) is the
+            module's most recognizable face, so previews render it against
+            the inert handle; macros render the whole group of panels their
+            definition expands to. A preview crash degrades to just the
+            caption, never takes the gallery down. */}
+        <ErrorBoundary context={`preview ${m.id}`} fallback={() => null}>
+          {m.abi === 'macro-1' ? (
+            <MacroPreview m={m} />
+          ) : (
+            <div className="picker-preview-panel" style={{ transform: `scale(${PICKER_SCALE})` }}>
+              <ModulePanel
+                instanceId={`preview-${m.id}`}
+                displayName={m.name}
+                manifest={m}
+                knobs={previewKnobs(m)}
+                wired={{}}
+                handle={previewHandle(m)}
+                customUI={previewUI(m.id)}
+                onKnobPosition={noop}
+                onKnobConfig={noop}
+                onAttenOffset={noop}
+              />
+            </div>
+          )}
+        </ErrorBoundary>
       </div>
       <div className="picker-entry-caption">
         <span className="picker-entry-name">{m.name}</span>

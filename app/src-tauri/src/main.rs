@@ -666,6 +666,18 @@ fn macro_layout(
     engine.macro_layout(&macro_id).map_err(err)
 }
 
+/// What a fresh instance of a macro expands to, for the module picker's
+/// composite thumbnail: concrete internal nodes with their manifests,
+/// definition-saved knobs and relative positions.
+#[tauri::command]
+fn macro_preview(
+    state: State<AppState>,
+    macro_id: String,
+) -> CmdResult<Vec<dj_engine::MacroPreviewNode>> {
+    let engine = engine_lock(&state)?;
+    engine.macro_preview(&macro_id).map_err(err)
+}
+
 #[tauri::command]
 fn add_module(state: State<AppState>, instance: String, type_id: String) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::Add(&instance))?;
@@ -2638,6 +2650,7 @@ fn main() {
             collapse_macro,
             macro_groups,
             macro_layout,
+            macro_preview,
             break_macro,
             inject_midi,
             qwerty_key,

@@ -69,6 +69,64 @@ impl Engine {
         })
     }
 
+    /// Everything a UI needs to draw a thumbnail of what a fresh instance
+    /// of `macro_id` expands to: each concrete internal node's type,
+    /// manifest, definition-saved knob states and saved relative position
+    /// (nested macros flattened with their entry's offset, like
+    /// [`Self::macro_layout`]; `None` position when the definition saved
+    /// none). Purely a read of the definition — no instantiation. Knob
+    /// states are each level's own saved values; an outer definition's
+    /// overrides of a *nested* macro's promoted jacks are not resolved
+    /// down (invisible at thumbnail scale, and instantiation handles them
+    /// properly via `expand_macro_def`).
+    pub fn macro_preview(&self, macro_id: &str) -> Result<Vec<MacroPreviewNode>> {
+        let def = self
+            .macros
+            .get(macro_id)
+            .ok_or_else(|| anyhow!("unknown macro {macro_id:?}"))?;
+        let mut out = Vec::new();
+        self.collect_macro_preview(def, "", Some((0.0, 0.0)), &mut out)?;
+        Ok(out)
+    }
+
+    fn collect_macro_preview(
+        &self,
+        def: &MacroDef,
+        prefix: &str,
+        offset: Option<(f32, f32)>,
+        out: &mut Vec<MacroPreviewNode>,
+    ) -> Result<()> {
+        for (inner, mf) in &def.modules {
+            let id = if prefix.is_empty() {
+                inner.clone()
+            } else {
+                format!("{prefix}/{inner}")
+            };
+            // A node is only placeable when every level down to it saved a
+            // position (same rule as macro_layout).
+            let pos = match (offset, def.positions.get(inner)) {
+                (Some((ox, oy)), Some(&(x, y))) => Some((ox + x, oy + y)),
+                _ => None,
+            };
+            if let Some(inner_def) = self.macros.get(&mf.ext) {
+                self.collect_macro_preview(inner_def, &id, pos, out)?;
+            } else {
+                let manifest = self
+                    .registry
+                    .manifest(&mf.ext)
+                    .ok_or_else(|| anyhow!("unknown module type {:?} in macro", mf.ext))?;
+                out.push(MacroPreviewNode {
+                    id,
+                    ext: mf.ext.clone(),
+                    manifest,
+                    knobs: mf.knobs.clone(),
+                    position: pos,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// The knob state a fresh instantiation of `def` would give an internal
     /// jack: the state saved in the definition (recursing through nested
     /// macros), or `None` when the definition saved nothing for it (the
