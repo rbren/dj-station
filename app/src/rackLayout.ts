@@ -52,8 +52,10 @@ export function boundingBox(rects: Rect[]): Rect {
 
 /** Breathing room between a macro's member panels and its box border. */
 export const MACRO_PAD = 10;
-/** Space above a macro box for its name tab. */
-export const MACRO_LABEL_H = 22;
+/** Space above a macro box for its name tab — must match the
+ *  `.macro-box-label` height in styles.css (the tab is styled as a
+ *  module-title-like bar spanning the box's top edge). */
+export const MACRO_LABEL_H = 44;
 
 /** The full on-screen rect of a macro's bounding box (member bbox plus
  *  padding and the label tab). Macro groups collide as this one solid
