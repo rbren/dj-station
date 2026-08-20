@@ -128,17 +128,6 @@ body {
   color: color-mix(in srgb, var(--accent) 60%, #e6e6e6);
 }
 
-/* Module type: same size as the title, dimmer, elides like it. */
-.module-instance {
-  color: #6b7482;
-  font-weight: 400;
-  font-size: inherit;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* The module's (renameable) name — the header's prominent element. */
 .module-name {
   min-width: 0;

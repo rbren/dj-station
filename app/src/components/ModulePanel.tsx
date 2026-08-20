@@ -349,7 +349,6 @@ export function ModulePanel(props: ModulePanelProps) {
             name={props.displayName || instanceId.slice(instanceId.lastIndexOf('/') + 1)}
             onRename={props.onRename}
           />
-          <span className="module-instance">{manifest.name}</span>
           {props.onDocs && (
             <button
               className="module-docs-btn"

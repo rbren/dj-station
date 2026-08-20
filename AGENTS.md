@@ -323,8 +323,10 @@ fails if it's missing.
   match the macro-label CSS height or collision/placement geometry drifts
   (module panels self-measure, so their CSS can change freely). Title
   fonts: `.module-title` 1.9rem, `.macro-box-label` 1.5rem, both
-  `line-height: 1`; the type/instance labels inherit the title size —
-  resize fonts, not bar heights, to keep geometry constants valid.
+  `line-height: 1`; the module title shows ONLY the name (no type text —
+  the docs panel covers the type) while the macro label's instance id
+  inherits the title size — resize fonts, not bar heights, to keep
+  geometry constants valid.
   `.module-title` is position: absolute over the panel top (containing
   block: `.module-panel`'s position: relative — `.module-panel-placed`
   carries extra specificity to stay absolute), so long titles elide and
@@ -390,7 +392,8 @@ fails if it's missing.
   are untouched); the paste path drops it (fresh id ≠ normalized name).
   The Tauri `rename_module` command records undo history only on success;
   the frontend (`ModuleName` in ModulePanel.tsx, double-click to edit)
-  shows the display name prominently with the type name secondary, and
+  shows the display name as the title (type text intentionally absent
+  from the bar), and
   `App.renameModule` remaps positions/selection to the returned id — a
   backend rejection resolves null (error banner) and the refresh reverts.
 - VCA `cv` ("Gain / CV") input default is 0.0 (closed/silent) in

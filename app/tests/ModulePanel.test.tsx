@@ -299,10 +299,10 @@ describe('grid-conforming panel size', () => {
 });
 
 describe('module rename', () => {
-  it('shows the display name prominently with the type as secondary text', () => {
+  it('shows only the display name in the title bar (no type text)', () => {
     render(<ModulePanel {...baseProps} displayName="Wobble LFO" />);
     expect(screen.getByTestId('module-name-osc1').textContent).toBe('Wobble LFO');
-    expect(screen.getByText('Oscillator')).toBeTruthy();
+    expect(screen.getByTestId('module-header-osc1').textContent).not.toContain('Oscillator');
   });
 
   it('falls back to the instance id when no display name is set', () => {
