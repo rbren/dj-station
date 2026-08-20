@@ -139,6 +139,13 @@ pub struct NodeInfo {
     /// Path of the track loaded into a Playback/Deck node (persisted in the
     /// patch).
     pub track_path: Option<String>,
+    /// Rack position (unzoomed rack coordinates) — pure UI passthrough,
+    /// control-side only, never touches the RT thread. Persisted in the
+    /// patch's `layout` map so undo/redo restores module moves and puts
+    /// deleted modules (and macro members) back where they were. `None`
+    /// means "never placed via the engine" (the frontend keeps a local
+    /// fallback layout).
+    pub position: Option<(f32, f32)>,
 }
 
 impl NodeInfo {
@@ -170,6 +177,11 @@ impl NodeSlots {
     /// Live nodes, in slot order.
     pub fn iter(&self) -> impl Iterator<Item = &NodeInfo> {
         self.slots.iter().flatten()
+    }
+
+    /// Live nodes, in slot order, mutably (control-side edits only).
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut NodeInfo> {
+        self.slots.iter_mut().flatten()
     }
 
     /// Live nodes with their slot indices (the indices used by
@@ -846,6 +858,7 @@ impl Engine {
                 None
             },
             track_path: None,
+            position: None,
         };
 
         // Apply default params before the module ships to the RT thread.
@@ -1113,6 +1126,25 @@ impl Engine {
         let (node, jack) = self.in_jack_indices(instance_id, jack_id)?;
         self.nodes[node].knobs[jack] = state;
         self.push_knob_rt(node, jack)
+    }
+
+    /// Rack position of a module node (UI passthrough; see
+    /// [`NodeInfo::position`]).
+    pub fn module_position(&self, instance_id: &str) -> Option<(f32, f32)> {
+        self.nodes
+            .iter()
+            .find(|n| n.instance_id == instance_id)
+            .and_then(|n| n.position)
+    }
+
+    /// Set a module node's rack position. Control-side only — the RT
+    /// thread is never involved. Positions ride along in patch snapshots
+    /// (`PatchDoc::layout`), which is what makes module moves and deletes
+    /// undoable with layout intact.
+    pub fn set_module_position(&mut self, instance_id: &str, pos: (f32, f32)) -> Result<()> {
+        let node = self.node_idx(instance_id)?;
+        self.nodes[node].position = Some(pos);
+        Ok(())
     }
 
     pub fn set_param(&mut self, instance_id: &str, param_id: &str, value: f32) -> Result<()> {

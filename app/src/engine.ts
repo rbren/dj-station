@@ -60,6 +60,17 @@ export interface NodeSnapshot {
   midi_mappings: MidiMapping[];
   /** LED feedback mappings (M4); each is also an input jack. */
   midi_led_mappings: MidiMapping[];
+  /** Engine-known rack position (unzoomed rack coordinates). Adopted on
+   *  refresh so undo/redo restores module moves; absent/null means the
+   *  engine has no opinion and the local layout store wins. */
+  position?: [number, number] | null;
+}
+
+/** One module's displacement within a completed drag gesture. */
+export interface ModuleMove {
+  instance: string;
+  from: [number, number];
+  to: [number, number];
 }
 
 export interface WireSnapshot {
@@ -367,6 +378,17 @@ export class EngineClient extends IpcClient {
   }
   removeModule(instance: string) {
     return this.call<void>('remove_module', { instance });
+  }
+  /** Commit a completed module-drag gesture as exactly ONE undo step:
+   *  every module the gesture displaced (group/macro members, bumps) in a
+   *  single batch, with pre-drag positions so undo can restore them. */
+  moveModules(moves: ModuleMove[]) {
+    return this.call<void>('move_modules', { moves });
+  }
+  /** Adopt frontend-computed rack positions WITHOUT an undo step (layout
+   *  seeding before deletes, post-render placement fixups). */
+  syncPositions(positions: Record<string, [number, number]>) {
+    return this.call<void>('sync_positions', { positions });
   }
   /** End of an edit gesture (pointer-up): next edit gets its own undo step. */
   endEdit() {

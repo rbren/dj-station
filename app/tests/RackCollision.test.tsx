@@ -41,6 +41,8 @@ const fakeEngine = {
   savePatchAs: vi.fn(async () => {}),
   removeModule: vi.fn(async () => {}),
   endEdit: vi.fn(async () => {}),
+  moveModules: vi.fn(async () => {}),
+  syncPositions: vi.fn(async () => {}),
 };
 
 vi.mock('../src/engine', () => ({

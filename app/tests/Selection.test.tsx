@@ -54,6 +54,8 @@ const fakeEngine = {
   connectWire: vi.fn(async () => {}),
   disconnectWire: vi.fn(async () => {}),
   endEdit: vi.fn(async () => {}),
+  moveModules: vi.fn(async () => {}),
+  syncPositions: vi.fn(async () => {}),
 };
 
 vi.mock('../src/engine', () => ({

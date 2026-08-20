@@ -564,11 +564,20 @@ impl Engine {
                 macro_version: Some(1),
             },
         );
+        // Rack layout survives the rebuild: collapsed members keep their
+        // absolute spots under their new `/`-prefixed ids.
+        let mut layout = doc.layout.clone();
+        for id in &sel {
+            if let Some(p) = layout.remove(id) {
+                layout.insert(format!("{new_instance_id}/{id}"), p);
+            }
+        }
         let new_doc = crate::patch::PatchDoc {
             header: doc.header.clone(),
             modules: new_modules,
             wires: new_wires,
             macros: BTreeMap::new(), // rebuild carries self.macros
+            layout,
         };
         self.rebuild(&new_doc)?;
         Ok(def)

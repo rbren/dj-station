@@ -974,3 +974,64 @@ fn recollapse_overwrites_definition_and_updates_other_instances() {
         )
         .is_err());
 }
+
+/// Undo of a macro-instance delete restores the WHOLE instance — expanded
+/// members, boundary wires, per-instance knob state AND the members' rack
+/// layout (positions travel per `/`-prefixed member id in PatchDoc::layout).
+#[test]
+fn undo_of_macro_delete_restores_members_wires_and_layout() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone-undo",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    e.set_module_position("tone1/osc1", (96.0, 48.0)).unwrap();
+    e.set_module_position("tone1/vca1", (336.0, 48.0)).unwrap();
+    e.set_knob_position("tone1", "level", 0.8).unwrap();
+
+    let mut h = dj_engine::UndoHistory::new();
+    h.record("remove:tone1", e.snapshot("t"));
+    e.remove_module("tone1").unwrap();
+    assert!(!e.macro_instances().contains_key("tone1"));
+    assert!(
+        e.snapshot("t").layout.is_empty(),
+        "members' layout went too"
+    );
+
+    let doc = h.undo(e.snapshot("t")).unwrap();
+    e.apply_doc(&doc).unwrap();
+    assert!(e.macro_instances().contains_key("tone1"));
+    assert_eq!(e.module_position("tone1/osc1"), Some((96.0, 48.0)));
+    assert_eq!(e.module_position("tone1/vca1"), Some((336.0, 48.0)));
+    // Internal + boundary wires and promoted knob state came back whole.
+    assert_eq!(e.wire_specs().len(), 2);
+    assert_eq!(e.knob_state("tone1", "level").unwrap().position, 0.8);
+    assert!(peak(&render(&mut e, 0.1)) > 0.0, "audible again after undo");
+}
+
+/// Collapsing keeps the members' on-screen spots: layout entries follow the
+/// rename to `/`-prefixed member ids through the collapse rebuild.
+#[test]
+fn collapse_carries_member_layout_to_prefixed_ids() {
+    let mut e = mono_engine();
+    build_tone_patch(&mut e);
+    e.set_module_position("osc1", (0.0, 0.0)).unwrap();
+    e.set_module_position("vca1", (240.0, 0.0)).unwrap();
+    e.set_module_position("out1", (480.0, 0.0)).unwrap();
+    e.collapse_to_macro(
+        &["osc1", "vca1"],
+        "tone1",
+        "macro.tone-layout",
+        "Tone",
+        tone_interface(),
+    )
+    .unwrap();
+    assert_eq!(e.module_position("tone1/osc1"), Some((0.0, 0.0)));
+    assert_eq!(e.module_position("tone1/vca1"), Some((240.0, 0.0)));
+    assert_eq!(e.module_position("out1"), Some((480.0, 0.0)));
+}

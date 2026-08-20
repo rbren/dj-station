@@ -63,6 +63,8 @@ const fakeEngine = {
   removeModule: vi.fn(async () => {}),
   renameModule: vi.fn(async (): Promise<string | null> => null),
   endEdit: vi.fn(async () => {}),
+  moveModules: vi.fn(async () => {}),
+  syncPositions: vi.fn(async () => {}),
 };
 
 vi.mock('../src/engine', () => ({

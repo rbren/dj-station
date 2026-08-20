@@ -58,6 +58,8 @@ const fakeEngine = {
   copyModules: vi.fn(async () => 'CLIP'),
   pasteModules: vi.fn(async () => ({})),
   endEdit: vi.fn(async () => {}),
+  moveModules: vi.fn(async () => {}),
+  syncPositions: vi.fn(async () => {}),
 };
 
 vi.mock('../src/engine', () => ({

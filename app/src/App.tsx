@@ -9,7 +9,7 @@
 // and knob drags re-render only the affected panels.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { engine, onMenuAction, type MacroGroup, type MacroInfo } from './engine';
+import { engine, onMenuAction, type MacroGroup, type MacroInfo, type ModuleMove } from './engine';
 import { library, type Track } from './library';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MacroBoxes } from './components/MacroBoxes';
@@ -249,12 +249,38 @@ export default function App() {
     from: { x: number; y: number };
   }>(null);
 
-  const endModuleDrag = useCallback((instance: string) => {
-    // Releasing the drag makes any surviving bump permanent (positions,
-    // including the neighbour's, were already committed by moveModule
-    // through the one shared setPositions/saveJson path).
-    if (dragBump.current?.dragged === instance) dragBump.current = null;
+  // Every module the in-flight drag gesture has displaced (grabbed panel,
+  // group/macro members, bumped neighbours) with its PRE-gesture position.
+  // Flushed to the engine as one undoable batch on release.
+  const dragMoved = useRef(new Map<string, { x: number; y: number }>());
+
+  const noteMove = useCallback((id: string, before: { x: number; y: number }) => {
+    if (!dragMoved.current.has(id)) dragMoved.current.set(id, before);
   }, []);
+
+  const endModuleDrag = useCallback(
+    (instance?: string) => {
+      // Releasing the drag makes any surviving bump permanent (positions,
+      // including the neighbour's, were already committed by moveModule
+      // through the one shared setPositions/saveJson path).
+      if (instance === undefined || dragBump.current?.dragged === instance) {
+        dragBump.current = null;
+      }
+      // Commit the whole gesture to the engine as ONE undo step (bump
+      // reverts drop out: they ended where they started).
+      const moved = dragMoved.current;
+      dragMoved.current = new Map();
+      const positions = store.getState().positions;
+      const moves: ModuleMove[] = [];
+      for (const [id, from] of moved) {
+        const to = positions[id];
+        if (!to || (to.x === from.x && to.y === from.y)) continue;
+        moves.push({ instance: id, from: [from.x, from.y], to: [to.x, to.y] });
+      }
+      if (moves.length > 0) void engine.moveModules(moves);
+    },
+    [store],
+  );
 
   // Collision rects for everything outside `exclude`: macro groups count
   // as ONE solid rect — their full bounding box, border padding and label
@@ -348,6 +374,7 @@ export default function App() {
         if (target.x === bbox.x && target.y === bbox.y) return prev;
         const next = { ...prev };
         for (const [i, id] of group.entries()) {
+          noteMove(id, { x: memberRects[i].x, y: memberRects[i].y });
           next[id] = {
             x: memberRects[i].x + (target.x - bbox.x),
             y: memberRects[i].y + (target.y - bbox.y),
@@ -357,7 +384,7 @@ export default function App() {
         return next;
       });
     },
-    [store, setPositions, collisionRects, groupFootprint],
+    [store, setPositions, collisionRects, groupFootprint, noteMove],
   );
 
   const moveModule = useCallback(
@@ -551,9 +578,13 @@ export default function App() {
         // One positions update covers the panel's move plus any bump
         // apply/revert, so the whole gesture persists (and coalesces)
         // through the same path as a plain move.
+        noteMove(instance, currentPos);
         const next = { ...prev, [instance]: target };
         if (bump && bump.bumped !== nextBump?.bumped) next[bump.bumped] = bump.from;
-        if (nextBump) next[nextBump.bumped] = nextBump.to;
+        if (nextBump) {
+          noteMove(nextBump.bumped, nextBump.from);
+          next[nextBump.bumped] = nextBump.to;
+        }
         dragBump.current = nextBump
           ? { dragged: instance, bumped: nextBump.bumped, from: nextBump.from }
           : null;
@@ -561,7 +592,7 @@ export default function App() {
         return next;
       });
     },
-    [store, setPositions, moveGroup, macroOwner],
+    [store, setPositions, moveGroup, macroOwner, noteMove],
   );
 
   // Post-render placement pass: with real panel sizes in the DOM, move any
@@ -623,6 +654,13 @@ export default function App() {
         }
         if (!changed) return prev;
         saveJson(POSITIONS_KEY, next);
+        // Mirror corrections into the engine layout (no undo step) so a
+        // later refresh doesn't re-adopt the stale pre-fixup positions.
+        const synced: Record<string, [number, number]> = {};
+        for (const [id, p] of Object.entries(next)) {
+          if (prev[id]?.x !== p.x || prev[id]?.y !== p.y) synced[id] = [p.x, p.y];
+        }
+        void engine.syncPositions(synced);
         return next;
       });
     }, 0);
@@ -632,7 +670,27 @@ export default function App() {
   const refresh = useCallback(async () => {
     const snapshot = await engine.nodes();
     setConnected(snapshot !== null);
-    if (snapshot) store.setNodes(snapshot);
+    if (snapshot) {
+      store.setNodes(snapshot);
+      // Adopt engine-known rack positions: undo/redo restores (moves,
+      // deletes, macro deletes) land here. Nodes the engine has no
+      // position for keep their local layout.
+      const prev = store.getState().positions;
+      let adopted: Positions | null = null;
+      for (const n of snapshot) {
+        const p = n.position;
+        if (!p) continue;
+        const cur = prev[n.instance_id];
+        if (!cur || cur.x !== p[0] || cur.y !== p[1]) {
+          adopted = adopted ?? { ...prev };
+          adopted[n.instance_id] = { x: p[0], y: p[1] };
+        }
+      }
+      if (adopted) {
+        store.set({ positions: adopted });
+        saveJson(POSITIONS_KEY, adopted);
+      }
+    }
     const wireList = await engine.wires();
     if (wireList) store.set({ wires: wireList });
     const groups = await engine.macroGroups();
@@ -687,6 +745,13 @@ export default function App() {
         saveJson(POSITIONS_KEY, next);
         return next;
       });
+      // Mirror the placement into the engine layout (no undo step) so a
+      // later delete+undo of the group restores this arrangement.
+      const synced: Record<string, [number, number]> = {};
+      for (const r of rels) {
+        synced[r.id] = [spot.x + (r.rect.x - bbox.x), spot.y + (r.rect.y - bbox.y)];
+      }
+      void engine.syncPositions(synced);
     },
     [store, setPositions, collisionRects],
   );
@@ -1039,6 +1104,23 @@ export default function App() {
       // Macro members delete as their whole instance (all-or-nothing).
       const topIds = toTopLevel(instances);
       const gone = expandGroups(instances);
+      // Seed the engine layout with the doomed modules' on-screen spots
+      // (no undo step) BEFORE deleting, so the delete's undo snapshot
+      // restores them — macro members included — right where they were.
+      const { nodes: curNodes, positions: curPositions } = store.getState();
+      const seed: Record<string, [number, number]> = {};
+      for (const id of gone) {
+        const p =
+          curPositions[id] ??
+          defaultPosition(
+            Math.max(
+              curNodes.findIndex((n) => n.instance_id === id),
+              0,
+            ),
+          );
+        seed[id] = [p.x, p.y];
+      }
+      await engine.syncPositions(seed);
       await engine.removeModules(topIds);
       setPositions((prev) => {
         const next = { ...prev };
@@ -1915,6 +1997,7 @@ export default function App() {
                   groups={macroGroups}
                   zoom={zoom}
                   onMoveGroup={(anchor, x, y, members) => moveGroup(anchor, x, y, members)}
+                  onMoveEnd={() => endModuleDrag()}
                   onContextMenu={onMacroBoxContextMenu}
                 />
                 {nodes.map((node, i) => (

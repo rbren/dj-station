@@ -106,6 +106,14 @@ pub struct PatchDoc {
     /// patch's "lockfile"; enables fork-on-version-mismatch, PRD §6).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub macros: BTreeMap<String, MacroDef>,
+    /// Rack layout: node instance id (macro members' `/`-prefixed ids
+    /// included) -> unzoomed rack position. Pure UI passthrough
+    /// ([`crate::engine::NodeInfo::position`]); saved as `layout.json`
+    /// only when non-empty so pre-layout patches stay byte-identical.
+    /// Riding in the snapshot is what makes moves/deletes undoable with
+    /// layout intact.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub layout: BTreeMap<String, (f32, f32)>,
 }
 
 fn to_pretty(value: &impl Serialize) -> Result<String> {
@@ -144,6 +152,11 @@ impl PatchDoc {
                 m.sync_to = None;
             }
         }
+        // Layout entries for the module (or, for a macro instance, its
+        // `/`-prefixed members) go with it.
+        let member_prefix = format!("{instance}/");
+        self.layout
+            .retain(|id, _| id != instance && !id.starts_with(&member_prefix));
         true
     }
 
@@ -193,6 +206,9 @@ impl PatchDoc {
             modules,
             wires,
             macros,
+            // The clipboard carries no rack layout: pasted copies get fresh
+            // ids and the frontend lays them out at the paste point.
+            layout: BTreeMap::new(),
         }
     }
 
@@ -339,11 +355,20 @@ impl Engine {
                 macros.insert(def.id.clone(), def.clone());
             }
         }
+        // Rack layout: every placed node, macro members included (their
+        // `/`-prefixed ids are how a macro-delete undo restores the whole
+        // group's arrangement).
+        let layout = self
+            .nodes
+            .iter()
+            .filter_map(|n| n.position.map(|p| (n.instance_id.clone(), p)))
+            .collect();
         PatchDoc {
             header,
             modules,
             wires,
             macros,
+            layout,
         }
     }
 
@@ -378,6 +403,17 @@ impl Engine {
             let fname = format!("{macro_id}.json");
             write_if_changed(&dir.join("macros").join(&fname), &to_pretty(def)?)?;
             keep_macros.insert(fname);
+        }
+
+        // Rack layout (UI passthrough): one small file, only when any node
+        // has a recorded position — pre-layout patches stay untouched.
+        let layout_path = dir.join("layout.json");
+        if doc.layout.is_empty() {
+            if layout_path.exists() {
+                std::fs::remove_file(&layout_path)?;
+            }
+        } else {
+            write_if_changed(&layout_path, &to_pretty(&doc.layout)?)?;
         }
 
         // Remove files for deleted modules/wires/macros.
@@ -520,7 +556,16 @@ impl Engine {
                 }
             }
         }
+        engine.apply_layout(doc);
         Ok(engine)
+    }
+
+    /// Bring every node's rack position to the doc's layout (clearing
+    /// positions the doc doesn't know). Pure control-side bookkeeping.
+    fn apply_layout(&mut self, doc: &PatchDoc) {
+        for info in self.nodes.iter_mut() {
+            info.position = doc.layout.get(&info.instance_id).copied();
+        }
     }
 
     /// Add one module instance from its patch entry, restoring mappings,
@@ -674,6 +719,10 @@ impl Engine {
         for (instance, master) in &deferred_syncs {
             self.deck_sync(instance, Some(master))?;
         }
+
+        // Rack layout last, when every node (recreated macro members
+        // included) exists — this is what moves modules back on undo.
+        self.apply_layout(doc);
         Ok(created)
     }
 
@@ -876,11 +925,20 @@ impl PatchDoc {
             }
         }
 
+        let layout_path = dir.join("layout.json");
+        let layout = if layout_path.is_file() {
+            serde_json::from_str(&std::fs::read_to_string(&layout_path)?)
+                .context("reading layout.json")?
+        } else {
+            BTreeMap::new()
+        };
+
         Ok(PatchDoc {
             header,
             modules,
             wires,
             macros,
+            layout,
         })
     }
 

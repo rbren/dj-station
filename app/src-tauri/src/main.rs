@@ -110,6 +110,9 @@ enum EditKey<'a> {
     WireStyle(&'a str, &'a str),
     ModuleReset(&'a str),
     ModuleResetMany,
+    /// A completed module-drag gesture ([`move_modules`] ends the gesture
+    /// itself, so every drag is exactly one undo step).
+    Move,
     Param(&'a str, &'a str),
     Load(&'a str),
     NewPatch,
@@ -150,6 +153,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::WireStyle(i, j) => write!(f, "wirestyle:{i}:{j}"),
             EditKey::ModuleReset(i) => write!(f, "modreset:{i}"),
             EditKey::ModuleResetMany => write!(f, "modreset_many"),
+            EditKey::Move => write!(f, "move"),
             EditKey::Param(i, p) => write!(f, "param:{i}:{p}"),
             EditKey::Load(d) => write!(f, "load:{d}"),
             EditKey::NewPatch => write!(f, "new_patch"),
@@ -182,12 +186,21 @@ fn mark_saved(state: &State<AppState>, engine: &Engine) {
 }
 
 /// True when the live patch differs from its last saved/loaded/new state,
-/// i.e. a destructive action (New Patch, Open) would lose work.
+/// i.e. a destructive action (New Patch, Open) would lose work. Rack layout
+/// is ignored: positions are UI passthrough kept in the local layout store
+/// too (and captured by autosave), so a mere rearrange — or the engine
+/// lazily adopting frontend positions via `sync_positions` — must not
+/// trigger save prompts.
 #[tauri::command]
 fn patch_dirty(state: State<AppState>) -> CmdResult<bool> {
     let engine = engine_lock(&state)?;
     let last = state.last_saved.lock().map_err(err)?;
-    Ok(last.as_ref() != Some(&engine.snapshot("baseline")))
+    let Some(last) = last.as_ref() else {
+        return Ok(true);
+    };
+    let mut current = engine.snapshot("baseline");
+    current.layout = last.layout.clone();
+    Ok(*last != current)
 }
 
 /// Lock the engine with NO undo snapshot: queries, telemetry taps, backend
@@ -298,6 +311,59 @@ fn rename_module(state: State<AppState>, instance: String, name: String) -> CmdR
 #[tauri::command]
 fn end_edit(state: State<AppState>) -> CmdResult<()> {
     state.history.lock().map_err(err)?.end_gesture();
+    Ok(())
+}
+
+/// One module's move within a drag gesture: where it started and where it
+/// ended (unzoomed rack coordinates).
+#[derive(serde::Deserialize)]
+struct ModuleMove {
+    instance: String,
+    from: (f32, f32),
+    to: (f32, f32),
+}
+
+/// Commit a completed drag gesture (undoable): the frontend batches every
+/// module the gesture displaced — group/macro members, co-operative bumps —
+/// into ONE call at pointer-up, so a whole drag is exactly one undo step.
+/// Modules the engine has no position for yet are seeded with the gesture's
+/// start position BEFORE the undo snapshot, so undo restores them there.
+#[tauri::command]
+fn move_modules(state: State<AppState>, moves: Vec<ModuleMove>) -> CmdResult<()> {
+    let mut engine = engine_lock(&state)?;
+    for m in &moves {
+        if engine.module_position(&m.instance).is_none() {
+            engine
+                .set_module_position(&m.instance, m.from)
+                .map_err(|e| CmdError::not_found(e.to_string()))?;
+        }
+    }
+    record_edit(&state, &engine, &EditKey::Move);
+    for m in &moves {
+        engine
+            .set_module_position(&m.instance, m.to)
+            .map_err(|e| CmdError::not_found(e.to_string()))?;
+    }
+    // The gesture is complete: the next drag is its own undo step.
+    if let Ok(mut history) = state.history.lock() {
+        history.end_gesture();
+    }
+    Ok(())
+}
+
+/// Adopt frontend-computed rack positions WITHOUT an undo step: layout
+/// seeding before a delete (so undoing the delete puts modules back) and
+/// post-render placement fixups. Unknown ids (stale local layout entries)
+/// are skipped, not errors.
+#[tauri::command]
+fn sync_positions(
+    state: State<AppState>,
+    positions: BTreeMap<String, (f32, f32)>,
+) -> CmdResult<()> {
+    let mut engine = engine_lock(&state)?;
+    for (instance, pos) in &positions {
+        let _ = engine.set_module_position(instance, *pos);
+    }
     Ok(())
 }
 
@@ -426,6 +492,10 @@ struct NodeSnapshot {
     midi_mappings: Vec<MidiMappingSnapshot>,
     /// LED feedback mappings (M4, PRD §7.1); each is also an input jack.
     midi_led_mappings: Vec<MidiMappingSnapshot>,
+    /// Engine-known rack position (unzoomed rack coordinates). The
+    /// frontend adopts it on refresh — this is how undo/redo moves panels
+    /// back. `None` = engine has no opinion; the local layout store wins.
+    position: Option<(f32, f32)>,
 }
 
 #[tauri::command]
@@ -568,6 +638,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                     num: m.num,
                 })
                 .collect(),
+            position: n.position,
         })
         .collect();
     Ok(out)
@@ -2759,6 +2830,8 @@ fn main() {
             undo,
             redo,
             end_edit,
+            move_modules,
+            sync_positions,
             engine_start,
             engine_stop,
             library_tracks,

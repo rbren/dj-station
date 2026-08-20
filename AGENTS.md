@@ -416,3 +416,25 @@ fails if it's missing.
   stop flag only every 50 ms. The RT graph itself edits in ~2 ms. Staged
   fix options (compile hoisting/cache, faster stop poll, keeping the cpal
   stream alive across edits) are in the ticket-44cd9510c3e3 diagnosis.
+- Undoable rack layout (module moves + delete restore): positions are UI
+  passthrough on `NodeInfo.position` (control-side only, never RT),
+  captured in `PatchDoc::layout` (macro members under their `/`-prefixed
+  ids; saved as `layout.json` only when non-empty so pre-layout patches
+  stay byte-identical; the clipboard doc carries no layout) and applied
+  by `from_doc`/`apply_doc` — so plain snapshot-based undo/redo restores
+  arrangement, and macro collapse remaps members' entries through its
+  rebuild. Shell commands: `move_modules` (ONE batch per completed drag
+  gesture = one undo step; frontend collects everything the gesture
+  displaced — group/macro members, co-operative bumps — in App.tsx's
+  `dragMoved`/`endModuleDrag`; seeds never-placed modules with the
+  gesture's `from` BEFORE the undo snapshot, then ends the gesture) and
+  `sync_positions` (NOT undoable: layout seeding right before a delete so
+  the delete's pre-edit snapshot can restore spots, macro placement, and
+  post-render fixup corrections). The frontend remains the position
+  authority: `App.refresh` adopts engine-known positions into
+  rackStore/localStorage (undo/redo restores land this way; nodes the
+  engine has no position for keep local layout), and `patch_dirty`
+  ignores layout so a mere rearrange never triggers save prompts. Pinned
+  by `app/tests/UndoMoveDelete.test.tsx` and the layout cases in
+  `tests/integration/undo.rs` / `macros.rs`. Engine mocks in app tests
+  need `moveModules`/`syncPositions` stubs next to `endEdit`.
