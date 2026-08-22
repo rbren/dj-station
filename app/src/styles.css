@@ -1394,6 +1394,16 @@ body {
   flex: 1;
 }
 
+/* Provider artwork (YouTube thumbnails, store covers). */
+.result-art {
+  width: 72px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #0f1116;
+  flex: none;
+}
+
 .tag {
   font-size: 0.7rem;
   text-transform: uppercase;

@@ -481,3 +481,29 @@ fails if it's missing.
   by `app/tests/UndoMoveDelete.test.tsx` and the layout cases in
   `tests/integration/undo.rs` / `macros.rs`. Engine mocks in app tests
   need `moveModules`/`syncPositions` stubs next to `endEdit`.
+- Acquisition fetches are a TRAIT METHOD, not a URL:
+  `AcquisitionProvider::fetch(result, dir, progress)` defaults to the
+  plain HTTP GET of `acquire()`'s `Acquire::Download`, and providers whose
+  media needs an external tool return `Acquire::External` and override
+  `fetch` (`providers/youtube.rs` → `yt-dlp`). ALL downloads then run
+  through `dj_library::DownloadManager` (`downloads.rs`): one thread per
+  job, progress into a `DownloadJob` snapshot the library view POLLS
+  (`start_download` / `download_jobs` commands, 500 ms while a job runs —
+  same pattern as the analysis queue, no Tauri events). Never download on
+  a Tauri command thread: sync commands run on the main thread and would
+  freeze the window. `search_provider` is `#[tauri::command(async)]` for
+  the same reason (yt-dlp search is a subprocess). Library-view engine
+  mocks need `startDownload`/`downloadJobs`.
+- The YouTube provider is keyless and shells out to `yt-dlp` (OPTIONAL
+  runtime dep, `DJ_YTDLP_BIN` overrides the binary, `DJ_YTDLP_ARGS` adds
+  flags — e.g. `--cookies-from-browser` for YouTube's bot check): search is
+  `--dump-json --flat-playlist ytsearchN:`, download is audio-only
+  `bestaudio[ext=m4a]/…` into a `.yt-<id>` staging dir under
+  `downloads/` (whatever file lands there is moved out and imported) —
+  no ffmpeg, no transcode. The tab stays visible without the binary; the
+  error carries the install hint. Its license is always `unknown` (the
+  search API exposes none). Tests never touch the network or the real
+  binary: parsing is pinned to `tests/fixtures/youtube_search.jsonl` and
+  the plumbing runs against a FAKE yt-dlp shell script
+  (`tests/youtube.rs`, `#[cfg(unix)]`); the real smoke test gates on
+  `DJ_YTDLP_SMOKE` (unset/empty ⇒ skip).

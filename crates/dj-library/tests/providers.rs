@@ -424,17 +424,80 @@ fn hub_from_env_enables_keyed_providers_only_with_keys() {
     std::env::remove_var("FREESOUND_API_KEY");
     std::env::remove_var("JAMENDO_CLIENT_ID");
     let hub = AcquisitionHub::from_env();
-    assert_eq!(hub.provider_ids(), vec!["itunes", "internet_archive"]);
+    // YouTube is keyless (yt-dlp), so it is always in the list — a missing
+    // binary is reported when the user searches, not by hiding the tab.
+    assert_eq!(
+        hub.provider_ids(),
+        vec!["itunes", "internet_archive", "youtube"]
+    );
 
     std::env::set_var("FREESOUND_API_KEY", "k");
     std::env::set_var("JAMENDO_CLIENT_ID", "c");
     let hub = AcquisitionHub::from_env();
     assert_eq!(
         hub.provider_ids(),
-        vec!["itunes", "internet_archive", "freesound", "jamendo"]
+        vec![
+            "itunes",
+            "internet_archive",
+            "youtube",
+            "freesound",
+            "jamendo"
+        ]
     );
     std::env::remove_var("FREESOUND_API_KEY");
     std::env::remove_var("JAMENDO_CLIENT_ID");
+}
+
+// ---------------------------------------------------------------------------
+// Background download jobs (progress off the caller's thread)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn http_downloads_run_as_background_jobs_with_progress() {
+    let mut server = mockito::Server::new();
+    let _search = server
+        .mock("GET", "/v3.0/tracks/")
+        .match_query(mockito::Matcher::Any)
+        .with_body(jamendo_search_body(&server.url()))
+        .create();
+    let _download = server
+        .mock("GET", "/download/track/168/mp32/")
+        .with_body(FAKE_MP3)
+        .create();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = std::sync::Arc::new(Library::open(&tmp.path().join("data")).unwrap());
+    let hub = std::sync::Arc::new(AcquisitionHub::new(vec![Box::new(
+        JamendoProvider::with_base_url("c", &server.url()),
+    )]));
+    let manager = dj_library::DownloadManager::new(lib.clone(), hub.clone());
+
+    let result = hub.search(&Query::new("triface")).results.remove(0);
+    let id = manager.start(result);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let job = loop {
+        let job = manager
+            .jobs()
+            .into_iter()
+            .find(|j| j.id == id)
+            .expect("job exists");
+        if !job.is_running() {
+            break job;
+        }
+        assert!(std::time::Instant::now() < deadline, "job never finished");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert_eq!(
+        job.state,
+        dj_library::DownloadState::Done,
+        "{:?}",
+        job.error
+    );
+    // Content-Length is known, so the HTTP fetch reports real fractions.
+    assert_eq!(job.fraction, Some(1.0));
+    assert_eq!(job.title, "J'm'e FPM");
+    assert_eq!(job.track_id, Some(lib.tracks().unwrap()[0].id));
 }
 
 // ---------------------------------------------------------------------------
@@ -489,6 +552,7 @@ fn providers_declare_ui_filters_and_kinds() {
         Box::new(InternetArchiveProvider::new()),
         Box::new(FreesoundProvider::new("k")),
         Box::new(JamendoProvider::new("c")),
+        Box::new(dj_library::providers::YoutubeProvider::new()),
     ]);
     let info = hub.providers_info();
     let by_id = |id: &str| info.iter().find(|p| p.id == id).unwrap();
@@ -509,6 +573,10 @@ fn providers_declare_ui_filters_and_kinds() {
         filter_ids(by_id("jamendo")),
         ["order", "vocalinstrumental", "speed"]
     );
+
+    let youtube = by_id("youtube");
+    assert_eq!(youtube.acquire_kind, AcquireKind::Download);
+    assert_eq!(filter_ids(youtube), ["sort", "length"]);
 
     // Every filter is select-style with the "any" default first, so the UI
     // can render them blindly.

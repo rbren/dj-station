@@ -7,23 +7,27 @@
 //!
 //! v1 providers: iTunes Search (deep link, keyless), Freesound (download,
 //! `FREESOUND_API_KEY`), Jamendo (download, `JAMENDO_CLIENT_ID`), Internet
-//! Archive (download, keyless). Musopen is a documented fast-follow (its
+//! Archive (download, keyless), YouTube (download via the external
+//! `yt-dlp` binary, keyless). Musopen is a documented fast-follow (its
 //! API requires manually-approved accounts).
 
 pub mod freesound;
 pub mod internet_archive;
 pub mod itunes;
 pub mod jamendo;
+pub mod youtube;
 
 pub use freesound::FreesoundProvider;
 pub use internet_archive::InternetArchiveProvider;
 pub use itunes::ItunesProvider;
 pub use jamendo::JamendoProvider;
+pub use youtube::YoutubeProvider;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 use crate::db::{Library, Track};
 use crate::import::{ImportOptions, ImportOutcome};
@@ -164,7 +168,42 @@ pub enum Acquire {
     DeepLink {
         url: String,
     },
+    /// The media cannot be fetched with a plain HTTP GET — the provider
+    /// owns the transfer via [`AcquisitionProvider::fetch`] (YouTube, which
+    /// shells out to `yt-dlp`). `url` is the human-facing source page.
+    External {
+        url: String,
+    },
 }
+
+/// Progress of one in-flight fetch, reported to the caller's callback.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FetchProgress {
+    /// Completed fraction (0..1) when the total size is known.
+    pub fraction: Option<f64>,
+    /// Coarse stage label for the UI ("downloading", "converting", …).
+    pub stage: String,
+}
+
+impl FetchProgress {
+    pub fn stage(stage: &str) -> Self {
+        FetchProgress {
+            fraction: None,
+            stage: stage.into(),
+        }
+    }
+
+    pub fn downloading(fraction: f64) -> Self {
+        FetchProgress {
+            fraction: Some(fraction.clamp(0.0, 1.0)),
+            stage: "downloading".into(),
+        }
+    }
+}
+
+/// Callback a provider calls as a fetch advances. Progress reporting is
+/// best-effort: a provider may only ever report stages.
+pub type ProgressFn<'a> = &'a mut dyn FnMut(FetchProgress);
 
 pub trait AcquisitionProvider: Send + Sync {
     fn id(&self) -> &'static str;
@@ -180,6 +219,65 @@ pub trait AcquisitionProvider: Send + Sync {
     fn acquire(&self, t: &TrackResult) -> Result<Acquire>;
     fn license(&self, t: &TrackResult) -> LicenseInfo {
         t.license.clone()
+    }
+
+    /// Pull a result's media into `dir` and return the file written.
+    ///
+    /// The default is a plain HTTP GET of `acquire()`'s `Download` URL;
+    /// providers whose media needs an external tool (YouTube/yt-dlp)
+    /// override this. Callers get progress through `progress`.
+    fn fetch(&self, t: &TrackResult, dir: &Path, progress: ProgressFn) -> Result<PathBuf> {
+        let (url, headers, filename) = match self.acquire(t)? {
+            Acquire::Download {
+                url,
+                headers,
+                filename,
+            } => (url, headers, filename),
+            Acquire::DeepLink { .. } => {
+                bail!(
+                    "provider {:?} is deep-link only; use open_deep_link",
+                    self.id()
+                )
+            }
+            Acquire::External { .. } => bail!(
+                "provider {:?} needs an external fetcher but does not implement one",
+                self.id()
+            ),
+        };
+        let dest = unique_path(&dir.join(sanitize_filename(&filename)));
+        let tmp = dest.with_extension("part");
+
+        progress(FetchProgress::stage("connecting"));
+        let mut req = ureq::get(&url);
+        for (k, v) in &headers {
+            req = req.set(k, v);
+        }
+        let resp = req.call().with_context(|| format!("GET {url}"))?;
+        let total: Option<u64> = resp.header("Content-Length").and_then(|v| v.parse().ok());
+        let mut reader = resp.into_reader();
+        let mut file = std::fs::File::create(&tmp)?;
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut done: u64 = 0;
+        loop {
+            let n = reader
+                .read(&mut buf)
+                .with_context(|| format!("downloading {url}"))?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n])?;
+            done += n as u64;
+            match total {
+                Some(total) if total > 0 => {
+                    progress(FetchProgress::downloading(done as f64 / total as f64))
+                }
+                _ => progress(FetchProgress::stage("downloading")),
+            }
+        }
+        file.flush()?;
+        drop(file);
+        std::fs::rename(&tmp, &dest)?;
+        Ok(dest)
     }
 }
 
@@ -203,12 +301,15 @@ impl AcquisitionHub {
     }
 
     /// Build from the environment: keyless providers (iTunes, Internet
-    /// Archive) are always enabled; Freesound/Jamendo when their env keys
-    /// are present.
+    /// Archive, YouTube) are always enabled; Freesound/Jamendo when their
+    /// env keys are present. YouTube stays enabled even without `yt-dlp`
+    /// installed — its searches then fail with an install hint instead of
+    /// the tab silently disappearing.
     pub fn from_env() -> Self {
         let mut providers: Vec<Box<dyn AcquisitionProvider>> = vec![
             Box::new(ItunesProvider::new()),
             Box::new(InternetArchiveProvider::new()),
+            Box::new(YoutubeProvider::new()),
         ];
         if let Ok(key) = std::env::var(ENV_FREESOUND_KEY) {
             if !key.is_empty() {
@@ -285,37 +386,24 @@ impl AcquisitionHub {
     /// Download a `Download` result into the library's downloads dir and
     /// import it with the provider's source + license tags.
     pub fn download_to_library(&self, library: &Library, t: &TrackResult) -> Result<Track> {
+        self.download_to_library_with_progress(library, t, &mut |_| {})
+    }
+
+    /// `download_to_library` with progress reporting — used by the
+    /// background [`crate::downloads::DownloadManager`] so slow fetches
+    /// (yt-dlp) can drive a UI.
+    pub fn download_to_library_with_progress(
+        &self,
+        library: &Library,
+        t: &TrackResult,
+        progress: ProgressFn,
+    ) -> Result<Track> {
         let provider = self.provider(&t.provider)?;
-        let (url, headers, filename) = match provider.acquire(t)? {
-            Acquire::Download {
-                url,
-                headers,
-                filename,
-            } => (url, headers, filename),
-            Acquire::DeepLink { .. } => {
-                bail!(
-                    "provider {:?} is deep-link only; use open_deep_link",
-                    t.provider
-                )
-            }
-        };
         let dir = library.downloads_dir();
         std::fs::create_dir_all(&dir)?;
-        let dest = unique_path(&dir.join(sanitize_filename(&filename)));
-        let tmp = dest.with_extension("part");
+        let dest = provider.fetch(t, &dir, progress)?;
 
-        let mut req = ureq::get(&url);
-        for (k, v) in &headers {
-            req = req.set(k, v);
-        }
-        let resp = req.call().with_context(|| format!("GET {url}"))?;
-        let mut reader = resp.into_reader();
-        let mut file = std::fs::File::create(&tmp)?;
-        std::io::copy(&mut reader, &mut file).with_context(|| format!("downloading {url}"))?;
-        file.flush()?;
-        drop(file);
-        std::fs::rename(&tmp, &dest)?;
-
+        progress(FetchProgress::stage("importing"));
         let outcome = library.import_file(
             &dest,
             ImportOptions {
@@ -346,7 +434,7 @@ impl AcquisitionHub {
                 dispatch(&url)?;
                 Ok(url)
             }
-            Acquire::Download { .. } => {
+            Acquire::Download { .. } | Acquire::External { .. } => {
                 bail!(
                     "provider {:?} downloads directly; use download_to_library",
                     t.provider
@@ -356,7 +444,7 @@ impl AcquisitionHub {
     }
 }
 
-fn sanitize_filename(name: &str) -> String {
+pub(crate) fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| match c {
@@ -372,7 +460,7 @@ fn sanitize_filename(name: &str) -> String {
     }
 }
 
-fn unique_path(path: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn unique_path(path: &Path) -> PathBuf {
     if !path.exists() {
         return path.to_path_buf();
     }
@@ -384,7 +472,7 @@ fn unique_path(path: &std::path::Path) -> std::path::PathBuf {
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy()))
         .unwrap_or_default();
-    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let dir = path.parent().unwrap_or(Path::new("."));
     for i in 1.. {
         let cand = dir.join(format!("{stem}-{i}{ext}"));
         if !cand.exists() {

@@ -1,20 +1,38 @@
 // Library view (M1, PRD §9): local library + per-store search tabs.
 // Each enabled provider gets its own tab with store-specific filters;
 // results are tagged by source and license. Download providers pull
-// straight into the library, DeepLink providers open the store page.
+// straight into the library (in the background — see the job poll below),
+// DeepLink providers open the store page.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { errorMessage } from '../errors';
 import { fixed } from '../format';
-import type { AnalysisQueue, LibraryClientApi, ProviderInfo, Track, TrackResult } from '../library';
+import type {
+  AnalysisQueue,
+  DownloadJob,
+  LibraryClientApi,
+  ProviderInfo,
+  Track,
+  TrackResult,
+} from '../library';
 
 const ANALYSIS_POLL_MS = 2000;
+// Downloads are backend threads (yt-dlp can run for minutes); poll their
+// progress only while something is in flight.
+const DOWNLOAD_POLL_MS = 500;
 
 function formatDuration(secs: number | null): string {
   if (secs == null || !Number.isFinite(secs)) return '—';
   const m = Math.floor(secs / 60);
   const s = Math.round(secs % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// Button label for a running job: percentage when the backend knows the
+// transfer size, the stage otherwise (yt-dlp reports both).
+function downloadLabel(job: DownloadJob): string {
+  if (job.fraction != null) return `${Math.round(job.fraction * 100)}%`;
+  return `${job.stage}…`;
 }
 
 function LicenseTag({ kind }: { kind: string }) {
@@ -47,7 +65,8 @@ export function LibraryView({ client }: LibraryViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [results, setResults] = useState<TrackResult[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<DownloadJob[]>([]);
+  const [watching, setWatching] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [queue, setQueue] = useState<AnalysisQueue | null>(null);
 
@@ -124,18 +143,58 @@ export function LibraryView({ client }: LibraryViewProps) {
     }
   }, [active, client, filters, query, refreshTracks]);
 
+  // Download jobs live in the backend; a poll reports progress and
+  // announces each job's outcome exactly once.
+  const announced = useRef<Set<number>>(new Set());
+  const pollJobs = useCallback(async (): Promise<boolean> => {
+    const list = await client.downloadJobs();
+    if (!list) return false;
+    setJobs(list);
+    let finished = false;
+    for (const job of list) {
+      if (job.state === 'running' || announced.current.has(job.id)) continue;
+      announced.current.add(job.id);
+      finished = true;
+      if (job.state === 'done') {
+        setStatus(`Downloaded "${job.title}" into the library`);
+      } else {
+        setStatus(null);
+        setError(`${job.title}: ${job.error ?? 'download failed'}`);
+      }
+    }
+    if (finished) await refreshTracks('');
+    return list.some((j) => j.state === 'running');
+  }, [client, refreshTracks]);
+
+  useEffect(() => {
+    if (!watching) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      void (async () => {
+        const running = await pollJobs();
+        if (!running && !cancelled) setWatching(false);
+      })();
+    }, DOWNLOAD_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [watching, pollJobs]);
+
   const download = useCallback(
     async (r: TrackResult) => {
-      setBusy(`${r.provider}:${r.id}`);
-      try {
-        const track = await client.downloadTrack(r);
-        if (track) setStatus(`Downloaded "${track.title}" into the library`);
-        await refreshTracks('');
-      } finally {
-        setBusy(null);
-      }
+      setError(null);
+      setStatus(`Downloading "${r.title}"…`);
+      await client.startDownload(r);
+      setWatching(await pollJobs());
     },
-    [client, refreshTracks],
+    [client, pollJobs],
+  );
+
+  const jobFor = useCallback(
+    (r: TrackResult) =>
+      jobs.find((j) => j.provider === r.provider && j.result_id === r.id && j.state === 'running'),
+    [jobs],
   );
 
   const openStore = useCallback(
@@ -230,43 +289,55 @@ export function LibraryView({ client }: LibraryViewProps) {
         <div className="provider-results">
           <h2>{active.name} results</h2>
           <ul>
-            {results.map((r) => (
-              <li key={`${r.provider}:${r.id}`} data-testid="provider-result">
-                <span className="result-title">
-                  {r.title} — {r.artist}
-                </span>
-                <SourceTag source={r.provider} />
-                <LicenseTag kind={r.license.kind} />
-                <span className="result-duration">{formatDuration(r.duration_secs)}</span>
-                {r.preview_url && (
-                  <a
-                    href={r.preview_url}
-                    data-testid="preview-link"
-                    onClick={(e) => {
-                      // Never navigate the app webview — open in the
-                      // system's default browser instead.
-                      e.preventDefault();
-                      void client.openExternal(r.preview_url!);
-                    }}
-                  >
-                    preview
-                  </a>
-                )}
-                {r.acquire_kind === 'download' ? (
-                  <button
-                    onClick={() => void download(r)}
-                    disabled={busy === `${r.provider}:${r.id}`}
-                    data-testid="download-button"
-                  >
-                    {busy === `${r.provider}:${r.id}` ? 'Downloading…' : 'Download'}
-                  </button>
-                ) : (
-                  <button onClick={() => void openStore(r)} data-testid="open-store-button">
-                    Open Store
-                  </button>
-                )}
-              </li>
-            ))}
+            {results.map((r) => {
+              const job = jobFor(r);
+              return (
+                <li key={`${r.provider}:${r.id}`} data-testid="provider-result">
+                  {r.artwork_url && (
+                    <img
+                      className="result-art"
+                      src={r.artwork_url}
+                      alt=""
+                      loading="lazy"
+                      data-testid="result-art"
+                    />
+                  )}
+                  <span className="result-title">
+                    {r.title} — {r.artist}
+                  </span>
+                  <SourceTag source={r.provider} />
+                  <LicenseTag kind={r.license.kind} />
+                  <span className="result-duration">{formatDuration(r.duration_secs)}</span>
+                  {r.preview_url && (
+                    <a
+                      href={r.preview_url}
+                      data-testid="preview-link"
+                      onClick={(e) => {
+                        // Never navigate the app webview — open in the
+                        // system's default browser instead.
+                        e.preventDefault();
+                        void client.openExternal(r.preview_url!);
+                      }}
+                    >
+                      {r.provider === 'youtube' ? 'watch' : 'preview'}
+                    </a>
+                  )}
+                  {r.acquire_kind === 'download' ? (
+                    <button
+                      onClick={() => void download(r)}
+                      disabled={job !== undefined}
+                      data-testid="download-button"
+                    >
+                      {job ? downloadLabel(job) : 'Download'}
+                    </button>
+                  ) : (
+                    <button onClick={() => void openStore(r)} data-testid="open-store-button">
+                      Open Store
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

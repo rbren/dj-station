@@ -68,6 +68,21 @@ export interface ProviderInfo {
   filters: FilterSpec[];
 }
 
+/** A provider download running in the background (or recently finished). */
+export interface DownloadJob {
+  id: number;
+  provider: string;
+  /** Provider-side result id — matches a job to its result row. */
+  result_id: string;
+  title: string;
+  state: 'running' | 'done' | 'failed';
+  /** Completed fraction (0..1) when the transfer size is known. */
+  fraction: number | null;
+  stage: string;
+  error: string | null;
+  track_id: number | null;
+}
+
 /** Analysis queue snapshot (M3): background worker progress. */
 export interface AnalysisQueue {
   /** Track id currently being analyzed, if any. */
@@ -94,7 +109,11 @@ export interface LibraryClientApi {
   importTrack(path: string): Promise<Track | null>;
   /** Import a rekordbox XML export (M4): tracks/beatgrids/cues/loops. */
   importRekordbox(path: string): Promise<{ imported: number; duplicates: number } | null>;
-  downloadTrack(result: TrackResult): Promise<Track | null>;
+  /** Queue a download; the transfer runs on a backend thread. Returns the
+   *  job id whose progress `downloadJobs` reports. */
+  startDownload(result: TrackResult): Promise<number | null>;
+  /** Running/recent download jobs (polled while a download is in flight). */
+  downloadJobs(): Promise<DownloadJob[] | null>;
   openStorePage(result: TrackResult): Promise<string | null>;
   /** Open a web URL in the system's default browser (never the webview). */
   openExternal(url: string): Promise<void | null>;
@@ -124,8 +143,11 @@ export class LibraryClient extends IpcClient implements LibraryClientApi {
   importRekordbox(path: string) {
     return this.call<{ imported: number; duplicates: number }>('import_rekordbox', { path });
   }
-  downloadTrack(result: TrackResult) {
-    return this.call<Track>('download_track', { result });
+  startDownload(result: TrackResult) {
+    return this.call<number>('start_download', { result });
+  }
+  downloadJobs() {
+    return this.call<DownloadJob[]>('download_jobs');
   }
   openStorePage(result: TrackResult) {
     return this.call<string>('open_store_page', { result });

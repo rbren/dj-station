@@ -27,6 +27,11 @@ failure.
 Prerequisites: Rust (rustup; `wasm32-unknown-unknown` target is added
 automatically), Node ≥ 20, and on Linux `libasound2-dev` (ALSA headers).
 
+Optional at runtime: **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** for the
+library's YouTube tab (`brew install yt-dlp`, `pipx install yt-dlp`, or your
+package manager). Nothing else needs it — without it the tab is still there
+and reports the missing binary when you search.
+
 ## State & saves — `custom/`
 
 All persistent state lives in **`custom/` inside this checkout** (the repo
@@ -89,11 +94,31 @@ downloads).
 |---|---|---|---|
 | iTunes Search | Deep link to the store page | storefront country, exclude explicit | always on (keyless) |
 | Internet Archive | Direct download — **Creative Commons material only** | collection, sort | always on (keyless) |
+| YouTube | Audio download via `yt-dlp` | sort (relevance/date), length | always on (keyless); needs `yt-dlp` installed |
 | Freesound | Direct download (HQ MP3 preview rendition) | CC license type, max length, sort | set `FREESOUND_API_KEY` (free key from freesound.org/apiv2) |
 | Jamendo | Direct download (MP3) | sort, vocal/instrumental, tempo | set `JAMENDO_CLIENT_ID` (free key from devportal.jamendo.com) |
 | Musopen | — | — | fast-follow (API requires manually approved accounts) |
 
 Deep-link purchases (iTunes) land via the watch folder like any other file.
+
+**Downloads run in the background.** Hitting Download queues a job on a
+backend thread; the button shows its progress and the track appears in the
+local list (queued for analysis) when it lands. Nothing blocks the UI, and
+a failed job reports its error in the library view.
+
+**YouTube tab.** Searching runs
+`yt-dlp --dump-json --flat-playlist "ytsearch<N>:<query>"` and lists
+title/channel/duration/thumbnail; Download fetches the best *audio-only*
+stream (m4a/mp3 preferred, so **no ffmpeg needed** — nothing is
+transcoded) into `custom/downloads/` and imports it as a normal track that
+analyzes and loads onto a deck like any other. `yt-dlp` must be on `PATH`
+(or point `DJ_YTDLP_BIN` at it); when it is missing, search and download
+fail with an install hint instead of the tab disappearing. YouTube results
+are tagged license `unknown` on purpose — the search API exposes no
+license, so check the video's terms before using its audio.
+`DJ_YTDLP_ARGS` adds flags to every yt-dlp call — set it to
+`--cookies-from-browser firefox` (or another browser) if YouTube answers
+with *"Sign in to confirm you're not a bot"*.
 
 The **Playback module** (`builtin.playback`) plays a library track in the
 patch graph: inputs `play_gate` (≥ 1.0 plays, low pauses) and `speed`
@@ -116,7 +141,10 @@ sync partner persist with the patch. The stock **Crossfader**
 
 Real-network provider smoke tests are optional: keyless ones (iTunes,
 Internet Archive) soft-skip on network failure; Freesound/Jamendo ones only
-run when their env keys are present. CI relies on local mock HTTP servers.
+run when their env keys are present; the YouTube one needs
+`DJ_YTDLP_SMOKE=1` (it wants both the network and a real `yt-dlp`). CI
+relies on local mock HTTP servers and, for YouTube, a recorded `yt-dlp`
+JSON fixture plus a fake binary (`crates/dj-library/tests/youtube.rs`).
 
 ## Architecture
 

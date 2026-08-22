@@ -6,9 +6,13 @@
 //!   watch-folder auto-import for new audio files.
 //! - Acquisition provider framework (§8.3): iTunes Search (deep link),
 //!   Freesound + Jamendo (download, keys from env), Internet Archive
-//!   (download, keyless). Unified fan-out search; per-track license storage.
+//!   (download, keyless), YouTube (download via the external `yt-dlp`
+//!   binary, keyless). Unified fan-out search; per-track license storage.
+//! - Background download jobs so slow acquisitions report progress off
+//!   the caller's thread.
 
 pub mod db;
+pub mod downloads;
 pub mod import;
 pub mod paths;
 pub mod providers;
@@ -16,11 +20,12 @@ pub mod rekordbox;
 pub mod watch;
 
 pub use db::{Beatgrid, CuePoint, Library, MacroRecord, SavedLoop, Track};
+pub use downloads::{DownloadJob, DownloadManager, DownloadState};
 pub use import::{ImportOptions, ImportOutcome, AUDIO_EXTENSIONS};
 pub use paths::{default_data_dir, init_data_dir, legacy_data_dir, migrate_legacy_data, Migration};
 pub use providers::{
-    Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, FilterOption, FilterSpec,
-    ProviderInfo, Query, TrackResult,
+    Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, FetchProgress, FilterOption,
+    FilterSpec, ProviderInfo, Query, TrackResult,
 };
 pub use rekordbox::{parse_rekordbox_xml, RekordboxReport, RekordboxTrack};
 pub use watch::{start_watcher, WatchHandle};

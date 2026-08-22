@@ -6,7 +6,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { LibraryView } from '../src/components/LibraryView';
-import type { LibraryClientApi, ProviderInfo, Track, TrackResult } from '../src/library';
+import type {
+  DownloadJob,
+  LibraryClientApi,
+  ProviderInfo,
+  Track,
+  TrackResult,
+} from '../src/library';
 
 const LOCAL_TRACK: Track = {
   id: 1,
@@ -76,11 +82,44 @@ const IA_RESULT: TrackResult = {
   deep_link_url: 'https://archive.org/details/gd1977-05-08',
 };
 
+// YouTube results are downloads resolved by yt-dlp at acquire time, and
+// they carry a video thumbnail.
+const YOUTUBE_RESULT: TrackResult = {
+  provider: 'youtube',
+  acquire_kind: 'download',
+  id: 'dQw4w9WgXcQ',
+  title: 'Amen Break - 174 BPM Loop',
+  artist: 'Breaks 4 Days',
+  album: '',
+  duration_secs: 213,
+  preview_url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  artwork_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
+  license: { kind: 'unknown', name: 'Unverified', url: '', attribution: '' },
+  download_url: null,
+  deep_link_url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+};
+
 const RESULT_BY_PROVIDER: Record<string, TrackResult[]> = {
   itunes: [ITUNES_RESULT],
   freesound: [FREESOUND_RESULT],
   internet_archive: [IA_RESULT],
+  youtube: [YOUTUBE_RESULT],
 };
+
+function doneJob(over: Partial<DownloadJob> = {}): DownloadJob {
+  return {
+    id: 1,
+    provider: 'freesound',
+    result_id: '123456',
+    title: 'amen break 174bpm',
+    state: 'done',
+    fraction: 1,
+    stage: 'done',
+    error: null,
+    track_id: 2,
+    ...over,
+  };
+}
 
 const PROVIDERS: ProviderInfo[] = [
   {
@@ -136,6 +175,29 @@ const PROVIDERS: ProviderInfo[] = [
       },
     ],
   },
+  {
+    id: 'youtube',
+    name: 'YouTube',
+    acquire_kind: 'download',
+    filters: [
+      {
+        id: 'sort',
+        label: 'Sort by',
+        options: [
+          { value: '', label: 'Relevance' },
+          { value: 'date', label: 'Upload date' },
+        ],
+      },
+      {
+        id: 'length',
+        label: 'Length',
+        options: [
+          { value: '', label: 'Any length' },
+          { value: 'short', label: 'Under 4 min' },
+        ],
+      },
+    ],
+  },
 ];
 
 function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi {
@@ -150,13 +212,8 @@ function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi
       ),
     importTrack: vi.fn().mockResolvedValue(LOCAL_TRACK),
     importRekordbox: vi.fn().mockResolvedValue({ imported: 0, duplicates: 0 }),
-    downloadTrack: vi.fn().mockResolvedValue({
-      ...LOCAL_TRACK,
-      id: 2,
-      title: 'amen break 174bpm',
-      source: 'freesound',
-      license: FREESOUND_RESULT.license,
-    }),
+    startDownload: vi.fn().mockResolvedValue(1),
+    downloadJobs: vi.fn().mockResolvedValue([doneJob()]),
     openStorePage: vi.fn().mockResolvedValue(ITUNES_RESULT.deep_link_url),
     openExternal: vi.fn().mockResolvedValue(undefined),
     playbackLoad: vi.fn().mockResolvedValue(undefined),
@@ -197,6 +254,7 @@ describe('LibraryView', () => {
     expect(tabs.textContent).toContain('iTunes Store');
     expect(tabs.textContent).toContain('Freesound');
     expect(tabs.textContent).toContain('Internet Archive');
+    expect(tabs.textContent).toContain('YouTube');
   });
 
   it('searches one store at a time from its tab', async () => {
@@ -260,7 +318,7 @@ describe('LibraryView', () => {
     expect(row.querySelector('[data-testid="open-store-button"]')).toBeNull();
     fireEvent.click(row.querySelector('[data-testid="download-button"]')!);
     await waitFor(() =>
-      expect(client.downloadTrack).toHaveBeenCalledWith(
+      expect(client.startDownload).toHaveBeenCalledWith(
         expect.objectContaining({ provider: 'internet_archive', id: 'gd1977-05-08' }),
       ),
     );
@@ -278,21 +336,82 @@ describe('LibraryView', () => {
     expect(client.openExternal).toHaveBeenCalledWith(ITUNES_RESULT.preview_url);
   });
 
-  it('Download pulls the result into the library and refreshes the list', async () => {
+  it('Download queues a background job and refreshes the list when it lands', async () => {
     const client = mockClient();
     render(<LibraryView client={client} />);
     await searchStore('freesound', 'amen');
     fireEvent.click(screen.getByTestId('download-button'));
     await waitFor(() =>
-      expect(client.downloadTrack).toHaveBeenCalledWith(
+      expect(client.startDownload).toHaveBeenCalledWith(
         expect.objectContaining({ provider: 'freesound', id: '123456' }),
       ),
     );
     await waitFor(() =>
       expect(screen.getByTestId('library-status').textContent).toContain('amen break 174bpm'),
     );
-    // Local list re-queried after the download.
+    // Local list re-queried once the job finished.
     expect(client.tracks).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows per-result progress while a download job runs', async () => {
+    const running: DownloadJob = doneJob({
+      provider: 'youtube',
+      result_id: 'dQw4w9WgXcQ',
+      title: 'Amen Break - 174 BPM Loop',
+      state: 'running',
+      fraction: 0.42,
+      stage: 'downloading',
+      track_id: null,
+    });
+    const client = mockClient({ downloadJobs: vi.fn().mockResolvedValue([running]) });
+    render(<LibraryView client={client} />);
+    await searchStore('youtube', 'amen break');
+    fireEvent.click(screen.getByTestId('download-button'));
+    await waitFor(() => expect(screen.getByTestId('download-button').textContent).toBe('42%'));
+    // A running job's button is inert, so one click can't fetch twice.
+    expect(screen.getByTestId('download-button')).toHaveProperty('disabled', true);
+    // Nothing landed yet: no completion status, no re-query of the list.
+    expect(client.tracks).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a failed download (e.g. yt-dlp missing) without losing the results', async () => {
+    const failed = doneJob({
+      provider: 'youtube',
+      result_id: 'dQw4w9WgXcQ',
+      title: 'Amen Break - 174 BPM Loop',
+      state: 'failed',
+      fraction: null,
+      stage: 'failed',
+      error: '`yt-dlp` not found — install yt-dlp or set DJ_YTDLP_BIN to its path',
+      track_id: null,
+    });
+    const client = mockClient({ downloadJobs: vi.fn().mockResolvedValue([failed]) });
+    render(<LibraryView client={client} />);
+    await searchStore('youtube', 'amen break');
+    fireEvent.click(screen.getByTestId('download-button'));
+    await waitFor(() =>
+      expect(screen.getByTestId('provider-error').textContent).toContain('yt-dlp'),
+    );
+    expect(screen.getAllByTestId('provider-result')).toHaveLength(1);
+    expect(screen.getByTestId('download-button').textContent).toBe('Download');
+  });
+
+  it('YouTube results show a thumbnail, channel, duration, and a Download action', async () => {
+    const client = mockClient();
+    render(<LibraryView client={client} />);
+    await searchStore('youtube', 'amen break');
+    expect(client.searchProvider).toHaveBeenCalledWith('youtube', 'amen break', {});
+    const row = screen.getByTestId('provider-result');
+    expect(row.textContent).toContain('Amen Break - 174 BPM Loop');
+    expect(row.textContent).toContain('Breaks 4 Days');
+    expect(row.textContent).toContain('3:33');
+    expect(row.querySelector('[data-testid="result-art"]')?.getAttribute('src')).toBe(
+      YOUTUBE_RESULT.artwork_url,
+    );
+    expect(row.querySelector('[data-testid="download-button"]')).toBeTruthy();
+    // The video page opens in the system browser, never in the webview.
+    expect(fireEvent.click(screen.getByTestId('preview-link'))).toBe(false);
+    expect(client.openExternal).toHaveBeenCalledWith(YOUTUBE_RESULT.preview_url);
   });
 
   it('iTunes results expose Open Store (deep link), not Download', async () => {

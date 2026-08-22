@@ -21,7 +21,10 @@ struct AppState {
     engine: Mutex<Engine>,
     history: Mutex<UndoHistory>,
     library: Arc<Library>,
-    hub: AcquisitionHub,
+    hub: Arc<AcquisitionHub>,
+    /// Provider downloads in flight (off the main thread, progress polled
+    /// by the library view).
+    downloads: dj_library::DownloadManager,
     /// Name of the patch currently being edited (used by save/autosave).
     patch_name: Mutex<String>,
     /// Last autosaved document, to skip disk writes when nothing changed.
@@ -2163,8 +2166,10 @@ fn providers(state: State<AppState>) -> CmdResult<Vec<ProviderInfo>> {
     Ok(state.hub.providers_info())
 }
 
-/// Search one store, with that store's filter selections.
-#[tauri::command]
+/// Search one store, with that store's filter selections. Runs on a
+/// worker thread (`async`): a provider search is a network round-trip, and
+/// the YouTube one spawns yt-dlp — neither may block the main thread.
+#[tauri::command(async)]
 fn search_provider(
     state: State<AppState>,
     provider: String,
@@ -2205,12 +2210,18 @@ fn import_rekordbox(state: State<AppState>, path: String) -> CmdResult<Rekordbox
     })
 }
 
+/// Start acquiring a result in the background and return the job id. The
+/// transfer never runs on this thread: yt-dlp fetches take seconds to
+/// minutes, and even HTTP downloads would stall the window.
 #[tauri::command]
-fn download_track(state: State<AppState>, result: TrackResult) -> CmdResult<Track> {
-    state
-        .hub
-        .download_to_library(&state.library, &result)
-        .map_err(err)
+fn start_download(state: State<AppState>, result: TrackResult) -> CmdResult<u64> {
+    Ok(state.downloads.start(result))
+}
+
+/// Snapshot of running/recent download jobs (polled by the library view).
+#[tauri::command]
+fn download_jobs(state: State<AppState>) -> CmdResult<Vec<dj_library::DownloadJob>> {
+    Ok(state.downloads.jobs())
 }
 
 /// Deep-link acquisition: resolves the store URL, opens it in the system
@@ -2592,7 +2603,10 @@ fn main() {
     }
     let watcher =
         dj_library::start_watcher(library.clone(), dj_library::watch::DEFAULT_POLL_INTERVAL);
-    let hub = AcquisitionHub::from_env();
+    let hub = Arc::new(AcquisitionHub::from_env());
+    // Provider downloads run on their own threads (yt-dlp fetches take
+    // seconds to minutes) and report progress into a polled snapshot.
+    let downloads = dj_library::DownloadManager::new(library.clone(), hub.clone());
     // M3: background analysis worker. Defaults to the DSP stem separator;
     // an ONNX model can be swapped in via the `onnx` feature of
     // dj-analysis (CoreML EP on macOS, CPU EP elsewhere).
@@ -2605,6 +2619,7 @@ fn main() {
             history: Mutex::new(UndoHistory::new()),
             library,
             hub,
+            downloads,
             patch_name: Mutex::new("untitled".into()),
             last_autosave: Mutex::new(None),
             last_saved: Mutex::new(None),
@@ -2832,7 +2847,8 @@ fn main() {
             search_provider,
             import_track,
             import_rekordbox,
-            download_track,
+            start_download,
+            download_jobs,
             open_store_page,
             open_external,
             add_watch_folder,

@@ -80,6 +80,39 @@ fn freesound_real_search_smoke_gated_on_key() {
     assert!(results[0].download_url.is_some());
 }
 
+/// Real YouTube search through a real `yt-dlp`. Gated on `DJ_YTDLP_SMOKE`
+/// (unset/empty ⇒ skip) so CI never depends on the binary or the network;
+/// the offline coverage is `youtube.rs` (fixtures + fake binary).
+#[test]
+fn youtube_real_search_smoke_gated_on_env() {
+    use dj_library::providers::YoutubeProvider;
+
+    match std::env::var("DJ_YTDLP_SMOKE") {
+        Ok(v) if !v.trim().is_empty() => {}
+        _ => {
+            eprintln!("SKIP youtube_real_search_smoke: DJ_YTDLP_SMOKE not set");
+            return;
+        }
+    }
+    let provider = YoutubeProvider::new();
+    let mut query = Query::new("amen break");
+    query.limit = 3;
+    let results = skip_on_network_error!(provider.search(&query), "youtube_real_search_smoke");
+    if results.is_empty() {
+        eprintln!("SKIP youtube_real_search_smoke: empty result set");
+        return;
+    }
+    let r = &results[0];
+    assert_eq!(r.provider, "youtube");
+    assert!(!r.title.is_empty());
+    assert!(r
+        .deep_link_url
+        .as_deref()
+        .unwrap_or("")
+        .contains("youtube.com/watch"));
+    assert!(r.artwork_url.is_some(), "results carry a thumbnail");
+}
+
 #[test]
 fn jamendo_real_search_smoke_gated_on_key() {
     let id = match std::env::var("JAMENDO_CLIENT_ID") {
