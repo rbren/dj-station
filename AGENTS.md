@@ -507,3 +507,27 @@ fails if it's missing.
   the plumbing runs against a FAKE yt-dlp shell script
   (`tests/youtube.rs`, `#[cfg(unix)]`); the real smoke test gates on
   `DJ_YTDLP_SMOKE` (unset/empty ⇒ skip).
+- Clip page (PRD §9): the third top-level view next to Rack and Library
+  (`view` union in App.tsx, `ClipView.tsx` + `src/clip.ts`). It is an
+  OFFLINE editor — it never touches the engine or the RT thread; the
+  `clip_*` Tauri commands (`app/src-tauri/src/clip.rs`, all
+  `#[tauri::command(async)]`) decode sources (small LRU cache), render
+  with `dj_analysis::clip` on a worker thread and are NOT undoable
+  (`engine_lock` isn't even taken). The edit is a `ClipProgram`: regions
+  (source index + in/out + reverse + gain), a fixed 3-band EQ, dB level
+  breakpoints on the OUTPUT timeline (automation is timeline-based, so a
+  cut shifts audio under it — deliberate, like a DAW) and `crossfade_ms`.
+  Adjacent regions OVERLAP by the crossfade, capped at half of either
+  neighbour: that one law exists twice — `splice` in
+  `crates/dj-analysis/src/clip.rs` and `regionSpans` in `app/src/clip.ts`
+  — pinned on both sides (`tests/clip_edit.rs`, `app/tests/ClipEdits.test.ts`);
+  change them together. Saving renders to FLAC under `<data_dir>/clips/`
+  (machine-local, gitignored) and imports a NEW library track
+  (`source = "clip"`, `source_ref` = comma-joined source track ids,
+  license inherited from the first source) — a clip NEVER overwrites the
+  track it was cut from. Its golden-audio case lives in dj-analysis
+  (`tests/e2e/clips/*.json` + `tests/e2e/goldens/*.wav`, second step of
+  `scripts/regen-goldens.sh`) rather than the engine e2e suite, because
+  the renderer is not a graph module. `decode_audio` truncates to the
+  container's declared frame count — our FLAC writer zero-pads the last
+  fixed-size block, and an exported clip must decode back sample-exact.

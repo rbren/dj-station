@@ -2896,3 +2896,184 @@ body {
   color: #626b7c;
   padding: 4px 2px;
 }
+
+/* ---------------------------------------------------------------------
+   Clip page (ClipView): waveform editor over library tracks.
+   Appended as its own block so the page's styles stay self-contained.
+   --------------------------------------------------------------------- */
+
+.clip-view {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* The shell never scrolls, so the page scrolls itself (see .library). */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.clip-load {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.clip-load label,
+.clip-save label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #9aa0aa;
+  font-size: 0.85rem;
+}
+
+.clip-load select,
+.clip-save input {
+  background: #14161a;
+  color: #e6e9ef;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 6px 10px;
+  max-width: 380px;
+}
+
+.clip-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clip-empty {
+  color: #626b7c;
+  max-width: 46em;
+}
+
+.clip-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clip-waveform {
+  width: 100%;
+  height: 160px;
+  background: #101216;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  cursor: text;
+  user-select: none;
+}
+
+.clip-level-lane {
+  width: 100%;
+  height: 90px;
+  background: #101216;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  cursor: crosshair;
+}
+
+.clip-join {
+  stroke: #62d0ff;
+  stroke-width: 2;
+  opacity: 0.5;
+}
+
+.clip-selection {
+  fill: rgba(90, 141, 238, 0.25);
+  stroke: #5a8dee;
+  stroke-width: 2;
+}
+
+.clip-level-line {
+  fill: none;
+  stroke: #7dd88f;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.clip-level-point {
+  fill: #7dd88f;
+  cursor: grab;
+}
+
+.clip-readout {
+  color: #9aa0aa;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-tools,
+.clip-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.clip-tools button,
+.clip-load button,
+.clip-save button {
+  background: #1b1d22;
+  color: #e6e9ef;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.clip-tools button:disabled,
+.clip-load button:disabled,
+.clip-save button:disabled {
+  color: #5c626c;
+  cursor: default;
+}
+
+.clip-save-button {
+  background: #24503a;
+  border-color: #37765a;
+}
+
+.clip-eq {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.clip-eq-band {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #9aa0aa;
+  font-size: 0.8rem;
+}
+
+.clip-regions {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.clip-regions th,
+.clip-regions td {
+  text-align: left;
+  padding: 3px 10px 3px 0;
+  color: #c8cdd6;
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-regions th {
+  color: #7e838d;
+  font-weight: 500;
+}
+
+.clip-status {
+  color: #7dd88f;
+  font-size: 0.85rem;
+}
+
+.clip-error {
+  color: #e08f8f;
+  font-size: 0.85rem;
+}

@@ -3,6 +3,7 @@
 # Only machine-local caches and scratch are ignored:
 stems/
 downloads/
+clips/
 autosave/
 library.sqlite-wal
 library.sqlite-shm

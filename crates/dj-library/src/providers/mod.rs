@@ -444,7 +444,9 @@ impl AcquisitionHub {
     }
 }
 
-pub(crate) fn sanitize_filename(name: &str) -> String {
+/// Make `name` safe to use as a file name (also used by the app's clip
+/// renderer when it names a rendered clip after its title).
+pub fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| match c {
@@ -460,7 +462,9 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
     }
 }
 
-pub(crate) fn unique_path(path: &Path) -> PathBuf {
+/// `path`, or the first free `<stem>-<n>` variant next to it — so writing
+/// a new file never clobbers an existing one.
+pub fn unique_path(path: &Path) -> PathBuf {
     if !path.exists() {
         return path.to_path_buf();
     }

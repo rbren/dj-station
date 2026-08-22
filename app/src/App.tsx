@@ -19,6 +19,8 @@ import { DocsPanel } from './components/DocsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
+import { ClipView } from './components/ClipView';
+import { clipClient } from './clip';
 import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
 import { GRID, snap } from './components/ModulePanel';
 import { RackModule } from './components/RackModule';
@@ -80,7 +82,7 @@ export default function App() {
   const [moduleLib, setModuleLib] = useState<Manifest[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
-  const [view, setView] = useState<'rack' | 'library'>('rack');
+  const [view, setView] = useState<'rack' | 'library' | 'clip'>('rack');
   const [wireColors, setWireColors] = useState<Record<string, number>>(() =>
     loadJson(WIRE_COLORS_KEY, {}),
   );
@@ -1758,6 +1760,13 @@ export default function App() {
           >
             Library
           </button>
+          <button
+            className={view === 'clip' ? 'tab active' : 'tab'}
+            onClick={() => setView('clip')}
+            data-testid="tab-clip"
+          >
+            Clip
+          </button>
         </nav>
         <button
           className="add-module-btn"
@@ -2009,6 +2018,9 @@ export default function App() {
         </div>
       )}
       {view === 'library' && <LibraryView client={library} />}
+      {view === 'clip' && (
+        <ClipView clip={clipClient} library={library} onSaved={() => void refresh()} />
+      )}
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}

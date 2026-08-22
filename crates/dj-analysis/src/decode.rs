@@ -68,6 +68,10 @@ pub fn decode_audio(path: &Path) -> Result<AudioData> {
         .codec_params
         .sample_rate
         .ok_or_else(|| anyhow!("unknown sample rate in {}", path.display()))?;
+    // FLAC frames are fixed-size, so the last one is zero-padded past the
+    // declared length; a rendered clip must decode back to exactly what
+    // was written, so trust the container's frame count when it has one.
+    let declared_frames = track.codec_params.n_frames;
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .with_context(|| format!("creating decoder for {}", path.display()))?;
@@ -106,6 +110,14 @@ pub fn decode_audio(path: &Path) -> Result<AudioData> {
         "no audio decoded from {}",
         path.display()
     );
+    if let Some(frames) = declared_frames {
+        let frames = frames as usize;
+        if frames > 0 && frames < channels[0].len() {
+            for ch in &mut channels {
+                ch.truncate(frames);
+            }
+        }
+    }
     Ok(AudioData {
         channels,
         sample_rate,

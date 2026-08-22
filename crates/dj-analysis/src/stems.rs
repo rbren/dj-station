@@ -315,8 +315,8 @@ pub fn write_stems(dir: &Path, stems: &Stems) -> Result<()> {
     Ok(())
 }
 
-/// Encode one stem to 16-bit FLAC.
-fn write_flac(path: &Path, audio: &AudioData) -> Result<()> {
+/// Encode audio as 16-bit FLAC (the stem cache and rendered clips).
+pub(crate) fn write_flac(path: &Path, audio: &AudioData) -> Result<()> {
     use flacenc::bitsink::ByteSink;
     use flacenc::component::BitRepr;
     use flacenc::error::Verify;

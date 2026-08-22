@@ -4,6 +4,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod clip;
+
 use dj_engine::{
     Backend, Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle,
     MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroStore, Manifest, MidiMapKind, PatchDoc,
@@ -38,6 +40,8 @@ struct AppState {
     /// Background analysis worker (M3): drains the library queue so
     /// BPM/key/beatgrid/stems land in the DB with no user action.
     analysis: dj_analysis::AnalysisWorker,
+    /// Decoded sources for the Clip page's offline editor.
+    clips: clip::ClipCache,
     /// Running gesture feeds by instance id (M5): stop flag + source name.
     /// Here the source is always a recorded fixture played through the
     /// mock pipeline; on macOS a camera source slots in behind the same
@@ -387,13 +391,13 @@ fn redo(state: State<AppState>) -> CmdResult<bool> {
     }
 }
 
-type CmdResult<T> = Result<T, CmdError>;
+pub(crate) type CmdResult<T> = Result<T, CmdError>;
 
 /// Structured IPC error. `kind` is machine-readable so the frontend can
 /// react programmatically (suppress, restyle, retry); `message` is the
 /// human-readable detail for the error banner.
 #[derive(Clone, Serialize)]
-struct CmdError {
+pub(crate) struct CmdError {
     kind: ErrorKind,
     message: String,
 }
@@ -426,7 +430,7 @@ impl CmdError {
             message: message.into(),
         }
     }
-    fn invalid(message: impl Into<String>) -> Self {
+    pub(crate) fn invalid(message: impl Into<String>) -> Self {
         CmdError {
             kind: ErrorKind::InvalidInput,
             message: message.into(),
@@ -435,7 +439,7 @@ impl CmdError {
 }
 
 /// Default conversion for `map_err(err)`: kind `internal`.
-fn err<E: std::fmt::Display>(e: E) -> CmdError {
+pub(crate) fn err<E: std::fmt::Display>(e: E) -> CmdError {
     CmdError {
         kind: ErrorKind::Internal,
         message: e.to_string(),
@@ -2625,6 +2629,7 @@ fn main() {
             last_saved: Mutex::new(None),
             _watcher: watcher,
             analysis,
+            clips: clip::ClipCache::default(),
             gesture_feeds: Mutex::new(BTreeMap::new()),
         })
         .setup(|app| {
@@ -2874,6 +2879,10 @@ fn main() {
             analyze_track,
             deck_load_stems,
             deck_clear_stems,
+            clip::clip_load_source,
+            clip::clip_render_preview,
+            clip::clip_preview_audio,
+            clip::clip_save,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

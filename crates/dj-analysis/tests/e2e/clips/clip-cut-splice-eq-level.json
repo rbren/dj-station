@@ -1,0 +1,49 @@
+{
+  "regions": [
+    {
+      "source": 0,
+      "start_secs": 0.1,
+      "end_secs": 0.45,
+      "reverse": false,
+      "gain_db": 0.0
+    },
+    {
+      "source": 1,
+      "start_secs": 0.2,
+      "end_secs": 0.5,
+      "reverse": true,
+      "gain_db": -3.0
+    },
+    {
+      "source": 0,
+      "start_secs": 0.6,
+      "end_secs": 0.85,
+      "reverse": false,
+      "gain_db": 0.0
+    }
+  ],
+  "eq": {
+    "low_db": 4.0,
+    "mid_db": -5.0,
+    "high_db": 2.5
+  },
+  "level": [
+    {
+      "time_secs": 0.0,
+      "gain_db": -60.0
+    },
+    {
+      "time_secs": 0.15,
+      "gain_db": 0.0
+    },
+    {
+      "time_secs": 0.6,
+      "gain_db": -4.0
+    },
+    {
+      "time_secs": 0.9,
+      "gain_db": -60.0
+    }
+  ],
+  "crossfade_ms": 8.0
+}

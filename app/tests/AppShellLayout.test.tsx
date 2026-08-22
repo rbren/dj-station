@@ -41,6 +41,7 @@ describe('app shell layout (CSS-level pin)', () => {
 
   it('inner panels keep their own scrolling', () => {
     expect(rule('.library')).toMatch(/overflow-y:\s*auto/);
+    expect(rule('.clip-view')).toMatch(/overflow-y:\s*auto/);
     expect(rule('.docs-body')).toMatch(/overflow-y:\s*auto/);
     expect(rule('.picker-body')).toMatch(/overflow-y:\s*auto/);
   });

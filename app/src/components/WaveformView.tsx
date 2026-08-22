@@ -48,7 +48,9 @@ export interface WaveformViewProps {
   onSeek?(positionSecs: number): void;
 }
 
-function peaksPath(peaks: number[], from: number, to: number, height: number): string {
+/** Symmetric min/max polygon for a peak window — shared with the Clip
+ *  page's editor waveform so both read the same. */
+export function peaksPath(peaks: number[], from: number, to: number, height: number): string {
   // from/to are fractions of the track; draw a symmetric min/max polygon.
   const n = peaks.length;
   if (n === 0 || to <= from) return '';
