@@ -276,7 +276,12 @@ fails if it's missing.
   count), the native File > New emits `request-new` instead of acting,
   and `guardUnsaved` in App.tsx shows the Save/Discard/Cancel dialog
   (`unsaved-dialog` test ids). Engine mocks in tests need
-  `patchDirty: vi.fn(async () => false)`.
+  `patchDirty: vi.fn(async () => false)`. Keyboard shortcuts
+  cmd/ctrl+S/O/N live in `app/src/fileShortcuts.ts` (`useFileShortcuts`,
+  also home of the shared `isEditableTarget`): they invoke the SAME
+  App.tsx actions as the File menu (New/Open inherit `guardUnsaved`) and
+  never fire in editable targets or while a modal dialog is open —
+  pinned by `app/tests/FileShortcuts.test.tsx`.
 - `rt_safety.rs`'s realtime stress can flake when run in parallel with
   the rest of the workspace on a loaded 4-core host (proc-deadline
   assert); it passes standalone — rerun

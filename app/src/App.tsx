@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { engine, onMenuAction, type MacroGroup, type MacroInfo, type ModuleMove } from './engine';
+import { isEditableTarget, useFileShortcuts } from './fileShortcuts';
 import { library, type Track } from './library';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MacroBoxes } from './components/MacroBoxes';
@@ -67,17 +68,6 @@ function loadPan(): { x: number; y: number } {
 const WIRE_COLORS_KEY = 'dj-wire-colors';
 const LAST_WIRE_COLOR_KEY = 'dj-wire-last-color';
 const NUM_WIRE_COLORS = WIRE_COLORS.length;
-
-/** True when a shortcut keydown should be left to a form control. */
-function isEditableTarget(t: EventTarget | null): boolean {
-  return (
-    t instanceof HTMLElement &&
-    (t.tagName === 'INPUT' ||
-      t.tagName === 'SELECT' ||
-      t.tagName === 'TEXTAREA' ||
-      t.isContentEditable)
-  );
-}
 
 export default function App() {
   const [store] = useState(createRackStore);
@@ -898,6 +888,19 @@ export default function App() {
     [requestNewPatch, openSaveAsDialog, openOpenDialog],
   );
 
+  // cmd/ctrl+S / +O / +N mirror File > Save / Open Patch… / New Patch.
+  useFileShortcuts({
+    save: savePatch,
+    open: openOpenDialog,
+    create: requestNewPatch,
+    modalOpen:
+      fileDialog !== null ||
+      confirmDiscard !== null ||
+      collapseName !== null ||
+      macroOverwrite !== null ||
+      pickerOpen,
+  });
+
   // The File menu as context-menu items: the rack-background right-click
   // menu renders exactly this list, and each entry reuses the same action
   // the native File menu triggers, so the two menus stay in sync.
@@ -1296,12 +1299,6 @@ export default function App() {
         return;
       }
       if (!(e.metaKey || e.ctrlKey)) return;
-      // cmd/ctrl+S saves even while the patch-name input has focus.
-      if (e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        void savePatch();
-        return;
-      }
       if (isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
       if (key === 'z') {
@@ -1343,16 +1340,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [
-    store,
-    refresh,
-    changeZoom,
-    savePatch,
-    copyModules,
-    pasteModules,
-    removeModules,
-    setSelected,
-  ]);
+  }, [store, refresh, changeZoom, copyModules, pasteModules, removeModules, setSelected]);
 
   // Click-to-add from the picker: land the module at the center of the
   // current view (pan/zoom-aware), then close the modal.
