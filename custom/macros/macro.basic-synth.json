@@ -1,0 +1,569 @@
+{
+  "id": "macro.basic-synth",
+  "name": "basic synth",
+  "modules": {
+    "adsr1": {
+      "ext": "com.dj.adsr",
+      "knobs": {
+        "attack": {
+          "position": 0.024141544,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "decay": {
+          "position": 0.047278736,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "release": {
+          "position": 0.01990199,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "retrig": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "sustain": {
+          "position": 0.6825397,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "attenuve1": {
+      "ext": "com.dj.attenuverter",
+      "knobs": {
+        "atten1": {
+          "position": 0.65999997,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "atten2": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "atten3": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "atten4": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "atten5": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "atten6": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "atten7": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "atten8": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in1": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in2": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in3": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in4": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in5": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in6": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in7": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in8": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "offset1": {
+          "position": 0.33999997,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "offset2": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "offset3": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "offset4": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "offset5": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "offset6": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "offset7": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "offset8": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "filter1": {
+      "ext": "com.dj.filter",
+      "knobs": {
+        "cutoff": {
+          "position": 0.5833333,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "drive": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "res": {
+          "position": 0.15,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "topology": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "oscillat2": {
+      "ext": "com.dj.oscillator",
+      "knobs": {
+        "fm": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pitch": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0,
+          "wire_style": "override"
+        },
+        "sync": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "waveform": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "vca1": {
+      "ext": "com.dj.vca",
+      "knobs": {
+        "cv": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    }
+  },
+  "wires": {
+    "adsr1": {
+      "wires": [
+        {
+          "from_jack": "env",
+          "to": "attenuve1",
+          "to_jack": "in1"
+        },
+        {
+          "from_jack": "env",
+          "to": "vca1",
+          "to_jack": "cv"
+        }
+      ]
+    },
+    "attenuve1": {
+      "wires": [
+        {
+          "from_jack": "out1",
+          "to": "filter1",
+          "to_jack": "cutoff"
+        }
+      ]
+    },
+    "filter1": {
+      "wires": [
+        {
+          "from_jack": "lp",
+          "to": "vca1",
+          "to_jack": "in"
+        }
+      ]
+    },
+    "oscillat2": {
+      "wires": [
+        {
+          "from_jack": "audio",
+          "to": "filter1",
+          "to_jack": "in"
+        }
+      ]
+    }
+  },
+  "interface": {
+    "inputs": [
+      {
+        "id": "gate",
+        "node": "adsr1",
+        "jack": "gate"
+      },
+      {
+        "id": "pitch",
+        "node": "oscillat2",
+        "jack": "pitch"
+      },
+      {
+        "id": "retrig",
+        "node": "adsr1",
+        "jack": "retrig"
+      },
+      {
+        "id": "attack",
+        "node": "adsr1",
+        "jack": "attack"
+      },
+      {
+        "id": "decay",
+        "node": "adsr1",
+        "jack": "decay"
+      },
+      {
+        "id": "sustain",
+        "node": "adsr1",
+        "jack": "sustain"
+      },
+      {
+        "id": "release",
+        "node": "adsr1",
+        "jack": "release"
+      },
+      {
+        "id": "atten1",
+        "node": "attenuve1",
+        "jack": "atten1"
+      },
+      {
+        "id": "offset1",
+        "node": "attenuve1",
+        "jack": "offset1"
+      },
+      {
+        "id": "in2",
+        "node": "attenuve1",
+        "jack": "in2"
+      },
+      {
+        "id": "atten2",
+        "node": "attenuve1",
+        "jack": "atten2"
+      },
+      {
+        "id": "offset2",
+        "node": "attenuve1",
+        "jack": "offset2"
+      },
+      {
+        "id": "in3",
+        "node": "attenuve1",
+        "jack": "in3"
+      },
+      {
+        "id": "atten3",
+        "node": "attenuve1",
+        "jack": "atten3"
+      },
+      {
+        "id": "offset3",
+        "node": "attenuve1",
+        "jack": "offset3"
+      },
+      {
+        "id": "in4",
+        "node": "attenuve1",
+        "jack": "in4"
+      },
+      {
+        "id": "atten4",
+        "node": "attenuve1",
+        "jack": "atten4"
+      },
+      {
+        "id": "offset4",
+        "node": "attenuve1",
+        "jack": "offset4"
+      },
+      {
+        "id": "in5",
+        "node": "attenuve1",
+        "jack": "in5"
+      },
+      {
+        "id": "atten5",
+        "node": "attenuve1",
+        "jack": "atten5"
+      },
+      {
+        "id": "offset5",
+        "node": "attenuve1",
+        "jack": "offset5"
+      },
+      {
+        "id": "in6",
+        "node": "attenuve1",
+        "jack": "in6"
+      },
+      {
+        "id": "atten6",
+        "node": "attenuve1",
+        "jack": "atten6"
+      },
+      {
+        "id": "offset6",
+        "node": "attenuve1",
+        "jack": "offset6"
+      },
+      {
+        "id": "in7",
+        "node": "attenuve1",
+        "jack": "in7"
+      },
+      {
+        "id": "atten7",
+        "node": "attenuve1",
+        "jack": "atten7"
+      },
+      {
+        "id": "offset7",
+        "node": "attenuve1",
+        "jack": "offset7"
+      },
+      {
+        "id": "in8",
+        "node": "attenuve1",
+        "jack": "in8"
+      },
+      {
+        "id": "atten8",
+        "node": "attenuve1",
+        "jack": "atten8"
+      },
+      {
+        "id": "offset8",
+        "node": "attenuve1",
+        "jack": "offset8"
+      },
+      {
+        "id": "res",
+        "node": "filter1",
+        "jack": "res"
+      },
+      {
+        "id": "drive",
+        "node": "filter1",
+        "jack": "drive"
+      },
+      {
+        "id": "topology",
+        "node": "filter1",
+        "jack": "topology"
+      },
+      {
+        "id": "fm",
+        "node": "oscillat2",
+        "jack": "fm"
+      },
+      {
+        "id": "sync",
+        "node": "oscillat2",
+        "jack": "sync"
+      },
+      {
+        "id": "waveform",
+        "node": "oscillat2",
+        "jack": "waveform"
+      }
+    ],
+    "outputs": [
+      {
+        "id": "out",
+        "node": "vca1",
+        "jack": "out"
+      },
+      {
+        "id": "env",
+        "node": "adsr1",
+        "jack": "env"
+      },
+      {
+        "id": "out1",
+        "node": "attenuve1",
+        "jack": "out1"
+      },
+      {
+        "id": "out2",
+        "node": "attenuve1",
+        "jack": "out2"
+      },
+      {
+        "id": "out3",
+        "node": "attenuve1",
+        "jack": "out3"
+      },
+      {
+        "id": "out4",
+        "node": "attenuve1",
+        "jack": "out4"
+      },
+      {
+        "id": "out5",
+        "node": "attenuve1",
+        "jack": "out5"
+      },
+      {
+        "id": "out6",
+        "node": "attenuve1",
+        "jack": "out6"
+      },
+      {
+        "id": "out7",
+        "node": "attenuve1",
+        "jack": "out7"
+      },
+      {
+        "id": "out8",
+        "node": "attenuve1",
+        "jack": "out8"
+      },
+      {
+        "id": "lp",
+        "node": "filter1",
+        "jack": "lp"
+      },
+      {
+        "id": "bp",
+        "node": "filter1",
+        "jack": "bp"
+      },
+      {
+        "id": "hp",
+        "node": "filter1",
+        "jack": "hp"
+      },
+      {
+        "id": "notch",
+        "node": "filter1",
+        "jack": "notch"
+      },
+      {
+        "id": "audio",
+        "node": "oscillat2",
+        "jack": "audio"
+      }
+    ],
+    "params": []
+  },
+  "positions": {
+    "adsr1": [
+      336.0,
+      0.0
+    ],
+    "attenuve1": [
+      336.0,
+      384.0
+    ],
+    "filter1": [
+      0.0,
+      192.0
+    ],
+    "oscillat2": [
+      96.0,
+      0.0
+    ],
+    "vca1": [
+      720.0,
+      144.0
+    ]
+  }
+}

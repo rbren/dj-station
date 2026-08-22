@@ -1,0 +1,2585 @@
+{
+  "id": "macro.drum-kit",
+  "name": "drum kit",
+  "modules": {
+    "drum1": {
+      "ext": "com.dj.drum",
+      "knobs": {
+        "hat_decay": {
+          "position": 0.7248783,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "hat_tone": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "hat_trig": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "hat_tune": {
+          "position": 0.64,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "kick_decay": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "kick_tone": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "kick_trig": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "kick_tune": {
+          "position": 0.7266667,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "snare_decay": {
+          "position": 0.8419865,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "snare_tone": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "snare_trig": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "snare_tune": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "lfo1": {
+      "ext": "com.dj.lfo",
+      "knobs": {
+        "clock": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "phase": {
+          "position": 0.25,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pw": {
+          "position": 0.49999997,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "rate": {
+          "position": 0.5476464,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratio": {
+          "position": 0.4375,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "reset": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "shape": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "logic1": {
+      "ext": "com.dj.logic",
+      "knobs": {
+        "a": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "b": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "c": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cmp_in": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "g2t_in": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "threshold": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "trig_ms": {
+          "position": 0.5663233,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "win_high": {
+          "position": 0.75,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "win_in": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "win_low": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "logic2": {
+      "ext": "com.dj.logic",
+      "knobs": {
+        "a": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "b": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "c": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cmp_in": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "g2t_in": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "threshold": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "trig_ms": {
+          "position": 0.5663233,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "win_high": {
+          "position": 0.75,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "win_in": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "win_low": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "mixer2": {
+      "ext": "com.dj.mixer",
+      "knobs": {
+        "in1_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in1_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in2_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in2_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in3_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in3_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in4_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in4_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in5_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in5_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in6_l": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "in6_r": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl1": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl2": {
+          "position": 0.62,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl3": {
+          "position": 0.6,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl4": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl5": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "lvl6": {
+          "position": 0.8,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "master": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan1": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan2": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan3": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan4": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan5": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "pan6": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "stepseq1": {
+      "ext": "com.dj.step_seq",
+      "knobs": {
+        "clock": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv1": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv10": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv11": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv12": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv13": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv14": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv15": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv16": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv2": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv3": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv4": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv5": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv6": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv7": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv8": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv9": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "dir": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate1": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate10": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate11": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate12": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate13": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate14": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate15": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate16": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate2": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate3": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate4": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate5": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate6": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate7": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate8": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate9": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "glide": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "length": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet1": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet10": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet11": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet12": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet13": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet14": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet15": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet16": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet2": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet3": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet4": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet5": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet6": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet7": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet8": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet9": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "reset": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "stepseq2": {
+      "ext": "com.dj.step_seq",
+      "knobs": {
+        "clock": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv1": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv10": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv11": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv12": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv13": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv14": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv15": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv16": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv2": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv3": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv4": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv5": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv6": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv7": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv8": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv9": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "dir": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate1": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate10": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate11": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate12": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate13": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate14": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate15": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate16": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate2": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate3": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate4": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate5": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate6": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate7": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate8": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate9": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "glide": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "length": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet1": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet10": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet11": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet12": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet13": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet14": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet15": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet16": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet2": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet3": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet4": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet5": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet6": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet7": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet8": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet9": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "reset": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    },
+    "stepseq3": {
+      "ext": "com.dj.step_seq",
+      "knobs": {
+        "clock": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv1": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv10": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv11": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv12": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv13": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv14": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv15": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv16": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv2": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv3": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv4": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv5": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv6": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv7": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv8": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "cv9": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "dir": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate1": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate10": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate11": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate12": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate13": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate14": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate15": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate16": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate2": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate3": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate4": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate5": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate6": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate7": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate8": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "gate9": {
+          "position": 0.5,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "glide": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "length": {
+          "position": 1.0,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet1": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet10": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet11": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet12": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet13": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet14": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet15": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet16": {
+          "position": 0.64,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet2": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet3": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet4": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet5": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet6": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet7": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet8": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "ratchet9": {
+          "position": 4.5474735e-13,
+          "atten": 1.0,
+          "offset": 0.0
+        },
+        "reset": {
+          "position": 0.0,
+          "atten": 1.0,
+          "offset": 0.0
+        }
+      },
+      "params": {}
+    }
+  },
+  "wires": {
+    "drum1": {
+      "wires": [
+        {
+          "from_jack": "hat",
+          "to": "mixer2",
+          "to_jack": "in3_l"
+        },
+        {
+          "from_jack": "kick",
+          "to": "mixer2",
+          "to_jack": "in1_l"
+        },
+        {
+          "from_jack": "snare",
+          "to": "mixer2",
+          "to_jack": "in2_l"
+        }
+      ]
+    },
+    "lfo1": {
+      "wires": [
+        {
+          "from_jack": "bi",
+          "to": "stepseq1",
+          "to_jack": "clock"
+        },
+        {
+          "from_jack": "bi",
+          "to": "stepseq2",
+          "to_jack": "clock"
+        },
+        {
+          "from_jack": "bi",
+          "to": "stepseq3",
+          "to_jack": "clock"
+        }
+      ]
+    },
+    "logic1": {
+      "wires": [
+        {
+          "from_jack": "and",
+          "to": "drum1",
+          "to_jack": "hat_trig"
+        }
+      ]
+    },
+    "logic2": {
+      "wires": [
+        {
+          "from_jack": "and",
+          "to": "drum1",
+          "to_jack": "snare_trig"
+        }
+      ]
+    },
+    "stepseq1": {
+      "wires": [
+        {
+          "from_jack": "cv",
+          "to": "drum1",
+          "to_jack": "kick_trig"
+        }
+      ]
+    },
+    "stepseq2": {
+      "wires": [
+        {
+          "from_jack": "cv",
+          "to": "logic2",
+          "to_jack": "a"
+        },
+        {
+          "from_jack": "gate",
+          "to": "logic2",
+          "to_jack": "b"
+        }
+      ]
+    },
+    "stepseq3": {
+      "wires": [
+        {
+          "from_jack": "cv",
+          "to": "logic1",
+          "to_jack": "a"
+        },
+        {
+          "from_jack": "gate",
+          "to": "logic1",
+          "to_jack": "b"
+        }
+      ]
+    }
+  },
+  "interface": {
+    "inputs": [
+      {
+        "id": "kick_tune",
+        "node": "drum1",
+        "jack": "kick_tune"
+      },
+      {
+        "id": "kick_decay",
+        "node": "drum1",
+        "jack": "kick_decay"
+      },
+      {
+        "id": "kick_tone",
+        "node": "drum1",
+        "jack": "kick_tone"
+      },
+      {
+        "id": "snare_tune",
+        "node": "drum1",
+        "jack": "snare_tune"
+      },
+      {
+        "id": "snare_decay",
+        "node": "drum1",
+        "jack": "snare_decay"
+      },
+      {
+        "id": "snare_tone",
+        "node": "drum1",
+        "jack": "snare_tone"
+      },
+      {
+        "id": "hat_tune",
+        "node": "drum1",
+        "jack": "hat_tune"
+      },
+      {
+        "id": "hat_decay",
+        "node": "drum1",
+        "jack": "hat_decay"
+      },
+      {
+        "id": "hat_tone",
+        "node": "drum1",
+        "jack": "hat_tone"
+      },
+      {
+        "id": "rate",
+        "node": "lfo1",
+        "jack": "rate"
+      },
+      {
+        "id": "shape",
+        "node": "lfo1",
+        "jack": "shape"
+      },
+      {
+        "id": "pw",
+        "node": "lfo1",
+        "jack": "pw"
+      },
+      {
+        "id": "clock",
+        "node": "lfo1",
+        "jack": "clock"
+      },
+      {
+        "id": "ratio",
+        "node": "lfo1",
+        "jack": "ratio"
+      },
+      {
+        "id": "reset",
+        "node": "lfo1",
+        "jack": "reset"
+      },
+      {
+        "id": "phase",
+        "node": "lfo1",
+        "jack": "phase"
+      },
+      {
+        "id": "c",
+        "node": "logic1",
+        "jack": "c"
+      },
+      {
+        "id": "cmp_in",
+        "node": "logic1",
+        "jack": "cmp_in"
+      },
+      {
+        "id": "threshold",
+        "node": "logic1",
+        "jack": "threshold"
+      },
+      {
+        "id": "win_in",
+        "node": "logic1",
+        "jack": "win_in"
+      },
+      {
+        "id": "win_low",
+        "node": "logic1",
+        "jack": "win_low"
+      },
+      {
+        "id": "win_high",
+        "node": "logic1",
+        "jack": "win_high"
+      },
+      {
+        "id": "g2t_in",
+        "node": "logic1",
+        "jack": "g2t_in"
+      },
+      {
+        "id": "trig_ms",
+        "node": "logic1",
+        "jack": "trig_ms"
+      },
+      {
+        "id": "logic2_c",
+        "node": "logic2",
+        "jack": "c"
+      },
+      {
+        "id": "logic2_cmp_in",
+        "node": "logic2",
+        "jack": "cmp_in"
+      },
+      {
+        "id": "logic2_threshold",
+        "node": "logic2",
+        "jack": "threshold"
+      },
+      {
+        "id": "logic2_win_in",
+        "node": "logic2",
+        "jack": "win_in"
+      },
+      {
+        "id": "logic2_win_low",
+        "node": "logic2",
+        "jack": "win_low"
+      },
+      {
+        "id": "logic2_win_high",
+        "node": "logic2",
+        "jack": "win_high"
+      },
+      {
+        "id": "logic2_g2t_in",
+        "node": "logic2",
+        "jack": "g2t_in"
+      },
+      {
+        "id": "logic2_trig_ms",
+        "node": "logic2",
+        "jack": "trig_ms"
+      },
+      {
+        "id": "in1_r",
+        "node": "mixer2",
+        "jack": "in1_r"
+      },
+      {
+        "id": "lvl1",
+        "node": "mixer2",
+        "jack": "lvl1"
+      },
+      {
+        "id": "pan1",
+        "node": "mixer2",
+        "jack": "pan1"
+      },
+      {
+        "id": "in2_r",
+        "node": "mixer2",
+        "jack": "in2_r"
+      },
+      {
+        "id": "lvl2",
+        "node": "mixer2",
+        "jack": "lvl2"
+      },
+      {
+        "id": "pan2",
+        "node": "mixer2",
+        "jack": "pan2"
+      },
+      {
+        "id": "in3_r",
+        "node": "mixer2",
+        "jack": "in3_r"
+      },
+      {
+        "id": "lvl3",
+        "node": "mixer2",
+        "jack": "lvl3"
+      },
+      {
+        "id": "pan3",
+        "node": "mixer2",
+        "jack": "pan3"
+      },
+      {
+        "id": "in4_l",
+        "node": "mixer2",
+        "jack": "in4_l"
+      },
+      {
+        "id": "in4_r",
+        "node": "mixer2",
+        "jack": "in4_r"
+      },
+      {
+        "id": "lvl4",
+        "node": "mixer2",
+        "jack": "lvl4"
+      },
+      {
+        "id": "pan4",
+        "node": "mixer2",
+        "jack": "pan4"
+      },
+      {
+        "id": "in5_l",
+        "node": "mixer2",
+        "jack": "in5_l"
+      },
+      {
+        "id": "in5_r",
+        "node": "mixer2",
+        "jack": "in5_r"
+      },
+      {
+        "id": "lvl5",
+        "node": "mixer2",
+        "jack": "lvl5"
+      },
+      {
+        "id": "pan5",
+        "node": "mixer2",
+        "jack": "pan5"
+      },
+      {
+        "id": "in6_l",
+        "node": "mixer2",
+        "jack": "in6_l"
+      },
+      {
+        "id": "in6_r",
+        "node": "mixer2",
+        "jack": "in6_r"
+      },
+      {
+        "id": "lvl6",
+        "node": "mixer2",
+        "jack": "lvl6"
+      },
+      {
+        "id": "pan6",
+        "node": "mixer2",
+        "jack": "pan6"
+      },
+      {
+        "id": "master",
+        "node": "mixer2",
+        "jack": "master"
+      },
+      {
+        "id": "stepseq1_reset",
+        "node": "stepseq1",
+        "jack": "reset"
+      },
+      {
+        "id": "length",
+        "node": "stepseq1",
+        "jack": "length"
+      },
+      {
+        "id": "dir",
+        "node": "stepseq1",
+        "jack": "dir"
+      },
+      {
+        "id": "glide",
+        "node": "stepseq1",
+        "jack": "glide"
+      },
+      {
+        "id": "cv1",
+        "node": "stepseq1",
+        "jack": "cv1"
+      },
+      {
+        "id": "cv2",
+        "node": "stepseq1",
+        "jack": "cv2"
+      },
+      {
+        "id": "cv3",
+        "node": "stepseq1",
+        "jack": "cv3"
+      },
+      {
+        "id": "cv4",
+        "node": "stepseq1",
+        "jack": "cv4"
+      },
+      {
+        "id": "cv5",
+        "node": "stepseq1",
+        "jack": "cv5"
+      },
+      {
+        "id": "cv6",
+        "node": "stepseq1",
+        "jack": "cv6"
+      },
+      {
+        "id": "cv7",
+        "node": "stepseq1",
+        "jack": "cv7"
+      },
+      {
+        "id": "cv8",
+        "node": "stepseq1",
+        "jack": "cv8"
+      },
+      {
+        "id": "cv9",
+        "node": "stepseq1",
+        "jack": "cv9"
+      },
+      {
+        "id": "cv10",
+        "node": "stepseq1",
+        "jack": "cv10"
+      },
+      {
+        "id": "cv11",
+        "node": "stepseq1",
+        "jack": "cv11"
+      },
+      {
+        "id": "cv12",
+        "node": "stepseq1",
+        "jack": "cv12"
+      },
+      {
+        "id": "cv13",
+        "node": "stepseq1",
+        "jack": "cv13"
+      },
+      {
+        "id": "cv14",
+        "node": "stepseq1",
+        "jack": "cv14"
+      },
+      {
+        "id": "cv15",
+        "node": "stepseq1",
+        "jack": "cv15"
+      },
+      {
+        "id": "cv16",
+        "node": "stepseq1",
+        "jack": "cv16"
+      },
+      {
+        "id": "gate1",
+        "node": "stepseq1",
+        "jack": "gate1"
+      },
+      {
+        "id": "gate2",
+        "node": "stepseq1",
+        "jack": "gate2"
+      },
+      {
+        "id": "gate3",
+        "node": "stepseq1",
+        "jack": "gate3"
+      },
+      {
+        "id": "gate4",
+        "node": "stepseq1",
+        "jack": "gate4"
+      },
+      {
+        "id": "gate5",
+        "node": "stepseq1",
+        "jack": "gate5"
+      },
+      {
+        "id": "gate6",
+        "node": "stepseq1",
+        "jack": "gate6"
+      },
+      {
+        "id": "gate7",
+        "node": "stepseq1",
+        "jack": "gate7"
+      },
+      {
+        "id": "gate8",
+        "node": "stepseq1",
+        "jack": "gate8"
+      },
+      {
+        "id": "gate9",
+        "node": "stepseq1",
+        "jack": "gate9"
+      },
+      {
+        "id": "gate10",
+        "node": "stepseq1",
+        "jack": "gate10"
+      },
+      {
+        "id": "gate11",
+        "node": "stepseq1",
+        "jack": "gate11"
+      },
+      {
+        "id": "gate12",
+        "node": "stepseq1",
+        "jack": "gate12"
+      },
+      {
+        "id": "gate13",
+        "node": "stepseq1",
+        "jack": "gate13"
+      },
+      {
+        "id": "gate14",
+        "node": "stepseq1",
+        "jack": "gate14"
+      },
+      {
+        "id": "gate15",
+        "node": "stepseq1",
+        "jack": "gate15"
+      },
+      {
+        "id": "gate16",
+        "node": "stepseq1",
+        "jack": "gate16"
+      },
+      {
+        "id": "ratchet1",
+        "node": "stepseq1",
+        "jack": "ratchet1"
+      },
+      {
+        "id": "ratchet2",
+        "node": "stepseq1",
+        "jack": "ratchet2"
+      },
+      {
+        "id": "ratchet3",
+        "node": "stepseq1",
+        "jack": "ratchet3"
+      },
+      {
+        "id": "ratchet4",
+        "node": "stepseq1",
+        "jack": "ratchet4"
+      },
+      {
+        "id": "ratchet5",
+        "node": "stepseq1",
+        "jack": "ratchet5"
+      },
+      {
+        "id": "ratchet6",
+        "node": "stepseq1",
+        "jack": "ratchet6"
+      },
+      {
+        "id": "ratchet7",
+        "node": "stepseq1",
+        "jack": "ratchet7"
+      },
+      {
+        "id": "ratchet8",
+        "node": "stepseq1",
+        "jack": "ratchet8"
+      },
+      {
+        "id": "ratchet9",
+        "node": "stepseq1",
+        "jack": "ratchet9"
+      },
+      {
+        "id": "ratchet10",
+        "node": "stepseq1",
+        "jack": "ratchet10"
+      },
+      {
+        "id": "ratchet11",
+        "node": "stepseq1",
+        "jack": "ratchet11"
+      },
+      {
+        "id": "ratchet12",
+        "node": "stepseq1",
+        "jack": "ratchet12"
+      },
+      {
+        "id": "ratchet13",
+        "node": "stepseq1",
+        "jack": "ratchet13"
+      },
+      {
+        "id": "ratchet14",
+        "node": "stepseq1",
+        "jack": "ratchet14"
+      },
+      {
+        "id": "ratchet15",
+        "node": "stepseq1",
+        "jack": "ratchet15"
+      },
+      {
+        "id": "ratchet16",
+        "node": "stepseq1",
+        "jack": "ratchet16"
+      },
+      {
+        "id": "stepseq2_reset",
+        "node": "stepseq2",
+        "jack": "reset"
+      },
+      {
+        "id": "stepseq2_length",
+        "node": "stepseq2",
+        "jack": "length"
+      },
+      {
+        "id": "stepseq2_dir",
+        "node": "stepseq2",
+        "jack": "dir"
+      },
+      {
+        "id": "stepseq2_glide",
+        "node": "stepseq2",
+        "jack": "glide"
+      },
+      {
+        "id": "stepseq2_cv1",
+        "node": "stepseq2",
+        "jack": "cv1"
+      },
+      {
+        "id": "stepseq2_cv2",
+        "node": "stepseq2",
+        "jack": "cv2"
+      },
+      {
+        "id": "stepseq2_cv3",
+        "node": "stepseq2",
+        "jack": "cv3"
+      },
+      {
+        "id": "stepseq2_cv4",
+        "node": "stepseq2",
+        "jack": "cv4"
+      },
+      {
+        "id": "stepseq2_cv5",
+        "node": "stepseq2",
+        "jack": "cv5"
+      },
+      {
+        "id": "stepseq2_cv6",
+        "node": "stepseq2",
+        "jack": "cv6"
+      },
+      {
+        "id": "stepseq2_cv7",
+        "node": "stepseq2",
+        "jack": "cv7"
+      },
+      {
+        "id": "stepseq2_cv8",
+        "node": "stepseq2",
+        "jack": "cv8"
+      },
+      {
+        "id": "stepseq2_cv9",
+        "node": "stepseq2",
+        "jack": "cv9"
+      },
+      {
+        "id": "stepseq2_cv10",
+        "node": "stepseq2",
+        "jack": "cv10"
+      },
+      {
+        "id": "stepseq2_cv11",
+        "node": "stepseq2",
+        "jack": "cv11"
+      },
+      {
+        "id": "stepseq2_cv12",
+        "node": "stepseq2",
+        "jack": "cv12"
+      },
+      {
+        "id": "stepseq2_cv13",
+        "node": "stepseq2",
+        "jack": "cv13"
+      },
+      {
+        "id": "stepseq2_cv14",
+        "node": "stepseq2",
+        "jack": "cv14"
+      },
+      {
+        "id": "stepseq2_cv15",
+        "node": "stepseq2",
+        "jack": "cv15"
+      },
+      {
+        "id": "stepseq2_cv16",
+        "node": "stepseq2",
+        "jack": "cv16"
+      },
+      {
+        "id": "stepseq2_gate1",
+        "node": "stepseq2",
+        "jack": "gate1"
+      },
+      {
+        "id": "stepseq2_gate2",
+        "node": "stepseq2",
+        "jack": "gate2"
+      },
+      {
+        "id": "stepseq2_gate3",
+        "node": "stepseq2",
+        "jack": "gate3"
+      },
+      {
+        "id": "stepseq2_gate4",
+        "node": "stepseq2",
+        "jack": "gate4"
+      },
+      {
+        "id": "stepseq2_gate5",
+        "node": "stepseq2",
+        "jack": "gate5"
+      },
+      {
+        "id": "stepseq2_gate6",
+        "node": "stepseq2",
+        "jack": "gate6"
+      },
+      {
+        "id": "stepseq2_gate7",
+        "node": "stepseq2",
+        "jack": "gate7"
+      },
+      {
+        "id": "stepseq2_gate8",
+        "node": "stepseq2",
+        "jack": "gate8"
+      },
+      {
+        "id": "stepseq2_gate9",
+        "node": "stepseq2",
+        "jack": "gate9"
+      },
+      {
+        "id": "stepseq2_gate10",
+        "node": "stepseq2",
+        "jack": "gate10"
+      },
+      {
+        "id": "stepseq2_gate11",
+        "node": "stepseq2",
+        "jack": "gate11"
+      },
+      {
+        "id": "stepseq2_gate12",
+        "node": "stepseq2",
+        "jack": "gate12"
+      },
+      {
+        "id": "stepseq2_gate13",
+        "node": "stepseq2",
+        "jack": "gate13"
+      },
+      {
+        "id": "stepseq2_gate14",
+        "node": "stepseq2",
+        "jack": "gate14"
+      },
+      {
+        "id": "stepseq2_gate15",
+        "node": "stepseq2",
+        "jack": "gate15"
+      },
+      {
+        "id": "stepseq2_gate16",
+        "node": "stepseq2",
+        "jack": "gate16"
+      },
+      {
+        "id": "stepseq2_ratchet1",
+        "node": "stepseq2",
+        "jack": "ratchet1"
+      },
+      {
+        "id": "stepseq2_ratchet2",
+        "node": "stepseq2",
+        "jack": "ratchet2"
+      },
+      {
+        "id": "stepseq2_ratchet3",
+        "node": "stepseq2",
+        "jack": "ratchet3"
+      },
+      {
+        "id": "stepseq2_ratchet4",
+        "node": "stepseq2",
+        "jack": "ratchet4"
+      },
+      {
+        "id": "stepseq2_ratchet5",
+        "node": "stepseq2",
+        "jack": "ratchet5"
+      },
+      {
+        "id": "stepseq2_ratchet6",
+        "node": "stepseq2",
+        "jack": "ratchet6"
+      },
+      {
+        "id": "stepseq2_ratchet7",
+        "node": "stepseq2",
+        "jack": "ratchet7"
+      },
+      {
+        "id": "stepseq2_ratchet8",
+        "node": "stepseq2",
+        "jack": "ratchet8"
+      },
+      {
+        "id": "stepseq2_ratchet9",
+        "node": "stepseq2",
+        "jack": "ratchet9"
+      },
+      {
+        "id": "stepseq2_ratchet10",
+        "node": "stepseq2",
+        "jack": "ratchet10"
+      },
+      {
+        "id": "stepseq2_ratchet11",
+        "node": "stepseq2",
+        "jack": "ratchet11"
+      },
+      {
+        "id": "stepseq2_ratchet12",
+        "node": "stepseq2",
+        "jack": "ratchet12"
+      },
+      {
+        "id": "stepseq2_ratchet13",
+        "node": "stepseq2",
+        "jack": "ratchet13"
+      },
+      {
+        "id": "stepseq2_ratchet14",
+        "node": "stepseq2",
+        "jack": "ratchet14"
+      },
+      {
+        "id": "stepseq2_ratchet15",
+        "node": "stepseq2",
+        "jack": "ratchet15"
+      },
+      {
+        "id": "stepseq2_ratchet16",
+        "node": "stepseq2",
+        "jack": "ratchet16"
+      },
+      {
+        "id": "stepseq3_reset",
+        "node": "stepseq3",
+        "jack": "reset"
+      },
+      {
+        "id": "stepseq3_length",
+        "node": "stepseq3",
+        "jack": "length"
+      },
+      {
+        "id": "stepseq3_dir",
+        "node": "stepseq3",
+        "jack": "dir"
+      },
+      {
+        "id": "stepseq3_glide",
+        "node": "stepseq3",
+        "jack": "glide"
+      },
+      {
+        "id": "stepseq3_cv1",
+        "node": "stepseq3",
+        "jack": "cv1"
+      },
+      {
+        "id": "stepseq3_cv2",
+        "node": "stepseq3",
+        "jack": "cv2"
+      },
+      {
+        "id": "stepseq3_cv3",
+        "node": "stepseq3",
+        "jack": "cv3"
+      },
+      {
+        "id": "stepseq3_cv4",
+        "node": "stepseq3",
+        "jack": "cv4"
+      },
+      {
+        "id": "stepseq3_cv5",
+        "node": "stepseq3",
+        "jack": "cv5"
+      },
+      {
+        "id": "stepseq3_cv6",
+        "node": "stepseq3",
+        "jack": "cv6"
+      },
+      {
+        "id": "stepseq3_cv7",
+        "node": "stepseq3",
+        "jack": "cv7"
+      },
+      {
+        "id": "stepseq3_cv8",
+        "node": "stepseq3",
+        "jack": "cv8"
+      },
+      {
+        "id": "stepseq3_cv9",
+        "node": "stepseq3",
+        "jack": "cv9"
+      },
+      {
+        "id": "stepseq3_cv10",
+        "node": "stepseq3",
+        "jack": "cv10"
+      },
+      {
+        "id": "stepseq3_cv11",
+        "node": "stepseq3",
+        "jack": "cv11"
+      },
+      {
+        "id": "stepseq3_cv12",
+        "node": "stepseq3",
+        "jack": "cv12"
+      },
+      {
+        "id": "stepseq3_cv13",
+        "node": "stepseq3",
+        "jack": "cv13"
+      },
+      {
+        "id": "stepseq3_cv14",
+        "node": "stepseq3",
+        "jack": "cv14"
+      },
+      {
+        "id": "stepseq3_cv15",
+        "node": "stepseq3",
+        "jack": "cv15"
+      },
+      {
+        "id": "stepseq3_cv16",
+        "node": "stepseq3",
+        "jack": "cv16"
+      },
+      {
+        "id": "stepseq3_gate1",
+        "node": "stepseq3",
+        "jack": "gate1"
+      },
+      {
+        "id": "stepseq3_gate2",
+        "node": "stepseq3",
+        "jack": "gate2"
+      },
+      {
+        "id": "stepseq3_gate3",
+        "node": "stepseq3",
+        "jack": "gate3"
+      },
+      {
+        "id": "stepseq3_gate4",
+        "node": "stepseq3",
+        "jack": "gate4"
+      },
+      {
+        "id": "stepseq3_gate5",
+        "node": "stepseq3",
+        "jack": "gate5"
+      },
+      {
+        "id": "stepseq3_gate6",
+        "node": "stepseq3",
+        "jack": "gate6"
+      },
+      {
+        "id": "stepseq3_gate7",
+        "node": "stepseq3",
+        "jack": "gate7"
+      },
+      {
+        "id": "stepseq3_gate8",
+        "node": "stepseq3",
+        "jack": "gate8"
+      },
+      {
+        "id": "stepseq3_gate9",
+        "node": "stepseq3",
+        "jack": "gate9"
+      },
+      {
+        "id": "stepseq3_gate10",
+        "node": "stepseq3",
+        "jack": "gate10"
+      },
+      {
+        "id": "stepseq3_gate11",
+        "node": "stepseq3",
+        "jack": "gate11"
+      },
+      {
+        "id": "stepseq3_gate12",
+        "node": "stepseq3",
+        "jack": "gate12"
+      },
+      {
+        "id": "stepseq3_gate13",
+        "node": "stepseq3",
+        "jack": "gate13"
+      },
+      {
+        "id": "stepseq3_gate14",
+        "node": "stepseq3",
+        "jack": "gate14"
+      },
+      {
+        "id": "stepseq3_gate15",
+        "node": "stepseq3",
+        "jack": "gate15"
+      },
+      {
+        "id": "stepseq3_gate16",
+        "node": "stepseq3",
+        "jack": "gate16"
+      },
+      {
+        "id": "stepseq3_ratchet1",
+        "node": "stepseq3",
+        "jack": "ratchet1"
+      },
+      {
+        "id": "stepseq3_ratchet2",
+        "node": "stepseq3",
+        "jack": "ratchet2"
+      },
+      {
+        "id": "stepseq3_ratchet3",
+        "node": "stepseq3",
+        "jack": "ratchet3"
+      },
+      {
+        "id": "stepseq3_ratchet4",
+        "node": "stepseq3",
+        "jack": "ratchet4"
+      },
+      {
+        "id": "stepseq3_ratchet5",
+        "node": "stepseq3",
+        "jack": "ratchet5"
+      },
+      {
+        "id": "stepseq3_ratchet6",
+        "node": "stepseq3",
+        "jack": "ratchet6"
+      },
+      {
+        "id": "stepseq3_ratchet7",
+        "node": "stepseq3",
+        "jack": "ratchet7"
+      },
+      {
+        "id": "stepseq3_ratchet8",
+        "node": "stepseq3",
+        "jack": "ratchet8"
+      },
+      {
+        "id": "stepseq3_ratchet9",
+        "node": "stepseq3",
+        "jack": "ratchet9"
+      },
+      {
+        "id": "stepseq3_ratchet10",
+        "node": "stepseq3",
+        "jack": "ratchet10"
+      },
+      {
+        "id": "stepseq3_ratchet11",
+        "node": "stepseq3",
+        "jack": "ratchet11"
+      },
+      {
+        "id": "stepseq3_ratchet12",
+        "node": "stepseq3",
+        "jack": "ratchet12"
+      },
+      {
+        "id": "stepseq3_ratchet13",
+        "node": "stepseq3",
+        "jack": "ratchet13"
+      },
+      {
+        "id": "stepseq3_ratchet14",
+        "node": "stepseq3",
+        "jack": "ratchet14"
+      },
+      {
+        "id": "stepseq3_ratchet15",
+        "node": "stepseq3",
+        "jack": "ratchet15"
+      },
+      {
+        "id": "stepseq3_ratchet16",
+        "node": "stepseq3",
+        "jack": "ratchet16"
+      }
+    ],
+    "outputs": [
+      {
+        "id": "out_l",
+        "node": "mixer2",
+        "jack": "out_l"
+      },
+      {
+        "id": "kick",
+        "node": "drum1",
+        "jack": "kick"
+      },
+      {
+        "id": "snare",
+        "node": "drum1",
+        "jack": "snare"
+      },
+      {
+        "id": "hat",
+        "node": "drum1",
+        "jack": "hat"
+      },
+      {
+        "id": "mix",
+        "node": "drum1",
+        "jack": "mix"
+      },
+      {
+        "id": "bi",
+        "node": "lfo1",
+        "jack": "bi"
+      },
+      {
+        "id": "uni",
+        "node": "lfo1",
+        "jack": "uni"
+      },
+      {
+        "id": "shifted",
+        "node": "lfo1",
+        "jack": "shifted"
+      },
+      {
+        "id": "and",
+        "node": "logic1",
+        "jack": "and"
+      },
+      {
+        "id": "nand",
+        "node": "logic1",
+        "jack": "nand"
+      },
+      {
+        "id": "or",
+        "node": "logic1",
+        "jack": "or"
+      },
+      {
+        "id": "nor",
+        "node": "logic1",
+        "jack": "nor"
+      },
+      {
+        "id": "xor",
+        "node": "logic1",
+        "jack": "xor"
+      },
+      {
+        "id": "xnor",
+        "node": "logic1",
+        "jack": "xnor"
+      },
+      {
+        "id": "not_a",
+        "node": "logic1",
+        "jack": "not_a"
+      },
+      {
+        "id": "not_b",
+        "node": "logic1",
+        "jack": "not_b"
+      },
+      {
+        "id": "cmp",
+        "node": "logic1",
+        "jack": "cmp"
+      },
+      {
+        "id": "window",
+        "node": "logic1",
+        "jack": "window"
+      },
+      {
+        "id": "trig",
+        "node": "logic1",
+        "jack": "trig"
+      },
+      {
+        "id": "logic2_and",
+        "node": "logic2",
+        "jack": "and"
+      },
+      {
+        "id": "logic2_nand",
+        "node": "logic2",
+        "jack": "nand"
+      },
+      {
+        "id": "logic2_or",
+        "node": "logic2",
+        "jack": "or"
+      },
+      {
+        "id": "logic2_nor",
+        "node": "logic2",
+        "jack": "nor"
+      },
+      {
+        "id": "logic2_xor",
+        "node": "logic2",
+        "jack": "xor"
+      },
+      {
+        "id": "logic2_xnor",
+        "node": "logic2",
+        "jack": "xnor"
+      },
+      {
+        "id": "logic2_not_a",
+        "node": "logic2",
+        "jack": "not_a"
+      },
+      {
+        "id": "logic2_not_b",
+        "node": "logic2",
+        "jack": "not_b"
+      },
+      {
+        "id": "logic2_cmp",
+        "node": "logic2",
+        "jack": "cmp"
+      },
+      {
+        "id": "logic2_window",
+        "node": "logic2",
+        "jack": "window"
+      },
+      {
+        "id": "logic2_trig",
+        "node": "logic2",
+        "jack": "trig"
+      },
+      {
+        "id": "out_r",
+        "node": "mixer2",
+        "jack": "out_r"
+      },
+      {
+        "id": "cv",
+        "node": "stepseq1",
+        "jack": "cv"
+      },
+      {
+        "id": "gate",
+        "node": "stepseq1",
+        "jack": "gate"
+      },
+      {
+        "id": "eos",
+        "node": "stepseq1",
+        "jack": "eos"
+      },
+      {
+        "id": "step",
+        "node": "stepseq1",
+        "jack": "step"
+      },
+      {
+        "id": "cvgate",
+        "node": "stepseq1",
+        "jack": "cvgate"
+      },
+      {
+        "id": "stepseq2_cv",
+        "node": "stepseq2",
+        "jack": "cv"
+      },
+      {
+        "id": "stepseq2_gate",
+        "node": "stepseq2",
+        "jack": "gate"
+      },
+      {
+        "id": "stepseq2_eos",
+        "node": "stepseq2",
+        "jack": "eos"
+      },
+      {
+        "id": "stepseq2_step",
+        "node": "stepseq2",
+        "jack": "step"
+      },
+      {
+        "id": "stepseq2_cvgate",
+        "node": "stepseq2",
+        "jack": "cvgate"
+      },
+      {
+        "id": "stepseq3_cv",
+        "node": "stepseq3",
+        "jack": "cv"
+      },
+      {
+        "id": "stepseq3_gate",
+        "node": "stepseq3",
+        "jack": "gate"
+      },
+      {
+        "id": "stepseq3_eos",
+        "node": "stepseq3",
+        "jack": "eos"
+      },
+      {
+        "id": "stepseq3_step",
+        "node": "stepseq3",
+        "jack": "step"
+      },
+      {
+        "id": "stepseq3_cvgate",
+        "node": "stepseq3",
+        "jack": "cvgate"
+      }
+    ],
+    "params": []
+  },
+  "positions": {
+    "drum1": [
+      96.0,
+      768.0
+    ],
+    "lfo1": [
+      528.0,
+      192.0
+    ],
+    "logic1": [
+      1344.0,
+      1392.0
+    ],
+    "logic2": [
+      1344.0,
+      624.0
+    ],
+    "mixer2": [
+      0.0,
+      0.0
+    ],
+    "stepseq1": [
+      384.0,
+      480.0
+    ],
+    "stepseq2": [
+      384.0,
+      912.0
+    ],
+    "stepseq3": [
+      384.0,
+      1344.0
+    ]
+  }
+}

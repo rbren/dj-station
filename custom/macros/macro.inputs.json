@@ -1,0 +1,307 @@
+{
+  "id": "macro.inputs",
+  "name": "Inputs",
+  "modules": {
+    "camera1": {
+      "ext": "com.dj.camera",
+      "knobs": {},
+      "params": {}
+    },
+    "hands1": {
+      "ext": "builtin.hands",
+      "knobs": {},
+      "params": {}
+    },
+    "qwerty1": {
+      "ext": "builtin.qwerty",
+      "knobs": {},
+      "params": {}
+    }
+  },
+  "wires": {},
+  "interface": {
+    "inputs": [],
+    "outputs": [
+      {
+        "id": "r_pinch",
+        "node": "hands1",
+        "jack": "r_pinch"
+      },
+      {
+        "id": "rx",
+        "node": "hands1",
+        "jack": "rx"
+      },
+      {
+        "id": "ry",
+        "node": "hands1",
+        "jack": "ry"
+      },
+      {
+        "id": "gate",
+        "node": "qwerty1",
+        "jack": "gate"
+      },
+      {
+        "id": "note",
+        "node": "qwerty1",
+        "jack": "note"
+      },
+      {
+        "id": "cx",
+        "node": "hands1",
+        "jack": "cx"
+      },
+      {
+        "id": "cy",
+        "node": "hands1",
+        "jack": "cy"
+      },
+      {
+        "id": "lx",
+        "node": "hands1",
+        "jack": "lx"
+      },
+      {
+        "id": "ly",
+        "node": "hands1",
+        "jack": "ly"
+      },
+      {
+        "id": "dx",
+        "node": "hands1",
+        "jack": "dx"
+      },
+      {
+        "id": "dy",
+        "node": "hands1",
+        "jack": "dy"
+      },
+      {
+        "id": "l_pinch",
+        "node": "hands1",
+        "jack": "l_pinch"
+      },
+      {
+        "id": "l_rot",
+        "node": "hands1",
+        "jack": "l_rot"
+      },
+      {
+        "id": "r_rot",
+        "node": "hands1",
+        "jack": "r_rot"
+      },
+      {
+        "id": "l_seen",
+        "node": "hands1",
+        "jack": "l_seen"
+      },
+      {
+        "id": "r_seen",
+        "node": "hands1",
+        "jack": "r_seen"
+      },
+      {
+        "id": "1",
+        "node": "qwerty1",
+        "jack": "1"
+      },
+      {
+        "id": "2",
+        "node": "qwerty1",
+        "jack": "2"
+      },
+      {
+        "id": "3",
+        "node": "qwerty1",
+        "jack": "3"
+      },
+      {
+        "id": "4",
+        "node": "qwerty1",
+        "jack": "4"
+      },
+      {
+        "id": "5",
+        "node": "qwerty1",
+        "jack": "5"
+      },
+      {
+        "id": "6",
+        "node": "qwerty1",
+        "jack": "6"
+      },
+      {
+        "id": "7",
+        "node": "qwerty1",
+        "jack": "7"
+      },
+      {
+        "id": "8",
+        "node": "qwerty1",
+        "jack": "8"
+      },
+      {
+        "id": "9",
+        "node": "qwerty1",
+        "jack": "9"
+      },
+      {
+        "id": "0",
+        "node": "qwerty1",
+        "jack": "0"
+      },
+      {
+        "id": "q",
+        "node": "qwerty1",
+        "jack": "q"
+      },
+      {
+        "id": "w",
+        "node": "qwerty1",
+        "jack": "w"
+      },
+      {
+        "id": "e",
+        "node": "qwerty1",
+        "jack": "e"
+      },
+      {
+        "id": "r",
+        "node": "qwerty1",
+        "jack": "r"
+      },
+      {
+        "id": "t",
+        "node": "qwerty1",
+        "jack": "t"
+      },
+      {
+        "id": "y",
+        "node": "qwerty1",
+        "jack": "y"
+      },
+      {
+        "id": "u",
+        "node": "qwerty1",
+        "jack": "u"
+      },
+      {
+        "id": "i",
+        "node": "qwerty1",
+        "jack": "i"
+      },
+      {
+        "id": "o",
+        "node": "qwerty1",
+        "jack": "o"
+      },
+      {
+        "id": "p",
+        "node": "qwerty1",
+        "jack": "p"
+      },
+      {
+        "id": "a",
+        "node": "qwerty1",
+        "jack": "a"
+      },
+      {
+        "id": "s",
+        "node": "qwerty1",
+        "jack": "s"
+      },
+      {
+        "id": "d",
+        "node": "qwerty1",
+        "jack": "d"
+      },
+      {
+        "id": "f",
+        "node": "qwerty1",
+        "jack": "f"
+      },
+      {
+        "id": "g",
+        "node": "qwerty1",
+        "jack": "g"
+      },
+      {
+        "id": "h",
+        "node": "qwerty1",
+        "jack": "h"
+      },
+      {
+        "id": "j",
+        "node": "qwerty1",
+        "jack": "j"
+      },
+      {
+        "id": "k",
+        "node": "qwerty1",
+        "jack": "k"
+      },
+      {
+        "id": "l",
+        "node": "qwerty1",
+        "jack": "l"
+      },
+      {
+        "id": "z",
+        "node": "qwerty1",
+        "jack": "z"
+      },
+      {
+        "id": "x",
+        "node": "qwerty1",
+        "jack": "x"
+      },
+      {
+        "id": "c",
+        "node": "qwerty1",
+        "jack": "c"
+      },
+      {
+        "id": "v",
+        "node": "qwerty1",
+        "jack": "v"
+      },
+      {
+        "id": "b",
+        "node": "qwerty1",
+        "jack": "b"
+      },
+      {
+        "id": "n",
+        "node": "qwerty1",
+        "jack": "n"
+      },
+      {
+        "id": "m",
+        "node": "qwerty1",
+        "jack": "m"
+      },
+      {
+        "id": "space",
+        "node": "qwerty1",
+        "jack": "space"
+      }
+    ],
+    "params": []
+  },
+  "positions": {
+    "camera1": [
+      0.0,
+      240.0
+    ],
+    "hands1": [
+      0.0,
+      720.0
+    ],
+    "qwerty1": [
+      0.0,
+      0.0
+    ]
+  }
+}
