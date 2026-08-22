@@ -5,12 +5,33 @@
   color: #e6e6e6;
 }
 
+/* The page itself must never scroll: the shell is pinned to the viewport
+   (100% chain, not 100vh — the webview's visual viewport can differ) and
+   only designated inner surfaces scroll. Without this the .rack's
+   min-width/min-height leak through .rack-area's layout box and grow the
+   body past the viewport, scrolling the header away. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  overflow: hidden;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 
 .app-header {
   display: flex;
+  flex: none;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 1rem;
   padding: 0.5rem 1rem;
@@ -1277,6 +1298,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* The shell no longer scrolls, so the library view scrolls itself. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .store-tabs {
@@ -1408,9 +1433,12 @@ body {
   color: #8a93a2;
 }
 
+/* Fills the shell below the header; the .rack-area child stretches to it
+   (min-height: 0 so the rack's minimum size can't re-inflate the row). */
 .app-body {
   display: flex;
-  align-items: flex-start;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Cmd+M module picker: a modal gallery of zoomed-out live module panels.
@@ -1603,7 +1631,11 @@ body {
   position: relative;
   flex: 1;
   overflow: hidden;
-  min-height: calc(100vh - 48px);
+  /* No explicit height: the flex chain (.app > .app-body) sizes it to the
+     space under the header. min-* 0 so the .rack's own minimum size never
+     propagates out and scrolls the page. */
+  min-height: 0;
+  min-width: 0;
   background-image: radial-gradient(circle, #22262d 1px, transparent 1px);
   background-size: 48px 48px;
 }

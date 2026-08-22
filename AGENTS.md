@@ -362,6 +362,16 @@ fails if it's missing.
   must match the bar height + 8px gap. Macro members' panel titles drop
   the `<macro>/` id prefix (display only, in ModulePanel's ModuleName
   callsite). The
+  App shell scroll contract (pinned by `app/tests/AppShellLayout.test.tsx`):
+  the PAGE never scrolls — `html`/`body`/`#root`/`.app` form a 100% height
+  chain (100%, not 100vh: the webview visual viewport can differ), `body`
+  is `overflow: hidden`, and `.app` is a flex column (header `flex: none`,
+  `.app-body` `flex: 1; min-height: 0`). `.rack-area` must keep
+  `overflow: hidden` + `min-height/min-width: 0` and NO viewport-relative
+  sizing — the `.rack`'s min extents otherwise leak through its layout box,
+  grow the body past the viewport, and scroll the header away. Scrolling
+  surfaces are inner and explicit (`.library`, `.docs-body`,
+  `.picker-body`, dialog lists). The
   `.wire-overlay` CSS must keep
   `z-index`, `overflow: visible` and `pointer-events: none`
   (WireOverlay.test.tsx pins it); knob right-clicks stopPropagation so
