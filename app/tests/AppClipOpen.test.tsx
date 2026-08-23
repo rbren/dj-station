@@ -79,8 +79,14 @@ const clipMock = {
   })),
   previewAudio: vi.fn(async () => new ArrayBuffer(44)),
   save: vi.fn(async () => TRACK),
-  stemStatus: vi.fn(async () => ({ state: 'absent', stems: [] })),
-  separateStems: vi.fn(async () => ({ state: 'absent', stems: [] })),
+  stemStatus: vi.fn(async (trackId: number) => ({
+    track_id: trackId,
+    backend: 'htdemucs_ft',
+    state: 'ready',
+    stage: null,
+    detail: null,
+    pending: 0,
+  })),
 };
 
 // The factories run before this file's consts are initialised (imports

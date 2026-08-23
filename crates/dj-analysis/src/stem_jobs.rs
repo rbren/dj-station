@@ -80,6 +80,12 @@ impl StemJobs {
         self.separator.id()
     }
 
+    /// Can the backend run on this machine? `Err` carries an install
+    /// hint — a missing external tool is a reported state, never a panic.
+    pub fn probe(&self) -> anyhow::Result<()> {
+        self.separator.probe()
+    }
+
     /// Are this track's stems already on disk for our backend?
     pub fn cached(&self, track_id: i64) -> bool {
         match self.library.track(track_id) {

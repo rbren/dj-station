@@ -704,8 +704,9 @@ fails if it's missing.
   first (`clip-discard-dialog`); nothing else is at risk, since the source
   track is never written.
   Sources are `{track_id, stems}` pairs, not bare ids: a source is a
-  CHOSEN SET of a track's stems (`clip_stem_*` commands over `StemJobs`,
-  summed by `dj_analysis::mix_stems`) and edits exactly like a full mix —
+  CHOSEN SET of a track's stems (read out of the stem cache the auto-stem
+  service fills, summed by `dj_analysis::mix_stems`) and edits exactly
+  like a full mix —
   the set is part of the cache key, the `source_ref` (`"7:drums+bass"`)
   and the rendered result. An EMPTY set means the full mix, and that is
   also how "every stem on" is sent: the track's own file is exact and
@@ -717,10 +718,15 @@ fails if it's missing.
   broken because picking a stem did nothing on its own. Stems are the
   same length as their track, so the program (regions, level, EQ)
   survives the swap untouched; a failed load rolls the switches back.
-  A separation can be abandoned (`clip_stem_cancel` →
-  `StemJobs::cancel_track`, `StemJobState::Cancelled`). Cancelling KILLS
-  the demucs child: it is minutes of another program's time, and a flag
-  alone stops nothing. Hence `CancelToken` owns the `Child`,
+  Nothing on the page starts or stops a separation: stems arrive by
+  themselves (see the auto-stem bullet below) and `clip_stem_status` only
+  REPORTS — `ready` / `loading` / `failed` / `unavailable`, plus the
+  queue length. Asking is the request, though: the command marks that
+  track wanted, which jumps it ahead of the backfill. Abandoning a run
+  (`AutoStemService::stop` → `StemJobs::cancel_track`,
+  `StemJobState::Cancelled`) KILLS the demucs child: it is minutes of
+  another program's time, and a flag alone stops nothing. Hence
+  `CancelToken` owns the `Child`,
   `wait_child()` polls instead of blocking (a blocking wait would put the
   child out of the canceller's reach), and stderr is drained on its own
   thread — demucs' `-j` workers inherit that pipe and hold it open after
@@ -732,16 +738,28 @@ fails if it's missing.
   the renderer is not a graph module. `decode_audio` truncates to the
   container's declared frame count — our FLAC writer zero-pads the last
   fixed-size block, and an exported clip must decode back sample-exact.
-- Clip page stems: a clip source is a `{track_id, stem}` ref, so one
-  isolated stem can be cut/EQ'd like a full mix. Separation runs in
-  `StemJobs` (thread per job, snapshot POLLED by the UI) behind
+- Stems are AUTOMATIC (`dj_analysis::AutoStemService`, started in
+  `AppState`): a background thread separates every track the scope covers
+  — provider downloads first, newest first, then the rest — and a startup
+  scan BACKFILLS history, including runs a quit interrupted. It was a
+  button on the Clip page; that made every first use a multi-minute wait
+  and forgot the work on exit. `DJ_AUTOSTEM=off|downloads|all` (default
+  `all`) picks the scope. ONE separation at a time: demucs saturates the
+  CPU alone, and a hundred-track backfill spawning a hundred models takes
+  the machine down. A track is given up on after `max_attempts` failures
+  so one broken file can't spin the loop, and `next_in_line` is a pure
+  function so the ordering policy is testable without a library, a model
+  or a thread.
+  Separation itself still runs in `StemJobs` (thread per job) behind
   `DemucsSeparator`, which shells out to the external `demucs` CLI the way
-  the library shells out to yt-dlp — a missing binary is a reported,
-  disabled state, never a panic. The separator's id keys its cache
-  (`stems_dir_for`), so a demucs request can never be served the
-  import-time band-split stems. The plumbing is tested against a fake CLI
-  script (`tests/stem_separation.rs`, `#[cfg(unix)]`) — never the real
-  model.
+  the library shells out to yt-dlp — a missing binary is a reported state,
+  never a panic, and it is re-probed periodically so installing demucs
+  needs no restart. The separator's id keys the cache (`stems_dir_for`),
+  so a demucs request can never be served the import-time band-split
+  stems, and `stems_cached` requires NON-EMPTY files: a half-written cache
+  from a kill is redone rather than trusted. The plumbing is tested
+  against a fake CLI script (`tests/stem_separation.rs`, `#[cfg(unix)]`) —
+  never the real model.
 - Clip playback has exactly ONE owner, `ClipTransport`
   (`app/src/clipTransport.ts`); ClipView holds no audio state. Four
   invariants keep it from playing twice: ONE SLOT (`install` runs only

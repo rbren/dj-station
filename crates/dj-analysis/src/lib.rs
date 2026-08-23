@@ -20,11 +20,15 @@
 //! - **Background worker** ([`worker`]): drains the library's analysis
 //!   queue off the audio/UI threads; results land in the library DB with
 //!   no user action.
+//! - **Automatic stems** ([`auto_stems`]): keeps the stem cache filled for
+//!   downloaded tracks — one separation at a time, backfilling history and
+//!   anything a quit interrupted, so the Clip page never has to ask.
 //!
 //! Everything here runs on background threads — never on the RT audio
 //! thread. The engine consumes results (beatgrids via the library DB, stem
 //! FLACs via `deck_load_stems`).
 
+pub mod auto_stems;
 pub mod clip;
 pub mod decode;
 pub mod demucs;
@@ -39,6 +43,9 @@ pub mod worker;
 #[cfg(feature = "onnx")]
 pub mod onnx;
 
+pub use auto_stems::{
+    AutoStemScope, AutoStemService, AutoStemSettings, AutoStemStatus, TrackStems,
+};
 pub use clip::{render_clip, ClipEq, ClipProgram, ClipRegion, LevelPoint};
 pub use decode::{decode_audio, AudioData};
 pub use demucs::DemucsSeparator;

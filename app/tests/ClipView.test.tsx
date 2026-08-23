@@ -84,15 +84,17 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
       detail: null,
       stems: ['vocals', 'drums', 'bass', 'other'],
     })),
+    // Separated already, which is the ordinary case: the shell stems
+    // every download in the background long before anyone opens it.
+    // Tests about the wait say so themselves.
     stemStatus: vi.fn(async (trackId: number) => ({
       track_id: trackId,
       backend: 'htdemucs_ft',
-      cached: false,
-      running: false,
+      state: 'ready' as const,
+      stage: null,
+      detail: null,
+      pending: 0,
     })),
-    stemSeparate: vi.fn(async () => 1),
-    stemCancel: vi.fn(async () => true),
-    stemJobs: vi.fn(async () => []),
     ...overrides,
   };
 }
@@ -830,48 +832,52 @@ describe('ClipView', () => {
     });
   });
 
-  it('separates stems on demand and then edits one in isolation', async () => {
-    let cached = false;
+  it('waits for the automatic separation instead of offering to start one', async () => {
+    // The background service is mid-way through this track when the page
+    // opens, and finishes while it is being watched.
+    let ready = false;
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
         backend: 'htdemucs_ft',
-        cached,
-        running: false,
+        state: ready ? ('ready' as const) : ('loading' as const),
+        stage: ready ? null : 'separating',
+        detail: null,
+        pending: ready ? 0 : 3,
       })),
-      stemSeparate: vi.fn(async () => {
-        cached = true;
-        return 42;
-      }),
-      stemJobs: vi.fn(async () => [
-        {
-          id: 42,
-          track_id: 7,
-          backend: 'htdemucs_ft',
-          title: TRACK.title,
-          state: 'done' as const,
-          stage: 'done',
-          error: null,
-        },
-      ]),
     });
-    render(<ClipView clip={clip} library={libraryMock()} />);
+    render(<ClipView clip={clip} library={libraryMock()} stemPollMs={300} />);
     await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
     fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '7' } });
 
-    // Before separation only the full mix is available.
+    // While it runs the mixer is locked and the page says why — there is
+    // nothing to press, because nobody starts a separation by hand.
     await waitFor(() =>
-      expect(screen.getByTestId('clip-stem-vocals')).toHaveProperty('disabled', true),
+      expect(screen.getByTestId('clip-stem-loading').textContent).toMatch(/stems are loading/i),
     );
-    fireEvent.click(screen.getByTestId('clip-stem-separate'));
-    expect(clip.stemSeparate).toHaveBeenCalledWith(7);
+    expect(screen.getByTestId('clip-stem-loading').textContent).toContain('separating');
+    expect(screen.getByTestId('clip-stem-loading').textContent).toContain('3 tracks queued');
+    expect(screen.getByTestId('clip-stem-vocals')).toHaveProperty('disabled', true);
+    expect(screen.queryByTestId('clip-stem-separate')).toBeNull();
+    expect(screen.queryByTestId('clip-stem-cancel')).toBeNull();
+    // Asking is what puts this track at the front of the queue.
+    expect(clip.stemStatus).toHaveBeenCalledWith(7);
 
-    // The job finishes and the stems unlock.
-    await waitFor(
-      () => expect(screen.getByTestId('clip-stem-ready').textContent).toContain('htdemucs_ft'),
-      { timeout: 3000 },
+    // The service finishes and the stems unlock on their own — the page
+    // notices on its next poll, with nobody clicking anything.
+    ready = true;
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-stem-ready').textContent).toContain('htdemucs_ft'),
     );
-    expect(screen.getByTestId('clip-status').textContent).toMatch(/stems ready/i);
+    expect(screen.queryByTestId('clip-stem-loading')).toBeNull();
+  });
+
+  it('edits one stem in isolation once they are separated', async () => {
+    const clip = clipMock();
+    render(<ClipView clip={clip} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+    fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '7' } });
+    await waitFor(() => expect(screen.getByTestId('clip-stem-ready')).toBeTruthy());
 
     // Every stem starts switched on — the whole track, which needs no
     // stem files at all.
@@ -909,7 +915,11 @@ describe('ClipView', () => {
       await waitFor(() =>
         expect(screen.getByTestId(`clip-stem-${name}`)).toHaveProperty('disabled', false),
       );
-      fireEvent.click(screen.getByTestId(`clip-stem-${name}`));
+      // The swap loads in the background, so let it settle before the
+      // next flip rather than piling clicks onto a disabled switch.
+      await act(async () => {
+        fireEvent.click(screen.getByTestId(`clip-stem-${name}`));
+      });
     };
     await flip('bass');
     await flip('other');
@@ -928,13 +938,33 @@ describe('ClipView', () => {
     expect(full?.[1]).toEqual([]);
   });
 
+  it('stops polling once the stems are there', async () => {
+    const clip = clipMock({
+      stemStatus: vi.fn(async (trackId: number) => ({
+        track_id: trackId,
+        backend: 'htdemucs_ft',
+        state: 'ready' as const,
+        stage: null,
+        detail: null,
+        pending: 0,
+      })),
+    });
+    render(<ClipView clip={clip} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-stem-ready')).toBeTruthy());
+    const asked = (clip.stemStatus as ReturnType<typeof vi.fn>).mock.calls.length;
+    await new Promise((r) => setTimeout(r, 300));
+    expect((clip.stemStatus as ReturnType<typeof vi.fn>).mock.calls.length).toBe(asked);
+  });
+
   it('keeps the edit when the stems behind it change', async () => {
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
         backend: 'htdemucs_ft',
-        cached: true,
-        running: false,
+        state: 'ready' as const,
+        stage: null,
+        detail: null,
+        pending: 0,
       })),
     });
     await openTrack(clip);
@@ -966,8 +996,10 @@ describe('ClipView', () => {
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
         backend: 'htdemucs_ft',
-        cached: true,
-        running: false,
+        state: 'ready' as const,
+        stage: null,
+        detail: null,
+        pending: 0,
       })),
     });
     render(<ClipView clip={clip} library={libraryMock()} />);
@@ -992,83 +1024,68 @@ describe('ClipView', () => {
     expect(screen.getByTestId('clip-stem-other').getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('leaves the stem switches alone until a track is separated', async () => {
-    render(<ClipView clip={clipMock()} library={libraryMock()} />);
-    await waitFor(() => expect(screen.getByTestId('clip-stem-vocals')).toBeTruthy());
-    expect(screen.getByTestId('clip-stem-vocals')).toHaveProperty('disabled', true);
-    expect(screen.getByTestId('clip-stem-vocals').getAttribute('aria-pressed')).toBe('true');
-  });
-
-  it('stops a separation that is taking too long, and can start it again', async () => {
-    let state: 'running' | 'cancelled' | 'done' = 'running';
+  it('leaves the stem switches alone until the separation lands', async () => {
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
         backend: 'htdemucs_ft',
-        cached: state === 'done',
-        running: state === 'running',
+        state: 'loading' as const,
+        stage: 'separating',
+        detail: null,
+        pending: 1,
       })),
-      stemCancel: vi.fn(async () => {
-        state = 'cancelled';
-        return true;
-      }),
-      stemJobs: vi.fn(async () => [
-        {
-          id: 42,
-          track_id: 7,
-          backend: 'htdemucs_ft',
-          title: TRACK.title,
-          state,
-          stage: state === 'running' ? 'separating' : state,
-          error: null,
-        },
-      ]),
     });
     render(<ClipView clip={clip} library={libraryMock()} />);
-    await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
-    fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '7' } });
-
-    fireEvent.click(screen.getByTestId('clip-stem-separate'));
-    await waitFor(() => expect(screen.getByTestId('clip-stem-cancel')).toBeTruthy());
-
-    fireEvent.click(screen.getByTestId('clip-stem-cancel'));
-    await waitFor(() => expect(clip.stemCancel).toHaveBeenCalledWith(7));
-
-    // The panel goes back to idle — no stems, no spinner, and the offer
-    // to run it again.
-    await waitFor(() => expect(screen.queryByTestId('clip-stem-cancel')).toBeNull(), {
-      timeout: 3000,
-    });
-    expect(screen.getByTestId('clip-status').textContent).toMatch(/stopped separating/i);
-    expect(screen.queryByTestId('clip-stem-ready')).toBeNull();
-    const again = screen.getByTestId('clip-stem-separate') as HTMLButtonElement;
-    expect(again.disabled).toBe(false);
-    expect(again.textContent).toBe('Separate stems');
-
-    // A cancel is not a failure, so nothing is shouted about.
-    expect(screen.queryByTestId('clip-error')).toBeNull();
-  });
-
-  it('only offers to cancel while something is running', async () => {
-    render(<ClipView clip={clipMock()} library={libraryMock()} />);
-    await waitFor(() => expect(screen.getByTestId('clip-stem-separate')).toBeTruthy());
-    expect(screen.queryByTestId('clip-stem-cancel')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('clip-stem-vocals')).toBeTruthy());
+    expect(screen.getByTestId('clip-stem-vocals')).toHaveProperty('disabled', true);
+    expect(screen.getByTestId('clip-stem-vocals').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('clip-stem-vocals').getAttribute('title')).toMatch(/loading/i);
   });
 
   it('explains itself when the separation tooling is missing', async () => {
+    const detail = 'demucs was not found on PATH — pip install demucs';
     const clip = clipMock({
       stemBackend: vi.fn(async () => ({
         backend: 'htdemucs_ft',
         available: false,
-        detail: 'demucs was not found on PATH — pip install demucs',
+        detail,
         stems: ['vocals', 'drums', 'bass', 'other'],
+      })),
+      stemStatus: vi.fn(async (trackId: number) => ({
+        track_id: trackId,
+        backend: 'htdemucs_ft',
+        state: 'unavailable' as const,
+        stage: null,
+        detail,
+        pending: 0,
       })),
     });
     render(<ClipView clip={clip} library={libraryMock()} />);
     await waitFor(() =>
       expect(screen.getByTestId('clip-stem-hint').textContent).toContain('pip install demucs'),
     );
-    expect(screen.getByTestId('clip-stem-separate')).toHaveProperty('disabled', true);
+    // Nothing claims stems are on their way, and there is nothing to press.
+    expect(screen.queryByTestId('clip-stem-loading')).toBeNull();
+    expect(screen.queryByTestId('clip-stem-separate')).toBeNull();
+    expect(screen.getByTestId('clip-stem-vocals')).toHaveProperty('disabled', true);
+  });
+
+  it('says when a track has been given up on rather than waiting forever', async () => {
+    const clip = clipMock({
+      stemStatus: vi.fn(async (trackId: number) => ({
+        track_id: trackId,
+        backend: 'htdemucs_ft',
+        state: 'failed' as const,
+        stage: null,
+        detail: 'demucs failed (exit status: 1): torch.cuda.OutOfMemoryError',
+        pending: 0,
+      })),
+    });
+    render(<ClipView clip={clip} library={libraryMock()} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-stem-hint').textContent).toContain('OutOfMemoryError'),
+    );
+    expect(screen.queryByTestId('clip-stem-loading')).toBeNull();
   });
 
   it('hides, pauses playback and detaches shortcuts while inactive', async () => {
@@ -1092,6 +1109,9 @@ describe('ClipView', () => {
     // Coming back, the edit is still there.
     rerender(<ClipView clip={clip} library={library} active />);
     expect((screen.getByTestId('clip-view') as HTMLElement).style.display).not.toBe('none');
+    // Coming back also re-reads the library and the stem report; let both
+    // land before the test walks away from the component.
+    await waitFor(() => expect(screen.getByTestId('clip-stem-ready')).toBeTruthy());
     expect(screen.getAllByTestId('clip-region')).toHaveLength(1);
   });
 });

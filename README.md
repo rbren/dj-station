@@ -33,13 +33,17 @@ package manager). Nothing else needs it — without it the tab is still there
 and reports the missing binary when you search.
 
 Also optional: **[demucs](https://github.com/adefossez/demucs)**
-(`pipx install demucs`) for studio-quality stem separation on the Clip
-page, where you can open one isolated stem of a track and edit it. Without
-it that button is disabled and says why; the decks' stem controls are
-unaffected (they use the built-in DSP band split). `DJ_DEMUCS_BIN` points
-at a specific binary, `DJ_DEMUCS_MODEL` picks another model (default
-`htdemucs_ft`) and `DJ_DEMUCS_ARGS` adds flags to every call (e.g.
-`--device cuda`).
+(`pipx install demucs`) for studio-quality stem separation. With it
+installed, tracks are separated on their own in the background — anything
+downloaded from YouTube first, then the rest of the library — so the Clip
+page can drop the vocals out of a track without anyone waiting on a model
+or pressing anything; it just reports whether the stems have landed.
+Without demucs the Clip page says so and the stem switches stay off; the
+decks' stem controls are unaffected (they use the built-in DSP band
+split). `DJ_AUTOSTEM=off|downloads|all` (default `all`) chooses what gets
+separated automatically, `DJ_DEMUCS_BIN` points at a specific binary,
+`DJ_DEMUCS_MODEL` picks another model (default `htdemucs_ft`) and
+`DJ_DEMUCS_ARGS` adds flags to every call (e.g. `--device cuda`).
 
 ## State & saves — `custom/`
 

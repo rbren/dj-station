@@ -3321,10 +3321,10 @@ body {
   text-decoration: line-through;
 }
 
-/* Stopping minutes of work: available, but not competing with Separate. */
-.clip-stem-cancel {
-  border-color: #6b3b3b;
-  color: #e0a3a3;
+/* Stems on their way: a wait, not a warning. */
+.clip-stem-loading {
+  color: #c8b07d;
+  font-size: 0.85rem;
 }
 
 .clip-stem-hint {

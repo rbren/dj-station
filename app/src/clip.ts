@@ -102,25 +102,38 @@ export interface ClipStemBackend {
   stems: string[];
 }
 
-/** Separation state of one track under the configured backend. */
+/** Where a track's stems stand. Nothing here asks for a separation: the
+ *  shell separates every downloaded track on its own (history included),
+ *  so the page reports progress rather than offering a button. */
+export type StemState = 'ready' | 'loading' | 'failed' | 'unavailable';
+
 export interface ClipStemStatus {
   track_id: number;
   backend: string;
-  cached: boolean;
-  running: boolean;
+  state: StemState;
+  /** What the separation is doing, while it is this track's turn. */
+  stage: string | null;
+  /** Why there will be no stems (missing tooling, repeated failure). */
+  detail: string | null;
+  /** Tracks still waiting for stems, this one included. */
+  pending: number;
 }
 
-export type StemJobState = 'running' | 'done' | 'failed' | 'cancelled';
-
-/** One separation in flight (or recently finished). */
-export interface StemJob {
-  id: number;
-  track_id: number;
-  backend: string;
-  title: string;
-  state: StemJobState;
-  stage: string;
-  error: string | null;
+/** What to tell someone whose stems are not ready yet.
+ *
+ *  Every one of these is a wait or a reason, never an instruction: there
+ *  is no button to press, because separation happens on its own. */
+export function stemWait(status: ClipStemStatus | null, backend: ClipStemBackend | null): string {
+  if (status?.state === 'ready') return 'Stems are ready';
+  if (status && (status.state === 'failed' || status.state === 'unavailable')) {
+    return status.detail ?? 'These stems are unavailable';
+  }
+  if (backend?.available === false) {
+    return backend.detail ?? 'Stem separation is unavailable';
+  }
+  const stage = status?.stage ? ` (${status.stage})` : '';
+  const queued = status && status.pending > 1 ? ` · ${status.pending} tracks queued` : '';
+  return `Stems are loading${stage}${queued} — separation runs in the background`;
 }
 
 /** Label for a source lane: "Title", "Title — vocals" or, once more than
@@ -576,14 +589,9 @@ export interface ClipClientApi {
   save(request: ClipRequest, title: string): Promise<Track | null>;
   /** Which separation backend is configured, and is it installed? */
   stemBackend(): Promise<ClipStemBackend | null>;
-  /** Are this track's stems already separated? */
+  /** Where this track's stems stand — asking also puts it at the front
+   *  of the separation queue. */
   stemStatus(trackId: number): Promise<ClipStemStatus | null>;
-  /** Start separating in the background; returns the job id. */
-  stemSeparate(trackId: number): Promise<number | null>;
-  /** Abandon the separation running for a track, killing the work. */
-  stemCancel(trackId: number): Promise<boolean | null>;
-  /** Poll separation progress. */
-  stemJobs(): Promise<StemJob[] | null>;
 }
 
 export class ClipClient extends IpcClient implements ClipClientApi {
@@ -604,15 +612,6 @@ export class ClipClient extends IpcClient implements ClipClientApi {
   }
   stemStatus(trackId: number) {
     return this.call<ClipStemStatus>('clip_stem_status', { trackId });
-  }
-  stemSeparate(trackId: number) {
-    return this.call<number>('clip_stem_separate', { trackId });
-  }
-  stemCancel(trackId: number) {
-    return this.call<boolean>('clip_stem_cancel', { trackId });
-  }
-  stemJobs() {
-    return this.call<StemJob[]>('clip_stem_jobs', {});
   }
 }
 

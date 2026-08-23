@@ -10,14 +10,14 @@
 //! Every command is `async` so the (multi-second) decode/render runs on
 //! Tauri's worker pool instead of blocking the UI thread.
 //!
-//! Sources are [`ClipSourceRef`]s — a library track, or one **isolated
-//! stem** of it. Stems come from the cache that
-//! [`StemJobs`](dj_analysis::StemJobs) fills on its own threads
-//! (`htdemucs_ft` runs for minutes); the clip commands only ever *read*
-//! separated FLACs, so nothing here blocks on a model.
+//! Sources are [`ClipSourceRef`]s — a library track, or a chosen set of
+//! its **stems**. Stems come from the cache that the auto-stem service
+//! ([`AutoStemService`](dj_analysis::AutoStemService)) fills on its own
+//! thread; the clip commands only ever *read* separated FLACs, so nothing
+//! here blocks on a model — and nothing here starts one either.
 
 use dj_analysis::clip::{self, ClipProgram};
-use dj_analysis::AudioData;
+use dj_analysis::{AudioData, TrackStems};
 use dj_library::{ImportOptions, ImportOutcome, Track};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -240,71 +240,65 @@ pub struct ClipStemBackend {
     stems: Vec<String>,
 }
 
-/// Separation state for one track under the configured backend.
+/// Where one track's stems stand. Nobody asks for a separation any more:
+/// the service does every download on its own, so all the UI can do is
+/// say whether they are here yet — and, when they are never coming, why.
 #[derive(Debug, Serialize)]
 pub struct ClipStemStatus {
     track_id: i64,
     backend: String,
-    /// Stems are on disk and can be loaded as sources right now.
-    cached: bool,
-    /// A separation for this track is running.
-    running: bool,
+    /// `ready` | `loading` | `failed` | `unavailable`.
+    state: &'static str,
+    /// What the separation is doing, while it is this track's turn.
+    stage: Option<String>,
+    /// Why there will be no stems (missing tooling, repeated failure,
+    /// automatic separation switched off).
+    detail: Option<String>,
+    /// Tracks still waiting for stems, this one included.
+    pending: usize,
 }
 
-/// Is the stem backend usable on this machine? Probing spawns the tool, so
-/// this is `async` (off the UI thread) like every other clip command.
+/// What the stem backend is, and whether it can run here.
+///
+/// The answer comes from the auto-stem service's own probe rather than a
+/// fresh one: probing spawns the tool, and the page asks every time it
+/// mounts.
 #[tauri::command(async)]
 pub fn clip_stem_backend(state: State<AppState>) -> ClipStemBackend {
-    let detail = state.stem_separator.probe().err().map(|e| format!("{e:#}"));
+    let status = state.auto_stems.status();
     ClipStemBackend {
-        backend: state.stems.backend().to_string(),
-        available: detail.is_none(),
-        detail,
+        backend: status.backend,
+        available: status.detail.is_none(),
+        detail: status.detail,
         stems: dj_analysis::STEM_NAMES.iter().map(|s| s.to_string()).collect(),
     }
 }
 
-/// Whether `track_id` already has stems for the configured backend.
+/// Where `track_id`'s stems stand — and, in passing, a note that somebody
+/// is waiting on them.
+///
+/// Asking IS the request: the backfill works through a whole library, and
+/// a track the editor has open should not wait behind a hundred others.
+/// There is no separate "separate this track" command to press, forget or
+/// call twice.
 #[tauri::command(async)]
 pub fn clip_stem_status(state: State<AppState>, track_id: i64) -> ClipStemStatus {
+    state.auto_stems.want(track_id);
+    let (stem_state, stage, detail) = match state.auto_stems.track_stems(track_id) {
+        TrackStems::Ready => ("ready", None, None),
+        TrackStems::Loading { stage } => ("loading", stage, None),
+        TrackStems::Failed { detail } => ("failed", None, Some(detail)),
+        TrackStems::Unavailable { detail } => ("unavailable", None, Some(detail)),
+    };
+    let service = state.auto_stems.status();
     ClipStemStatus {
         track_id,
-        backend: state.stems.backend().to_string(),
-        cached: state.stems.cached(track_id),
-        running: state
-            .stems
-            .jobs()
-            .iter()
-            .any(|j| j.track_id == track_id && j.is_running()),
+        backend: service.backend,
+        state: stem_state,
+        stage,
+        detail,
+        pending: service.pending,
     }
-}
-
-/// Start separating `track_id` in the background, returning the job id.
-/// Returns immediately: `htdemucs_ft` runs for minutes, so the UI polls
-/// `clip_stem_jobs` instead of waiting. A cached track finishes instantly.
-#[tauri::command(async)]
-pub fn clip_stem_separate(state: State<AppState>, track_id: i64) -> CmdResult<u64> {
-    // Fail loudly here rather than spawning a job that cannot succeed.
-    state
-        .stem_separator
-        .probe()
-        .map_err(|e| CmdError::invalid(format!("{e:#}")))?;
-    state.library.track(track_id).map_err(err)?;
-    Ok(state.stems.start(track_id))
-}
-
-/// Abandon the separation running for `track_id`, killing the work in
-/// flight. Returns whether there was one. Nothing is cached, so the
-/// track can simply be separated again.
-#[tauri::command(async)]
-pub fn clip_stem_cancel(state: State<AppState>, track_id: i64) -> bool {
-    state.stems.cancel_track(track_id)
-}
-
-/// Snapshot of separation jobs (the Clip page polls this for progress).
-#[tauri::command(async)]
-pub fn clip_stem_jobs(state: State<AppState>) -> Vec<dj_analysis::StemJob> {
-    state.stems.jobs()
 }
 
 /// Render the edit and return its waveform overview (no file is written).

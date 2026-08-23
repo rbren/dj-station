@@ -46,6 +46,14 @@ pub trait StemSeparator: Send + Sync {
     fn id(&self) -> &str;
     fn separate(&self, audio: &AudioData) -> Result<Stems>;
 
+    /// Can this backend actually run here? In-process separators always
+    /// can; one that shells out to a tool reports a missing install as an
+    /// `Err` carrying a user-facing hint, so callers can say so instead
+    /// of starting work that cannot finish.
+    fn probe(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Separate, giving up early if `cancel` fires.
     ///
     /// The default ignores the token, which is right for the in-process
@@ -419,9 +427,18 @@ pub fn stem_paths(dir: &Path) -> [PathBuf; N_STEMS] {
     std::array::from_fn(|i| dir.join(format!("{}.flac", STEM_NAMES[i])))
 }
 
-/// True when all four stems are cached.
+/// True when all four stems are cached AND none of them is empty.
+///
+/// Both halves matter, because both are what an interrupted separation
+/// leaves behind. Missing files are the obvious case (a quit between
+/// stems). Empty ones are the nastier case: `write_stems` renames each
+/// stem into place, and a rename that outlived its data through a power
+/// cut leaves a 0-byte file that a presence check would trust forever.
+/// Either way the answer is no, and the track is separated again.
 pub fn stems_cached(dir: &Path) -> bool {
-    stem_paths(dir).iter().all(|p| p.is_file())
+    stem_paths(dir)
+        .iter()
+        .all(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.len() > 0))
 }
 
 /// Compute-if-missing stem cache: returns `true` if stems were computed,

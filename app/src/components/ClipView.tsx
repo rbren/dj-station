@@ -49,12 +49,14 @@ import {
   sourceRef,
   stemLabel,
   stemSet,
+  stemWait,
   trimTo,
   type ClipClientApi,
   type ClipProgram,
   type ClipRender,
   type ClipSource,
   type ClipStemBackend,
+  type ClipStemStatus,
   SILENCE_DB,
   STEM_NAMES,
 } from '../clip';
@@ -85,8 +87,9 @@ const HISTORY_DEPTH = 49;
 const MIN_VIEW_SECS = 0.05;
 /** Grab radius for the selection's edge handles, in waveform pixels. */
 const HANDLE_PX = 7;
-/** How often separation jobs are polled while one is running. */
-const STEM_POLL_MS = 700;
+/** How often the picked track's stems are asked after. Separation is
+ *  minutes long, so this is about noticing, not about progress. */
+const STEM_POLL_MS = 2000;
 /** Playhead refresh while a Web Audio loop runs (it has no timeupdate). */
 const LOOP_TICK_MS = 50;
 
@@ -124,6 +127,8 @@ export interface ClipViewProps {
   /** False while another page is showing: shortcuts detach, playback
    *  pauses, and the section hides (but stays mounted, keeping the edit). */
   active?: boolean;
+  /** How often to ask after the picked track's stems (tests shorten it). */
+  stemPollMs?: number;
   /** Called after a clip is imported, so the library list can refresh. */
   onSaved?: (track: Track) => void;
   /** Handle for the Library page's Edit button (see ClipViewHandle). */
@@ -137,7 +142,14 @@ export interface ClipViewHandle {
   open: (trackId: number) => void;
 }
 
-export function ClipView({ clip, library, active = true, onSaved, ref }: ClipViewProps) {
+export function ClipView({
+  clip,
+  library,
+  active = true,
+  stemPollMs = STEM_POLL_MS,
+  onSaved,
+  ref,
+}: ClipViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [pick, setPick] = useState<number | null>(null);
   const [sources, setSources] = useState<ClipSource[]>([]);
@@ -167,10 +179,8 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
   });
   /** The configured separation backend, or null until probed. */
   const [backend, setBackend] = useState<ClipStemBackend | null>(null);
-  /** Tracks whose stems are already separated (backend-qualified cache). */
-  const [separated, setSeparated] = useState<Record<number, boolean>>({});
-  /** Separation running for this track id, with its stage for the UI. */
-  const [separating, setSeparating] = useState<{ trackId: number; stage: string } | null>(null);
+  /** Where each track's stems stand, as last polled. */
+  const [stemStatus, setStemStatus] = useState<Record<number, ClipStemStatus>>({});
 
   const duration = programDuration(program);
   const spans = useMemo(() => regionSpans(program), [program]);
@@ -434,11 +444,13 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
     [clip, pick, sources, stemsOn],
   );
 
-  // --- stems: isolate a stem of the picked track on demand ----------------
+  // --- stems: automatic, so the page watches rather than asks ------------
   //
-  // Separation is minutes of CPU work in the shell's job manager; the page
-  // only ever kicks it off and polls. Missing tooling is a normal state:
-  // the controls explain it instead of failing.
+  // Every downloaded track is separated in the background (history
+  // included), which is minutes of CPU each. There is nothing to press:
+  // the page polls where the picked track stands and unlocks the mixer
+  // when its stems land. Asking also puts that track at the front of the
+  // queue, so an editor is never stuck behind a whole backfill.
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -450,83 +462,32 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
     };
   }, [clip]);
 
-  const refreshStemStatus = useCallback(
-    async (trackId: number) => {
-      const status = await clip.stemStatus(trackId);
-      if (!status) return;
-      setSeparated((m) => ({ ...m, [trackId]: status.cached }));
-      setSeparating((cur) => {
-        if (status.running) return { trackId, stage: 'separating' };
-        return cur?.trackId === trackId ? null : cur;
-      });
-    },
-    [clip],
-  );
+  const picked = pick === null ? null : (stemStatus[pick] ?? null);
+  /** Worth asking again? Only while stems might still turn up: a failed
+   *  or unavailable track is a settled answer, not a wait. */
+  const stemsPending = pick !== null && (picked === null || picked.state === 'loading');
 
   useEffect(() => {
-    if (pick === null) return;
-    void (async () => {
-      await refreshStemStatus(pick);
-    })();
-  }, [pick, refreshStemStatus]);
-
-  const separateStems = useCallback(async () => {
-    if (pick === null) return;
-    setError(null);
-    const id = await clip.stemSeparate(pick);
-    if (id === null) {
-      // The command rejected it (tooling missing) — the client surfaced
-      // the reason; re-probe so the panel reflects reality.
-      const info = await clip.stemBackend();
-      setBackend(info);
-      setError(info?.detail ?? 'Stem separation is unavailable');
-      return;
-    }
-    setSeparating({ trackId: pick, stage: 'queued' });
-    setStatus(`Separating stems with ${backend?.backend ?? 'the stem model'} — this takes a while`);
-  }, [backend, clip, pick]);
-
-  // Cancelling only fires the signal; the poll above sees the job finish
-  // and clears the panel, so the button stays honest about work that
-  // takes a moment to actually stop.
-  const cancelStems = useCallback(async () => {
-    if (!separating) return;
-    setStatus('Stopping the separation…');
-    await clip.stemCancel(separating.trackId);
-  }, [clip, separating]);
-
-  // Poll while a separation runs; stop as soon as none is in flight.
-  useEffect(() => {
-    if (!separating) return;
-    const trackId = separating.trackId;
-    const timer = setInterval(() => {
-      void (async () => {
-        const jobs = await clip.stemJobs();
-        const job = jobs?.filter((j) => j.track_id === trackId).pop();
-        if (!job) return;
-        if (job.state === 'running') {
-          // Keep the same object when the stage is unchanged, so this
-          // effect (and its interval) is not torn down every poll.
-          setSeparating((cur) =>
-            cur && cur.trackId === trackId && cur.stage === job.stage
-              ? cur
-              : { trackId, stage: job.stage },
-          );
-          return;
-        }
-        setSeparating(null);
-        if (job.state === 'failed') {
-          setError(job.error ?? 'Stem separation failed');
-        } else if (job.state === 'cancelled') {
-          setStatus(`Stopped separating "${job.title}"`);
-        } else {
-          setSeparated((m) => ({ ...m, [trackId]: true }));
-          setStatus(`Stems ready for "${job.title}"`);
-        }
-      })();
-    }, STEM_POLL_MS);
-    return () => clearInterval(timer);
-  }, [clip, separating]);
+    if (pick === null || !stemsPending || !active) return;
+    let live = true;
+    const poll = async () => {
+      const status = await clip.stemStatus(pick);
+      if (!live || !status) return;
+      setStemStatus((m) =>
+        m[pick]?.state === status.state &&
+        m[pick]?.stage === status.stage &&
+        m[pick]?.pending === status.pending
+          ? m
+          : { ...m, [pick]: status },
+      );
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), stemPollMs);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [active, clip, pick, stemPollMs, stemsPending]);
 
   // --- selection: sweep on empty space, slide inside the selection -------
   const waveRef = useRef<SVGSVGElement | null>(null);
@@ -827,7 +788,7 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
   // alone, so zooming and scrolling move them with the audio.
   const ticks = useMemo(() => rulerTicks(vpStart, vpEnd), [vpStart, vpEnd]);
   /** Can the picked track be loaded stem by stem right now? */
-  const stemsReady = pick !== null && separated[pick] === true;
+  const stemsReady = picked?.state === 'ready';
   const xOf = (secs: number) => (vpLen > 0 ? ((secs - vpStart) / vpLen) * W : 0);
   const disabled = program.regions.length === 0;
   const noSelection = disabled || sel === null;
@@ -907,7 +868,7 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
                 title={
                   stemsReady
                     ? `${on ? 'Drop' : 'Bring back'} the ${name}`
-                    : 'Separate this track first to mix its stems'
+                    : stemWait(picked, backend)
                 }
                 onClick={() => void toggleStem(name)}
               >
@@ -918,35 +879,21 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
         </div>
         {stemsReady ? (
           <span className="clip-stem-ready" data-testid="clip-stem-ready">
-            stems ready ({backend?.backend})
+            stems ready ({picked?.backend ?? backend?.backend})
+          </span>
+        ) : picked?.state === 'loading' ? (
+          <span className="clip-stem-loading" data-testid="clip-stem-loading">
+            Stems are loading…{picked.stage ? ` (${picked.stage})` : ''}
+            {picked.pending > 1 ? ` · ${picked.pending} tracks queued` : ''}
           </span>
         ) : (
-          <button
-            data-testid="clip-stem-separate"
-            disabled={pick === null || separating !== null || backend?.available === false}
-            title={
-              backend?.available === false
-                ? (backend.detail ?? 'Stem separation is unavailable')
-                : `Separate this track into ${(backend?.stems ?? STEM_NAMES).join(', ')} with ${
-                    backend?.backend ?? 'the stem model'
-                  }`
-            }
-            onClick={() => void separateStems()}
-          >
-            {separating ? `Separating… (${separating.stage})` : 'Separate stems'}
-          </button>
+          pick !== null && (
+            <span className="clip-stem-hint" data-testid="clip-stem-hint">
+              {stemWait(picked, backend)}
+            </span>
+          )
         )}
-        {separating && (
-          <button
-            className="clip-stem-cancel"
-            data-testid="clip-stem-cancel"
-            title="Stop the separation — nothing is kept, and it can be run again"
-            onClick={() => void cancelStems()}
-          >
-            Cancel
-          </button>
-        )}
-        {backend?.available === false && (
+        {pick === null && backend?.available === false && (
           <span className="clip-stem-hint" data-testid="clip-stem-hint">
             {backend.detail ?? 'Stem separation is unavailable'}
           </span>

@@ -91,21 +91,6 @@ impl DemucsSeparator {
         &self.bin
     }
 
-    /// Is the tooling actually installed? Runs `demucs --help`, which is
-    /// cheap and needs no weights (the model itself is downloaded lazily
-    /// on first separation). `Err` carries a user-facing install hint.
-    pub fn probe(&self) -> Result<()> {
-        let out = Command::new(&self.bin)
-            .arg("--help")
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| self.spawn_error(e))?;
-        if !out.status.success() {
-            bail!("{}", tool_failure(&self.bin, &out.stderr, out.status));
-        }
-        Ok(())
-    }
-
     fn spawn_error(&self, e: std::io::Error) -> anyhow::Error {
         if e.kind() == std::io::ErrorKind::NotFound {
             anyhow!(
@@ -276,6 +261,21 @@ impl StemSeparator for DemucsSeparator {
 
     fn separate(&self, audio: &AudioData) -> Result<Stems> {
         self.separate_cancellable(audio, &CancelToken::new())
+    }
+
+    /// Runs `demucs --help`, which is cheap and needs no weights (the
+    /// model downloads itself lazily on the first separation). `Err`
+    /// carries a user-facing install hint.
+    fn probe(&self) -> Result<()> {
+        let out = Command::new(&self.bin)
+            .arg("--help")
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| self.spawn_error(e))?;
+        if !out.status.success() {
+            bail!("{}", tool_failure(&self.bin, &out.stderr, out.status));
+        }
+        Ok(())
     }
 
     fn separate_cancellable(&self, audio: &AudioData, cancel: &CancelToken) -> Result<Stems> {

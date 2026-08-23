@@ -350,7 +350,8 @@ fn fake_demucs(dir: &std::path::Path, stem_secs: f64) -> (std::path::PathBuf, st
             r#"#!/bin/sh
 if [ "$1" = "--help" ]; then echo "usage: demucs"; exit 0; fi
 # printf, not echo: the argv starts with `-n`, which echo would eat.
-printf '%s\n' "$*" > '{argv}'
+# Appended, so the log doubles as a count of model runs.
+printf '%s\n' "$*" >> '{argv}'
 out=""; model=""; prev=""
 for arg in "$@"; do
   case "$prev" in
@@ -738,4 +739,372 @@ fn alive(pid: i32) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
+// Automatic stem separation (the background service)
+// ---------------------------------------------------------------------------
+
+/// How many times the fake model was actually run.
+#[cfg(unix)]
+fn model_runs(argv_log: &std::path::Path) -> usize {
+    std::fs::read_to_string(argv_log)
+        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
+        .unwrap_or(0)
+}
+
+#[cfg(unix)]
+fn wait_until(what: &str, secs: u64, mut done: impl FnMut() -> bool) {
+    let t0 = std::time::Instant::now();
+    while !done() {
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(secs),
+            "{what} never happened"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// A library holding one track per `sources` entry, imported under that
+/// source name (as a provider download would be).
+#[cfg(unix)]
+fn library_of(
+    dir: &std::path::Path,
+    sources: &[&str],
+) -> (
+    std::sync::Arc<dj_library::Library>,
+    Vec<dj_library::db::Track>,
+) {
+    use dj_library::{ImportOptions, Library};
+    let library = std::sync::Arc::new(Library::open(dir).unwrap());
+    let tracks = sources
+        .iter()
+        .enumerate()
+        .map(|(i, source)| {
+            let wav = dir.join(format!("track{i}.wav"));
+            // A different tone per track: same content would dedupe to one
+            // library row (and one stem cache entry).
+            write_wav(&wav, &tone(220.0 + 30.0 * i as f64, 1.0, 44_100));
+            library
+                .import_file(
+                    &wav,
+                    ImportOptions {
+                        source: (*source).into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+                .track()
+                .clone()
+        })
+        .collect();
+    (library, tracks)
+}
+
+#[cfg(unix)]
+fn auto_settings(scope: dj_analysis::AutoStemScope) -> dj_analysis::AutoStemSettings {
+    dj_analysis::AutoStemSettings {
+        scope,
+        poll_interval: std::time::Duration::from_millis(50),
+        probe_interval: std::time::Duration::from_millis(50),
+        max_attempts: 2,
+    }
+}
+
+#[cfg(unix)]
+fn demucs_jobs(
+    library: std::sync::Arc<dj_library::Library>,
+    script: &std::path::Path,
+) -> std::sync::Arc<dj_analysis::StemJobs> {
+    std::sync::Arc::new(dj_analysis::StemJobs::new(
+        library,
+        std::sync::Arc::new(DemucsSeparator::with_bin(
+            &script.to_string_lossy(),
+            DEFAULT_MODEL,
+        )),
+    ))
+}
+
+/// The headline: downloads get separated with nobody asking, including
+/// the ones that were downloaded long before the service existed.
+#[cfg(unix)]
+#[test]
+fn downloaded_tracks_are_separated_without_anyone_asking() {
+    use dj_analysis::{AutoStemScope, AutoStemService, TrackStems};
+
+    let tmp = tempfile::tempdir().unwrap();
+    // Two YouTube downloads already sitting in the library, plus a local
+    // file: this is the backfill case — history, not new arrivals.
+    let (library, tracks) = library_of(tmp.path(), &["youtube", "youtube", "local"]);
+    let work = tempfile::tempdir().unwrap();
+    let (script, argv_log) = fake_demucs(work.path(), 1.0);
+    let jobs = demucs_jobs(library.clone(), &script);
+
+    // Before the service runs, the editor is told to wait, not to press
+    // a button.
+    let service = AutoStemService::start(
+        library.clone(),
+        jobs.clone(),
+        auto_settings(AutoStemScope::Downloads),
+    );
+    assert!(
+        matches!(
+            service.track_stems(tracks[0].id),
+            TrackStems::Ready | TrackStems::Loading { .. }
+        ),
+        "a download should be on its way to having stems"
+    );
+
+    wait_until("both downloads separated", 60, || {
+        jobs.cached(tracks[0].id) && jobs.cached(tracks[1].id)
+    });
+    assert_eq!(service.track_stems(tracks[0].id), TrackStems::Ready);
+    assert_eq!(service.track_stems(tracks[1].id), TrackStems::Ready);
+    assert_eq!(model_runs(&argv_log), 2, "one model run per track, no more");
+
+    // Scoped to downloads, the local file is left alone — and says so,
+    // rather than claiming stems are coming.
+    assert!(
+        !jobs.cached(tracks[2].id),
+        "local track was separated anyway"
+    );
+    assert!(
+        matches!(
+            service.track_stems(tracks[2].id),
+            TrackStems::Unavailable { .. }
+        ),
+        "a track nothing will separate must not read as loading"
+    );
+
+    // The service settles instead of spinning: the queue empties.
+    wait_until("the queue to drain", 10, || service.status().pending == 0);
+}
+
+/// Stems are the expensive thing here, so they must survive the app
+/// quitting: a second run reuses what the first one wrote.
+#[cfg(unix)]
+#[test]
+fn stems_written_by_one_run_are_reused_by_the_next() {
+    use dj_analysis::{AutoStemScope, AutoStemService, TrackStems};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let (library, tracks) = library_of(tmp.path(), &["youtube"]);
+    let work = tempfile::tempdir().unwrap();
+    let (script, argv_log) = fake_demucs(work.path(), 1.0);
+
+    {
+        let jobs = demucs_jobs(library.clone(), &script);
+        let _service = AutoStemService::start(
+            library.clone(),
+            jobs.clone(),
+            auto_settings(AutoStemScope::All),
+        );
+        wait_until("the first run to separate", 60, || {
+            jobs.cached(tracks[0].id)
+        });
+    } // dropping the service stops it, as quitting the app would
+
+    assert_eq!(model_runs(&argv_log), 1);
+    let stem_dir = stems_dir_for(library.data_dir(), &tracks[0].content_hash, DEFAULT_MODEL);
+    let written: Vec<std::time::SystemTime> = stem_paths(&stem_dir)
+        .iter()
+        .map(|p| std::fs::metadata(p).unwrap().modified().unwrap())
+        .collect();
+
+    // A fresh instance over the same data dir: same library, same cache.
+    let library2 = std::sync::Arc::new(dj_library::Library::open(tmp.path()).unwrap());
+    let jobs2 = demucs_jobs(library2.clone(), &script);
+    let service2 =
+        AutoStemService::start(library2, jobs2.clone(), auto_settings(AutoStemScope::All));
+    assert_eq!(service2.track_stems(tracks[0].id), TrackStems::Ready);
+    wait_until("the second run to settle", 10, || {
+        service2.status().pending == 0
+    });
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    assert_eq!(
+        model_runs(&argv_log),
+        1,
+        "the second run separated a track that was already done"
+    );
+    let after: Vec<std::time::SystemTime> = stem_paths(&stem_dir)
+        .iter()
+        .map(|p| std::fs::metadata(p).unwrap().modified().unwrap())
+        .collect();
+    assert_eq!(written, after, "cached stems were rewritten");
+}
+
+/// A separation interrupted part-way is NOT a cache hit — neither the
+/// obvious case (files missing) nor the nasty one (a file that survived
+/// as zero bytes, which a presence check would trust forever).
+#[test]
+fn a_half_written_stem_cache_is_redone_rather_than_trusted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (audio, _) = fixture(1.0);
+
+    // Quit between stems: two of the four ever made it to disk.
+    let missing = tmp.path().join("stems").join("interrupted");
+    std::fs::create_dir_all(&missing).unwrap();
+    let paths = stem_paths(&missing);
+    std::fs::write(&paths[0], b"a stem that finished writing").unwrap();
+    std::fs::write(&paths[1], b"and another").unwrap();
+    assert!(!stems_cached(&missing), "two of four is not a cache");
+    assert!(ensure_stems(&missing, &audio, &BandSeparator).unwrap());
+    assert!(stems_cached(&missing));
+
+    // Power cut after the rename, before the data: the file is there and
+    // empty. This is the one a presence check gets wrong.
+    let hollow = tmp.path().join("stems").join("hollowed-out");
+    std::fs::create_dir_all(&hollow).unwrap();
+    let paths = stem_paths(&hollow);
+    let Stems(stems) = BandSeparator.separate(&audio).unwrap();
+    dj_analysis::stems::write_stems(&hollow, &Stems(stems)).unwrap();
+    assert!(stems_cached(&hollow), "a real separation is a cache hit");
+    std::fs::write(&paths[2], b"").unwrap();
+    assert!(
+        !stems_cached(&hollow),
+        "an empty stem file must not count as cached"
+    );
+
+    assert!(
+        ensure_stems(&hollow, &audio, &BandSeparator).unwrap(),
+        "the hollowed-out cache should be separated again"
+    );
+    assert!(stems_cached(&hollow));
+    for path in &paths {
+        let len = std::fs::metadata(path).unwrap().len();
+        assert!(
+            len > 100,
+            "{} is still a stub ({len} bytes)",
+            path.display()
+        );
+    }
+    // And what came back is really audio, not a leftover stub.
+    let decoded = dj_analysis::decode_audio(&paths[2]).expect("the bass stem must decode");
+    assert_eq!(decoded.sample_rate, audio.sample_rate);
+}
+
+/// Ordering: somebody waiting on a track beats the backfill, and the
+/// backfill does downloads before local files (newest first within each).
+#[test]
+fn the_queue_serves_whoever_is_waiting_before_the_backfill() {
+    use dj_analysis::auto_stems::{next_in_line, Candidate};
+    use dj_analysis::AutoStemScope;
+
+    let track = |id: i64, source: &str| Candidate {
+        track_id: id,
+        source: source.into(),
+    };
+    // Newest first, as the library hands them over.
+    let tracks = vec![
+        track(5, "local"),
+        track(4, "youtube"),
+        track(3, "youtube"),
+        track(2, "watch"),
+    ];
+    let all = |_: i64| true;
+
+    let (pick, pending) = next_in_line(&[], &tracks, AutoStemScope::All, all);
+    assert_eq!(
+        pick,
+        Some(4),
+        "the newest download comes before local files"
+    );
+    assert_eq!(pending, 4);
+
+    let (pick, pending) = next_in_line(&[], &tracks, AutoStemScope::Downloads, all);
+    assert_eq!(pick, Some(4));
+    assert_eq!(pending, 2, "only downloads are in scope");
+
+    // The editor opened track 5: it goes first, whatever the backfill
+    // would have chosen.
+    let (pick, _) = next_in_line(&[5], &tracks, AutoStemScope::All, all);
+    assert_eq!(pick, Some(5));
+
+    // ...unless it no longer needs stems, in which case the backfill
+    // carries on rather than stalling.
+    let (pick, _) = next_in_line(&[5], &tracks, AutoStemScope::All, |id| id != 5);
+    assert_eq!(pick, Some(4));
+
+    // Nothing left to do.
+    let (pick, pending) = next_in_line(&[], &tracks, AutoStemScope::All, |_| false);
+    assert_eq!(pick, None);
+    assert_eq!(pending, 0);
+}
+
+/// Missing tooling is a reported state: the service says why instead of
+/// leaving the editor waiting on stems that will never arrive.
+#[cfg(unix)]
+#[test]
+fn missing_tooling_is_reported_instead_of_a_forever_wait() {
+    use dj_analysis::{AutoStemScope, AutoStemService, TrackStems};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let (library, tracks) = library_of(tmp.path(), &["youtube"]);
+    let jobs = std::sync::Arc::new(dj_analysis::StemJobs::new(
+        library.clone(),
+        std::sync::Arc::new(DemucsSeparator::with_bin(
+            "definitely-not-installed-demucs",
+            DEFAULT_MODEL,
+        )),
+    ));
+    let service = AutoStemService::start(library, jobs.clone(), auto_settings(AutoStemScope::All));
+
+    wait_until("the missing tool to be noticed", 30, || {
+        matches!(
+            service.track_stems(tracks[0].id),
+            TrackStems::Unavailable { .. }
+        )
+    });
+    let TrackStems::Unavailable { detail } = service.track_stems(tracks[0].id) else {
+        unreachable!("just checked");
+    };
+    assert!(detail.contains("install demucs"), "unhelpful: {detail}");
+    let status = service.status();
+    assert!(status.enabled && !status.available);
+    assert!(!jobs.cached(tracks[0].id));
+}
+
+/// A track that cannot be separated is retried a few times and then left
+/// alone, rather than spinning the loop forever.
+#[cfg(unix)]
+#[test]
+fn a_track_that_keeps_failing_is_given_up_on() {
+    use dj_analysis::{AutoStemScope, AutoStemService, TrackStems};
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let (library, tracks) = library_of(tmp.path(), &["youtube"]);
+    let work = tempfile::tempdir().unwrap();
+    let script = work.path().join("broken-demucs");
+    let runs = work.path().join("runs.txt");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = "--help" ]; then echo "usage: demucs"; exit 0; fi
+echo run >> '{runs}'
+echo "torch.cuda.OutOfMemoryError" >&2
+exit 1
+"#,
+            runs = runs.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let jobs = demucs_jobs(library.clone(), &script);
+    let service = AutoStemService::start(library, jobs, auto_settings(AutoStemScope::All));
+
+    wait_until("the track to be given up on", 60, || {
+        matches!(service.track_stems(tracks[0].id), TrackStems::Failed { .. })
+    });
+    let TrackStems::Failed { detail } = service.track_stems(tracks[0].id) else {
+        unreachable!("just checked");
+    };
+    assert!(detail.contains("OutOfMemory"), "lost the reason: {detail}");
+
+    // max_attempts is 2 here: it stops there rather than hammering.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    assert_eq!(model_runs(&runs), 2, "retried past max_attempts");
 }
