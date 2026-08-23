@@ -360,9 +360,13 @@ describe('LibraryView', () => {
         expect.objectContaining({ provider: 'freesound', id: '123456' }),
       ),
     );
+    // No green banner — the finished job lands in the Recent downloads
+    // panel instead.
     await waitFor(() =>
-      expect(screen.getByTestId('library-status').textContent).toContain('amen break 174bpm'),
+      expect(screen.getByTestId('download-job-state').textContent).toBe('in library'),
     );
+    expect(screen.getByTestId('download-job').textContent).toContain('amen break 174bpm');
+    expect(screen.queryByTestId('library-status')).toBeNull();
     // Local list re-queried once the job finished.
     expect(client.tracks).toHaveBeenCalledTimes(2);
   });
@@ -422,6 +426,9 @@ describe('LibraryView', () => {
     const client = mockClient();
     render(<LibraryView client={client} />);
     await waitFor(() => expect(screen.getByTestId('download-queue')).toBeTruthy());
+    expect(screen.getByTestId('download-queue').querySelector('h2')?.textContent).toBe(
+      'Recent downloads',
+    );
     const row = screen.getByTestId('download-job');
     expect(row.textContent).toContain('amen break 174bpm');
     expect(screen.getByTestId('download-job-state').textContent).toBe('in library');

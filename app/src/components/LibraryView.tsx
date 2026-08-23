@@ -183,7 +183,8 @@ export function LibraryView({ client }: LibraryViewProps) {
   }, [active, client, filters, query, refreshTracks]);
 
   // Download jobs live in the backend; a poll reports progress and
-  // announces each job's outcome exactly once.
+  // announces each failure exactly once. Successes need no banner — the
+  // Recent downloads panel already shows them.
   const announced = useRef<Set<number>>(new Set());
   const pollJobs = useCallback(async (): Promise<boolean> => {
     const list = await client.downloadJobs();
@@ -194,9 +195,7 @@ export function LibraryView({ client }: LibraryViewProps) {
       if (job.state === 'running' || announced.current.has(job.id)) continue;
       announced.current.add(job.id);
       finished = true;
-      if (job.state === 'done') {
-        setStatus(`Downloaded "${job.title}" into the library`);
-      } else {
+      if (job.state === 'failed') {
         setStatus(null);
         setError(`${job.title}: ${job.error ?? 'download failed'}`);
       }
@@ -239,7 +238,6 @@ export function LibraryView({ client }: LibraryViewProps) {
   const download = useCallback(
     async (r: TrackResult) => {
       setError(null);
-      setStatus(`Downloading "${r.title}"…`);
       await client.startDownload(r);
       setWatching(await pollJobs());
     },
@@ -349,7 +347,7 @@ export function LibraryView({ client }: LibraryViewProps) {
 
       {jobs.length > 0 && (
         <div className="download-queue" data-testid="download-queue">
-          <h2>Downloads</h2>
+          <h2>Recent downloads</h2>
           <ul>
             {[...jobs].reverse().map((job) => (
               <DownloadRow key={job.id} job={job} />
