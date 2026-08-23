@@ -433,6 +433,17 @@ fails if it's missing.
   click (gesture flag cleared by a fresh button-0 mousedown — see
   PickerEntry in ModulePicker.tsx; its "macro management" tests pin
   the full right-click event stream).
+- Portaled menus (the input right-click `KnobConfigMenu`, rendered into
+  `document.body` so panels can't clip it) still bubble their events up
+  the REACT tree — through the module panel to the `.rack-area` handlers.
+  Those must ignore anything that didn't land in their own DOM subtree
+  (`e.currentTarget.contains(e.target)` in App.tsx's rack mousedown;
+  ModulePanel's press-to-select uses an interactive-target /
+  `.knob-config-menu` guard for the same reason): the marquee's
+  `preventDefault()` otherwise cancels the mousedown's default action,
+  and in WebKit that action is what opens a `<select>`'s option popup, so
+  menu dropdowns silently refuse to open. Pinned by the "input
+  right-click menu (portal)" cases in ContextMenu.test.tsx.
 - Module layout (post-refactor): `engine.rs` keeps core types,
   construction, graph editing, knobs and telemetry; feature-area
   `impl Engine` blocks live under `src/engine/` (`midi`, `gesture_api`,

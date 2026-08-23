@@ -60,6 +60,7 @@ const fakeEngine = {
   endEdit: vi.fn(async () => {}),
   moveModules: vi.fn(async () => {}),
   syncPositions: vi.fn(async () => {}),
+  setKnobConfig: vi.fn(async () => {}),
 };
 
 vi.mock('../src/engine', () => ({
@@ -275,5 +276,61 @@ describe('background context menu', () => {
     // The module menu is showing (Delete present), not the background one.
     expect(screen.getByTestId('ctx-delete')).toBeTruthy();
     expect(screen.queryByTestId('ctx-save')).toBeNull();
+  });
+});
+
+// The input right-click menu is PORTALED to document.body, but React
+// dispatches its events along the React tree — so they reach the rack
+// background's handlers, which must ignore them (they aren't presses on
+// the background). Getting this wrong preventDefault()s the mousedown and
+// the native <select> popup never opens.
+describe('input right-click menu (portal)', () => {
+  const openKnobMenu = () => {
+    const knob = screen.getByTestId('knob-pitch');
+    fireEvent.contextMenu(knob.querySelector('.knob-dial') ?? knob, { clientX: 20, clientY: 20 });
+    expect(document.querySelector('.knob-config-menu')).toBeTruthy();
+  };
+
+  it('a press on a menu dropdown keeps its default action (the popup opens)', async () => {
+    await renderApp();
+    openKnobMenu();
+    for (const label of ['knob style', 'knob curve']) {
+      const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
+      screen.getByLabelText(label).dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(false);
+    }
+    // The press also must not dismiss the menu it landed in.
+    expect(document.querySelector('.knob-config-menu')).toBeTruthy();
+  });
+
+  it('a press inside the menu neither clears the selection nor sweeps a marquee', async () => {
+    await renderApp();
+    fireEvent.mouseDown(screen.getByTestId('module-osc1'), { button: 0 });
+    expect(screen.getByTestId('module-osc1').dataset.selected).toBe('true');
+    openKnobMenu();
+    fireEvent.mouseDown(screen.getByLabelText('knob style'), {
+      button: 0,
+      clientX: 20,
+      clientY: 40,
+    });
+    expect(screen.getByTestId('module-osc1').dataset.selected).toBe('true');
+    fireEvent.mouseMove(window, { clientX: 400, clientY: 400 });
+    expect(screen.queryByTestId('marquee')).toBeNull();
+    fireEvent.mouseUp(window, { clientX: 400, clientY: 400 });
+  });
+
+  it('picking a dropdown value commits it to the engine', async () => {
+    await renderApp();
+    openKnobMenu();
+    const select = screen.getByLabelText('knob style') as HTMLSelectElement;
+    fireEvent.mouseDown(select, { button: 0 });
+    fireEvent.change(select, { target: { value: 'stepped' } });
+    await waitFor(() =>
+      expect(fakeEngine.setKnobConfig).toHaveBeenCalledWith(
+        'osc1',
+        'pitch',
+        expect.objectContaining({ style: 'stepped' }),
+      ),
+    );
   });
 });

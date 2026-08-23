@@ -2111,6 +2111,13 @@ export default function App() {
                     // over the background) must not wipe the drag's own
                     // selection.
                     if (e.button !== 0) return;
+                    // A module's input config menu is portaled to <body>,
+                    // but its events still bubble the REACT tree to here.
+                    // Presses that landed outside the rack's own DOM subtree
+                    // are not background presses — and the preventDefault
+                    // below would cancel the mousedown's default action,
+                    // which in WebKit is what opens a <select>'s options.
+                    if (!e.currentTarget.contains(e.target as Node)) return;
                     if ((e.target as HTMLElement).closest?.('.module-panel')) return;
                     // The sweep must never double as a native text-selection
                     // drag (a text selection hijacks cmd+C).
