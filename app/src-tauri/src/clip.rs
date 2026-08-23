@@ -169,15 +169,10 @@ pub fn clip_preview_audio(
 /// track (the sources are left untouched). Analysis is queued by the
 /// import, so BPM/key land like any other track.
 #[tauri::command(async)]
-pub fn clip_save(
-    state: State<AppState>,
-    request: ClipRequest,
-    title: String,
-    artist: String,
-) -> CmdResult<Track> {
+pub fn clip_save(state: State<AppState>, request: ClipRequest, title: String) -> CmdResult<Track> {
     let title = title.trim().to_string();
     if title.is_empty() {
-        return Err(CmdError::invalid("clip: the new track needs a title"));
+        return Err(CmdError::invalid("clip: the new track needs a name"));
     }
     let rendered = request.render(&state)?;
 
@@ -186,8 +181,8 @@ pub fn clip_save(
     let path = dj_library::providers::unique_path(&dir.join(format!("{name}.flac")));
     clip::write_clip(&path, &rendered).map_err(err)?;
 
-    // A clip is a derivative work: it inherits the first source's license
-    // and records the tracks it was cut from.
+    // A clip is a derivative work: it inherits the first source's artist
+    // and license, and records the tracks it was cut from.
     let first = state.library.track(request.sources[0]).map_err(err)?;
     let source_ref = request
         .sources
@@ -204,7 +199,7 @@ pub fn clip_save(
                 source_ref,
                 license: first.license,
                 title: Some(title),
-                artist: Some(artist.trim().to_string()),
+                artist: Some(first.artist),
                 album: Some("Clips".into()),
             },
         )

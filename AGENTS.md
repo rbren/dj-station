@@ -382,10 +382,15 @@ fails if it's missing.
   effect checks `view !== 'rack'` directly, and QwertyPanel/MidiPanel read
   `RackKeysContext` (`src/keyScope.ts`, provided around `.app-body`,
   default true for headless unit tests). Going inactive must RELEASE held
-  gates/notes immediately (the keyup lands on the other page). Only
-  Save/Open/New (fileShortcuts.ts) and per-modal handlers (ContextMenu,
-  ModulePicker, KnobConfigMenu) stay page-global. Pinned by the
-  scope cases in AppShortcuts/QwertyPanel/MidiPanel tests. The
+  gates/notes immediately (the keyup lands on the other page). ClipView
+  follows the same pattern via its `active` prop (space + undo/redo keys,
+  pauses playback on deactivate). Only Save/Open/New (fileShortcuts.ts)
+  and per-modal handlers (ContextMenu, ModulePicker, KnobConfigMenu) stay
+  page-global. Pinned by the scope cases in
+  AppShortcuts/QwertyPanel/MidiPanel/ClipView tests.
+  `npm run lint` runs react-hooks v6 rules: no synchronous setState in an
+  effect body (async callbacks are fine) and no ref reads/writes during
+  render — mirror props into a ref inside a `useEffect`, not inline. The
   `.wire-overlay` CSS must keep
   `z-index`, `overflow: visible` and `pointer-events: none`
   (WireOverlay.test.tsx pins it); knob right-clicks stopPropagation so
@@ -522,10 +527,15 @@ fails if it's missing.
   `clip_*` Tauri commands (`app/src-tauri/src/clip.rs`, all
   `#[tauri::command(async)]`) decode sources (small LRU cache), render
   with `dj_analysis::clip` on a worker thread and are NOT undoable
-  (`engine_lock` isn't even taken). The edit is a `ClipProgram`: regions
-  (source index + in/out + reverse + gain), a fixed 3-band EQ, dB level
-  breakpoints on the OUTPUT timeline (automation is timeline-based, so a
-  cut shifts audio under it — deliberate, like a DAW) and `crossfade_ms`.
+  (`engine_lock` isn't even taken; ClipView keeps its own undo/redo
+  stacks). The edit is a `ClipProgram`: regions (source index + in/out +
+  reverse + gain), overlays (a region MIXED over the output timeline at
+  `at_secs` instead of spliced — it can extend the clip; edges get the
+  same crossfade-length declick ramp), a parametric EQ (`bands` of RBJ
+  peaking bells — same filter as the EQ module; empty/all-0 dB bands are
+  an exact bypass), dB level breakpoints on the OUTPUT timeline
+  (automation is timeline-based, so a cut shifts audio under it —
+  deliberate, like a DAW) and `crossfade_ms`.
   Adjacent regions OVERLAP by the crossfade, capped at half of either
   neighbour: that one law exists twice — `splice` in
   `crates/dj-analysis/src/clip.rs` and `regionSpans` in `app/src/clip.ts`
@@ -533,8 +543,14 @@ fails if it's missing.
   change them together. Saving renders to FLAC under `<data_dir>/clips/`
   (machine-local, gitignored) and imports a NEW library track
   (`source = "clip"`, `source_ref` = comma-joined source track ids,
-  license inherited from the first source) — a clip NEVER overwrites the
-  track it was cut from. Its golden-audio case lives in dj-analysis
+  license AND artist inherited from the first source) — a clip NEVER
+  overwrites the track it was cut from. Like the rack, ClipView stays
+  MOUNTED while other pages show (App passes `active`; the component
+  hides itself, pauses playback and detaches its shortcuts — space,
+  ctrl/cmd+Z/shift+Z/Y). Playback streams the RENDERED edit: 60 s WAV
+  windows through `clip_preview_audio` into an `<audio>` element,
+  chaining windows and stopping on any edit (the fetched audio is
+  stale). Its golden-audio case lives in dj-analysis
   (`tests/e2e/clips/*.json` + `tests/e2e/goldens/*.wav`, second step of
   `scripts/regen-goldens.sh`) rather than the engine e2e suite, because
   the renderer is not a graph module. `decode_audio` truncates to the

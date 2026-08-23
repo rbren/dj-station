@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  addOverlay,
   appendSource,
   cutRange,
   duplicateRange,
@@ -13,8 +14,10 @@ import {
   fadeOut,
   gainRange,
   levelDbAt,
+  moveRange,
   programDuration,
   regionSpans,
+  removeOverlay,
   reverseRange,
   setLevelPoint,
   SILENCE_DB,
@@ -101,6 +104,47 @@ describe('clip region math', () => {
       [5, 10],
     ]);
     expect(programDuration(doubled)).toBeCloseTo(15, 9);
+  });
+
+  it('moves a selection later on the timeline (drag right)', () => {
+    // [2,4) of a 10 s clip dragged to start at 5: the material between
+    // 4 and 7 shifts left to fill the hole, the selection lands at 5.
+    const p = moveRange(base(), 2, 4, 5);
+    expect(p.regions.map((r) => [r.start_secs, r.end_secs])).toEqual([
+      [0, 2],
+      [4, 7],
+      [2, 4],
+      [7, 10],
+    ]);
+    expect(programDuration(p)).toBeCloseTo(10, 9);
+  });
+
+  it('moves a selection earlier on the timeline (drag left)', () => {
+    const p = moveRange(base(), 6, 8, 1);
+    expect(p.regions.map((r) => [r.start_secs, r.end_secs])).toEqual([
+      [0, 1],
+      [6, 8],
+      [1, 6],
+      [8, 10],
+    ]);
+  });
+
+  it('clamps a move to the ends of the timeline', () => {
+    const start = moveRange(base(), 4, 6, -3);
+    expect(start.regions[0]).toMatchObject({ start_secs: 4, end_secs: 6 });
+    const end = moveRange(base(), 4, 6, 99);
+    expect(end.regions[end.regions.length - 1]).toMatchObject({ start_secs: 4, end_secs: 6 });
+    // Moving the whole clip is a no-op shape-wise.
+    expect(moveRange(base(), 0, 10, 3).regions).toEqual(base().regions);
+  });
+
+  it('overlays mix over the timeline and extend the duration', () => {
+    const p = addOverlay(base(), 1, 4, 8);
+    expect(p.overlays).toHaveLength(1);
+    expect(p.overlays[0]).toMatchObject({ source: 1, at_secs: 8, start_secs: 0, end_secs: 4 });
+    // 8 s in + 4 s of overlay outruns the 10 s base.
+    expect(programDuration(p)).toBeCloseTo(12, 9);
+    expect(programDuration(removeOverlay(p, 0))).toBeCloseTo(10, 9);
   });
 
   it('appends another source for splicing', () => {

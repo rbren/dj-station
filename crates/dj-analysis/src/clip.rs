@@ -13,9 +13,12 @@
 //!    piece out is "two regions that skip it"; splicing is "regions from
 //!    different sources in a row". Neighbouring regions are joined with a
 //!    short equal-power crossfade so edits never click.
-//! 2. **EQ** ([`ClipEq`]): fixed 3-band tone control (low shelf / mid
-//!    bell / high shelf), bypassed exactly at 0 dB.
-//! 3. **Level automation** ([`LevelPoint`]): a breakpoint envelope in dB
+//! 2. **Overlays** ([`ClipOverlay`]): the same region material, mixed on
+//!    top of the assembled timeline at a chosen output time (layering two
+//!    tracks instead of splicing them). Edges get a short declick ramp.
+//! 3. **EQ** ([`ClipEq`]): parametric peaking bells in series — the same
+//!    RBJ filters as the rack's EQ module — bypassed exactly at 0 dB.
+//! 4. **Level automation** ([`LevelPoint`]): a breakpoint envelope in dB
 //!    over the *output* timeline — fades in/out are just endpoints.
 //!
 //! Sources may differ in sample rate and channel count: the render runs at
@@ -55,23 +58,55 @@ impl ClipRegion {
     }
 }
 
-/// Fixed 3-band tone control. Every band is an exact pass-through at 0 dB.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+/// A source span mixed OVER the assembled timeline (instead of spliced
+/// into it) starting at `at_secs` of the output. Extends the clip when it
+/// runs past the end.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClipOverlay {
+    /// Where on the output timeline the overlay starts.
+    pub at_secs: f64,
+    #[serde(flatten)]
+    pub region: ClipRegion,
+}
+
+/// One parametric EQ band: an RBJ peaking bell, exact pass-through at
+/// 0 dB. Same filter (and clamps) as the rack's 4-band EQ module.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClipEqBand {
+    pub freq_hz: f64,
+    pub gain_db: f64,
+    pub q: f64,
+}
+
+impl Default for ClipEqBand {
+    fn default() -> Self {
+        ClipEqBand {
+            freq_hz: 1000.0,
+            gain_db: 0.0,
+            q: 1.0,
+        }
+    }
+}
+
+impl ClipEqBand {
+    pub const MIN_HZ: f64 = 20.0;
+    pub const MIN_Q: f64 = 0.2;
+    pub const MAX_Q: f64 = 12.0;
+}
+
+/// Parametric tone control: peaking bells in series (the Clip page uses
+/// four, mirroring the EQ module's UI, but any count renders).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClipEq {
-    pub low_db: f64,
-    pub mid_db: f64,
-    pub high_db: f64,
+    pub bands: Vec<ClipEqBand>,
 }
 
 impl ClipEq {
-    pub const LOW_HZ: f64 = 200.0;
-    pub const MID_HZ: f64 = 1000.0;
-    pub const MID_Q: f64 = 0.9;
-    pub const HIGH_HZ: f64 = 4000.0;
-
     pub fn is_flat(&self) -> bool {
-        self.low_db == 0.0 && self.mid_db == 0.0 && self.high_db == 0.0
+        self.bands.iter().all(|b| b.gain_db == 0.0)
     }
 }
 
@@ -87,6 +122,8 @@ pub struct LevelPoint {
 #[serde(default)]
 pub struct ClipProgram {
     pub regions: Vec<ClipRegion>,
+    /// Material mixed over the spliced timeline (see [`ClipOverlay`]).
+    pub overlays: Vec<ClipOverlay>,
     pub eq: ClipEq,
     /// Level automation breakpoints (unsorted input is fine). Empty means
     /// unity gain throughout.
@@ -99,6 +136,7 @@ impl Default for ClipProgram {
     fn default() -> Self {
         ClipProgram {
             regions: Vec::new(),
+            overlays: Vec::new(),
             eq: ClipEq::default(),
             level: Vec::new(),
             crossfade_ms: DEFAULT_CROSSFADE_MS,
@@ -215,34 +253,6 @@ impl Biquad {
         }
     }
 
-    /// RBJ low/high shelf (S = 1).
-    fn shelf(freq: f64, gain_db: f64, sr: f64, high: bool) -> Biquad {
-        let a = 10f64.powf(gain_db / 40.0);
-        let w0 = 2.0 * PI * freq / sr;
-        let (sin_w0, cos_w0) = (w0.sin(), w0.cos());
-        let alpha = sin_w0 / 2.0 * 2f64.sqrt();
-        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
-        if high {
-            Biquad::new(
-                a * ((a + 1.0) + (a - 1.0) * cos_w0 + two_sqrt_a_alpha),
-                -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0),
-                a * ((a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha),
-                (a + 1.0) - (a - 1.0) * cos_w0 + two_sqrt_a_alpha,
-                2.0 * ((a - 1.0) - (a + 1.0) * cos_w0),
-                (a + 1.0) - (a - 1.0) * cos_w0 - two_sqrt_a_alpha,
-            )
-        } else {
-            Biquad::new(
-                a * ((a + 1.0) - (a - 1.0) * cos_w0 + two_sqrt_a_alpha),
-                2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0),
-                a * ((a + 1.0) - (a - 1.0) * cos_w0 - two_sqrt_a_alpha),
-                (a + 1.0) + (a - 1.0) * cos_w0 + two_sqrt_a_alpha,
-                -2.0 * ((a - 1.0) + (a + 1.0) * cos_w0),
-                (a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha,
-            )
-        }
-    }
-
     /// RBJ peaking bell.
     fn peaking(freq: f64, gain_db: f64, q: f64, sr: f64) -> Biquad {
         let a = 10f64.powf(gain_db / 40.0);
@@ -272,27 +282,62 @@ fn apply_eq(channels: &mut [Vec<f32>], eq: &ClipEq, sr: u32) {
     }
     let sr = sr as f64;
     for chan in channels.iter_mut() {
-        let mut bands: Vec<Biquad> = Vec::new();
-        if eq.low_db != 0.0 {
-            bands.push(Biquad::shelf(ClipEq::LOW_HZ, eq.low_db, sr, false));
-        }
-        if eq.mid_db != 0.0 {
-            bands.push(Biquad::peaking(
-                ClipEq::MID_HZ,
-                eq.mid_db,
-                ClipEq::MID_Q,
-                sr,
-            ));
-        }
-        if eq.high_db != 0.0 {
-            bands.push(Biquad::shelf(ClipEq::HIGH_HZ, eq.high_db, sr, true));
-        }
+        // Series peaking bells, clamped like the EQ module's DSP so the
+        // plotted response is what actually renders.
+        let mut bands: Vec<Biquad> = eq
+            .bands
+            .iter()
+            .filter(|b| b.gain_db != 0.0)
+            .map(|b| {
+                Biquad::peaking(
+                    b.freq_hz.clamp(ClipEqBand::MIN_HZ, 0.45 * sr),
+                    b.gain_db,
+                    b.q.clamp(ClipEqBand::MIN_Q, ClipEqBand::MAX_Q),
+                    sr,
+                )
+            })
+            .collect();
         for s in chan.iter_mut() {
             let mut x = *s as f64;
             for b in bands.iter_mut() {
                 x = b.process(x);
             }
             *s = x as f32;
+        }
+    }
+}
+
+/// Mix overlay material into the assembled timeline, extending it when an
+/// overlay runs past the end. Short linear ramps at the overlay's edges
+/// declick the entry/exit (the material may start mid-waveform).
+fn apply_overlay(
+    channels: &mut [Vec<f32>],
+    material: Vec<Vec<f32>>,
+    at_frame: usize,
+    ramp_frames: usize,
+) {
+    let len = material.first().map(|c| c.len()).unwrap_or(0);
+    if len == 0 {
+        return;
+    }
+    let needed = at_frame + len;
+    for chan in channels.iter_mut() {
+        if chan.len() < needed {
+            chan.resize(needed, 0.0);
+        }
+    }
+    let ramp = ramp_frames.min(len / 2);
+    for (c, chan) in channels.iter_mut().enumerate() {
+        for (i, &s) in material[c].iter().enumerate() {
+            let mut g = 1.0f32;
+            if ramp > 0 {
+                if i < ramp {
+                    g = (i as f32 + 0.5) / ramp as f32;
+                } else if i >= len - ramp {
+                    g = ((len - i) as f32 - 0.5) / ramp as f32;
+                }
+            }
+            chan[at_frame + i] += s * g;
         }
     }
 }
@@ -373,6 +418,14 @@ pub fn render_clip(sources: &[&AudioData], program: &ClipProgram) -> Result<Audi
         !channels[0].is_empty(),
         "clip render: the edit is empty (all regions are zero-length)"
     );
+    for overlay in &program.overlays {
+        let src = sources.get(overlay.region.source).ok_or_else(|| {
+            anyhow::anyhow!("clip render: unknown source {}", overlay.region.source)
+        })?;
+        let material = region_material(src, &overlay.region, sample_rate, n_ch);
+        let at_frame = (overlay.at_secs.max(0.0) * sample_rate as f64).round() as usize;
+        apply_overlay(&mut channels, material, at_frame, crossfade_frames);
+    }
     apply_eq(&mut channels, &program.eq, sample_rate);
     apply_level(&mut channels, &program.level, sample_rate);
     Ok(AudioData {
@@ -382,7 +435,7 @@ pub fn render_clip(sources: &[&AudioData], program: &ClipProgram) -> Result<Audi
 }
 
 /// Output length of a program without rendering it (region durations minus
-/// the crossfade overlaps).
+/// the crossfade overlaps, extended by overlays that run past the end).
 pub fn program_duration_secs(program: &ClipProgram) -> f64 {
     let xf = program.crossfade_ms.max(0.0) / 1000.0;
     let mut total = 0.0;
@@ -397,6 +450,9 @@ pub fn program_duration_secs(program: &ClipProgram) -> f64 {
         }
         total += d;
         prev = Some(d);
+    }
+    for o in &program.overlays {
+        total = total.max(o.at_secs.max(0.0) + o.region.duration_secs());
     }
     total
 }

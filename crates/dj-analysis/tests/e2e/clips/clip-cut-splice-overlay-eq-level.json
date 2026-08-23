@@ -22,10 +22,34 @@
       "gain_db": 0.0
     }
   ],
+  "overlays": [
+    {
+      "at_secs": 0.3,
+      "source": 1,
+      "start_secs": 0.55,
+      "end_secs": 0.95,
+      "reverse": false,
+      "gain_db": -6.0
+    }
+  ],
   "eq": {
-    "low_db": 4.0,
-    "mid_db": -5.0,
-    "high_db": 2.5
+    "bands": [
+      {
+        "freq_hz": 99.0,
+        "gain_db": 4.0,
+        "q": 1.0
+      },
+      {
+        "freq_hz": 990.0,
+        "gain_db": -5.0,
+        "q": 2.5
+      },
+      {
+        "freq_hz": 6300.0,
+        "gain_db": 2.5,
+        "q": 0.7
+      }
+    ]
   },
   "level": [
     {

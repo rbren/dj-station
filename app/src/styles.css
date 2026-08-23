@@ -3036,18 +3036,60 @@ body {
   border-color: #37765a;
 }
 
-.clip-eq {
+.clip-transport {
   display: flex;
   flex-wrap: wrap;
-  gap: 18px;
+  align-items: center;
+  gap: 8px;
 }
 
-.clip-eq-band {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.clip-transport button {
+  background: #1b1d22;
+  color: #e6e9ef;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.clip-transport button:disabled {
+  color: #5c626c;
+  cursor: default;
+}
+
+.clip-transport .clip-toggle-on {
+  background: #24503a;
+  border-color: #37765a;
+}
+
+.clip-playhead-readout {
   color: #9aa0aa;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 72px;
+}
+
+.clip-zoom {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.clip-playhead {
+  stroke: #e5c07b;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.clip-overlay-span {
+  fill: rgba(224, 108, 117, 0.5);
+  pointer-events: none;
+}
+
+/* The clip EQ reuses the EQ module's plot styling (.eq-ui etc.). */
+.clip-eq-ui {
+  align-self: flex-start;
 }
 
 .clip-regions {

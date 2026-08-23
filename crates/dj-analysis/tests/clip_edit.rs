@@ -9,7 +9,7 @@
 
 use dj_analysis::clip::{
     clips_dir, peaks, program_duration_secs, render_clip, wav16_bytes, write_clip, ClipEq,
-    ClipProgram, ClipRegion, LevelPoint,
+    ClipEqBand, ClipOverlay, ClipProgram, ClipRegion, LevelPoint,
 };
 use dj_analysis::AudioData;
 use std::path::{Path, PathBuf};
@@ -174,37 +174,127 @@ fn crossfade_joins_are_click_free() {
     assert!(faded.frames() < hard.frames());
 }
 
+/// A single parametric band over the whole clip.
+fn one_band(freq_hz: f64, gain_db: f64, q: f64) -> ClipEq {
+    ClipEq {
+        bands: vec![ClipEqBand {
+            freq_hz,
+            gain_db,
+            q,
+        }],
+    }
+}
+
 #[test]
-fn eq_bands_boost_and_cut_their_own_range() {
+fn parametric_eq_bells_boost_and_cut_at_their_frequency() {
     let low = tone(60.0, 1.0);
     let high = tone(9000.0, 1.0);
-    let peak = |a: &AudioData| a.channels[0].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    // Peak over the second half only: the biquad's onset transient passes
+    // the first cycles nearly untouched.
+    let peak = |a: &AudioData| {
+        let tail = a.channels[0].len() / 2;
+        a.channels[0][tail..]
+            .iter()
+            .fold(0.0f32, |m, s| m.max(s.abs()))
+    };
 
     let boost_low = ClipProgram {
         regions: vec![whole(0, &low)],
-        eq: ClipEq {
-            low_db: 9.0,
-            ..ClipEq::default()
-        },
+        eq: one_band(60.0, 9.0, 1.0),
         ..ClipProgram::default()
     };
     let out = render_clip(&[&low], &boost_low).unwrap();
-    assert!(peak(&out) > peak(&low) * 1.5, "low shelf did not boost");
+    assert!(peak(&out) > peak(&low) * 1.5, "bell at 60 Hz did not boost");
 
     let cut_high = ClipProgram {
         regions: vec![whole(0, &high)],
-        eq: ClipEq {
-            high_db: -12.0,
-            ..ClipEq::default()
-        },
+        eq: one_band(9000.0, -12.0, 1.0),
         ..ClipProgram::default()
     };
     let out = render_clip(&[&high], &cut_high).unwrap();
-    assert!(peak(&out) < peak(&high) * 0.5, "high shelf did not cut");
+    assert!(peak(&out) < peak(&high) * 0.5, "bell at 9 kHz did not cut");
 
-    // Flat EQ is an exact bypass.
+    // A narrow bell far from the material barely touches it.
+    let off_target = ClipProgram {
+        regions: vec![whole(0, &low)],
+        eq: one_band(8000.0, 12.0, 8.0),
+        ..ClipProgram::default()
+    };
+    let out = render_clip(&[&low], &off_target).unwrap();
+    assert!(
+        (peak(&out) - peak(&low)).abs() < 0.05,
+        "remote bell moved a 60 Hz tone"
+    );
+
+    // All-zero gains (and the default empty EQ) are an exact bypass.
     let flat = render_clip(&[&low], &hard_cuts(vec![whole(0, &low)])).unwrap();
     assert_eq!(flat.channels[0], low.channels[0]);
+    let zeroed = ClipProgram {
+        regions: vec![whole(0, &low)],
+        eq: one_band(1000.0, 0.0, 1.0),
+        crossfade_ms: 0.0,
+        ..ClipProgram::default()
+    };
+    let out = render_clip(&[&low], &zeroed).unwrap();
+    assert_eq!(out.channels[0], low.channels[0]);
+}
+
+#[test]
+fn overlays_mix_on_top_and_extend_the_clip() {
+    let base = tone(220.0, 1.0);
+    let extra = tone(330.0, 1.0);
+    // Overlay 0.5 s of source 1 starting at 0.75 s: the first half is the
+    // base alone, the middle is a mix, and the last 0.25 s exists only
+    // because the overlay extended the clip.
+    let program = ClipProgram {
+        regions: vec![whole(0, &base)],
+        overlays: vec![ClipOverlay {
+            at_secs: 0.75,
+            region: span(1, 0.0, 0.5),
+        }],
+        crossfade_ms: 0.0,
+        ..ClipProgram::default()
+    };
+    let out = render_clip(&[&base, &extra], &program).unwrap();
+
+    assert_eq!(out.frames(), (1.25 * SR as f64) as usize);
+    assert!((program_duration_secs(&program) - 1.25).abs() < 1e-9);
+    // Before the overlay: untouched base material.
+    let i = (0.5 * SR as f64) as usize;
+    assert_eq!(out.channels[0][i], base.channels[0][i]);
+    // Inside the overlap: the sum of both sources.
+    let j = (0.9 * SR as f64) as usize;
+    let k = j - (0.75 * SR as f64) as usize;
+    assert!((out.channels[0][j] - (base.channels[0][j] + extra.channels[0][k])).abs() < 1e-6);
+    // Past the base clip's end: overlay material alone.
+    let l = (1.1 * SR as f64) as usize;
+    let m = l - (0.75 * SR as f64) as usize;
+    assert!((out.channels[0][l] - extra.channels[0][m]).abs() < 1e-6);
+}
+
+#[test]
+fn overlay_edges_are_ramped_when_crossfade_is_set() {
+    let base = tone(220.0, 1.0);
+    let extra = tone(330.0, 1.0);
+    // Start the overlay mid-waveform: without the declick ramp the mix
+    // would step at the entry point.
+    let overlay = ClipOverlay {
+        at_secs: 0.3,
+        region: span(1, 0.2501, 0.7501),
+    };
+    let ramped = ClipProgram {
+        regions: vec![whole(0, &base)],
+        overlays: vec![overlay.clone()],
+        ..ClipProgram::default()
+    };
+    let hard = ClipProgram {
+        crossfade_ms: 0.0,
+        ..ramped.clone()
+    };
+    let max_step = |a: &[f32]| a.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+    let out_ramped = render_clip(&[&base, &extra], &ramped).unwrap();
+    let out_hard = render_clip(&[&base, &extra], &hard).unwrap();
+    assert!(max_step(&out_ramped.channels[0]) < max_step(&out_hard.channels[0]));
 }
 
 #[test]
@@ -349,10 +439,31 @@ fn golden_program() -> ClipProgram {
             },
             span(0, 0.60, 0.85),
         ],
+        overlays: vec![ClipOverlay {
+            at_secs: 0.30,
+            region: ClipRegion {
+                gain_db: -6.0,
+                ..span(1, 0.55, 0.95)
+            },
+        }],
         eq: ClipEq {
-            low_db: 4.0,
-            mid_db: -5.0,
-            high_db: 2.5,
+            bands: vec![
+                ClipEqBand {
+                    freq_hz: 99.0,
+                    gain_db: 4.0,
+                    q: 1.0,
+                },
+                ClipEqBand {
+                    freq_hz: 990.0,
+                    gain_db: -5.0,
+                    q: 2.5,
+                },
+                ClipEqBand {
+                    freq_hz: 6300.0,
+                    gain_db: 2.5,
+                    q: 0.7,
+                },
+            ],
         },
         level: vec![
             LevelPoint {
@@ -385,7 +496,7 @@ fn read_wav(path: &Path) -> (hound::WavSpec, Vec<i16>) {
 
 #[test]
 fn golden_clip_edit() {
-    let case = "clip-cut-splice-eq-level";
+    let case = "clip-cut-splice-overlay-eq-level";
     let program_path = e2e_dir().join("clips").join(format!("{case}.json"));
     let golden_path = e2e_dir().join("goldens").join(format!("{case}.wav"));
 

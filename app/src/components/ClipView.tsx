@@ -1,14 +1,21 @@
-// Clip page (PRD §9): load library tracks, cut/splice/reverse/EQ them and
-// automate their level, then render the edit into a NEW library track.
+// Clip page (PRD §9): load library tracks, cut/splice/reverse/overlay/EQ
+// them and automate their level, then render the edit into a NEW library
+// track.
 //
 // The edit itself is a plain ClipProgram (src/clip.ts) — every operation is
-// a pure function over it, so this component only owns selection, undo
-// history and the debounced preview render. Nothing here touches the
-// engine: rendering happens off-thread in the shell (dj-analysis).
+// a pure function over it, so this component only owns selection, undo/redo
+// history, the viewport (zoom), playback and the debounced preview render.
+// Nothing here touches the engine: rendering happens off-thread in the
+// shell (dj-analysis).
+//
+// The component stays MOUNTED when another page is showing (App hides it
+// with display: none) so the edit survives tab switches; `active` gates
+// its keyboard shortcuts and pauses playback on the way out.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import {
+  addOverlay,
   appendSource,
   clearLevel,
   cutRange,
@@ -18,9 +25,11 @@ import {
   fadeOut,
   gainRange,
   levelDbAt,
+  moveRange,
   programDuration,
   regionSpans,
   removeLevelPoint,
+  removeOverlay,
   removeRegion,
   reverseRange,
   setLevelPoint,
@@ -31,22 +40,30 @@ import {
   type ClipSource,
   SILENCE_DB,
 } from '../clip';
+import { isEditableTarget } from '../fileShortcuts';
 import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
+import { ClipEqUI } from './ClipEqUI';
 import { peaksPath, WAVEFORM_VIEW_W as W } from './WaveformView';
 
 const WAVE_H = 120;
 const LEVEL_H = 90;
-const PREVIEW_BUCKETS = 1200;
+/** Preview peak resolution: enough per second that zooming stays sharp,
+ *  within the backend's bucket cap. */
+const PEAKS_PER_SEC = 100;
+const MIN_BUCKETS = 1200;
+const MAX_BUCKETS = 20000;
 /** Debounce before re-rendering the preview after an edit. */
 const PREVIEW_DELAY_MS = 350;
-/** Audition window; the backend caps it too. */
-const AUDITION_SECS = 30;
+/** One playback fetch (the backend caps preview windows); playback chains
+ *  consecutive windows for longer clips. */
+const PLAY_WINDOW_SECS = 60;
 const LEVEL_MAX_DB = 6;
 const FADE_SECS = 2;
-const EQ_RANGE_DB = 15;
 /** Undo depth for clip edits (page-local; unrelated to patch undo). */
 const HISTORY_DEPTH = 49;
+/** Narrowest zoom window. */
+const MIN_VIEW_SECS = 0.05;
 
 function timecode(secs: number): string {
   if (!Number.isFinite(secs) || secs < 0) return '0:00.00';
@@ -66,26 +83,41 @@ function levelDbFromY(y: number): number {
   return LEVEL_MAX_DB - frac * (LEVEL_MAX_DB - SILENCE_DB);
 }
 
+type Range = { start: number; end: number };
+
+/** A drag on the waveform: sweeping a new selection, or sliding the
+ *  existing one along the timeline. */
+type WaveDrag =
+  { kind: 'select'; anchor: number } | { kind: 'move'; base: Range; anchor: number; delta: number };
+
 export interface ClipViewProps {
   clip: ClipClientApi;
   library: LibraryClientApi;
+  /** False while another page is showing: shortcuts detach, playback
+   *  pauses, and the section hides (but stays mounted, keeping the edit). */
+  active?: boolean;
   /** Called after a clip is imported, so the library list can refresh. */
   onSaved?: (track: Track) => void;
 }
 
-export function ClipView({ clip, library, onSaved }: ClipViewProps) {
+export function ClipView({ clip, library, active = true, onSaved }: ClipViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [pick, setPick] = useState<number | null>(null);
   const [sources, setSources] = useState<ClipSource[]>([]);
   const [program, setProgram] = useState<ClipProgram>(emptyProgram);
   const [past, setPast] = useState<ClipProgram[]>([]);
-  const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
+  const [future, setFuture] = useState<ClipProgram[]>([]);
+  const [selection, setSelection] = useState<Range | null>(null);
   const [previewState, setPreview] = useState<ClipRender | null>(null);
-  const [title, setTitle] = useState('');
-  const [artist, setArtist] = useState('');
+  const [name, setName] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [loop, setLoop] = useState(false);
+  const [playhead, setPlayhead] = useState(0);
+  /** Zoomed viewport over the output timeline; null = the whole clip. */
+  const [vp, setVp] = useState<Range | null>(null);
 
   const duration = programDuration(program);
   const spans = useMemo(() => regionSpans(program), [program]);
@@ -94,15 +126,33 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
     [sources, program],
   );
 
-  useEffect(() => {
-    void (async () => {
-      const list = await library.tracks();
-      if (list) {
-        setTracks(list);
-        setPick((cur) => cur ?? list[0]?.id ?? null);
-      }
-    })();
+  // Viewport, clamped against the current duration (edits shrink clips).
+  const vpLen = Math.min(vp ? vp.end - vp.start : duration, duration);
+  const vpStart = vp ? Math.max(0, Math.min(vp.start, duration - vpLen)) : 0;
+  const vpEnd = vpStart + vpLen;
+
+  const refreshTracks = useCallback(async () => {
+    const list = await library.tracks();
+    if (list) {
+      setTracks(list);
+      setPick((cur) => cur ?? list[0]?.id ?? null);
+    }
   }, [library]);
+
+  // Refresh the pickable track list whenever the page comes back into
+  // view — other pages import tracks while this one stays mounted.
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    void library.tracks().then((list) => {
+      if (cancelled || !list) return;
+      setTracks(list);
+      setPick((cur) => cur ?? list[0]?.id ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [active, library]);
 
   // Debounced preview render: the peaks the editor draws are the real
   // rendered output, not a client-side guess.
@@ -111,7 +161,11 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
     let cancelled = false;
     const timer = setTimeout(() => {
       void (async () => {
-        const out = await clip.renderPreview(request, PREVIEW_BUCKETS);
+        const buckets = Math.min(
+          MAX_BUCKETS,
+          Math.max(MIN_BUCKETS, Math.round(programDuration(program) * PEAKS_PER_SEC)),
+        );
+        const out = await clip.renderPreview(request, buckets);
         if (!cancelled && out) setPreview(out);
       })();
     }, PREVIEW_DELAY_MS);
@@ -119,7 +173,7 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [clip, request, program.regions.length, sources.length]);
+  }, [clip, request, program, sources.length]);
 
   /** Apply a pure edit, remembering the previous program for undo. */
   const apply = useCallback(
@@ -127,24 +181,48 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
       const next = edit(program);
       if (next === program) return;
       setPast((h) => [...h.slice(-HISTORY_DEPTH), program]);
+      setFuture([]);
       setProgram(next);
     },
     [program],
   );
 
+  /** Snapshot for gestures (level-point and EQ drags) that then stream
+   *  edits through setProgram directly. */
+  const beginGesture = useCallback(() => {
+    setPast((h) => [...h.slice(-HISTORY_DEPTH), program]);
+    setFuture([]);
+  }, [program]);
+
   const undo = useCallback(() => {
     if (past.length === 0) return;
+    setFuture((f) => [...f, program]);
     setProgram(past[past.length - 1]);
     setPast(past.slice(0, -1));
     setSelection(null);
-  }, [past]);
+  }, [past, program]);
+
+  const redo = useCallback(() => {
+    if (future.length === 0) return;
+    setPast((h) => [...h.slice(-HISTORY_DEPTH), program]);
+    setProgram(future[future.length - 1]);
+    setFuture(future.slice(0, -1));
+    setSelection(null);
+  }, [future, program]);
+
+  const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
 
   const loadTrack = useCallback(
-    async (trackId: number, mode: 'open' | 'append') => {
+    async (trackId: number, mode: 'open' | 'append' | 'overlay') => {
       setBusy(true);
       setError(null);
       try {
-        const source = await clip.loadSource(trackId, PREVIEW_BUCKETS);
+        // Re-adding a track that is already a source reuses its slot.
+        const existing = sources.findIndex((s) => s.track_id === trackId);
+        const source =
+          mode !== 'open' && existing >= 0
+            ? sources[existing]
+            : await clip.loadSource(trackId, MIN_BUCKETS);
         if (!source) {
           setError('Could not decode that track');
           return;
@@ -153,69 +231,153 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
           setSources([source]);
           setProgram(appendSource(emptyProgram(), 0, source.duration_secs));
           setPast([]);
+          setFuture([]);
           setSelection(null);
-          setTitle(`${source.title} (clip)`);
-          setArtist(source.artist);
+          setVp(null);
+          setPlayhead(0);
+          setName(`${source.title} (clip)`);
           setStatus(`Editing "${source.title}" — the original is never modified`);
-        } else {
-          setSources([...sources, source]);
-          setPast((h) => [...h.slice(-HISTORY_DEPTH), program]);
-          setProgram(appendSource(program, sources.length, source.duration_secs));
+          return;
+        }
+        const index = existing >= 0 ? existing : sources.length;
+        if (existing < 0) setSources([...sources, source]);
+        setPast((h) => [...h.slice(-HISTORY_DEPTH), program]);
+        setFuture([]);
+        if (mode === 'append') {
+          setProgram(appendSource(program, index, source.duration_secs));
           setStatus(`Spliced "${source.title}" onto the end`);
+        } else {
+          const at = sel ? sel.start : playhead;
+          setProgram(addOverlay(program, index, source.duration_secs, at));
+          setStatus(`Overlaid "${source.title}" at ${timecode(at)}`);
         }
       } finally {
         setBusy(false);
       }
     },
-    [clip, program, sources],
+    [clip, playhead, program, sel, sources],
   );
 
-  // --- selection dragging over the output waveform ---------------------
+  // --- selection: sweep on empty space, slide inside the selection -------
   const waveRef = useRef<SVGSVGElement | null>(null);
   const dragRect = useRef<DOMRect | null>(null);
-  const dragAnchor = useRef<number | null>(null);
+  const dragRef = useRef<WaveDrag | null>(null);
   const [dragging, setDragging] = useState(false);
 
   const timeAt = useCallback(
     (clientX: number, rect: DOMRect | null) => {
       if (!rect || rect.width <= 0 || duration <= 0) return 0;
       const frac = (clientX - rect.left) / rect.width;
-      return Math.min(duration, Math.max(0, frac * duration));
+      return Math.min(duration, Math.max(0, vpStart + frac * vpLen));
     },
-    [duration],
+    [duration, vpStart, vpLen],
   );
 
   const startDrag = useCallback(
     (e: ReactMouseEvent<SVGSVGElement>) => {
-      if (duration <= 0) return;
+      if (duration <= 0 || e.button !== 0) return;
       const rect = e.currentTarget.getBoundingClientRect();
       dragRect.current = rect;
       const t = timeAt(e.clientX, rect);
-      dragAnchor.current = t;
-      setSelection({ start: t, end: t });
+      if (sel && t >= sel.start && t <= sel.end) {
+        dragRef.current = { kind: 'move', base: sel, anchor: t, delta: 0 };
+      } else {
+        dragRef.current = { kind: 'select', anchor: t };
+        setSelection({ start: t, end: t });
+        setPlayhead(t);
+      }
       setDragging(true);
     },
-    [duration, timeAt],
+    [duration, sel, timeAt],
   );
 
   useEffect(() => {
     if (!dragging) return;
     const move = (e: MouseEvent) => {
-      const anchor = dragAnchor.current;
-      if (anchor === null) return;
+      const drag = dragRef.current;
+      if (!drag) return;
       const t = timeAt(e.clientX, dragRect.current);
-      setSelection({ start: Math.min(anchor, t), end: Math.max(anchor, t) });
+      if (drag.kind === 'select') {
+        setSelection({ start: Math.min(drag.anchor, t), end: Math.max(drag.anchor, t) });
+      } else {
+        const len = drag.base.end - drag.base.start;
+        const delta = Math.min(
+          duration - len - drag.base.start,
+          Math.max(-drag.base.start, t - drag.anchor),
+        );
+        drag.delta = delta;
+        setSelection({ start: drag.base.start + delta, end: drag.base.end + delta });
+      }
     };
-    const up = () => setDragging(false);
+    const up = () => {
+      const drag = dragRef.current;
+      dragRef.current = null;
+      setDragging(false);
+      if (drag?.kind !== 'move') return;
+      if (Math.abs(drag.delta) > 1e-3) {
+        // The selection rect already sits at the target; move the audio
+        // underneath it to match.
+        const target = drag.base.start + drag.delta;
+        apply((p) => moveRange(p, drag.base.start, drag.base.end, target));
+        setSelection({ start: target, end: target + (drag.base.end - drag.base.start) });
+        setPlayhead(target);
+      } else {
+        // A plain click inside the selection just parks the playhead.
+        setPlayhead(drag.anchor);
+      }
+    };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
     return () => {
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
     };
-  }, [dragging, timeAt]);
+  }, [apply, dragging, duration, timeAt]);
 
-  const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
+  // --- zoom ---------------------------------------------------------------
+  const zoomAround = useCallback(
+    (center: number, factor: number) => {
+      if (duration <= 0) return;
+      const span = Math.max(MIN_VIEW_SECS, Math.min(duration, vpLen * factor));
+      if (span >= duration) {
+        setVp(null);
+        return;
+      }
+      const frac = vpLen > 0 ? (center - vpStart) / vpLen : 0.5;
+      const start = Math.max(0, Math.min(center - frac * span, duration - span));
+      setVp({ start, end: start + span });
+    },
+    [duration, vpLen, vpStart],
+  );
+
+  const zoomIn = useCallback(() => {
+    const center = sel ? (sel.start + sel.end) / 2 : playhead > 0 ? playhead : vpStart + vpLen / 2;
+    zoomAround(center, 0.5);
+  }, [playhead, sel, vpLen, vpStart, zoomAround]);
+  const zoomOut = useCallback(
+    () => zoomAround(vpStart + vpLen / 2, 2),
+    [vpLen, vpStart, zoomAround],
+  );
+
+  // Wheel over the waveform: zoom around the cursor; shift/horizontal
+  // scroll pans. Native non-passive listener so the page never scrolls.
+  useEffect(() => {
+    const el = waveRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) {
+        const d = (e.deltaX || e.deltaY) * (vpLen / W);
+        const start = Math.max(0, Math.min(vpStart + d, duration - vpLen));
+        if (vp) setVp({ start, end: start + vpLen });
+      } else {
+        zoomAround(timeAt(e.clientX, rect), 2 ** (e.deltaY / 300));
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [duration, timeAt, vp, vpLen, vpStart, zoomAround]);
 
   // --- level automation lane -------------------------------------------
   const laneRef = useRef<SVGSVGElement | null>(null);
@@ -253,9 +415,11 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
     };
   }, [dragPoint, timeAt]);
 
-  // --- audition ---------------------------------------------------------
+  // --- playback ----------------------------------------------------------
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrl = useRef<string | null>(null);
+  /** The rendered window the <audio> element currently holds. */
+  const windowRef = useRef<{ start: number; end: number; loop: boolean } | null>(null);
 
   useEffect(
     () => () => {
@@ -264,49 +428,157 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
     [],
   );
 
-  const audition = useCallback(async () => {
-    const from = sel ? sel.start : 0;
-    const secs = sel ? Math.min(AUDITION_SECS, sel.end - sel.start) : AUDITION_SECS;
-    const bytes = await clip.previewAudio(request, from, secs);
-    if (!bytes) return;
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
-    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-    objectUrl.current = url;
+  const haltPlayback = useCallback(() => {
+    const el = audioRef.current;
+    const w = windowRef.current;
+    if (el && w) setPlayhead(Math.min(duration, w.start + el.currentTime));
+    el?.pause();
+    setPlaying(false);
+  }, [duration]);
+
+  /** Fetch a rendered window and start the <audio> element on it. Looping
+   *  a selection plays the (window-capped) selection with native looping;
+   *  linear playback chains windows from `startSecs` to the end. */
+  const playFrom = useCallback(
+    async (startSecs: number, loopRange: Range | null) => {
+      let start: number;
+      let end: number;
+      if (loopRange) {
+        start = loopRange.start;
+        end = Math.min(loopRange.end, loopRange.start + PLAY_WINDOW_SECS);
+      } else {
+        // Play again from the top when the playhead sits at the end.
+        start = startSecs >= duration - 0.01 ? 0 : Math.max(0, startSecs);
+        end = Math.min(duration, start + PLAY_WINDOW_SECS);
+      }
+      if (end - start <= 1e-3) return;
+      const bytes = await clip.previewAudio(request, start, end - start);
+      const el = audioRef.current;
+      if (!bytes || !el) return;
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+      objectUrl.current = url;
+      windowRef.current = { start, end, loop: loopRange !== null };
+      el.src = url;
+      el.loop = loopRange !== null;
+      setPlayhead(start);
+      setPlaying(true);
+      try {
+        await el.play();
+      } catch {
+        // jsdom (and a webview without an output device) can't play; the
+        // element still holds the rendered audio.
+      }
+    },
+    [clip, duration, request],
+  );
+
+  const togglePlay = useCallback(() => {
+    if (playing) {
+      haltPlayback();
+    } else {
+      void playFrom(playhead, loop && sel ? sel : null);
+    }
+  }, [haltPlayback, loop, playFrom, playhead, playing, sel]);
+
+  const stop = useCallback(() => {
+    audioRef.current?.pause();
+    windowRef.current = null;
+    setPlaying(false);
+    setPlayhead(sel ? sel.start : 0);
+  }, [sel]);
+
+  // Track the playhead and chain the next window when one runs out.
+  useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
-    el.src = url;
-    try {
-      await el.play();
-    } catch {
-      // jsdom (and a webview without an output device) can't play; the
-      // element still holds the rendered audio.
-    }
-  }, [clip, request, sel]);
+    const onTime = () => {
+      const w = windowRef.current;
+      if (w) setPlayhead(Math.min(duration, w.start + el.currentTime));
+    };
+    const onEnded = () => {
+      const w = windowRef.current;
+      if (!w) return;
+      if (!w.loop && w.end < duration - 0.01) {
+        void playFrom(w.end, null);
+      } else {
+        setPlaying(false);
+        setPlayhead(w.loop ? w.start : duration);
+      }
+    };
+    el.addEventListener('timeupdate', onTime);
+    el.addEventListener('ended', onEnded);
+    return () => {
+      el.removeEventListener('timeupdate', onTime);
+      el.removeEventListener('ended', onEnded);
+    };
+  }, [duration, playFrom]);
+
+  // An edit makes the fetched audio stale: stop rather than play the old
+  // render. Leaving the page pauses too (its shortcuts detach with it).
+  const lastRequest = useRef(request);
+  useEffect(() => {
+    if (lastRequest.current === request) return;
+    lastRequest.current = request;
+    if (playing) haltPlayback();
+    windowRef.current = null;
+  }, [request, playing, haltPlayback]);
+  useEffect(() => {
+    if (!active && playing) haltPlayback();
+  }, [active, playing, haltPlayback]);
+
+  // --- keyboard shortcuts (page-scoped; see AGENTS.md keyboard scope) ----
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((mod && key === 'z' && e.shiftKey) || (mod && key === 'y')) {
+        e.preventDefault();
+        redo();
+      } else if (!mod && e.key === ' ') {
+        // Space would otherwise click a focused button / scroll the page.
+        e.preventDefault();
+        togglePlay();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active, redo, togglePlay, undo]);
 
   const save = useCallback(async () => {
     setBusy(true);
     setError(null);
     setStatus(null);
     try {
-      const track = await clip.save(request, title, artist);
+      const track = await clip.save(request, name);
       if (track) {
         setStatus(`Saved "${track.title}" to the library as a new track`);
         onSaved?.(track);
+        void refreshTracks();
       }
     } finally {
       setBusy(false);
     }
-  }, [artist, clip, onSaved, request, title]);
+  }, [clip, name, onSaved, refreshTracks, request]);
 
   // The preview belongs to the current edit only; an emptied program has none.
   const preview = program.regions.length === 0 ? null : previewState;
   const peaks = preview?.peaks ?? [];
-  const xOf = (secs: number) => (duration > 0 ? (secs / duration) * W : 0);
+  const xOf = (secs: number) => (vpLen > 0 ? ((secs - vpStart) / vpLen) * W : 0);
   const disabled = program.regions.length === 0;
   const noSelection = disabled || sel === null;
 
   return (
-    <section className="clip-view" data-testid="clip-view">
+    <section
+      className="clip-view"
+      data-testid="clip-view"
+      style={active ? undefined : { display: 'none' }}
+    >
       <div className="clip-load">
         <label>
           <span>Track</span>
@@ -336,6 +608,14 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
         >
           Splice on end
         </button>
+        <button
+          data-testid="clip-overlay-track"
+          disabled={pick === null || busy || disabled}
+          title="Mix the track over the timeline at the selection (or playhead)"
+          onClick={() => pick !== null && void loadTrack(pick, 'overlay')}
+        >
+          Overlay
+        </button>
         <span className="clip-sources" data-testid="clip-sources">
           {sources.map((s, i) => (
             <span className="tag tag-source" key={`${s.track_id}:${i}`}>
@@ -352,6 +632,58 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
         </p>
       ) : (
         <>
+          <div className="clip-transport" data-testid="clip-transport">
+            <button
+              data-testid="clip-play"
+              title={playing ? 'Pause (space)' : 'Play (space)'}
+              onClick={togglePlay}
+            >
+              {playing ? '❚❚' : '▶'}
+            </button>
+            <button data-testid="clip-stop" title="Stop" onClick={stop}>
+              ■
+            </button>
+            <button
+              data-testid="clip-loop"
+              className={loop ? 'clip-toggle-on' : undefined}
+              aria-pressed={loop}
+              title="Loop the selection"
+              onClick={() => setLoop((v) => !v)}
+            >
+              Loop
+            </button>
+            <span className="clip-playhead-readout" data-testid="clip-playhead-readout">
+              {timecode(playhead)}
+            </span>
+            <span className="clip-zoom">
+              <button data-testid="clip-zoom-in" title="Zoom in" onClick={zoomIn}>
+                +
+              </button>
+              <button
+                data-testid="clip-zoom-out"
+                title="Zoom out"
+                disabled={vp === null}
+                onClick={zoomOut}
+              >
+                −
+              </button>
+              <button
+                data-testid="clip-zoom-fit"
+                title="Fit whole clip"
+                disabled={vp === null}
+                onClick={() => setVp(null)}
+              >
+                Fit
+              </button>
+            </span>
+            <button data-testid="clip-undo" disabled={past.length === 0} onClick={undo}>
+              Undo
+            </button>
+            <button data-testid="clip-redo" disabled={future.length === 0} onClick={redo}>
+              Redo
+            </button>
+          </div>
+
           <div className="clip-timeline">
             <svg
               ref={waveRef}
@@ -359,6 +691,8 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
               className="clip-waveform"
               viewBox={`0 0 ${W} ${WAVE_H}`}
               preserveAspectRatio="none"
+              data-vp-start={fixed(vpStart, 3)}
+              data-vp-end={fixed(vpEnd, 3)}
               onMouseDown={startDrag}
             >
               {spans.map((s) => (
@@ -372,7 +706,23 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
                   y2={WAVE_H}
                 />
               ))}
-              <path className="waveform-peaks" d={peaksPath(peaks, 0, 1, WAVE_H)} />
+              <path
+                className="waveform-peaks"
+                d={
+                  duration > 0 ? peaksPath(peaks, vpStart / duration, vpEnd / duration, WAVE_H) : ''
+                }
+              />
+              {program.overlays.map((o, i) => (
+                <rect
+                  key={`ov${i}`}
+                  data-testid={`clip-overlay-span-${i}`}
+                  className="clip-overlay-span"
+                  x={xOf(Math.max(0, o.at_secs))}
+                  y={0}
+                  width={Math.max(1, xOf(o.at_secs + (o.end_secs - o.start_secs)) - xOf(o.at_secs))}
+                  height={10}
+                />
+              ))}
               {sel && (
                 <rect
                   data-testid="clip-selection"
@@ -383,6 +733,14 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
                   height={WAVE_H}
                 />
               )}
+              <line
+                data-testid="clip-playhead"
+                className="clip-playhead"
+                x1={xOf(playhead)}
+                x2={xOf(playhead)}
+                y1={0}
+                y2={WAVE_H}
+              />
             </svg>
             <svg
               ref={laneRef}
@@ -397,8 +755,8 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
                 data-testid="clip-level-line"
                 points={
                   program.level.length === 0
-                    ? `0,${levelY(0)} ${W},${levelY(0)}`
-                    : [0, ...program.level.map((p) => p.time_secs), duration]
+                    ? `${xOf(vpStart)},${levelY(0)} ${xOf(vpEnd)},${levelY(0)}`
+                    : [vpStart, ...program.level.map((p) => p.time_secs), duration]
                         .map((t) => `${xOf(t)},${levelY(levelDbAt(program.level, t))}`)
                         .join(' ')
                 }
@@ -413,7 +771,7 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
                   r={7}
                   onMouseDown={(e) => {
                     e.stopPropagation();
-                    setPast((h) => [...h.slice(-HISTORY_DEPTH), program]);
+                    beginGesture();
                     dragBase.current = removeLevelPoint(program, i);
                     setDragPoint(true);
                   }}
@@ -427,6 +785,7 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
             <p className="clip-readout" data-testid="clip-readout">
               {timecode(duration)} total
               {sel ? ` · selection ${timecode(sel.start)}–${timecode(sel.end)}` : ' · no selection'}
+              {vp ? ` · view ${timecode(vpStart)}–${timecode(vpEnd)}` : ''}
               {preview ? ` · ${preview.channels}ch ${preview.sample_rate} Hz` : ' · rendering…'}
             </p>
           </div>
@@ -503,36 +862,13 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
             >
               Clear automation
             </button>
-            <button data-testid="clip-undo" disabled={past.length === 0} onClick={undo}>
-              Undo
-            </button>
           </div>
 
-          <div className="clip-eq" data-testid="clip-eq">
-            {(['low', 'mid', 'high'] as const).map((band) => {
-              const key = `${band}_db` as const;
-              return (
-                <label key={band} className="clip-eq-band">
-                  <span>
-                    {band === 'low' ? 'Low' : band === 'mid' ? 'Mid' : 'High'}{' '}
-                    {fixed(program.eq[key], 1)} dB
-                  </span>
-                  <input
-                    type="range"
-                    data-testid={`clip-eq-${band}`}
-                    min={-EQ_RANGE_DB}
-                    max={EQ_RANGE_DB}
-                    step={0.5}
-                    value={program.eq[key]}
-                    onChange={(e) => {
-                      const value = Number(e.target.value);
-                      apply((p) => ({ ...p, eq: { ...p.eq, [key]: value } }));
-                    }}
-                  />
-                </label>
-              );
-            })}
-          </div>
+          <ClipEqUI
+            bands={program.eq.bands}
+            onBegin={beginGesture}
+            onChange={(bands) => setProgram({ ...program, eq: { bands } })}
+          />
 
           <table className="clip-regions" data-testid="clip-regions">
             <thead>
@@ -565,33 +901,40 @@ export function ClipView({ clip, library, onSaved }: ClipViewProps) {
                   </td>
                 </tr>
               ))}
+              {program.overlays.map((o, i) => (
+                <tr key={`ov${i}`} data-testid="clip-overlay">
+                  <td>+</td>
+                  <td>{sources[o.source]?.title ?? `source ${o.source + 1}`} (overlay)</td>
+                  <td>{timecode(o.at_secs)}</td>
+                  <td>{timecode(o.at_secs + (o.end_secs - o.start_secs))}</td>
+                  <td>{o.reverse ? '◀' : ''}</td>
+                  <td>{fixed(o.gain_db, 1)} dB</td>
+                  <td>
+                    <button
+                      data-testid={`clip-overlay-delete-${i}`}
+                      onClick={() => apply((p) => removeOverlay(p, i))}
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
 
           <div className="clip-save">
             <label>
-              <span>Title</span>
+              <span>Name</span>
               <input
-                data-testid="clip-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                data-testid="clip-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
               />
             </label>
-            <label>
-              <span>Artist</span>
-              <input
-                data-testid="clip-artist"
-                value={artist}
-                onChange={(e) => setArtist(e.target.value)}
-              />
-            </label>
-            <button data-testid="clip-audition" onClick={() => void audition()}>
-              ▶ Audition
-            </button>
             <button
               className="clip-save-button"
               data-testid="clip-save"
-              disabled={busy || title.trim() === ''}
+              disabled={busy || name.trim() === ''}
               onClick={() => void save()}
             >
               Save as new track

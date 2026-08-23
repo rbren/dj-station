@@ -2022,9 +2022,14 @@ export default function App() {
         </div>
       )}
       {view === 'library' && <LibraryView client={library} />}
-      {view === 'clip' && (
-        <ClipView clip={clipClient} library={library} onSaved={() => void refresh()} />
-      )}
+      {/* The clip editor stays mounted so the edit survives tab switches;
+          it hides itself and pauses playback while inactive. */}
+      <ClipView
+        clip={clipClient}
+        library={library}
+        active={view === 'clip'}
+        onSaved={() => void refresh()}
+      />
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}

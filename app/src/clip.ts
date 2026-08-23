@@ -18,10 +18,29 @@ export interface ClipRegion {
   gain_db: number;
 }
 
+/** A span mixed OVER the timeline at `at_secs` instead of spliced in. */
+export type ClipOverlay = ClipRegion & { at_secs: number };
+
+/** One parametric EQ band — an RBJ peaking bell, pass-through at 0 dB.
+ *  Same filter as the rack's EQ module. */
+export interface ClipEqBand {
+  freq_hz: number;
+  gain_db: number;
+  q: number;
+}
+
 export interface ClipEq {
-  low_db: number;
-  mid_db: number;
-  high_db: number;
+  bands: ClipEqBand[];
+}
+
+export const EQ_MIN_HZ = 20;
+export const EQ_MIN_Q = 0.2;
+export const EQ_MAX_Q = 12;
+
+/** Four bells at the EQ module's default frequencies (its freq knobs'
+ *  defaults, converted from 1 V/oct pitch to Hz). */
+export function defaultEqBands(): ClipEqBand[] {
+  return [99, 397, 1586, 6343].map((freq_hz) => ({ freq_hz, gain_db: 0, q: 1 }));
 }
 
 export interface LevelPoint {
@@ -31,6 +50,7 @@ export interface LevelPoint {
 
 export interface ClipProgram {
   regions: ClipRegion[];
+  overlays: ClipOverlay[];
   eq: ClipEq;
   level: LevelPoint[];
   crossfade_ms: number;
@@ -68,7 +88,8 @@ export const DEFAULT_CROSSFADE_MS = 5;
 export function emptyProgram(): ClipProgram {
   return {
     regions: [],
-    eq: { low_db: 0, mid_db: 0, high_db: 0 },
+    overlays: [],
+    eq: { bands: defaultEqBands() },
     level: [],
     crossfade_ms: DEFAULT_CROSSFADE_MS,
   };
@@ -103,7 +124,11 @@ export function regionSpans(program: ClipProgram): RegionSpan[] {
 
 export function programDuration(program: ClipProgram): number {
   const spans = regionSpans(program);
-  return spans.length ? spans[spans.length - 1].end : 0;
+  let total = spans.length ? spans[spans.length - 1].end : 0;
+  for (const o of program.overlays) {
+    total = Math.max(total, Math.max(0, o.at_secs) + regionDuration(o));
+  }
+  return total;
 }
 
 /** The region under an output time, plus how far into it the time falls. */
@@ -219,6 +244,31 @@ export function gainRange(
   return mapRange(program, from, to, (r) => ({ ...r, gain_db: r.gain_db + deltaDb }));
 }
 
+/** Move the selected range so it starts at `destStart` (drag a selection
+ *  left or right along the timeline: cut it out, splice it back in). */
+export function moveRange(
+  program: ClipProgram,
+  from: number,
+  to: number,
+  destStart: number,
+): ClipProgram {
+  const iso = isolate(program, from, to);
+  if (!iso) return program;
+  const moved = iso.regions.slice(iso.from, iso.to);
+  if (moved.length === 0) return program;
+  const rest = [...iso.regions.slice(0, iso.from), ...iso.regions.slice(iso.to)];
+  if (rest.length === 0) return withRegions(program, moved);
+  // Land the selection's start at destStart of the final timeline: that is
+  // the same time on the remainder's timeline (everything after the
+  // insertion just shifts right by the selection's length).
+  const restProgram = withRegions(program, rest);
+  const t = Math.min(Math.max(0, destStart), programDuration(restProgram));
+  const loc = locate(restProgram, t);
+  const at = splitAt(rest, loc.index, loc.offset);
+  rest.splice(at.index, 0, ...moved);
+  return withRegions(program, rest);
+}
+
 /** Splice a copy of the selected range in right after it. */
 export function duplicateRange(program: ClipProgram, from: number, to: number): ClipProgram {
   const iso = isolate(program, from, to);
@@ -246,6 +296,28 @@ export function removeRegion(program: ClipProgram, index: number): ClipProgram {
     program,
     program.regions.filter((_, i) => i !== index),
   );
+}
+
+/** Mix a whole source over the timeline starting at `atSecs`. */
+export function addOverlay(
+  program: ClipProgram,
+  source: number,
+  durationSecs: number,
+  atSecs: number,
+): ClipProgram {
+  const overlay: ClipOverlay = {
+    source,
+    start_secs: 0,
+    end_secs: durationSecs,
+    reverse: false,
+    gain_db: 0,
+    at_secs: Math.max(0, atSecs),
+  };
+  return { ...program, overlays: [...program.overlays, overlay] };
+}
+
+export function removeOverlay(program: ClipProgram, index: number): ClipProgram {
+  return { ...program, overlays: program.overlays.filter((_, i) => i !== index) };
 }
 
 // ---------------------------------------------------------------------------
@@ -317,10 +389,11 @@ export function levelDbAt(points: LevelPoint[], t: number): number {
 export interface ClipClientApi {
   loadSource(trackId: number, buckets: number): Promise<ClipSource | null>;
   renderPreview(request: ClipRequest, buckets: number): Promise<ClipRender | null>;
-  /** 16-bit WAV bytes for an audition window. */
+  /** 16-bit WAV bytes for a playback window of the rendered edit. */
   previewAudio(request: ClipRequest, startSecs: number, secs: number): Promise<ArrayBuffer | null>;
-  /** Render and import as a NEW library track (sources untouched). */
-  save(request: ClipRequest, title: string, artist: string): Promise<Track | null>;
+  /** Render and import as a NEW library track (sources untouched). The
+   *  artist is inherited from the first source. */
+  save(request: ClipRequest, title: string): Promise<Track | null>;
 }
 
 export class ClipClient extends IpcClient implements ClipClientApi {
@@ -333,8 +406,8 @@ export class ClipClient extends IpcClient implements ClipClientApi {
   previewAudio(request: ClipRequest, startSecs: number, secs: number) {
     return this.call<ArrayBuffer>('clip_preview_audio', { request, startSecs, secs });
   }
-  save(request: ClipRequest, title: string, artist: string) {
-    return this.call<Track>('clip_save', { request, title, artist });
+  save(request: ClipRequest, title: string) {
+    return this.call<Track>('clip_save', { request, title });
   }
 }
 
