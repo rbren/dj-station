@@ -14,6 +14,10 @@
 //!   model from a configurable path (CoreML execution provider on macOS,
 //!   CPU elsewhere). Stems are cached as FLAC in app storage, keyed by the
 //!   track's content hash.
+//! - **Beatify** ([`beatify`]): the Beatify tab's headless pipeline —
+//!   beat detection (`beat_this` when installed, a deterministic DSP
+//!   tracker otherwise), least-squares grid fit, anchored time warp and
+//!   the hash-keyed record store. Beats only: no meter, no downbeats.
 //! - **Clip editing** ([`clip`]): the Clip page's offline editor —
 //!   cut/splice/reverse spans of library tracks, 3-band EQ and level
 //!   automation, rendered deterministically into a new audio file.
@@ -29,6 +33,7 @@
 //! FLACs via `deck_load_stems`).
 
 pub mod auto_stems;
+pub mod beatify;
 pub mod clip;
 pub mod decode;
 pub mod demucs;
@@ -46,6 +51,7 @@ pub mod onnx;
 pub use auto_stems::{
     AutoStemScope, AutoStemService, AutoStemSettings, AutoStemStatus, TrackStems,
 };
+pub use beatify::{analyze as beatify_analyze, BeatifyRecord};
 pub use clip::{render_clip, ClipEq, ClipProgram, ClipRegion, LevelPoint};
 pub use decode::{decode_audio, AudioData};
 pub use demucs::DemucsSeparator;

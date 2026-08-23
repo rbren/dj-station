@@ -1,0 +1,16 @@
+{
+  "bpm_start": 118.0,
+  "bpm_end": 123.5,
+  "beats": 40,
+  "offset_secs": 0.5,
+  "region": [
+    2.0,
+    10.0
+  ],
+  "strength": 0.6,
+  "reading": {
+    "factor": 1.0,
+    "halfShift": false
+  },
+  "ruler_group": 4
+}

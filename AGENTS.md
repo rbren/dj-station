@@ -797,3 +797,53 @@ fails if it's missing.
   Switch/Button styles to an exact end position rather than the 0.5 snap
   threshold — that is what makes a default-ON switch survive a patch round
   trip; the TS twin in the app must match.
+- Beatify tab (`PRD-beatify.md`): the fourth top-level view (`view` union in
+  App.tsx, `tab-beatify`). Like the Clip page it is OFFLINE — the
+  `beatify_*` Tauri commands (`app/src-tauri/src/beatify.rs`, all
+  `#[tauri::command(async)]`) never touch the engine, the RT thread or
+  `engine_lock`, and they are not undoable. The pipeline lives in
+  `crates/dj-analysis/src/beatify/`: `detect` (beat trackers), `grid`
+  (fit + meters + sweep), `warp` (WSOLA renderer), `audition` (click
+  track, sync check), `store` (artifacts). THE OUTPUT CONTRACT: beat n of
+  a beatified track is `phase + n × period`, exactly, with `phase` = one
+  period of head padding so beat 0 has audio behind it; there are no bars,
+  no meter and no beat array anywhere — `ruler.group` is a display
+  preference nothing else reads. Artifacts are content-hash keyed under
+  `<data_dir>/beatify/<hash>/{meta.json,warped.wav}` (machine-local,
+  gitignored) plus a best-effort `<source>.beatify.json` sidecar; Beatify
+  never rewrites the source file or the library DB row, so re-importing
+  the same audio finds its grid again.
+- Beatify detection degrades like the yt-dlp provider: `beat_this` (a
+  PyTorch model) is an OPTIONAL runtime dep probed with
+  `python3 -c "import beat_this"` (`DJ_BEAT_THIS_PYTHON` /
+  `_DEVICE` / `_CHECKPOINTS`, `DJ_BEATIFY_FORCE_DSP=1` pins the fallback
+  for tests). Without it the tab runs the built-in DSP tracker — the
+  tested default — and the header carries the install hint. Multi-seed
+  agreement (three `beat_this` checkpoints) is what fills the verdict
+  line; a single tracker reports `singleTracker`, never a fake consensus.
+- Beatify's meter law exists twice: `grid.rs` (`FLAM_GREEN_MS`,
+  `STRETCH_GREEN_PCT`, `IN_BAND_SECS`, `LEAD_IN_MAX`, `MIN/MAX_STRIDE`,
+  `anchor_stride`) and `app/src/beatify.ts`. `app/tests/BeatifyGrid.test.ts`
+  parses grid.rs to pin them equal — change both sides together, like the
+  knob/choreo twins. Beatify's IPC payloads are camelCase on both sides
+  (the §5 record format is specified that way; one convention per
+  feature).
+- Beatify's golden-audio case lives in dj-analysis alongside the clip one
+  (`tests/e2e/beatify/*.json` + `tests/e2e/goldens/beatify_*.wav`, third
+  step of `scripts/regen-goldens.sh`); it renders a MONO drifting click
+  track to keep the wav small — the stereo path is covered by the
+  in-suite warp test. Everything else about the pipeline is pinned by
+  `cargo test -p dj-analysis --release --test beatify`.
+- Beatify §6 open questions, decided: (1) a loop edited while the
+  playhead is outside it wraps at the next RULER GROUP boundary
+  (`loopWrapBeat`), never instantly and never at a loop end that may
+  never arrive; (2) re-beatifying an already-beatified track is allowed
+  but warns that anything cut from the old grid stops matching, and it
+  overwrites the same hash-keyed record (no versions); (3) the lead-in is
+  ONE global value (median onset offset + pad, `grid::lead_in`), because
+  uniformity is what keeps cuts sync-safe; (4) the phase-1 click track
+  ticks the DETECTIONS (over unwarped audio that is what proves the
+  metrical level), the phase-2 click ticks the GRID; (5) the tab reads
+  library tracks and writes nothing back to the library — a beatified
+  render is not a new library track (unlike a clip), because it is the
+  same performance, not a new one.

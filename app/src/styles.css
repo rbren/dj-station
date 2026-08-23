@@ -3389,3 +3389,333 @@ body {
   color: #e08f8f;
   font-size: 0.85rem;
 }
+
+/* --- Beatify tab -------------------------------------------------------
+   Colour semantics (MOD-1): AMBER is what was played (detections, drift,
+   waveform), TEAL is what the maths says (grid lines, anchors, cut
+   points). Warping is the act of pulling amber onto teal. */
+
+.beatify-view {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.beatify-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.beatify-bar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #9aa0aa;
+  font-size: 0.85rem;
+}
+
+.beatify-bar select {
+  background: #14161a;
+  color: #e6e9ef;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 6px 10px;
+  max-width: 380px;
+}
+
+.beatify-tracker {
+  color: #5fd0c5;
+  font-size: 0.8rem;
+}
+
+.beatify-tracker.fallback {
+  color: #d8a15f;
+}
+
+.beatify-empty {
+  color: #626b7c;
+  max-width: 46em;
+}
+
+.beatify-status {
+  color: #7dd88f;
+  font-size: 0.85rem;
+}
+
+.beatify-error {
+  color: #e08f8f;
+  font-size: 0.85rem;
+}
+
+.beatify-line {
+  color: #9aa0aa;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.beatify-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 9, 12, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.beatify-modal,
+.beatify-warn {
+  background: #16181d;
+  border: 1px solid #2a2f38;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(1100px, 94vw);
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.beatify-warn {
+  width: min(520px, 90vw);
+}
+
+.beatify-modal-head,
+.beatify-modal-foot,
+.beatify-track-head,
+.beatify-transport,
+.beatify-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.beatify-modal-head h2,
+.beatify-track-head h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.beatify-file {
+  color: #c8cdd6;
+  font-size: 0.85rem;
+}
+
+.beatify-agreement {
+  margin-left: auto;
+  color: #5fd0c5;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+
+.beatify-wave,
+.beatify-strip,
+.beatify-track-wave {
+  width: 100%;
+  background: #0e1013;
+  border: 1px solid #23262d;
+  border-radius: 6px;
+}
+
+.beatify-wave {
+  height: 130px;
+}
+
+.beatify-strip {
+  height: 74px;
+}
+
+.beatify-track-wave {
+  height: 220px;
+}
+
+.beatify-peaks {
+  fill: #d8a15f;
+  opacity: 0.85;
+}
+
+.beatify-dim {
+  fill: #0b0c0f;
+  opacity: 0.68;
+}
+
+.beatify-region {
+  fill: none;
+  stroke: #5fd0c5;
+  stroke-width: 2;
+}
+
+.beatify-drift {
+  fill: #d8a15f;
+  opacity: 0.5;
+}
+
+.beatify-disagree {
+  fill: #e08f8f;
+  opacity: 0.18;
+}
+
+.beatify-selection {
+  fill: #5fd0c5;
+  opacity: 0.14;
+}
+
+.beatify-grid {
+  stroke: #5fd0c5;
+  stroke-width: 1;
+  opacity: 0.35;
+}
+
+.beatify-grid.emph {
+  opacity: 0.75;
+  stroke-width: 1.6;
+}
+
+.beatify-density {
+  fill: #d8a15f;
+  opacity: 0.6;
+}
+
+.beatify-playhead {
+  stroke: #e6e9ef;
+  stroke-width: 1.5;
+}
+
+.beatify-inband {
+  fill: #5fd0c5;
+  opacity: 0.1;
+}
+
+.beatify-zero {
+  stroke: #2a2f38;
+}
+
+.beatify-res.good {
+  fill: #5fd0c5;
+}
+
+.beatify-res.warn {
+  fill: #d8a15f;
+}
+
+.beatify-res.bad {
+  fill: #e08f8f;
+}
+
+.beatify-panes {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.beatify-phase {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #23262d;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+/* MOD-A2: phase 2 dims until phase 1 lands — it never disappears. */
+.beatify-phase.inert {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.beatify-phase h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  color: #7e838d;
+  text-transform: uppercase;
+}
+
+.beatify-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #9aa0aa;
+  font-size: 0.8rem;
+}
+
+.beatify-slider input[type='range'] {
+  flex: 1;
+  min-width: 120px;
+}
+
+.beatify-slider input[type='number'],
+.beatify-transport input[type='number'] {
+  width: 60px;
+  background: #14161a;
+  color: #e6e9ef;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+
+.beatify-flag {
+  color: #d8a15f;
+  font-size: 0.78rem;
+}
+
+.beatify-modal button.active,
+.beatify-transport button.active {
+  border-color: #5fd0c5;
+  color: #5fd0c5;
+}
+
+.beatify-verdict {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.beatify-verdict.good {
+  color: #7dd88f;
+}
+
+.beatify-verdict.warn {
+  color: #d8a15f;
+}
+
+.beatify-verdict.bad {
+  color: #e08f8f;
+}
+
+.beatify-modal-foot .beatify-commit {
+  margin-left: 4px;
+  border-color: #5fd0c5;
+  color: #5fd0c5;
+}
+
+.beatify-modal-foot > .beatify-verdict {
+  margin-right: auto;
+}
+
+.beatify-track {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.beatify-ruler {
+  position: relative;
+  height: 16px;
+  color: #7e838d;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.beatify-ruler span {
+  position: absolute;
+  transform: translateX(-50%);
+}

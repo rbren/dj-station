@@ -22,7 +22,9 @@ import { ErrorBanner } from './components/ErrorBanner';
 import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
 import { ClipView, type ClipViewHandle } from './components/ClipView';
+import { BeatifyView } from './components/BeatifyView';
 import { clipClient } from './clip';
+import { beatifyClient } from './beatify';
 import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
 import { GRID, snap } from './components/ModulePanel';
 import { RackModule } from './components/RackModule';
@@ -84,7 +86,7 @@ export default function App() {
   const [moduleLib, setModuleLib] = useState<Manifest[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
-  const [view, setView] = useState<'rack' | 'library' | 'clip'>('rack');
+  const [view, setView] = useState<'rack' | 'library' | 'clip' | 'beatify'>('rack');
   // The library's Edit button opens a track in the (always mounted) clip
   // editor, which owns what that costs the edit already in there.
   const clipView = useRef<ClipViewHandle>(null);
@@ -1825,6 +1827,13 @@ export default function App() {
           >
             Clip
           </button>
+          <button
+            className={view === 'beatify' ? 'tab active' : 'tab'}
+            onClick={() => setView('beatify')}
+            data-testid="tab-beatify"
+          >
+            Beatify
+          </button>
         </nav>
         <button
           className="add-module-btn"
@@ -2093,6 +2102,7 @@ export default function App() {
         onSaved={() => void refresh()}
         ref={clipView}
       />
+      {view === 'beatify' && <BeatifyView client={beatifyClient} library={library} />}
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}

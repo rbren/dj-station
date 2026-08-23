@@ -4,6 +4,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod beatify;
 mod clip;
 
 use dj_engine::{
@@ -48,6 +49,8 @@ struct AppState {
     /// Keeps the stem cache filled by itself — every downloaded track,
     /// history included — so the Clip page never has to ask for one.
     auto_stems: dj_analysis::AutoStemService,
+    /// The Beatify tab's in-flight analysis (ephemeral until Save).
+    beatify: beatify::BeatifySession,
     /// Running gesture feeds by instance id (M5): stop flag + source name.
     /// Here the source is always a recorded fixture played through the
     /// mock pipeline; on macOS a camera source slots in behind the same
@@ -2683,6 +2686,7 @@ fn main() {
             clips: clip::ClipCache::default(),
             stems,
             auto_stems,
+            beatify: beatify::BeatifySession::default(),
             gesture_feeds: Mutex::new(BTreeMap::new()),
         })
         .setup(|app| {
@@ -2941,6 +2945,17 @@ fn main() {
             clip::clip_save,
             clip::clip_stem_backend,
             clip::clip_stem_status,
+            beatify::beatify_tracker_status,
+            beatify::beatify_analyze,
+            beatify::beatify_set_reading,
+            beatify::beatify_meters,
+            beatify::beatify_preview,
+            beatify::beatify_sync_check,
+            beatify::beatify_save,
+            beatify::beatify_load,
+            beatify::beatify_track_audio,
+            beatify::beatify_cancel,
+            beatify::beatify_warp_map,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
