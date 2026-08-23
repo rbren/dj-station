@@ -712,3 +712,18 @@ fails if it's missing.
   (EQ, level) re-renders the window in place, debounced, resuming at the
   same loop phase — keep that split, and keep the staleness identity
   checks allocation-free or every keystroke reads as a timeline change.
+- Audio module (`builtin.audio`, `crates/dj-engine/src/audio.rs`): the
+  `loop` switch input defaults ON (`default: SIGNAL_MAX` in the manifest);
+  a pass wraps BEFORE the sample read so the first sample of the next pass
+  and the clock trigger land on the same frame, and the sub-sample
+  remainder carries over so long loops don't drift. Panel readout comes
+  from `AudioShared` (position/rate/playing atomics published once per
+  block, surfaced via `AudioStatus`, mirroring `DeckShared`) — the RT-
+  observed `playing` replaced the old `audio_playing` knob read; do not
+  reintroduce knob-derived transport state. `TrackData::peaks` is the ONE
+  waveform-overview implementation behind both `deck_waveform` and
+  `audio_waveform`; the panel extrapolates the playhead with rAF between
+  polls (wrapping when looping). `position_for_value` resolves
+  Switch/Button styles to an exact end position rather than the 0.5 snap
+  threshold — that is what makes a default-ON switch survive a patch round
+  trip; the TS twin in the app must match.
