@@ -5,6 +5,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MidiPanel, noteName } from '../src/components/MidiPanel';
+import { RackKeysContext } from '../src/keyScope';
 
 const noop = () => {};
 
@@ -101,6 +102,39 @@ describe('MidiPanel', () => {
     // unbound keys do nothing
     fireEvent.keyDown(window, { key: 'z' });
     expect(onMidi).toHaveBeenCalledTimes(2);
+  });
+
+  it('key bindings go quiet off the rack page, sending note-off for held keys', () => {
+    const onMidi = vi.fn();
+    localStorage.setItem('dj-midi-keys:midi1', JSON.stringify({ C4: 'a' }));
+    const at = (active: boolean) => (
+      <RackKeysContext.Provider value={active}>
+        <MidiPanel
+          instance="midi1"
+          mappings={[{ name: 'C4', kind: 'note', num: 60 }]}
+          onAdd={noop}
+          onRemove={noop}
+          onMidi={onMidi}
+        />
+      </RackKeysContext.Provider>
+    );
+    const { rerender } = render(at(true));
+    fireEvent.keyDown(window, { key: 'a' });
+    expect(onMidi).toHaveBeenLastCalledWith([0x90, 60, 100]);
+
+    // Leaving the rack page releases the held note; keys pressed on other
+    // pages play nothing.
+    rerender(at(false));
+    expect(onMidi).toHaveBeenLastCalledWith([0x80, 60, 0]);
+    fireEvent.keyDown(window, { key: 'a' });
+    fireEvent.keyUp(window, { key: 'a' });
+    expect(onMidi).toHaveBeenCalledTimes(2);
+
+    // Back on the rack the binding plays again.
+    rerender(at(true));
+    fireEvent.keyDown(window, { key: 'a' });
+    expect(onMidi).toHaveBeenLastCalledWith([0x90, 60, 100]);
+    expect(onMidi).toHaveBeenCalledTimes(3);
   });
 
   it('persists key bindings per instance in localStorage', () => {

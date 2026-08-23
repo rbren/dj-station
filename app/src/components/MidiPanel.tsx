@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MidiMapping } from '../engine';
+import { useRackKeysActive } from '../keyScope';
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -68,7 +69,21 @@ export function MidiPanel(props: MidiPanelProps) {
     [instance],
   );
 
+  // Key bindings are rack-page-scoped: on other pages the listeners come
+  // off and anything held sends its note-off now (the keyup will land
+  // where we no longer listen, so waiting for it would stick notes on).
+  const active = useRackKeysActive();
+
   useEffect(() => {
+    if (!active) {
+      for (const key of held.current) {
+        for (const m of mappings) {
+          if (m.kind === 'note' && keys[m.name] === key) onMidi([0x80, m.num, 0]);
+        }
+      }
+      held.current.clear();
+      return;
+    }
     const down = (e: KeyboardEvent) => {
       if (captureFor) {
         e.preventDefault();
@@ -102,7 +117,7 @@ export function MidiPanel(props: MidiPanelProps) {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
     };
-  }, [captureFor, keys, mappings, onMidi, saveKeys]);
+  }, [active, captureFor, keys, mappings, onMidi, saveKeys]);
 
   const add = () => {
     const taken = new Set(mappings.map((m) => m.name));

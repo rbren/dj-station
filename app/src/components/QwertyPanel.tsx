@@ -5,6 +5,7 @@
 // component only owns the listeners.
 
 import { useEffect, useRef } from 'react';
+import { useRackKeysActive } from '../keyScope';
 
 /** Keys the module maps (mirrors the engine's jack table). */
 const KEY_RE = /^[a-z0-9 ]$/;
@@ -28,31 +29,47 @@ export function QwertyPanel({ instance, onKey }: QwertyPanelProps) {
     onKeyRef.current = onKey;
   }, [onKey]);
 
+  // Keys currently held, so OS key-repeat doesn't retrigger gates and a
+  // keyup always releases what its keydown pressed. A ref (not effect
+  // state) so the deactivation effect below can release them.
+  const held = useRef(new Set<string>());
+
+  // The rack page going inactive must release held gates NOW — the keyup
+  // will land on another page where we no longer listen.
+  const active = useRackKeysActive();
+  const activeRef = useRef(active);
   useEffect(() => {
-    // Keys currently held, so OS key-repeat doesn't retrigger gates and
-    // a keyup always releases what its keydown pressed.
-    const held = new Set<string>();
+    activeRef.current = active;
+    if (!active) {
+      for (const key of held.current) onKeyRef.current(key, false);
+      held.current.clear();
+    }
+  }, [active]);
+
+  useEffect(() => {
+    const heldKeys = held.current;
     const down = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       if (
+        !activeRef.current ||
         e.repeat ||
         e.metaKey ||
         e.ctrlKey ||
         e.altKey ||
         isTyping(e.target) ||
         !KEY_RE.test(key) ||
-        held.has(key)
+        heldKeys.has(key)
       ) {
         return;
       }
       // Space would otherwise scroll the rack / click a focused button.
       e.preventDefault();
-      held.add(key);
+      heldKeys.add(key);
       onKeyRef.current(key, true);
     };
     const up = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      if (!held.delete(key)) return;
+      if (!heldKeys.delete(key)) return;
       onKeyRef.current(key, false);
     };
     window.addEventListener('keydown', down);
@@ -61,7 +78,8 @@ export function QwertyPanel({ instance, onKey }: QwertyPanelProps) {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
       // Release anything still held so gates don't stick high.
-      for (const key of held) onKeyRef.current(key, false);
+      for (const key of heldKeys) onKeyRef.current(key, false);
+      heldKeys.clear();
     };
   }, []);
 

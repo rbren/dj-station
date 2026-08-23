@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { engine, onMenuAction, type MacroGroup, type MacroInfo, type ModuleMove } from './engine';
 import { isEditableTarget, useFileShortcuts } from './fileShortcuts';
+import { RackKeysContext } from './keyScope';
 import { library, type Track } from './library';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MacroBoxes } from './components/MacroBoxes';
@@ -1280,10 +1281,13 @@ export default function App() {
     [refresh, setPositions, setSelected],
   );
 
-  // Global shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z),
+  // Rack shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z),
   // rack zoom (cmd/ctrl +/-/0), select-all (cmd/ctrl+A), selection
-  // copy/paste (cmd/ctrl+C/V) and selection delete (Backspace).
+  // copy/paste (cmd/ctrl+C/V) and selection delete (Backspace). All of it
+  // acts on the patch/canvas, so none of it listens on other pages (only
+  // Save/Open/New in fileShortcuts.ts is app-global).
   useEffect(() => {
+    if (view !== 'rack') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         store.set({ pending: null });
@@ -1342,7 +1346,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [store, refresh, changeZoom, copyModules, pasteModules, removeModules, setSelected]);
+  }, [view, store, refresh, changeZoom, copyModules, pasteModules, removeModules, setSelected]);
 
   // Click-to-add from the picker: land the module at the center of the
   // current view (pan/zoom-aware), then close the modal.
@@ -2030,107 +2034,112 @@ export default function App() {
           onDeleteMacro={deleteMacroDef}
         />
       )}
+      {/* The rack stays mounted on other pages (hidden, not unmounted, so
+          panel state survives) — RackKeysContext tells its window key
+          listeners (QwertyPanel, MidiPanel) to go quiet and release. */}
       <div className="app-body" style={view === 'rack' ? undefined : { display: 'none' }}>
-        <RackStoreContext.Provider value={store}>
-          <DeckUIContext.Provider value={deckUI}>
-            <div
-              className="rack-area"
-              ref={setRackEl}
-              data-testid="rack-area"
-              style={{
-                backgroundPosition: `${pan.x}px ${pan.y}px`,
-                backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
-              }}
-              onDragOver={onRackDragOver}
-              onDrop={onRackDrop}
-              onContextMenu={onRackContextMenu}
-              onMouseDown={(e) => {
-                // Pressing the rack background abandons a pending wire,
-                // clears the selection (unless shift/cmd/ctrl — additive
-                // marquee), and arms a marquee sweep. Mousedown, not click:
-                // selection happens on mousedown too, and the synthetic
-                // click a module drag fires on the rack (mouseup landing
-                // over the background) must not wipe the drag's own
-                // selection.
-                if (e.button !== 0) return;
-                if ((e.target as HTMLElement).closest?.('.module-panel')) return;
-                // The sweep must never double as a native text-selection
-                // drag (a text selection hijacks cmd+C).
-                e.preventDefault();
-                const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-                const { pending, selected } = store.getState();
-                if (pending) setPending(null);
-                if (!additive && selected.length > 0) setSelected([]);
-                const p = toRackCoords(e.clientX, e.clientY);
-                setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
-              }}
-            >
+        <RackKeysContext.Provider value={view === 'rack'}>
+          <RackStoreContext.Provider value={store}>
+            <DeckUIContext.Provider value={deckUI}>
               <div
-                className="rack"
-                data-testid="rack"
-                ref={setRackInnerEl}
+                className="rack-area"
+                ref={setRackEl}
+                data-testid="rack-area"
                 style={{
-                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                  transformOrigin: '0 0',
+                  backgroundPosition: `${pan.x}px ${pan.y}px`,
+                  backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
+                }}
+                onDragOver={onRackDragOver}
+                onDrop={onRackDrop}
+                onContextMenu={onRackContextMenu}
+                onMouseDown={(e) => {
+                  // Pressing the rack background abandons a pending wire,
+                  // clears the selection (unless shift/cmd/ctrl — additive
+                  // marquee), and arms a marquee sweep. Mousedown, not click:
+                  // selection happens on mousedown too, and the synthetic
+                  // click a module drag fires on the rack (mouseup landing
+                  // over the background) must not wipe the drag's own
+                  // selection.
+                  if (e.button !== 0) return;
+                  if ((e.target as HTMLElement).closest?.('.module-panel')) return;
+                  // The sweep must never double as a native text-selection
+                  // drag (a text selection hijacks cmd+C).
+                  e.preventDefault();
+                  const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+                  const { pending, selected } = store.getState();
+                  if (pending) setPending(null);
+                  if (!additive && selected.length > 0) setSelected([]);
+                  const p = toRackCoords(e.clientX, e.clientY);
+                  setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
                 }}
               >
-                <MacroBoxes
-                  groups={macroGroups}
-                  zoom={zoom}
-                  onMoveGroup={(anchor, x, y, members) => moveGroup(anchor, x, y, members)}
-                  onMoveEnd={() => endModuleDrag()}
-                  onContextMenu={onMacroBoxContextMenu}
-                />
-                {nodes.map((node, i) => (
-                  <RackModule
-                    key={node.instance_id}
-                    instanceId={node.instance_id}
-                    index={i}
-                    refresh={refresh}
-                    moveModule={moveModule}
-                    endModuleDrag={endModuleDrag}
+                <div
+                  className="rack"
+                  data-testid="rack"
+                  ref={setRackInnerEl}
+                  style={{
+                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                    transformOrigin: '0 0',
+                  }}
+                >
+                  <MacroBoxes
+                    groups={macroGroups}
                     zoom={zoom}
-                    removeModule={removeModule}
-                    renameModule={renameModule}
-                    openDocs={openDocs}
-                    selectModule={selectModule}
-                    onJackClick={onJackClick}
-                    onContextMenu={onModuleContextMenu}
+                    onMoveGroup={(anchor, x, y, members) => moveGroup(anchor, x, y, members)}
+                    onMoveEnd={() => endModuleDrag()}
+                    onContextMenu={onMacroBoxContextMenu}
                   />
-                ))}
-                {nodes.length === 0 && (
-                  <p className="rack-empty">
-                    No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
-                    rack.
-                  </p>
-                )}
-                {marquee && (
-                  <div
-                    className="marquee"
-                    data-testid="marquee"
-                    style={{
-                      left: Math.min(marquee.x0, marquee.x1),
-                      top: Math.min(marquee.y0, marquee.y1),
-                      width: Math.abs(marquee.x1 - marquee.x0),
-                      height: Math.abs(marquee.y1 - marquee.y0),
-                    }}
-                  />
-                )}
-                {/* Inside the transformed rack, in rack coordinates: pan
+                  {nodes.map((node, i) => (
+                    <RackModule
+                      key={node.instance_id}
+                      instanceId={node.instance_id}
+                      index={i}
+                      refresh={refresh}
+                      moveModule={moveModule}
+                      endModuleDrag={endModuleDrag}
+                      zoom={zoom}
+                      removeModule={removeModule}
+                      renameModule={renameModule}
+                      openDocs={openDocs}
+                      selectModule={selectModule}
+                      onJackClick={onJackClick}
+                      onContextMenu={onModuleContextMenu}
+                    />
+                  ))}
+                  {nodes.length === 0 && (
+                    <p className="rack-empty">
+                      No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
+                      rack.
+                    </p>
+                  )}
+                  {marquee && (
+                    <div
+                      className="marquee"
+                      data-testid="marquee"
+                      style={{
+                        left: Math.min(marquee.x0, marquee.x1),
+                        top: Math.min(marquee.y0, marquee.y1),
+                        width: Math.abs(marquee.x1 - marquee.x0),
+                        height: Math.abs(marquee.y1 - marquee.y0),
+                      }}
+                    />
+                  )}
+                  {/* Inside the transformed rack, in rack coordinates: pan
                     and zoom move the cables through the CSS transform, so
                     they are deliberately NOT part of layoutKey. */}
-                <WireOverlay
-                  wires={wires}
-                  container={rackInnerEl}
-                  colors={wireColors}
-                  pending={pending}
-                  zoom={zoom}
-                  layoutKey={JSON.stringify(positions)}
-                />
+                  <WireOverlay
+                    wires={wires}
+                    container={rackInnerEl}
+                    colors={wireColors}
+                    pending={pending}
+                    zoom={zoom}
+                    layoutKey={JSON.stringify(positions)}
+                  />
+                </div>
               </div>
-            </div>
-          </DeckUIContext.Provider>
-        </RackStoreContext.Provider>
+            </DeckUIContext.Provider>
+          </RackStoreContext.Provider>
+        </RackKeysContext.Provider>
       </div>
     </main>
   );

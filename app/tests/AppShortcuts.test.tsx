@@ -42,6 +42,7 @@ const fakeEngine = {
   endEdit: vi.fn(async () => {}),
   moveModules: vi.fn(async () => {}),
   syncPositions: vi.fn(async () => {}),
+  qwertyKey: vi.fn(async () => {}),
 };
 
 vi.mock('../src/engine', () => ({
@@ -279,5 +280,49 @@ describe('cmd+M module picker', () => {
       const positions = JSON.parse(localStorage.getItem('dj-rack-positions') ?? '{}');
       expect(positions.oscillat1).toEqual({ x: 96, y: 96 });
     });
+  });
+});
+
+describe('rack keyboard scope', () => {
+  // The rack stays mounted (hidden) while another page is showing, so its
+  // window key listeners must gate on the active view — and release
+  // anything held at the moment of switching (the keyup lands elsewhere).
+  const QWERTY: Manifest = {
+    id: 'builtin.qwerty',
+    name: 'QWERTY',
+    version: '0.1.0',
+    abi: 'native-1',
+    inputs: [],
+    outputs: [{ id: 'q', name: 'Q' }],
+    params: [],
+  };
+
+  it('QWERTY gates and rack shortcuts go quiet on the library page', async () => {
+    state.nodes = [node('osc1', OSC), node('kb1', QWERTY)];
+    await renderApp();
+    fireEvent.keyDown(window, { key: 'q' });
+    await waitFor(() => expect(fakeEngine.qwertyKey).toHaveBeenCalledWith('kb1', 'q', true));
+    fireEvent.mouseDown(screen.getByTestId('module-header-osc1'), { shiftKey: true });
+
+    // Switching away releases the held gate...
+    fireEvent.click(screen.getByTestId('tab-library'));
+    await waitFor(() => expect(fakeEngine.qwertyKey).toHaveBeenLastCalledWith('kb1', 'q', false));
+    // ...and neither the QWERTY module nor the rack shortcuts hear keys.
+    fireEvent.keyDown(window, { key: 'w' });
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    fireEvent.keyDown(window, { key: 'm', metaKey: true });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fakeEngine.qwertyKey).toHaveBeenCalledTimes(2);
+    expect(fakeEngine.undo).not.toHaveBeenCalled();
+    expect(fakeEngine.removeModules).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('module-picker')).toBeNull();
+
+    // Back on the rack everything plays again.
+    fireEvent.click(screen.getByTestId('tab-rack'));
+    fireEvent.keyDown(window, { key: 'q' });
+    await waitFor(() => expect(fakeEngine.qwertyKey).toHaveBeenLastCalledWith('kb1', 'q', true));
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    await waitFor(() => expect(fakeEngine.undo).toHaveBeenCalledTimes(1));
   });
 });

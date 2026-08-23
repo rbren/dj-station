@@ -6,6 +6,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { resolveLayout } from '../src/components/panelLayouts';
 import { QwertyPanel } from '../src/components/QwertyPanel';
+import { RackKeysContext } from '../src/keyScope';
 import type { Manifest } from '../src/types';
 
 const KEYS = [
@@ -106,6 +107,40 @@ describe('QwertyPanel', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     fireEvent.keyDown(screen.getByTestId('field'), { key: 'q' });
     expect(onKey).not.toHaveBeenCalled();
+  });
+
+  it('goes quiet while the rack page is inactive, releasing held gates', () => {
+    // The rack stays mounted (hidden) when another page is showing, so
+    // the panel must gate on RackKeysContext, not on being mounted.
+    const onKey = vi.fn();
+    const at = (active: boolean) => (
+      <RackKeysContext.Provider value={active}>
+        <QwertyPanel instance="kb1" onKey={onKey} />
+      </RackKeysContext.Provider>
+    );
+    const { rerender } = render(at(true));
+    fireEvent.keyDown(window, { key: 'q' });
+    expect(onKey.mock.calls).toEqual([['q', true]]);
+
+    // Switching away releases the held gate immediately (its keyup will
+    // land on the other page) and further keys are ignored.
+    rerender(at(false));
+    expect(onKey.mock.calls).toEqual([
+      ['q', true],
+      ['q', false],
+    ]);
+    fireEvent.keyDown(window, { key: 'w' });
+    fireEvent.keyUp(window, { key: 'w' });
+    expect(onKey).toHaveBeenCalledTimes(2);
+
+    // Back on the rack page the keyboard plays again.
+    rerender(at(true));
+    fireEvent.keyDown(window, { key: 'e' });
+    expect(onKey.mock.calls).toEqual([
+      ['q', true],
+      ['q', false],
+      ['e', true],
+    ]);
   });
 
   it('releases held keys on unmount so gates never stick high', () => {

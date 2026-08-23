@@ -376,7 +376,16 @@ fails if it's missing.
   sizing — the `.rack`'s min extents otherwise leak through its layout box,
   grow the body past the viewport, and scroll the header away. Scrolling
   surfaces are inner and explicit (`.library`, `.docs-body`,
-  `.picker-body`, dialog lists). The
+  `.picker-body`, dialog lists).
+  Keyboard scope: the rack stays MOUNTED (hidden) on other pages, so every
+  rack window key listener gates on the active view — App's rack shortcut
+  effect checks `view !== 'rack'` directly, and QwertyPanel/MidiPanel read
+  `RackKeysContext` (`src/keyScope.ts`, provided around `.app-body`,
+  default true for headless unit tests). Going inactive must RELEASE held
+  gates/notes immediately (the keyup lands on the other page). Only
+  Save/Open/New (fileShortcuts.ts) and per-modal handlers (ContextMenu,
+  ModulePicker, KnobConfigMenu) stay page-global. Pinned by the
+  scope cases in AppShortcuts/QwertyPanel/MidiPanel tests. The
   `.wire-overlay` CSS must keep
   `z-index`, `overflow: visible` and `pointer-events: none`
   (WireOverlay.test.tsx pins it); knob right-clicks stopPropagation so
