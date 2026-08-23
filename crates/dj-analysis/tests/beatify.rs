@@ -572,14 +572,17 @@ fn beat_this_output_is_parsed_and_context_trimmed() {
     use std::os::unix::fs::PermissionsExt;
 
     // A fake interpreter standing in for `python -c <script>`: it ignores
-    // the script and prints two seeds' worth of beats spanning more than
-    // the requested region, so the context trim (ANL-2a) is exercised.
+    // the script and writes two seeds' worth of beats to the reply file
+    // (`$6`), spanning more than the requested region so the context trim
+    // (ANL-2a) is exercised. It also chatters on stdout, which the reply
+    // file exists to make harmless.
     let dir = tempfile::tempdir().expect("tempdir");
     let fake = dir.path().join("fake-python");
     let mut f = std::fs::File::create(&fake).expect("create");
     writeln!(
         f,
-        "#!/bin/sh\ncat <<'JSON'\n{{\"runs\":[{{\"seed\":\"final0\",\"beats\":[0.0,0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0,6.5,7.0,7.5,8.0,8.5,9.0]}},\
+        "#!/bin/sh\necho 'Downloading: final0.ckpt'\ncat > \"$6\" <<'JSON'\n\
+         {{\"runs\":[{{\"seed\":\"final0\",\"beats\":[0.0,0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0,6.5,7.0,7.5,8.0,8.5,9.0]}},\
          {{\"seed\":\"final1\",\"beats\":[0.01,0.51,1.01,1.51,2.01,2.51,3.01,3.51,4.01,4.51,5.01,5.51,6.01,6.51,7.01,7.51,8.01,8.51,9.01]}}]}}\nJSON"
     )
     .expect("write");
@@ -588,7 +591,7 @@ fn beat_this_output_is_parsed_and_context_trimmed() {
 
     let audio = click_track(&drifting_beats(120.0, 120.0, 24, 0.5), 1.0);
     let tracker = beatify::detect::BeatThisTracker::with_python(fake.to_str().unwrap());
-    // The fake prints beats relative to the context clip, which starts
+    // The fake reports beats relative to the context clip, which starts
     // CONTEXT_SECS before the region; only beats inside the region survive.
     let runs = tracker.detect(&audio, Some((4.0, 8.0))).expect("detect");
     assert_eq!(runs.len(), 2);
@@ -599,6 +602,21 @@ fn beat_this_output_is_parsed_and_context_trimmed() {
             .iter()
             .all(|b| *b >= 4.0 - 1e-9 && *b <= 8.0 + 1e-9));
     }
+}
+
+#[test]
+fn a_model_that_fails_at_run_time_falls_back_to_dsp_and_says_so() {
+    // Installed but broken (here: the interpreter is gone) must not cost
+    // the analysis — but the tracker id has to admit what happened, since
+    // that string is the tab's verdict line.
+    let tracker = beatify::detect::FallbackTracker::with_python("dj-station-no-such-python");
+    let audio = click_track(&drifting_beats(120.0, 120.0, 32, 0.5), 0.5);
+    let runs = tracker.detect(&audio, None).expect("dsp beats");
+    assert_eq!(runs.len(), 1);
+    assert!(runs[0].beats.len() > 8);
+    let id = tracker.id();
+    assert!(id.starts_with("dsp (beat_this failed:"), "{id}");
+    assert!(id.contains("not found"), "{id}");
 }
 
 /// The embedded inference script, against a stand-in for the package.

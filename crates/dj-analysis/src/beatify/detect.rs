@@ -162,9 +162,76 @@ pub fn tracker_status() -> TrackerStatus {
 /// The tracker Beatify runs: `beat_this` when installed, DSP otherwise.
 pub fn default_tracker() -> Box<dyn BeatTracker> {
     if !env_flag(ENV_FORCE_DSP) && probe_beat_this().is_ok() {
-        Box::new(BeatThisTracker::new())
+        Box::new(FallbackTracker::default())
     } else {
         Box::new(DspTracker)
+    }
+}
+
+/// `beat_this` with the DSP tracker behind it.
+///
+/// An installed model can still fail at run time — a broken torch, a
+/// checkpoint that will not download, an accelerator that dies mid-run —
+/// and losing the whole analysis over that is worse than analyzing the
+/// track less well. The fallback is never silent: [`BeatTracker::id`]
+/// reports which tracker actually produced the beats, and that string is
+/// what the payload and the tab's verdict line carry.
+pub struct FallbackTracker {
+    model: BeatThisTracker,
+    used: Mutex<Option<String>>,
+}
+
+impl Default for FallbackTracker {
+    fn default() -> Self {
+        FallbackTracker {
+            model: BeatThisTracker::new(),
+            used: Mutex::new(None),
+        }
+    }
+}
+
+impl FallbackTracker {
+    /// Point at a specific interpreter (tests use one that cannot work).
+    pub fn with_python(python: &str) -> Self {
+        FallbackTracker {
+            model: BeatThisTracker::with_python(python),
+            used: Mutex::new(None),
+        }
+    }
+}
+
+/// How much of the failure is worth carrying in the tracker id.
+const FAILURE_DETAIL: usize = 120;
+
+impl BeatTracker for FallbackTracker {
+    fn id(&self) -> String {
+        match self.used.lock() {
+            Ok(used) => used.clone().unwrap_or_else(|| self.model.id()),
+            Err(_) => self.model.id(),
+        }
+    }
+
+    fn detect(&self, audio: &AudioData, span: Option<(f64, f64)>) -> Result<Vec<BeatRun>> {
+        let failure = match self.model.detect(audio, span) {
+            Ok(runs) => {
+                if let Ok(mut used) = self.used.lock() {
+                    *used = Some(self.model.id());
+                }
+                return Ok(runs);
+            }
+            Err(e) => e
+                .to_string()
+                .replace('\n', " ")
+                .chars()
+                .take(FAILURE_DETAIL)
+                .collect::<String>(),
+        };
+        eprintln!("beatify: {failure} — falling back to the DSP tracker");
+        let runs = DspTracker.detect(audio, span)?;
+        if let Ok(mut used) = self.used.lock() {
+            *used = Some(format!("dsp (beat_this failed: {failure})"));
+        }
+        Ok(runs)
     }
 }
 
@@ -439,7 +506,8 @@ fn tool_env_pythons() -> Vec<PathBuf> {
 // ---------------------------------------------------------------------------
 
 /// The helper run by the interpreter. Kept tiny on purpose: it loads one
-/// checkpoint at a time, discards the downbeats (ANL-3) and prints JSON.
+/// checkpoint at a time, discards the downbeats (ANL-3) and writes the
+/// beat times as JSON to the reply file named by `argv[4]`.
 pub const SCRIPT: &str = r#"
 import json, sys, wave
 import numpy as np
@@ -485,7 +553,8 @@ for ckpt in sys.argv[3].split(","):
         device = "cpu"
         beats = track(ckpt, device)
     runs.append({"seed": ckpt, "beats": [float(b) for b in beats]})
-json.dump({"runs": runs, "device": device}, sys.stdout)
+with open(sys.argv[4], "w") as reply:
+    json.dump({"runs": runs, "device": device}, reply)
 "#;
 
 pub struct BeatThisTracker {
@@ -551,13 +620,18 @@ impl BeatTracker for BeatThisTracker {
         // out as a temporary wav.
         let (lo, hi) = context_span(audio, span);
         let clip = crate::clip::slice(audio, lo, hi - lo);
-        let temp = TempWav::write(&clip)?;
+        let temp = TempFile::wav(&clip)?;
+        // The answer comes back through a FILE, not stdout: torch, its
+        // download progress and the checkpoint loader all write where they
+        // like, and one stray line would make the reply unparseable.
+        let reply = TempFile::empty("json");
         let out = Command::new(&self.python)
             .arg("-c")
             .arg(SCRIPT)
             .arg(temp.path())
             .arg(&self.device)
             .arg(self.seeds.join(","))
+            .arg(reply.path())
             // Apple's backend is missing ops the model uses; without this
             // they raise instead of running on the CPU.
             .env("PYTORCH_ENABLE_MPS_FALLBACK", "1")
@@ -578,8 +652,16 @@ impl BeatTracker for BeatThisTracker {
                 .unwrap_or("no output");
             return Err(anyhow!("beat_this failed ({}): {detail}", out.status));
         }
+        let written = std::fs::read(reply.path()).with_context(|| {
+            let text = String::from_utf8_lossy(&out.stderr);
+            let detail = text
+                .lines()
+                .rfind(|l| !l.trim().is_empty())
+                .unwrap_or("no output");
+            format!("beat_this wrote no beats ({detail})")
+        })?;
         let parsed: ScriptOutput =
-            serde_json::from_slice(&out.stdout).context("parsing beat_this output")?;
+            serde_json::from_slice(&written).context("parsing beat_this output")?;
         Ok(parsed
             .runs
             .into_iter()
@@ -591,20 +673,28 @@ impl BeatTracker for BeatThisTracker {
     }
 }
 
-/// A wav file that deletes itself when dropped.
-struct TempWav(PathBuf);
+/// A scratch file for the subprocess exchange; deletes itself when dropped.
+struct TempFile(PathBuf);
 
-impl TempWav {
-    fn write(audio: &AudioData) -> Result<Self> {
+impl TempFile {
+    fn empty(ext: &str) -> Self {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let path =
-            std::env::temp_dir().join(format!("dj-beatify-{}-{stamp}.wav", std::process::id()));
-        std::fs::write(&path, crate::clip::wav16_bytes(audio))
-            .with_context(|| format!("writing {}", path.display()))?;
-        Ok(TempWav(path))
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        TempFile(std::env::temp_dir().join(format!(
+            "dj-beatify-{}-{stamp}-{n}.{ext}",
+            std::process::id()
+        )))
+    }
+
+    fn wav(audio: &AudioData) -> Result<Self> {
+        let file = Self::empty("wav");
+        std::fs::write(&file.0, crate::clip::wav16_bytes(audio))
+            .with_context(|| format!("writing {}", file.0.display()))?;
+        Ok(file)
     }
 
     fn path(&self) -> &Path {
@@ -612,7 +702,7 @@ impl TempWav {
     }
 }
 
-impl Drop for TempWav {
+impl Drop for TempFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
