@@ -73,7 +73,10 @@ describe('AudioPanel', () => {
   });
 
   it('draws the track waveform with the playhead at the current position', async () => {
-    const api = makeApi(makeStatus({ position_secs: 95.5 / 4, playing: true }));
+    // Parked, not playing: a playing panel extrapolates the playhead off
+    // the wall clock, so the drawn x drifts with however long the render
+    // took. `extrapolate` is pinned on its own below.
+    const api = makeApi(makeStatus({ position_secs: 95.5 / 4, playing: false }));
     render(<AudioPanel instanceId="audio1" api={api} tracks={TRACKS} pollMs={100000} />);
     await waitFor(() => expect(api.waveform).toHaveBeenCalledWith('audio1', 600));
     const peaks = screen.getByTestId('audio-waveform').querySelector('.waveform-peaks');
