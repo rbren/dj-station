@@ -46,7 +46,7 @@ import {
   SILENCE_DB,
   STEM_NAMES,
 } from '../clip';
-import { startGaplessLoop, type LoopHandle } from '../clipAudio';
+import { ClipTransport, type TransportHost } from '../clipTransport';
 import { isEditableTarget } from '../fileShortcuts';
 import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
@@ -157,6 +157,58 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
   const request = useMemo(() => ({ sources: sourceRefs, program }), [sourceRefs, program]);
 
   const stemPick = stemChoice.trackId === pick ? stemChoice.stem : '';
+
+  // --- playback: the owner ------------------------------------------------
+  //
+  // Every source that can make sound belongs to ONE ClipTransport
+  // (src/clipTransport.ts). This component never touches an audio node: it
+  // hands the transport a host to read the live edit through, calls
+  // commands (further down, and from the handlers below), and renders the
+  // status it is given back. See AGENTS.md for why: overlapping async play
+  // requests used to leave a second source playing with nobody holding its
+  // handle. The owner is declared up here because the editing handlers
+  // below issue commands to it.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const transportRef = useRef<ClipTransport | null>(null);
+
+  // What the transport needs to read at CALL time, not at render time: the
+  // host closes over this ref so a single transport instance survives every
+  // edit. Updated in an effect that runs before the ones that issue
+  // commands, so a command always sees the render it was triggered by.
+  const live = useRef({ clip, request, duration });
+  useEffect(() => {
+    live.current = { clip, request, duration };
+  });
+
+  // One effect creates the transport and one effect destroys it, so React
+  // StrictMode's mount/unmount/mount leaves nothing of the first instance
+  // behind: it is disposed (which stops everything and makes it refuse
+  // further commands) and replaced by a fresh one. The host is built here
+  // rather than memoized above so the transport owns nothing that outlives
+  // it, and reads everything that changes through `live`.
+  useEffect(() => {
+    const host: TransportHost = {
+      duration: () => live.current.duration,
+      // The editor only renders an <audio> element once a track is open,
+      // so the transport looks it up when it needs it.
+      element: () => audioRef.current,
+      render: (start, len) => live.current.clip.previewAudio(live.current.request, start, len),
+      onStatus: (s) => {
+        setPlaying(s.playing);
+        setPlayhead(s.playhead);
+      },
+    };
+    const transport = new ClipTransport(host, {
+      windowSecs: PLAY_WINDOW_SECS,
+      tickMs: LOOP_TICK_MS,
+      toneDelayMs: PREVIEW_DELAY_MS,
+    });
+    transportRef.current = transport;
+    return () => {
+      transportRef.current = null;
+      transport.dispose();
+    };
+  }, []);
 
   // Viewport, clamped against the current duration (edits shrink clips).
   const vpLen = Math.min(vp ? vp.end - vp.start : duration, duration);
@@ -274,7 +326,8 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
           setFuture([]);
           setSelection(null);
           setVp(null);
-          setPlayhead(0);
+          // A different program entirely: stop, don't play the old render.
+          transportRef.current?.stop(0);
           setName(stem ? `${source.title} (${stem})` : `${source.title} (clip)`);
           setStatus(`Editing "${label}" — the original is never modified`);
           return;
@@ -422,7 +475,7 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
       } else {
         dragRef.current = { kind: 'select', anchor: t };
         setSelection({ start: t, end: t });
-        setPlayhead(t);
+        transportRef.current?.seek(t);
       }
       setDragging(true);
     },
@@ -458,10 +511,10 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
         const target = drag.base.start + drag.delta;
         apply((p) => moveRange(p, drag.base.start, drag.base.end, target));
         setSelection({ start: target, end: target + (drag.base.end - drag.base.start) });
-        setPlayhead(target);
+        transportRef.current?.seek(target);
       } else {
-        // A plain click inside the selection just parks the playhead.
-        setPlayhead(drag.anchor);
+        // A plain click inside the selection just moves the playhead.
+        transportRef.current?.seek(drag.anchor);
       }
     };
     window.addEventListener('mousemove', move);
@@ -553,191 +606,17 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
     };
   }, [dragPoint, timeAt]);
 
-  // --- playback ----------------------------------------------------------
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const objectUrl = useRef<string | null>(null);
-  /** The rendered window the <audio> element currently holds. */
-  const windowRef = useRef<{ start: number; end: number; loop: boolean } | null>(null);
-
-  useEffect(
-    () => () => {
-      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-    },
-    [],
-  );
-
-  /** Live gapless loop (Web Audio), when one is running. */
-  const loopRef = useRef<LoopHandle | null>(null);
-
-  /** Pending debounced re-render of the playing window after a tone edit. */
-  const toneTimer = useRef<number | null>(null);
-  const clearToneTimer = useCallback(() => {
-    if (toneTimer.current !== null) clearTimeout(toneTimer.current);
-    toneTimer.current = null;
-  }, []);
-  useEffect(() => clearToneTimer, [clearToneTimer]);
-
-  /** Where playback has actually got to, from whichever backend owns it. */
-  const livePosition = useCallback(() => {
-    const w = windowRef.current;
-    if (!w) return null;
-    const handle = loopRef.current;
-    if (handle) return Math.min(duration, w.start + handle.position());
-    const el = audioRef.current;
-    return el ? Math.min(duration, w.start + el.currentTime) : null;
-  }, [duration]);
-
-  const stopLoopNode = useCallback(() => {
-    loopRef.current?.stop();
-    loopRef.current = null;
-  }, []);
-
-  /** Stop both backends and park the playhead where playback got to.
-   *  Written out rather than delegating to the helpers above: effects call
-   *  this, and `react-hooks/set-state-in-effect` only sees through a
-   *  self-contained callback. */
-  const haltPlayback = useCallback(() => {
-    const w = windowRef.current;
-    const handle = loopRef.current;
-    const el = audioRef.current;
-    if (w) {
-      const within = handle ? handle.position() : (el?.currentTime ?? 0);
-      setPlayhead(Math.min(duration, w.start + within));
-    }
-    handle?.stop();
-    loopRef.current = null;
-    if (toneTimer.current !== null) clearTimeout(toneTimer.current);
-    toneTimer.current = null;
-    el?.pause();
-    setPlaying(false);
-  }, [duration]);
-
-  useEffect(() => () => stopLoopNode(), [stopLoopNode]);
-
-  /** Fetch a rendered window and start playing it.
-   *
-   *  A loop goes through Web Audio, which wraps at a sample boundary —
-   *  `<audio loop>` re-seeks instead, and the webview renders that as
-   *  ~100 ms of silence every pass. Linear playback stays on the element
-   *  and chains 60 s windows from `startSecs` to the end.
-   *
-   *  `seekWithin` resumes this many seconds into the fetched window, so a
-   *  re-render (an EQ tweak, say) can pick up where it left off. */
-  const playFrom = useCallback(
-    async (startSecs: number, loopRange: Range | null, seekWithin = 0) => {
-      let start: number;
-      let end: number;
-      if (loopRange) {
-        start = loopRange.start;
-        end = Math.min(loopRange.end, loopRange.start + PLAY_WINDOW_SECS);
-      } else {
-        // Play again from the top when the playhead sits at the end.
-        start = startSecs >= duration - 0.01 ? 0 : Math.max(0, startSecs);
-        end = Math.min(duration, start + PLAY_WINDOW_SECS);
-      }
-      if (end - start <= 1e-3) return;
-      const bytes = await clip.previewAudio(request, start, end - start);
-      const el = audioRef.current;
-      if (!bytes) return;
-
-      // Whatever was playing is superseded by this window.
-      stopLoopNode();
-      if (loopRange) {
-        const handle = await startGaplessLoop(bytes, seekWithin);
-        if (handle) {
-          el?.pause();
-          loopRef.current = handle;
-          windowRef.current = { start, end, loop: true };
-          setPlayhead(start + handle.position());
-          setPlaying(true);
-          return;
-        }
-        // No Web Audio here: fall through to the element's own looping.
-      }
-      if (!el) return;
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
-      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-      objectUrl.current = url;
-      windowRef.current = { start, end, loop: loopRange !== null };
-      el.src = url;
-      el.loop = loopRange !== null;
-      if (seekWithin > 0) {
-        // Seeking only sticks once the duration is known, so try now (for
-        // runtimes that are ready immediately) and again on metadata.
-        const seek = () => {
-          try {
-            el.currentTime = seekWithin;
-          } catch {
-            // Not seekable yet.
-          }
-        };
-        el.addEventListener('loadedmetadata', seek, { once: true });
-        seek();
-      }
-      setPlayhead(start + seekWithin);
-      setPlaying(true);
-      try {
-        await el.play();
-      } catch {
-        // jsdom (and a webview without an output device) can't play; the
-        // element still holds the rendered audio.
-      }
-    },
-    [clip, duration, request, stopLoopNode],
-  );
-
-  // A Web Audio loop has no timeupdate events; poll it for the playhead.
-  useEffect(() => {
-    if (!playing) return;
-    const timer = setInterval(() => {
-      if (!loopRef.current) return;
-      const at = livePosition();
-      if (at !== null) setPlayhead(at);
-    }, LOOP_TICK_MS);
-    return () => clearInterval(timer);
-  }, [livePosition, playing]);
-
+  // --- playback: commands -------------------------------------------------
   const togglePlay = useCallback(() => {
-    if (playing) {
-      haltPlayback();
-    } else {
-      void playFrom(playhead, loop && sel ? sel : null);
-    }
-  }, [haltPlayback, loop, playFrom, playhead, playing, sel]);
+    const transport = transportRef.current;
+    if (!transport) return;
+    if (transport.playing) transport.pause();
+    else transport.play(transport.playhead, loop && sel ? sel : null);
+  }, [loop, sel]);
 
   const stop = useCallback(() => {
-    stopLoopNode();
-    audioRef.current?.pause();
-    windowRef.current = null;
-    setPlaying(false);
-    setPlayhead(sel ? sel.start : 0);
-  }, [sel, stopLoopNode]);
-
-  // Track the playhead and chain the next window when one runs out.
-  useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
-    const onTime = () => {
-      const w = windowRef.current;
-      if (w) setPlayhead(Math.min(duration, w.start + el.currentTime));
-    };
-    const onEnded = () => {
-      const w = windowRef.current;
-      if (!w) return;
-      if (!w.loop && w.end < duration - 0.01) {
-        void playFrom(w.end, null);
-      } else {
-        setPlaying(false);
-        setPlayhead(w.loop ? w.start : duration);
-      }
-    };
-    el.addEventListener('timeupdate', onTime);
-    el.addEventListener('ended', onEnded);
-    return () => {
-      el.removeEventListener('timeupdate', onTime);
-      el.removeEventListener('ended', onEnded);
-    };
-  }, [duration, playFrom]);
+    transportRef.current?.stop(sel ? sel.start : 0);
+  }, [sel]);
 
   // An edit makes the fetched audio stale. What that costs playback
   // depends on WHAT changed:
@@ -747,10 +626,6 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
   // - tone only (EQ, level automation): the timeline is untouched, so
   //   re-fetch the same window and carry on from the same spot — pausing
   //   for an EQ tweak would make the control useless for auditioning.
-  //   Debounced, because a knob drag streams edits and each re-fetch
-  //   renders the whole window.
-  //
-  // Leaving the page pauses too (its shortcuts detach with it).
   const lastRequest = useRef(request);
   useEffect(() => {
     const prev = lastRequest.current;
@@ -763,53 +638,20 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
       prev.program.regions !== request.program.regions ||
       prev.program.overlays !== request.program.overlays ||
       prev.program.crossfade_ms !== request.program.crossfade_ms;
-    clearToneTimer();
-    if (timelineChanged) {
-      if (playing) haltPlayback();
-      windowRef.current = null;
-      return;
-    }
-    if (!playing) return;
-    toneTimer.current = window.setTimeout(() => {
-      toneTimer.current = null;
-      const w = windowRef.current;
-      if (!w) return;
-      if (w.loop) {
-        // Resume at the same phase of the loop, so the audition keeps
-        // its place while the tone changes underneath it.
-        const phase = (livePosition() ?? w.start) - w.start;
-        void playFrom(w.start, sel && loop ? sel : null, Math.max(0, phase));
-      } else {
-        void playFrom(livePosition() ?? w.start, null);
-      }
-    }, PREVIEW_DELAY_MS);
-  }, [clearToneTimer, haltPlayback, livePosition, loop, playFrom, playing, request, sel]);
+    if (timelineChanged) transportRef.current?.invalidate();
+    else transportRef.current?.refreshTone();
+  }, [request]);
 
-  // Keep playback in step with the selection. The <audio> element holds a
-  // rendered *window*, so changing or clearing the loop range while it
-  // plays would otherwise keep looping the old span until the next
-  // pause/play — re-fetch instead, so the change is heard immediately.
+  // Keep playback in step with the selection, so a loop follows its edges
+  // live instead of looping the old span until the next pause/play.
   useEffect(() => {
-    if (!playing) return;
-    const w = windowRef.current;
-    if (!w) return;
-    const want = loop && sel ? sel : null;
-    if (want) {
-      const wantEnd = Math.min(want.end, want.start + PLAY_WINDOW_SECS);
-      const same =
-        w.loop && Math.abs(w.start - want.start) < 1e-3 && Math.abs(w.end - wantEnd) < 1e-3;
-      if (!same) void playFrom(want.start, want);
-    } else if (w.loop) {
-      // The loop range is gone (selection cleared/changed, or Loop turned
-      // off): carry on linearly from where the loop had got to.
-      const el = audioRef.current;
-      const at = el ? Math.min(duration, w.start + el.currentTime) : w.start;
-      void playFrom(at, null);
-    }
-  }, [duration, loop, playFrom, playing, sel]);
+    transportRef.current?.setLoop(loop && sel ? sel : null);
+  }, [loop, sel]);
+
+  // Leaving the page pauses (its shortcuts detach with it).
   useEffect(() => {
-    if (!active && playing) haltPlayback();
-  }, [active, playing, haltPlayback]);
+    if (!active) transportRef.current?.pause();
+  }, [active]);
 
   // --- keyboard shortcuts (page-scoped; see AGENTS.md keyboard scope) ----
   useEffect(() => {

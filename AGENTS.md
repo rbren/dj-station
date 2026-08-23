@@ -618,22 +618,47 @@ fails if it's missing.
   hides itself, pauses playback and detaches its shortcuts — space,
   ctrl/cmd+Z/shift+Z/Y). Playback streams the RENDERED edit: 60 s WAV
   windows through `clip_preview_audio`, chaining windows as they run out.
-  Two backends, one window: linear play uses the `<audio>` element, but a
-  LOOPED selection runs the same bytes through Web Audio
-  (`src/clipAudio.ts`, `AudioBufferSourceNode.loop`) because the media
-  element's own `loop` re-seeks and drops ~100 ms at every wrap — the
-  renderer's splice is already sample-exact, so any audible gap is the
-  frontend's. What an edit costs playback depends on WHAT changed:
-  a TIMELINE change (sources/regions/overlays/crossfade — identity-compared
-  on the memoized `request`, so keep `sourceRefs` memoized separately)
-  stops, because every output time now means something else; a TONE-ONLY
-  change (EQ, level) re-renders the window in place, debounced, and
-  resumes at the same loop phase, since pausing for an EQ tweak would make
-  the control useless for auditioning. Selection changes re-fetch too, so
-  a loop follows its edges live. `haltPlayback` is deliberately
-  self-contained (no calls to the neighbouring `livePosition`/`stopLoopNode`
-  helpers): effects call it, and `react-hooks/set-state-in-effect` flags a
-  callback whose setState it can only reach through another callback.
+  ALL of it belongs to ONE owner, `ClipTransport` (`src/clipTransport.ts`):
+  ClipView never touches an audio node, it calls commands (`play`, `pause`,
+  `stop`, `seek`, `setLoop`, `refreshTone`, `invalidate`, `dispose`) and
+  renders the `onStatus` it gets back. The transport owns the element src
+  and object URL, the loop node, the loaded window, the playhead, the
+  playhead ticker and the tone debounce; it reads the live edit back
+  through its host (`duration`/`element`/`render`), so ONE instance
+  survives every edit. Four rules make a second source impossible, and
+  `tests/ClipTransport.test.ts` pins each with a fake host whose renders
+  and decodes resolve when the test says so:
+  (1) one slot — `source` is filled by `install` only ever immediately
+  after `release` has emptied it, so no instant has two live sources;
+  (2) epochs — every command bumps one, and each async continuation drops
+  out if its epoch is stale, so a late render or decode is discarded;
+  (3) nothing sounds before its last staleness check — decoding
+  (`prepareLoop`) is side-effect free and the node starts synchronously
+  after it, which is why `clipAudio` splits prepare from start (a
+  decode-and-start call left the loser of a race playing with nobody
+  holding its handle — the "playing twice, lost control of one" bug);
+  (4) disposal is final, so StrictMode's mount/unmount/mount leaves
+  nothing behind. The transport is therefore created AND disposed in one
+  `[]` effect (never memoized: the owner must not outlive the mount), and
+  that effect sits ABOVE the editing handlers in the component, because
+  `react-hooks/immutability` rejects writing a ref that hooks declared
+  earlier already captured. Two backends, one window: linear play uses the
+  `<audio>` element, but a LOOPED range runs the same bytes through Web
+  Audio (`AudioBufferSourceNode.loop`) because the media element's own
+  `loop` re-seeks and drops ~100 ms at every wrap — the renderer's splice
+  is already sample-exact, so any audible gap is the frontend's. What an
+  edit costs playback depends on WHAT changed: a TIMELINE change
+  (sources/regions/overlays/crossfade — identity-compared on the memoized
+  `request`, so keep `sourceRefs` memoized separately) invalidates,
+  because every output time now means something else; a TONE-ONLY change
+  (EQ, level) re-renders the window in place, debounced, and resumes at
+  the same loop phase, since pausing for an EQ tweak would make the
+  control useless for auditioning. A re-render keeps the OLD source
+  playing until the new one is ready and swaps, rather than gapping.
+  Selection changes re-fetch too, so a loop follows its edges live, and
+  clicking the waveform `seek`s (jumping live playback, not just parking
+  the cursor) — the transport owns the playhead, so nothing else may
+  write it.
   Sources are `{track_id, stem}` pairs, not bare ids: the picker can open
   ONE ISOLATED STEM of a track (`clip_stem_*` commands over `StemJobs`)
   and edit it exactly like a full mix — the stem is part of the cache key,

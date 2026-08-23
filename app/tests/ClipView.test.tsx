@@ -3,6 +3,7 @@
 // track. The backend is mocked; the edit math itself is pinned by
 // ClipEdits.test.ts and the rendered audio by dj-analysis's golden test.
 
+import { StrictMode } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClipView } from '../src/components/ClipView';
@@ -594,6 +595,122 @@ describe('ClipView', () => {
     expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
     const last = (clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls.at(-1);
     expect(last?.[0].program.eq.bands[0].gain_db).toBeCloseTo(9.9, 5);
+  });
+
+  // The reported bug: "at one point the track started playing back twice
+  // and I lost control over one of them". Every one of these is a way the
+  // page used to end up with two sources, or one nobody could stop.
+  // ClipTransport.test.ts pins the same invariants on the owner itself.
+  describe('one source, always', () => {
+    const liveLoops = (starts: FakeLoop[]) => starts.filter((s) => !s.stopped);
+
+    it('starts one source however hard play is hammered', async () => {
+      const starts = installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+      fireEvent.click(screen.getByTestId('clip-loop'));
+
+      const play = screen.getByTestId('clip-play');
+      for (let i = 0; i < 8; i++) fireEvent.click(play);
+      await waitFor(() => expect(starts.length).toBeGreaterThan(0));
+      await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
+
+      // ...and the one that is live is the one the transport can stop.
+      fireEvent.click(screen.getByTestId('clip-stop'));
+      await waitFor(() => expect(liveLoops(starts)).toHaveLength(0));
+    });
+
+    it('keeps one source while the selection is dragged during playback', async () => {
+      const starts = installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+      fireEvent.click(screen.getByTestId('clip-loop'));
+      fireEvent.click(screen.getByTestId('clip-play'));
+      await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
+
+      // Re-sweep the loop over and over: each gesture supersedes a render
+      // and a decode that are still in flight.
+      const wave = sizeTimeline('clip-waveform');
+      for (const x of [650, 700, 750, 800, 850]) {
+        fireEvent.mouseDown(wave, { clientX: 100 });
+        fireEvent.mouseMove(window, { clientX: x });
+        fireEvent.mouseUp(window);
+      }
+      await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
+      expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
+    });
+
+    it('stops the loop when the page unmounts', async () => {
+      const starts = installWebAudio(4);
+      const clip = clipMock();
+      const library = libraryMock();
+      const view = render(<ClipView clip={clip} library={library} />);
+      await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+      fireEvent.click(screen.getByTestId('clip-open-track'));
+      await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
+      select(2, 6);
+      fireEvent.click(screen.getByTestId('clip-loop'));
+      fireEvent.click(screen.getByTestId('clip-play'));
+      await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
+
+      view.unmount();
+      expect(liveLoops(starts)).toHaveLength(0);
+    });
+
+    it('survives StrictMode double-mounting with one live source', async () => {
+      const starts = installWebAudio(4);
+      const clip = clipMock();
+      render(
+        <StrictMode>
+          <ClipView clip={clip} library={libraryMock()} />
+        </StrictMode>,
+      );
+      await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+      fireEvent.click(screen.getByTestId('clip-open-track'));
+      await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
+      select(2, 6);
+      fireEvent.click(screen.getByTestId('clip-loop'));
+      fireEvent.click(screen.getByTestId('clip-play'));
+
+      await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
+      fireEvent.click(screen.getByTestId('clip-stop'));
+      await waitFor(() => expect(liveLoops(starts)).toHaveLength(0));
+    });
+
+    it('stops playing the old track when another one is opened', async () => {
+      const starts = installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+      fireEvent.click(screen.getByTestId('clip-loop'));
+      fireEvent.click(screen.getByTestId('clip-play'));
+      await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
+
+      fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '8' } });
+      fireEvent.click(screen.getByTestId('clip-open-track'));
+
+      await waitFor(() => expect(liveLoops(starts)).toHaveLength(0));
+      expect(screen.getByTestId('clip-play').textContent).toBe('▶');
+      expect(screen.getByTestId('clip-playhead-readout').textContent).toBe('0:00.00');
+    });
+
+    it('moves the playhead on a click, even mid-playback', async () => {
+      const clip = clipMock();
+      await openTrack(clip);
+      fireEvent.click(screen.getByTestId('clip-play'));
+      await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
+
+      const wave = sizeTimeline('clip-waveform');
+      fireEvent.mouseDown(wave, { clientX: 400 });
+      fireEvent.mouseUp(window);
+
+      // Playback re-fetches from the click instead of carrying on from the
+      // window it happened to be holding.
+      await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 4, 6));
+      expect(screen.getByTestId('clip-playhead-readout').textContent).toBe('0:04.00');
+    });
   });
 
   it('separates stems on demand and then edits one in isolation', async () => {

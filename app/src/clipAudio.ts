@@ -9,8 +9,17 @@
 // Linear playback stays on the <audio> element: it streams 60 s windows
 // and never wraps, so it has nothing to gain from holding whole buffers
 // in memory. This module is also the fallback boundary: where there is no
-// AudioContext (jsdom, an ancient webview) `startGaplessLoop` returns null
-// and the caller falls back to the element.
+// AudioContext (jsdom, an ancient webview) `prepareLoop` returns null and
+// the caller falls back to the element.
+//
+// DECODING AND STARTING ARE SEPARATE ON PURPOSE. Decoding is async;
+// starting a node is not. If one call did both, a caller superseded
+// mid-decode would already have made sound by the time it learned it was
+// stale — a playing source with no owner holding its handle, which is
+// exactly how the Clip page ended up playing a track twice with one copy
+// uncontrollable. `prepareLoop` therefore makes NO sound: it hands back a
+// `PreparedLoop` that the owner starts synchronously, after its last
+// staleness check.
 
 /** A running gapless loop. */
 export interface LoopHandle {
@@ -19,6 +28,14 @@ export interface LoopHandle {
   /** Length of one pass, in seconds. */
   readonly duration: number;
   stop(): void;
+}
+
+/** Decoded audio, ready to loop but silent until `start` is called. */
+export interface PreparedLoop {
+  /** Length of one pass, in seconds. */
+  readonly duration: number;
+  /** Start looping now, `offsetSecs` into the buffer. Call once. */
+  start(offsetSecs?: number): LoopHandle;
 }
 
 type AudioContextCtor = typeof AudioContext;
@@ -56,32 +73,26 @@ export function closeAudio(): void {
 }
 
 /**
- * Decode `wavBytes` and start looping it immediately, gaplessly.
- *
- * `offsetSecs` starts the first pass that far in, which lets a caller
- * re-render the loop (an EQ tweak while auditioning) and pick the phase
- * back up where it left off instead of jumping to the top.
+ * Decode `wavBytes` for gapless looping. Makes no sound.
  *
  * Returns null when Web Audio is unavailable or the bytes will not decode,
  * so the caller can fall back to the media element rather than going
  * silent.
  */
-export async function startGaplessLoop(
-  wavBytes: ArrayBuffer,
-  offsetSecs = 0,
-): Promise<LoopHandle | null> {
+export async function prepareLoop(wavBytes: ArrayBuffer): Promise<PreparedLoop | null> {
   const ctx = sharedContext();
   if (!ctx) return null;
   let buffer: AudioBuffer;
   try {
     // decodeAudioData detaches its input, so hand it a copy: the caller's
-    // bytes stay usable (e.g. for the fallback path).
+    // bytes stay usable (e.g. for the media-element fallback).
     buffer = await ctx.decodeAudioData(wavBytes.slice(0));
   } catch {
     return null;
   }
-  // Autoplay policies suspend fresh contexts until a gesture; play() is
-  // always reached from a click or key press, so resuming here is safe.
+  // Autoplay policies suspend fresh contexts until a gesture; play is
+  // always reached from a click or key press, so resuming here is safe —
+  // and resuming an idle context makes no sound of its own.
   if (ctx.state === 'suspended') {
     try {
       await ctx.resume();
@@ -90,7 +101,13 @@ export async function startGaplessLoop(
       // context resumes on its own.
     }
   }
+  return {
+    duration: buffer.duration,
+    start: (offsetSecs = 0) => startLoop(ctx, buffer, offsetSecs),
+  };
+}
 
+function startLoop(ctx: AudioContext, buffer: AudioBuffer, offsetSecs: number): LoopHandle {
   const source = ctx.createBufferSource();
   source.buffer = buffer;
   source.loop = true;
