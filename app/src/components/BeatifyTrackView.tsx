@@ -1,37 +1,53 @@
 // Beatify track view (PRD §4): the warped track, gridded, playable.
 //
-// The audio is constant-tempo, so every grid line is `phase + n × period`
-// (TV-1) and seeking to a beat is phase-correct by construction (TV-7).
-// Beats are the atomic unit: clicks snap to the nearest beat (TV-6),
-// selections snap outward to whole beats (TV-14).
+// The playback surface is the shared AudioTimeline (the Clip page's
+// editor timeline): same sweep/resize/slide selection, same wheel zoom
+// around the cursor, same transport row. What Beatify adds through its
+// hooks:
 //
-// Continuity (TV-24): UI state never tears the audio element down. Zoom,
-// selection, loop and follow-mode changes only mutate scheduling
-// parameters — looping is enforced by rewinding the SAME element, never by
-// reloading it, and the playhead is read from the element's own clock on
-// requestAnimationFrame (never setInterval).
+//   - QUANTIZED gestures (TV-6/TV-14): every raw time passes through
+//     `snap` — clicks seek to the nearest beat (⌘ frees them), swept
+//     selections snap OUTWARD to whole beats, slid selections move by
+//     whole beats. The audio is constant-tempo, so every beat is
+//     `phase + n × period` (TV-1) and a snapped seek is phase-correct
+//     by construction (TV-7).
+//   - the beat grid as ruler ticks (teal, MOD-1): line spacing follows
+//     the zoom (TV-2, gridLod), emphasized every `group` beats, with
+//     beat numbers as the ruler labels.
+//   - the per-beat confidence band at the closest zooms (TV-5, amber).
+//
+// Audio belongs to ONE ClipTransport (src/clipTransport.ts), exactly as
+// on the Clip page: windows are fetched from the saved warped render,
+// loops follow the selection live, and the view only renders the status
+// it is handed back.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   beatAt,
   beatTime,
   clampBeat,
   gridLines,
   gridLod,
-  loopWrapBeat,
   qualityLevel,
   selectionLabel,
+  snapSelection,
+  snapTime,
   timecode,
   verdictLabel,
-  ZOOM_BEATS,
   type BeatifyTrack,
+  type Grid,
 } from '../beatify';
-import { peaksPath, WAVEFORM_VIEW_W as W } from './WaveformView';
+import type { TimeTick } from '../clip';
+import { ClipTransport, type TransportHost } from '../clipTransport';
+import { AudioTimeline, viewSpan, zoomView, type Range } from './AudioTimeline';
 
 const WAVE_H = 180;
 /** Playback windows are fetched in chunks; the backend caps them too. */
 export const WINDOW_SECS = 120;
+/** Playhead refresh while a Web Audio loop runs. */
+const LOOP_TICK_MS = 50;
+/** Height of the confidence band, viewBox units (TV-5). */
+const DENSITY_H = 20;
 
 export interface BeatifyTrackViewProps {
   track: BeatifyTrack;
@@ -40,248 +56,134 @@ export interface BeatifyTrackViewProps {
   onRebeatify(): void;
 }
 
-interface Selection {
-  startBeat: number;
-  endBeat: number;
+/** Beat-quantizing gesture hooks for AudioTimeline (TV-6/TV-9/TV-14). */
+export function beatSnap(grid: Grid) {
+  return {
+    seek: (secs: number, free: boolean) => (free ? secs : snapTime(grid, secs)),
+    range: (r: Range): Range => {
+      const s = snapSelection(grid, r.start, r.end);
+      return { start: beatTime(grid, s.startBeat), end: beatTime(grid, s.endBeat) };
+    },
+    slide: (r: Range): Range => {
+      const start = snapTime(grid, r.start);
+      return { start, end: start + (r.end - r.start) };
+    },
+  };
 }
 
 export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrackViewProps) {
   const grid = track.record.grid;
+  const duration = track.durationSecs;
   const [group, setGroup] = useState(track.record.ruler.group || 4);
-  const [zoom, setZoom] = useState(0);
-  const [centerBeat, setCenterBeat] = useState(0);
-  const [selection, setSelection] = useState<Selection | null>(null);
+  const [vp, setVp] = useState<Range | null>(null);
+  const [selection, setSelection] = useState<Range | null>(null);
   const [loop, setLoop] = useState(false);
   const [follow, setFollow] = useState(true);
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
 
+  const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
+
+  // --- playback: one ClipTransport owns everything that sounds ----------
+  //
+  // The parent keys this component by track+render, so a re-beatify
+  // remounts it: the transport, viewport and selection all start fresh
+  // against the new audio.
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  /** Latest playhead, readable from callbacks without re-binding them
-   *  (written by the rAF loop and by seeks, never during render). */
-  const playheadRef = useRef(0);
-  const objectUrl = useRef<string | null>(null);
-  /** Output-time offset of the loaded audio window. */
-  const windowStart = useRef(0);
-  const loopRef = useRef<{ from: number; to: number } | null>(null);
+  const transportRef = useRef<ClipTransport | null>(null);
+  const live = useRef({ track, loadAudio, duration, follow });
+  useLayoutEffect(() => {
+    live.current = { track, loadAudio, duration, follow };
+  });
 
-  const visibleBeats = ZOOM_BEATS[zoom] ?? grid.beats;
-  const span = Math.min(grid.beats, Math.max(1, visibleBeats));
-  // TV-13: following is a derived view centre, not stored state — a manual
-  // scroll (which sets `centerBeat`) simply stops being overridden.
-  const center = follow && playing ? beatAt(grid, playhead) : centerBeat;
-  const firstBeat = Math.max(0, Math.min(grid.beats - span, Math.round(center - span / 2)));
-  const lastBeat = Math.min(grid.beats - 1, firstBeat + span);
-  const lod = gridLod(span, group);
-
-  const fromSecs = beatTime(grid, firstBeat);
-  const toSecs = beatTime(grid, lastBeat);
-  const xOf = useCallback(
-    (secs: number) => ((secs - fromSecs) / Math.max(1e-6, toSecs - fromSecs)) * W,
-    [fromSecs, toSecs],
-  );
-
-  useEffect(
-    () => () => {
-      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-    },
-    [],
-  );
-
-  /** Load the window containing `secs` and (optionally) start playing. */
-  const loadWindow = useCallback(
-    async (secs: number, autoplay: boolean) => {
-      const start = Math.max(0, Math.floor(secs / WINDOW_SECS) * WINDOW_SECS);
-      const bytes = await loadAudio(track.trackId, start, WINDOW_SECS);
-      if (!bytes) return;
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
-      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-      objectUrl.current = url;
-      const el = audioRef.current;
-      if (!el) return;
-      windowStart.current = start;
-      el.src = url;
-      el.currentTime = Math.max(0, secs - start);
-      if (autoplay) {
-        try {
-          await el.play();
-          setPlaying(true);
-        } catch {
-          // jsdom / no output device: the element still holds the audio.
-        }
-      }
-    },
-    [loadAudio, track.trackId],
-  );
-
-  // Playhead from the element's own clock, on rAF (TV-24).
   useEffect(() => {
-    let raf = 0;
-    const tick = () => {
-      const el = audioRef.current;
-      if (el) {
-        const at = windowStart.current + el.currentTime;
-        playheadRef.current = at;
-        setPlayhead(at);
-        const bounds = loopRef.current;
-        if (bounds && at >= bounds.to) {
-          // Loop bounds are enforced by rewinding the SAME source; the
-          // element is never rebuilt, so there is no click and no gap.
-          el.currentTime = Math.max(0, bounds.from - windowStart.current);
+    const host: TransportHost = {
+      duration: () => live.current.duration,
+      element: () => audioRef.current,
+      render: (start, len) => live.current.loadAudio(live.current.track.trackId, start, len),
+      onStatus: (s) => {
+        setPlaying(s.playing);
+        setPlayhead(s.playhead);
+        // TV-13: follow keeps the playhead centred while playing zoomed
+        // in; a manual scroll (wheel) simply overwrites the viewport.
+        if (s.playing && live.current.follow) {
+          setVp((cur) => {
+            if (!cur) return cur;
+            const { len } = viewSpan(cur, live.current.duration);
+            const start = Math.max(0, Math.min(s.playhead - len / 2, live.current.duration - len));
+            return Math.abs(start - cur.start) > len / 8 ? { start, end: start + len } : cur;
+          });
         }
-      }
-      raf = requestAnimationFrame(tick);
+      },
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    const transport = new ClipTransport(host, { windowSecs: WINDOW_SECS, tickMs: LOOP_TICK_MS });
+    transportRef.current = transport;
+    return () => {
+      transportRef.current = null;
+      transport.dispose();
+    };
   }, []);
 
-  // TV-23: loop bounds follow the selection live.
-  useEffect(() => {
-    if (!loop) {
-      loopRef.current = null;
-      return undefined;
-    }
-    const from = selection ? beatTime(grid, selection.startBeat) : beatTime(grid, 0);
-    const to = selection
-      ? beatTime(grid, selection.endBeat)
-      : beatTime(grid, Math.max(1, grid.beats - 1));
-    // TV-25: if the playhead is outside the new loop, keep playing and
-    // wrap at the next GROUP boundary rather than jumping now.
-    const at = playheadRef.current;
-    if (at >= from && at <= to) {
-      loopRef.current = { from, to };
-      return undefined;
-    }
-    // Outside the new loop: keep playing and wrap at the next GROUP
-    // boundary, then let the real bounds take over.
-    const wrapBeat = loopWrapBeat(beatAt(grid, at), group);
-    loopRef.current = { from, to: Math.max(from, beatTime(grid, wrapBeat)) };
-    const settle = setTimeout(() => {
-      loopRef.current = { from, to };
-    }, 1000);
-    return () => clearTimeout(settle);
-  }, [grid, group, loop, selection]);
-
-  const seek = useCallback(
-    (secs: number) => {
-      const el = audioRef.current;
-      const target = Math.max(0, secs);
-      playheadRef.current = target;
-      if (!el || !el.src) {
-        void loadWindow(target, false);
-        setPlayhead(target);
-        return;
-      }
-      const local = target - windowStart.current;
-      if (local < 0 || local > WINDOW_SECS) {
-        void loadWindow(target, !el.paused);
-      } else {
-        // TV-8: seeking during playback does not stop playback.
-        el.currentTime = local;
-      }
-      setPlayhead(target);
-    },
-    [loadWindow],
+  // What Loop loops: the selection if there is one, otherwise everything
+  // (TV-23: the bounds follow the selection live).
+  const loopRange = useMemo(
+    () => (!loop ? null : (sel ?? (duration > 0 ? { start: 0, end: duration } : null))),
+    [loop, sel, duration],
   );
+  useEffect(() => {
+    transportRef.current?.setLoop(loopRange);
+  }, [loopRange]);
 
   const togglePlay = useCallback(() => {
-    const el = audioRef.current;
-    if (!el) return;
-    if (!el.src) {
-      void loadWindow(playheadRef.current, true);
-      return;
-    }
-    if (el.paused) {
-      void el
-        .play()
-        .then(() => setPlaying(true))
-        .catch(() => setPlaying(false));
-    } else {
-      el.pause();
-      setPlaying(false);
-    }
-  }, [loadWindow]);
+    const transport = transportRef.current;
+    if (!transport) return;
+    if (transport.playing) transport.pause();
+    else transport.play(transport.playhead, loopRange);
+  }, [loopRange]);
+
+  const stop = useCallback(() => {
+    transportRef.current?.stop(sel ? sel.start : 0);
+  }, [sel]);
+
+  const seek = useCallback((secs: number) => {
+    transportRef.current?.seek(Math.max(0, secs));
+    setPlayhead(Math.max(0, secs));
+  }, []);
 
   const stepBeats = useCallback(
     (delta: number) => {
-      const n = clampBeat(grid, beatAt(grid, playheadRef.current) + delta);
-      seek(beatTime(grid, n));
+      const transport = transportRef.current;
+      const at = transport?.playhead ?? 0;
+      seek(beatTime(grid, clampBeat(grid, beatAt(grid, at) + delta)));
     },
     [grid, seek],
   );
 
-  const changeZoom = useCallback(
-    (delta: number) => {
-      setZoom((z) => Math.min(ZOOM_BEATS.length - 1, Math.max(0, z + delta)));
-      setCenterBeat(beatAt(grid, playheadRef.current));
-    },
-    [grid],
-  );
-
-  // --- pointer -----------------------------------------------------------
-  const dragFrom = useRef<number | null>(null);
-  const timeAt = useCallback(
-    (clientX: number, rect: DOMRect) => {
-      if (rect.width <= 0) return fromSecs;
-      const frac = (clientX - rect.left) / rect.width;
-      return fromSecs + frac * (toSecs - fromSecs);
-    },
-    [fromSecs, toSecs],
-  );
-
-  const onDown = useCallback(
-    (e: ReactMouseEvent<SVGSVGElement>) => {
-      dragFrom.current = timeAt(e.clientX, e.currentTarget.getBoundingClientRect());
-    },
-    [timeAt],
-  );
-
-  const onMove = useCallback(
-    (e: ReactMouseEvent<SVGSVGElement>) => {
-      if (dragFrom.current === null) return;
-      const t = timeAt(e.clientX, e.currentTarget.getBoundingClientRect());
-      const a = beatAt(grid, Math.min(dragFrom.current, t));
-      const b = beatAt(grid, Math.max(dragFrom.current, t));
-      if (b > a) setSelection({ startBeat: clampBeat(grid, a), endBeat: clampBeat(grid, b) });
-    },
-    [grid, timeAt],
-  );
-
-  const onUp = useCallback(
-    (e: ReactMouseEvent<SVGSVGElement>) => {
-      const start = dragFrom.current;
-      dragFrom.current = null;
-      if (start === null) return;
-      const t = timeAt(e.clientX, e.currentTarget.getBoundingClientRect());
-      if (Math.abs(t - start) >= grid.period / 4) return;
-      const beat = clampBeat(grid, beatAt(grid, t));
-      if (e.shiftKey) {
-        // TV-16: shift-click extends the selection to the nearest beat.
-        setSelection((sel) => {
-          const anchor = sel ? sel.startBeat : beatAt(grid, playheadRef.current);
-          const lo = Math.min(anchor, beat);
-          const hi = Math.max(anchor, beat);
-          return { startBeat: lo, endBeat: Math.max(hi, lo + 1) };
-        });
-        return;
-      }
-      // TV-6/TV-9: click seeks to the nearest beat; ⌘ frees the position.
-      seek(e.metaKey ? t : beatTime(grid, beat));
-    },
-    [grid, seek, timeAt],
-  );
+  const snap = useMemo(() => beatSnap(grid), [grid]);
 
   /** TV-18: double-click selects the group under the cursor. */
-  const onDoubleClick = useCallback(
-    (e: ReactMouseEvent<SVGSVGElement>) => {
-      const t = timeAt(e.clientX, e.currentTarget.getBoundingClientRect());
-      const beat = beatAt(grid, t);
-      const startBeat = clampBeat(grid, Math.floor(beat / group) * group);
-      setSelection({ startBeat, endBeat: clampBeat(grid, startBeat + group) });
+  const onDoubleClickAt = useCallback(
+    (secs: number) => {
+      const startBeat = clampBeat(grid, Math.floor(beatAt(grid, secs) / group) * group);
+      const endBeat = clampBeat(grid, startBeat + group);
+      setSelection({ start: beatTime(grid, startBeat), end: beatTime(grid, endBeat) });
     },
-    [grid, group, timeAt],
+    [grid, group],
   );
+
+  // --- the beat grid as ticks (TV-1/TV-2) --------------------------------
+  const { start: vpStart, end: vpEnd, len: vpLen } = viewSpan(vp, duration);
+  const lod = gridLod(vpLen / Math.max(1e-6, grid.period), group);
+  const ticks = useMemo<TimeTick[]>(() => {
+    const fromBeat = Math.floor((vpStart - grid.phase) / Math.max(1e-6, grid.period));
+    const toBeat = Math.ceil((vpEnd - grid.phase) / Math.max(1e-6, grid.period));
+    const emphasized = new Set(gridLines(grid, fromBeat, toBeat, lod.emphasis));
+    return gridLines(grid, fromBeat, toBeat, lod.step).map((t) => ({
+      secs: t,
+      major: emphasized.has(t),
+      label: String(beatAt(grid, t)),
+    }));
+  }, [grid, lod.emphasis, lod.step, vpEnd, vpStart]);
 
   // --- keyboard (§4.7) ---------------------------------------------------
   useEffect(() => {
@@ -308,28 +210,18 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
           break;
         case '+':
         case '=':
-          changeZoom(1);
+          setVp((cur) => zoomView(cur, duration, playhead, 0.5));
           break;
         case '-':
-          changeZoom(-1);
+          setVp((cur) => zoomView(cur, duration, playhead, 2));
           break;
         case 'f':
         case 'F':
-          setZoom(0);
+          setVp(null);
           break;
         case 's':
         case 'S':
-          if (selection) {
-            setZoom(
-              Math.max(
-                1,
-                ZOOM_BEATS.findIndex(
-                  (z) => z !== null && z <= selection.endBeat - selection.startBeat,
-                ),
-              ),
-            );
-            setCenterBeat((selection.startBeat + selection.endBeat) / 2);
-          }
+          if (sel) setVp({ start: sel.start, end: sel.end });
           break;
         case 'Escape':
           setSelection(null);
@@ -346,22 +238,12 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [changeZoom, grid, group, seek, selection, stepBeats, togglePlay]);
-
-  const lines = useMemo(
-    () => gridLines(grid, firstBeat, lastBeat, lod.step),
-    [firstBeat, grid, lastBeat, lod.step],
-  );
-  const emphasis = useMemo(
-    () => new Set(gridLines(grid, firstBeat, lastBeat, lod.emphasis)),
-    [firstBeat, grid, lastBeat, lod.emphasis],
-  );
+  }, [duration, grid, group, playhead, seek, sel, stepBeats, togglePlay]);
 
   const quality = track.record.quality;
   const level = qualityLevel(quality);
   const confidence = track.record.analysis.confidence;
-  const peakFrom = (fromSecs - beatTime(grid, 0)) / Math.max(1e-6, track.durationSecs);
-  const peakTo = (toSecs - beatTime(grid, 0)) / Math.max(1e-6, track.durationSecs);
+  const selBeats = sel ? snapSelection(grid, sel.start, sel.end) : null;
 
   return (
     <section className="beatify-track" data-testid="beatify-track-view">
@@ -380,116 +262,75 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
         </button>
       </header>
 
-      <svg
-        className="beatify-track-wave"
-        data-testid="beatify-track-wave"
-        viewBox={`0 0 ${W} ${WAVE_H}`}
-        preserveAspectRatio="none"
-        onMouseDown={onDown}
-        onMouseMove={onMove}
-        onMouseUp={onUp}
-        onDoubleClick={onDoubleClick}
-      >
-        <path className="beatify-peaks" d={peaksPath(track.peaks, peakFrom, peakTo, WAVE_H)} />
-        {selection && (
-          <rect
-            className="beatify-selection"
-            data-testid="beatify-selection"
-            x={xOf(beatTime(grid, selection.startBeat))}
-            y={0}
-            width={Math.max(
-              1,
-              xOf(beatTime(grid, selection.endBeat)) - xOf(beatTime(grid, selection.startBeat)),
-            )}
-            height={WAVE_H}
-          />
-        )}
-        {lines.map((t) => (
-          <line
-            key={t}
-            className={emphasis.has(t) ? 'beatify-grid emph' : 'beatify-grid'}
-            x1={xOf(t)}
-            x2={xOf(t)}
-            y1={0}
-            y2={WAVE_H}
-          />
-        ))}
-        {/* TV-5: the density band only exists at the closest zooms. */}
-        {lod.density &&
-          confidence.map((c, i) => {
-            const t = beatTime(grid, i);
-            if (t < fromSecs || t > toSecs) return null;
-            return (
-              <rect
-                key={`c-${i}`}
-                className="beatify-density"
-                x={xOf(t) - 2}
-                y={WAVE_H - c * 20}
-                width={4}
-                height={c * 20}
+      <AudioTimeline
+        idPrefix="beatify-track"
+        duration={duration}
+        peaks={track.peaks}
+        waveHeight={WAVE_H}
+        vp={vp}
+        onVpChange={setVp}
+        selection={selection}
+        onSelectionChange={setSelection}
+        playing={playing}
+        playhead={playhead}
+        loop={loop}
+        onTogglePlay={togglePlay}
+        onStop={stop}
+        onToggleLoop={() => setLoop((v) => !v)}
+        onSeek={seek}
+        snap={snap}
+        ticks={ticks}
+        tickGrid="all"
+        onDoubleClickAt={onDoubleClickAt}
+        timecode={timecode}
+        loopTitle={sel ? 'Loop the selection (l)' : 'Loop the whole track (l)'}
+        transportExtra={
+          <>
+            <button
+              data-testid="beatify-track-follow"
+              className={follow ? 'clip-toggle-on' : undefined}
+              aria-pressed={follow}
+              title="Keep the playhead centred while zoomed in"
+              onClick={() => setFollow((v) => !v)}
+            >
+              Follow
+            </button>
+            <label className="beatify-group">
+              group
+              <input
+                type="number"
+                min={1}
+                max={16}
+                data-testid="beatify-track-group"
+                value={group}
+                onChange={(e) => setGroup(Math.max(1, Number(e.target.value) || 1))}
               />
-            );
-          })}
-        <line
-          className="beatify-playhead"
-          data-testid="beatify-track-playhead"
-          x1={xOf(playhead)}
-          x2={xOf(playhead)}
-          y1={0}
-          y2={WAVE_H}
-        />
-      </svg>
-
-      <div className="beatify-ruler" data-testid="beatify-ruler">
-        {gridLines(grid, firstBeat, lastBeat, Math.max(lod.emphasis, 1)).map((t) => (
-          <span key={t} style={{ left: `${(xOf(t) / W) * 100}%` }}>
-            {beatAt(grid, t)}
-          </span>
-        ))}
-      </div>
-
-      <div className="beatify-transport">
-        <button data-testid="beatify-track-play" onClick={togglePlay}>
-          {playing ? '⏸' : '▶'}
-        </button>
-        <button
-          data-testid="beatify-track-loop"
-          className={loop ? 'active' : undefined}
-          onClick={() => setLoop((v) => !v)}
-        >
-          Loop
-        </button>
-        <button
-          data-testid="beatify-track-follow"
-          className={follow ? 'active' : undefined}
-          onClick={() => setFollow((v) => !v)}
-        >
-          Follow
-        </button>
-        <button data-testid="beatify-zoom-in" onClick={() => changeZoom(1)}>
-          +
-        </button>
-        <button data-testid="beatify-zoom-out" onClick={() => changeZoom(-1)}>
-          −
-        </button>
-        <label>
-          group
-          <input
-            type="number"
-            min={1}
-            max={16}
-            data-testid="beatify-track-group"
-            value={group}
-            onChange={(e) => setGroup(Math.max(1, Number(e.target.value) || 1))}
-          />
-        </label>
-        <span className="beatify-line" data-testid="beatify-readout">
-          beat {beatAt(grid, playhead)} · {timecode(playhead)} ·{' '}
-          {selection
-            ? selectionLabel(selection.endBeat - selection.startBeat, group)
-            : `${span} beats visible`}
-        </span>
-      </div>
+            </label>
+          </>
+        }
+        readoutExtra={` · beat ${clampBeat(grid, beatAt(grid, playhead))}${
+          selBeats ? ` · ${selectionLabel(selBeats.endBeat - selBeats.startBeat, group)}` : ''
+        }`}
+        renderOver={(xOf) =>
+          // TV-5: the density band only exists at the closest zooms.
+          lod.density
+            ? confidence.map((c, i) => {
+                const t = beatTime(grid, i);
+                if (t < vpStart || t > vpEnd) return null;
+                return (
+                  <rect
+                    key={`c-${i}`}
+                    className="beatify-density"
+                    x={xOf(t) - 2}
+                    y={WAVE_H - c * DENSITY_H}
+                    width={4}
+                    height={c * DENSITY_H}
+                  />
+                );
+              })
+            : null
+        }
+      />
       <audio ref={audioRef} data-testid="beatify-track-audio" />
     </section>
   );

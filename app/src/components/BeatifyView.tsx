@@ -111,6 +111,7 @@ export function BeatifyView({ client, library }: BeatifyViewProps) {
 
       {beatified && (
         <BeatifyTrackView
+          key={`${beatified.trackId}:${beatified.record.warped}`}
           track={beatified}
           loadAudio={(trackId, startSecs, secs) => client.trackAudio(trackId, startSecs, secs)}
           onRebeatify={() => setWarn({ trackId: beatified.trackId, title: beatified.title })}

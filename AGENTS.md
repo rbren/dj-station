@@ -855,10 +855,31 @@ fails if it's missing.
   track to keep the wav small — the stereo path is covered by the
   in-suite warp test. Everything else about the pipeline is pinned by
   `cargo test -p dj-analysis --release --test beatify`.
-- Beatify §6 open questions, decided: (1) a loop edited while the
-  playhead is outside it wraps at the next RULER GROUP boundary
-  (`loopWrapBeat`), never instantly and never at a loop end that may
-  never arrive; (2) re-beatifying an already-beatified track is allowed
+- ONE audition timeline, `app/src/components/AudioTimeline.tsx`: waveform
+  + ruler + selection gestures (sweep / edge-resize / slide /
+  shift-extend) + wheel-zoom-around-cursor + transport row, extracted
+  from the Clip page and reused by Beatify's modal AND track view. It
+  draws and gestures only — audio stays in the parent's `ClipTransport`
+  (all three pages now share that owner), selection/viewport are
+  controlled props, and testids/classes are `${idPrefix}-…` so the Clip
+  page's `clip-*` DOM contract is unchanged (it also emits the `clip-*`
+  layout classes for shared styling; per-prefix CSS overrides colour and
+  size). Domain drawings go through `renderUnder`/`renderOver(xOf)` so
+  they follow zoom; quantization goes through the `snap` hooks —
+  Beatify's `beatSnap(grid)` (BeatifyTrackView.tsx) snaps seeks to the
+  nearest beat (⌘ frees), selections OUTWARD to whole beats, slides by
+  whole beats; the Clip page passes no snap. Zoom law is
+  `viewSpan`/`zoomView` (exported, pinned in BeatifyGrid.test.ts).
+  BeatifyTrackView is keyed by track+render in BeatifyView so a
+  re-beatify remounts it (fresh transport/viewport/selection) instead of
+  setState-in-effect resets, and follow-mode recentres the viewport from
+  the transport's `onStatus` callback, not an effect.
+- Beatify §6 open questions, decided: (1) loops follow `ClipTransport`'s
+  `setLoop` policy — a change while the playhead is inside the new range
+  carries on from there, outside it restarts at the range head
+  (`loopWrapBeat` remains as pure math but the UI no longer schedules
+  group-boundary wraps; the shared transport's behavior won);
+  (2) re-beatifying an already-beatified track is allowed
   but warns that anything cut from the old grid stops matching, and it
   overwrites the same hash-keyed record (no versions); (3) the lead-in is
   ONE global value (median onset offset + pad, `grid::lead_in`), because

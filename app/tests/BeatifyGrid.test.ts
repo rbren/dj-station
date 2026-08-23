@@ -123,3 +123,40 @@ describe('warp slider', () => {
     }
   });
 });
+
+// The timeline snap hooks (TV-6/TV-9/TV-14): what AudioTimeline routes
+// every gesture through on the Beatify track view.
+import { beatSnap } from '../src/components/BeatifyTrackView';
+import { viewSpan, zoomView } from '../src/components/AudioTimeline';
+
+describe('beatSnap', () => {
+  const grid = { bpm: 120, period: 0.5, phase: 0.5, beats: 64 };
+  const snap = beatSnap(grid);
+
+  it('seeks to the nearest beat unless freed (TV-6)', () => {
+    expect(snap.seek(7.6, false)).toBeCloseTo(7.5);
+    expect(snap.seek(7.6, true)).toBe(7.6);
+    expect(snap.seek(-3, false)).toBeCloseTo(0.5); // clamped into the track
+  });
+
+  it('snaps swept selections OUTWARD to whole beats (TV-14)', () => {
+    const r = snap.range({ start: 7.6, end: 9.4 });
+    expect(r.start).toBeCloseTo(7.5);
+    expect(r.end).toBeCloseTo(9.5);
+  });
+
+  it('slides selections by whole beats, keeping their length', () => {
+    const r = snap.slide({ start: 7.7, end: 9.7 });
+    expect(r.start).toBeCloseTo(7.5);
+    expect(r.end - r.start).toBeCloseTo(2);
+  });
+});
+
+describe('timeline zoom law', () => {
+  it('zooms around a center and refuses to zoom past the whole clip', () => {
+    const vp = zoomView(null, 60, 30, 0.5);
+    expect(vp).toEqual({ start: 15, end: 45 });
+    expect(zoomView(vp, 60, 30, 4)).toBeNull();
+    expect(viewSpan(vp, 60)).toEqual({ start: 15, end: 45, len: 30 });
+  });
+});

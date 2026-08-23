@@ -203,8 +203,8 @@ describe('Beatify tab', () => {
   it('re-runs detection on a dragged region and resets alignment (MOD-A3/A8)', async () => {
     const client = clientMock();
     await openTrack(client);
-    await screen.findByTestId('beatify-region');
-    const wave = screen.getByTestId('beatify-wave');
+    await screen.findByTestId('beatify-selection');
+    const wave = screen.getByTestId('beatify-waveform');
     wave.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 100 }) as DOMRect;
     fireEvent.mouseDown(wave, { clientX: 10 });
     fireEvent.mouseMove(wave, { clientX: 50 });
@@ -304,8 +304,9 @@ describe('Beatify tab', () => {
     );
     fireEvent.keyDown(window, { key: ' ' });
     await waitFor(() => expect(client.preview).toHaveBeenCalled());
-    const audio = screen.getByTestId('beatify-audio') as HTMLAudioElement;
-    expect(audio.loop).toBe(true);
+    // The audition loops by default (the transport owns the looping; its
+    // wrap mechanics are pinned by ClipTransport.test.ts).
+    expect(screen.getByTestId('beatify-loop').getAttribute('aria-pressed')).toBe('true');
     // The window never exceeds the region being auditioned.
     const [start, secs] = (client.preview as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(start + secs).toBeLessThanOrEqual(60);
@@ -315,26 +316,41 @@ describe('Beatify tab', () => {
     const client = clientMock({ load: vi.fn(async () => beatified()) });
     render(<BeatifyView client={client} library={libraryMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-open'));
-    const wave = await screen.findByTestId('beatify-track-wave');
+    const wave = await screen.findByTestId('beatify-track-waveform');
     wave.getBoundingClientRect = () => ({ left: 0, width: 320, top: 0, height: 100 }) as DOMRect;
     fireEvent.doubleClick(wave, { clientX: 100 });
-    await screen.findByTestId('beatify-selection');
-    expect(screen.getByTestId('beatify-readout').textContent).toContain('4 beats · 1 group');
+    await screen.findByTestId('beatify-track-selection');
+    expect(screen.getByTestId('beatify-track-readout').textContent).toContain('4 beats · 1 group');
+  });
+
+  it('zooms the track view and offers the way back (TV-10)', async () => {
+    const client = clientMock({ load: vi.fn(async () => beatified()) });
+    render(<BeatifyView client={client} library={libraryMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-open'));
+    await screen.findByTestId('beatify-track-waveform');
+    expect((screen.getByTestId('beatify-track-zoom-out') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
+    expect(screen.getByTestId('beatify-track-readout').textContent).toContain('view');
+    expect((screen.getByTestId('beatify-track-zoom-out') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByTestId('beatify-track-zoom-fit'));
+    expect(screen.getByTestId('beatify-track-readout').textContent).not.toContain('view');
   });
 
   it('seeks and selects in whole beats in the track view (TV-6/TV-14)', async () => {
     const client = clientMock({ load: vi.fn(async () => beatified()) });
     render(<BeatifyView client={client} library={libraryMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-open'));
-    const wave = await screen.findByTestId('beatify-track-wave');
+    const wave = await screen.findByTestId('beatify-track-waveform');
     wave.getBoundingClientRect = () => ({ left: 0, width: 320, top: 0, height: 100 }) as DOMRect;
     fireEvent.mouseDown(wave, { clientX: 40 });
     fireEvent.mouseMove(wave, { clientX: 120 });
     fireEvent.mouseUp(wave, { clientX: 120 });
-    const selection = await screen.findByTestId('beatify-selection');
+    const selection = await screen.findByTestId('beatify-track-selection');
     expect(selection).toBeTruthy();
     await waitFor(() =>
-      expect(screen.getByTestId('beatify-readout').textContent).toMatch(/\d+ beats/),
+      expect(screen.getByTestId('beatify-track-readout').textContent).toMatch(/\d+ beats/),
     );
   });
 });

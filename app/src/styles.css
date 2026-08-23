@@ -3491,6 +3491,7 @@ body {
 .beatify-modal-foot,
 .beatify-track-head,
 .beatify-transport,
+.beatify-track-transport,
 .beatify-row {
   display: flex;
   align-items: center;
@@ -3516,16 +3517,16 @@ body {
   letter-spacing: 0.04em;
 }
 
-.beatify-wave,
+.beatify-waveform,
 .beatify-strip,
-.beatify-track-wave {
+.beatify-track-waveform {
   width: 100%;
   background: #0e1013;
   border: 1px solid #23262d;
   border-radius: 6px;
 }
 
-.beatify-wave {
+.beatify-waveform {
   height: 130px;
 }
 
@@ -3533,11 +3534,12 @@ body {
   height: 74px;
 }
 
-.beatify-track-wave {
+.beatify-track-waveform {
   height: 220px;
 }
 
-.beatify-peaks {
+.beatify-peaks,
+.beatify-track-peaks {
   fill: #d8a15f;
   opacity: 0.85;
 }
@@ -3545,12 +3547,6 @@ body {
 .beatify-dim {
   fill: #0b0c0f;
   opacity: 0.68;
-}
-
-.beatify-region {
-  fill: none;
-  stroke: #5fd0c5;
-  stroke-width: 2;
 }
 
 .beatify-drift {
@@ -3563,18 +3559,22 @@ body {
   opacity: 0.18;
 }
 
-.beatify-selection {
+.beatify-selection,
+.beatify-track-selection {
   fill: #5fd0c5;
-  opacity: 0.14;
+  stroke: #5fd0c5;
+  opacity: 0.2;
 }
 
-.beatify-grid {
+.beatify-grid,
+.beatify-track-grid {
   stroke: #5fd0c5;
   stroke-width: 1;
   opacity: 0.35;
 }
 
-.beatify-grid.emph {
+.beatify-grid.emph,
+.beatify-track-grid.emph {
   opacity: 0.75;
   stroke-width: 1.6;
 }
@@ -3584,7 +3584,8 @@ body {
   opacity: 0.6;
 }
 
-.beatify-playhead {
+.beatify-playhead,
+.beatify-track-playhead {
   stroke: #e6e9ef;
   stroke-width: 1.5;
 }
@@ -3654,7 +3655,8 @@ body {
 }
 
 .beatify-slider input[type='number'],
-.beatify-transport input[type='number'] {
+.beatify-transport input[type='number'],
+.beatify-track-transport input[type='number'] {
   width: 60px;
   background: #14161a;
   color: #e6e9ef;
@@ -3705,17 +3707,4 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.beatify-ruler {
-  position: relative;
-  height: 16px;
-  color: #7e838d;
-  font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.beatify-ruler span {
-  position: absolute;
-  transform: translateX(-50%);
 }

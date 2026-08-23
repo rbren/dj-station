@@ -13,8 +13,7 @@
 // Colour semantics (MOD-1): amber is what was played (detections, drift),
 // teal is what the maths says (grid lines, anchors).
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   anchorStride,
   DEFAULT_RULER_GROUP,
@@ -30,8 +29,10 @@ import {
   type BeatifyTrack,
   type Quality,
 } from '../beatify';
+import { ClipTransport, type TransportHost } from '../clipTransport';
 import { logError } from '../errors';
-import { peaksPath, WAVEFORM_VIEW_W as W } from './WaveformView';
+import { AudioTimeline, type Range } from './AudioTimeline';
+import { WAVEFORM_VIEW_W as W } from './WaveformView';
 
 const WAVE_H = 110;
 const STRIP_H = 70;
@@ -63,8 +64,14 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
   const [click, setClick] = useState(false);
   const [warpedAudition, setWarpedAudition] = useState(false);
   const [playhead, setPlayhead] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  /** MOD-A18: the audition loops the region by default. */
+  const [loop, setLoop] = useState(true);
+  const [vp, setVp] = useState<Range | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  /** Held for the sync-check render only; auditions go through the
+   *  transport, which owns its own URLs. */
   const objectUrl = useRef<string | null>(null);
   useEffect(
     () => () => {
@@ -72,6 +79,80 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
     },
     [],
   );
+
+  const duration = analysis?.source.durationSecs ?? 0;
+
+  // --- playback: one ClipTransport owns everything that sounds ----------
+  //
+  // Same ownership as the Clip page (see clipTransport.ts). The host
+  // reads the CURRENT audition settings through a ref, so one transport
+  // instance survives every knob.
+  const transportRef = useRef<ClipTransport | null>(null);
+  const live = useRef({ client, duration, warpedAudition, strength, click });
+  useLayoutEffect(() => {
+    live.current = { client, duration, warpedAudition, strength, click };
+  });
+
+  useEffect(() => {
+    const host: TransportHost = {
+      duration: () => live.current.duration,
+      element: () => audioRef.current,
+      render: (start, len) =>
+        live.current.client.preview(
+          start,
+          len,
+          live.current.warpedAudition,
+          live.current.strength,
+          live.current.click,
+        ),
+      onStatus: (s) => {
+        setPlaying(s.playing);
+        setPlayhead(s.playhead);
+      },
+    };
+    const transport = new ClipTransport(host, { windowSecs: AUDITION_SECS });
+    transportRef.current = transport;
+    return () => {
+      transportRef.current = null;
+      transport.dispose();
+    };
+  }, []);
+
+  // MOD-A18: what plays IS the region, looped, so dragging its edges is
+  // audible — it catches the half-beat phase error no plot can show.
+  const loopRange = useMemo(
+    () =>
+      !loop
+        ? null
+        : region
+          ? { start: region[0], end: region[1] }
+          : duration > 0
+            ? { start: 0, end: duration }
+            : null,
+    [duration, loop, region],
+  );
+  useEffect(() => {
+    transportRef.current?.setLoop(loopRange);
+  }, [loopRange]);
+
+  const togglePlay = useCallback(() => {
+    const transport = transportRef.current;
+    if (!transport) return;
+    if (transport.playing) transport.pause();
+    else transport.play(transport.playhead, loopRange);
+  }, [loopRange]);
+
+  // A/B flips WHAT the times index (source vs warped render): stale.
+  useEffect(() => {
+    transportRef.current?.invalidate();
+  }, [warpedAudition]);
+
+  // The click track and the warp strength change the sound, not the
+  // timeline: re-render the playing window in place (inaudible when
+  // paused — refreshTone is a no-op then).
+  useEffect(() => {
+    transportRef.current?.refreshTone();
+  }, [click, strength]);
 
   const adopt = useCallback((next: BeatifyAnalysis) => {
     setAnalysis(next);
@@ -81,6 +162,8 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
     setResiduals(next.residuals);
     setLeadInMs(Math.round(next.leadIn * 1000));
     setRegion(next.region);
+    // A new grid: whatever was rendered belongs to the old one.
+    transportRef.current?.invalidate();
   }, []);
 
   const run = useCallback(
@@ -151,38 +234,6 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
     };
   }, [analysis, client, strength]);
 
-  const play = useCallback(
-    async (fromSecs: number) => {
-      if (!analysis) return;
-      // MOD-A18: what plays IS the region, looped, so dragging its edges is
-      // audible — it catches the half-beat phase error no plot can show.
-      const span = region ? Math.min(AUDITION_SECS, region[1] - fromSecs) : AUDITION_SECS;
-      const bytes = await client.preview(
-        fromSecs,
-        Math.max(1, span),
-        warpedAudition,
-        strength,
-        click,
-      );
-      if (!bytes) return;
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
-      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-      objectUrl.current = url;
-      const el = audioRef.current;
-      if (!el) return;
-      el.src = url;
-      el.loop = true;
-      setPlayhead(fromSecs);
-      try {
-        await el.play();
-      } catch {
-        // jsdom (and a webview with no output device) cannot play; the
-        // element still holds the rendered audio.
-      }
-    },
-    [analysis, click, client, region, strength, warpedAudition],
-  );
-
   // MOD-A16: spacebar plays/pauses, like every other transport here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -190,24 +241,18 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
       if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT')) return;
       if (e.key !== ' ') return;
       e.preventDefault();
-      const el = audioRef.current;
-      if (el && !el.paused) {
-        el.pause();
-        return;
-      }
-      if (el?.src) {
-        void el.play().catch(() => undefined);
-        return;
-      }
-      void play(region ? region[0] : 0);
+      togglePlay();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [play, region]);
+  }, [togglePlay]);
 
   const syncCheck = useCallback(async () => {
     const bytes = await client.syncCheck(strength);
     if (!bytes) return;
+    // The sync render is its own little file, outside the audition
+    // timeline: park the transport, then borrow the element.
+    transportRef.current?.pause();
     const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     objectUrl.current = url;
@@ -218,7 +263,8 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
     try {
       await el.play();
     } catch {
-      /* see play() */
+      // jsdom (and a webview with no output device) cannot play; the
+      // element still holds the rendered audio.
     }
   }, [client, strength]);
 
@@ -240,61 +286,28 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
     onCancel();
   }, [client, onCancel]);
 
-  // --- region selection on the whole-track waveform (MOD-A8/A9) --------
-  const waveRef = useRef<SVGSVGElement | null>(null);
-  const dragFrom = useRef<number | null>(null);
-  const duration = analysis?.source.durationSecs ?? 0;
-
-  const timeAt = useCallback(
-    (clientX: number, rect: DOMRect) => {
-      if (rect.width <= 0 || duration <= 0) return 0;
-      const frac = (clientX - rect.left) / rect.width;
-      return Math.min(duration, Math.max(0, frac * duration));
-    },
-    [duration],
-  );
-
-  const onWaveDown = useCallback(
-    (e: ReactMouseEvent<SVGSVGElement>) => {
+  // --- region selection on the track waveform (MOD-A8/A9) ---------------
+  //
+  // The region IS the timeline's selection. Sweeping (re)draws it; a
+  // plain click seeks to the nearest beat (MOD-A17, ⌘ frees it) and puts
+  // the region back to what the analysis covered — an empty region would
+  // mean "discard everything".
+  const grid = analysis?.grid ?? null;
+  const onRegionChange = useCallback(
+    (r: Range | null) => {
       if (!analysis) return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      const t = timeAt(e.clientX, rect);
-      dragFrom.current = t;
-      setRegion([t, t]);
+      if (!r || r.end - r.start < 0.05) setRegion(analysis.region);
+      else setRegion([r.start, r.end]);
     },
-    [analysis, timeAt],
+    [analysis],
+  );
+  const snap = useMemo(
+    () => ({
+      seek: (secs: number, free: boolean) => (free || !grid ? secs : snapTime(grid, secs)),
+    }),
+    [grid],
   );
 
-  const onWaveMove = useCallback(
-    (e: ReactMouseEvent<SVGSVGElement>) => {
-      if (dragFrom.current === null) return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      const t = timeAt(e.clientX, rect);
-      const a = dragFrom.current;
-      setRegion([Math.min(a, t), Math.max(a, t)]);
-    },
-    [timeAt],
-  );
-
-  const onWaveUp = useCallback(
-    (e: ReactMouseEvent<SVGSVGElement>) => {
-      const start = dragFrom.current;
-      dragFrom.current = null;
-      if (start === null || !analysis) return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      const t = timeAt(e.clientX, rect);
-      if (Math.abs(t - start) < 0.05) {
-        // A click, not a drag: MOD-A17 seeks to the nearest beat.
-        setRegion(analysis.region);
-        void play(snapTime(analysis.grid, t));
-        return;
-      }
-      setRegion([Math.min(start, t), Math.max(start, t)]);
-    },
-    [analysis, play, timeAt],
-  );
-
-  const xOf = (secs: number) => (duration > 0 ? (secs / duration) * W : 0);
   const agreement = analysis?.agreement;
   const reading = readingOf(analysis?.reading);
   const stride = anchorStride(strength);
@@ -324,74 +337,90 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
         )}
         {status && <p className="beatify-status">{status}</p>}
 
-        <svg
-          ref={waveRef}
-          className="beatify-wave"
-          data-testid="beatify-wave"
-          viewBox={`0 0 ${W} ${WAVE_H}`}
-          preserveAspectRatio="none"
-          onMouseDown={onWaveDown}
-          onMouseMove={onWaveMove}
-          onMouseUp={onWaveUp}
-        >
-          <path
-            className="beatify-peaks"
-            d={peaksPath(analysis?.source.peaks ?? [], 0, 1, WAVE_H)}
-          />
-          {/* MOD-3a: the region is always drawn, and everything outside it
-              is dimmed — it is being discarded. */}
-          {region && (
+        <AudioTimeline
+          idPrefix="beatify"
+          duration={duration}
+          peaks={analysis?.source.peaks ?? []}
+          waveHeight={WAVE_H}
+          vp={vp}
+          onVpChange={setVp}
+          selection={region ? { start: region[0], end: region[1] } : null}
+          onSelectionChange={onRegionChange}
+          playing={playing}
+          playhead={playhead}
+          loop={loop}
+          onTogglePlay={togglePlay}
+          onStop={() => transportRef.current?.stop(region ? region[0] : 0)}
+          onToggleLoop={() => setLoop((v) => !v)}
+          onSeek={(t) => transportRef.current?.seek(t)}
+          snap={snap}
+          allowSlide={false}
+          selectionTitle="The region being beatified — everything outside it is discarded"
+          loopTitle="Loop the region (MOD-A18)"
+          timecode={timecode}
+          readoutExtra={
+            region ? ` · region ${region[0].toFixed(2)}–${region[1].toFixed(2)}s` : null
+          }
+          transportExtra={
+            <label className="beatify-click-toggle">
+              <input
+                type="checkbox"
+                data-testid="beatify-click"
+                checked={click}
+                onChange={(e) => setClick(e.target.checked)}
+              />
+              Click track
+            </label>
+          }
+          renderOver={(xOf) => (
             <>
-              <rect className="beatify-dim" x={0} y={0} width={xOf(region[0])} height={WAVE_H} />
-              <rect
-                className="beatify-dim"
-                x={xOf(region[1])}
-                y={0}
-                width={Math.max(0, W - xOf(region[1]))}
-                height={WAVE_H}
-              />
-              <rect
-                className="beatify-region"
-                data-testid="beatify-region"
-                x={xOf(region[0])}
-                y={0}
-                width={Math.max(1, xOf(region[1]) - xOf(region[0]))}
-                height={WAVE_H}
-              />
+              {/* MOD-3a: everything outside the region is dimmed — it is
+                  being discarded. */}
+              {region && (
+                <>
+                  <rect
+                    className="beatify-dim"
+                    x={xOf(0)}
+                    y={0}
+                    width={Math.max(0, xOf(region[0]) - xOf(0))}
+                    height={WAVE_H}
+                  />
+                  <rect
+                    className="beatify-dim"
+                    x={xOf(region[1])}
+                    y={0}
+                    width={Math.max(0, xOf(duration) - xOf(region[1]))}
+                    height={WAVE_H}
+                  />
+                </>
+              )}
+              {/* Drift: where the source tempo leaves the target (MOD-3). */}
+              {analysis?.drift.map((d, i) => (
+                <rect
+                  key={`drift-${i}`}
+                  className="beatify-drift"
+                  x={xOf(d.startSecs)}
+                  y={WAVE_H - 12}
+                  width={Math.max(1, xOf(d.endSecs) - xOf(d.startSecs))}
+                  height={12}
+                >
+                  <title>{`${d.deltaBpm > 0 ? 'PUSHES' : 'DRAGS'} ${d.deltaBpm.toFixed(1)} BPM`}</title>
+                </rect>
+              ))}
+              {/* Seed disagreement (MOD-A6). */}
+              {agreement?.disagreementSpans.map((s, i) => (
+                <rect
+                  key={`dis-${i}`}
+                  className="beatify-disagree"
+                  x={xOf(s[0])}
+                  y={0}
+                  width={Math.max(2, xOf(s[1]) - xOf(s[0]))}
+                  height={WAVE_H}
+                />
+              ))}
             </>
           )}
-          {/* Drift: where the source tempo leaves the target (MOD-3). */}
-          {analysis?.drift.map((d, i) => (
-            <rect
-              key={`drift-${i}`}
-              className="beatify-drift"
-              x={xOf(d.startSecs)}
-              y={WAVE_H - 12}
-              width={Math.max(1, xOf(d.endSecs) - xOf(d.startSecs))}
-              height={12}
-            >
-              <title>{`${d.deltaBpm > 0 ? 'PUSHES' : 'DRAGS'} ${d.deltaBpm.toFixed(1)} BPM`}</title>
-            </rect>
-          ))}
-          {/* Seed disagreement (MOD-A6). */}
-          {agreement?.disagreementSpans.map((s, i) => (
-            <rect
-              key={`dis-${i}`}
-              className="beatify-disagree"
-              x={xOf(s[0])}
-              y={0}
-              width={Math.max(2, xOf(s[1]) - xOf(s[0]))}
-              height={WAVE_H}
-            />
-          ))}
-          <line
-            className="beatify-playhead"
-            x1={xOf(playhead)}
-            x2={xOf(playhead)}
-            y1={0}
-            y2={WAVE_H}
-          />
-        </svg>
+        />
 
         {/* Error strip (§3.4): signed per-beat residual, ±40 ms. */}
         <svg
@@ -483,28 +512,6 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
                   intervals look 2:1 — check ÷2 / ×2
                 </span>
               )}
-            </div>
-            <div className="beatify-row">
-              <button
-                data-testid="beatify-play"
-                disabled={!analysis}
-                onClick={() => void play(region ? region[0] : 0)}
-              >
-                ▶ Play
-              </button>
-              <button data-testid="beatify-pause" onClick={() => audioRef.current?.pause()}>
-                ⏸
-              </button>
-              <label>
-                <input
-                  type="checkbox"
-                  data-testid="beatify-click"
-                  checked={click}
-                  onChange={(e) => setClick(e.target.checked)}
-                />
-                Click track
-              </label>
-              <span className="beatify-line">{timecode(playhead)}</span>
             </div>
           </section>
 
