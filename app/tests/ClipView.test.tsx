@@ -3,10 +3,10 @@
 // track. The backend is mocked; the edit math itself is pinned by
 // ClipEdits.test.ts and the rendered audio by dj-analysis's golden test.
 
-import { StrictMode } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createRef, StrictMode } from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ClipView } from '../src/components/ClipView';
+import { ClipView, type ClipViewHandle } from '../src/components/ClipView';
 import type { ClipClientApi, ClipRequest, ClipSource } from '../src/clip';
 import { closeAudio } from '../src/clipAudio';
 import type { LibraryClientApi, Track } from '../src/library';
@@ -383,13 +383,11 @@ describe('ClipView', () => {
 
   it('opens the track the Library page asks for', async () => {
     const clip = clipMock();
-    const view = render(
-      <ClipView
-        clip={clip}
-        library={libraryMock()}
-        openRequest={{ trackId: OTHER.id, nonce: 1 }}
-      />,
-    );
+    const handle = createRef<ClipViewHandle>();
+    render(<ClipView ref={handle} clip={clip} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+
+    act(() => handle.current?.open(OTHER.id));
     await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
     expect(clip.loadSource).toHaveBeenCalledWith(OTHER.id, null, expect.any(Number));
     expect((screen.getByTestId('clip-name') as HTMLInputElement).value).toContain(OTHER.title);
@@ -398,19 +396,41 @@ describe('ClipView', () => {
     expect((screen.getByTestId('clip-track-select') as HTMLSelectElement).value).toBe(
       String(OTHER.id),
     );
+  });
 
-    // Asking for the SAME track again re-opens it: after editing, Edit has
-    // to mean "start over", and the prop's value alone cannot say that.
+  it('asks before an open from the library throws away an edit', async () => {
+    const clip = clipMock();
+    const handle = createRef<ClipViewHandle>();
+    render(<ClipView ref={handle} clip={clip} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+    act(() => handle.current?.open(SOURCE.track_id));
+    await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
+
+    // An untouched clip is not worth a question.
+    act(() => handle.current?.open(OTHER.id));
+    expect(screen.queryByTestId('clip-discard-dialog')).toBeNull();
+    await waitFor(() =>
+      expect((screen.getByTestId('clip-name') as HTMLInputElement).value).toContain(OTHER.title),
+    );
+
+    // An edited one is.
     select(2, 6);
     fireEvent.click(screen.getByTestId('clip-cut'));
     await waitFor(() => expect(screen.getAllByTestId('clip-region')).toHaveLength(2));
-    view.rerender(
-      <ClipView
-        clip={clip}
-        library={libraryMock()}
-        openRequest={{ trackId: OTHER.id, nonce: 2 }}
-      />,
-    );
+    act(() => handle.current?.open(OTHER.id));
+    await waitFor(() => expect(screen.getByTestId('clip-discard-dialog')).toBeTruthy());
+    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+
+    // Keeping the edit leaves the timeline exactly as it was...
+    fireEvent.click(screen.getByTestId('clip-discard-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('clip-discard-dialog')).toBeNull());
+    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+
+    // ...and discarding starts that same track over, which is what Edit
+    // means the second time round.
+    act(() => handle.current?.open(OTHER.id));
+    await waitFor(() => expect(screen.getByTestId('clip-discard-dialog')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('clip-discard-confirm'));
     await waitFor(() => expect(screen.getAllByTestId('clip-region')).toHaveLength(1));
   });
 

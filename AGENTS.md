@@ -694,13 +694,15 @@ fails if it's missing.
   transient. Timing marks come from `rulerTicks` (pure, in `clip.ts`) and
   render as HTML over the stretched SVG, whose `preserveAspectRatio="none"`
   would squash text.
-  A track also opens straight from the Library page: its Edit button hands
-  App a `{trackId, nonce}` request that it passes to the (already mounted)
-  ClipView, which opens it and switches tabs. The nonce is what makes
-  asking for the SAME track twice re-open it — after an edit, Edit has to
-  mean "start over", and a bare id cannot say that. Like the in-page
-  picker this replaces the current edit without confirming; nothing is at
-  risk but unsaved editing, since the source track is never written.
+  A track also opens straight from the Library page: its Edit button calls
+  `open(trackId)` on ClipView's imperative handle (`ClipViewHandle`) and
+  switches tabs. It is a handle rather than a prop because opening is an
+  ACTION, not a state — a prop would need a nonce to fire twice for the
+  same track, and reacting to it would put the state updates in an effect,
+  which `react-hooks/set-state-in-effect` rejects (rightly: they belong in
+  the click). An edit that has been touched but not saved is asked about
+  first (`clip-discard-dialog`); nothing else is at risk, since the source
+  track is never written.
   Sources are `{track_id, stem}` pairs, not bare ids: the picker can open
   ONE ISOLATED STEM of a track (`clip_stem_*` commands over `StemJobs`)
   and edit it exactly like a full mix — the stem is part of the cache key,

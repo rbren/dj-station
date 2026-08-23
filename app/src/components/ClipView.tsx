@@ -12,8 +12,16 @@
 // with display: none) so the edit survives tab switches; `active` gates
 // its keyboard shortcuts and pauses playback on the way out.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import type { MouseEvent as ReactMouseEvent, Ref } from 'react';
 import {
   addOverlay,
   appendSource,
@@ -115,24 +123,25 @@ export interface ClipViewProps {
   active?: boolean;
   /** Called after a clip is imported, so the library list can refresh. */
   onSaved?: (track: Track) => void;
-  /** A track to open for editing, sent by the Library page's Edit button.
-   *  Carries a nonce so asking for the SAME track again still re-opens it
-   *  (after an edit, "Edit" has to mean "start over"). */
-  openRequest?: { trackId: number; nonce: number } | null;
+  /** Handle for the Library page's Edit button (see ClipViewHandle). */
+  ref?: Ref<ClipViewHandle>;
 }
 
-export function ClipView({
-  clip,
-  library,
-  active = true,
-  onSaved,
-  openRequest = null,
-}: ClipViewProps) {
+/** What another page can ask the (permanently mounted) editor to do. */
+export interface ClipViewHandle {
+  /** Open a library track for editing. Asks first if that would throw
+   *  away an unsaved edit. */
+  open: (trackId: number) => void;
+}
+
+export function ClipView({ clip, library, active = true, onSaved, ref }: ClipViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [pick, setPick] = useState<number | null>(null);
   const [sources, setSources] = useState<ClipSource[]>([]);
   const [program, setProgram] = useState<ClipProgram>(emptyProgram);
   const [past, setPast] = useState<ClipProgram[]>([]);
+  /** A library track waiting on "discard the current edit?". */
+  const [pendingOpen, setPendingOpen] = useState<number | null>(null);
   const [future, setFuture] = useState<ClipProgram[]>([]);
   const [selection, setSelection] = useState<Range | null>(null);
   const [previewState, setPreview] = useState<ClipRender | null>(null);
@@ -622,18 +631,30 @@ export function ClipView({
     };
   }, [dragPoint, timeAt]);
 
-  // Opening from the Library page. Like the in-page picker this replaces
-  // the current edit without asking — the source track is never touched,
-  // so the only thing at stake is unsaved editing, and the same is true
-  // of the Open button next to the picker.
-  const lastOpen = useRef(0);
-  useEffect(() => {
-    if (!openRequest || openRequest.nonce === lastOpen.current) return;
-    lastOpen.current = openRequest.nonce;
-    setPick(openRequest.trackId);
-    setStemChoice({ trackId: openRequest.trackId, stem: '' });
-    void loadTrack(openRequest.trackId, 'open', '');
-  }, [openRequest, loadTrack]);
+  // Opening from the Library page. An edit that has been touched but not
+  // saved would be lost, so that case asks first — the source track is
+  // never written, so the only thing at stake is the editing itself.
+  const openFromLibrary = useCallback(
+    (trackId: number) => {
+      setPendingOpen(null);
+      setPick(trackId);
+      setStemChoice({ trackId, stem: '' });
+      void loadTrack(trackId, 'open', '');
+    },
+    [loadTrack],
+  );
+
+  const dirtyEdit = past.length > 0 && program.regions.length > 0;
+  useImperativeHandle(
+    ref,
+    () => ({
+      open: (trackId: number) => {
+        if (dirtyEdit) setPendingOpen(trackId);
+        else openFromLibrary(trackId);
+      },
+    }),
+    [dirtyEdit, openFromLibrary],
+  );
 
   // --- playback: commands -------------------------------------------------
   // What Loop loops: the selection if there is one, otherwise the whole
@@ -1228,6 +1249,32 @@ export function ClipView({
         <p className="clip-error" data-testid="clip-error">
           {error}
         </p>
+      )}
+      {pendingOpen !== null && (
+        <div
+          className="file-dialog-backdrop"
+          data-testid="clip-discard-dialog"
+          onClick={() => setPendingOpen(null)}
+        >
+          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Discard this edit?</h3>
+            <p className="file-dialog-empty">
+              Opening “{tracks.find((t) => t.id === pendingOpen)?.title ?? 'that track'}” clears the
+              timeline. This edit has not been saved to the library, and nothing here can be
+              recovered afterwards.
+            </p>
+            <button data-testid="clip-discard-confirm" onClick={() => openFromLibrary(pendingOpen)}>
+              Discard and Open
+            </button>
+            <button
+              className="file-dialog-cancel"
+              data-testid="clip-discard-cancel"
+              onClick={() => setPendingOpen(null)}
+            >
+              Keep Editing
+            </button>
+          </div>
+        </div>
       )}
     </section>
   );

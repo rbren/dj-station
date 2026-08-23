@@ -21,7 +21,7 @@ import { DocsPanel } from './components/DocsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
-import { ClipView } from './components/ClipView';
+import { ClipView, type ClipViewHandle } from './components/ClipView';
 import { clipClient } from './clip';
 import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
 import { GRID, snap } from './components/ModulePanel';
@@ -85,9 +85,9 @@ export default function App() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
   const [view, setView] = useState<'rack' | 'library' | 'clip'>('rack');
-  // The library's Edit button hands a track to the (always mounted) clip
-  // editor; the nonce makes re-opening the same track a fresh request.
-  const [clipOpen, setClipOpen] = useState<{ trackId: number; nonce: number } | null>(null);
+  // The library's Edit button opens a track in the (always mounted) clip
+  // editor, which owns what that costs the edit already in there.
+  const clipView = useRef<ClipViewHandle>(null);
   const [wireColors, setWireColors] = useState<Record<string, number>>(() =>
     loadJson(WIRE_COLORS_KEY, {}),
   );
@@ -2079,7 +2079,7 @@ export default function App() {
         <LibraryView
           client={library}
           onEdit={(t) => {
-            setClipOpen((prev) => ({ trackId: t.id, nonce: (prev?.nonce ?? 0) + 1 }));
+            clipView.current?.open(t.id);
             setView('clip');
           }}
         />
@@ -2091,7 +2091,7 @@ export default function App() {
         library={library}
         active={view === 'clip'}
         onSaved={() => void refresh()}
-        openRequest={clipOpen}
+        ref={clipView}
       />
       {pickerOpen && (
         <ModulePicker
