@@ -460,8 +460,14 @@ impl HostModule for HandsRtModule {
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
-        for (i, chunk) in bytes.chunks_exact(4).enumerate().take(N_HANDS_JACKS) {
-            self.values[i] = f32::from_le_bytes(chunk.try_into().unwrap());
+        for (i, chunk) in bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .enumerate()
+            .take(N_HANDS_JACKS)
+        {
+            self.values[i] = f32::from_le_bytes(*chunk);
         }
     }
 

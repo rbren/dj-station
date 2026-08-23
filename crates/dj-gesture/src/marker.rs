@@ -44,7 +44,7 @@ impl HandDetector for MarkerDetector {
         // (sum_x, sum_y, count) per hand and landmark.
         let mut acc = [[(0u64, 0u64, 0u64); N_LANDMARKS]; 2];
         let w = frame.width as usize;
-        for (i, px) in frame.rgb.chunks_exact(3).enumerate() {
+        for (i, px) in frame.rgb.as_chunks::<3>().0.iter().enumerate() {
             if px[2] != MARKER_MAGIC {
                 continue;
             }

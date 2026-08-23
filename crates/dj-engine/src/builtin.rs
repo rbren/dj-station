@@ -731,8 +731,10 @@ impl HostModule for MidiModule {
 
     fn load_state(&mut self, bytes: &[u8]) {
         let mut words = bytes
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().unwrap()));
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c));
         for (i, w) in words.by_ref().take(MAX_MIDI_JACKS).enumerate() {
             self.values[i] = w;
         }
