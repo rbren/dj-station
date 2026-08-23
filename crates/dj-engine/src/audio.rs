@@ -2,7 +2,8 @@
 //! at the tempo its BPM input is set to.
 //!
 //! - Inputs: `play` (switch; high plays, low pauses), `bpm` (clock tempo),
-//!   `speed` (playback rate multiplier, 1 = the file's own rate).
+//!   `speed` (playback rate multiplier, 1 = the file's own rate), `loop`
+//!   (switch, ON by default: the track repeats instead of ending).
 //! - Outputs: `audio_l`, `audio_r` (mono files feed both) and `clock`, a
 //!   10 ms trigger per beat at the `bpm` input's tempo.
 //!
@@ -21,6 +22,7 @@
 //! off-RT drop.
 
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::graph::SIGNAL_MAX;
@@ -35,6 +37,7 @@ pub const AUDIO_ID: &str = "builtin.audio";
 pub(crate) const IN_PLAY: usize = 0;
 pub(crate) const IN_BPM: usize = 1;
 pub(crate) const IN_SPEED: usize = 2;
+pub(crate) const IN_LOOP: usize = 3;
 
 const OUT_AUDIO_L: usize = 0;
 const OUT_AUDIO_R: usize = 1;
@@ -104,6 +107,22 @@ pub fn audio_manifest() -> Manifest {
                     ..DisplaySpec::default()
                 }),
             },
+            JackDecl {
+                id: "loop".into(),
+                name: "Loop".into(),
+                // High by default: a loaded track repeats until you say
+                // otherwise, so the module is useful the moment it plays.
+                default: SIGNAL_MAX,
+                audio: false,
+                knob: Some(KnobConfig {
+                    style: KnobStyle::Switch,
+                    min: 0.0,
+                    max: 10.0,
+                    curve: Curve::Linear,
+                    steps: None,
+                }),
+                display: None,
+            },
         ],
         outputs: vec![
             OutputDecl {
@@ -128,12 +147,55 @@ pub fn audio_manifest() -> Manifest {
     }
 }
 
+/// Transport state the RT module publishes once per block for the panel's
+/// playhead: where the audible position is, how fast it moves and whether
+/// it moves at all. f64s are stored as bit patterns (same trick as
+/// [`crate::deck::DeckShared`]); may lag the audio by one block.
+#[derive(Debug)]
+pub struct AudioShared {
+    pos_secs: AtomicU64,
+    /// Track seconds advanced per output second (the `speed` input as the
+    /// RT thread actually read it — knob or wire).
+    rate: AtomicU64,
+    playing: AtomicBool,
+}
+
+impl Default for AudioShared {
+    fn default() -> Self {
+        AudioShared {
+            pos_secs: AtomicU64::new(0.0f64.to_bits()),
+            rate: AtomicU64::new(1.0f64.to_bits()),
+            playing: AtomicBool::new(false),
+        }
+    }
+}
+
+impl AudioShared {
+    fn publish(&self, pos_secs: f64, rate: f64, playing: bool) {
+        self.pos_secs.store(pos_secs.to_bits(), Ordering::Relaxed);
+        self.rate.store(rate.to_bits(), Ordering::Relaxed);
+        self.playing.store(playing, Ordering::Relaxed);
+    }
+
+    pub fn position_secs(&self) -> f64 {
+        f64::from_bits(self.pos_secs.load(Ordering::Relaxed))
+    }
+    pub fn rate(&self) -> f64 {
+        f64::from_bits(self.rate.load(Ordering::Relaxed))
+    }
+    pub fn playing(&self) -> bool {
+        self.playing.load(Ordering::Relaxed)
+    }
+}
+
 /// Control-side state per Audio node: the track handoff ring, the garbage
-/// return, and the decoded track (duration for the panel readout).
+/// return, the decoded track (duration + waveform peaks for the panel) and
+/// the transport the RT module publishes.
 pub struct AudioControl {
     pub tx: rtrb::Producer<Arc<TrackData>>,
     pub garbage_rx: rtrb::Consumer<Arc<TrackData>>,
     pub track: Option<Arc<TrackData>>,
+    pub shared: Arc<AudioShared>,
 }
 
 /// Snapshot of an Audio node for UIs (serialized over IPC).
@@ -141,10 +203,18 @@ pub struct AudioControl {
 pub struct AudioStatus {
     pub track: Option<String>,
     pub duration_secs: f64,
+    /// Audible position in track seconds, as of the last processed block.
+    pub position_secs: f64,
+    /// Track seconds per output second — what the playhead moves at.
+    pub rate: f64,
+    /// Audio is actually advancing (track loaded, play high, not ended).
+    pub playing: bool,
     /// Clock tempo the BPM input is set to.
     pub bpm: f64,
     /// Playback rate multiplier the speed input is set to.
     pub speed: f64,
+    /// Loop switch position (knob only — a wired jack is RT state).
+    pub looping: bool,
 }
 
 /// The RT-side Audio module. Never allocates or blocks: tracks arrive over
@@ -165,6 +235,7 @@ pub struct AudioModule {
     /// Samples of clock trigger still to emit.
     pulse_left: u32,
     pulse_samples: u32,
+    shared: Arc<AudioShared>,
 }
 
 impl AudioModule {
@@ -172,6 +243,7 @@ impl AudioModule {
         rx: rtrb::Consumer<Arc<TrackData>>,
         garbage_tx: rtrb::Producer<Arc<TrackData>>,
         engine_rate: f32,
+        shared: Arc<AudioShared>,
     ) -> Self {
         AudioModule {
             rx,
@@ -184,6 +256,7 @@ impl AudioModule {
             clock_phase: 0.0,
             pulse_left: 0,
             pulse_samples: (CLOCK_PULSE_SECS * engine_rate).max(1.0) as u32,
+            shared,
         }
     }
 
@@ -232,6 +305,7 @@ impl HostModule for AudioModule {
         let play = &inputs[IN_PLAY];
         let bpm = &inputs[IN_BPM];
         let speed = &inputs[IN_SPEED];
+        let looping = &inputs[IN_LOOP];
         for s in 0..frames {
             let play_high = play[s] >= 1.0;
             if play_high && !self.prev_play_high {
@@ -243,9 +317,29 @@ impl HostModule for AudioModule {
             }
             self.prev_play_high = play_high;
 
+            // Handle the end of a pass BEFORE reading, so the first sample
+            // of the next one — and the clock trigger marking it — land on
+            // the same frame.
+            if play_high && !self.ended {
+                if let Some(track) = &self.track {
+                    let n = track.frames() as f64;
+                    if n <= 0.0 {
+                        self.ended = true;
+                    } else if self.pos >= n {
+                        if looping[s] >= 1.0 {
+                            // Back to the top, keeping the sub-sample
+                            // remainder so the loop doesn't drift.
+                            self.pos %= n;
+                            self.restart_clock();
+                        } else {
+                            self.ended = true;
+                        }
+                    }
+                }
+            }
+
             let (l, r) = match &self.track {
                 Some(track) if play_high && !self.ended => {
-                    let n = track.frames();
                     let l = Self::sample_at(&track.channels[0], self.pos);
                     let r = if track.channels.len() > 1 {
                         Self::sample_at(&track.channels[1], self.pos)
@@ -256,9 +350,6 @@ impl HostModule for AudioModule {
                     // sample-rate conversion folds into the increment.
                     self.pos += (track.sample_rate as f64 / self.engine_rate as f64)
                         * speed[s].max(0.0) as f64;
-                    if self.pos >= n as f64 {
-                        self.ended = true;
-                    }
                     (l, r)
                 }
                 _ => (0.0, 0.0),
@@ -280,6 +371,22 @@ impl HostModule for AudioModule {
                 0.0
             };
         }
+
+        // One publish per block for the panel's playhead: the position we
+        // just reached plus the rate to extrapolate it with (the last
+        // sample's speed — a block is 3 ms of control movement).
+        let (pos_secs, rate) = match &self.track {
+            Some(track) => (
+                self.pos / track.sample_rate as f64,
+                speed[..frames]
+                    .last()
+                    .map(|v| v.max(0.0) as f64)
+                    .unwrap_or(0.0),
+            ),
+            None => (0.0, 0.0),
+        };
+        let playing = self.track.is_some() && self.prev_play_high && !self.ended;
+        self.shared.publish(pos_secs, rate, playing);
     }
 
     fn save_state(&mut self) -> Vec<u8> {

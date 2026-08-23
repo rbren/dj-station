@@ -1168,11 +1168,14 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'tempo. BPM and speed are one tempo in two units: moving either ' +
       'moves the other, so pushing the BPM up plays the track faster and ' +
       'the clock stays locked to what you hear. Loading a track takes the ' +
-      'BPM the library analysed and sets speed back to 1x.',
+      'BPM the library analysed and sets speed back to 1x. The panel ' +
+      'shows the track as a waveform with a playhead, and the track ' +
+      'loops until you switch looping off.',
     inputs: {
       play: 'Play/pause switch (rising edge restarts a finished track).',
       bpm: 'Clock tempo in BPM; drags the speed control with it.',
       speed: 'Playback rate, 1x = the file\u2019s own tempo; drags BPM with it.',
+      loop: 'Repeat the track at its end (on by default); the clock restarts each pass.',
     },
     outputs: {
       audio_l: 'Left audio.',

@@ -4,6 +4,8 @@
 //! - BPM and speed are one tempo in two units: moving either moves the
 //!   other, and the audio really runs at the new rate,
 //! - the clock output triggers once per beat at the BPM input's tempo,
+//! - the track loops by default and stops at its end with the switch off,
+//! - the status snapshot tracks the playhead the panel draws,
 //! - track and tempo survive patch save/load.
 
 use dj_engine::{Engine, EngineConfig};
@@ -46,6 +48,8 @@ fn mono_engine() -> Engine {
 }
 
 /// Audio -> Audio Out (ch1), playing, with `track` loaded at `bpm`.
+/// Looping is left at its default (on) — tests that want a one-shot say so
+/// with [`no_loop`].
 fn audio_engine(track: &Path, bpm: Option<f64>) -> Engine {
     let mut e = mono_engine();
     e.add_module("audio1", "builtin.audio").unwrap();
@@ -54,6 +58,10 @@ fn audio_engine(track: &Path, bpm: Option<f64>) -> Engine {
     e.set_knob_position("audio1", "play", 1.0).unwrap();
     e.audio_load("audio1", track, bpm).unwrap();
     e
+}
+
+fn no_loop(e: &mut Engine) {
+    e.set_knob_position("audio1", "loop", 0.0).unwrap();
 }
 
 fn zero_crossings(signal: &[f32]) -> usize {
@@ -107,6 +115,7 @@ fn plays_the_loaded_track_and_stops_at_its_end() {
     let source = write_wav(&wav, 440.0, 0.5);
 
     let mut e = audio_engine(&wav, Some(120.0));
+    no_loop(&mut e);
     let rendered = e.render_offline(source.len()).unwrap();
     // Engine units are [-10, 10]; the module scales file samples by 10.
     for (i, (&s, &r)) in source.iter().zip(&rendered[0]).enumerate() {
@@ -219,6 +228,7 @@ fn raising_bpm_speeds_the_audio_up() {
 
     // 100 BPM track at 200 BPM = double speed: 880 Hz, done in ~0.5 s.
     let mut e = audio_engine(&wav, Some(100.0));
+    no_loop(&mut e);
     e.set_knob_value("audio1", "bpm", 200.0).unwrap();
     let out = e.render_offline(source.len()).unwrap().remove(0);
 
@@ -279,6 +289,131 @@ fn clock_triggers_once_per_beat_at_the_bpm_input() {
         (beat - 12_000.0).abs() < 2.0,
         "120 BPM track at 2x = 240 BPM clock, beat = {beat} samples"
     );
+}
+
+#[test]
+fn a_loaded_track_loops_by_default() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wav = tmp.path().join("tone.wav");
+    let source = write_wav(&wav, 440.0, 0.25);
+
+    // Two track lengths of output: the second pass repeats the first,
+    // sample for sample, with no gap at the seam.
+    let mut e = audio_engine(&wav, Some(120.0));
+    let out = e.render_offline(2 * source.len()).unwrap().remove(0);
+    for (i, (&s, &r)) in source.iter().zip(&out[source.len()..]).enumerate() {
+        assert!(
+            (s - r / 10.0).abs() <= 1e-5,
+            "second pass sample {i}: source {s} vs rendered {}",
+            r / 10.0
+        );
+    }
+
+    // Switching the loop off mid-flight lets the current pass finish and
+    // stop (the module is one-shot from then on).
+    no_loop(&mut e);
+    let tail = e.render_offline(2 * source.len()).unwrap().remove(0);
+    assert!(
+        tail[source.len()..].iter().all(|&x| x == 0.0),
+        "loop off must let the track end"
+    );
+}
+
+#[test]
+fn the_clock_restarts_on_every_loop_pass() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wav = tmp.path().join("tone.wav");
+    // 0.75 s at 120 BPM is 1.5 beats: without a restart at the seam the
+    // clock would drift off the top of the loop every pass.
+    let source = write_wav(&wav, 440.0, 0.75);
+
+    let mut e = mono_engine();
+    e.add_module("audio1", "builtin.audio").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("audio1", "clock", "out1", "l").unwrap();
+    e.set_knob_position("audio1", "play", 1.0).unwrap();
+    e.audio_load("audio1", &wav, Some(120.0)).unwrap();
+
+    let out = e.render_offline(3 * source.len()).unwrap().remove(0);
+    let at = pulse_frames(&out);
+    let loop_len = source.len();
+    for pass in 0..3 {
+        assert!(
+            at.contains(&(pass * loop_len)),
+            "no clock trigger at the top of pass {pass} (frame {}), got {at:?}",
+            pass * loop_len
+        );
+    }
+}
+
+#[test]
+fn status_follows_the_playhead_and_the_loop_switch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wav = tmp.path().join("tone.wav");
+    let source = write_wav(&wav, 440.0, 0.5);
+
+    let mut e = audio_engine(&wav, Some(120.0));
+    let st = e.audio_status("audio1").unwrap();
+    assert!(st.looping, "loop is on by default");
+    assert!(!st.playing, "nothing has been processed yet");
+    assert!(
+        (st.duration_secs - 0.5).abs() < 1e-3,
+        "{}",
+        st.duration_secs
+    );
+
+    // Quarter of the way in: the position the panel draws.
+    e.render_offline(source.len() / 4).unwrap();
+    let st = e.audio_status("audio1").unwrap();
+    assert!(st.playing, "should be playing");
+    assert!(
+        (st.position_secs - 0.125).abs() < 1e-3,
+        "position {}",
+        st.position_secs
+    );
+    assert!((st.rate - 1.0).abs() < 1e-4, "rate {}", st.rate);
+
+    // Double speed doubles the rate the panel extrapolates with, and the
+    // position wraps instead of sticking at the end.
+    e.set_knob_value("audio1", "speed", 2.0).unwrap();
+    e.render_offline(source.len()).unwrap();
+    let st = e.audio_status("audio1").unwrap();
+    assert!((st.rate - 2.0).abs() < 1e-3, "rate {}", st.rate);
+    assert!(
+        st.position_secs < 0.5,
+        "position {} should have wrapped",
+        st.position_secs
+    );
+
+    // Pausing stops the playhead; the loop switch reads back.
+    e.set_knob_position("audio1", "play", 0.0).unwrap();
+    e.render_offline(256).unwrap();
+    assert!(!e.audio_status("audio1").unwrap().playing);
+    no_loop(&mut e);
+    assert!(!e.audio_status("audio1").unwrap().looping);
+}
+
+#[test]
+fn waveform_peaks_span_the_loaded_track() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wav = tmp.path().join("tone.wav");
+    write_wav(&wav, 440.0, 0.5);
+
+    let mut e = mono_engine();
+    e.add_module("audio1", "builtin.audio").unwrap();
+    assert!(
+        e.audio_waveform("audio1", 64).unwrap().is_empty(),
+        "no track, no waveform"
+    );
+
+    e.audio_load("audio1", &wav, Some(120.0)).unwrap();
+    let peaks = e.audio_waveform("audio1", 64).unwrap();
+    assert_eq!(peaks.len(), 64);
+    // The tone is a constant half-amplitude sine, so every bucket peaks
+    // near 0.5 and none of them clip.
+    for (b, &p) in peaks.iter().enumerate() {
+        assert!((p - 0.5).abs() < 0.02, "bucket {b} peak {p}");
+    }
 }
 
 #[test]

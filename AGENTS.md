@@ -77,7 +77,25 @@ fails if it's missing.
   `audio_load` resets the pair (speed 1x, BPM from the library's analysis,
   passed in by the caller — patches persist only the track path). On the RT
   thread the two jacks are independent per-sample reads, so wiring either
-  one keeps meaning exactly what its unit says.
+  one keeps meaning exactly what its unit says. Its `loop` switch is ON by
+  default (a manifest `default: SIGNAL_MAX` on a `Switch` jack) and wraps
+  the playhead at the end of the file, restarting the beat clock on the
+  seam; the wrap is decided BEFORE the sample read, so the first sample of
+  a pass and its clock trigger land on the same frame.
+- Panel playheads (deck, audio) are drawn from a `Shared` atomics struct the
+  RT module publishes ONCE PER BLOCK (`position`, `rate`, `playing` as
+  `AtomicU64` bit patterns / `AtomicBool`) — never from control-thread
+  guesswork. The panel polls it every 100 ms and extrapolates between polls
+  in a rAF loop that mutates the SVG playhead directly (`useDeckPlayhead`,
+  `useAudioPlayhead`); a looping module wraps the extrapolation the same way
+  the engine wraps the audio (`extrapolate` in `AudioPanel.tsx`).
+  Waveform peaks come from `TrackData::peaks` on the control thread, the one
+  implementation behind both `Engine::deck_waveform` and
+  `Engine::audio_waveform`.
+- `position_for_value` (knob.rs and its TS twin in `Knob.tsx`) resolves
+  `Switch`/`Button` styles to an exact end position (0 or 1), never the 0.5
+  snap threshold — that's what makes a "default on" switch survive a patch
+  round trip. Pinned in `app/tests/KnobMath.test.ts`.
 - Stems (M3) follow the same split: the FLAC stem cache under
   `<data_dir>/stems/<content_hash>/` is app-layer state auto-loaded by
   `apply_deck_metadata`; patches persist only the `stem_*` gain params.

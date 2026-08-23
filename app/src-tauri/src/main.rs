@@ -2300,7 +2300,7 @@ fn audio_load(state: State<AppState>, instance: String, track_id: i64) -> CmdRes
         .map_err(err)
 }
 
-/// Track + tempo snapshot for the Audio module panel.
+/// Track + transport + tempo snapshot for the Audio module panel.
 #[tauri::command]
 fn audio_status(
     state: State<AppState>,
@@ -2308,6 +2308,15 @@ fn audio_status(
 ) -> CmdResult<dj_engine::audio::AudioStatus> {
     let engine = engine_lock(&state)?;
     engine.audio_status(&instance).map_err(err)
+}
+
+/// Waveform overview peaks (0..=1) of an Audio module's track.
+#[tauri::command]
+fn audio_waveform(state: State<AppState>, instance: String, buckets: usize) -> CmdResult<Vec<f32>> {
+    let engine = engine_lock(&state)?;
+    engine
+        .audio_waveform(&instance, buckets.min(20_000))
+        .map_err(err)
 }
 
 // ---------------------------------------------------------------------------
@@ -2896,6 +2905,7 @@ fn main() {
             playback_load,
             audio_load,
             audio_status,
+            audio_waveform,
             deck_load,
             deck_status,
             deck_waveform,

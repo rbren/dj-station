@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::audio::{AudioControl, AudioModule};
+use crate::audio::{AudioControl, AudioModule, AudioShared};
 use crate::builtin::{
     AudioOutModule, BuiltinKind, MidiEvent, MidiMapKind, MidiModule, MidiOutEvent, MidiOutSink,
     MidiShared,
@@ -794,12 +794,19 @@ impl Engine {
             Some(BuiltinKind::Audio) => {
                 let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
                 let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let shared = Arc::new(AudioShared::default());
                 audio_ctl = Some(AudioControl {
                     tx,
                     garbage_rx,
                     track: None,
+                    shared: shared.clone(),
                 });
-                Box::new(AudioModule::new(rx, garbage_tx, self.config.sample_rate))
+                Box::new(AudioModule::new(
+                    rx,
+                    garbage_tx,
+                    self.config.sample_rate,
+                    shared,
+                ))
             }
             Some(BuiltinKind::Deck) => {
                 let (tx, rx) = rtrb::RingBuffer::new(DECK_QUEUE_CAP);

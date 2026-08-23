@@ -85,6 +85,13 @@ export function curveAt(config: KnobConfig, position: number): number {
  *  (approximately) `value`. Binary search over the monotone mapping,
  *  mirroring the engine's `position_for_value`. */
 export function positionForValue(config: KnobConfig, value: number): number {
+  // Two-position styles: the search would land on the snap threshold
+  // itself, so pick the end that maps closest (mirrors knob.rs).
+  if (config.style === 'switch' || config.style === 'button') {
+    const low = mapPosition(config, 0);
+    const high = mapPosition(config, 1);
+    return Math.abs(value - high) <= Math.abs(value - low) ? 1 : 0;
+  }
   let lo = 0;
   let hi = 1;
   const increasing = mapPosition(config, 1) >= mapPosition(config, 0);

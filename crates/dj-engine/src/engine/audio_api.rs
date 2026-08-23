@@ -2,7 +2,7 @@
 //! BPM/speed pair; methods on [`Engine`] only.
 
 use super::*;
-use crate::audio::{AudioStatus, IN_BPM, IN_PLAY, IN_SPEED};
+use crate::audio::{AudioStatus, IN_BPM, IN_LOOP, IN_SPEED};
 
 /// A pending mirror of one half of an Audio module's tempo pair onto the
 /// other. Captured BEFORE the knob write (the ratio is what the pair meant
@@ -63,26 +63,33 @@ impl Engine {
         Ok(self.nodes[node].track_path.clone())
     }
 
-    /// Track/tempo snapshot for UIs.
+    /// Track/transport/tempo snapshot for UIs. Position and rate come from
+    /// the RT thread's last processed block; the panel extrapolates between
+    /// polls from exactly these two fields.
     pub fn audio_status(&self, instance_id: &str) -> Result<AudioStatus> {
         let node = self.audio_node(instance_id)?;
+        let ctl = &self.audios[&node];
         Ok(AudioStatus {
             track: self.nodes[node].track_path.clone(),
-            duration_secs: self.audios[&node]
-                .track
-                .as_ref()
-                .map(|t| t.duration_secs())
-                .unwrap_or(0.0),
+            duration_secs: ctl.track.as_ref().map(|t| t.duration_secs()).unwrap_or(0.0),
+            position_secs: ctl.shared.position_secs(),
+            rate: ctl.shared.rate(),
+            playing: ctl.shared.playing(),
             bpm: self.knob_value(node, IN_BPM) as f64,
             speed: self.knob_value(node, IN_SPEED) as f64,
+            looping: self.knob_value(node, IN_LOOP) >= 1.0,
         })
     }
 
-    /// True while an Audio node's play input is up (knob only — a wired
-    /// gate is RT state the control thread never sees).
-    pub fn audio_playing(&self, instance_id: &str) -> Result<bool> {
+    /// Waveform overview of the loaded track: peak per bucket, 0..=1.
+    /// Computed on the control thread from the decoded track.
+    pub fn audio_waveform(&self, instance_id: &str, buckets: usize) -> Result<Vec<f32>> {
         let node = self.audio_node(instance_id)?;
-        Ok(self.knob_value(node, IN_PLAY) >= 1.0)
+        Ok(self.audios[&node]
+            .track
+            .as_ref()
+            .map(|t| t.peaks(buckets))
+            .unwrap_or_default())
     }
 
     /// Snapshot the BPM/speed link of a knob that is about to change.

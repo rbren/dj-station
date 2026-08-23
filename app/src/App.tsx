@@ -1685,10 +1685,17 @@ export default function App() {
     [libraryTracks, nodes, refresh],
   );
 
-  // Audio module panels need the track list, and a refresh after a load:
-  // adopting the track's tempo moves the module's BPM/speed knobs.
+  // Audio module panels need the track list, a refresh after a load
+  // (adopting the track's tempo moves the module's BPM/speed knobs) and
+  // the loop switch, which is a knob-backed input like play_gate.
   const audioUI = useMemo(
-    () => ({ tracks: libraryTracks, onLoaded: () => void refresh() }),
+    () => ({
+      tracks: libraryTracks,
+      onLoaded: () => void refresh(),
+      setLoop: (instance: string, on: boolean) => {
+        void engine.setKnobPosition(instance, 'loop', on ? 1 : 0).then(refresh);
+      },
+    }),
     [libraryTracks, refresh],
   );
 

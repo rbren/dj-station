@@ -108,6 +108,33 @@ impl TrackData {
     pub fn duration_secs(&self) -> f64 {
         self.frames() as f64 / self.sample_rate as f64
     }
+
+    /// Waveform overview: peak |sample| per bucket over the channel mix
+    /// (0..=1), spanning the whole track. Control thread only — every
+    /// waveform UI (deck, audio module) reads the same shape.
+    pub fn peaks(&self, buckets: usize) -> Vec<f32> {
+        let frames = self.frames();
+        if frames == 0 || buckets == 0 {
+            return Vec::new();
+        }
+        let buckets = buckets.min(frames);
+        let mut out = vec![0.0f32; buckets];
+        let per = frames as f64 / buckets as f64;
+        for (b, peak) in out.iter_mut().enumerate() {
+            let start = (b as f64 * per) as usize;
+            let end = (((b + 1) as f64 * per) as usize).min(frames);
+            let mut p = 0.0f32;
+            for i in start..end {
+                let mut s = self.channels[0][i].abs();
+                if self.channels.len() > 1 {
+                    s = s.max(self.channels[1][i].abs());
+                }
+                p = p.max(s);
+            }
+            *peak = p;
+        }
+        out
+    }
 }
 
 /// Decode an audio file (mp3/flac/wav/aac/...) fully into memory.

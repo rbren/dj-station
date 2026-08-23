@@ -1,0 +1,26 @@
+{
+  "ext": "builtin.audio",
+  "knobs": {
+    "bpm": {
+      "position": 0.35714287,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "loop": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "play": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "speed": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

@@ -1,4 +1,4 @@
-//! E2E golden-audio case for the Audio module (PRD §10.1).
+//! E2E golden-audio cases for the Audio module (PRD §10.1).
 //!
 //! `audio-tone-clock-gate`: a library track playing at its own tempo, with
 //! the module's beat clock chopping that audio through a VCA — left is the
@@ -6,6 +6,11 @@
 //! rate and the beat timing the BPM input produces. The track's tempo
 //! comes from the sidecar (library metadata, like deck beatgrids), and the
 //! module adopts it on load.
+//!
+//! `audio-loop-repeat`: a track shorter than the render, left at the
+//! module's default (looping) — the golden pins the seam, the phase the
+//! second and third passes come back at, and the clock restart that marks
+//! each one.
 //!
 //! Regenerate with `REGEN_GOLDENS=1 cargo test -p dj-engine --release
 //! --test e2e_suite audio` (or `./scripts/regen-goldens.sh`).
@@ -55,4 +60,41 @@ fn audio_tone_clock_gate() {
         regen_audio_clock_gate();
     }
     check_case("audio-tone-clock-gate");
+}
+
+fn regen_audio_loop() {
+    let dir = case_dir("audio-loop-repeat");
+    // 0.4 s of tone rendered for 1.1 s: two seams inside the golden.
+    write_case_tone(&dir.join("tone.wav"), 220.0, 0.4);
+
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
+    e.add_module("audio1", "builtin.audio").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("audio1", "audio_l", "out1", "l").unwrap();
+    e.connect("audio1", "clock", "out1", "r").unwrap();
+    e.set_knob_position("audio1", "play", 1.0).unwrap();
+    // `loop` is deliberately untouched: this case pins the DEFAULT.
+
+    e.save_patch(&dir.join("patch"), "e2e-audio-loop-repeat")
+        .unwrap();
+    write_events(
+        &dir,
+        &EventsFile {
+            seconds: 1.1,
+            tracks: vec![TrackLoadSpec {
+                instance: "audio1".into(),
+                file: "tone.wav".into(),
+                bpm: Some(120.0),
+            }],
+            ..EventsFile::default()
+        },
+    );
+}
+
+#[test]
+fn audio_loop_repeat() {
+    if regen() {
+        regen_audio_loop();
+    }
+    check_case("audio-loop-repeat");
 }
