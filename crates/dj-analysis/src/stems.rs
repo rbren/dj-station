@@ -381,6 +381,39 @@ pub fn stems_dir_for(data_dir: &Path, content_hash: &str, separator_id: &str) ->
     }
 }
 
+/// Sum stems back together — the editor's "vocals + drums, no bass" is
+/// this over the cached stem files.
+///
+/// Separation is a partition of the signal, so summing is all a subset
+/// needs: no gain staging, no normalisation. Parts must share a sample
+/// rate and channel count (they come from one separation of one track);
+/// a ragged last block just leaves the shorter parts silent at the end.
+pub fn mix_stems(parts: &[&AudioData]) -> Result<AudioData> {
+    let (first, rest) = parts
+        .split_first()
+        .context("mixing stems: nothing to mix")?;
+    let n_ch = first.channels.len();
+    for part in rest {
+        anyhow::ensure!(
+            part.sample_rate == first.sample_rate && part.channels.len() == n_ch,
+            "mixing stems: parts disagree on format"
+        );
+    }
+    let frames = parts.iter().map(|p| p.frames()).max().unwrap_or(0);
+    let mut channels = vec![vec![0.0f32; frames]; n_ch];
+    for part in parts {
+        for (out, src) in channels.iter_mut().zip(&part.channels) {
+            for (o, s) in out.iter_mut().zip(src) {
+                *o += *s;
+            }
+        }
+    }
+    Ok(AudioData {
+        sample_rate: first.sample_rate,
+        channels,
+    })
+}
+
 /// The four stem FLAC paths inside a stems directory, [`STEM_NAMES`] order.
 pub fn stem_paths(dir: &Path) -> [PathBuf; N_STEMS] {
     std::array::from_fn(|i| dir.join(format!("{}.flac", STEM_NAMES[i])))

@@ -61,9 +61,9 @@ const libraryMock = {
 const nothing = async () => null;
 
 const clipMock = {
-  loadSource: vi.fn(async (trackId: number, stem: string | null) => ({
+  loadSource: vi.fn(async (trackId: number, stems: string[]) => ({
     track_id: trackId,
-    stem,
+    stems,
     title: TRACK.title,
     artist: TRACK.artist,
     duration_secs: 10,
@@ -120,7 +120,7 @@ describe('editing a library track', () => {
     await waitFor(() => expect(screen.getByTestId('tab-clip').className).toContain('active'));
     // ...editing that track, with no second trip through the clip picker.
     await waitFor(() =>
-      expect(clipMock.loadSource).toHaveBeenCalledWith(4, null, expect.any(Number)),
+      expect(clipMock.loadSource).toHaveBeenCalledWith(4, [], expect.any(Number)),
     );
     await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
   });

@@ -40,12 +40,15 @@ import {
   removeOverlay,
   removeRegion,
   resizeSelection,
+  sameSource,
   reverseRange,
   rulerTicks,
   selectionEdgeAt,
   setLevelPoint,
   sourceLabel,
   sourceRef,
+  stemLabel,
+  stemSet,
   trimTo,
   type ClipClientApi,
   type ClipProgram,
@@ -155,11 +158,12 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
 
   /** Zoomed viewport over the output timeline; null = the whole clip. */
   const [vp, setVp] = useState<Range | null>(null);
-  /** Which stem to load ('' = the full mix), and the track it was chosen
-   *  for: a choice does not carry over to the next track picked. */
-  const [stemChoice, setStemChoice] = useState<{ trackId: number; stem: string }>({
+  /** Which stems are switched ON, and the track they were chosen for: a
+   *  choice does not carry over to the next track picked, which starts
+   *  with the whole thing playing. */
+  const [stemChoice, setStemChoice] = useState<{ trackId: number; on: string[] }>({
     trackId: -1,
-    stem: '',
+    on: [...STEM_NAMES],
   });
   /** The configured separation backend, or null until probed. */
   const [backend, setBackend] = useState<ClipStemBackend | null>(null);
@@ -176,7 +180,12 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
   const sourceRefs = useMemo(() => sources.map(sourceRef), [sources]);
   const request = useMemo(() => ({ sources: sourceRefs, program }), [sourceRefs, program]);
 
-  const stemPick = stemChoice.trackId === pick ? stemChoice.stem : '';
+  // A fresh array each render would churn every callback that depends on
+  // the stem choice.
+  const stemsOn = useMemo(
+    () => (stemChoice.trackId === pick ? stemChoice.on : [...STEM_NAMES]),
+    [pick, stemChoice],
+  );
 
   // --- playback: the owner ------------------------------------------------
   //
@@ -322,23 +331,29 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
   const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
 
   const loadTrack = useCallback(
-    async (trackId: number, mode: 'open' | 'append' | 'overlay', stemName = stemPick) => {
-      const stem = stemName || null;
+    async (
+      trackId: number,
+      mode: 'open' | 'append' | 'overlay',
+      stemsWanted = stemSet(stemsOn),
+    ) => {
+      const stems = stemsWanted;
       setBusy(true);
       setError(null);
       try {
         // Re-adding a source that is already loaded reuses its slot — the
-        // stem is part of that identity, so "vocals" and the full mix of
-        // the same track are two lanes.
-        const existing = sources.findIndex((s) => s.track_id === trackId && s.stem === stem);
+        // stem set is part of that identity, so "vocals" and the full mix
+        // of the same track are two lanes.
+        const existing = sources.findIndex((s) =>
+          sameSource(sourceRef(s), { track_id: trackId, stems }),
+        );
         const source =
           mode !== 'open' && existing >= 0
             ? sources[existing]
-            : await clip.loadSource(trackId, stem, MIN_BUCKETS);
+            : await clip.loadSource(trackId, stems, MIN_BUCKETS);
         if (!source) {
           setError(
-            stem
-              ? `Could not load the ${stem} stem — separate the track first`
+            stems.length
+              ? `Could not load ${stemLabel(stems)} — separate the track first`
               : 'Could not decode that track',
           );
           return;
@@ -353,7 +368,9 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
           setVp(null);
           // A different program entirely: stop, don't play the old render.
           transportRef.current?.stop(0);
-          setName(stem ? `${source.title} (${stem})` : `${source.title} (clip)`);
+          setName(
+            stems.length ? `${source.title} (${stemLabel(stems)})` : `${source.title} (clip)`,
+          );
           setStatus(`Editing "${label}" — the original is never modified`);
           return;
         }
@@ -373,7 +390,48 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
         setBusy(false);
       }
     },
-    [clip, playhead, program, sel, sources, stemPick],
+    [clip, playhead, program, sel, sources, stemsOn],
+  );
+
+  /** Flip one stem of the picked track on or off.
+   *
+   *  The change lands on the audio straight away — swapping the loaded
+   *  lane for the new mix — rather than waiting for another Open. Stems
+   *  are the same length as the track they came from, so the edit itself
+   *  (regions, level, EQ) survives untouched: only what those regions are
+   *  made of changes. A load that fails leaves the switches as they were,
+   *  so the panel never claims a mix that isn't playing.
+   */
+  const toggleStem = useCallback(
+    async (name: string) => {
+      if (pick === null) return;
+      const on = stemsOn.includes(name) ? stemsOn.filter((s) => s !== name) : [...stemsOn, name];
+      if (on.length === 0) {
+        setError('Leave at least one stem on — muting all four is silence');
+        return;
+      }
+      const was = stemsOn;
+      setStemChoice({ trackId: pick, on });
+      const lane = sources.findIndex((s) => s.track_id === pick);
+      if (lane < 0) return;
+
+      const stems = stemSet(on);
+      setBusy(true);
+      setError(null);
+      try {
+        const source = await clip.loadSource(pick, stems, MIN_BUCKETS);
+        if (!source) {
+          setStemChoice({ trackId: pick, on: was });
+          setError(`Could not load ${stemLabel(stems) || 'the full mix'}`);
+          return;
+        }
+        setSources(sources.map((s, i) => (i === lane ? source : s)));
+        setStatus(stems.length ? `Playing ${stemLabel(stems)}` : 'Playing the full mix');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [clip, pick, sources, stemsOn],
   );
 
   // --- stems: isolate a stem of the picked track on demand ----------------
@@ -649,8 +707,8 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
     (trackId: number) => {
       setPendingOpen(null);
       setPick(trackId);
-      setStemChoice({ trackId, stem: '' });
-      void loadTrack(trackId, 'open', '');
+      setStemChoice({ trackId, on: [...STEM_NAMES] });
+      void loadTrack(trackId, 'open', []);
     },
     [loadTrack],
   );
@@ -819,7 +877,10 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
         </button>
         <span className="clip-sources" data-testid="clip-sources">
           {sources.map((s, i) => (
-            <span className="tag tag-source" key={`${s.track_id}:${s.stem ?? 'mix'}:${i}`}>
+            <span
+              className="tag tag-source"
+              key={`${s.track_id}:${s.stems.join('+') || 'mix'}:${i}`}
+            >
               {i + 1}. {sourceLabel(s)}
             </span>
           ))}
@@ -827,27 +888,34 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
       </div>
 
       <div className="clip-stems" data-testid="clip-stems">
-        <label>
-          <span>Stem</span>
-          <select
-            data-testid="clip-stem-select"
-            value={stemPick}
-            disabled={!stemsReady}
-            title={
-              stemsReady
-                ? 'Load one isolated stem instead of the full mix'
-                : 'Separate the track first'
-            }
-            onChange={(e) => setStemChoice({ trackId: pick ?? -1, stem: e.target.value })}
-          >
-            <option value="">Full mix</option>
-            {(backend?.stems ?? STEM_NAMES).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div
+          className="clip-stem-toggles"
+          data-testid="clip-stem-toggles"
+          role="group"
+          aria-label="Stems"
+        >
+          <span>Stems</span>
+          {(backend?.stems ?? STEM_NAMES).map((name) => {
+            const on = stemsOn.includes(name);
+            return (
+              <button
+                key={name}
+                className={on ? 'clip-stem-on' : 'clip-stem-off'}
+                data-testid={`clip-stem-${name}`}
+                aria-pressed={on}
+                disabled={!stemsReady || busy}
+                title={
+                  stemsReady
+                    ? `${on ? 'Drop' : 'Bring back'} the ${name}`
+                    : 'Separate this track first to mix its stems'
+                }
+                onClick={() => void toggleStem(name)}
+              >
+                {name}
+              </button>
+            );
+          })}
+        </div>
         {stemsReady ? (
           <span className="clip-stem-ready" data-testid="clip-stem-ready">
             stems ready ({backend?.backend})

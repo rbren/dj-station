@@ -6,7 +6,8 @@
 //!   not invoke the separator and are near-instant).
 
 use dj_analysis::{
-    ensure_stems, stem_paths, stems_cached, AudioData, BandSeparator, StemSeparator, Stems,
+    ensure_stems, mix_stems, stem_paths, stems_cached, AudioData, BandSeparator, StemSeparator,
+    Stems,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -150,6 +151,58 @@ fn each_component_lands_mostly_in_its_stem() {
             );
         }
     }
+}
+
+/// What the Clip page asks for when some stem switches are off: the
+/// chosen ones summed, and nothing of the ones left out.
+#[test]
+fn a_subset_of_stems_mixes_to_exactly_those_stems() {
+    let (audio, parts) = fixture(2.0);
+    let Stems(stems) = BandSeparator.separate(&audio).unwrap();
+
+    // "Everything but the vocals" — the classic instrumental. STEM_NAMES
+    // is vocals, drums, bass, other.
+    let keep: Vec<&AudioData> = [1usize, 2, 3].iter().map(|i| &stems[*i]).collect();
+    let mix = mix_stems(&keep).unwrap();
+    assert_eq!(mix.sample_rate, audio.sample_rate);
+    assert_eq!(mix.channels.len(), audio.channels.len());
+    assert_eq!(mix.frames(), audio.frames());
+
+    for ch in 0..2 {
+        for (i, &m) in mix.channels[ch].iter().enumerate() {
+            let want: f32 = keep.iter().map(|s| s.channels[ch][i]).sum();
+            assert!((m - want).abs() < 1e-6, "frame {i} is not the plain sum");
+        }
+    }
+
+    // And the point of leaving a stem out: the vocal is gone. The whole
+    // track carries essentially all of the vocal component; the
+    // instrumental carries almost none of it.
+    let vox = &parts[0];
+    let in_whole = component_capture(&audio.channels[0], vox);
+    let in_mix = component_capture(&mix.channels[0], vox);
+    println!("vocal capture: whole {in_whole:.3}, instrumental {in_mix:.3}");
+    assert!(in_whole > 0.9, "the fixture should contain its own vocal");
+    assert!(in_mix < 0.2, "the vocal survived being switched off");
+
+    // Every stem on is the whole track again.
+    let all: Vec<&AudioData> = stems.iter().collect();
+    let whole = mix_stems(&all).unwrap();
+    for ch in 0..2 {
+        let err = rms(&whole.channels[ch]
+            .iter()
+            .zip(&audio.channels[ch])
+            .map(|(a, b)| a - b)
+            .collect::<Vec<_>>());
+        assert!(err < rms(&audio.channels[ch]) * 1e-3, "err {err}");
+    }
+}
+
+#[test]
+fn mixing_no_stems_is_an_error_rather_than_silence() {
+    // The UI must not be able to ask for "nothing" and get a track of
+    // silence back; it has to keep at least one switch on.
+    assert!(mix_stems(&[]).is_err());
 }
 
 #[test]

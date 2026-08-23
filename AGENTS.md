@@ -703,10 +703,20 @@ fails if it's missing.
   the click). An edit that has been touched but not saved is asked about
   first (`clip-discard-dialog`); nothing else is at risk, since the source
   track is never written.
-  Sources are `{track_id, stem}` pairs, not bare ids: the picker can open
-  ONE ISOLATED STEM of a track (`clip_stem_*` commands over `StemJobs`)
-  and edit it exactly like a full mix — the stem is part of the cache key,
-  the `source_ref` (`"7:vocals"`) and the rendered result.
+  Sources are `{track_id, stems}` pairs, not bare ids: a source is a
+  CHOSEN SET of a track's stems (`clip_stem_*` commands over `StemJobs`,
+  summed by `dj_analysis::mix_stems`) and edits exactly like a full mix —
+  the set is part of the cache key, the `source_ref` (`"7:drums+bass"`)
+  and the rendered result. An EMPTY set means the full mix, and that is
+  also how "every stem on" is sent: the track's own file is exact and
+  needs no separation, where re-summing four stems is neither. Sets are
+  normalised (STEM_NAMES order, no repeats) so `{drums,vocals}` and
+  `{vocals,drums}` are one cache entry.
+  The stem switches apply IMMEDIATELY, swapping the loaded lane for the
+  new mix instead of waiting for another Open — the old dropdown looked
+  broken because picking a stem did nothing on its own. Stems are the
+  same length as their track, so the program (regions, level, EQ)
+  survives the swap untouched; a failed load rolls the switches back.
   A separation can be abandoned (`clip_stem_cancel` →
   `StemJobs::cancel_track`, `StemJobState::Cancelled`). Cancelling KILLS
   the demucs child: it is minutes of another program's time, and a flag

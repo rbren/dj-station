@@ -36,7 +36,7 @@ const OTHER: Track = { ...TRACK, id: 8, title: 'Hat Loop' };
 
 const SOURCE: ClipSource = {
   track_id: 7,
-  stem: null,
+  stems: [],
   title: TRACK.title,
   artist: TRACK.artist,
   duration_secs: 10,
@@ -64,10 +64,10 @@ function libraryMock(): LibraryClientApi {
 
 function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
   return {
-    loadSource: vi.fn(async (trackId: number, stem: string | null) => ({
+    loadSource: vi.fn(async (trackId: number, stems: string[]) => ({
       ...SOURCE,
       track_id: trackId,
-      stem,
+      stems,
       title: trackId === OTHER.id ? OTHER.title : SOURCE.title,
     })),
     renderPreview: vi.fn(async () => ({
@@ -202,7 +202,7 @@ describe('ClipView', () => {
   it('opens a library track as a single full-length region', async () => {
     const clip = clipMock();
     await openTrack(clip);
-    expect(clip.loadSource).toHaveBeenCalledWith(7, null, expect.any(Number));
+    expect(clip.loadSource).toHaveBeenCalledWith(7, [], expect.any(Number));
     const rows = screen.getAllByTestId('clip-region');
     expect(rows).toHaveLength(1);
     expect(rows[0].textContent).toContain('0:00.00');
@@ -390,7 +390,7 @@ describe('ClipView', () => {
 
     act(() => handle.current?.open(OTHER.id));
     await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
-    expect(clip.loadSource).toHaveBeenCalledWith(OTHER.id, null, expect.any(Number));
+    expect(clip.loadSource).toHaveBeenCalledWith(OTHER.id, [], expect.any(Number));
     expect((screen.getByTestId('clip-name') as HTMLInputElement).value).toContain(OTHER.title);
     // The picker follows, so the page does not claim to be editing
     // something else.
@@ -441,7 +441,7 @@ describe('ClipView', () => {
     fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '8' } });
     fireEvent.click(screen.getByTestId('clip-append-track'));
     await waitFor(() => expect(screen.getAllByTestId('clip-region')).toHaveLength(2));
-    expect(clip.loadSource).toHaveBeenLastCalledWith(8, null, expect.any(Number));
+    expect(clip.loadSource).toHaveBeenLastCalledWith(8, [], expect.any(Number));
     expect(screen.getByTestId('clip-sources').textContent).toContain('2. Hat Loop');
     expect(screen.getAllByTestId('clip-region')[1].textContent).toContain('Hat Loop');
   });
@@ -547,7 +547,7 @@ describe('ClipView', () => {
     );
 
     const [request, title] = (clip.save as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(request.sources).toEqual([{ track_id: 7, stem: null }]);
+    expect(request.sources).toEqual([{ track_id: 7, stems: [] }]);
     expect(request.program.regions).toHaveLength(1);
     expect(title).toBe('Basement Edit');
     expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ title: 'Basement Edit' }));
@@ -861,7 +861,7 @@ describe('ClipView', () => {
 
     // Before separation only the full mix is available.
     await waitFor(() =>
-      expect(screen.getByTestId('clip-stem-select')).toHaveProperty('disabled', true),
+      expect(screen.getByTestId('clip-stem-vocals')).toHaveProperty('disabled', true),
     );
     fireEvent.click(screen.getByTestId('clip-stem-separate'));
     expect(clip.stemSeparate).toHaveBeenCalledWith(7);
@@ -873,19 +873,130 @@ describe('ClipView', () => {
     );
     expect(screen.getByTestId('clip-status').textContent).toMatch(/stems ready/i);
 
-    // Opening a stem edits that stem, and says so.
-    fireEvent.change(screen.getByTestId('clip-stem-select'), { target: { value: 'vocals' } });
+    // Every stem starts switched on — the whole track, which needs no
+    // stem files at all.
     fireEvent.click(screen.getByTestId('clip-open-track'));
-    await waitFor(() =>
-      expect(clip.loadSource).toHaveBeenCalledWith(7, 'vocals', expect.any(Number)),
-    );
-    expect(screen.getByTestId('clip-sources').textContent).toContain('Basement Loop — vocals');
+    await waitFor(() => expect(clip.loadSource).toHaveBeenCalledWith(7, [], expect.any(Number)));
+    for (const name of ['vocals', 'drums', 'bass', 'other']) {
+      expect(screen.getByTestId(`clip-stem-${name}`).getAttribute('aria-pressed')).toBe('true');
+    }
 
-    // The stem is what gets rendered and saved, never the full mix.
+    // Switching one off takes effect on the spot: no second Open.
+    fireEvent.click(screen.getByTestId('clip-stem-vocals'));
+    await waitFor(() =>
+      expect(clip.loadSource).toHaveBeenCalledWith(
+        7,
+        ['drums', 'bass', 'other'],
+        expect.any(Number),
+      ),
+    );
+    expect(screen.getByTestId('clip-stem-vocals').getAttribute('aria-pressed')).toBe('false');
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-sources').textContent).toContain('Basement Loop — no vocals'),
+    );
+
+    // What plays and what saves is the chosen mix, never the full track.
     await waitFor(() => {
       const calls = (clip.renderPreview as ReturnType<typeof vi.fn>).mock.calls;
-      expect(calls[calls.length - 1][0].sources).toEqual([{ track_id: 7, stem: 'vocals' }]);
+      expect(calls[calls.length - 1][0].sources).toEqual([
+        { track_id: 7, stems: ['drums', 'bass', 'other'] },
+      ]);
     });
+
+    // Down to one stem, then back to the whole track. Each flip settles
+    // before the next: the switches are disabled while the swap loads.
+    const flip = async (name: string) => {
+      await waitFor(() =>
+        expect(screen.getByTestId(`clip-stem-${name}`)).toHaveProperty('disabled', false),
+      );
+      fireEvent.click(screen.getByTestId(`clip-stem-${name}`));
+    };
+    await flip('bass');
+    await flip('other');
+    await waitFor(() =>
+      expect(clip.loadSource).toHaveBeenCalledWith(7, ['drums'], expect.any(Number)),
+    );
+    expect(screen.getByTestId('clip-sources').textContent).toContain('Basement Loop — drums');
+
+    await flip('vocals');
+    await flip('bass');
+    await flip('other');
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-sources').textContent).toBe('1. Basement Loop'),
+    );
+    const full = (clip.loadSource as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(full?.[1]).toEqual([]);
+  });
+
+  it('keeps the edit when the stems behind it change', async () => {
+    const clip = clipMock({
+      stemStatus: vi.fn(async (trackId: number) => ({
+        track_id: trackId,
+        backend: 'htdemucs_ft',
+        cached: true,
+        running: false,
+      })),
+    });
+    await openTrack(clip);
+
+    // Cut a chunk out, then drop a stem: the cut stays cut. Stems are the
+    // same length as their track, so the edit is still meaningful.
+    select(3, 7);
+    fireEvent.click(screen.getByTestId('clip-cut'));
+    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-stem-bass')).toHaveProperty('disabled', false),
+    );
+    fireEvent.click(screen.getByTestId('clip-stem-bass'));
+    await waitFor(() =>
+      expect(clip.loadSource).toHaveBeenCalledWith(
+        7,
+        ['vocals', 'drums', 'other'],
+        expect.any(Number),
+      ),
+    );
+    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+    // One lane still, swapped in place rather than added alongside.
+    expect(screen.getByTestId('clip-sources').textContent).toBe('1. Basement Loop — no bass');
+  });
+
+  it('refuses to mute every stem, since that is just silence', async () => {
+    const clip = clipMock({
+      stemStatus: vi.fn(async (trackId: number) => ({
+        track_id: trackId,
+        backend: 'htdemucs_ft',
+        cached: true,
+        running: false,
+      })),
+    });
+    render(<ClipView clip={clip} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+    fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '7' } });
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-stem-vocals')).toHaveProperty('disabled', false),
+    );
+    for (const name of ['vocals', 'drums', 'bass']) {
+      await waitFor(() =>
+        expect(screen.getByTestId(`clip-stem-${name}`)).toHaveProperty('disabled', false),
+      );
+      fireEvent.click(screen.getByTestId(`clip-stem-${name}`));
+    }
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-stem-other').getAttribute('aria-pressed')).toBe('true'),
+    );
+    fireEvent.click(screen.getByTestId('clip-stem-other'));
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-error').textContent).toMatch(/at least one/i),
+    );
+    expect(screen.getByTestId('clip-stem-other').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('leaves the stem switches alone until a track is separated', async () => {
+    render(<ClipView clip={clipMock()} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-stem-vocals')).toBeTruthy());
+    expect(screen.getByTestId('clip-stem-vocals')).toHaveProperty('disabled', true);
+    expect(screen.getByTestId('clip-stem-vocals').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('stops a separation that is taking too long, and can start it again', async () => {

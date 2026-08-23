@@ -56,13 +56,16 @@ export interface ClipProgram {
   crossfade_ms: number;
 }
 
-/** One thing the editor cuts from: a library track, or one isolated stem
- *  of it. The stem is part of the identity — "the vocals of track 7" is a
- *  different source from "track 7". */
+/** One thing the editor cuts from: a library track, or a chosen set of
+ *  its stems mixed together. The set is part of the identity — "the
+ *  vocals of track 7" is a different source from "track 7".
+ *
+ *  Empty means the full mix, which is also how "every stem on" is sent:
+ *  the track's own file is exact, where re-summing stems is not. */
 export interface ClipSourceRef {
   track_id: number;
-  /** null = the full mix; otherwise a STEM_NAMES entry. */
-  stem: string | null;
+  /** Empty = the full mix; otherwise STEM_NAMES entries. */
+  stems: string[];
 }
 
 export interface ClipRequest {
@@ -74,8 +77,8 @@ export interface ClipRequest {
 /** A decoded source track, as the editor needs it. */
 export interface ClipSource {
   track_id: number;
-  /** Which stem this lane is, or null for the full mix. */
-  stem: string | null;
+  /** Which stems this lane is (canonical order), empty for the full mix. */
+  stems: string[];
   title: string;
   artist: string;
   duration_secs: number;
@@ -120,17 +123,39 @@ export interface StemJob {
   error: string | null;
 }
 
-/** Label for a source lane: "Title" or "Title — vocals". */
+/** Label for a source lane: "Title", "Title — vocals" or, once more than
+ *  one stem is off, the shorter way round: "Title — no bass". */
+export function stemLabel(stems: string[]): string {
+  if (stems.length === 0) return '';
+  if (stems.length > STEM_NAMES.length - stems.length) {
+    const off = STEM_NAMES.filter((s) => !stems.includes(s));
+    return `no ${off.join(', ')}`;
+  }
+  return stems.join(' + ');
+}
+
 export function sourceLabel(source: ClipSource): string {
-  return source.stem ? `${source.title} — ${source.stem}` : source.title;
+  const stems = stemLabel(source.stems);
+  return stems ? `${source.title} — ${stems}` : source.title;
 }
 
 export function sourceRef(source: ClipSource): ClipSourceRef {
-  return { track_id: source.track_id, stem: source.stem };
+  return { track_id: source.track_id, stems: source.stems };
+}
+
+/** The set the backend would use: every stem on is the full mix, so it
+ *  travels as the empty set (and never needs a separation). */
+export function stemSet(on: readonly string[]): string[] {
+  const kept = STEM_NAMES.filter((s) => on.includes(s));
+  return kept.length === STEM_NAMES.length ? [] : kept;
 }
 
 export function sameSource(a: ClipSourceRef, b: ClipSourceRef): boolean {
-  return a.track_id === b.track_id && (a.stem ?? null) === (b.stem ?? null);
+  return (
+    a.track_id === b.track_id &&
+    a.stems.length === b.stems.length &&
+    a.stems.every((s, i) => s === b.stems[i])
+  );
 }
 
 /** The rendered edit (no file written). */
@@ -541,8 +566,8 @@ export function rulerTicks(from: number, to: number, target = 8): TimeTick[] {
 
 /** What ClipView needs; tests substitute a mock. */
 export interface ClipClientApi {
-  /** Decode a track — or one of its separated stems — for editing. */
-  loadSource(trackId: number, stem: string | null, buckets: number): Promise<ClipSource | null>;
+  /** Decode a track — or a mix of its separated stems — for editing. */
+  loadSource(trackId: number, stems: string[], buckets: number): Promise<ClipSource | null>;
   renderPreview(request: ClipRequest, buckets: number): Promise<ClipRender | null>;
   /** 16-bit WAV bytes for a playback window of the rendered edit. */
   previewAudio(request: ClipRequest, startSecs: number, secs: number): Promise<ArrayBuffer | null>;
@@ -562,8 +587,8 @@ export interface ClipClientApi {
 }
 
 export class ClipClient extends IpcClient implements ClipClientApi {
-  loadSource(trackId: number, stem: string | null, buckets: number) {
-    return this.call<ClipSource>('clip_load_source', { trackId, stem, buckets });
+  loadSource(trackId: number, stems: string[], buckets: number) {
+    return this.call<ClipSource>('clip_load_source', { trackId, stems, buckets });
   }
   renderPreview(request: ClipRequest, buckets: number) {
     return this.call<ClipRender>('clip_render_preview', { request, buckets });

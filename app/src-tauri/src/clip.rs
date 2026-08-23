@@ -25,34 +25,58 @@ use tauri::State;
 
 use crate::{err, AppState, CmdError, CmdResult};
 
-/// One thing the editor can cut from: a library track, or one isolated
-/// stem of it (`Some("vocals")`, …). The stem is part of the identity, so
-/// "the vocals of track 7" and "track 7" are different sources.
+/// One thing the editor can cut from: a library track, or a chosen set of
+/// its stems mixed together ("vocals + drums", "everything but the
+/// bass"). The set is part of the identity, so "the vocals of track 7"
+/// and "track 7" are different sources.
+///
+/// An EMPTY set means the full mix, and that is also how every stem
+/// switched on is sent: the track's own file is exact and needs no
+/// separation, where re-summing four stems is neither.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct ClipSourceRef {
     pub track_id: i64,
-    /// `None` = the full mix; otherwise a [`STEM_NAMES`] entry.
+    /// Empty = the full mix; otherwise [`STEM_NAMES`] entries.
     #[serde(default)]
-    pub stem: Option<String>,
+    pub stems: Vec<String>,
 }
 
 impl ClipSourceRef {
-    /// Index of `stem` in [`STEM_NAMES`], or an error naming the valid
-    /// choices. `None` (full mix) yields `None`.
-    fn stem_index(&self) -> CmdResult<Option<usize>> {
-        let Some(name) = self.stem.as_deref().filter(|s| !s.is_empty()) else {
-            return Ok(None);
-        };
-        dj_analysis::STEM_NAMES
-            .iter()
-            .position(|s| *s == name)
-            .map(Some)
-            .ok_or_else(|| {
-                CmdError::invalid(format!(
-                    "clip: unknown stem {name:?} (expected one of {})",
-                    dj_analysis::STEM_NAMES.join(", ")
-                ))
-            })
+    /// Indices into [`STEM_NAMES`], in that order and without repeats, or
+    /// an error naming the valid choices. The full mix yields an empty
+    /// vec.
+    fn stem_indices(&self) -> CmdResult<Vec<usize>> {
+        let mut indices = Vec::new();
+        for name in self.stems.iter().filter(|s| !s.is_empty()) {
+            let i = dj_analysis::STEM_NAMES
+                .iter()
+                .position(|s| s == name)
+                .ok_or_else(|| {
+                    CmdError::invalid(format!(
+                        "clip: unknown stem {name:?} (expected one of {})",
+                        dj_analysis::STEM_NAMES.join(", ")
+                    ))
+                })?;
+            if !indices.contains(&i) {
+                indices.push(i);
+            }
+        }
+        indices.sort_unstable();
+        Ok(indices)
+    }
+
+    /// The same source with its stems validated and put in a canonical
+    /// order, so `{drums, vocals}` and `{vocals, drums}` are one cache
+    /// entry and one `source_ref`.
+    fn normalized(&self) -> CmdResult<ClipSourceRef> {
+        let indices = self.stem_indices()?;
+        Ok(ClipSourceRef {
+            track_id: self.track_id,
+            stems: indices
+                .iter()
+                .map(|i| dj_analysis::STEM_NAMES[*i].to_string())
+                .collect(),
+        })
     }
 }
 
@@ -91,29 +115,37 @@ impl ClipCache {
 /// runs separation itself, because that takes minutes and belongs on a
 /// [`StemJobs`](dj_analysis::StemJobs) thread (see `clip_stem_separate`).
 fn source_audio(state: &AppState, source: &ClipSourceRef) -> CmdResult<Arc<AudioData>> {
-    if let Some(audio) = state.clips.get(source) {
+    let source = source.normalized()?;
+    if let Some(audio) = state.clips.get(&source) {
         return Ok(audio);
     }
     let track = state.library.track(source.track_id).map_err(err)?;
-    let path = match source.stem_index()? {
-        None => std::path::PathBuf::from(&track.file_path),
-        Some(i) => {
-            let paths = state.stems.cached_paths(source.track_id).ok_or_else(|| {
-                CmdError::invalid(format!(
-                    "clip: {} has no {} stems yet — separate it first",
-                    track.title,
-                    state.stems.backend()
-                ))
-            })?;
-            paths[i].clone()
-        }
+    let indices = source.stem_indices()?;
+    let audio = if indices.is_empty() {
+        decode(&std::path::PathBuf::from(&track.file_path), &track.title)?
+    } else {
+        let paths = state.stems.cached_paths(source.track_id).ok_or_else(|| {
+            CmdError::invalid(format!(
+                "clip: {} has no {} stems yet — separate it first",
+                track.title,
+                state.stems.backend()
+            ))
+        })?;
+        let parts = indices
+            .iter()
+            .map(|i| decode(&paths[*i], &track.title))
+            .collect::<CmdResult<Vec<_>>>()?;
+        let refs: Vec<&AudioData> = parts.iter().map(|a| a.as_ref()).collect();
+        Arc::new(dj_analysis::mix_stems(&refs).map_err(|e| err(e.to_string()))?)
     };
-    let audio = Arc::new(
-        dj_analysis::decode_audio(&path)
-            .map_err(|e| err(format!("decoding {}: {e}", track.title)))?,
-    );
-    state.clips.put(source.clone(), Arc::clone(&audio));
+    state.clips.put(source, Arc::clone(&audio));
     Ok(audio)
+}
+
+fn decode(path: &std::path::Path, title: &str) -> CmdResult<Arc<AudioData>> {
+    dj_analysis::decode_audio(path)
+        .map(Arc::new)
+        .map_err(|e| err(format!("decoding {title}: {e}")))
 }
 
 /// An edit as the UI sends it: `program` regions index into `sources`,
@@ -146,8 +178,9 @@ impl ClipRequest {
 #[derive(Debug, Serialize)]
 pub struct ClipSource {
     track_id: i64,
-    /// Which stem this is, echoed back so the UI can label the lane.
-    stem: Option<String>,
+    /// Which stems this lane is, echoed back (canonically ordered) so the
+    /// UI can label it. Empty = the full mix.
+    stems: Vec<String>,
     title: String,
     artist: String,
     duration_secs: f64,
@@ -175,15 +208,15 @@ const MAX_PREVIEW_SECS: f64 = 60.0;
 pub fn clip_load_source(
     state: State<AppState>,
     track_id: i64,
-    stem: Option<String>,
+    stems: Vec<String>,
     buckets: usize,
 ) -> CmdResult<ClipSource> {
     let track = state.library.track(track_id).map_err(err)?;
-    let source = ClipSourceRef { track_id, stem };
+    let source = ClipSourceRef { track_id, stems }.normalized()?;
     let audio = source_audio(&state, &source)?;
     Ok(ClipSource {
         track_id,
-        stem: source.stem,
+        stems: source.stems,
         title: track.title,
         artist: track.artist,
         duration_secs: audio.duration_secs(),
@@ -332,10 +365,16 @@ pub fn clip_save(state: State<AppState>, request: ClipRequest, title: String) ->
     let source_ref = request
         .sources
         .iter()
-        .map(|s| match &s.stem {
-            Some(stem) => format!("{}:{stem}", s.track_id),
-            None => s.track_id.to_string(),
+        .map(|s| {
+            let s = s.normalized()?;
+            Ok(if s.stems.is_empty() {
+                s.track_id.to_string()
+            } else {
+                format!("{}:{}", s.track_id, s.stems.join("+"))
+            })
         })
+        .collect::<CmdResult<Vec<_>>>()?
+        .into_iter()
         .collect::<Vec<_>>()
         .join(",");
     let outcome = state

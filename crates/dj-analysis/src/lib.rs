@@ -44,8 +44,9 @@ pub use decode::{decode_audio, AudioData};
 pub use demucs::DemucsSeparator;
 pub use stem_jobs::{StemJob, StemJobState, StemJobs};
 pub use stems::{
-    ensure_stems, ensure_stems_cancellable, stem_paths, stems_cached, stems_dir, stems_dir_for,
-    BandSeparator, CancelToken, StemSeparator, Stems, DEFAULT_SEPARATOR_ID, N_STEMS, STEM_NAMES,
+    ensure_stems, ensure_stems_cancellable, mix_stems, stem_paths, stems_cached, stems_dir,
+    stems_dir_for, BandSeparator, CancelToken, StemSeparator, Stems, DEFAULT_SEPARATOR_ID, N_STEMS,
+    STEM_NAMES,
 };
 pub use worker::{start_worker, AnalysisSettings, AnalysisWorker};
 

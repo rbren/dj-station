@@ -3303,6 +3303,24 @@ body {
   font-size: 0.85rem;
 }
 
+.clip-stem-toggles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* On/off at a glance: a lit switch is in the mix, a dim one is dropped. */
+.clip-stem-toggles .clip-stem-on {
+  border-color: #3f6b52;
+  background: #24382c;
+  color: #b9e6c8;
+}
+
+.clip-stem-toggles .clip-stem-off {
+  color: #626b7c;
+  text-decoration: line-through;
+}
+
 /* Stopping minutes of work: available, but not competing with Separate. */
 .clip-stem-cancel {
   border-color: #6b3b3b;
