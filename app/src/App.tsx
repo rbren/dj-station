@@ -85,6 +85,9 @@ export default function App() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
   const [view, setView] = useState<'rack' | 'library' | 'clip'>('rack');
+  // The library's Edit button hands a track to the (always mounted) clip
+  // editor; the nonce makes re-opening the same track a fresh request.
+  const [clipOpen, setClipOpen] = useState<{ trackId: number; nonce: number } | null>(null);
   const [wireColors, setWireColors] = useState<Record<string, number>>(() =>
     loadJson(WIRE_COLORS_KEY, {}),
   );
@@ -2072,7 +2075,15 @@ export default function App() {
           </div>
         </div>
       )}
-      {view === 'library' && <LibraryView client={library} />}
+      {view === 'library' && (
+        <LibraryView
+          client={library}
+          onEdit={(t) => {
+            setClipOpen((prev) => ({ trackId: t.id, nonce: (prev?.nonce ?? 0) + 1 }));
+            setView('clip');
+          }}
+        />
+      )}
       {/* The clip editor stays mounted so the edit survives tab switches;
           it hides itself and pauses playback while inactive. */}
       <ClipView
@@ -2080,6 +2091,7 @@ export default function App() {
         library={library}
         active={view === 'clip'}
         onSaved={() => void refresh()}
+        openRequest={clipOpen}
       />
       {pickerOpen && (
         <ModulePicker

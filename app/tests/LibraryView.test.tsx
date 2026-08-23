@@ -260,6 +260,20 @@ describe('LibraryView', () => {
     expect(row.querySelector('[data-testid="license-tag"]')?.textContent).toBe('unknown');
   });
 
+  it('hands a track to the clip editor, and only offers to when it can', async () => {
+    const onEdit = vi.fn();
+    const { unmount } = render(<LibraryView client={mockClient()} onEdit={onEdit} />);
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('library-edit'));
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+
+    // Without a handler there is no dead button in the row.
+    unmount();
+    render(<LibraryView client={mockClient()} />);
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
+    expect(screen.queryByTestId('library-edit')).toBeNull();
+  });
+
   it('renders one tab per enabled provider plus Local', async () => {
     render(<LibraryView client={mockClient()} />);
     await waitFor(() => expect(screen.getByTestId('store-tab-internet_archive')).toBeTruthy());

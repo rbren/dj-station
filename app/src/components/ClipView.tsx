@@ -115,9 +115,19 @@ export interface ClipViewProps {
   active?: boolean;
   /** Called after a clip is imported, so the library list can refresh. */
   onSaved?: (track: Track) => void;
+  /** A track to open for editing, sent by the Library page's Edit button.
+   *  Carries a nonce so asking for the SAME track again still re-opens it
+   *  (after an edit, "Edit" has to mean "start over"). */
+  openRequest?: { trackId: number; nonce: number } | null;
 }
 
-export function ClipView({ clip, library, active = true, onSaved }: ClipViewProps) {
+export function ClipView({
+  clip,
+  library,
+  active = true,
+  onSaved,
+  openRequest = null,
+}: ClipViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [pick, setPick] = useState<number | null>(null);
   const [sources, setSources] = useState<ClipSource[]>([]);
@@ -611,6 +621,19 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
       window.removeEventListener('mouseup', up);
     };
   }, [dragPoint, timeAt]);
+
+  // Opening from the Library page. Like the in-page picker this replaces
+  // the current edit without asking — the source track is never touched,
+  // so the only thing at stake is unsaved editing, and the same is true
+  // of the Open button next to the picker.
+  const lastOpen = useRef(0);
+  useEffect(() => {
+    if (!openRequest || openRequest.nonce === lastOpen.current) return;
+    lastOpen.current = openRequest.nonce;
+    setPick(openRequest.trackId);
+    setStemChoice({ trackId: openRequest.trackId, stem: '' });
+    void loadTrack(openRequest.trackId, 'open', '');
+  }, [openRequest, loadTrack]);
 
   // --- playback: commands -------------------------------------------------
   // What Loop loops: the selection if there is one, otherwise the whole

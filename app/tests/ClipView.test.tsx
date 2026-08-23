@@ -381,6 +381,39 @@ describe('ClipView', () => {
     expect(wave).toBeTruthy();
   });
 
+  it('opens the track the Library page asks for', async () => {
+    const clip = clipMock();
+    const view = render(
+      <ClipView
+        clip={clip}
+        library={libraryMock()}
+        openRequest={{ trackId: OTHER.id, nonce: 1 }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
+    expect(clip.loadSource).toHaveBeenCalledWith(OTHER.id, null, expect.any(Number));
+    expect((screen.getByTestId('clip-name') as HTMLInputElement).value).toContain(OTHER.title);
+    // The picker follows, so the page does not claim to be editing
+    // something else.
+    expect((screen.getByTestId('clip-track-select') as HTMLSelectElement).value).toBe(
+      String(OTHER.id),
+    );
+
+    // Asking for the SAME track again re-opens it: after editing, Edit has
+    // to mean "start over", and the prop's value alone cannot say that.
+    select(2, 6);
+    fireEvent.click(screen.getByTestId('clip-cut'));
+    await waitFor(() => expect(screen.getAllByTestId('clip-region')).toHaveLength(2));
+    view.rerender(
+      <ClipView
+        clip={clip}
+        library={libraryMock()}
+        openRequest={{ trackId: OTHER.id, nonce: 2 }}
+      />,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('clip-region')).toHaveLength(1));
+  });
+
   it('splices a second library track onto the end', async () => {
     const clip = clipMock();
     await openTrack(clip);

@@ -694,6 +694,13 @@ fails if it's missing.
   transient. Timing marks come from `rulerTicks` (pure, in `clip.ts`) and
   render as HTML over the stretched SVG, whose `preserveAspectRatio="none"`
   would squash text.
+  A track also opens straight from the Library page: its Edit button hands
+  App a `{trackId, nonce}` request that it passes to the (already mounted)
+  ClipView, which opens it and switches tabs. The nonce is what makes
+  asking for the SAME track twice re-open it — after an edit, Edit has to
+  mean "start over", and a bare id cannot say that. Like the in-page
+  picker this replaces the current edit without confirming; nothing is at
+  risk but unsaved editing, since the source track is never written.
   Sources are `{track_id, stem}` pairs, not bare ids: the picker can open
   ONE ISOLATED STEM of a track (`clip_stem_*` commands over `StemJobs`)
   and edit it exactly like a full mix — the stem is part of the cache key,

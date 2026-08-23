@@ -84,9 +84,11 @@ function SourceTag({ source }: { source: string }) {
 
 export interface LibraryViewProps {
   client: LibraryClientApi;
+  /** Open a track in the Clip editor. Absent means no Edit column. */
+  onEdit?: (track: Track) => void;
 }
 
-export function LibraryView({ client }: LibraryViewProps) {
+export function LibraryView({ client, onEdit }: LibraryViewProps) {
   const [query, setQuery] = useState('');
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   // Active tab: 'local' or a provider id.
@@ -438,6 +440,7 @@ export function LibraryView({ client }: LibraryViewProps) {
                   <th>Source</th>
                   <th>License</th>
                   <th>Analysis</th>
+                  {onEdit && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -472,6 +475,17 @@ export function LibraryView({ client }: LibraryViewProps) {
                         </button>
                       )}
                     </td>
+                    {onEdit && (
+                      <td>
+                        <button
+                          data-testid="library-edit"
+                          data-tip="edit a copy in the Clip page"
+                          onClick={() => onEdit(t)}
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
