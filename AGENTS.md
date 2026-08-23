@@ -26,6 +26,10 @@ as an iteration loop.
   cache stays warm; don't alternate debug/release.
 - Run `cargo fmt` and scoped clippy (`cargo clippy -p <crate> --all-targets`)
   as you go; save workspace-wide clippy for the end.
+- CI's toolchain is UNPINNED latest stable (`dtolnay/rust-toolchain@stable`),
+  so a Rust release can break the lint job with brand-new clippy lints while
+  an older local toolchain still passes. If lint fails in CI but not locally,
+  `rustup update stable` first and reproduce on the same version CI uses.
 - Frontend: run a single test file during iteration
   (`npx vitest run tests/<File>.test.tsx`), not the whole vitest suite.
 - Do exactly ONE full CI-equivalent pass at the end of a milestone/task:
