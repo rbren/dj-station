@@ -669,3 +669,28 @@ fails if it's missing.
   the renderer is not a graph module. `decode_audio` truncates to the
   container's declared frame count — our FLAC writer zero-pads the last
   fixed-size block, and an exported clip must decode back sample-exact.
+- Clip page stems: a clip source is a `{track_id, stem}` ref, so one
+  isolated stem can be cut/EQ'd like a full mix. Separation runs in
+  `StemJobs` (thread per job, snapshot POLLED by the UI) behind
+  `DemucsSeparator`, which shells out to the external `demucs` CLI the way
+  the library shells out to yt-dlp — a missing binary is a reported,
+  disabled state, never a panic. The separator's id keys its cache
+  (`stems_dir_for`), so a demucs request can never be served the
+  import-time band-split stems. The plumbing is tested against a fake CLI
+  script (`tests/stem_separation.rs`, `#[cfg(unix)]`) — never the real
+  model.
+- Clip playback has exactly ONE owner, `ClipTransport`
+  (`app/src/clipTransport.ts`); ClipView holds no audio state. Four
+  invariants keep it from playing twice: ONE SLOT (`install` runs only
+  right after `release`), EPOCHS (every command bumps one, every
+  continuation rechecks after each await and drops out if superseded),
+  NOTHING SOUNDS BEFORE ITS LAST CHECK (`clipAudio.prepareLoop` is
+  side-effect free, `PreparedLoop.start` is synchronous) and DISPOSAL IS
+  FINAL (a disposed transport refuses every command, so a StrictMode
+  remount leaves nothing behind). Loops wrap at a sample boundary via an
+  `AudioBufferSourceNode` (`<audio loop>` drops ~100 ms), falling back to
+  the media element where Web Audio is absent. A TIMELINE edit
+  (sources/regions/overlays/crossfade) halts playback; a TONE-ONLY edit
+  (EQ, level) re-renders the window in place, debounced, resuming at the
+  same loop phase — keep that split, and keep the staleness identity
+  checks allocation-free or every keystroke reads as a timeline change.
