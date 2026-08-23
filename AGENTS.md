@@ -490,6 +490,16 @@ fails if it's missing.
   from the bar), and
   `App.renameModule` remaps positions/selection to the returned id — a
   backend rejection resolves null (error banner) and the refresh reverts.
+- Mixer mute/solo (`extensions/mixer`) are per-channel `switch` INPUT
+  jacks (`mute{n}`/`solo{n}`, gate law >= 1 V), not params — the WASM
+  "params vs. inputs" rule above — so they are wireable and persist as
+  ordinary knob state. The law lives once, in `process`: heard =
+  un-muted AND (nothing soloed OR soloed), evaluated per sample so CV
+  can drive it, with a 5 ms per-channel fade (`FADE_SECONDS`) that keeps
+  a toggle from clicking; the first processed sample snaps instead of
+  fading (`primed`). Per-channel input stride is 6 — adding a channel
+  control means updating `STRIDE`, the manifest and the channel strip in
+  `panelLayouts.ts` together. Golden: `utilities-mixer-mute-solo`.
 - VCA `cv` ("Gain / CV") input default is 0.0 (closed/silent) in
   `extensions/vca/manifest.json` — the manifest is the single source of
   truth for module defaults (engine derives initial knob position via

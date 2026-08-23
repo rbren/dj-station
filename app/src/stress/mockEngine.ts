@@ -28,7 +28,7 @@ import turing from '../../../extensions/turing/manifest.json';
 import vca from '../../../extensions/vca/manifest.json';
 import waveshaper from '../../../extensions/waveshaper/manifest.json';
 
-/** Representative type mix, heavy panels included (mixer: 25 inputs,
+/** Representative type mix, heavy panels included (mixer: 37 inputs,
  *  step_seq: 56; lfo/scope run rAF canvas custom UIs). Cycled to fill N. */
 const MANIFESTS = [
   oscillator,

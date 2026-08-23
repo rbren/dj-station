@@ -172,7 +172,8 @@ const LAYOUTS: Record<string, LayoutFactory> = {
   }),
 
   // A real-mixer look: one strip per channel — stereo input jacks on top,
-  // pan knob, then the level fader — plus a master strip.
+  // pan knob, then the level fader with mute/solo under it, as on a
+  // console — plus a master strip.
   'com.dj.mixer': () => ({
     groups: [
       ...[1, 2, 3, 4, 5, 6].map((ch) => ({
@@ -183,6 +184,8 @@ const LAYOUTS: Record<string, LayoutFactory> = {
           { jack: `in${ch}_r`, label: 'R' },
           { jack: `pan${ch}`, label: 'pan' },
           { jack: `lvl${ch}`, control: 'fader' as const, hideLabel: true },
+          { jack: `mute${ch}`, label: 'mute' },
+          { jack: `solo${ch}`, label: 'solo' },
         ],
       })),
       {

@@ -746,16 +746,22 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   // --------------------------------------------------------------- Utilities
   'com.dj.mixer': {
     summary:
-      'Six-channel stereo mixer with per-channel level and pan plus a ' +
-      'master level. Each channel is an L/R pair; leave R unpatched and ' +
-      'it mirrors L, so a mono source pans across the stereo field. Good ' +
-      'for summing a multi-oscillator stack into one fat voice, balancing ' +
-      'a few parts into a stereo submix, or placing voices in the field.',
+      'Six-channel stereo mixer with per-channel level, pan, mute and ' +
+      'solo plus a master level. Each channel is an L/R pair; leave R ' +
+      'unpatched and it mirrors L, so a mono source pans across the ' +
+      'stereo field. Solo follows the console law — the moment any ' +
+      'channel is soloed the rest go quiet — while mute stands on its ' +
+      'own, so a muted channel stays silent even when soloed. Good for ' +
+      'summing a multi-oscillator stack into one fat voice, balancing a ' +
+      'few parts into a stereo submix, or auditioning one part alone.',
     inputs: {
       'in#_l': 'Channel # left input (audio).',
       'in#_r': 'Channel # right input (audio; mirrors L when unpatched).',
       'lvl#': 'Channel # level fader, 0..10 (10 = unity).',
       'pan#': 'Channel # pan/balance, -10 (left) .. +10 (right).',
+      'mute#': 'Channel # mute: on (or a gate >= 1 V) silences it.',
+      'solo#':
+        'Channel # solo: while any solo is on, only soloed (and ' + 'un-muted) channels are heard.',
       master: 'Master output level.',
     },
     outputs: {
@@ -765,6 +771,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     examples: [
       'Sum a three-oscillator stack before one Filter.',
       'Pan two voices apart for instant stereo width.',
+      'Solo one channel to audition a part, or gate a mute from an LFO ' +
+        'square for rhythmic drop-outs.',
     ],
   },
   'com.dj.alias': {

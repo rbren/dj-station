@@ -1,7 +1,7 @@
 {
   "id": "com.dj.mixer",
   "name": "Mixer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "abi": "wasm-1",
   "category": "Utilities",
   "inputs": [
@@ -11,6 +11,10 @@
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "pan1", "name": "Pan 1", "default": 0.0,
       "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute1", "name": "Mute 1", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo1", "name": "Solo 1", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in2_l", "name": "In 2 L", "default": 0.0, "audio": true },
     { "id": "in2_r", "name": "In 2 R", "default": 0.0, "audio": true },
@@ -18,6 +22,10 @@
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "pan2", "name": "Pan 2", "default": 0.0,
       "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute2", "name": "Mute 2", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo2", "name": "Solo 2", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in3_l", "name": "In 3 L", "default": 0.0, "audio": true },
     { "id": "in3_r", "name": "In 3 R", "default": 0.0, "audio": true },
@@ -25,6 +33,10 @@
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "pan3", "name": "Pan 3", "default": 0.0,
       "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute3", "name": "Mute 3", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo3", "name": "Solo 3", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in4_l", "name": "In 4 L", "default": 0.0, "audio": true },
     { "id": "in4_r", "name": "In 4 R", "default": 0.0, "audio": true },
@@ -32,6 +44,10 @@
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "pan4", "name": "Pan 4", "default": 0.0,
       "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute4", "name": "Mute 4", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo4", "name": "Solo 4", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in5_l", "name": "In 5 L", "default": 0.0, "audio": true },
     { "id": "in5_r", "name": "In 5 R", "default": 0.0, "audio": true },
@@ -39,6 +55,10 @@
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "pan5", "name": "Pan 5", "default": 0.0,
       "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute5", "name": "Mute 5", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo5", "name": "Solo 5", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "in6_l", "name": "In 6 L", "default": 0.0, "audio": true },
     { "id": "in6_r", "name": "In 6 R", "default": 0.0, "audio": true },
@@ -46,6 +66,10 @@
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
     { "id": "pan6", "name": "Pan 6", "default": 0.0,
       "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute6", "name": "Mute 6", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo6", "name": "Solo 6", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
 
     { "id": "master", "name": "Master", "default": 10.0,
       "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } }
