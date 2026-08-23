@@ -613,12 +613,21 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
   }, [dragPoint, timeAt]);
 
   // --- playback: commands -------------------------------------------------
+  // What Loop loops: the selection if there is one, otherwise the whole
+  // clip. "Loop" with nothing selected used to light up and do nothing,
+  // which read as broken — and looping the whole edit is what you want
+  // when auditioning one anyway.
+  const loopRange = useMemo(
+    () => (!loop ? null : (sel ?? (duration > 0 ? { start: 0, end: duration } : null))),
+    [loop, sel, duration],
+  );
+
   const togglePlay = useCallback(() => {
     const transport = transportRef.current;
     if (!transport) return;
     if (transport.playing) transport.pause();
-    else transport.play(transport.playhead, loop && sel ? sel : null);
-  }, [loop, sel]);
+    else transport.play(transport.playhead, loopRange);
+  }, [loopRange]);
 
   const stop = useCallback(() => {
     transportRef.current?.stop(sel ? sel.start : 0);
@@ -651,8 +660,8 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
   // Keep playback in step with the selection, so a loop follows its edges
   // live instead of looping the old span until the next pause/play.
   useEffect(() => {
-    transportRef.current?.setLoop(loop && sel ? sel : null);
-  }, [loop, sel]);
+    transportRef.current?.setLoop(loopRange);
+  }, [loopRange]);
 
   // Leaving the page pauses (its shortcuts detach with it).
   useEffect(() => {
@@ -833,7 +842,7 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
               data-testid="clip-loop"
               className={loop ? 'clip-toggle-on' : undefined}
               aria-pressed={loop}
-              title="Loop the selection"
+              title={sel ? 'Loop the selection' : 'Loop the whole clip'}
               onClick={() => setLoop((v) => !v)}
             >
               Loop

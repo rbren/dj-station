@@ -673,6 +673,12 @@ fails if it's missing.
   the same loop phase, since pausing for an EQ tweak would make the
   control useless for auditioning. A re-render keeps the OLD source
   playing until the new one is ready and swaps, rather than gapping.
+  Loop with NOTHING selected loops the whole clip (it used to light up and
+  do nothing), so a loop range routinely outgrows the 60 s window: a range
+  that fits still runs on one gapless Web Audio buffer, while a longer one
+  chains element windows and wraps at the range end in `onEnded`. Arming a
+  loop that already contains the playhead carries on from there instead of
+  rewinding to its head.
   Selection changes re-fetch too, so a loop follows its edges live, and
   clicking the waveform `seek`s (jumping live playback, not just parking
   the cursor) — the transport owns the playhead, so nothing else may

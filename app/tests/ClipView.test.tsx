@@ -553,6 +553,22 @@ describe('ClipView', () => {
     expect(screen.getByTestId('clip-playhead-readout').textContent).toBe('0:02.00');
   });
 
+  it('loops the whole clip when nothing is selected', async () => {
+    const starts = installWebAudio(10);
+    const clip = clipMock();
+    await openTrack(clip);
+    // No selection: Loop used to light up and change nothing at all.
+    fireEvent.click(screen.getByTestId('clip-loop'));
+    fireEvent.click(screen.getByTestId('clip-play'));
+    await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 0, 10));
+    await waitFor(() => expect(starts).toHaveLength(1));
+    expect(starts[0].loop).toBe(true);
+
+    // Selecting something afterwards narrows the loop to it, live.
+    select(2, 6);
+    await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 4));
+  });
+
   it('loops through Web Audio so the wrap is gapless', async () => {
     const starts = installWebAudio(4);
     const clip = clipMock();
@@ -601,10 +617,17 @@ describe('ClipView', () => {
     await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 7));
     expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
 
-    // Clearing the selection drops the loop and carries on linearly.
+    // Clearing the selection widens the loop to the whole clip rather
+    // than disarming it — Loop is a toggle, and it stays on.
     fireEvent.mouseDown(wave, { clientX: 100 });
     fireEvent.mouseUp(window);
+    await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 0, 10));
     const audio = screen.getByTestId('clip-audio') as HTMLAudioElement;
+    expect(audio.loop).toBe(true);
+    expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
+
+    // Turning it off is what carries on linearly.
+    fireEvent.click(screen.getByTestId('clip-loop'));
     await waitFor(() => expect(audio.loop).toBe(false));
     expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
   });

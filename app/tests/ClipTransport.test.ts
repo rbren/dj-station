@@ -481,4 +481,53 @@ describe('ClipTransport', () => {
     world.emit('ended');
     expect(transport.playing).toBe(false);
   });
+
+  describe('a loop longer than one render window', () => {
+    beforeEach(() => {
+      world.durationSecs = 200;
+    });
+
+    it('chains windows through the range and wraps at its end', async () => {
+      transport.play(0, { start: 0, end: 200 });
+      await world.settle();
+      // 200 s cannot sit in one buffer, so this runs on the element —
+      // and the element must NOT loop the 60 s it is holding.
+      expect(world.renders[0]).toMatchObject({ start: 0, len: 60 });
+      expect(world.decodes).toHaveLength(0);
+      expect(world.element.loop).toBe(false);
+
+      for (const start of [60, 120, 180]) {
+        world.emit('ended');
+        await world.settle();
+        expect(world.renders[world.renders.length - 1]).toMatchObject({ start });
+      }
+      // The last window is the short tail, and running out of it wraps
+      // back to the head instead of stopping.
+      expect(world.renders[world.renders.length - 1]).toMatchObject({ start: 180, len: 20 });
+      world.emit('ended');
+      await world.settle();
+      expect(world.renders[world.renders.length - 1]).toMatchObject({ start: 0, len: 60 });
+      expect(world.status.playing).toBe(true);
+      expect(world.peak).toBe(1);
+    });
+
+    it('arms around the playhead instead of rewinding to the head', async () => {
+      transport.play(30, null);
+      await world.settle();
+      expect(world.renders[0]).toMatchObject({ start: 30, len: 60 });
+
+      transport.setLoop({ start: 0, end: 200 });
+      await world.settle();
+      // Still where it was, now looping — not yanked back to 0.
+      expect(world.renders[world.renders.length - 1]).toMatchObject({ start: 30 });
+      expect(world.status.playing).toBe(true);
+    });
+
+    it('still loops a range that fits on a gapless buffer', async () => {
+      transport.play(0, { start: 10, end: 40 });
+      await world.settle();
+      expect(world.renders[0]).toMatchObject({ start: 10, len: 30 });
+      expect(world.loops.filter((l) => !l.stopped)).toHaveLength(1);
+    });
+  });
 });

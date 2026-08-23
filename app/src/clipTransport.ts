@@ -217,7 +217,11 @@ export class ClipTransport {
       const end = Math.min(range.end, range.start + this.windowSecs);
       const same = w.loop && Math.abs(w.start - range.start) < EPS && Math.abs(w.end - end) < EPS;
       if (same) return;
-      void this.begin(range.start, range, 0);
+      // Arming a loop around where playback already is (looping the whole
+      // clip, say) carries on from there rather than rewinding to the head.
+      const at = this.position();
+      const inside = at !== null && at > range.start + EPS && at < range.end - EPS;
+      void this.begin(inside ? at : range.start, range, 0);
     } else if (w.loop) {
       // The loop is gone: carry on linearly from where it had got to.
       void this.begin(this.position() ?? w.start, null, 0);
@@ -275,9 +279,20 @@ export class ClipTransport {
     const duration = this.host.duration();
     let start: number;
     let end: number;
+    // A loop longer than one window (looping a whole track, say) cannot be
+    // held in a single buffer: it plays as chained windows that wrap at
+    // the range end instead, so `wholeLoop` decides which backend runs.
+    let wholeLoop = false;
     if (loopRange) {
-      start = Math.max(0, loopRange.start);
-      end = Math.min(loopRange.end, start + this.windowSecs);
+      const lo = Math.max(0, loopRange.start);
+      const hi = Math.min(duration, loopRange.end);
+      // A range that fits always loads from its head, so `seekWithin`
+      // carries the loop's phase; a longer one loads the window that
+      // `fromSecs` falls in, which is how a chain walks through it.
+      const inside = fromSecs > lo + EPS && fromSecs < hi - EPS;
+      start = hi - lo <= this.windowSecs || !inside ? lo : fromSecs;
+      end = Math.min(hi, start + this.windowSecs);
+      wholeLoop = start <= lo + EPS && end >= hi - EPS;
     } else {
       // Play again from the top when the playhead sits at the end.
       start = fromSecs >= duration - 0.01 ? 0 : Math.max(0, fromSecs);
@@ -288,7 +303,7 @@ export class ClipTransport {
     const bytes = await this.host.render(start, end - start);
     if (this.stale(epoch) || !bytes) return;
 
-    if (loopRange) {
+    if (loopRange && wholeLoop) {
       const prepare = this.host.prepareLoop ?? defaultPrepareLoop;
       const prepared = await prepare(bytes);
       // Nothing has sounded yet, so a stale call here simply drops the
@@ -316,7 +331,9 @@ export class ClipTransport {
     this.revokeUrl();
     this.url = url;
     el.src = url;
-    el.loop = loopRange !== null;
+    // Only let the element loop what it holds; a longer range wraps in
+    // `onEnded`, which knows where the range actually ends.
+    el.loop = loopRange !== null && wholeLoop;
     if (seekWithin > 0) seekElement(el, seekWithin);
     this.setPlayhead(Math.min(duration, start + seekWithin));
     this.setPlaying(true);
@@ -364,14 +381,21 @@ export class ClipTransport {
     const w = this.win;
     if (this.disposed || this.source?.kind !== 'element' || !w) return;
     const duration = this.host.duration();
-    if (!w.loop && w.end < duration - 0.01) {
+    const range = w.loop ? this.loopRange : null;
+    if (range) {
+      // A loop too long for one window: chain through it, then wrap.
+      const more = w.end < range.end - 0.01;
+      void this.begin(more ? w.end : range.start, range, 0);
+      return;
+    }
+    if (w.end < duration - 0.01) {
       // Chain the next window of a long clip.
       void this.begin(w.end, null, 0);
       return;
     }
     this.release();
     this.setPlaying(false);
-    this.setPlayhead(w.loop ? w.start : duration);
+    this.setPlayhead(duration);
   };
 
   /** The element to drive, with this transport's listeners on it. The
