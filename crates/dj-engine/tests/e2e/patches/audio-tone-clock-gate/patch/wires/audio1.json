@@ -1,0 +1,19 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio_l",
+      "to": "vca1",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "clock",
+      "to": "out1",
+      "to_jack": "r"
+    },
+    {
+      "from_jack": "clock",
+      "to": "vca1",
+      "to_jack": "cv"
+    }
+  ]
+}

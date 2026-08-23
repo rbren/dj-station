@@ -651,6 +651,27 @@ impl Engine {
         }
     }
 
+    /// Load a saved track path into whichever track-playing module the
+    /// node is. Patches persist only the path — an Audio node's tempo
+    /// rides along in its saved knobs, deck grids/cues/loops come from the
+    /// library, both re-applied by the caller/app layer after load.
+    pub(crate) fn load_module_track(
+        &mut self,
+        instance_id: &str,
+        kind: Option<crate::builtin::BuiltinKind>,
+        track: &str,
+    ) -> Result<()> {
+        match kind {
+            Some(crate::builtin::BuiltinKind::Deck) => {
+                self.deck_load(instance_id, Path::new(track))
+            }
+            Some(crate::builtin::BuiltinKind::Audio) => {
+                self.audio_load(instance_id, Path::new(track), None)
+            }
+            _ => self.playback_load(instance_id, Path::new(track)),
+        }
+    }
+
     /// Add one module instance from its patch entry, restoring mappings,
     /// gesture state, track, params and knobs. Deck sync targets are pushed
     /// onto `deferred_syncs` (applied once every module exists).
@@ -687,13 +708,8 @@ impl Engine {
             self.choreo_set_state(instance_id, c.clone())?;
         }
         if let Some(track) = &mf.track {
-            if crate::builtin::BuiltinKind::from_ext_id(&mf.ext)
-                == Some(crate::builtin::BuiltinKind::Deck)
-            {
-                self.deck_load(instance_id, Path::new(track))?;
-            } else {
-                self.playback_load(instance_id, Path::new(track))?;
-            }
+            let kind = crate::builtin::BuiltinKind::from_ext_id(&mf.ext);
+            self.load_module_track(instance_id, kind, track)?;
         }
         if let Some(sync_to) = &mf.sync_to {
             deferred_syncs.push((instance_id.to_string(), sync_to.clone()));
@@ -940,11 +956,8 @@ impl Engine {
             let node = self.node_idx(instance_id)?;
             if let Some(track) = &mf.track {
                 if self.nodes[node].track_path.as_deref() != Some(track.as_str()) {
-                    if self.nodes[node].is_deck() {
-                        self.deck_load(instance_id, Path::new(track))?;
-                    } else {
-                        self.playback_load(instance_id, Path::new(track))?;
-                    }
+                    let kind = self.nodes[node].builtin_kind();
+                    self.load_module_track(instance_id, kind, track)?;
                 }
             }
 

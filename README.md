@@ -126,6 +126,15 @@ patch graph: inputs `play_gate` (≥ 1.0 plays, low pauses) and `speed`
 (symphonia) and sample-rate conversion happen off the RT thread; the loaded
 track path persists with the patch.
 
+The **Audio module** (`builtin.audio`) plays any library track and clocks the
+rack from it: inputs `play`, `bpm` and `speed`, outputs `audio_l`/`audio_r`
+plus `clock` (a trigger per beat, free-running while paused). BPM and speed
+are one tempo in two units — move either and the other follows, so pushing
+the BPM up plays the track faster and the clock stays locked to what you
+hear. Loading a track adopts the BPM the library analyzed and sets speed
+back to 1x; its panel picks the track, the rest is ordinary knob-backed
+inputs you can wire, MIDI-map or automate.
+
 The **DJ Deck module** (`builtin.deck`, M2) is the full DJ deck (PRD §7):
 transport with pitch fader (`speed` × `pitch_range` param, default ±8 %) and
 `phase_nudge`, 8 hot cues (`cue_trig1..8` jacks), loops (`loop_toggle` jack,

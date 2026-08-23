@@ -69,6 +69,15 @@ fails if it's missing.
   sync partner, and the app layer re-applies library metadata on
   deck_load/patch load. E2E deck cases carry grid/cue/loop state in the
   `decks` section of their `events.json` sidecar for the same reason.
+- The Audio module (`builtin.audio`, `src/audio.rs` + `engine/audio_api.rs`)
+  is the simple "play a library track with a clock" module: its `bpm` and
+  `speed` inputs are ONE tempo in two units, mirrored on the control thread
+  by `tempo_link`/`apply_tempo_link` (hooked into `set_knob_value` /
+  `set_knob_position`, preserving `bpm / speed` = the track's 1x tempo).
+  `audio_load` resets the pair (speed 1x, BPM from the library's analysis,
+  passed in by the caller — patches persist only the track path). On the RT
+  thread the two jacks are independent per-sample reads, so wiring either
+  one keeps meaning exactly what its unit says.
 - Stems (M3) follow the same split: the FLAC stem cache under
   `<data_dir>/stems/<content_hash>/` is app-layer state auto-loaded by
   `apply_deck_metadata`; patches persist only the `stem_*` gain params.

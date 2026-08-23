@@ -22,6 +22,7 @@ import TrigSeqUI from '../../../extensions/trig_seq/ui-src/TrigSeqUI';
 import TuringUI from '../../../extensions/turing/ui-src/TuringUI';
 import WaveshaperUI from '../../../extensions/waveshaper/ui-src/WaveshaperUI';
 import type { ModuleHandle } from '../types';
+import { AudioCustomUI } from './AudioPanel';
 import { DeckCustomUI } from './DeckPanel';
 import { CompressorUI, FilterUI, MixerUI, VcaDualUI, VcaUI } from './LevelMeter';
 
@@ -47,14 +48,15 @@ export const CUSTOM_UIS: Record<string, CustomUI> = {
   'com.dj.vca': VcaUI,
   'com.dj.vca_dual': VcaDualUI,
   'com.dj.waveshaper': WaveshaperUI,
+  'builtin.audio': AudioCustomUI,
   'builtin.deck': DeckCustomUI,
 };
 
 /** Custom UIs that must NOT mount against an inert preview handle: they
  *  have mount-time side effects beyond the handle — the camera auto-starts
- *  getUserMedia, the deck polls the deck IPC client for a (nonexistent)
- *  instance. Their previews show the bare panel instead. */
-const PREVIEW_UNSAFE = new Set(['com.dj.camera', 'builtin.deck']);
+ *  getUserMedia, the deck and audio panels poll their IPC clients for a
+ *  (nonexistent) instance. Their previews show the bare panel instead. */
+const PREVIEW_UNSAFE = new Set(['com.dj.camera', 'builtin.deck', 'builtin.audio']);
 
 /** The custom UI to render in a picker preview, if any. */
 export function previewUI(typeId: string): CustomUI | undefined {

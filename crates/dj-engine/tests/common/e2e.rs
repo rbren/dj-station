@@ -32,6 +32,11 @@ pub struct TrackLoadSpec {
     pub instance: String,
     /// Audio file, relative to the case directory (keeps patches portable).
     pub file: String,
+    /// The track's tempo as the library knows it (Audio nodes adopt it on
+    /// load). Library metadata lives outside the patch, like deck grids,
+    /// so cases carry it in the sidecar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
 }
 
 /// Deck DJ metadata applied after load. In the app this comes from the
@@ -166,6 +171,10 @@ fn render_case(case: &str) -> PathBuf {
         if ext == "builtin.deck" {
             engine
                 .deck_load(&t.instance, &case_dir.join(&t.file))
+                .unwrap();
+        } else if ext == "builtin.audio" {
+            engine
+                .audio_load(&t.instance, &case_dir.join(&t.file), t.bpm)
                 .unwrap();
         } else {
             engine

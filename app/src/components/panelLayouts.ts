@@ -728,6 +728,17 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     groups: [{ inputs: [{ jack: 'play_gate', label: 'play' }, 'speed', 'loop'] }],
   }),
 
+  'builtin.audio': () => ({
+    groups: [
+      { title: 'transport', inputs: ['play'] },
+      { title: 'tempo', inputs: ['bpm', 'speed'] },
+    ],
+    outputGroups: [
+      { title: 'audio', outputs: ['audio_l', 'audio_r'] },
+      { title: 'clock', outputs: ['clock'] },
+    ],
+  }),
+
   'builtin.deck': () => ({
     groups: [
       {

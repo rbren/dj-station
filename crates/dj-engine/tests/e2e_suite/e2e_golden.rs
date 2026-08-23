@@ -174,6 +174,7 @@ fn regen_patches() {
                 tracks: vec![TrackLoadSpec {
                     instance: "play1".into(),
                     file: "tone.wav".into(),
+                    bpm: None,
                 }],
                 decks: vec![],
                 gestures: vec![],
@@ -212,6 +213,7 @@ fn regen_deck_patches() {
                 tracks: vec![TrackLoadSpec {
                     instance: "deck1".into(),
                     file: "tone.wav".into(),
+                    bpm: None,
                 }],
                 decks: vec![DeckSetupSpec {
                     instance: "deck1".into(),
@@ -262,10 +264,12 @@ fn regen_deck_patches() {
                     TrackLoadSpec {
                         instance: "deckA".into(),
                         file: "tone-a.wav".into(),
+                        bpm: None,
                     },
                     TrackLoadSpec {
                         instance: "deckB".into(),
                         file: "tone-b.wav".into(),
+                        bpm: None,
                     },
                 ],
                 decks: vec![
@@ -342,6 +346,7 @@ fn regen_stem_patches() {
                 tracks: vec![TrackLoadSpec {
                     instance: "deck1".into(),
                     file: "mix.wav".into(),
+                    bpm: None,
                 }],
                 decks: vec![DeckSetupSpec {
                     instance: "deck1".into(),

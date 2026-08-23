@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::audio::{AudioControl, AudioModule};
 use crate::builtin::{
     AudioOutModule, BuiltinKind, MidiEvent, MidiMapKind, MidiModule, MidiOutEvent, MidiOutSink,
     MidiShared,
@@ -27,6 +28,7 @@ use crate::wasm_host::WasmRuntime;
 
 // Facade modules: additional `impl Engine` blocks grouped by feature area.
 // This file keeps construction, graph editing, knobs and telemetry.
+mod audio_api;
 mod choreo_api;
 mod deck_api;
 mod gesture_api;
@@ -358,6 +360,8 @@ pub struct Engine {
     playback_producers: HashMap<usize, rtrb::Producer<Arc<TrackData>>>,
     /// Replaced tracks come back from the RT thread for off-RT drop.
     playback_garbage: HashMap<usize, rtrb::Consumer<Arc<TrackData>>>,
+    /// Control-side state per Audio node (track handoff + decoded track).
+    audios: HashMap<usize, AudioControl>,
     /// Control-side state per DJ Deck node (M2).
     decks: HashMap<usize, DeckControl>,
     xruns: Arc<AtomicU64>,
@@ -463,6 +467,7 @@ impl Engine {
             macro_instances: BTreeMap::new(),
             playback_producers: HashMap::new(),
             playback_garbage: HashMap::new(),
+            audios: HashMap::new(),
             decks: HashMap::new(),
             xruns: Arc::new(AtomicU64::new(0)),
             proc_misses: Arc::new(AtomicU64::new(0)),
@@ -663,6 +668,7 @@ impl Engine {
                 | BuiltinKind::Gesture
                 | BuiltinKind::Hands
                 | BuiltinKind::Playback
+                | BuiltinKind::Audio
                 | BuiltinKind::Deck,
             ) => Err(anyhow!("{ext_id} modules are created via add_module")),
             None => {
@@ -736,6 +742,7 @@ impl Engine {
         let mut qwerty_plumbing = None;
         let mut choreo_ctl = None;
         let mut playback_plumbing = None;
+        let mut audio_ctl = None;
         let mut deck_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
             Some(BuiltinKind::Midi) => {
@@ -783,6 +790,16 @@ impl Engine {
                 let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
                 playback_plumbing = Some((tx, garbage_rx));
                 Box::new(PlaybackModule::new(rx, garbage_tx, self.config.sample_rate))
+            }
+            Some(BuiltinKind::Audio) => {
+                let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                audio_ctl = Some(AudioControl {
+                    tx,
+                    garbage_rx,
+                    track: None,
+                });
+                Box::new(AudioModule::new(rx, garbage_tx, self.config.sample_rate))
             }
             Some(BuiltinKind::Deck) => {
                 let (tx, rx) = rtrb::RingBuffer::new(DECK_QUEUE_CAP);
@@ -927,6 +944,9 @@ impl Engine {
             self.playback_producers.insert(idx, tx);
             self.playback_garbage.insert(idx, garbage_rx);
         }
+        if let Some(ctl) = audio_ctl {
+            self.audios.insert(idx, ctl);
+        }
         if let Some(ctl) = deck_ctl {
             self.decks.insert(idx, ctl);
         }
@@ -1002,6 +1022,7 @@ impl Engine {
         self.choreos.remove(&slot);
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);
+        self.audios.remove(&slot);
         self.decks.remove(&slot);
         // Other decks sync-locked to this one lose their master.
         for ctl in self.decks.values_mut() {
@@ -1193,8 +1214,10 @@ impl Engine {
         position: f32,
     ) -> Result<()> {
         let (node, jack) = self.in_jack_indices(instance_id, jack_id)?;
+        let link = self.tempo_link(node, jack);
         self.nodes[node].knobs[jack].position = position.clamp(0.0, 1.0);
-        self.push_knob_rt(node, jack)
+        self.push_knob_rt(node, jack)?;
+        self.apply_tempo_link(link)
     }
 
     /// Set an unwired input's knob by mapped signal value (inverse of the
@@ -1203,11 +1226,32 @@ impl Engine {
     pub fn set_knob_value(&mut self, instance_id: &str, jack_id: &str, value: f32) -> Result<()> {
         let node = self.node_idx(instance_id)?;
         let jack = self.jack_index(node, jack_id)?;
-        let cfg = self.nodes[node].knobs[jack]
+        let link = self.tempo_link(node, jack);
+        self.write_knob_value(node, jack, value)?;
+        self.apply_tempo_link(link)
+    }
+
+    /// The knob config in force for an input: the per-patch override, else
+    /// the manifest's declaration.
+    pub(crate) fn knob_config(&self, node: usize, jack: usize) -> KnobConfig {
+        self.nodes[node].knobs[jack]
             .config
             .clone()
             .or_else(|| self.nodes[node].manifest.inputs[jack].knob.clone())
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    /// Value an input's knob currently maps to (what an unwired jack reads).
+    pub(crate) fn knob_value(&self, node: usize, jack: usize) -> f32 {
+        self.knob_config(node, jack)
+            .map(self.nodes[node].knobs[jack].position)
+    }
+
+    /// Move a knob to the position that maps to `value`, with no linked-
+    /// knob side effects (the mirror in [`Engine::apply_tempo_link`] uses
+    /// this to write the partner without recursing).
+    pub(crate) fn write_knob_value(&mut self, node: usize, jack: usize, value: f32) -> Result<()> {
+        let cfg = self.knob_config(node, jack);
         self.nodes[node].knobs[jack].position = position_for_value(&cfg, value);
         self.push_knob_rt(node, jack)
     }

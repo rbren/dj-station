@@ -1987,6 +1987,40 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/* Audio module panel                                                  */
+/* ------------------------------------------------------------------ */
+
+.audio-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.audio-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audio-row select {
+  flex: 1;
+  min-width: 120px;
+  background: #12161c;
+  color: inherit;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.audio-readout {
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #9aa7b5;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
 /* DJ Deck panel (M2)                                                  */
 /* ------------------------------------------------------------------ */
 

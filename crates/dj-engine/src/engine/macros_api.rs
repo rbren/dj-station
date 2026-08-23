@@ -250,11 +250,7 @@ impl Engine {
                 self.choreo_set_state(&full, c.clone())?;
             }
             if let Some(track) = &mf.track {
-                if BuiltinKind::from_ext_id(&mf.ext) == Some(BuiltinKind::Deck) {
-                    self.deck_load(&full, std::path::Path::new(track))?;
-                } else {
-                    self.playback_load(&full, std::path::Path::new(track))?;
-                }
+                self.load_module_track(&full, BuiltinKind::from_ext_id(&mf.ext), track)?;
             }
             if let Some(sync_to) = &mf.sync_to {
                 deferred_syncs.push((full.clone(), format!("{prefix}/{sync_to}")));

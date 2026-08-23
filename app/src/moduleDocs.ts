@@ -1147,6 +1147,28 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     outputs: { out_l: 'Left audio.', out_r: 'Right audio.' },
     examples: ['Loop a texture under a live set with speed at 0.5 for half-time.'],
   },
+  'builtin.audio': {
+    summary:
+      'Plays any track from the library and runs a beat clock at its ' +
+      'tempo. BPM and speed are one tempo in two units: moving either ' +
+      'moves the other, so pushing the BPM up plays the track faster and ' +
+      'the clock stays locked to what you hear. Loading a track takes the ' +
+      'BPM the library analysed and sets speed back to 1x.',
+    inputs: {
+      play: 'Play/pause switch (rising edge restarts a finished track).',
+      bpm: 'Clock tempo in BPM; drags the speed control with it.',
+      speed: 'Playback rate, 1x = the file\u2019s own tempo; drags BPM with it.',
+    },
+    outputs: {
+      audio_l: 'Left audio.',
+      audio_r: 'Right audio.',
+      clock: 'Trigger per beat at the BPM tempo (free-running while paused).',
+    },
+    examples: [
+      'clock -> Step Sequencer clock: the pattern locks to the loaded track.',
+      'audio_l/audio_r -> Audio Output; ride the BPM control to tempo-match a jam.',
+    ],
+  },
   'builtin.crossfader': {
     summary:
       'DJ crossfader: blends stereo pair A and pair B under one fader. ' +

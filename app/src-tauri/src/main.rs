@@ -2282,6 +2282,28 @@ fn playback_load(state: State<AppState>, instance: String, track_id: i64) -> Cmd
         .map_err(err)
 }
 
+/// Load a library track into an Audio module instance. The track's tempo
+/// comes from the library (canonical, like deck beatgrids): the module
+/// adopts it on the BPM input and resets speed to 1x.
+#[tauri::command]
+fn audio_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResult<()> {
+    let track = state.library.track(track_id).map_err(err)?;
+    let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
+    engine
+        .audio_load(&instance, &PathBuf::from(track.file_path), track.bpm)
+        .map_err(err)
+}
+
+/// Track + tempo snapshot for the Audio module panel.
+#[tauri::command]
+fn audio_status(
+    state: State<AppState>,
+    instance: String,
+) -> CmdResult<dj_engine::audio::AudioStatus> {
+    let engine = engine_lock(&state)?;
+    engine.audio_status(&instance).map_err(err)
+}
+
 // ---------------------------------------------------------------------------
 // DJ Deck (M2). The library DB is the canonical store for cues/loops/
 // beatgrids (PRD §7): every set is written through to the library, and
@@ -2859,6 +2881,8 @@ fn main() {
             add_watch_folder,
             watch_folders,
             playback_load,
+            audio_load,
+            audio_status,
             deck_load,
             deck_status,
             deck_waveform,
