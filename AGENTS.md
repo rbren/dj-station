@@ -707,6 +707,15 @@ fails if it's missing.
   ONE ISOLATED STEM of a track (`clip_stem_*` commands over `StemJobs`)
   and edit it exactly like a full mix — the stem is part of the cache key,
   the `source_ref` (`"7:vocals"`) and the rendered result.
+  A separation can be abandoned (`clip_stem_cancel` →
+  `StemJobs::cancel_track`, `StemJobState::Cancelled`). Cancelling KILLS
+  the demucs child: it is minutes of another program's time, and a flag
+  alone stops nothing. Hence `CancelToken` owns the `Child`,
+  `wait_child()` polls instead of blocking (a blocking wait would put the
+  child out of the canceller's reach), and stderr is drained on its own
+  thread — demucs' `-j` workers inherit that pipe and hold it open after
+  their parent dies. A cancelled run writes no stems, so the track is
+  left exactly as it was and can simply be separated again.
   Its golden-audio case lives in dj-analysis
   (`tests/e2e/clips/*.json` + `tests/e2e/goldens/*.wav`, second step of
   `scripts/regen-goldens.sh`) rather than the engine e2e suite, because

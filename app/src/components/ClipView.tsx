@@ -428,6 +428,15 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
     setStatus(`Separating stems with ${backend?.backend ?? 'the stem model'} — this takes a while`);
   }, [backend, clip, pick]);
 
+  // Cancelling only fires the signal; the poll above sees the job finish
+  // and clears the panel, so the button stays honest about work that
+  // takes a moment to actually stop.
+  const cancelStems = useCallback(async () => {
+    if (!separating) return;
+    setStatus('Stopping the separation…');
+    await clip.stemCancel(separating.trackId);
+  }, [clip, separating]);
+
   // Poll while a separation runs; stop as soon as none is in flight.
   useEffect(() => {
     if (!separating) return;
@@ -450,6 +459,8 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
         setSeparating(null);
         if (job.state === 'failed') {
           setError(job.error ?? 'Stem separation failed');
+        } else if (job.state === 'cancelled') {
+          setStatus(`Stopped separating "${job.title}"`);
         } else {
           setSeparated((m) => ({ ...m, [trackId]: true }));
           setStatus(`Stems ready for "${job.title}"`);
@@ -855,6 +866,16 @@ export function ClipView({ clip, library, active = true, onSaved, ref }: ClipVie
             onClick={() => void separateStems()}
           >
             {separating ? `Separating… (${separating.stage})` : 'Separate stems'}
+          </button>
+        )}
+        {separating && (
+          <button
+            className="clip-stem-cancel"
+            data-testid="clip-stem-cancel"
+            title="Stop the separation — nothing is kept, and it can be run again"
+            onClick={() => void cancelStems()}
+          >
+            Cancel
           </button>
         )}
         {backend?.available === false && (

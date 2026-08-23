@@ -22,6 +22,9 @@
 use anyhow::{Context, Result};
 use rustfft::num_complex::Complex;
 use std::path::{Path, PathBuf};
+use std::process::{Child, ExitStatus};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use crate::decode::AudioData;
 use crate::stft::Stft;
@@ -42,6 +45,82 @@ pub trait StemSeparator: Send + Sync {
     /// share a cache directory (see [`stems_dir_for`]).
     fn id(&self) -> &str;
     fn separate(&self, audio: &AudioData) -> Result<Stems>;
+
+    /// Separate, giving up early if `cancel` fires.
+    ///
+    /// The default ignores the token, which is right for the in-process
+    /// separators: they are seconds of CPU, so the caller simply throws
+    /// the result away. A separator that shells out to a tool for minutes
+    /// must override this and hand its child process to the token — a
+    /// flag alone cannot stop another process.
+    fn separate_cancellable(&self, audio: &AudioData, _cancel: &CancelToken) -> Result<Stems> {
+        self.separate(audio)
+    }
+}
+
+/// A stop signal for one separation, plus the child process (if any) that
+/// is doing the work. Cancelling kills that child: a demucs run is
+/// minutes of another program's time and nothing inside it is watching a
+/// flag of ours.
+#[derive(Debug, Default)]
+pub struct CancelToken {
+    stopped: AtomicBool,
+    child: Mutex<Option<Child>>,
+}
+
+impl CancelToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ask the separation to stop, killing the running child if there is
+    /// one. Safe to call from any thread, and safe to call twice.
+    pub fn cancel(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        if let Some(child) = self.child.lock().expect("cancel token poisoned").as_mut() {
+            let _ = child.kill();
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
+    }
+
+    /// Put `child` under this token's control. A token cancelled before
+    /// the spawn kills it immediately, so a cancel can never be lost in
+    /// the gap between the two.
+    pub fn adopt(&self, child: Child) {
+        let mut slot = self.child.lock().expect("cancel token poisoned");
+        *slot = Some(child);
+        if self.is_cancelled() {
+            if let Some(child) = slot.as_mut() {
+                let _ = child.kill();
+            }
+        }
+    }
+
+    /// Wait for the adopted child, returning how it exited.
+    ///
+    /// Polls rather than blocking in `wait`: the child has to stay
+    /// reachable for [`cancel`](Self::cancel) the whole time it runs, and
+    /// a blocking wait would either hold the lock (deadlocking the cancel)
+    /// or take the child out of reach of it. A separation is minutes
+    /// long, so a 25 ms tick costs nothing.
+    pub fn wait_child(&self) -> std::io::Result<Option<ExitStatus>> {
+        loop {
+            {
+                let mut slot = self.child.lock().expect("cancel token poisoned");
+                let Some(child) = slot.as_mut() else {
+                    return Ok(None);
+                };
+                if let Some(status) = child.try_wait()? {
+                    *slot = None;
+                    return Ok(Some(status));
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -316,10 +395,25 @@ pub fn stems_cached(dir: &Path) -> bool {
 /// `false` on a cache hit (nothing recomputed, per-track caching keyed by
 /// the content hash embedded in `dir`).
 pub fn ensure_stems(dir: &Path, audio: &AudioData, separator: &dyn StemSeparator) -> Result<bool> {
+    ensure_stems_cancellable(dir, audio, separator, &CancelToken::new())
+}
+
+/// [`ensure_stems`], abandonable through `cancel`. A cancelled run writes
+/// nothing: a half-filled cache directory would be indistinguishable from
+/// a real one on the next look.
+pub fn ensure_stems_cancellable(
+    dir: &Path,
+    audio: &AudioData,
+    separator: &dyn StemSeparator,
+    cancel: &CancelToken,
+) -> Result<bool> {
     if stems_cached(dir) {
         return Ok(false);
     }
-    let stems = separator.separate(audio)?;
+    let stems = separator.separate_cancellable(audio, cancel)?;
+    if cancel.is_cancelled() {
+        return Ok(false);
+    }
     write_stems(dir, &stems)?;
     Ok(true)
 }

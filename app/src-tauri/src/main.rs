@@ -2933,6 +2933,7 @@ fn main() {
             clip::clip_stem_backend,
             clip::clip_stem_status,
             clip::clip_stem_separate,
+            clip::clip_stem_cancel,
             clip::clip_stem_jobs,
         ])
         .run(tauri::generate_context!())

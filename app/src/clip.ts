@@ -107,7 +107,7 @@ export interface ClipStemStatus {
   running: boolean;
 }
 
-export type StemJobState = 'running' | 'done' | 'failed';
+export type StemJobState = 'running' | 'done' | 'failed' | 'cancelled';
 
 /** One separation in flight (or recently finished). */
 export interface StemJob {
@@ -555,6 +555,8 @@ export interface ClipClientApi {
   stemStatus(trackId: number): Promise<ClipStemStatus | null>;
   /** Start separating in the background; returns the job id. */
   stemSeparate(trackId: number): Promise<number | null>;
+  /** Abandon the separation running for a track, killing the work. */
+  stemCancel(trackId: number): Promise<boolean | null>;
   /** Poll separation progress. */
   stemJobs(): Promise<StemJob[] | null>;
 }
@@ -580,6 +582,9 @@ export class ClipClient extends IpcClient implements ClipClientApi {
   }
   stemSeparate(trackId: number) {
     return this.call<number>('clip_stem_separate', { trackId });
+  }
+  stemCancel(trackId: number) {
+    return this.call<boolean>('clip_stem_cancel', { trackId });
   }
   stemJobs() {
     return this.call<StemJob[]>('clip_stem_jobs', {});

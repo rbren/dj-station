@@ -443,6 +443,7 @@ fn stem_jobs_separate_in_the_background_and_cache_under_the_backend() {
             match job.state {
                 StemJobState::Done => return,
                 StemJobState::Failed => panic!("{what} failed: {:?}", job.error),
+                StemJobState::Cancelled => panic!("{what} was cancelled by nobody"),
                 StemJobState::Running => {
                     assert!(t0.elapsed() < Duration::from_secs(30), "{what} hung");
                     std::thread::sleep(Duration::from_millis(20));
@@ -542,4 +543,146 @@ fn a_stem_job_failure_is_reported_not_panicked() {
     let error = job.error.unwrap_or_default();
     assert!(error.contains("install demucs"), "unhelpful: {error}");
     assert!(!jobs.cached(track.id), "a failed run must cache nothing");
+}
+
+/// A fake `demucs` that never finishes on its own: it writes its pid to
+/// `pidfile`, then sleeps. Cancelling has to kill it.
+#[cfg(unix)]
+fn hanging_demucs(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let pidfile = dir.join("pid.txt");
+    let script = dir.join("hanging-demucs");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = "--help" ]; then echo "usage: demucs"; exit 0; fi
+echo $$ > '{pid}'
+# Progress chatter, then a wait no cancel-less run would ever escape.
+echo "Separating track" >&2
+sleep 600
+"#,
+            pid = pidfile.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (script, pidfile)
+}
+
+#[cfg(unix)]
+#[test]
+fn cancelling_a_stem_job_kills_the_run_and_leaves_the_track_separable() {
+    use dj_analysis::{StemJobState, StemJobs};
+    use dj_library::{ImportOptions, Library};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
+        let t0 = Instant::now();
+        while !done() {
+            assert!(
+                t0.elapsed() < Duration::from_secs(30),
+                "{what} never happened"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let library = Arc::new(Library::open(tmp.path()).unwrap());
+    let wav = tmp.path().join("track.wav");
+    write_wav(&wav, &tone(440.0, 1.0, 44_100));
+    let track = library
+        .import_file(&wav, ImportOptions::default())
+        .unwrap()
+        .track()
+        .clone();
+
+    let work = tempfile::tempdir().unwrap();
+    let (hanging, pidfile) = hanging_demucs(work.path());
+    let jobs = StemJobs::new(
+        library.clone(),
+        Arc::new(DemucsSeparator::with_bin(
+            &hanging.to_string_lossy(),
+            DEFAULT_MODEL,
+        )),
+    );
+
+    let id = jobs.start(track.id);
+    wait_for("demucs started", || pidfile.is_file());
+    let pid: i32 = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(alive(pid), "the fake demucs should still be running");
+
+    assert!(jobs.cancel_track(track.id), "there was a job to cancel");
+    wait_for("the job finished", || {
+        !jobs.jobs().iter().any(|j| j.id == id && j.is_running())
+    });
+
+    let job = jobs.jobs().into_iter().find(|j| j.id == id).unwrap();
+    assert_eq!(
+        job.state,
+        StemJobState::Cancelled,
+        "a killed run is cancelled, not failed: {:?}",
+        job.error
+    );
+    // The point of the button: the work actually stops. Without the kill
+    // the child would sit there for ten minutes.
+    wait_for("the child was killed", || !alive(pid));
+    assert!(!jobs.cached(track.id), "a cancelled run must cache nothing");
+
+    // And the track is left separable — nothing half-written in the way.
+    let work2 = tempfile::tempdir().unwrap();
+    let (script, _) = fake_demucs(work2.path(), 1.0);
+    let jobs = StemJobs::new(
+        library.clone(),
+        Arc::new(DemucsSeparator::with_bin(
+            &script.to_string_lossy(),
+            DEFAULT_MODEL,
+        )),
+    );
+    let again = jobs.start(track.id);
+    wait_for("the re-run finished", || {
+        !jobs.jobs().iter().any(|j| j.id == again && j.is_running())
+    });
+    let job = jobs.jobs().into_iter().find(|j| j.id == again).unwrap();
+    assert_eq!(
+        job.state,
+        StemJobState::Done,
+        "re-run failed: {:?}",
+        job.error
+    );
+    assert!(jobs.cached(track.id));
+}
+
+#[cfg(unix)]
+#[test]
+fn cancelling_nothing_says_so() {
+    use dj_analysis::StemJobs;
+    use dj_library::Library;
+    use std::sync::Arc;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let library = Arc::new(Library::open(tmp.path()).unwrap());
+    let jobs = StemJobs::new(
+        library,
+        Arc::new(DemucsSeparator::with_bin("no-such-demucs", DEFAULT_MODEL)),
+    );
+    assert!(!jobs.cancel_track(1), "no job, nothing to stop");
+}
+
+/// Is `pid` still around? `kill -0` in Rust: signal 0 only checks.
+#[cfg(unix)]
+fn alive(pid: i32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }

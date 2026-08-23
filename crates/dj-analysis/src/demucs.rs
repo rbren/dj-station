@@ -26,11 +26,12 @@
 //! thread. Callers go through [`StemJobs`](crate::stem_jobs::StemJobs).
 
 use anyhow::{anyhow, bail, Context, Result};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::decode::{decode_audio, AudioData};
-use crate::stems::{StemSeparator, Stems, N_STEMS, STEM_NAMES};
+use crate::stems::{CancelToken, StemSeparator, Stems, N_STEMS, STEM_NAMES};
 
 /// Override the `demucs` binary (name on `PATH` or absolute path).
 pub const ENV_DEMUCS_BIN: &str = "DJ_DEMUCS_BIN";
@@ -118,18 +119,47 @@ impl DemucsSeparator {
     }
 
     /// Run the CLI over `input`, returning the directory demucs filled.
-    fn run(&self, input: &Path, out_dir: &Path) -> Result<()> {
-        let out = Command::new(&self.bin)
+    ///
+    /// The child is handed to `cancel` so a cancelled job can kill it; the
+    /// run is minutes long, and the process is the only thing that can be
+    /// stopped. Its stderr is drained on this thread while it works —
+    /// demucs writes a progress bar there, and an unread pipe would wedge
+    /// it once the buffer filled.
+    fn run(&self, input: &Path, out_dir: &Path, cancel: &CancelToken) -> Result<()> {
+        let mut child = Command::new(&self.bin)
             .args(["-n", &self.model])
             .arg("--out")
             .arg(out_dir)
             .args(&self.extra_args)
             .arg(input)
             .stdin(Stdio::null())
-            .output()
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| self.spawn_error(e))?;
-        if !out.status.success() {
-            bail!("{}", tool_failure(&self.bin, &out.stderr, out.status));
+        let mut pipe = child.stderr.take().expect("stderr is piped");
+        cancel.adopt(child);
+
+        // Drained on its own thread rather than here: waiting for EOF
+        // would outlive a cancel, because demucs' `-j` workers inherit the
+        // pipe and hold it open after their parent is killed.
+        let reader = std::thread::spawn(move || {
+            let mut stderr = Vec::new();
+            let _ = pipe.read_to_end(&mut stderr);
+            stderr
+        });
+        let status = cancel
+            .wait_child()
+            .with_context(|| format!("waiting for {}", self.bin))?
+            .expect("the child was adopted");
+        if cancel.is_cancelled() {
+            // The reader ends when the last writer does; nobody is
+            // waiting on it now.
+            return Ok(());
+        }
+        let stderr = reader.join().unwrap_or_default();
+        if !status.success() {
+            bail!("{}", tool_failure(&self.bin, &stderr, status));
         }
         Ok(())
     }
@@ -245,6 +275,10 @@ impl StemSeparator for DemucsSeparator {
     }
 
     fn separate(&self, audio: &AudioData) -> Result<Stems> {
+        self.separate_cancellable(audio, &CancelToken::new())
+    }
+
+    fn separate_cancellable(&self, audio: &AudioData, cancel: &CancelToken) -> Result<Stems> {
         let frames = audio.frames();
         let channels = audio.channels.len();
         anyhow::ensure!(channels >= 1 && frames > 0, "empty audio");
@@ -255,7 +289,16 @@ impl StemSeparator for DemucsSeparator {
             .with_context(|| format!("writing {}", input.display()))?;
 
         let out_dir = tmp.path().join("out");
-        self.run(&input, &out_dir)?;
+        self.run(&input, &out_dir, cancel)?;
+        // A killed run left a half-written output tree behind; the caller
+        // discards cancelled stems, so hand back something shaped right
+        // rather than an error about demucs producing nothing.
+        if cancel.is_cancelled() {
+            return Ok(Stems(std::array::from_fn(|_| AudioData {
+                sample_rate: audio.sample_rate,
+                channels: vec![Vec::new(); channels],
+            })));
+        }
 
         let paths = stem_files(&out_dir, &self.model)?;
         let mut decoded = Vec::with_capacity(N_STEMS);

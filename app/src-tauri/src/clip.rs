@@ -260,6 +260,14 @@ pub fn clip_stem_separate(state: State<AppState>, track_id: i64) -> CmdResult<u6
     Ok(state.stems.start(track_id))
 }
 
+/// Abandon the separation running for `track_id`, killing the work in
+/// flight. Returns whether there was one. Nothing is cached, so the
+/// track can simply be separated again.
+#[tauri::command(async)]
+pub fn clip_stem_cancel(state: State<AppState>, track_id: i64) -> bool {
+    state.stems.cancel_track(track_id)
+}
+
 /// Snapshot of separation jobs (the Clip page polls this for progress).
 #[tauri::command(async)]
 pub fn clip_stem_jobs(state: State<AppState>) -> Vec<dj_analysis::StemJob> {

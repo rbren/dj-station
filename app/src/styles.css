@@ -3303,6 +3303,12 @@ body {
   font-size: 0.85rem;
 }
 
+/* Stopping minutes of work: available, but not competing with Separate. */
+.clip-stem-cancel {
+  border-color: #6b3b3b;
+  color: #e0a3a3;
+}
+
 .clip-stem-hint {
   color: #626b7c;
   font-size: 0.8rem;

@@ -91,6 +91,7 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
       running: false,
     })),
     stemSeparate: vi.fn(async () => 1),
+    stemCancel: vi.fn(async () => true),
     stemJobs: vi.fn(async () => []),
     ...overrides,
   };
@@ -885,6 +886,62 @@ describe('ClipView', () => {
       const calls = (clip.renderPreview as ReturnType<typeof vi.fn>).mock.calls;
       expect(calls[calls.length - 1][0].sources).toEqual([{ track_id: 7, stem: 'vocals' }]);
     });
+  });
+
+  it('stops a separation that is taking too long, and can start it again', async () => {
+    let state: 'running' | 'cancelled' | 'done' = 'running';
+    const clip = clipMock({
+      stemStatus: vi.fn(async (trackId: number) => ({
+        track_id: trackId,
+        backend: 'htdemucs_ft',
+        cached: state === 'done',
+        running: state === 'running',
+      })),
+      stemCancel: vi.fn(async () => {
+        state = 'cancelled';
+        return true;
+      }),
+      stemJobs: vi.fn(async () => [
+        {
+          id: 42,
+          track_id: 7,
+          backend: 'htdemucs_ft',
+          title: TRACK.title,
+          state,
+          stage: state === 'running' ? 'separating' : state,
+          error: null,
+        },
+      ]),
+    });
+    render(<ClipView clip={clip} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+    fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '7' } });
+
+    fireEvent.click(screen.getByTestId('clip-stem-separate'));
+    await waitFor(() => expect(screen.getByTestId('clip-stem-cancel')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('clip-stem-cancel'));
+    await waitFor(() => expect(clip.stemCancel).toHaveBeenCalledWith(7));
+
+    // The panel goes back to idle — no stems, no spinner, and the offer
+    // to run it again.
+    await waitFor(() => expect(screen.queryByTestId('clip-stem-cancel')).toBeNull(), {
+      timeout: 3000,
+    });
+    expect(screen.getByTestId('clip-status').textContent).toMatch(/stopped separating/i);
+    expect(screen.queryByTestId('clip-stem-ready')).toBeNull();
+    const again = screen.getByTestId('clip-stem-separate') as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+    expect(again.textContent).toBe('Separate stems');
+
+    // A cancel is not a failure, so nothing is shouted about.
+    expect(screen.queryByTestId('clip-error')).toBeNull();
+  });
+
+  it('only offers to cancel while something is running', async () => {
+    render(<ClipView clip={clipMock()} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-stem-separate')).toBeTruthy());
+    expect(screen.queryByTestId('clip-stem-cancel')).toBeNull();
   });
 
   it('explains itself when the separation tooling is missing', async () => {
