@@ -39,11 +39,8 @@ import {
   removeLevelPoint,
   removeOverlay,
   removeRegion,
-  resizeSelection,
   sameSource,
   reverseRange,
-  rulerTicks,
-  selectionEdgeAt,
   setLevelPoint,
   sourceLabel,
   sourceRef,
@@ -64,8 +61,9 @@ import { ClipTransport, type TransportHost } from '../clipTransport';
 import { isEditableTarget } from '../fileShortcuts';
 import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
+import { AudioTimeline, viewSpan } from './AudioTimeline';
 import { ClipEqUI } from './ClipEqUI';
-import { peaksPath, WAVEFORM_VIEW_W as W } from './WaveformView';
+import { WAVEFORM_VIEW_W as W } from './WaveformView';
 
 const WAVE_H = 120;
 const LEVEL_H = 90;
@@ -83,10 +81,6 @@ const LEVEL_MAX_DB = 6;
 const FADE_SECS = 2;
 /** Undo depth for clip edits (page-local; unrelated to patch undo). */
 const HISTORY_DEPTH = 49;
-/** Narrowest zoom window. */
-const MIN_VIEW_SECS = 0.05;
-/** Grab radius for the selection's edge handles, in waveform pixels. */
-const HANDLE_PX = 7;
 /** How often the picked track's stems are asked after. Separation is
  *  minutes long, so this is about noticing, not about progress. */
 const STEM_POLL_MS = 2000;
@@ -112,16 +106,6 @@ function levelDbFromY(y: number): number {
 }
 
 type Range = { start: number; end: number };
-
-/** A drag on the waveform. Sweeping a new selection and dragging one end
- *  of an existing one are the same gesture — both track the pointer
- *  against a fixed `anchor` (for a resize, the end you did NOT grab) —
- *  so they share a kind. Dragging from inside the selection slides the
- *  selection itself; only its `audio` variant (alt-drag) edits, and only
- *  on release. */
-type WaveDrag =
-  | { kind: 'select'; anchor: number }
-  | { kind: 'move'; base: Range; anchor: number; delta: number; audio: boolean };
 
 export interface ClipViewProps {
   clip: ClipClientApi;
@@ -257,9 +241,7 @@ export function ClipView({
   }, []);
 
   // Viewport, clamped against the current duration (edits shrink clips).
-  const vpLen = Math.min(vp ? vp.end - vp.start : duration, duration);
-  const vpStart = vp ? Math.max(0, Math.min(vp.start, duration - vpLen)) : 0;
-  const vpEnd = vpStart + vpLen;
+  const { start: vpStart, end: vpEnd, len: vpLen } = viewSpan(vp, duration);
 
   const refreshTracks = useCallback(async () => {
     const list = await library.tracks();
@@ -491,11 +473,24 @@ export function ClipView({
     };
   }, [active, clip, pick, stemPollMs, stemsPending]);
 
-  // --- selection: sweep on empty space, slide inside the selection -------
-  const waveRef = useRef<SVGSVGElement | null>(null);
-  const dragRect = useRef<DOMRect | null>(null);
-  const dragRef = useRef<WaveDrag | null>(null);
-  const [dragging, setDragging] = useState(false);
+  // --- selection edits (the timeline owns the gestures) -------------------
+  //
+  // The sweep/resize/slide gestures live in AudioTimeline; what stays here
+  // is the one that EDITS: an alt-drag slide re-splices the audio to where
+  // the selection was let go.
+  const onSelectionSlid = useCallback(
+    (base: Range, delta: number, audio: boolean) => {
+      // Plain drag has already done its whole job: the selection sits
+      // where it was let go and the audio never moved. Alt-drag asked
+      // for the material to follow, so re-splice it there.
+      if (!audio) return;
+      const target = base.start + delta;
+      apply((p) => moveRange(p, base.start, base.end, target));
+      setSelection({ start: target, end: target + (base.end - base.start) });
+      transportRef.current?.seek(target);
+    },
+    [apply],
+  );
 
   const timeAt = useCallback(
     (clientX: number, rect: DOMRect | null) => {
@@ -505,131 +500,6 @@ export function ClipView({
     },
     [duration, vpStart, vpLen],
   );
-
-  /** Seconds per HANDLE_PX at the current zoom — the edge grab radius. */
-  const handleSecs = useCallback(
-    (rect: DOMRect | null) =>
-      rect && rect.width > 0 ? (HANDLE_PX / rect.width) * vpLen : (HANDLE_PX / W) * vpLen,
-    [vpLen],
-  );
-
-  const startDrag = useCallback(
-    (e: ReactMouseEvent<SVGSVGElement>) => {
-      if (duration <= 0 || e.button !== 0) return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      dragRect.current = rect;
-      const t = timeAt(e.clientX, rect);
-      // Grabbing an end expands/shrinks the selection; that beats the
-      // "slide the whole thing" case, whose zone contains both edges.
-      const edge = selectionEdgeAt(sel, t, handleSecs(rect));
-      if (sel && edge) {
-        // Anchor the end you did not grab and sweep from there; the
-        // playhead stays put (only a fresh sweep moves it).
-        dragRef.current = { kind: 'select', anchor: edge === 'start' ? sel.end : sel.start };
-        setSelection(resizeSelection(sel, edge, t, duration));
-      } else if (sel && t >= sel.start && t <= sel.end) {
-        // Inside the selection: slide WHICH PART is selected. Holding alt
-        // slides the audio with it — an edit, so it must be asked for.
-        dragRef.current = { kind: 'move', base: sel, anchor: t, delta: 0, audio: e.altKey };
-      } else {
-        dragRef.current = { kind: 'select', anchor: t };
-        setSelection({ start: t, end: t });
-        transportRef.current?.seek(t);
-      }
-      setDragging(true);
-    },
-    [duration, handleSecs, sel, timeAt],
-  );
-
-  useEffect(() => {
-    if (!dragging) return;
-    const move = (e: MouseEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      const t = timeAt(e.clientX, dragRect.current);
-      if (drag.kind === 'select') {
-        setSelection({ start: Math.min(drag.anchor, t), end: Math.max(drag.anchor, t) });
-      } else {
-        const len = drag.base.end - drag.base.start;
-        const delta = Math.min(
-          duration - len - drag.base.start,
-          Math.max(-drag.base.start, t - drag.anchor),
-        );
-        drag.delta = delta;
-        setSelection({ start: drag.base.start + delta, end: drag.base.end + delta });
-      }
-    };
-    const up = () => {
-      const drag = dragRef.current;
-      dragRef.current = null;
-      setDragging(false);
-      if (drag?.kind !== 'move') return;
-      if (Math.abs(drag.delta) > 1e-3) {
-        // Plain drag has already done its whole job: the selection sits
-        // where it was let go and the audio never moved. Alt-drag asked
-        // for the material to follow, so re-splice it there.
-        if (!drag.audio) return;
-        const target = drag.base.start + drag.delta;
-        apply((p) => moveRange(p, drag.base.start, drag.base.end, target));
-        setSelection({ start: target, end: target + (drag.base.end - drag.base.start) });
-        transportRef.current?.seek(target);
-      } else {
-        // A plain click inside the selection just moves the playhead.
-        transportRef.current?.seek(drag.anchor);
-      }
-    };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-    return () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-    };
-  }, [apply, dragging, duration, timeAt]);
-
-  // --- zoom ---------------------------------------------------------------
-  const zoomAround = useCallback(
-    (center: number, factor: number) => {
-      if (duration <= 0) return;
-      const span = Math.max(MIN_VIEW_SECS, Math.min(duration, vpLen * factor));
-      if (span >= duration) {
-        setVp(null);
-        return;
-      }
-      const frac = vpLen > 0 ? (center - vpStart) / vpLen : 0.5;
-      const start = Math.max(0, Math.min(center - frac * span, duration - span));
-      setVp({ start, end: start + span });
-    },
-    [duration, vpLen, vpStart],
-  );
-
-  const zoomIn = useCallback(() => {
-    const center = sel ? (sel.start + sel.end) / 2 : playhead > 0 ? playhead : vpStart + vpLen / 2;
-    zoomAround(center, 0.5);
-  }, [playhead, sel, vpLen, vpStart, zoomAround]);
-  const zoomOut = useCallback(
-    () => zoomAround(vpStart + vpLen / 2, 2),
-    [vpLen, vpStart, zoomAround],
-  );
-
-  // Wheel over the waveform: zoom around the cursor; shift/horizontal
-  // scroll pans. Native non-passive listener so the page never scrolls.
-  useEffect(() => {
-    const el = waveRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) {
-        const d = (e.deltaX || e.deltaY) * (vpLen / W);
-        const start = Math.max(0, Math.min(vpStart + d, duration - vpLen));
-        if (vp) setVp({ start, end: start + vpLen });
-      } else {
-        zoomAround(timeAt(e.clientX, rect), 2 ** (e.deltaY / 300));
-      }
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [duration, timeAt, vp, vpLen, vpStart, zoomAround]);
 
   // --- level automation lane -------------------------------------------
   const laneRef = useRef<SVGSVGElement | null>(null);
@@ -790,11 +660,10 @@ export function ClipView({
   // The preview belongs to the current edit only; an emptied program has none.
   const preview = program.regions.length === 0 ? null : previewState;
   const peaks = preview?.peaks ?? [];
-  // Ruler marks for whatever is on screen. Recomputed from the viewport
-  // alone, so zooming and scrolling move them with the audio.
-  const ticks = useMemo(() => rulerTicks(vpStart, vpEnd), [vpStart, vpEnd]);
   /** Can the picked track be loaded stem by stem right now? */
   const stemsReady = picked?.state === 'ready';
+  /** The level lane shares the timeline's viewport (AudioTimeline uses
+   *  the same mapping), so automation stays under its audio at any zoom. */
   const xOf = (secs: number) => (vpLen > 0 ? ((secs - vpStart) / vpLen) * W : 0);
   const disabled = program.regions.length === 0;
   const noSelection = disabled || sel === null;
@@ -913,86 +782,37 @@ export function ClipView({
         </p>
       ) : (
         <>
-          <div className="clip-transport" data-testid="clip-transport">
-            <button
-              data-testid="clip-play"
-              title={playing ? 'Pause (space)' : 'Play (space)'}
-              onClick={togglePlay}
-            >
-              {playing ? '❚❚' : '▶'}
-            </button>
-            <button data-testid="clip-stop" title="Stop" onClick={stop}>
-              ■
-            </button>
-            <button
-              data-testid="clip-loop"
-              className={loop ? 'clip-toggle-on' : undefined}
-              aria-pressed={loop}
-              title={sel ? 'Loop the selection' : 'Loop the whole clip'}
-              onClick={() => setLoop((v) => !v)}
-            >
-              Loop
-            </button>
-            <span className="clip-playhead-readout" data-testid="clip-playhead-readout">
-              {timecode(playhead)}
-            </span>
-            <span className="clip-zoom">
-              <button data-testid="clip-zoom-in" title="Zoom in" onClick={zoomIn}>
-                +
-              </button>
-              <button
-                data-testid="clip-zoom-out"
-                title="Zoom out"
-                disabled={vp === null}
-                onClick={zoomOut}
-              >
-                −
-              </button>
-              <button
-                data-testid="clip-zoom-fit"
-                title="Fit whole clip"
-                disabled={vp === null}
-                onClick={() => setVp(null)}
-              >
-                Fit
-              </button>
-            </span>
-            <button data-testid="clip-undo" disabled={past.length === 0} onClick={undo}>
-              Undo
-            </button>
-            <button data-testid="clip-redo" disabled={future.length === 0} onClick={redo}>
-              Redo
-            </button>
-          </div>
-
-          <div className="clip-timeline">
-            {/* The ruler is HTML, not SVG: the waveform's viewBox is
-                stretched to the pane width (preserveAspectRatio="none"),
-                which would squash text with it. Percentages track the
-                viewport, so the marks follow every zoom and scroll. */}
-            <div className="clip-ruler" data-testid="clip-ruler">
-              {ticks.map((t) => (
-                <span
-                  key={t.secs}
-                  className={t.major ? 'clip-tick clip-tick-major' : 'clip-tick'}
-                  style={{ left: `${((t.secs - vpStart) / Math.max(1e-9, vpLen)) * 100}%` }}
-                  data-testid={t.major ? `clip-tick-${fixed(t.secs, 3)}` : undefined}
-                >
-                  {t.major && <i className="clip-tick-label">{t.label}</i>}
-                </span>
-              ))}
-            </div>
-            <svg
-              ref={waveRef}
-              data-testid="clip-waveform"
-              className="clip-waveform"
-              viewBox={`0 0 ${W} ${WAVE_H}`}
-              preserveAspectRatio="none"
-              data-vp-start={fixed(vpStart, 3)}
-              data-vp-end={fixed(vpEnd, 3)}
-              onMouseDown={startDrag}
-            >
-              {spans.map((s) => (
+          <AudioTimeline
+            idPrefix="clip"
+            duration={duration}
+            peaks={peaks}
+            waveHeight={WAVE_H}
+            vp={vp}
+            onVpChange={setVp}
+            selection={selection}
+            onSelectionChange={setSelection}
+            playing={playing}
+            playhead={playhead}
+            loop={loop}
+            onTogglePlay={togglePlay}
+            onStop={stop}
+            onToggleLoop={() => setLoop((v) => !v)}
+            onSeek={(t) => transportRef.current?.seek(t)}
+            onSelectionSlid={onSelectionSlid}
+            selectionTitle="Drag to move the selection — alt-drag to move the audio with it"
+            timecode={timecode}
+            transportExtra={
+              <>
+                <button data-testid="clip-undo" disabled={past.length === 0} onClick={undo}>
+                  Undo
+                </button>
+                <button data-testid="clip-redo" disabled={future.length === 0} onClick={redo}>
+                  Redo
+                </button>
+              </>
+            }
+            renderUnder={(xOf) =>
+              spans.map((s) => (
                 <line
                   key={s.index}
                   data-testid={`clip-join-${s.index}`}
@@ -1002,28 +822,10 @@ export function ClipView({
                   y1={0}
                   y2={WAVE_H}
                 />
-              ))}
-              <path
-                className="waveform-peaks"
-                d={
-                  duration > 0 ? peaksPath(peaks, vpStart / duration, vpEnd / duration, WAVE_H) : ''
-                }
-              />
-              {/* The ruler's labelled marks, carried across the audio so a
-                  time can be read off the waveform itself. */}
-              {ticks
-                .filter((t) => t.major)
-                .map((t) => (
-                  <line
-                    key={`grid${t.secs}`}
-                    className="clip-grid"
-                    x1={xOf(t.secs)}
-                    x2={xOf(t.secs)}
-                    y1={0}
-                    y2={WAVE_H}
-                  />
-                ))}
-              {program.overlays.map((o, i) => (
+              ))
+            }
+            renderOver={(xOf) =>
+              program.overlays.map((o, i) => (
                 <rect
                   key={`ov${i}`}
                   data-testid={`clip-overlay-span-${i}`}
@@ -1033,102 +835,54 @@ export function ClipView({
                   width={Math.max(1, xOf(o.at_secs + (o.end_secs - o.start_secs)) - xOf(o.at_secs))}
                   height={10}
                 />
-              ))}
-              {sel && (
-                <>
-                  <rect
-                    data-testid="clip-selection"
-                    className="clip-selection"
-                    x={xOf(sel.start)}
-                    y={0}
-                    width={Math.max(1, xOf(sel.end) - xOf(sel.start))}
-                    height={WAVE_H}
-                  >
-                    <title>Drag to move the selection — alt-drag to move the audio with it</title>
-                  </rect>
-                  {/* A hairline you aim at, over a wide invisible zone you
-                      can actually hit. startDrag hit-tests the same radius,
-                      so the zone only has to exist for the cursor to change
-                      over it — which is the only hint that the edge is
-                      draggable. */}
-                  {(['start', 'end'] as const).map((edge) => (
-                    <g key={edge}>
-                      <rect
-                        data-testid={`clip-selection-handle-${edge}`}
-                        className="clip-selection-handle"
-                        x={xOf(edge === 'start' ? sel.start : sel.end) - HANDLE_PX / 2}
-                        y={0}
-                        width={HANDLE_PX}
-                        height={WAVE_H}
-                      />
-                      <line
-                        data-testid={`clip-selection-edge-${edge}`}
-                        className="clip-selection-edge"
-                        x1={xOf(edge === 'start' ? sel.start : sel.end)}
-                        x2={xOf(edge === 'start' ? sel.start : sel.end)}
-                        y1={0}
-                        y2={WAVE_H}
-                      />
-                    </g>
-                  ))}
-                </>
-              )}
-              <line
-                data-testid="clip-playhead"
-                className="clip-playhead"
-                x1={xOf(playhead)}
-                x2={xOf(playhead)}
-                y1={0}
-                y2={WAVE_H}
-              />
-            </svg>
-            <svg
-              ref={laneRef}
-              data-testid="clip-level-lane"
-              className="clip-level-lane"
-              viewBox={`0 0 ${W} ${LEVEL_H}`}
-              preserveAspectRatio="none"
-              onMouseDown={addLevelPoint}
-            >
-              <polyline
-                className="clip-level-line"
-                data-testid="clip-level-line"
-                points={
-                  program.level.length === 0
-                    ? `${xOf(vpStart)},${levelY(0)} ${xOf(vpEnd)},${levelY(0)}`
-                    : [vpStart, ...program.level.map((p) => p.time_secs), duration]
-                        .map((t) => `${xOf(t)},${levelY(levelDbAt(program.level, t))}`)
-                        .join(' ')
-                }
-              />
-              {program.level.map((p, i) => (
-                <circle
-                  key={`${p.time_secs}:${i}`}
-                  data-testid={`clip-level-point-${i}`}
-                  className="clip-level-point"
-                  cx={xOf(p.time_secs)}
-                  cy={levelY(p.gain_db)}
-                  r={7}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    beginGesture();
-                    dragBase.current = removeLevelPoint(program, i);
-                    setDragPoint(true);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    apply((prog) => removeLevelPoint(prog, i));
-                  }}
+              ))
+            }
+            readoutExtra={
+              preview ? ` · ${preview.channels}ch ${preview.sample_rate} Hz` : ' · rendering…'
+            }
+            belowWave={
+              <svg
+                ref={laneRef}
+                data-testid="clip-level-lane"
+                className="clip-level-lane"
+                viewBox={`0 0 ${W} ${LEVEL_H}`}
+                preserveAspectRatio="none"
+                onMouseDown={addLevelPoint}
+              >
+                <polyline
+                  className="clip-level-line"
+                  data-testid="clip-level-line"
+                  points={
+                    program.level.length === 0
+                      ? `${xOf(vpStart)},${levelY(0)} ${xOf(vpEnd)},${levelY(0)}`
+                      : [vpStart, ...program.level.map((p) => p.time_secs), duration]
+                          .map((t) => `${xOf(t)},${levelY(levelDbAt(program.level, t))}`)
+                          .join(' ')
+                  }
                 />
-              ))}
-            </svg>
-            <p className="clip-readout" data-testid="clip-readout">
-              {timecode(duration)} total
-              {sel ? ` · selection ${timecode(sel.start)}–${timecode(sel.end)}` : ' · no selection'}
-              {vp ? ` · view ${timecode(vpStart)}–${timecode(vpEnd)}` : ''}
-              {preview ? ` · ${preview.channels}ch ${preview.sample_rate} Hz` : ' · rendering…'}
-            </p>
-          </div>
+                {program.level.map((p, i) => (
+                  <circle
+                    key={`${p.time_secs}:${i}`}
+                    data-testid={`clip-level-point-${i}`}
+                    className="clip-level-point"
+                    cx={xOf(p.time_secs)}
+                    cy={levelY(p.gain_db)}
+                    r={7}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      beginGesture();
+                      dragBase.current = removeLevelPoint(program, i);
+                      setDragPoint(true);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      apply((prog) => removeLevelPoint(prog, i));
+                    }}
+                  />
+                ))}
+              </svg>
+            }
+          />
 
           <div className="clip-tools">
             <button
