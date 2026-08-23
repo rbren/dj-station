@@ -495,6 +495,17 @@ fails if it's missing.
   by `app/tests/UndoMoveDelete.test.tsx` and the layout cases in
   `tests/integration/undo.rs` / `macros.rs`. Engine mocks in app tests
   need `moveModules`/`syncPositions` stubs next to `endEdit`.
+  Layout-entry LIFETIME around id-changing edits (macro collapse/break,
+  rename, delete): the rack renders the PRE-edit snapshot until that
+  edit's `refresh` lands (several IPC round-trips), and anything without
+  a layout entry falls back to `defaultPosition` — so entries for the new
+  ids are seeded FIRST (`App.carryPositions`, additive) and the retired
+  ids are dropped only AFTER the refresh (`App.dropPositions`). Retiring
+  them up front teleported the old panels — and the macro box drawn
+  around them, title bar included — to the rack origin on top of other
+  modules for the whole round-trip. Pinned by the mid-refresh break case
+  in `app/tests/MacroCollapse.test.tsx` (its engine mock can hold the
+  node snapshot in flight via `state.hold`).
 - Acquisition fetches are a TRAIT METHOD, not a URL:
   `AcquisitionProvider::fetch(result, dir, progress)` defaults to the
   plain HTTP GET of `acquire()`'s `Acquire::Download`, and providers whose

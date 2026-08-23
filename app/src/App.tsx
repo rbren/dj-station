@@ -195,6 +195,50 @@ export default function App() {
     [store],
   );
 
+  // Layout-entry lifetime around edits that RENAME or REMOVE modules
+  // (macro collapse/break, rename, delete). The rack keeps rendering the
+  // PRE-edit snapshot until the edit's `refresh` lands — several IPC
+  // round-trips later — and anything without a layout entry falls back to
+  // `defaultPosition`: retiring entries up front teleports the old panels
+  // (and the macro box drawn around them, title bar included) to the rack
+  // origin for the whole round-trip, over whatever is parked there. So new
+  // ids are seeded FIRST (`carryPositions`, additive) and the retired
+  // entries are dropped only AFTER the refresh (`dropPositions`).
+  const carryPositions = useCallback(
+    (renames: Record<string, string>) => {
+      setPositions((prev) => {
+        let next = prev;
+        for (const [oldId, newId] of Object.entries(renames)) {
+          const at = prev[oldId];
+          if (!at) continue;
+          if (next === prev) next = { ...prev };
+          next[newId] = at;
+        }
+        if (next === prev) return prev;
+        saveJson(POSITIONS_KEY, next);
+        return next;
+      });
+    },
+    [setPositions],
+  );
+
+  const dropPositions = useCallback(
+    (ids: Iterable<string>) => {
+      setPositions((prev) => {
+        let next = prev;
+        for (const id of ids) {
+          if (!(id in prev)) continue;
+          if (next === prev) next = { ...prev };
+          delete next[id];
+        }
+        if (next === prev) return prev;
+        saveJson(POSITIONS_KEY, next);
+        return next;
+      });
+    },
+    [setPositions],
+  );
+
   const setPending = useCallback((pending: PendingWire | null) => store.set({ pending }), [store]);
 
   // Overscroll pan: wheel/trackpad scrolling over the rack shifts the
@@ -1129,18 +1173,13 @@ export default function App() {
       }
       await engine.syncPositions(seed);
       await engine.removeModules(topIds);
-      setPositions((prev) => {
-        const next = { ...prev };
-        for (const id of gone) delete next[id];
-        saveJson(POSITIONS_KEY, next);
-        return next;
-      });
       const { pending, selected } = store.getState();
       setSelected(selected.filter((i) => !gone.includes(i)));
       if (pending && gone.includes(pending.instance)) setPending(null);
       await refresh();
+      dropPositions(gone);
     },
-    [store, setPositions, setPending, refresh, setSelected, toTopLevel, expandGroups],
+    [store, dropPositions, setPending, refresh, setSelected, toTopLevel, expandGroups],
   );
 
   const collapseToMacro = useCallback(
@@ -1183,27 +1222,46 @@ export default function App() {
       // The engine rebuilt the selection as <instance>/<old id> nodes
       // (nested macro members gain the same prefix): carry every panel's
       // position over so nothing moves on screen.
+      const retired: string[] = [];
       if (instance) {
-        setPositions((p) => {
-          const next = { ...p };
-          for (const id of topIds) {
-            for (const key of Object.keys(next)) {
-              if (key === id || key.startsWith(`${id}/`)) {
-                next[`${instance}/${key}`] = next[key];
-                delete next[key];
-              }
-            }
-            if (!next[`${instance}/${id}`] && !macroGroups.some((g) => g.instance === id)) {
-              next[`${instance}/${id}`] = posOf(id);
-            }
+        const prevPositions = store.getState().positions;
+        const prefixed: Record<string, string> = {};
+        for (const id of topIds) {
+          for (const key of Object.keys(prevPositions)) {
+            if (key === id || key.startsWith(`${id}/`)) prefixed[key] = `${instance}/${key}`;
           }
+        }
+        carryPositions(prefixed);
+        retired.push(...Object.keys(prefixed));
+        // Units that were never placed have no entry to carry: record the
+        // default slot they render at, so they don't move either.
+        setPositions((prev) => {
+          const next = { ...prev };
+          let changed = false;
+          for (const id of topIds) {
+            const key = `${instance}/${id}`;
+            if (next[key] || macroGroups.some((g) => g.instance === id)) continue;
+            next[key] = posOf(id);
+            changed = true;
+          }
+          if (!changed) return prev;
           saveJson(POSITIONS_KEY, next);
           return next;
         });
       }
       await refresh();
+      dropPositions(retired);
     },
-    [store, refresh, setSelected, toTopLevel, macroGroups, setPositions],
+    [
+      store,
+      refresh,
+      setSelected,
+      toTopLevel,
+      macroGroups,
+      setPositions,
+      carryPositions,
+      dropPositions,
+    ],
   );
 
   // Right-click actions on macro entries in the module picker. Rename
@@ -1261,24 +1319,12 @@ export default function App() {
   const breakMacro = useCallback(
     async (group: MacroGroup) => {
       const renames = await engine.breakMacro(group.instance);
-      if (renames) {
-        setPositions((prev) => {
-          const next = { ...prev };
-          for (const [oldId, newId] of Object.entries(renames)) {
-            if (next[oldId]) {
-              next[newId] = next[oldId];
-              delete next[oldId];
-            }
-          }
-          delete next[group.instance];
-          saveJson(POSITIONS_KEY, next);
-          return next;
-        });
-      }
+      if (renames) carryPositions(renames);
       setSelected([]);
       await refresh();
+      if (renames) dropPositions([...Object.keys(renames), group.instance]);
     },
-    [refresh, setPositions, setSelected],
+    [refresh, carryPositions, dropPositions, setSelected],
   );
 
   // Rack shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z),
@@ -1597,18 +1643,12 @@ export default function App() {
         return;
       }
       await engine.removeModule(instance);
-      setPositions((prev) => {
-        if (!(instance in prev)) return prev;
-        const next = { ...prev };
-        delete next[instance];
-        saveJson(POSITIONS_KEY, next);
-        return next;
-      });
       const pending = store.getState().pending;
       if (pending?.instance === instance) setPending(null);
       await refresh();
+      dropPositions([instance]);
     },
-    [store, setPositions, setPending, refresh, macroOwner, removeModules],
+    [store, dropPositions, setPending, refresh, macroOwner, removeModules],
   );
 
   const renameModule = useCallback(
@@ -1617,21 +1657,17 @@ export default function App() {
       // rejects duplicates/empty names — a rejection reports to the error
       // banner, resolves null, and the refresh below reverts the display.
       const newId = await engine.renameModule(instance, name);
-      if (newId && newId !== instance) {
-        setPositions((prev) => {
-          if (!(instance in prev)) return prev;
-          const next = { ...prev, [newId]: prev[instance] };
-          delete next[instance];
-          saveJson(POSITIONS_KEY, next);
-          return next;
-        });
-        setSelected(store.getState().selected.map((id) => (id === instance ? newId : id)));
+      const renamedTo = newId && newId !== instance ? newId : null;
+      if (renamedTo) {
+        carryPositions({ [instance]: renamedTo });
+        setSelected(store.getState().selected.map((id) => (id === instance ? renamedTo : id)));
         const pending = store.getState().pending;
         if (pending?.instance === instance) setPending(null);
       }
       await refresh();
+      if (renamedTo) dropPositions([instance]);
     },
-    [store, setPositions, setSelected, setPending, refresh],
+    [store, carryPositions, dropPositions, setSelected, setPending, refresh],
   );
 
   // Shared state for DeckPanel custom UIs (track list, sync candidates,
