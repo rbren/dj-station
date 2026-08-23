@@ -3124,6 +3124,9 @@ body {
   fill: rgba(90, 141, 238, 0.25);
   stroke: #5a8dee;
   stroke-width: 2;
+  /* Grabbing inside slides the selection along the audio (alt-drag takes
+     the audio with it), so the interior reads as draggable. */
+  cursor: grab;
 }
 
 /* The grab zone for either end of the selection: invisible, and only as

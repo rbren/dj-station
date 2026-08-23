@@ -116,10 +116,12 @@ type Range = { start: number; end: number };
 /** A drag on the waveform. Sweeping a new selection and dragging one end
  *  of an existing one are the same gesture — both track the pointer
  *  against a fixed `anchor` (for a resize, the end you did NOT grab) —
- *  so they share a kind. Sliding the whole selection is the only one that
- *  edits the program. */
+ *  so they share a kind. Dragging from inside the selection slides the
+ *  selection itself; only its `audio` variant (alt-drag) edits, and only
+ *  on release. */
 type WaveDrag =
-  { kind: 'select'; anchor: number } | { kind: 'move'; base: Range; anchor: number; delta: number };
+  | { kind: 'select'; anchor: number }
+  | { kind: 'move'; base: Range; anchor: number; delta: number; audio: boolean };
 
 export interface ClipViewProps {
   clip: ClipClientApi;
@@ -526,7 +528,9 @@ export function ClipView({
         dragRef.current = { kind: 'select', anchor: edge === 'start' ? sel.end : sel.start };
         setSelection(resizeSelection(sel, edge, t, duration));
       } else if (sel && t >= sel.start && t <= sel.end) {
-        dragRef.current = { kind: 'move', base: sel, anchor: t, delta: 0 };
+        // Inside the selection: slide WHICH PART is selected. Holding alt
+        // slides the audio with it — an edit, so it must be asked for.
+        dragRef.current = { kind: 'move', base: sel, anchor: t, delta: 0, audio: e.altKey };
       } else {
         dragRef.current = { kind: 'select', anchor: t };
         setSelection({ start: t, end: t });
@@ -561,8 +565,10 @@ export function ClipView({
       setDragging(false);
       if (drag?.kind !== 'move') return;
       if (Math.abs(drag.delta) > 1e-3) {
-        // The selection rect already sits at the target; move the audio
-        // underneath it to match.
+        // Plain drag has already done its whole job: the selection sits
+        // where it was let go and the audio never moved. Alt-drag asked
+        // for the material to follow, so re-splice it there.
+        if (!drag.audio) return;
         const target = drag.base.start + drag.delta;
         apply((p) => moveRange(p, drag.base.start, drag.base.end, target));
         setSelection({ start: target, end: target + (drag.base.end - drag.base.start) });
@@ -1037,7 +1043,9 @@ export function ClipView({
                     y={0}
                     width={Math.max(1, xOf(sel.end) - xOf(sel.start))}
                     height={WAVE_H}
-                  />
+                  >
+                    <title>Drag to move the selection — alt-drag to move the audio with it</title>
+                  </rect>
                   {/* A hairline you aim at, over a wide invisible zone you
                       can actually hit. startDrag hit-tests the same radius,
                       so the zone only has to exist for the cursor to change

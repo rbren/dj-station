@@ -687,6 +687,13 @@ fails if it's missing.
   flushed after the browser can dispatch the next click, so a play that
   landed in that gap read the PREVIOUS render's duration, computed an
   empty window and silently played nothing (~1 in 6 in the suite).
+  A drag on the waveform NEVER edits by itself: sweeping empty space
+  makes a selection, grabbing an edge resizes it, and grabbing the inside
+  slides WHICH PART is selected — the audio stays where it is. Moving the
+  material itself is alt-drag (`WaveDrag.audio` → `moveRange` on release,
+  the one edit in the gesture). Plain dragging used to re-splice, which
+  read as the waveform coming apart under a gesture people meant as
+  "select this bit instead".
   The waveform draws from the peaks already in hand — `peaksPath` takes
   one column per bucket in view (capped at the viewBox width) and pools
   the loudest bucket per column, so zooming reveals detail instead of

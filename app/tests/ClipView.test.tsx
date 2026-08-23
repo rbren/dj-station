@@ -264,12 +264,31 @@ describe('ClipView', () => {
     expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
   });
 
-  it('drags the selection along the timeline to re-splice it', async () => {
+  it('drags the selection along the timeline without touching the audio', async () => {
     await openTrack(clipMock());
     select(2, 4);
     // Grab the middle of the selection and slide it 3 s to the right.
     const wave = sizeTimeline('clip-waveform');
     fireEvent.mouseDown(wave, { clientX: 300 });
+    fireEvent.mouseMove(window, { clientX: 600 });
+    fireEvent.mouseUp(window);
+
+    // Only the selection moved: same one region, same length, nothing to
+    // undo. Dragging picks what is selected; it does not re-splice.
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:05.00–0:07.00');
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:10.00 total');
+    const rows = screen.getAllByTestId('clip-region');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('0:00.00');
+    expect(rows[0].textContent).toContain('0:10.00');
+    expect(screen.getByTestId('clip-undo')).toHaveProperty('disabled', true);
+  });
+
+  it('alt-drags the selection to re-splice the audio with it', async () => {
+    await openTrack(clipMock());
+    select(2, 4);
+    const wave = sizeTimeline('clip-waveform');
+    fireEvent.mouseDown(wave, { clientX: 300, altKey: true });
     fireEvent.mouseMove(window, { clientX: 600 });
     fireEvent.mouseUp(window);
 
