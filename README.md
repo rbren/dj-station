@@ -120,8 +120,9 @@ a failed job reports its error in the library view.
 title/channel/duration/thumbnail; Download fetches the best *audio-only*
 stream (m4a/mp3 preferred, so **no ffmpeg needed** — nothing is
 transcoded) into `custom/downloads/` and imports it as a normal track that
-analyzes and loads onto a deck like any other. `yt-dlp` must be on `PATH`
-(or point `DJ_YTDLP_BIN` at it); when it is missing, search and download
+analyzes and loads onto a deck like any other. The binary defaults to
+`/usr/local/bin/yt-dlp_macos` (point `DJ_YTDLP_BIN` at a different one to
+override); when it is missing, search and download
 fail with an install hint instead of the tab disappearing. YouTube results
 are tagged license `unknown` on purpose — the search API exposes no
 license, so check the video's terms before using its audio.
