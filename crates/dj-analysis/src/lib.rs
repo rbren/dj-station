@@ -27,7 +27,9 @@
 
 pub mod clip;
 pub mod decode;
+pub mod demucs;
 pub mod key;
+pub mod stem_jobs;
 pub mod stems;
 pub mod stft;
 pub mod tempo;
@@ -39,9 +41,11 @@ pub mod onnx;
 
 pub use clip::{render_clip, ClipEq, ClipProgram, ClipRegion, LevelPoint};
 pub use decode::{decode_audio, AudioData};
+pub use demucs::DemucsSeparator;
+pub use stem_jobs::{StemJob, StemJobState, StemJobs};
 pub use stems::{
-    ensure_stems, stem_paths, stems_cached, stems_dir, BandSeparator, StemSeparator, Stems,
-    STEM_NAMES,
+    ensure_stems, stem_paths, stems_cached, stems_dir, stems_dir_for, BandSeparator, StemSeparator,
+    Stems, DEFAULT_SEPARATOR_ID, N_STEMS, STEM_NAMES,
 };
 pub use worker::{start_worker, AnalysisSettings, AnalysisWorker};
 

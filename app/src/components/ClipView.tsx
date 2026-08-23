@@ -31,15 +31,22 @@ import {
   removeLevelPoint,
   removeOverlay,
   removeRegion,
+  resizeSelection,
   reverseRange,
+  selectionEdgeAt,
   setLevelPoint,
+  sourceLabel,
+  sourceRef,
   trimTo,
   type ClipClientApi,
   type ClipProgram,
   type ClipRender,
   type ClipSource,
+  type ClipStemBackend,
   SILENCE_DB,
+  STEM_NAMES,
 } from '../clip';
+import { startGaplessLoop, type LoopHandle } from '../clipAudio';
 import { isEditableTarget } from '../fileShortcuts';
 import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
@@ -64,6 +71,12 @@ const FADE_SECS = 2;
 const HISTORY_DEPTH = 49;
 /** Narrowest zoom window. */
 const MIN_VIEW_SECS = 0.05;
+/** Grab radius for the selection's edge handles, in waveform pixels. */
+const HANDLE_PX = 7;
+/** How often separation jobs are polled while one is running. */
+const STEM_POLL_MS = 700;
+/** Playhead refresh while a Web Audio loop runs (it has no timeupdate). */
+const LOOP_TICK_MS = 50;
 
 function timecode(secs: number): string {
   if (!Number.isFinite(secs) || secs < 0) return '0:00.00';
@@ -85,8 +98,11 @@ function levelDbFromY(y: number): number {
 
 type Range = { start: number; end: number };
 
-/** A drag on the waveform: sweeping a new selection, or sliding the
- *  existing one along the timeline. */
+/** A drag on the waveform. Sweeping a new selection and dragging one end
+ *  of an existing one are the same gesture — both track the pointer
+ *  against a fixed `anchor` (for a resize, the end you did NOT grab) —
+ *  so they share a kind. Sliding the whole selection is the only one that
+ *  edits the program. */
 type WaveDrag =
   { kind: 'select'; anchor: number } | { kind: 'move'; base: Range; anchor: number; delta: number };
 
@@ -116,15 +132,31 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(false);
   const [playhead, setPlayhead] = useState(0);
+
   /** Zoomed viewport over the output timeline; null = the whole clip. */
   const [vp, setVp] = useState<Range | null>(null);
+  /** Which stem to load ('' = the full mix), and the track it was chosen
+   *  for: a choice does not carry over to the next track picked. */
+  const [stemChoice, setStemChoice] = useState<{ trackId: number; stem: string }>({
+    trackId: -1,
+    stem: '',
+  });
+  /** The configured separation backend, or null until probed. */
+  const [backend, setBackend] = useState<ClipStemBackend | null>(null);
+  /** Tracks whose stems are already separated (backend-qualified cache). */
+  const [separated, setSeparated] = useState<Record<number, boolean>>({});
+  /** Separation running for this track id, with its stage for the UI. */
+  const [separating, setSeparating] = useState<{ trackId: number; stage: string } | null>(null);
 
   const duration = programDuration(program);
   const spans = useMemo(() => regionSpans(program), [program]);
-  const request = useMemo(
-    () => ({ sources: sources.map((s) => s.track_id), program }),
-    [sources, program],
-  );
+  // Memoized apart from `request` so its identity tracks the source list
+  // itself: the staleness check below reads these references to tell a
+  // timeline edit from a tone-only one.
+  const sourceRefs = useMemo(() => sources.map(sourceRef), [sources]);
+  const request = useMemo(() => ({ sources: sourceRefs, program }), [sourceRefs, program]);
+
+  const stemPick = stemChoice.trackId === pick ? stemChoice.stem : '';
 
   // Viewport, clamped against the current duration (edits shrink clips).
   const vpLen = Math.min(vp ? vp.end - vp.start : duration, duration);
@@ -213,20 +245,28 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
   const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
 
   const loadTrack = useCallback(
-    async (trackId: number, mode: 'open' | 'append' | 'overlay') => {
+    async (trackId: number, mode: 'open' | 'append' | 'overlay', stemName = stemPick) => {
+      const stem = stemName || null;
       setBusy(true);
       setError(null);
       try {
-        // Re-adding a track that is already a source reuses its slot.
-        const existing = sources.findIndex((s) => s.track_id === trackId);
+        // Re-adding a source that is already loaded reuses its slot — the
+        // stem is part of that identity, so "vocals" and the full mix of
+        // the same track are two lanes.
+        const existing = sources.findIndex((s) => s.track_id === trackId && s.stem === stem);
         const source =
           mode !== 'open' && existing >= 0
             ? sources[existing]
-            : await clip.loadSource(trackId, MIN_BUCKETS);
+            : await clip.loadSource(trackId, stem, MIN_BUCKETS);
         if (!source) {
-          setError('Could not decode that track');
+          setError(
+            stem
+              ? `Could not load the ${stem} stem — separate the track first`
+              : 'Could not decode that track',
+          );
           return;
         }
+        const label = sourceLabel(source);
         if (mode === 'open') {
           setSources([source]);
           setProgram(appendSource(emptyProgram(), 0, source.duration_secs));
@@ -235,8 +275,8 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
           setSelection(null);
           setVp(null);
           setPlayhead(0);
-          setName(`${source.title} (clip)`);
-          setStatus(`Editing "${source.title}" — the original is never modified`);
+          setName(stem ? `${source.title} (${stem})` : `${source.title} (clip)`);
+          setStatus(`Editing "${label}" — the original is never modified`);
           return;
         }
         const index = existing >= 0 ? existing : sources.length;
@@ -245,18 +285,101 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
         setFuture([]);
         if (mode === 'append') {
           setProgram(appendSource(program, index, source.duration_secs));
-          setStatus(`Spliced "${source.title}" onto the end`);
+          setStatus(`Spliced "${label}" onto the end`);
         } else {
           const at = sel ? sel.start : playhead;
           setProgram(addOverlay(program, index, source.duration_secs, at));
-          setStatus(`Overlaid "${source.title}" at ${timecode(at)}`);
+          setStatus(`Overlaid "${label}" at ${timecode(at)}`);
         }
       } finally {
         setBusy(false);
       }
     },
-    [clip, playhead, program, sel, sources],
+    [clip, playhead, program, sel, sources, stemPick],
   );
+
+  // --- stems: isolate a stem of the picked track on demand ----------------
+  //
+  // Separation is minutes of CPU work in the shell's job manager; the page
+  // only ever kicks it off and polls. Missing tooling is a normal state:
+  // the controls explain it instead of failing.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const info = await clip.stemBackend();
+      if (live) setBackend(info);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [clip]);
+
+  const refreshStemStatus = useCallback(
+    async (trackId: number) => {
+      const status = await clip.stemStatus(trackId);
+      if (!status) return;
+      setSeparated((m) => ({ ...m, [trackId]: status.cached }));
+      setSeparating((cur) => {
+        if (status.running) return { trackId, stage: 'separating' };
+        return cur?.trackId === trackId ? null : cur;
+      });
+    },
+    [clip],
+  );
+
+  useEffect(() => {
+    if (pick === null) return;
+    void (async () => {
+      await refreshStemStatus(pick);
+    })();
+  }, [pick, refreshStemStatus]);
+
+  const separateStems = useCallback(async () => {
+    if (pick === null) return;
+    setError(null);
+    const id = await clip.stemSeparate(pick);
+    if (id === null) {
+      // The command rejected it (tooling missing) — the client surfaced
+      // the reason; re-probe so the panel reflects reality.
+      const info = await clip.stemBackend();
+      setBackend(info);
+      setError(info?.detail ?? 'Stem separation is unavailable');
+      return;
+    }
+    setSeparating({ trackId: pick, stage: 'queued' });
+    setStatus(`Separating stems with ${backend?.backend ?? 'the stem model'} — this takes a while`);
+  }, [backend, clip, pick]);
+
+  // Poll while a separation runs; stop as soon as none is in flight.
+  useEffect(() => {
+    if (!separating) return;
+    const trackId = separating.trackId;
+    const timer = setInterval(() => {
+      void (async () => {
+        const jobs = await clip.stemJobs();
+        const job = jobs?.filter((j) => j.track_id === trackId).pop();
+        if (!job) return;
+        if (job.state === 'running') {
+          // Keep the same object when the stage is unchanged, so this
+          // effect (and its interval) is not torn down every poll.
+          setSeparating((cur) =>
+            cur && cur.trackId === trackId && cur.stage === job.stage
+              ? cur
+              : { trackId, stage: job.stage },
+          );
+          return;
+        }
+        setSeparating(null);
+        if (job.state === 'failed') {
+          setError(job.error ?? 'Stem separation failed');
+        } else {
+          setSeparated((m) => ({ ...m, [trackId]: true }));
+          setStatus(`Stems ready for "${job.title}"`);
+        }
+      })();
+    }, STEM_POLL_MS);
+    return () => clearInterval(timer);
+  }, [clip, separating]);
 
   // --- selection: sweep on empty space, slide inside the selection -------
   const waveRef = useRef<SVGSVGElement | null>(null);
@@ -273,13 +396,28 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
     [duration, vpStart, vpLen],
   );
 
+  /** Seconds per HANDLE_PX at the current zoom — the edge grab radius. */
+  const handleSecs = useCallback(
+    (rect: DOMRect | null) =>
+      rect && rect.width > 0 ? (HANDLE_PX / rect.width) * vpLen : (HANDLE_PX / W) * vpLen,
+    [vpLen],
+  );
+
   const startDrag = useCallback(
     (e: ReactMouseEvent<SVGSVGElement>) => {
       if (duration <= 0 || e.button !== 0) return;
       const rect = e.currentTarget.getBoundingClientRect();
       dragRect.current = rect;
       const t = timeAt(e.clientX, rect);
-      if (sel && t >= sel.start && t <= sel.end) {
+      // Grabbing an end expands/shrinks the selection; that beats the
+      // "slide the whole thing" case, whose zone contains both edges.
+      const edge = selectionEdgeAt(sel, t, handleSecs(rect));
+      if (sel && edge) {
+        // Anchor the end you did not grab and sweep from there; the
+        // playhead stays put (only a fresh sweep moves it).
+        dragRef.current = { kind: 'select', anchor: edge === 'start' ? sel.end : sel.start };
+        setSelection(resizeSelection(sel, edge, t, duration));
+      } else if (sel && t >= sel.start && t <= sel.end) {
         dragRef.current = { kind: 'move', base: sel, anchor: t, delta: 0 };
       } else {
         dragRef.current = { kind: 'select', anchor: t };
@@ -288,7 +426,7 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
       }
       setDragging(true);
     },
-    [duration, sel, timeAt],
+    [duration, handleSecs, sel, timeAt],
   );
 
   useEffect(() => {
@@ -428,19 +566,65 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
     [],
   );
 
-  const haltPlayback = useCallback(() => {
-    const el = audioRef.current;
+  /** Live gapless loop (Web Audio), when one is running. */
+  const loopRef = useRef<LoopHandle | null>(null);
+
+  /** Pending debounced re-render of the playing window after a tone edit. */
+  const toneTimer = useRef<number | null>(null);
+  const clearToneTimer = useCallback(() => {
+    if (toneTimer.current !== null) clearTimeout(toneTimer.current);
+    toneTimer.current = null;
+  }, []);
+  useEffect(() => clearToneTimer, [clearToneTimer]);
+
+  /** Where playback has actually got to, from whichever backend owns it. */
+  const livePosition = useCallback(() => {
     const w = windowRef.current;
-    if (el && w) setPlayhead(Math.min(duration, w.start + el.currentTime));
+    if (!w) return null;
+    const handle = loopRef.current;
+    if (handle) return Math.min(duration, w.start + handle.position());
+    const el = audioRef.current;
+    return el ? Math.min(duration, w.start + el.currentTime) : null;
+  }, [duration]);
+
+  const stopLoopNode = useCallback(() => {
+    loopRef.current?.stop();
+    loopRef.current = null;
+  }, []);
+
+  /** Stop both backends and park the playhead where playback got to.
+   *  Written out rather than delegating to the helpers above: effects call
+   *  this, and `react-hooks/set-state-in-effect` only sees through a
+   *  self-contained callback. */
+  const haltPlayback = useCallback(() => {
+    const w = windowRef.current;
+    const handle = loopRef.current;
+    const el = audioRef.current;
+    if (w) {
+      const within = handle ? handle.position() : (el?.currentTime ?? 0);
+      setPlayhead(Math.min(duration, w.start + within));
+    }
+    handle?.stop();
+    loopRef.current = null;
+    if (toneTimer.current !== null) clearTimeout(toneTimer.current);
+    toneTimer.current = null;
     el?.pause();
     setPlaying(false);
   }, [duration]);
 
-  /** Fetch a rendered window and start the <audio> element on it. Looping
-   *  a selection plays the (window-capped) selection with native looping;
-   *  linear playback chains windows from `startSecs` to the end. */
+  useEffect(() => () => stopLoopNode(), [stopLoopNode]);
+
+  /** Fetch a rendered window and start playing it.
+   *
+   *  A loop goes through Web Audio, which wraps at a sample boundary —
+   *  `<audio loop>` re-seeks instead, and the webview renders that as
+   *  ~100 ms of silence every pass. Linear playback stays on the element
+   *  and chains 60 s windows from `startSecs` to the end.
+   *
+   *  `seekWithin` resumes this many seconds into the fetched window, so a
+   *  re-render (an EQ tweak, say) can pick up where it left off. */
   const playFrom = useCallback(
-    async (startSecs: number, loopRange: Range | null) => {
+    async (startSecs: number, loopRange: Range | null, seekWithin = 0) => {
       let start: number;
       let end: number;
       if (loopRange) {
@@ -454,14 +638,43 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
       if (end - start <= 1e-3) return;
       const bytes = await clip.previewAudio(request, start, end - start);
       const el = audioRef.current;
-      if (!bytes || !el) return;
+      if (!bytes) return;
+
+      // Whatever was playing is superseded by this window.
+      stopLoopNode();
+      if (loopRange) {
+        const handle = await startGaplessLoop(bytes, seekWithin);
+        if (handle) {
+          el?.pause();
+          loopRef.current = handle;
+          windowRef.current = { start, end, loop: true };
+          setPlayhead(start + handle.position());
+          setPlaying(true);
+          return;
+        }
+        // No Web Audio here: fall through to the element's own looping.
+      }
+      if (!el) return;
       const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
       objectUrl.current = url;
       windowRef.current = { start, end, loop: loopRange !== null };
       el.src = url;
       el.loop = loopRange !== null;
-      setPlayhead(start);
+      if (seekWithin > 0) {
+        // Seeking only sticks once the duration is known, so try now (for
+        // runtimes that are ready immediately) and again on metadata.
+        const seek = () => {
+          try {
+            el.currentTime = seekWithin;
+          } catch {
+            // Not seekable yet.
+          }
+        };
+        el.addEventListener('loadedmetadata', seek, { once: true });
+        seek();
+      }
+      setPlayhead(start + seekWithin);
       setPlaying(true);
       try {
         await el.play();
@@ -470,8 +683,19 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
         // element still holds the rendered audio.
       }
     },
-    [clip, duration, request],
+    [clip, duration, request, stopLoopNode],
   );
+
+  // A Web Audio loop has no timeupdate events; poll it for the playhead.
+  useEffect(() => {
+    if (!playing) return;
+    const timer = setInterval(() => {
+      if (!loopRef.current) return;
+      const at = livePosition();
+      if (at !== null) setPlayhead(at);
+    }, LOOP_TICK_MS);
+    return () => clearInterval(timer);
+  }, [livePosition, playing]);
 
   const togglePlay = useCallback(() => {
     if (playing) {
@@ -482,11 +706,12 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
   }, [haltPlayback, loop, playFrom, playhead, playing, sel]);
 
   const stop = useCallback(() => {
+    stopLoopNode();
     audioRef.current?.pause();
     windowRef.current = null;
     setPlaying(false);
     setPlayhead(sel ? sel.start : 0);
-  }, [sel]);
+  }, [sel, stopLoopNode]);
 
   // Track the playhead and chain the next window when one runs out.
   useEffect(() => {
@@ -514,15 +739,74 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
     };
   }, [duration, playFrom]);
 
-  // An edit makes the fetched audio stale: stop rather than play the old
-  // render. Leaving the page pauses too (its shortcuts detach with it).
+  // An edit makes the fetched audio stale. What that costs playback
+  // depends on WHAT changed:
+  //
+  // - the timeline (regions/overlays/crossfade/sources): every output time
+  //   now means something else, so stop rather than play the old render;
+  // - tone only (EQ, level automation): the timeline is untouched, so
+  //   re-fetch the same window and carry on from the same spot — pausing
+  //   for an EQ tweak would make the control useless for auditioning.
+  //   Debounced, because a knob drag streams edits and each re-fetch
+  //   renders the whole window.
+  //
+  // Leaving the page pauses too (its shortcuts detach with it).
   const lastRequest = useRef(request);
   useEffect(() => {
-    if (lastRequest.current === request) return;
+    const prev = lastRequest.current;
+    // Unrelated state moved (selection, zoom, …): leave any pending
+    // re-render alone rather than re-arming its timer.
+    if (prev === request) return;
     lastRequest.current = request;
-    if (playing) haltPlayback();
-    windowRef.current = null;
-  }, [request, playing, haltPlayback]);
+    const timelineChanged =
+      prev.sources !== request.sources ||
+      prev.program.regions !== request.program.regions ||
+      prev.program.overlays !== request.program.overlays ||
+      prev.program.crossfade_ms !== request.program.crossfade_ms;
+    clearToneTimer();
+    if (timelineChanged) {
+      if (playing) haltPlayback();
+      windowRef.current = null;
+      return;
+    }
+    if (!playing) return;
+    toneTimer.current = window.setTimeout(() => {
+      toneTimer.current = null;
+      const w = windowRef.current;
+      if (!w) return;
+      if (w.loop) {
+        // Resume at the same phase of the loop, so the audition keeps
+        // its place while the tone changes underneath it.
+        const phase = (livePosition() ?? w.start) - w.start;
+        void playFrom(w.start, sel && loop ? sel : null, Math.max(0, phase));
+      } else {
+        void playFrom(livePosition() ?? w.start, null);
+      }
+    }, PREVIEW_DELAY_MS);
+  }, [clearToneTimer, haltPlayback, livePosition, loop, playFrom, playing, request, sel]);
+
+  // Keep playback in step with the selection. The <audio> element holds a
+  // rendered *window*, so changing or clearing the loop range while it
+  // plays would otherwise keep looping the old span until the next
+  // pause/play — re-fetch instead, so the change is heard immediately.
+  useEffect(() => {
+    if (!playing) return;
+    const w = windowRef.current;
+    if (!w) return;
+    const want = loop && sel ? sel : null;
+    if (want) {
+      const wantEnd = Math.min(want.end, want.start + PLAY_WINDOW_SECS);
+      const same =
+        w.loop && Math.abs(w.start - want.start) < 1e-3 && Math.abs(w.end - wantEnd) < 1e-3;
+      if (!same) void playFrom(want.start, want);
+    } else if (w.loop) {
+      // The loop range is gone (selection cleared/changed, or Loop turned
+      // off): carry on linearly from where the loop had got to.
+      const el = audioRef.current;
+      const at = el ? Math.min(duration, w.start + el.currentTime) : w.start;
+      void playFrom(at, null);
+    }
+  }, [duration, loop, playFrom, playing, sel]);
   useEffect(() => {
     if (!active && playing) haltPlayback();
   }, [active, playing, haltPlayback]);
@@ -569,6 +853,8 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
   // The preview belongs to the current edit only; an emptied program has none.
   const preview = program.regions.length === 0 ? null : previewState;
   const peaks = preview?.peaks ?? [];
+  /** Can the picked track be loaded stem by stem right now? */
+  const stemsReady = pick !== null && separated[pick] === true;
   const xOf = (secs: number) => (vpLen > 0 ? ((secs - vpStart) / vpLen) * W : 0);
   const disabled = program.regions.length === 0;
   const noSelection = disabled || sel === null;
@@ -618,11 +904,60 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
         </button>
         <span className="clip-sources" data-testid="clip-sources">
           {sources.map((s, i) => (
-            <span className="tag tag-source" key={`${s.track_id}:${i}`}>
-              {i + 1}. {s.title}
+            <span className="tag tag-source" key={`${s.track_id}:${s.stem ?? 'mix'}:${i}`}>
+              {i + 1}. {sourceLabel(s)}
             </span>
           ))}
         </span>
+      </div>
+
+      <div className="clip-stems" data-testid="clip-stems">
+        <label>
+          <span>Stem</span>
+          <select
+            data-testid="clip-stem-select"
+            value={stemPick}
+            disabled={!stemsReady}
+            title={
+              stemsReady
+                ? 'Load one isolated stem instead of the full mix'
+                : 'Separate the track first'
+            }
+            onChange={(e) => setStemChoice({ trackId: pick ?? -1, stem: e.target.value })}
+          >
+            <option value="">Full mix</option>
+            {(backend?.stems ?? STEM_NAMES).map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+        {stemsReady ? (
+          <span className="clip-stem-ready" data-testid="clip-stem-ready">
+            stems ready ({backend?.backend})
+          </span>
+        ) : (
+          <button
+            data-testid="clip-stem-separate"
+            disabled={pick === null || separating !== null || backend?.available === false}
+            title={
+              backend?.available === false
+                ? (backend.detail ?? 'Stem separation is unavailable')
+                : `Separate this track into ${(backend?.stems ?? STEM_NAMES).join(', ')} with ${
+                    backend?.backend ?? 'the stem model'
+                  }`
+            }
+            onClick={() => void separateStems()}
+          >
+            {separating ? `Separating… (${separating.stage})` : 'Separate stems'}
+          </button>
+        )}
+        {backend?.available === false && (
+          <span className="clip-stem-hint" data-testid="clip-stem-hint">
+            {backend.detail ?? 'Stem separation is unavailable'}
+          </span>
+        )}
       </div>
 
       {disabled ? (
@@ -724,14 +1059,30 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
                 />
               ))}
               {sel && (
-                <rect
-                  data-testid="clip-selection"
-                  className="clip-selection"
-                  x={xOf(sel.start)}
-                  y={0}
-                  width={Math.max(1, xOf(sel.end) - xOf(sel.start))}
-                  height={WAVE_H}
-                />
+                <>
+                  <rect
+                    data-testid="clip-selection"
+                    className="clip-selection"
+                    x={xOf(sel.start)}
+                    y={0}
+                    width={Math.max(1, xOf(sel.end) - xOf(sel.start))}
+                    height={WAVE_H}
+                  />
+                  {/* Grab affordances: the drag itself is hit-tested in
+                      startDrag against the same radius, so these are
+                      purely what you see (and where you aim). */}
+                  {(['start', 'end'] as const).map((edge) => (
+                    <rect
+                      key={edge}
+                      data-testid={`clip-selection-handle-${edge}`}
+                      className="clip-selection-handle"
+                      x={xOf(edge === 'start' ? sel.start : sel.end) - HANDLE_PX / 2}
+                      y={0}
+                      width={HANDLE_PX}
+                      height={WAVE_H}
+                    />
+                  ))}
+                </>
               )}
               <line
                 data-testid="clip-playhead"

@@ -3021,6 +3021,20 @@ body {
   stroke-width: 2;
 }
 
+/* Drag either end to expand or shrink the selection. Pointer events stay
+   off: startDrag hit-tests the same radius on the waveform itself, so the
+   handles never swallow a click that lands between them. */
+.clip-selection-handle {
+  fill: #5a8dee;
+  fill-opacity: 0.55;
+  cursor: col-resize;
+  pointer-events: none;
+}
+
+.clip-waveform:hover .clip-selection-handle {
+  fill-opacity: 0.9;
+}
+
 .clip-level-line {
   fill: none;
   stroke: #7dd88f;
@@ -3121,9 +3135,48 @@ body {
   pointer-events: none;
 }
 
+.clip-stems {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.clip-stem-ready {
+  color: #7dd88f;
+  font-size: 0.85rem;
+}
+
+.clip-stem-hint {
+  color: #626b7c;
+  font-size: 0.8rem;
+  max-width: 46em;
+}
+
 /* The clip EQ reuses the EQ module's plot styling (.eq-ui etc.). */
 .clip-eq-ui {
   align-self: flex-start;
+}
+
+.clip-eq-qrow {
+  display: flex;
+  justify-content: space-around;
+  gap: 6px;
+  padding: 2px 8px 0;
+}
+
+.clip-eq-q {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  cursor: ns-resize;
+  user-select: none;
+}
+
+.clip-eq-q-label {
+  font-size: 0.7rem;
+  color: #8b93a3;
 }
 
 .clip-regions {

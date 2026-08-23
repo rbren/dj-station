@@ -42,6 +42,12 @@ struct AppState {
     analysis: dj_analysis::AnalysisWorker,
     /// Decoded sources for the Clip page's offline editor.
     clips: clip::ClipCache,
+    /// On-demand stem separation for the Clip page (PRD §8.2): htdemucs_ft
+    /// via the external demucs CLI, one background thread per job.
+    stems: dj_analysis::StemJobs,
+    /// The same separator, kept for availability probes (the tooling is an
+    /// optional install, so the UI must be able to say it is missing).
+    stem_separator: Arc<dj_analysis::DemucsSeparator>,
     /// Running gesture feeds by instance id (M5): stop flag + source name.
     /// Here the source is always a recorded fixture played through the
     /// mock pipeline; on macOS a camera source slots in behind the same
@@ -2638,6 +2644,11 @@ fn main() {
     // dj-analysis (CoreML EP on macOS, CPU EP elsewhere).
     let analysis =
         dj_analysis::start_worker(library.clone(), dj_analysis::AnalysisSettings::default());
+    // Clip page stems: htdemucs_ft through the external demucs CLI. The
+    // tooling is optional — nothing here fails at startup if it is absent,
+    // the Clip page just reports it (see `clip_stem_backend`).
+    let stem_separator = Arc::new(dj_analysis::DemucsSeparator::from_env());
+    let stems = dj_analysis::StemJobs::new(library.clone(), stem_separator.clone());
 
     tauri::Builder::default()
         .manage(AppState {
@@ -2652,6 +2663,8 @@ fn main() {
             _watcher: watcher,
             analysis,
             clips: clip::ClipCache::default(),
+            stems,
+            stem_separator,
             gesture_feeds: Mutex::new(BTreeMap::new()),
         })
         .setup(|app| {
@@ -2907,6 +2920,10 @@ fn main() {
             clip::clip_render_preview,
             clip::clip_preview_audio,
             clip::clip_save,
+            clip::clip_stem_backend,
+            clip::clip_stem_status,
+            clip::clip_stem_separate,
+            clip::clip_stem_jobs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

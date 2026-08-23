@@ -37,8 +37,10 @@ pub struct Stems(pub [AudioData; N_STEMS]);
 /// A stem separation backend. Implementations must be deterministic for a
 /// given input and preserve length/sample rate.
 pub trait StemSeparator: Send + Sync {
-    /// Short id recorded alongside cached stems ("band", "onnx").
-    fn id(&self) -> &'static str;
+    /// Short id that keys the stem cache ("band", "onnx", "htdemucs_ft").
+    /// Model-backed separators return the model name so two models never
+    /// share a cache directory (see [`stems_dir_for`]).
+    fn id(&self) -> &str;
     fn separate(&self, audio: &AudioData) -> Result<Stems>;
 }
 
@@ -69,7 +71,7 @@ const CHUNK_SECS: f64 = 20.0;
 pub struct BandSeparator;
 
 impl StemSeparator for BandSeparator {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "band"
     }
 
@@ -275,8 +277,29 @@ fn median(v: &mut [f32]) -> f32 {
 // ---------------------------------------------------------------------------
 
 /// Where a track's stems live: `<data_dir>/stems/<content_hash>/`.
+///
+/// This is the DSP fallback's (and the deck's) cache. Model-backed
+/// backends qualify it further — see [`stems_dir_for`].
 pub fn stems_dir(data_dir: &Path, content_hash: &str) -> PathBuf {
     data_dir.join("stems").join(content_hash)
+}
+
+/// The default (DSP) separator id, whose stems live unqualified in
+/// [`stems_dir`] so the deck's auto-load path never moves.
+pub const DEFAULT_SEPARATOR_ID: &str = "band";
+
+/// Where one *backend's* stems live. The DSP fallback keeps the flat
+/// `<data_dir>/stems/<hash>/` layout; every other backend gets its own
+/// subdirectory `<data_dir>/stems/<hash>/<separator id>/`, so asking for
+/// `htdemucs_ft` can never be served the DSP stems that the import-time
+/// analysis pass already wrote (and vice versa).
+pub fn stems_dir_for(data_dir: &Path, content_hash: &str, separator_id: &str) -> PathBuf {
+    let base = stems_dir(data_dir, content_hash);
+    if separator_id == DEFAULT_SEPARATOR_ID {
+        base
+    } else {
+        base.join(separator_id)
+    }
 }
 
 /// The four stem FLAC paths inside a stems directory, [`STEM_NAMES`] order.

@@ -32,6 +32,15 @@ library's YouTube tab (`brew install yt-dlp`, `pipx install yt-dlp`, or your
 package manager). Nothing else needs it — without it the tab is still there
 and reports the missing binary when you search.
 
+Also optional: **[demucs](https://github.com/adefossez/demucs)**
+(`pipx install demucs`) for studio-quality stem separation on the Clip
+page, where you can open one isolated stem of a track and edit it. Without
+it that button is disabled and says why; the decks' stem controls are
+unaffected (they use the built-in DSP band split). `DJ_DEMUCS_BIN` points
+at a specific binary, `DJ_DEMUCS_MODEL` picks another model (default
+`htdemucs_ft`) and `DJ_DEMUCS_ARGS` adds flags to every call (e.g.
+`--device cuda`).
+
 ## State & saves — `custom/`
 
 All persistent state lives in **`custom/` inside this checkout** (the repo

@@ -18,7 +18,9 @@ import {
   programDuration,
   regionSpans,
   removeOverlay,
+  resizeSelection,
   reverseRange,
+  selectionEdgeAt,
   setLevelPoint,
   SILENCE_DB,
   trimTo,
@@ -186,5 +188,37 @@ describe('clip level automation', () => {
     expect(p.level[2]).toEqual({ time_secs: 7, gain_db: 0 });
     expect(p.level[3]).toEqual({ time_secs: 10, gain_db: SILENCE_DB });
     expect(levelDbAt(p.level, 1)).toBeCloseTo(SILENCE_DB / 2, 9);
+  });
+});
+
+describe('selection edges', () => {
+  const sel = { start: 3, end: 6 };
+
+  it('grabs whichever end is within the handle radius', () => {
+    expect(selectionEdgeAt(sel, 3.05, 0.1)).toBe('start');
+    expect(selectionEdgeAt(sel, 5.95, 0.1)).toBe('end');
+    // Between the ends, and outside them, is not a grab.
+    expect(selectionEdgeAt(sel, 4.5, 0.1)).toBeNull();
+    expect(selectionEdgeAt(sel, 2.5, 0.1)).toBeNull();
+    expect(selectionEdgeAt(null, 3, 0.1)).toBeNull();
+  });
+
+  it('breaks a tie toward the start and ignores a zero radius', () => {
+    expect(selectionEdgeAt({ start: 4, end: 6 }, 5, 1)).toBe('start');
+    expect(selectionEdgeAt(sel, 3, 0)).toBeNull();
+  });
+
+  it('expands and shrinks against the anchored end', () => {
+    expect(resizeSelection(sel, 'end', 9, 10)).toEqual({ start: 3, end: 9 });
+    expect(resizeSelection(sel, 'end', 4, 10)).toEqual({ start: 3, end: 4 });
+    expect(resizeSelection(sel, 'start', 1, 10)).toEqual({ start: 1, end: 6 });
+    expect(resizeSelection(sel, 'start', 5, 10)).toEqual({ start: 5, end: 6 });
+  });
+
+  it('flips when an end is dragged past its opposite, and clamps to the clip', () => {
+    expect(resizeSelection(sel, 'end', 1, 10)).toEqual({ start: 1, end: 3 });
+    expect(resizeSelection(sel, 'start', 8, 10)).toEqual({ start: 6, end: 8 });
+    expect(resizeSelection(sel, 'end', 99, 10)).toEqual({ start: 3, end: 10 });
+    expect(resizeSelection(sel, 'start', -5, 10)).toEqual({ start: 0, end: 6 });
   });
 });

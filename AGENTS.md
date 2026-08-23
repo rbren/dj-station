@@ -86,6 +86,16 @@ fails if it's missing.
   test gates on `DJ_STEMS_ONNX_MODEL` (unset/empty ⇒ skip). The tested
   default separator is the deterministic DSP `BandSeparator` — don't make
   CI depend on model files.
+- A separator's `id()` KEYS ITS CACHE: `stems_dir_for` keeps the DSP
+  fallback (`DEFAULT_SEPARATOR_ID`, the deck's auto-load path) flat at
+  `<data_dir>/stems/<hash>/` and gives every other backend its own
+  `<hash>/<id>/` subdirectory, so a request for `htdemucs_ft` can never be
+  served the band-split stems the import-time analysis already wrote.
+  `DemucsSeparator` shells out to `demucs` (minutes per track, so it runs
+  through `StemJobs`, a small background job manager polled by the UI);
+  its plumbing is tested against a FAKE demucs script
+  (`tests/stem_separation.rs`, `#[cfg(unix)]`) — missing tooling is a
+  normal, reported state, never a panic.
 - Macros (M4, PRD §6): macros are GLOBAL objects in the macro store —
   `<data_dir>/macros/<macro id>.json`, a sibling of `patches/`
   (`crates/dj-engine/src/macro_store.rs`, `MACROS_DIR_NAME`). One file per
@@ -562,15 +572,34 @@ fails if it's missing.
   — pinned on both sides (`tests/clip_edit.rs`, `app/tests/ClipEdits.test.ts`);
   change them together. Saving renders to FLAC under `<data_dir>/clips/`
   (machine-local, gitignored) and imports a NEW library track
-  (`source = "clip"`, `source_ref` = comma-joined source track ids,
+  (`source = "clip"`, `source_ref` = comma-joined source refs,
   license AND artist inherited from the first source) — a clip NEVER
   overwrites the track it was cut from. Like the rack, ClipView stays
   MOUNTED while other pages show (App passes `active`; the component
   hides itself, pauses playback and detaches its shortcuts — space,
   ctrl/cmd+Z/shift+Z/Y). Playback streams the RENDERED edit: 60 s WAV
-  windows through `clip_preview_audio` into an `<audio>` element,
-  chaining windows and stopping on any edit (the fetched audio is
-  stale). Its golden-audio case lives in dj-analysis
+  windows through `clip_preview_audio`, chaining windows as they run out.
+  Two backends, one window: linear play uses the `<audio>` element, but a
+  LOOPED selection runs the same bytes through Web Audio
+  (`src/clipAudio.ts`, `AudioBufferSourceNode.loop`) because the media
+  element's own `loop` re-seeks and drops ~100 ms at every wrap — the
+  renderer's splice is already sample-exact, so any audible gap is the
+  frontend's. What an edit costs playback depends on WHAT changed:
+  a TIMELINE change (sources/regions/overlays/crossfade — identity-compared
+  on the memoized `request`, so keep `sourceRefs` memoized separately)
+  stops, because every output time now means something else; a TONE-ONLY
+  change (EQ, level) re-renders the window in place, debounced, and
+  resumes at the same loop phase, since pausing for an EQ tweak would make
+  the control useless for auditioning. Selection changes re-fetch too, so
+  a loop follows its edges live. `haltPlayback` is deliberately
+  self-contained (no calls to the neighbouring `livePosition`/`stopLoopNode`
+  helpers): effects call it, and `react-hooks/set-state-in-effect` flags a
+  callback whose setState it can only reach through another callback.
+  Sources are `{track_id, stem}` pairs, not bare ids: the picker can open
+  ONE ISOLATED STEM of a track (`clip_stem_*` commands over `StemJobs`)
+  and edit it exactly like a full mix — the stem is part of the cache key,
+  the `source_ref` (`"7:vocals"`) and the rendered result.
+  Its golden-audio case lives in dj-analysis
   (`tests/e2e/clips/*.json` + `tests/e2e/goldens/*.wav`, second step of
   `scripts/regen-goldens.sh`) rather than the engine e2e suite, because
   the renderer is not a graph module. `decode_audio` truncates to the

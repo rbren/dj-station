@@ -56,21 +56,81 @@ export interface ClipProgram {
   crossfade_ms: number;
 }
 
+/** One thing the editor cuts from: a library track, or one isolated stem
+ *  of it. The stem is part of the identity — "the vocals of track 7" is a
+ *  different source from "track 7". */
+export interface ClipSourceRef {
+  track_id: number;
+  /** null = the full mix; otherwise a STEM_NAMES entry. */
+  stem: string | null;
+}
+
 export interface ClipRequest {
-  /** Library track ids; `region.source` indexes into this list. */
-  sources: number[];
+  /** `region.source` indexes into this list. */
+  sources: ClipSourceRef[];
   program: ClipProgram;
 }
 
 /** A decoded source track, as the editor needs it. */
 export interface ClipSource {
   track_id: number;
+  /** Which stem this lane is, or null for the full mix. */
+  stem: string | null;
   title: string;
   artist: string;
   duration_secs: number;
   sample_rate: number;
   channels: number;
   peaks: number[];
+}
+
+/** Stem order, mirroring `dj_analysis::stems::STEM_NAMES`. */
+export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'] as const;
+export type StemName = (typeof STEM_NAMES)[number];
+
+/** Which separation backend the shell is configured with, and whether its
+ *  tooling is actually installed on this machine. */
+export interface ClipStemBackend {
+  /** Separator id — the model name for demucs, e.g. "htdemucs_ft". */
+  backend: string;
+  available: boolean;
+  /** Install hint / failure reason when `available` is false. */
+  detail: string | null;
+  stems: string[];
+}
+
+/** Separation state of one track under the configured backend. */
+export interface ClipStemStatus {
+  track_id: number;
+  backend: string;
+  cached: boolean;
+  running: boolean;
+}
+
+export type StemJobState = 'running' | 'done' | 'failed';
+
+/** One separation in flight (or recently finished). */
+export interface StemJob {
+  id: number;
+  track_id: number;
+  backend: string;
+  title: string;
+  state: StemJobState;
+  stage: string;
+  error: string | null;
+}
+
+/** Label for a source lane: "Title" or "Title — vocals". */
+export function sourceLabel(source: ClipSource): string {
+  return source.stem ? `${source.title} — ${source.stem}` : source.title;
+}
+
+export function sourceRef(source: ClipSource): ClipSourceRef {
+  return { track_id: source.track_id, stem: source.stem };
+}
+
+export function sameSource(a: ClipSourceRef, b: ClipSourceRef): boolean {
+  return a.track_id === b.track_id && (a.stem ?? null) === (b.stem ?? null);
 }
 
 /** The rendered edit (no file written). */
@@ -382,23 +442,74 @@ export function levelDbAt(points: LevelPoint[], t: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Selection geometry (pure, so the drag behaviour is testable headless)
+// ---------------------------------------------------------------------------
+
+/** A span of the output timeline, in seconds. */
+export interface TimeRange {
+  start: number;
+  end: number;
+}
+
+/** Which end of a selection a pointer is grabbing. */
+export type SelectionEdge = 'start' | 'end';
+
+/** The edge within `tolerance` seconds of `t`, or null for "not an edge".
+ *  The nearer edge wins, so a very short selection still resizes sanely
+ *  from whichever side the pointer is closest to. */
+export function selectionEdgeAt(
+  sel: TimeRange | null,
+  t: number,
+  tolerance: number,
+): SelectionEdge | null {
+  if (!sel || tolerance <= 0) return null;
+  const dStart = Math.abs(t - sel.start);
+  const dEnd = Math.abs(t - sel.end);
+  if (Math.min(dStart, dEnd) > tolerance) return null;
+  return dStart <= dEnd ? 'start' : 'end';
+}
+
+/** Drag one edge of a selection to `t`, keeping the other end anchored.
+ *  Dragging an edge past its opposite simply flips the range (the pointer
+ *  keeps controlling the same physical end), matching every DAW. */
+export function resizeSelection(
+  sel: TimeRange,
+  edge: SelectionEdge,
+  t: number,
+  duration: number,
+): TimeRange {
+  const anchor = edge === 'start' ? sel.end : sel.start;
+  const moved = Math.min(Math.max(0, t), Math.max(0, duration));
+  return { start: Math.min(anchor, moved), end: Math.max(anchor, moved) };
+}
+
+// ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
 
 /** What ClipView needs; tests substitute a mock. */
 export interface ClipClientApi {
-  loadSource(trackId: number, buckets: number): Promise<ClipSource | null>;
+  /** Decode a track — or one of its separated stems — for editing. */
+  loadSource(trackId: number, stem: string | null, buckets: number): Promise<ClipSource | null>;
   renderPreview(request: ClipRequest, buckets: number): Promise<ClipRender | null>;
   /** 16-bit WAV bytes for a playback window of the rendered edit. */
   previewAudio(request: ClipRequest, startSecs: number, secs: number): Promise<ArrayBuffer | null>;
   /** Render and import as a NEW library track (sources untouched). The
    *  artist is inherited from the first source. */
   save(request: ClipRequest, title: string): Promise<Track | null>;
+  /** Which separation backend is configured, and is it installed? */
+  stemBackend(): Promise<ClipStemBackend | null>;
+  /** Are this track's stems already separated? */
+  stemStatus(trackId: number): Promise<ClipStemStatus | null>;
+  /** Start separating in the background; returns the job id. */
+  stemSeparate(trackId: number): Promise<number | null>;
+  /** Poll separation progress. */
+  stemJobs(): Promise<StemJob[] | null>;
 }
 
 export class ClipClient extends IpcClient implements ClipClientApi {
-  loadSource(trackId: number, buckets: number) {
-    return this.call<ClipSource>('clip_load_source', { trackId, buckets });
+  loadSource(trackId: number, stem: string | null, buckets: number) {
+    return this.call<ClipSource>('clip_load_source', { trackId, stem, buckets });
   }
   renderPreview(request: ClipRequest, buckets: number) {
     return this.call<ClipRender>('clip_render_preview', { request, buckets });
@@ -408,6 +519,18 @@ export class ClipClient extends IpcClient implements ClipClientApi {
   }
   save(request: ClipRequest, title: string) {
     return this.call<Track>('clip_save', { request, title });
+  }
+  stemBackend() {
+    return this.call<ClipStemBackend>('clip_stem_backend', {});
+  }
+  stemStatus(trackId: number) {
+    return this.call<ClipStemStatus>('clip_stem_status', { trackId });
+  }
+  stemSeparate(trackId: number) {
+    return this.call<number>('clip_stem_separate', { trackId });
+  }
+  stemJobs() {
+    return this.call<StemJob[]>('clip_stem_jobs', {});
   }
 }
 

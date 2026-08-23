@@ -22,7 +22,8 @@ rustfft = "6"
 flacenc = { version = "0.4", default-features = false }
 dj-library = { path = "../dj-library" }
 ort = { version = "=2.0.0-rc.13", optional = true }
+# Staging dir for the external demucs CLI (src/demucs.rs).
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 hound = "3.5"

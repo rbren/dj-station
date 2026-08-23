@@ -6,6 +6,10 @@
 // over a handle to widen or narrow the band. The drawn curve is the exact
 // magnitude response of the renderer's series RBJ peaking biquads.
 //
+// Q is also on a knob per band under the plot (drag vertically,
+// double-click to reset, arrow keys for fine steps) — the wheel gesture
+// alone was undiscoverable. Both drive the same geometric law.
+//
 // Undo integration: `onBegin` fires once at the start of a gesture (drag
 // or a fresh wheel burst) so the owner can snapshot history, then
 // `onChange` streams the live band values.
@@ -31,6 +35,7 @@ const BAND_COLORS = ['#e06c75', '#e5c07b', '#61afef', '#98c379'];
 const GRID_HZ = [50, 100, 500, 1000, 5000, 10000];
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const round2 = (v: number) => Math.round(v * 100) / 100;
 const pitchToHz = (v: number) => 261.626 * 2 ** v;
 const hzToPitch = (hz: number) => Math.log2(hz / 261.626);
 const hzLabel = (hz: number) => (hz >= 1000 ? `${Math.round(hz / 100) / 10}k` : `${hz}`);
@@ -73,6 +78,106 @@ function responsePath(bands: ClipEqBand[]): string {
     pts.push(`${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`);
   }
   return pts.join(' ');
+}
+
+/** Q on a 0..1 dial position (geometric, so the knob's feel matches the
+ *  wheel gesture's `q * 2^n` law). */
+const qToPos = (q: number) =>
+  Math.log(clamp(q, EQ_MIN_Q, EQ_MAX_Q) / EQ_MIN_Q) / Math.log(EQ_MAX_Q / EQ_MIN_Q);
+const posToQ = (pos: number) => EQ_MIN_Q * (EQ_MAX_Q / EQ_MIN_Q) ** clamp(pos, 0, 1);
+
+/** Pixels of vertical drag for the knob's full travel. */
+const Q_KNOB_TRAVEL_PX = 140;
+const Q_KNOB_R = 13;
+/** Dial sweep: 270°, pointing down-left at minimum. */
+const Q_KNOB_SWEEP = 270;
+
+interface QKnobProps {
+  index: number;
+  q: number;
+  color: string;
+  onBegin(): void;
+  onChange(q: number): void;
+}
+
+/** Compact Q dial: drag vertically (up = narrower), double-click to reset
+ *  to 1. The same geometric law as scrolling over a band's handle, but
+ *  discoverable — the wheel gesture is not. */
+function QKnob({ index, q, color, onBegin, onChange }: QKnobProps) {
+  const drag = useRef<{ startY: number; startQ: number } | null>(null);
+
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      const dPos = (d.startY - e.clientY) / Q_KNOB_TRAVEL_PX;
+      onChange(round2(posToQ(qToPos(d.startQ) + dPos)));
+    };
+    const up = () => {
+      drag.current = null;
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, [onChange]);
+
+  const angle = -Q_KNOB_SWEEP / 2 + qToPos(q) * Q_KNOB_SWEEP;
+  const rad = ((angle - 90) * Math.PI) / 180;
+  return (
+    <div className="clip-eq-q" data-testid={`clip-eq-q-${index + 1}`}>
+      <svg
+        width={Q_KNOB_R * 2 + 4}
+        height={Q_KNOB_R * 2 + 4}
+        role="slider"
+        aria-label={`Band ${index + 1} Q`}
+        aria-valuemin={EQ_MIN_Q}
+        aria-valuemax={EQ_MAX_Q}
+        aria-valuenow={q}
+        tabIndex={0}
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          onBegin();
+          drag.current = { startY: e.clientY, startQ: q };
+        }}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          onBegin();
+          onChange(1);
+        }}
+        onKeyDown={(e) => {
+          const step = e.key === 'ArrowUp' ? 0.05 : e.key === 'ArrowDown' ? -0.05 : 0;
+          if (step === 0) return;
+          e.preventDefault();
+          onBegin();
+          onChange(round2(posToQ(qToPos(q) + step)));
+        }}
+      >
+        <circle
+          cx={Q_KNOB_R + 2}
+          cy={Q_KNOB_R + 2}
+          r={Q_KNOB_R}
+          fill="#1b1e24"
+          stroke={color}
+          strokeOpacity={0.6}
+        />
+        <line
+          x1={Q_KNOB_R + 2}
+          y1={Q_KNOB_R + 2}
+          x2={Q_KNOB_R + 2 + Math.cos(rad) * (Q_KNOB_R - 3)}
+          y2={Q_KNOB_R + 2 + Math.sin(rad) * (Q_KNOB_R - 3)}
+          stroke={color}
+          strokeWidth={2}
+          strokeLinecap="round"
+        />
+      </svg>
+      <span className="clip-eq-q-label">Q{q.toFixed(1)}</span>
+    </div>
+  );
 }
 
 export interface ClipEqUIProps {
@@ -236,6 +341,18 @@ export function ClipEqUI({ bands, onBegin, onChange }: ClipEqUIProps) {
           );
         })}
       </svg>
+      <div className="clip-eq-qrow" data-testid="clip-eq-qrow">
+        {bands.map((b, i) => (
+          <QKnob
+            key={i}
+            index={i}
+            q={b.q}
+            color={BAND_COLORS[i % BAND_COLORS.length]}
+            onBegin={onBegin}
+            onChange={(q) => apply(i, { ...bandsRef.current[i], q })}
+          />
+        ))}
+      </div>
       <div className="eq-readout" data-testid="clip-eq-readout">
         {bands.map((b, i) => (
           <span
