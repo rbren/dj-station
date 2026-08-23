@@ -1,0 +1,19 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "noise_env",
+      "to_jack": "gate"
+    },
+    {
+      "from_jack": "out",
+      "to": "note_env",
+      "to_jack": "gate"
+    },
+    {
+      "from_jack": "out",
+      "to": "warble_env",
+      "to_jack": "gate"
+    }
+  ]
+}

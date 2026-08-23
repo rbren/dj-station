@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "bi",
+      "to": "warble_vca",
+      "to_jack": "in"
+    }
+  ]
+}

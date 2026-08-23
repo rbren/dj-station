@@ -1,18 +1,13 @@
 {
-  "ext": "com.dj.attenuverter1",
+  "ext": "com.dj.vca",
   "knobs": {
-    "atten": {
-      "position": 1.0,
+    "cv": {
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "in": {
       "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "offset": {
-      "position": 0.25,
       "atten": 1.0,
       "offset": 0.0
     }

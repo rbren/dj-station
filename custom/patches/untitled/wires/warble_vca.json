@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "warble_filter",
+      "to_jack": "in"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "env",
+      "to": "warble_vca",
+      "to_jack": "cv"
+    }
+  ]
+}

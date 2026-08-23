@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "bass_voice",
+      "to_jack": "pitch"
+    }
+  ]
+}

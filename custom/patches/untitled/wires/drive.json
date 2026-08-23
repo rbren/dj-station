@@ -2,8 +2,8 @@
   "wires": [
     {
       "from_jack": "out",
-      "to": "synth-2",
-      "to_jack": "atten1"
+      "to": "waveshap1",
+      "to_jack": "drive"
     }
   ]
 }

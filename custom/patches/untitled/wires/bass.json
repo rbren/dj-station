@@ -2,8 +2,8 @@
   "wires": [
     {
       "from_jack": "out",
-      "to": "synth-2",
-      "to_jack": "rate"
+      "to": "voice_mix",
+      "to_jack": "lvl4"
     }
   ]
 }

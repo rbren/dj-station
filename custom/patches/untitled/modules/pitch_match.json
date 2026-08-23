@@ -1,0 +1,22 @@
+{
+  "ext": "com.dj.attenuverter1",
+  "name": "pitch match",
+  "knobs": {
+    "atten": {
+      "position": 0.44,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset": {
+      "position": 0.3865,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio",
+      "to": "voice_mix",
+      "to_jack": "in3_l"
+    }
+  ]
+}

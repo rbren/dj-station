@@ -1,8 +1,9 @@
 {
   "ext": "com.dj.attenuverter1",
+  "name": "note filter",
   "knobs": {
     "atten": {
-      "position": 0.55,
+      "position": 0.42,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -12,7 +13,7 @@
       "offset": 0.0
     },
     "offset": {
-      "position": 0.4,
+      "position": 0.5065,
       "atten": 1.0,
       "offset": 0.0
     }

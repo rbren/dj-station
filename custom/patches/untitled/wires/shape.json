@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "waveshap1",
+      "to_jack": "mode"
+    }
+  ]
+}

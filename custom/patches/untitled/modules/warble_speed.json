@@ -1,0 +1,12 @@
+{
+  "ext": "com.dj.alias",
+  "name": "warble speed",
+  "knobs": {
+    "in": {
+      "position": 0.29333332,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}
