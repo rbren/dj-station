@@ -58,6 +58,7 @@ import {
   STEM_NAMES,
 } from '../clip';
 import { ClipTransport, type TransportHost } from '../clipTransport';
+import { logError } from '../errors';
 import { isEditableTarget } from '../fileShortcuts';
 import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
@@ -345,6 +346,10 @@ export function ClipView({
             ? sources[existing]
             : await clip.loadSource(trackId, stems, MIN_BUCKETS);
         if (!source) {
+          logError(
+            'clip.loadSource',
+            `could not load track ${trackId} (stems: ${stems.join(', ') || 'none'})`,
+          );
           setError(
             stems.length
               ? `Could not load ${stemLabel(stems)} — separate the track first`
@@ -416,6 +421,7 @@ export function ClipView({
         const source = await clip.loadSource(pick, stems, MIN_BUCKETS);
         if (!source) {
           setStemChoice({ trackId: pick, on: was });
+          logError('clip.loadSource', `could not load track ${pick} (stems: ${stems.join(', ')})`);
           setError(`Could not load ${stemLabel(stems) || 'the full mix'}`);
           return;
         }

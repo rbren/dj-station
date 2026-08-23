@@ -30,6 +30,7 @@ import {
   type BeatifyTrack,
   type Quality,
 } from '../beatify';
+import { logError } from '../errors';
 import { peaksPath, WAVEFORM_VIEW_W as W } from './WaveformView';
 
 const WAVE_H = 110;
@@ -89,6 +90,7 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
       const next = await client.analyze(trackId, span, BUCKETS);
       setBusy(false);
       if (!next) {
+        logError('beatify.analyze', `no analysis for track ${trackId} (span: ${span ?? 'whole'})`);
         setError('Could not track beats in that audio');
         return;
       }
@@ -109,6 +111,7 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
       if (cancelled) return;
       setBusy(false);
       if (!next) {
+        logError('beatify.analyze', `no analysis for track ${trackId}`);
         setError('Could not track beats in that audio');
         return;
       }
@@ -225,11 +228,12 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
     const track = await client.save({ strength, leadIn: leadInMs / 1000, rulerGroup }, BUCKETS);
     setBusy(false);
     if (!track) {
+      logError('beatify.save', `render failed for track ${trackId}`);
       setError('Rendering the warp failed');
       return;
     }
     onCommitted(track);
-  }, [client, leadInMs, onCommitted, rulerGroup, strength]);
+  }, [client, leadInMs, onCommitted, rulerGroup, strength, trackId]);
 
   const dismiss = useCallback(() => {
     void client.cancel();

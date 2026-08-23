@@ -3,15 +3,25 @@
 // `TypeError: null is not an object` out of render and blanked the app.
 // Bad numbers must degrade to a placeholder, and anything that still throws
 // must be caught and shown instead of killing the tree.
+//
+// It also pins the second half of that contract: nothing the user can see is
+// allowed to be invisible in the devtools console.
 
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorBanner } from '../src/components/ErrorBanner';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { Jack } from '../src/components/Jack';
 import { ModulePanel } from '../src/components/ModulePanel';
-import { clearErrors, reportError } from '../src/errors';
+import {
+  clearErrors,
+  installGlobalErrorHandlers,
+  logError,
+  reportError,
+  subscribeErrors,
+} from '../src/errors';
 import { fixed, safeNumber } from '../src/format';
+import { IpcClient } from '../src/ipc';
 import type { JackTelemetry, Manifest, ModuleHandle } from '../src/types';
 
 /** Telemetry as it actually arrives when the engine emits NaN/Inf. */
@@ -38,7 +48,16 @@ const HANDLE: ModuleHandle = {
   size: { w: 300, h: 150 },
 };
 
-beforeEach(() => clearErrors());
+// Every path under test logs; the spy keeps the run readable and lets the
+// console-logging cases assert on it.
+let consoleError: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  clearErrors();
+  consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+afterEach(() => consoleError.mockRestore());
 
 describe('format helpers', () => {
   it('treats null/undefined/NaN/Infinity as unusable', () => {
@@ -113,8 +132,6 @@ describe('ErrorBoundary', () => {
   }
 
   it('shows the failure instead of unmounting the tree', () => {
-    // React logs the caught error; keep the test output readable.
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     render(
       <div>
         <span data-testid="sibling">still here</span>
@@ -127,11 +144,9 @@ describe('ErrorBoundary', () => {
     expect(screen.getByTestId('error-boundary-mixer1').textContent).toContain(
       'null is not an object',
     );
-    spy.mockRestore();
   });
 
-  it('reports caught errors to the banner', () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('reports caught errors to the banner and the console', () => {
     render(
       <div>
         <ErrorBanner />
@@ -143,7 +158,10 @@ describe('ErrorBoundary', () => {
     const banner = screen.getByTestId('error-banner');
     expect(banner.textContent).toContain('mixer1');
     expect(banner.textContent).toContain('null is not an object');
-    spy.mockRestore();
+    // …plus the component stack, which the banner has no room for.
+    const logged = consoleError.mock.calls.find((c) => c[0] === '[mixer1]');
+    expect(logged?.[1]).toBeInstanceOf(TypeError);
+    expect(String(logged?.[2])).toContain('Boom');
   });
 });
 
@@ -183,5 +201,80 @@ describe('ErrorBanner', () => {
     expect(items[0].dataset.kind).toBe('not_found');
     expect(items[0].textContent).toContain('no such module instance: osc9');
     expect(items[1].dataset.kind).toBe('unknown');
+  });
+});
+
+describe('console trail', () => {
+  it('logs every banner error with its context', () => {
+    reportError('engine.start', new Error('audio device busy'));
+    expect(consoleError).toHaveBeenCalledWith('[engine.start]', expect.any(Error));
+  });
+
+  it('collapses consecutive repeats in the console like the banner does', () => {
+    reportError('telemetry', new Error('no such node'));
+    reportError('telemetry', new Error('no such node'));
+    expect(consoleError).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs inline panel failures without pushing them into the banner', () => {
+    let banner: unknown[] = [];
+    const stop = subscribeErrors((errs) => (banner = errs));
+    logError('search freesound', 'HTTP 503');
+    expect(consoleError).toHaveBeenCalledWith('[search freesound]', 'HTTP 503');
+    expect(banner).toHaveLength(0);
+    stop();
+  });
+
+  it('captures stray window errors and unhandled rejections', () => {
+    const stop = installGlobalErrorHandlers();
+    render(<ErrorBanner />);
+    act(() => {
+      window.dispatchEvent(new ErrorEvent('error', { error: new Error('stray throw') }));
+      // jsdom has no PromiseRejectionEvent constructor; the listener only
+      // reads `reason`.
+      const rejection = new Event('unhandledrejection') as Event & { reason?: unknown };
+      rejection.reason = new Error('nobody caught me');
+      window.dispatchEvent(rejection);
+    });
+    expect(consoleError).toHaveBeenCalledWith('[window]', expect.any(Error));
+    expect(consoleError).toHaveBeenCalledWith('[promise]', expect.any(Error));
+    const banner = screen.getByTestId('error-banner').textContent ?? '';
+    expect(banner).toContain('stray throw');
+    expect(banner).toContain('nobody caught me');
+    stop();
+  });
+});
+
+describe('IPC failures', () => {
+  class TestClient extends IpcClient {
+    run(cmd: string, quiet?: boolean) {
+      return this.call<unknown>(cmd, undefined, { quiet });
+    }
+  }
+
+  beforeEach(() => {
+    window.__DJ_STRESS_INVOKE__ = () => Promise.reject(new Error('engine mutex poisoned'));
+  });
+  afterEach(() => delete window.__DJ_STRESS_INVOKE__);
+
+  it('banners and logs a rejected command, and resolves null', async () => {
+    render(<ErrorBanner />);
+    let result: unknown = 'unset';
+    await act(async () => {
+      result = await new TestClient().run('add_module');
+    });
+    expect(result).toBeNull();
+    expect(consoleError).toHaveBeenCalledWith('[add_module]', expect.any(Error));
+    expect(screen.getByTestId('error-banner').textContent).toContain('engine mutex poisoned');
+  });
+
+  it('keeps a quiet poll out of the banner but still logs it', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    render(<ErrorBanner />);
+    expect(await new TestClient().run('tap', true)).toBeNull();
+    expect(debug).toHaveBeenCalledWith('[tap] (quiet)', expect.any(Error));
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('error-banner')).toBeNull();
+    debug.mockRestore();
   });
 });

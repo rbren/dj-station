@@ -868,3 +868,20 @@ fails if it's missing.
   library tracks and writes nothing back to the library — a beatified
   render is not a new library track (unlike a clip), because it is the
   same performance, not a new one.
+- Error surfacing is DOUBLE-CHANNEL: nothing the user can see may be
+  invisible to a developer. Frontend (`app/src/errors.ts`): `reportError`
+  (banner) logs through `logError` → `console.error('[context]', err)`,
+  and consecutive duplicates collapse in BOTH channels so a 10 Hz poll
+  can't drown the console. Panels that render their own inline error text
+  instead of the banner (LibraryView search/download, ClipView decode,
+  Beatify analyze/save, the camera panel's `[camera]` messages) call
+  `logError`/`console.error` next to their `setError`; quiet IPC polls
+  (`ipc.ts`) stay out of the banner but log `console.debug`; window
+  `error`/`unhandledrejection` are routed to the banner+console by
+  `installGlobalErrorHandlers` (main.tsx). Backend: every `CmdError` logs
+  once where it is born (`CmdError::new` → `log_cmd_error`,
+  `[dj-ipc] <kind>: …`, same consecutive-dup collapse — so never build one
+  with a struct literal), patch-load / macro-pull warnings log where they
+  are produced, and a failed download job logs in
+  `dj-library::downloads`. Pinned by
+  `app/tests/ErrorHandling.test.tsx`.

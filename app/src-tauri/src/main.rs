@@ -426,6 +426,16 @@ enum ErrorKind {
     Internal,
 }
 
+impl ErrorKind {
+    fn tag(self) -> &'static str {
+        match self {
+            ErrorKind::NotFound => "not_found",
+            ErrorKind::InvalidInput => "invalid_input",
+            ErrorKind::Internal => "internal",
+        }
+    }
+}
+
 impl std::fmt::Display for CmdError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
@@ -433,26 +443,40 @@ impl std::fmt::Display for CmdError {
 }
 
 impl CmdError {
+    /// The one place a command failure is born, so it is also the one place
+    /// it gets logged: everything the frontend banner shows must leave a
+    /// trail in the terminal too (a bug report rarely carries both).
+    fn new(kind: ErrorKind, message: String) -> Self {
+        log_cmd_error(kind, &message);
+        CmdError { kind, message }
+    }
+
     fn not_found(message: impl Into<String>) -> Self {
-        CmdError {
-            kind: ErrorKind::NotFound,
-            message: message.into(),
-        }
+        CmdError::new(ErrorKind::NotFound, message.into())
     }
+
     pub(crate) fn invalid(message: impl Into<String>) -> Self {
-        CmdError {
-            kind: ErrorKind::InvalidInput,
-            message: message.into(),
-        }
+        CmdError::new(ErrorKind::InvalidInput, message.into())
     }
+}
+
+/// Consecutive identical failures collapse, exactly like the frontend banner
+/// does: polled commands (`tap`, `*_status`) fail every tick while they race
+/// a live edit, and 10 lines a second would bury everything else.
+fn log_cmd_error(kind: ErrorKind, message: &str) {
+    static LAST: Mutex<String> = Mutex::new(String::new());
+    let line = format!("[dj-ipc] {}: {message}", kind.tag());
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last == line {
+        return;
+    }
+    eprintln!("{line}");
+    *last = line;
 }
 
 /// Default conversion for `map_err(err)`: kind `internal`.
 pub(crate) fn err<E: std::fmt::Display>(e: E) -> CmdError {
-    CmdError {
-        kind: ErrorKind::Internal,
-        message: e.to_string(),
-    }
+    CmdError::new(ErrorKind::Internal, e.to_string())
 }
 
 #[derive(Serialize)]
@@ -1375,10 +1399,8 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     let autosave = autosave_dir();
     if autosave.join("patch.json").is_file() {
         match load_patch_dir(&state, &autosave) {
-            Ok(warnings) => {
-                for w in warnings {
-                    eprintln!("[dj-audio] autosave restore: {w}");
-                }
+            // Load warnings are logged by load_patch_dir itself.
+            Ok(_) => {
                 if let Some(name) = std::fs::read_to_string(autosave.join("patch.json"))
                     .ok()
                     .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
@@ -1728,7 +1750,11 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     }
     restart_backend(&mut engine, backend, "patch load")?;
     mark_saved(state, &engine);
-    Ok(engine.load_warnings.clone())
+    let warnings = engine.load_warnings.clone();
+    for w in &warnings {
+        eprintln!("[dj-audio] patch load ({}): {w}", dir.display());
+    }
+    Ok(warnings)
 }
 
 /// The global macro store: `<data_dir>/macros/`, a sibling of `patches/`.
@@ -2047,6 +2073,9 @@ fn pull_macro_instance(state: State<AppState>, instance: String) -> CmdResult<Ve
         warnings = e.pull_macro_instance(&instance).map_err(err)?;
         Ok(())
     })?;
+    for w in &warnings {
+        eprintln!("[dj-macros] pull {instance}: {w}");
+    }
     Ok(warnings)
 }
 

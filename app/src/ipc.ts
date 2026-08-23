@@ -51,7 +51,10 @@ export class IpcClient {
       if (!this.invoke) return null;
       return (await this.invoke(cmd, args)) as T;
     } catch (err) {
-      if (!opts?.quiet) reportError(cmd, err);
+      // Quiet commands stay out of the banner, never out of the console: a
+      // "race" that keeps repeating is a real bug and needs a trail.
+      if (opts?.quiet) console.debug(`[${cmd}] (quiet)`, err);
+      else reportError(cmd, err);
       return null;
     }
   }

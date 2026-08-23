@@ -5,7 +5,7 @@
 // DeepLink providers open the store page.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { errorMessage } from '../errors';
+import { errorMessage, logError } from '../errors';
 import { fixed } from '../format';
 import type {
   AnalysisQueue,
@@ -176,6 +176,7 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
         const remote = await client.searchProvider(active.id, query, selected);
         if (remote) setResults(remote);
       } catch (e) {
+        logError(`search ${active.id}`, e);
         setError(`${active.name}: ${errorMessage(e)}`);
         setResults([]);
       }
@@ -199,7 +200,9 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
       finished = true;
       if (job.state === 'failed') {
         setStatus(null);
-        setError(`${job.title}: ${job.error ?? 'download failed'}`);
+        const detail = `${job.title}: ${job.error ?? 'download failed'}`;
+        logError(`download ${job.provider}`, detail);
+        setError(detail);
       }
     }
     if (finished) await refreshTracks('');
