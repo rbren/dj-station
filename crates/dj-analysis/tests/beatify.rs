@@ -601,6 +601,37 @@ fn beat_this_output_is_parsed_and_context_trimmed() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn a_launcher_script_names_the_interpreter_that_owns_the_package() {
+    use std::io::Write;
+
+    // What `uv tool install beat_this` / `pipx install beat-this` leave
+    // behind: a console script whose shebang points at the environment's
+    // own python. That interpreter — not `python3` — is the one that can
+    // import the package, so discovery has to read it out.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let venv_bin = dir.path().join("tools/beat-this/bin");
+    std::fs::create_dir_all(&venv_bin).expect("mkdir");
+    let venv_python = venv_bin.join("python3");
+    std::fs::write(&venv_python, "").expect("python");
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).expect("mkdir");
+    let mut launcher = std::fs::File::create(bin.join("beat_this")).expect("create");
+    writeln!(
+        launcher,
+        "#!{}\n# -*- coding: utf-8 -*-",
+        venv_python.display()
+    )
+    .expect("write");
+    drop(launcher);
+
+    let found = beatify::detect::interpreters_from_launcher(&bin);
+    assert_eq!(found, vec![venv_python]);
+    // No launcher, nothing claimed.
+    assert!(beatify::detect::interpreters_from_launcher(dir.path()).is_empty());
+}
+
 #[test]
 fn tracker_status_reports_the_install_hint() {
     let status = beatify::detect::tracker_status();

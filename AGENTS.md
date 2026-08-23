@@ -814,10 +814,18 @@ fails if it's missing.
   never rewrites the source file or the library DB row, so re-importing
   the same audio finds its grid again.
 - Beatify detection degrades like the yt-dlp provider: `beat_this` (a
-  PyTorch model) is an OPTIONAL runtime dep probed with
-  `python3 -c "import beat_this"` (`DJ_BEAT_THIS_PYTHON` /
-  `_DEVICE` / `_CHECKPOINTS`, `DJ_BEATIFY_FORCE_DSP=1` pins the fallback
-  for tests). Without it the tab runs the built-in DSP tracker — the
+  PyTorch model) is an OPTIONAL runtime dep. `detect::probe_beat_this`
+  FINDS it rather than assuming `python3`: it reads the shebang of a
+  `beat_this` launcher (PATH plus `~/.local/bin`, `/opt/homebrew/bin`,
+  `/usr/local/bin` — a Finder-launched app has none of those on PATH),
+  then known `uv tool`/`pipx` env roots, then PATH interpreters, and the
+  same probe asks torch for the device (cuda > mps > cpu; `mps` runs with
+  `PYTORCH_ENABLE_MPS_FALLBACK=1` and the script retries a failed
+  checkpoint on the CPU). Successful probes are cached per
+  `DJ_BEAT_THIS_PYTHON`, failures are not, so installing the package
+  takes effect without a restart. Overrides: `DJ_BEAT_THIS_PYTHON` /
+  `_DEVICE` (`auto` by default) / `_CHECKPOINTS`, `DJ_BEATIFY_FORCE_DSP=1`
+  pins the fallback for tests. Without it the tab runs the built-in DSP tracker — the
   tested default — and the header carries the install hint. Multi-seed
   agreement (three `beat_this` checkpoints) is what fills the verdict
   line; a single tracker reports `singleTracker`, never a fake consensus.

@@ -121,6 +121,7 @@ const STATUS: TrackerStatus = {
   beatThis: false,
   seeds: ['dsp'],
   device: 'cpu',
+  python: '',
   detail: 'beat_this not importable',
   installHint: 'pip install beat-this torch',
 };

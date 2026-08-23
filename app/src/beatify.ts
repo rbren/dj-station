@@ -134,6 +134,7 @@ export interface TrackerStatus {
   beatThis: boolean;
   seeds: string[];
   device: string;
+  python: string;
   detail: string;
   installHint: string;
 }

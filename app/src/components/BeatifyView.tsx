@@ -99,6 +99,7 @@ export function BeatifyView({ client, library }: BeatifyViewProps) {
           <span
             className={tracker.beatThis ? 'beatify-tracker' : 'beatify-tracker fallback'}
             data-testid="beatify-tracker-status"
+            title={tracker.beatThis ? tracker.python : tracker.detail}
           >
             {tracker.beatThis
               ? `tracker ${tracker.tracker} · ${tracker.device}`
