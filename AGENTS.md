@@ -294,7 +294,13 @@ fails if it's missing.
   called by the `connect_wire` command; extra wires never touch the
   mode) — pitch wires SET the note, an LFO into pitch stays CV. UI:
   "Wire mode" select in KnobConfigMenu, spread arc/cmd-drag/spread
-  fields suppressed and dial dimmed under override.
+  fields suppressed and dial dimmed under override. An overridden
+  control also READS OUT the wire: `LiveOverrideKnob` (Knob.tsx, picked
+  by InputCell when `wired && wire_style === 'override'`) subscribes to
+  the jack's telemetry and feeds `Knob.displayPosition`, so the dial and
+  mixer-style level faders move with the signal while drags keep editing
+  the (inert) baseline. The subscription sits in that wrapper — never in
+  InputCell or the panel — to keep the tick's re-render to one control.
 - App save/load lives in the native File menu (Tauri `MenuItemBuilder`
   in `app/src-tauri/src/main.rs`); the frontend listens via
   `onMenuAction` in `src/engine.ts` (menu events re-dispatched as

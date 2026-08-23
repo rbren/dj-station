@@ -15,7 +15,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDisplay, stepLabel } from '../display';
-import type { DisplaySpec, KnobConfig, WireStyle } from '../types';
+import { useLiveJackTelemetry } from '../rackStore';
+import type { DisplaySpec, JackTelemetry, KnobConfig, WireStyle } from '../types';
 import { KnobConfigMenu } from './KnobConfigMenu';
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -186,6 +187,10 @@ export interface KnobProps {
   /** Manifest display spec (unit / mapping / step labels); absent = Volts. */
   display?: DisplaySpec | null;
   position: number;
+  /** Position to RENDER at, when that is not the knob's own: under wire
+   *  override the signal sets the value, so the dial/fader follows the
+   *  live reading (see LiveOverrideKnob). Drags still move `position`. */
+  displayPosition?: number;
   onPosition(position: number): void;
   /** End of an interaction gesture (drag release / toggle / momentary up). */
   onRelease?(): void;
@@ -273,8 +278,11 @@ export function Knob(props: KnobProps) {
     };
   }, [onMove, onUp]);
 
-  const value = mapPosition(config, position);
-  const angle = angleFor(position);
+  // What the control shows. Normally its own position; under wire override
+  // the live value the signal is setting (drags still act on `position`).
+  const shownPosition = props.displayPosition ?? position;
+  const value = mapPosition(config, shownPosition);
+  const angle = angleFor(shownPosition);
   const openMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     // Right-click is the knob's own gesture (its config menu, when
@@ -322,7 +330,7 @@ export function Knob(props: KnobProps) {
   // 'switch' toggles on click; 'button' is momentary — held down while the
   // mouse button is pressed, released on mouseup/leave.
   if (config.style === 'button') {
-    const on = position >= 0.5;
+    const on = shownPosition >= 0.5;
     return (
       <div className="knob" data-testid={`knob-${label}`}>
         <button
@@ -352,7 +360,7 @@ export function Knob(props: KnobProps) {
   }
 
   if (config.style === 'switch') {
-    const on = position >= 0.5;
+    const on = shownPosition >= 0.5;
     return (
       <div className="knob" data-testid={`knob-${label}`}>
         <button
@@ -403,7 +411,7 @@ export function Knob(props: KnobProps) {
     : undefined;
 
   if (appearance === 'fader' || appearance === 'hfader') {
-    const pct = clamp01(position) * 100;
+    const pct = clamp01(shownPosition) * 100;
     return (
       <div
         className={`knob knob-fader-box${horizontal ? ' knob-hfader-box' : ''}`}
@@ -496,5 +504,40 @@ export function Knob(props: KnobProps) {
       )}
       {menu}
     </div>
+  );
+}
+
+/** The knob of an input in wire-override mode: there the incoming signal
+ *  IS the value (knob.rs `WireStyle::Override`), so the control renders as
+ *  a live readout of the jack's post-blend telemetry — the dial turns and
+ *  the fader cap slides with the wire, instead of sitting on an inert
+ *  baseline. Drags still edit that baseline (it takes over again when the
+ *  mode goes back to CV). The telemetry subscription lives in this wrapper
+ *  so a tick re-renders only the control, never the cell or the panel
+ *  around it. */
+export function LiveOverrideKnob({
+  instance,
+  jack,
+  telemetry,
+  ...props
+}: KnobProps & {
+  instance: string;
+  jack: string;
+  /** Storeless fallback reading (docs previews, unit tests). */
+  telemetry?: JackTelemetry;
+}) {
+  const live = useLiveJackTelemetry(instance, jack, telemetry);
+  // `display` is typed number but crosses IPC as JSON, where a non-finite
+  // f32 becomes null: fall back to the baseline rather than jump to 0.
+  const value = live?.display;
+  return (
+    <Knob
+      {...props}
+      displayPosition={
+        typeof value === 'number' && Number.isFinite(value)
+          ? positionForValue(props.config, value)
+          : undefined
+      }
+    />
   );
 }

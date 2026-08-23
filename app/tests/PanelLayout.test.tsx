@@ -10,7 +10,7 @@ import GridSeqUI from '../../extensions/grid_seq/ui-src/GridSeqUI';
 import StepSeqUI from '../../extensions/step_seq/ui-src/StepSeqUI';
 import { ModulePanel } from '../src/components/ModulePanel';
 import { resolveLayout } from '../src/components/panelLayouts';
-import type { Manifest, ModuleHandle } from '../src/types';
+import type { JackTelemetry, Manifest, ModuleHandle } from '../src/types';
 
 const HANDLE: ModuleHandle = {
   paramValue: () => 0,
@@ -20,6 +20,14 @@ const HANDLE: ModuleHandle = {
 };
 
 const noop = () => {};
+
+const tele = (display: number): JackTelemetry => ({
+  instantaneous: display,
+  rms_100ms: 0,
+  display,
+  volatility: 0,
+  is_fast: false,
+});
 
 const baseProps = {
   knobs: {},
@@ -139,6 +147,40 @@ describe('ModulePanel with layouts', () => {
       expect(screen.getByTestId(`input-cell-pan${ch}`).querySelector('.knob')).toBeTruthy();
     }
     expect(screen.getByTestId('input-cell-master').querySelector('.fader-v')).toBeTruthy();
+  });
+
+  // A level wired in override mode is set by the signal, not the fader:
+  // the cap has to ride the incoming level instead of the inert baseline.
+  it('a mixer level in override mode rides the wire, not its baseline', () => {
+    const m = manifest('com.dj.mixer', ['lvl1', 'master'], ['out_l', 'out_r']);
+    const capPct = () =>
+      parseFloat(
+        (screen.getByTestId('input-cell-lvl1').querySelector('.fader-cap') as HTMLElement).style
+          .bottom,
+      );
+    const { rerender } = render(
+      <ModulePanel
+        {...baseProps}
+        instanceId="mix1"
+        manifest={m}
+        knobs={{ lvl1: { position: 0.1, atten: 1, offset: 0, wire_style: 'override' } }}
+        wired={{ lvl1: true }}
+        telemetry={{ lvl1: tele(6) }}
+      />,
+    );
+    expect(capPct()).toBeCloseTo(60, 3);
+    // Back in CV mode the fader is the baseline again, wire or no wire.
+    rerender(
+      <ModulePanel
+        {...baseProps}
+        instanceId="mix1"
+        manifest={m}
+        knobs={{ lvl1: { position: 0.1, atten: 1, offset: 0, wire_style: 'cv' } }}
+        wired={{ lvl1: true }}
+        telemetry={{ lvl1: tele(6) }}
+      />,
+    );
+    expect(capPct()).toBeCloseTo(10, 3);
   });
 
   it('audio-flagged inputs render as plain jacks with no control (mixer ins)', () => {

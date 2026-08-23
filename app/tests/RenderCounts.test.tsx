@@ -37,7 +37,7 @@ const VCA: Manifest = {
   params: [],
 };
 
-function node(instance: string, manifest: Manifest) {
+function node(instance: string, manifest: Manifest, extra?: Record<string, unknown>) {
   return {
     instance_id: instance,
     type_id: manifest.id,
@@ -47,6 +47,7 @@ function node(instance: string, manifest: Manifest) {
     wired_inputs: [],
     midi_mappings: [],
     midi_led_mappings: [],
+    ...extra,
   };
 }
 
@@ -54,13 +55,24 @@ function tele(display: number): JackTelemetry {
   return { instantaneous: display, rms_100ms: 0, display, volatility: 0, is_fast: false };
 }
 
-// Output jacks are keyed `out:<id>` in tap_all responses.
+// osc-3's pitch is wired in OVERRIDE mode: its knob is a live readout of
+// the incoming signal, so it must follow ticks — without the panel doing so.
 const state = {
-  nodes: [node('osc-1', OSC), node('osc-2', OSC), node('vca-1', VCA)],
+  nodes: [
+    node('osc-1', OSC),
+    node('osc-2', OSC),
+    node('vca-1', VCA),
+    node('osc-3', OSC, {
+      knobs: { pitch: { position: 0.1, atten: 1, offset: 0, wire_style: 'override' } },
+      wired_inputs: ['pitch'],
+    }),
+  ],
+  // Output jacks are keyed `out:<id>` in tap_all responses.
   telemetry: {
     'osc-1': { pitch: tele(0), 'out:audio': tele(1) },
     'osc-2': { pitch: tele(0), 'out:audio': tele(2) },
     'vca-1': { in: tele(0), cv: tele(0), 'out:out': tele(3) },
+    'osc-3': { pitch: tele(2), 'out:audio': tele(4) },
   } as Record<string, Record<string, JackTelemetry>>,
 };
 
@@ -162,6 +174,25 @@ describe('telemetry tick render counts', () => {
     // The moved jack's indicator followed the new reading...
     expect(glow()).not.toBe(before);
     // ...but no ModulePanel re-rendered to make that happen.
+    expect(renderCounts).toEqual({});
+  });
+
+  it('keeps an override-mode knob following its wire, panel unmoved', async () => {
+    await mount();
+    const angle = () => {
+      const pointer = screen
+        .getByTestId('module-osc-3')
+        .querySelector('.knob-pointer') as HTMLElement;
+      return parseFloat(/rotate\((-?[\d.]+)deg\)/.exec(pointer.style.transform)![1]);
+    };
+    // 2 V of the default 0..10 knob: -135 + 270 * 0.2.
+    expect(angle()).toBeCloseTo(-81, 3);
+    state.telemetry = {
+      ...state.telemetry,
+      'osc-3': { ...state.telemetry['osc-3'], pitch: tele(8) },
+    };
+    await tick(100);
+    expect(angle()).toBeCloseTo(81, 3);
     expect(renderCounts).toEqual({});
   });
 
