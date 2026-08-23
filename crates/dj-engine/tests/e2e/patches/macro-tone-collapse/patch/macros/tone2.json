@@ -11,6 +11,11 @@
             "atten": 1.0,
             "offset": 0.0
           },
+          "fm_index": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
           "pitch": {
             "position": 0.5,
             "atten": 1.0,
@@ -35,6 +40,92 @@
           "cv": {
             "position": 0.5,
             "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      }
+    },
+    "wires": {
+      "osc1": {
+        "wires": [
+          {
+            "from_jack": "audio",
+            "to": "vca1",
+            "to_jack": "in"
+          }
+        ]
+      }
+    },
+    "interface": {
+      "inputs": [
+        {
+          "id": "pitch",
+          "node": "osc1",
+          "jack": "pitch"
+        },
+        {
+          "id": "level",
+          "node": "vca1",
+          "jack": "cv"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "node": "vca1",
+          "jack": "out"
+        }
+      ],
+      "params": []
+    }
+  },
+  "state": {
+    "id": "macro.tone",
+    "name": "Tone",
+    "modules": {
+      "osc1": {
+        "ext": "com.dj.oscillator",
+        "knobs": {
+          "fm": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "fm_index": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pitch": {
+            "position": 0.55,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "sync": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "waveform": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "vca1": {
+        "ext": "com.dj.vca",
+        "knobs": {
+          "cv": {
+            "position": 0.3,
+            "atten": 0.2,
             "offset": 0.0
           },
           "in": {

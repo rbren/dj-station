@@ -247,6 +247,18 @@ fails if it's missing.
   target those. After any manifest/knob change, run
   `./scripts/regen-goldens.sh` and the full workspace suite (macro and
   perf_m4 tests reference module controls).
+- FM convention: every oscillator's `fm` input is LINEAR, thru-zero FM
+  scaled by an `fm_index` depth knob (0..4) —
+  `f = f0 * (1 + fm/5 * index)`, so index 0 (the manifest default) is no
+  FM at all, index 1 is ±100 % deviation at ±5 V, and a negative factor
+  runs the phase backwards instead of rectifying. The law exists three
+  times (`extensions/oscillator`, `extensions/vco`,
+  `extensions/wavetable`) — change them together. The basic Oscillator's
+  `fm` was exponential (added to `pitch` in 1 V/oct units) until the
+  linear-FM change, which intentionally re-rendered the
+  `waveforms-fm-sync` golden (that case now sets `fm_index`; every other
+  golden is byte-identical because index 0 leaves the frequency exactly
+  `pitch_to_hz(pitch)`).
 - Units & display mapping: jack values are Volts to the engine; a
   manifest input/output may carry a `display` spec (unit string —
   default "V" — plus optional `volt_per_octave` map and per-step

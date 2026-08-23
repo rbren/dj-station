@@ -50,7 +50,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.oscillator': {
     summary:
       'Basic audio oscillator with sine, saw, square and triangle shapes, ' +
-      'exponential FM and hard sync. Output is +-5 V audio. The ' +
+      'linear through-zero FM and hard sync. Output is +-5 V audio. The ' +
       'bread-and-butter starting point for basslines, leads and drones: ' +
       'pair it with a filter and envelope for a classic subtractive voice, ' +
       'or point it at another oscillator\u2019s fm input as a modulator.',
@@ -58,7 +58,14 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       pitch:
         'Which note to play: 1 V/oct pitch CV (0 V = C4). Patch a sequencer, ' +
         'quantizer or MIDI pitch output here for melodies.',
-      fm: 'Exponential FM, added to pitch in 1 V/oct units.',
+      fm:
+        'FM signal input (audio or CV): linear through-zero FM, so the pitch ' +
+        'you play stays put while the timbre changes. +-5 V swings the ' +
+        'frequency by +-100 % per unit of fm_index; past that the frequency ' +
+        'goes negative and the phase runs backwards.',
+      fm_index:
+        'FM depth: how strongly fm modulates the frequency. 0 (the default) ' +
+        'is no FM at all \u2014 turn it up to hear the fm input.',
       sync: 'Hard sync: a rising edge (>= 1 V) resets the phase.',
       waveform: 'Wave select: 0 sine, 1 saw, 2 square, 3 triangle.',
     },
@@ -69,7 +76,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     },
     examples: [
       'pitch <- Quantizer out, audio -> Filter in for a classic subtractive voice.',
-      'audio -> another Oscillator fm for two-operator FM.',
+      'audio -> another Oscillator fm with fm_index up for two-operator FM.',
     ],
   },
   'com.dj.vco': {

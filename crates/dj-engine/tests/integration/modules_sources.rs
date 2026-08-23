@@ -75,6 +75,81 @@ fn source_patch(ext: &str, out_jack: &str) -> Engine {
 }
 
 // ---------------------------------------------------------------------------
+// Oscillator (the basic one)
+// ---------------------------------------------------------------------------
+
+/// Oscillator running at `hz` with `fm` volts at `index` depth.
+fn osc_at(hz: f32, fm: f32, index: f32) -> Engine {
+    let mut e = source_patch("com.dj.oscillator", "audio");
+    e.set_knob_value("src", "pitch", pitch_of(hz)).unwrap();
+    e.set_knob_value("src", "fm", fm).unwrap();
+    e.set_knob_value("src", "fm_index", index).unwrap();
+    e
+}
+
+fn osc_rate(hz: f32, fm: f32, index: f32) -> f32 {
+    let out = render(&mut osc_at(hz, fm, index), 1.0);
+    zero_cross_rate(&out[4_800..])
+}
+
+#[test]
+fn oscillator_fm_is_linear_in_hz_not_volt_per_octave() {
+    // f = f0 * (1 + fm/5 * index): at index 1, +5 V doubles the frequency
+    // and -2.5 V halves it. Exponential (1 V/oct) FM would give 300 * 2^5
+    // and 300 * 2^-2.5 instead.
+    for (fm, want) in [(5.0f32, 600.0f32), (-2.5, 150.0), (0.0, 300.0)] {
+        let got = osc_rate(300.0, fm, 1.0);
+        assert!((got - want).abs() < 2.0, "fm {fm} V: {got} Hz != {want} Hz");
+    }
+
+    // Linear means the deviation is symmetric in Hz (an exponential
+    // response would be symmetric in octaves instead).
+    let up = osc_rate(300.0, 1.0, 1.0);
+    let down = osc_rate(300.0, -1.0, 1.0);
+    assert!(
+        ((up - 300.0) + (down - 300.0)).abs() < 3.0,
+        "deviation not symmetric in Hz: +{up} / {down}"
+    );
+}
+
+#[test]
+fn oscillator_fm_index_sets_the_depth() {
+    // Index 0 (the manifest default) is no FM at all, whatever fm does.
+    assert!(
+        (osc_rate(300.0, 5.0, 0.0) - 300.0).abs() < 2.0,
+        "fm at index 0 must not move the pitch"
+    );
+    // ... and the deviation is proportional to the index.
+    let one = osc_rate(300.0, 2.5, 1.0) - 300.0;
+    let two = osc_rate(300.0, 2.5, 2.0) - 300.0;
+    assert!((one - 150.0).abs() < 2.0, "index 1: deviation {one} Hz");
+    assert!((two - 2.0 * one).abs() < 3.0, "index 2: {two} != 2 * {one}");
+}
+
+#[test]
+fn oscillator_thru_zero_fm_runs_phase_backwards() {
+    // Frequency factor 1 + (-5/5)*2 = -1: the phase runs backwards at the
+    // same rate, so the sine is the time-reverse (negation) of the forward
+    // one rather than a rectified copy of it.
+    let fwd = render(&mut osc_at(300.0, 0.0, 0.0), 0.2);
+    let back = render(&mut osc_at(300.0, -5.0, 2.0), 0.2);
+    let err = fwd
+        .iter()
+        .zip(&back)
+        .map(|(&x, &y)| (x + y).abs())
+        .fold(0.0f32, f32::max);
+    assert!(err < 0.05, "thru-zero sine is not the time-reverse: {err}");
+
+    // A factor of exactly 0 freezes the phase (DC) instead of folding.
+    let frozen = render(&mut osc_at(300.0, -5.0, 1.0), 0.1);
+    assert!(
+        frozen.iter().all(|&v| v == frozen[0]),
+        "frozen phase expected, got peak {}",
+        peak(&frozen)
+    );
+}
+
+// ---------------------------------------------------------------------------
 // VCO
 // ---------------------------------------------------------------------------
 

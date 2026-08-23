@@ -90,7 +90,7 @@ type LayoutFactory = (manifest: Manifest) => PanelLayout;
 /** Per-module layouts, keyed by manifest id. */
 const LAYOUTS: Record<string, LayoutFactory> = {
   'com.dj.oscillator': () => ({
-    groups: [{ inputs: ['pitch', 'fm', 'sync', 'waveform'] }],
+    groups: [{ inputs: ['pitch', 'fm', 'fm_index', 'sync', 'waveform'] }],
   }),
 
   'com.dj.vco': () => ({

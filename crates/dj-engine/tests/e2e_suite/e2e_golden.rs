@@ -111,6 +111,9 @@ fn regen_patches() {
         e.set_knob_position("osc1", "pitch", 0.3).unwrap(); // -2 oct
         e.connect("osc1", "audio", "osc2", "fm").unwrap();
         e.set_knob_atten_offset("osc2", "fm", 0.2, 0.0).unwrap();
+        // Linear thru-zero FM is depth-gated: index 0 (the default) is no
+        // FM at all, so the case has to open it up to modulate anything.
+        e.set_knob_value("osc2", "fm_index", 2.0).unwrap();
         e.connect("osc1", "audio", "osc3", "sync").unwrap();
         e.connect("osc2", "audio", "vca1", "in").unwrap();
         e.set_knob_position("vca1", "cv", 0.4).unwrap();
