@@ -827,7 +827,11 @@ fails if it's missing.
   `PYTORCH_ENABLE_MPS_FALLBACK=1` and the script retries a failed
   checkpoint on the CPU). Successful probes are cached per
   `DJ_BEAT_THIS_PYTHON`, failures are not, so installing the package
-  takes effect without a restart. Overrides: `DJ_BEAT_THIS_PYTHON` /
+  takes effect without a restart. The embedded script calls `Audio2Beats`
+  with SAMPLES it decodes from our temp wav (stdlib `wave` + numpy), never
+  `File2Beats`: beat_this's loader goes through `torchaudio.load`, which
+  torchaudio 2.9 removed, so the path-taking API fails on every file for a
+  current install. Overrides: `DJ_BEAT_THIS_PYTHON` /
   `_DEVICE` (`auto` by default) / `_CHECKPOINTS`, `DJ_BEATIFY_FORCE_DSP=1`
   pins the fallback for tests. Without it the tab runs the built-in DSP tracker — the
   tested default — and the header carries the install hint. Multi-seed

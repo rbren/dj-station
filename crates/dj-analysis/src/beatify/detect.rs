@@ -441,10 +441,24 @@ fn tool_env_pythons() -> Vec<PathBuf> {
 /// The helper run by the interpreter. Kept tiny on purpose: it loads one
 /// checkpoint at a time, discards the downbeats (ANL-3) and prints JSON.
 pub const SCRIPT: &str = r#"
-import json, sys
-from beat_this.inference import File2Beats
+import json, sys, wave
+import numpy as np
+from beat_this.inference import Audio2Beats
 
 path, device = sys.argv[1], sys.argv[2]
+
+# We read the wav ourselves and hand the model SAMPLES rather than a path:
+# beat_this's own loader calls torchaudio.load, and torchaudio dropped its
+# I/O API in 2.9, so File2Beats cannot open any file on a current install.
+with wave.open(path, "rb") as wav:
+    channels, width, sr = wav.getnchannels(), wav.getsampwidth(), wav.getframerate()
+    frames = wav.readframes(wav.getnframes())
+if width != 2:
+    raise SystemExit("expected 16-bit pcm, got %d-bit" % (width * 8))
+signal = np.frombuffer(frames, dtype="<i2").astype(np.float64) / 32768.0
+if channels > 1:
+    signal = signal.reshape(-1, channels)
+
 if device in ("", "auto"):
     import torch
     if torch.cuda.is_available():
@@ -456,7 +470,7 @@ if device in ("", "auto"):
 
 
 def track(ckpt, dev):
-    return File2Beats(checkpoint_path=ckpt, device=dev, dbn=False)(path)[0]
+    return Audio2Beats(checkpoint_path=ckpt, device=dev, dbn=False)(signal, sr)[0]
 
 
 runs = []

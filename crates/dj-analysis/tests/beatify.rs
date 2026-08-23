@@ -601,6 +601,105 @@ fn beat_this_output_is_parsed_and_context_trimmed() {
     }
 }
 
+/// The embedded inference script, against a stand-in for the package.
+///
+/// The script decodes the temp wav ITSELF and hands `Audio2Beats` samples,
+/// because `File2Beats` goes through `torchaudio.load`, which torchaudio
+/// 2.9 removed — a current `beat_this` install cannot open any file. The
+/// stand-in checks what the model would receive and reports it back.
+///
+/// Needs a python3 with numpy; skipped when there is none (nothing in the
+/// suite may depend on the optional dependency being installed).
+#[cfg(unix)]
+#[test]
+fn the_inference_script_hands_the_model_samples_not_a_path() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    let numpy = Command::new("python3")
+        .args(["-c", "import numpy"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !numpy {
+        eprintln!("skipping: no python3 with numpy");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pkg = dir.path().join("beat_this");
+    std::fs::create_dir_all(&pkg).expect("mkdir");
+    std::fs::write(pkg.join("__init__.py"), "").expect("init");
+    let report = dir.path().join("seen.json");
+    std::fs::write(
+        pkg.join("inference.py"),
+        format!(
+            r#"
+import json
+import numpy as np
+
+
+class Audio2Beats:
+    def __init__(self, checkpoint_path="final0", device="cpu", float16=False, dbn=False):
+        self.ckpt = checkpoint_path
+        self.device = device
+
+    def __call__(self, signal, sr):
+        assert signal.dtype == np.float64, signal.dtype
+        assert abs(signal).max() <= 1.0, abs(signal).max()
+        with open({report:?}, "w") as f:
+            json.dump({{"sr": sr, "samples": int(signal.shape[0]),
+                        "channels": int(signal.shape[1]) if signal.ndim == 2 else 1,
+                        "device": self.device}}, f)
+        beats = np.arange(0.0, signal.shape[0] / sr, 0.5)
+        return beats, beats[::4]
+"#,
+            report = report.to_str().unwrap()
+        ),
+    )
+    .expect("inference");
+    // The script asks torch for a device when none was forced.
+    std::fs::write(
+        dir.path().join("torch.py"),
+        "import types\n\
+         cuda = types.SimpleNamespace(is_available=lambda: False)\n\
+         backends = types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: False))\n",
+    )
+    .expect("torch");
+
+    // An interpreter that only differs from python3 by seeing the fake.
+    let python = dir.path().join("python-with-fake");
+    let mut f = std::fs::File::create(&python).expect("create");
+    writeln!(
+        f,
+        "#!/bin/sh\nPYTHONPATH={} exec python3 \"$@\"",
+        dir.path().display()
+    )
+    .expect("write");
+    drop(f);
+    std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let audio = click_track(&drifting_beats(120.0, 120.0, 24, 0.5), 1.0);
+    let tracker = beatify::detect::BeatThisTracker::with_python(python.to_str().unwrap());
+    let runs = tracker.detect(&audio, Some((4.0, 8.0))).expect("detect");
+    assert_eq!(runs.len(), 3, "one run per seeded checkpoint");
+    assert!(runs.iter().all(|r| !r.beats.is_empty()));
+
+    let seen: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&report).expect("report")).expect("json");
+    assert_eq!(seen["sr"].as_u64().unwrap() as u32, audio.sample_rate);
+    assert_eq!(
+        seen["channels"].as_u64().unwrap() as usize,
+        audio.channels.len()
+    );
+    assert_eq!(seen["device"].as_str(), Some("cpu"));
+    // The region plus the context read around it (ANL-2a), never the file.
+    let secs = seen["samples"].as_f64().unwrap() / audio.sample_rate as f64;
+    let expected = 4.0 + 2.0 * beatify::detect::CONTEXT_SECS;
+    assert!((secs - expected).abs() < 0.05, "{secs} vs {expected}");
+}
+
 #[cfg(unix)]
 #[test]
 fn a_launcher_script_names_the_interpreter_that_owns_the_package() {
