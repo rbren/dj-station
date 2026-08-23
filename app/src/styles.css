@@ -1372,6 +1372,87 @@ body {
   font-size: 0.8rem;
 }
 
+/* In-flight search indicator (provider searches shell out to yt-dlp and
+   can take seconds). */
+.search-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #8a93a2;
+  font-size: 0.85rem;
+}
+
+.search-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #2a2f38;
+  border-top-color: #62d0ff;
+  border-radius: 50%;
+  animation: search-spin 0.8s linear infinite;
+}
+
+@keyframes search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Downloads panel: the backend job queue (running + recently finished). */
+.download-queue ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.download-job {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #1b1e24;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.download-job-title {
+  flex: 1;
+}
+
+.download-job-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #62d0ff;
+  font-size: 0.8rem;
+}
+
+.download-bar {
+  width: 120px;
+  height: 6px;
+  background: #14161a;
+  border: 1px solid #2a2f38;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.download-bar-fill {
+  display: block;
+  height: 100%;
+  background: #62d0ff;
+  transition: width 0.3s ease;
+}
+
+.tag-download-done {
+  color: #7dd88f;
+}
+
+.tag-download-failed {
+  color: #e08f8f;
+}
+
 .provider-results ul {
   list-style: none;
   padding: 0;

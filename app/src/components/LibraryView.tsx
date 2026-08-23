@@ -35,6 +35,37 @@ function downloadLabel(job: DownloadJob): string {
   return `${job.stage}…`;
 }
 
+// One row of the Downloads panel: a running job shows its progress (bar +
+// percentage when the size is known, the stage otherwise); a finished one
+// shows its outcome.
+function DownloadRow({ job }: { job: DownloadJob }) {
+  return (
+    <li className={`download-job download-job-${job.state}`} data-testid="download-job">
+      <span className="download-job-title">{job.title}</span>
+      <SourceTag source={job.provider} />
+      {job.state === 'running' ? (
+        <span className="download-job-progress" data-testid="download-job-progress">
+          <span className="download-bar">
+            <span
+              className="download-bar-fill"
+              style={{ width: `${Math.round((job.fraction ?? 0) * 100)}%` }}
+            />
+          </span>
+          {downloadLabel(job)}
+        </span>
+      ) : (
+        <span
+          className={`tag tag-download tag-download-${job.state}`}
+          data-testid="download-job-state"
+          data-tip={job.error ?? undefined}
+        >
+          {job.state === 'done' ? 'in library' : 'failed'}
+        </span>
+      )}
+    </li>
+  );
+}
+
 function LicenseTag({ kind }: { kind: string }) {
   return (
     <span className={`tag tag-license tag-license-${kind}`} data-testid="license-tag">
@@ -65,6 +96,7 @@ export function LibraryView({ client }: LibraryViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [results, setResults] = useState<TrackResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
   const [watching, setWatching] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -125,21 +157,28 @@ export function LibraryView({ client }: LibraryViewProps) {
   const runSearch = useCallback(async () => {
     setStatus(null);
     setError(null);
-    if (!active) {
-      await refreshTracks(query);
-      return;
-    }
-    const selected: Record<string, string> = {};
-    for (const f of active.filters) {
-      const v = filters[`${active.id}:${f.id}`];
-      if (v) selected[f.id] = v;
-    }
+    // Provider searches can take seconds (yt-dlp is a subprocess); the
+    // loading state covers every tab so a slow local query shows it too.
+    setSearching(true);
     try {
-      const remote = await client.searchProvider(active.id, query, selected);
-      if (remote) setResults(remote);
-    } catch (e) {
-      setError(`${active.name}: ${errorMessage(e)}`);
-      setResults([]);
+      if (!active) {
+        await refreshTracks(query);
+        return;
+      }
+      const selected: Record<string, string> = {};
+      for (const f of active.filters) {
+        const v = filters[`${active.id}:${f.id}`];
+        if (v) selected[f.id] = v;
+      }
+      try {
+        const remote = await client.searchProvider(active.id, query, selected);
+        if (remote) setResults(remote);
+      } catch (e) {
+        setError(`${active.name}: ${errorMessage(e)}`);
+        setResults([]);
+      }
+    } finally {
+      setSearching(false);
     }
   }, [active, client, filters, query, refreshTracks]);
 
@@ -165,6 +204,22 @@ export function LibraryView({ client }: LibraryViewProps) {
     if (finished) await refreshTracks('');
     return list.some((j) => j.state === 'running');
   }, [client, refreshTracks]);
+
+  // Seed the Downloads panel on mount: jobs live in the backend and
+  // survive view switches, so the queue and recent outcomes reappear.
+  // Jobs already finished are pre-announced — their status/error banners
+  // were shown when they landed (or belong to a previous session).
+  useEffect(() => {
+    void (async () => {
+      const list = await client.downloadJobs();
+      if (!list) return;
+      for (const job of list) {
+        if (job.state !== 'running') announced.current.add(job.id);
+      }
+      setJobs(list);
+      if (list.some((j) => j.state === 'running')) setWatching(true);
+    })();
+  }, [client]);
 
   useEffect(() => {
     if (!watching) return;
@@ -245,8 +300,8 @@ export function LibraryView({ client }: LibraryViewProps) {
           onChange={(e) => setQuery(e.target.value)}
           data-testid="library-search-input"
         />
-        <button type="submit" data-testid="library-search-button">
-          Search
+        <button type="submit" disabled={searching} data-testid="library-search-button">
+          {searching ? 'Searching…' : 'Search'}
         </button>
       </form>
 
@@ -274,6 +329,13 @@ export function LibraryView({ client }: LibraryViewProps) {
         </div>
       )}
 
+      {searching && (
+        <p className="search-loading" data-testid="search-loading">
+          <span className="search-spinner" aria-hidden="true" />
+          Searching {active ? active.name : 'local library'}…
+        </p>
+      )}
+
       {status && (
         <p className="library-status" data-testid="library-status">
           {status}
@@ -283,6 +345,17 @@ export function LibraryView({ client }: LibraryViewProps) {
         <p className="library-errors" data-testid="provider-error">
           {error}
         </p>
+      )}
+
+      {jobs.length > 0 && (
+        <div className="download-queue" data-testid="download-queue">
+          <h2>Downloads</h2>
+          <ul>
+            {[...jobs].reverse().map((job) => (
+              <DownloadRow key={job.id} job={job} />
+            ))}
+          </ul>
+        </div>
       )}
 
       {active && results.length > 0 && (

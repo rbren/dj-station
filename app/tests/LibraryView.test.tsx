@@ -200,6 +200,20 @@ const PROVIDERS: ProviderInfo[] = [
   },
 ];
 
+// A client whose download jobs appear only once startDownload is called —
+// the backend's real behavior (the view also fetches jobs on mount, so a
+// static job list would look like a pre-existing download).
+function mockClientWithJob(job: DownloadJob) {
+  const jobs: DownloadJob[] = [];
+  return mockClient({
+    downloadJobs: vi.fn().mockImplementation(() => Promise.resolve([...jobs])),
+    startDownload: vi.fn().mockImplementation(() => {
+      jobs.push(job);
+      return Promise.resolve(job.id);
+    }),
+  });
+}
+
 function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi {
   return {
     tracks: vi.fn().mockResolvedValue([LOCAL_TRACK]),
@@ -337,7 +351,7 @@ describe('LibraryView', () => {
   });
 
   it('Download queues a background job and refreshes the list when it lands', async () => {
-    const client = mockClient();
+    const client = mockClientWithJob(doneJob());
     render(<LibraryView client={client} />);
     await searchStore('freesound', 'amen');
     fireEvent.click(screen.getByTestId('download-button'));
@@ -353,7 +367,7 @@ describe('LibraryView', () => {
     expect(client.tracks).toHaveBeenCalledTimes(2);
   });
 
-  it('shows per-result progress while a download job runs', async () => {
+  it('shows per-result and queue progress while a download job runs', async () => {
     const running: DownloadJob = doneJob({
       provider: 'youtube',
       result_id: 'dQw4w9WgXcQ',
@@ -363,13 +377,17 @@ describe('LibraryView', () => {
       stage: 'downloading',
       track_id: null,
     });
-    const client = mockClient({ downloadJobs: vi.fn().mockResolvedValue([running]) });
+    const client = mockClientWithJob(running);
     render(<LibraryView client={client} />);
     await searchStore('youtube', 'amen break');
     fireEvent.click(screen.getByTestId('download-button'));
     await waitFor(() => expect(screen.getByTestId('download-button').textContent).toBe('42%'));
     // A running job's button is inert, so one click can't fetch twice.
     expect(screen.getByTestId('download-button')).toHaveProperty('disabled', true);
+    // The Downloads panel shows the queued job with its progress.
+    const row = screen.getByTestId('download-job');
+    expect(row.textContent).toContain('Amen Break - 174 BPM Loop');
+    expect(screen.getByTestId('download-job-progress').textContent).toBe('42%');
     // Nothing landed yet: no completion status, no re-query of the list.
     expect(client.tracks).toHaveBeenCalledTimes(1);
   });
@@ -385,7 +403,7 @@ describe('LibraryView', () => {
       error: '`yt-dlp` not found — install yt-dlp or set DJ_YTDLP_BIN to its path',
       track_id: null,
     });
-    const client = mockClient({ downloadJobs: vi.fn().mockResolvedValue([failed]) });
+    const client = mockClientWithJob(failed);
     render(<LibraryView client={client} />);
     await searchStore('youtube', 'amen break');
     fireEvent.click(screen.getByTestId('download-button'));
@@ -394,6 +412,73 @@ describe('LibraryView', () => {
     );
     expect(screen.getAllByTestId('provider-result')).toHaveLength(1);
     expect(screen.getByTestId('download-button').textContent).toBe('Download');
+    // The failed job stays visible in the Downloads panel.
+    expect(screen.getByTestId('download-job-state').textContent).toBe('failed');
+  });
+
+  it('shows recent downloads from the backend on mount without re-announcing them', async () => {
+    // The default mock reports one finished job — e.g. a download that
+    // landed before the user switched views.
+    const client = mockClient();
+    render(<LibraryView client={client} />);
+    await waitFor(() => expect(screen.getByTestId('download-queue')).toBeTruthy());
+    const row = screen.getByTestId('download-job');
+    expect(row.textContent).toContain('amen break 174bpm');
+    expect(screen.getByTestId('download-job-state').textContent).toBe('in library');
+    // Its outcome was announced when it landed — no stale status banner.
+    expect(screen.queryByTestId('library-status')).toBeNull();
+  });
+
+  it('shows a loading state while a store search is in flight', async () => {
+    let resolveSearch!: (r: TrackResult[]) => void;
+    const client = mockClient({
+      searchProvider: vi
+        .fn()
+        .mockImplementation(
+          () => new Promise<TrackResult[]>((resolve) => (resolveSearch = resolve)),
+        ),
+    });
+    render(<LibraryView client={client} />);
+    await openTab('youtube');
+    fireEvent.change(screen.getByTestId('library-search-input'), {
+      target: { value: 'amen break' },
+    });
+    fireEvent.click(screen.getByTestId('library-search-button'));
+    await waitFor(() =>
+      expect(screen.getByTestId('search-loading').textContent).toContain('Searching YouTube'),
+    );
+    // The button is inert while the subprocess runs (yt-dlp can take
+    // seconds) — a double click must not fire a second search.
+    const button = screen.getByTestId('library-search-button');
+    expect(button).toHaveProperty('disabled', true);
+    expect(button.textContent).toBe('Searching…');
+    fireEvent.click(button);
+    expect(client.searchProvider).toHaveBeenCalledTimes(1);
+
+    resolveSearch([YOUTUBE_RESULT]);
+    await waitFor(() => expect(screen.getAllByTestId('provider-result')).toHaveLength(1));
+    expect(screen.queryByTestId('search-loading')).toBeNull();
+    expect(button.textContent).toBe('Search');
+  });
+
+  it('shows the loading state for local library searches too', async () => {
+    let resolveSearch!: (t: Track[]) => void;
+    const client = mockClient({
+      search: vi
+        .fn()
+        .mockImplementation(() => new Promise<Track[]>((resolve) => (resolveSearch = resolve))),
+    });
+    render(<LibraryView client={client} />);
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
+    fireEvent.change(screen.getByTestId('library-search-input'), {
+      target: { value: 'basement' },
+    });
+    fireEvent.click(screen.getByTestId('library-search-button'));
+    await waitFor(() =>
+      expect(screen.getByTestId('search-loading').textContent).toContain('local library'),
+    );
+    resolveSearch([LOCAL_TRACK]);
+    await waitFor(() => expect(screen.queryByTestId('search-loading')).toBeNull());
   });
 
   it('YouTube results show a thumbnail, channel, duration, and a Download action', async () => {
