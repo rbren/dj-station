@@ -48,20 +48,34 @@ export interface WaveformViewProps {
   onSeek?(positionSecs: number): void;
 }
 
+/** One column per viewBox unit at most: past this the path is bytes the
+ *  screen cannot show. */
+const MAX_PATH_STEPS = W;
+
 /** Symmetric min/max polygon for a peak window — shared with the Clip
- *  page's editor waveform so both read the same. */
+ *  page's editor waveform so both read the same.
+ *
+ *  from/to are fractions of the track. Columns come from the peaks
+ *  ALREADY IN HAND: zooming in draws more of them (up to one per bucket)
+ *  rather than stretching a fixed 200, and zooming out takes the loudest
+ *  bucket per column rather than sampling one and aliasing the rest — a
+ *  peak display that misses the peaks is worse than a coarse one. */
 export function peaksPath(peaks: number[], from: number, to: number, height: number): string {
-  // from/to are fractions of the track; draw a symmetric min/max polygon.
   const n = peaks.length;
   if (n === 0 || to <= from) return '';
   const mid = height / 2;
+  const span = to - from;
+  const steps = Math.max(1, Math.min(MAX_PATH_STEPS, Math.round(span * n)));
   const top: string[] = [];
   const bottom: string[] = [];
-  const steps = 200;
   for (let s = 0; s <= steps; s++) {
-    const frac = from + ((to - from) * s) / steps;
-    const idx = Math.min(n - 1, Math.max(0, Math.floor(frac * n)));
-    const p = frac >= 0 && frac <= 1 ? peaks[idx] : 0;
+    const frac = from + (span * s) / steps;
+    let p = 0;
+    if (frac >= 0 && frac <= 1) {
+      const lo = Math.min(n - 1, Math.max(0, Math.floor(frac * n)));
+      const hi = Math.min(n - 1, Math.max(lo, Math.floor((frac + span / steps) * n) - 1));
+      for (let i = lo; i <= hi; i++) p = Math.max(p, peaks[i]);
+    }
     const x = (s / steps) * W;
     top.push(`${x},${mid - p * mid}`);
     bottom.unshift(`${x},${mid + p * mid}`);

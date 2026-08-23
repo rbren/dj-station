@@ -3126,18 +3126,69 @@ body {
   stroke-width: 2;
 }
 
-/* Drag either end to expand or shrink the selection. Pointer events stay
-   off: startDrag hit-tests the same radius on the waveform itself, so the
-   handles never swallow a click that lands between them. */
+/* The grab zone for either end of the selection: invisible, and only as
+   wide as startDrag's hit-test radius. It takes pointer events purely so
+   the cursor turns — mousedown still bubbles to the waveform, which does
+   the hit-testing, so it cannot swallow a click. */
 .clip-selection-handle {
-  fill: #5a8dee;
-  fill-opacity: 0.55;
-  cursor: col-resize;
+  fill: transparent;
+  cursor: ew-resize;
+}
+
+/* What you actually aim at: a hairline, kept 2px however far the viewBox
+   is stretched. It brightens with the pointer over the waveform so the
+   ends read as grabbable. */
+.clip-selection-edge {
+  stroke: #9dc0ff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
 
-.clip-waveform:hover .clip-selection-handle {
-  fill-opacity: 0.9;
+.clip-waveform:hover .clip-selection-edge {
+  stroke: #dce8ff;
+}
+
+.clip-grid {
+  stroke: #ffffff;
+  stroke-width: 1;
+  opacity: 0.05;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* Time ruler over the waveform. Marks are absolutely positioned by
+   percentage, so they follow the viewport without re-laying out. */
+.clip-ruler {
+  position: relative;
+  height: 18px;
+  overflow: hidden;
+  border-bottom: 1px solid #2a2f38;
+  user-select: none;
+}
+
+.clip-tick {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 4px;
+  border-left: 1px solid #39404d;
+}
+
+.clip-tick-major {
+  height: 9px;
+  border-left-color: #5b6577;
+}
+
+.clip-tick-label {
+  position: absolute;
+  bottom: 8px;
+  left: 3px;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1;
+  color: #8b94a6;
+  white-space: nowrap;
 }
 
 .clip-level-line {

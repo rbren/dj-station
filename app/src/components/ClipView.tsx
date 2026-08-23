@@ -12,7 +12,7 @@
 // with display: none) so the edit survives tab switches; `active` gates
 // its keyboard shortcuts and pauses playback on the way out.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import {
   addOverlay,
@@ -33,6 +33,7 @@ import {
   removeRegion,
   resizeSelection,
   reverseRange,
+  rulerTicks,
   selectionEdgeAt,
   setLevelPoint,
   sourceLabel,
@@ -173,10 +174,15 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
 
   // What the transport needs to read at CALL time, not at render time: the
   // host closes over this ref so a single transport instance survives every
-  // edit. Updated in an effect that runs before the ones that issue
-  // commands, so a command always sees the render it was triggered by.
+  // edit.
+  //
+  // The mirror is updated in a LAYOUT effect, which React flushes during
+  // the commit. A passive effect is flushed later — after the browser can
+  // dispatch the next click — so pressing play in that gap read the
+  // previous render's duration, computed an empty window, and silently
+  // played nothing.
   const live = useRef({ clip, request, duration });
-  useEffect(() => {
+  useLayoutEffect(() => {
     live.current = { clip, request, duration };
   });
 
@@ -695,6 +701,9 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
   // The preview belongs to the current edit only; an emptied program has none.
   const preview = program.regions.length === 0 ? null : previewState;
   const peaks = preview?.peaks ?? [];
+  // Ruler marks for whatever is on screen. Recomputed from the viewport
+  // alone, so zooming and scrolling move them with the audio.
+  const ticks = useMemo(() => rulerTicks(vpStart, vpEnd), [vpStart, vpEnd]);
   /** Can the picked track be loaded stem by stem right now? */
   const stemsReady = pick !== null && separated[pick] === true;
   const xOf = (secs: number) => (vpLen > 0 ? ((secs - vpStart) / vpLen) * W : 0);
@@ -862,6 +871,22 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
           </div>
 
           <div className="clip-timeline">
+            {/* The ruler is HTML, not SVG: the waveform's viewBox is
+                stretched to the pane width (preserveAspectRatio="none"),
+                which would squash text with it. Percentages track the
+                viewport, so the marks follow every zoom and scroll. */}
+            <div className="clip-ruler" data-testid="clip-ruler">
+              {ticks.map((t) => (
+                <span
+                  key={t.secs}
+                  className={t.major ? 'clip-tick clip-tick-major' : 'clip-tick'}
+                  style={{ left: `${((t.secs - vpStart) / Math.max(1e-9, vpLen)) * 100}%` }}
+                  data-testid={t.major ? `clip-tick-${fixed(t.secs, 3)}` : undefined}
+                >
+                  {t.major && <i className="clip-tick-label">{t.label}</i>}
+                </span>
+              ))}
+            </div>
             <svg
               ref={waveRef}
               data-testid="clip-waveform"
@@ -889,6 +914,20 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
                   duration > 0 ? peaksPath(peaks, vpStart / duration, vpEnd / duration, WAVE_H) : ''
                 }
               />
+              {/* The ruler's labelled marks, carried across the audio so a
+                  time can be read off the waveform itself. */}
+              {ticks
+                .filter((t) => t.major)
+                .map((t) => (
+                  <line
+                    key={`grid${t.secs}`}
+                    className="clip-grid"
+                    x1={xOf(t.secs)}
+                    x2={xOf(t.secs)}
+                    y1={0}
+                    y2={WAVE_H}
+                  />
+                ))}
               {program.overlays.map((o, i) => (
                 <rect
                   key={`ov${i}`}
@@ -910,19 +949,30 @@ export function ClipView({ clip, library, active = true, onSaved }: ClipViewProp
                     width={Math.max(1, xOf(sel.end) - xOf(sel.start))}
                     height={WAVE_H}
                   />
-                  {/* Grab affordances: the drag itself is hit-tested in
-                      startDrag against the same radius, so these are
-                      purely what you see (and where you aim). */}
+                  {/* A hairline you aim at, over a wide invisible zone you
+                      can actually hit. startDrag hit-tests the same radius,
+                      so the zone only has to exist for the cursor to change
+                      over it — which is the only hint that the edge is
+                      draggable. */}
                   {(['start', 'end'] as const).map((edge) => (
-                    <rect
-                      key={edge}
-                      data-testid={`clip-selection-handle-${edge}`}
-                      className="clip-selection-handle"
-                      x={xOf(edge === 'start' ? sel.start : sel.end) - HANDLE_PX / 2}
-                      y={0}
-                      width={HANDLE_PX}
-                      height={WAVE_H}
-                    />
+                    <g key={edge}>
+                      <rect
+                        data-testid={`clip-selection-handle-${edge}`}
+                        className="clip-selection-handle"
+                        x={xOf(edge === 'start' ? sel.start : sel.end) - HANDLE_PX / 2}
+                        y={0}
+                        width={HANDLE_PX}
+                        height={WAVE_H}
+                      />
+                      <line
+                        data-testid={`clip-selection-edge-${edge}`}
+                        className="clip-selection-edge"
+                        x1={xOf(edge === 'start' ? sel.start : sel.end)}
+                        x2={xOf(edge === 'start' ? sel.start : sel.end)}
+                        y1={0}
+                        y2={WAVE_H}
+                      />
+                    </g>
                   ))}
                 </>
               )}

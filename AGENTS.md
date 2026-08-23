@@ -676,7 +676,18 @@ fails if it's missing.
   Selection changes re-fetch too, so a loop follows its edges live, and
   clicking the waveform `seek`s (jumping live playback, not just parking
   the cursor) — the transport owns the playhead, so nothing else may
-  write it.
+  write it. The host reads the live edit through a ref mirror that MUST be
+  refreshed in a `useLayoutEffect`, not a passive one: passive effects are
+  flushed after the browser can dispatch the next click, so a play that
+  landed in that gap read the PREVIOUS render's duration, computed an
+  empty window and silently played nothing (~1 in 6 in the suite).
+  The waveform draws from the peaks already in hand — `peaksPath` takes
+  one column per bucket in view (capped at the viewBox width) and pools
+  the loudest bucket per column, so zooming reveals detail instead of
+  stretching a fixed 200 steps, and zooming out cannot step over a
+  transient. Timing marks come from `rulerTicks` (pure, in `clip.ts`) and
+  render as HTML over the stretched SVG, whose `preserveAspectRatio="none"`
+  would squash text.
   Sources are `{track_id, stem}` pairs, not bare ids: the picker can open
   ONE ISOLATED STEM of a track (`clip_stem_*` commands over `StemJobs`)
   and edit it exactly like a full mix — the stem is part of the cache key,

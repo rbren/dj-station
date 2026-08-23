@@ -484,6 +484,58 @@ export function resizeSelection(
 }
 
 // ---------------------------------------------------------------------------
+// Time ruler
+// ---------------------------------------------------------------------------
+
+/** Tick spacings that read as round times, from a hundredth of a second
+ *  (fully zoomed in) to ten minutes. Thirds of a minute are in there
+ *  because 15 s and 30 s labels beat 20 s ones on a music timeline. */
+const TICK_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+
+/** A labelled mark on the time ruler. `major` ticks carry the label. */
+export interface TimeTick {
+  secs: number;
+  label: string;
+  major: boolean;
+}
+
+/** Seconds as a ruler label, no more precise than `step` warrants:
+ *  `1:30` at whole-second spacing, `1:30.5` at tenths, `1:30.25` below. */
+export function tickLabel(secs: number, step: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs - m * 60;
+  const decimals = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
+  const pad = decimals === 0 ? 2 : decimals + 3;
+  return `${m}:${s.toFixed(decimals).padStart(pad, '0')}`;
+}
+
+/** Ticks for the visible window [from, to], aiming for about `target`
+ *  labels: the step is the coarsest one that still gets there, so the
+ *  labels stay put as you zoom instead of crawling. Minor ticks subdivide
+ *  each step in halves (fifths where the step is a 5, which subdivides
+ *  1-2-5 evenly) and carry no label. */
+export function rulerTicks(from: number, to: number, target = 8): TimeTick[] {
+  const span = to - from;
+  if (!Number.isFinite(span) || span <= 0 || target < 1) return [];
+  const ideal = span / target;
+  const step = TICK_STEPS.find((s) => s >= ideal) ?? TICK_STEPS[TICK_STEPS.length - 1];
+  const mantissa = step / 10 ** Math.floor(Math.log10(step));
+  const minors = Math.abs(mantissa - 5) < 1e-9 ? 5 : 2;
+  const sub = step / minors;
+  const ticks: TimeTick[] = [];
+  const first = Math.ceil(from / sub - 1e-9);
+  const last = Math.floor(to / sub + 1e-9);
+  for (let i = first; i <= last; i++) {
+    // Snap away the dust i*sub leaves (3 * 0.005 is not 0.015), or a label
+    // lands on 0:00.99 instead of 0:01.00.
+    const at = Number((i * sub).toFixed(6));
+    const major = Math.abs(at / step - Math.round(at / step)) < 1e-6;
+    ticks.push({ secs: at, label: major ? tickLabel(at, step) : '', major });
+  }
+  return ticks;
+}
+
+// ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
 

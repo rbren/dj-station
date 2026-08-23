@@ -341,6 +341,46 @@ describe('ClipView', () => {
     expect(wave.getAttribute('data-vp-end')).toBe('10.000');
   });
 
+  it('rules the timeline with marks that follow the zoom', async () => {
+    await openTrack(clipMock());
+    const ruler = screen.getByTestId('clip-ruler');
+    const labels = () => [...ruler.querySelectorAll('.clip-tick-label')].map((n) => n.textContent);
+    // Ten seconds fit: labels every two seconds, 0:00 at the left edge.
+    expect(labels()).toEqual(['0:00', '0:02', '0:04', '0:06', '0:08', '0:10']);
+    expect(screen.getByTestId('clip-tick-0.000').getAttribute('style')).toContain('left: 0%');
+    expect(screen.getByTestId('clip-tick-4.000').getAttribute('style')).toContain('left: 40%');
+
+    // Zoomed to 2–7 s, the marks are the ones in view, repositioned —
+    // 5 s now sits 60% across, not 50%.
+    select(2, 6);
+    fireEvent.click(screen.getByTestId('clip-zoom-in'));
+    expect(labels()).toEqual(['0:02', '0:03', '0:04', '0:05', '0:06', '0:07']);
+    expect(screen.getByTestId('clip-tick-5.000').getAttribute('style')).toContain('left: 60%');
+    expect(screen.queryByTestId('clip-tick-0.000')).toBeNull();
+  });
+
+  it('marks the selection ends with hairlines over a grab zone', async () => {
+    await openTrack(clipMock());
+    select(2, 6);
+    const wave = sizeTimeline('clip-waveform');
+    for (const edge of ['start', 'end'] as const) {
+      const line = screen.getByTestId(`clip-selection-edge-${edge}`);
+      // A hairline, not a slab: the same x both sides, and it stays a
+      // hairline however far the viewBox is stretched.
+      expect(line.getAttribute('x1')).toBe(line.getAttribute('x2'));
+      // The zone you can hit is wider than the line you can see.
+      const zone = screen.getByTestId(`clip-selection-handle-${edge}`);
+      expect(Number(zone.getAttribute('width'))).toBeGreaterThan(2);
+    }
+    // The grab zone takes pointer events (so the cursor can change) but
+    // still lets the waveform hit-test the drag.
+    fireEvent.mouseDown(screen.getByTestId('clip-selection-handle-end'), { clientX: 600 });
+    fireEvent.mouseMove(window, { clientX: 800 });
+    fireEvent.mouseUp(window);
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:02.00–0:08.00');
+    expect(wave).toBeTruthy();
+  });
+
   it('splices a second library track onto the end', async () => {
     const clip = clipMock();
     await openTrack(clip);

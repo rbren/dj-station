@@ -18,6 +18,7 @@ import {
   programDuration,
   regionSpans,
   removeOverlay,
+  rulerTicks,
   resizeSelection,
   reverseRange,
   selectionEdgeAt,
@@ -220,5 +221,67 @@ describe('selection edges', () => {
     expect(resizeSelection(sel, 'start', 8, 10)).toEqual({ start: 6, end: 8 });
     expect(resizeSelection(sel, 'end', 99, 10)).toEqual({ start: 3, end: 10 });
     expect(resizeSelection(sel, 'start', -5, 10)).toEqual({ start: 0, end: 6 });
+  });
+});
+
+describe('ruler ticks', () => {
+  const majors = (from: number, to: number, target?: number) =>
+    rulerTicks(from, to, target)
+      .filter((t) => t.major)
+      .map((t) => t.label);
+
+  it('labels round times at a spacing the zoom warrants', () => {
+    expect(majors(0, 60)).toEqual(['0:00', '0:10', '0:20', '0:30', '0:40', '0:50', '1:00']);
+    // Zoomed to four seconds: half-second labels, not four one-second ones.
+    expect(majors(0, 4)).toEqual([
+      '0:00.0',
+      '0:00.5',
+      '0:01.0',
+      '0:01.5',
+      '0:02.0',
+      '0:02.5',
+      '0:03.0',
+      '0:03.5',
+      '0:04.0',
+    ]);
+  });
+
+  it('only labels ticks that fall inside the window', () => {
+    const ticks = rulerTicks(12.3, 27.8);
+    expect(ticks.every((t) => t.secs >= 12.3 && t.secs <= 27.8)).toBe(true);
+    expect(majors(12.3, 27.8)).toEqual(['0:14', '0:16', '0:18', '0:20', '0:22', '0:24', '0:26']);
+  });
+
+  it('subdivides between labels without labelling the minors', () => {
+    const ticks = rulerTicks(0, 60);
+    expect(ticks.filter((t) => !t.major).every((t) => t.label === '')).toBe(true);
+    // 10 s steps are subdivided in halves.
+    expect(ticks.map((t) => t.secs)).toContain(5);
+    expect(ticks.map((t) => t.secs)).toContain(55);
+  });
+
+  it('keeps labels on exact times when zoomed to hundredths', () => {
+    expect(majors(0.995, 1.06)).toEqual([
+      '0:01.00',
+      '0:01.01',
+      '0:01.02',
+      '0:01.03',
+      '0:01.04',
+      '0:01.05',
+      '0:01.06',
+    ]);
+  });
+
+  it('has nothing to draw for an empty or backwards window', () => {
+    expect(rulerTicks(5, 5)).toEqual([]);
+    expect(rulerTicks(9, 3)).toEqual([]);
+    expect(rulerTicks(0, Number.NaN)).toEqual([]);
+  });
+
+  it('stops coarsening at ten minutes for a very long clip', () => {
+    const labels = majors(0, 7200);
+    expect(labels[0]).toBe('0:00');
+    expect(labels[1]).toBe('10:00');
+    expect(labels[labels.length - 1]).toBe('120:00');
   });
 });
