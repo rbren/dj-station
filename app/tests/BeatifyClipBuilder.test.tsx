@@ -689,6 +689,17 @@ describe('saving', () => {
     await screen.findByTestId('beatify-clip-source-clip:1');
   });
 
+  // The clip in the list under that name is the receipt; a line saying
+  // "Saved" is the same news twice, and the note line has refusals to
+  // carry.
+  it('does not congratulate you for saving', async () => {
+    await mount();
+    await fourBeatsAt(0);
+    await saveAs('Intro loop');
+    expect(screen.queryByTestId('beatify-clip-note')).toBeNull();
+    expect(screen.getByTestId('beatify-clip-source-clip:1').textContent).toContain('Intro loop');
+  });
+
   it('refuses to save an empty clip', async () => {
     const clips = await mount();
     fireEvent.click(screen.getByTestId('beatify-clip-save'));

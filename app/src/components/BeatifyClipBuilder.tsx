@@ -408,7 +408,9 @@ export function BeatifyClipBuilder({
     // to learn it, or the next save would file a second copy and Delete
     // would have nothing to delete.
     setDraft((cur) => ({ ...cur, id: filed.id }));
-    setNote(`Saved "${draft.name}"`);
+    // No "Saved X": the clip is in the list on the left under that name,
+    // which is the receipt. The note line is for refusals and hints.
+    setNote(null);
   }, [clips, draft, projectId]);
 
   /** Delete the clip this draft came from. The material stays on screen,
@@ -424,7 +426,9 @@ export function BeatifyClipBuilder({
     if (picked === `clip:${draft.id}`) {
       setPicked(project.seeds[0] ? seedSourceId(project.seeds[0].id) : '');
     }
-    setNote(`Deleted "${draft.name}" — what is on the grid is now unsaved`);
+    // Not a congratulation: the file is gone but the material is still on
+    // the grid, and only this says so.
+    setNote(`"${draft.name}" is deleted — what is on the grid is now unsaved`);
   }, [clips, draft, picked, project.seeds, projectId]);
 
   /** Clear the desk: a new, empty clip, and silence. */

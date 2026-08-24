@@ -8,6 +8,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BeatifyClipClientApi } from '../src/beatifyClip';
 import { BeatifyView } from '../src/components/BeatifyView';
+import { MAX_PROJECT_BPM, MIN_PROJECT_BPM } from '../src/beatify';
 import type {
   BeatifyAnalysis,
   BeatifyClientApi,
@@ -560,6 +561,20 @@ describe('Beatify tab', () => {
     expect(screen.queryByTestId('beatify-status')).toBeNull();
   });
 
+  // Nothing on this page congratulates the user: the page IS the receipt.
+  // Failures are not silent either — every beatify command goes through
+  // `ipc.ts`, which puts a failed one in the banner and the console.
+  it('has no success line to congratulate anybody with', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-close-project'));
+    await screen.findByTestId('beatify-projects');
+    fireEvent.click(await screen.findByTestId('beatify-project-delete-p1'));
+    await waitFor(() => expect(client.deleteProject).toHaveBeenCalled());
+    expect(screen.queryByTestId('beatify-status')).toBeNull();
+    expect(document.body.textContent).not.toContain('Deleted');
+  });
+
   it('loops the region it auditions and takes the spacebar (MOD-A16/A18)', async () => {
     const client = clientMock();
     await openTrack(client);
@@ -726,9 +741,12 @@ describe('beatify projects', () => {
     await waitFor(() =>
       expect(client.setProjectBpm).toHaveBeenCalledWith('p1', 128, expect.any(Number)),
     );
+    // The box now reads 128 and every seed is re-rendered: no banner
+    // announces what the page is already showing.
     await waitFor(() =>
-      expect(screen.getByTestId('beatify-status').textContent).toContain('clips are unchanged'),
+      expect((screen.getByTestId('beatify-project-bpm') as HTMLInputElement).value).toBe('128'),
     );
+    expect(screen.queryByTestId('beatify-status')).toBeNull();
   });
 
   it('re-tempos without throwing away the clip on the bench', async () => {
@@ -758,15 +776,19 @@ describe('beatify projects', () => {
     expect(screen.getByTestId('beatify-clip-grid')).toBe(grid);
   });
 
-  it('refuses a tempo that is not a tempo', async () => {
+  it('refuses a tempo that is not a tempo, by springing back to the one it has', async () => {
     const client = clientMock({ projects: vi.fn(async () => [project()]) });
     await openProject(client);
-    const box = screen.getByTestId('beatify-project-bpm');
+    const box = screen.getByTestId('beatify-project-bpm') as HTMLInputElement;
     fireEvent.change(box, { target: { value: '4' } });
     fireEvent.keyDown(box, { key: 'Enter' });
 
     expect(client.setProjectBpm).not.toHaveBeenCalled();
-    expect(screen.getByTestId('beatify-status').textContent).toContain('has to be between');
+    // The box says no by showing the tempo the project still runs at —
+    // and carries the range it will take in its own min/max.
+    expect(box.value).toBe('120');
+    expect(box.min).toBe(String(MIN_PROJECT_BPM));
+    expect(box.max).toBe(String(MAX_PROJECT_BPM));
   });
 
   it('re-beatifies a SEED in place, keeping its id', async () => {
@@ -824,7 +846,6 @@ describe('beatify projects', () => {
 
     await waitFor(() => expect(client.deleteProject).toHaveBeenCalledWith('p1'));
     await waitFor(() => expect(screen.queryByTestId('beatify-project-p1')).toBeNull());
-    expect(screen.getByTestId('beatify-status').textContent).toContain('Deleted');
   });
 
   it('closes a project without deleting it', async () => {

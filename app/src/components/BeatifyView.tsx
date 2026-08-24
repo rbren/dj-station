@@ -58,7 +58,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const [warn, setWarn] = useState<ModalFor | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [bpmDraft, setBpmDraft] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -81,13 +80,11 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const openProject = useCallback(
     async (projectId: string) => {
       setBusy(true);
-      setStatus(null);
       const project = await client.openProject(projectId, BUCKETS);
       setBusy(false);
-      if (!project) {
-        setStatus('That project could not be opened — its renders may have been deleted');
-        return;
-      }
+      // A failed command has already said so, in the banner and in the
+      // console (`ipc.ts`): saying it again here is the same news twice.
+      if (!project) return;
       setOpen(project);
       setModal(null);
     },
@@ -97,13 +94,9 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   /** Start a project: a name and nothing else. Material comes later. */
   const newProject = useCallback(async () => {
     setBusy(true);
-    setStatus(null);
     const project = await client.newProject('');
     setBusy(false);
-    if (!project) {
-      setStatus('That project could not be created');
-      return;
-    }
+    if (!project) return;
     setOpen(project);
     setModal(null);
     void refreshShelf();
@@ -113,7 +106,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const importSeed = useCallback(() => {
     if (pick === null || !open) return;
     const track = tracks.find((t) => t.id === pick);
-    setStatus(null);
     setModal({
       trackId: pick,
       title: track?.title ?? `track ${pick}`,
@@ -129,7 +121,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     (project: BeatifyProject) => {
       setOpen(project);
       setModal(null);
-      setStatus(null);
       void refreshShelf();
     },
     [refreshShelf],
@@ -141,21 +132,16 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
       setBpmDraft(null);
       const bpm = Number(value);
       if (!open || !Number.isFinite(bpm)) return;
-      if (bpm < MIN_PROJECT_BPM || bpm > MAX_PROJECT_BPM) {
-        setStatus(`A project's tempo has to be between ${MIN_PROJECT_BPM} and ${MAX_PROJECT_BPM}`);
-        return;
-      }
+      // Out of range is refused by the box itself: the draft is already
+      // dropped, so it springs back to the tempo the project still has,
+      // which is the answer. Its min/max say what the range is.
+      if (bpm < MIN_PROJECT_BPM || bpm > MAX_PROJECT_BPM) return;
       if (open.bpm !== null && Math.abs(open.bpm - bpm) < 0.005) return;
       setBusy(true);
-      setStatus(`Re-rendering ${open.seeds.length} seed${open.seeds.length === 1 ? '' : 's'}…`);
       const project = await client.setProjectBpm(open.id, bpm, BUCKETS);
       setBusy(false);
-      if (!project) {
-        setStatus('That tempo could not be applied');
-        return;
-      }
+      if (!project) return;
       setOpen(project);
-      setStatus(`Everything now runs at ${bpm.toFixed(2)} BPM — clips are unchanged`);
       void refreshShelf();
     },
     [client, open, refreshShelf],
@@ -189,7 +175,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
       if (!saved) return;
       setProjects(saved);
       setOpen((cur) => (cur && cur.id === project.id ? null : cur));
-      setStatus(`Deleted "${project.name}"`);
     },
     [client],
   );
@@ -277,12 +262,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
           </span>
         )}
       </div>
-      {status && (
-        <p className="beatify-status" data-testid="beatify-status">
-          {status}
-        </p>
-      )}
-
       {!open && (
         <div className="beatify-projects" data-testid="beatify-projects">
           {projects.length === 0 && (

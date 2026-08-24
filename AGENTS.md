@@ -1166,6 +1166,16 @@ The detail is in the `Conventions` bullets above; this is the map.
   `BeatifyClipBuilder.test.tsx` ("switching a stem off leaves the source
   where it was", "the project tempo changing under the builder") and by
   the DOM-node-identity check in `BeatifyView.test.tsx`.
+- The page does not congratulate anybody. There is no success line on it:
+  a re-tempo is announced by the BPM box and the re-rendered seeds, a
+  saved clip by its name appearing in the list, a deleted one by its
+  absence. Failures are not silent — every beatify command goes through
+  `ipc.ts`, which puts a rejection in the banner AND the console — so a
+  "could not …" line next to one is the same news twice. What is left in
+  the builder's note line is refusals and consequences only ("Leave at
+  least one stem on", "what is on the grid is now unsaved"), and a
+  refused BPM is answered by the box springing back to the tempo the
+  project still has.
 - Playback ownership: EXACTLY ONE of the source pane and the clip editor
   sounds at a time. Starting either pauses the other
   (`BeatifyTrackViewHandle.pause` one way, `onPlayingChange` the other)
