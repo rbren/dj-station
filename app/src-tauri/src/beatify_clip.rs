@@ -95,6 +95,16 @@ impl ClipDraft {
     }
 }
 
+/// What a save answers with: the id it was filed under — which the
+/// editor has to learn, or its next save would file a second copy — and
+/// the list as it now stands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipSaved {
+    pub id: String,
+    pub clips: Vec<SavedClip>,
+}
+
 /// A clip on disk. Same shape plus the id it is filed under.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -490,19 +500,20 @@ pub fn beatify_clip_save(
     state: State<AppState>,
     track_id: i64,
     clip: SavedClip,
-) -> CmdResult<Vec<SavedClip>> {
+) -> CmdResult<ClipSaved> {
     let track = state.library.track(track_id).map_err(err)?;
     let mut clips = read_clips(&state, &track.content_hash)?;
     let mut clip = clip;
     if clip.id.is_empty() {
         clip.id = next_id(&clips);
     }
+    let id = clip.id.clone();
     match clips.iter_mut().find(|c| c.id == clip.id) {
         Some(existing) => *existing = clip,
         None => clips.push(clip),
     }
     write_clips(&state, &track.content_hash, &clips)?;
-    Ok(clips)
+    Ok(ClipSaved { id, clips })
 }
 
 #[tauri::command(async)]

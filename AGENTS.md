@@ -867,6 +867,29 @@ fails if it's missing.
   geometry is therefore PERCENTAGES of that column (`pct(n, columns)` in
   BeatifyClipEditor, no fixed px-per-beat), so the beats line up under
   the waveform at any width — do not reintroduce a `COL_W`.
+- THE DRAWER PICKS THE SOURCE; THE PENCIL PICKS THE EDIT. Clicking an
+  entry in the left-hand list only changes what the source pane is
+  showing — it never touches the editor — and the ✎ on a saved clip only
+  loads it into the editor, never the source. "+ new clip" clears the
+  editor (and stops the clip's transport). Doing both at once was one
+  click doing two jobs.
+- A DRAFT'S IDENTITY IS `ClipDraft.id`, not its name: '' until it has
+  been saved (`isSaved`), which is also what enables Delete. The backend
+  answers a save with `ClipSaved { id, clips }` precisely so the draft
+  can learn the id it was filed under — do not go back to inferring it
+  by diffing the list (a mutated-in-place list makes that silently
+  wrong). Deleting the open clip removes the FILE and leaves the
+  material on the grid, unsaved.
+- The editor has its own selection: a swept rectangle of cells
+  (`CellRange`, `cellRange`), drawn per row as `.beatify-clip-marquee`,
+  with ⌘/Ctrl+C copying what is inside it (`copyRange`, TRIMMED at the
+  edges, positions made relative) and ⌘/Ctrl+V pasting at the current
+  selection's corner (`pasteFragment`, ordinary drop rules, so it
+  overwrites and can grow the clip). Escape clears it. Cell presses
+  `preventDefault()`, and `.beatify-builder` is `user-select: none`
+  (inputs opt back in), because a drag across the grid was selecting the
+  page's text — as was a sweep on the waveform before `AudioTimeline`'s
+  mousedown started preventing it.
 - Beats reach the clip TWO ways and both go through `liftSelection`: the
   `⠿ N beats` handle in the transport row, and dragging the selection
   DOWN out of the waveform (`AudioTimeline.onPullOut`, fired mid-drag

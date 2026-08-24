@@ -243,6 +243,10 @@ export function AudioTimeline({
   const startDrag = useCallback(
     (e: ReactMouseEvent<SVGSVGElement>) => {
       if (duration <= 0 || e.button !== 0) return;
+      // Without this the browser starts selecting the page's text under
+      // the drag: the waveform itself is unselectable, but everything a
+      // sweep passes over is not.
+      e.preventDefault();
       const rect = e.currentTarget.getBoundingClientRect();
       dragRect.current = rect;
       const t = timeAt(e.clientX, rect);

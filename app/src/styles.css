@@ -3720,6 +3720,17 @@ body {
   min-height: 0;
 }
 
+/* Dragging beats about is a drag, not a text selection: without this
+   the browser highlights every label the pointer crosses. Inputs opt
+   back in — a clip's name is text and behaves like text. */
+.beatify-builder {
+  user-select: none;
+}
+
+.beatify-builder input {
+  user-select: text;
+}
+
 /* Source above, clip below, in ONE column: same left edge, same width,
    so a beat in the grid sits under the same pixel as the waveform. */
 .beatify-builder-main {
@@ -3808,11 +3819,37 @@ body {
   line-height: 1.25;
 }
 
-.beatify-clip-source-x {
+.beatify-clip-source-edit {
   background: transparent;
   border: none;
   color: #7c869a;
   cursor: pointer;
+}
+
+.beatify-clip-source-edit:hover {
+  color: #dce8ff;
+}
+
+.beatify-clip-new {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+/* Amber is what was played, teal is what the maths says — a selection is
+   neither, so it stays a neutral wash over whatever it covers. */
+.beatify-clip-marquee {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(220, 232, 255, 0.12);
+  border: 1px solid rgba(220, 232, 255, 0.45);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.beatify-clip-danger:not(:disabled) {
+  border-color: #5a2b2b;
+  color: #e2a0a0;
 }
 
 .beatify-clip-editor {

@@ -18,12 +18,17 @@ import type { BeatifyTrack } from '../beatify';
 import {
   SEED_SOURCE,
   addRow,
+  cellRange,
   clipSeconds,
+  copyRange,
   drawnColumns,
   emptyDraft,
+  fragmentIsEmpty,
   fromWire,
   isEmpty,
+  isSaved,
   movePlacement,
+  pasteFragment,
   parseSourceId,
   placeRun,
   removeLastRow,
@@ -34,13 +39,16 @@ import {
   usedColumns,
   type BeatifyClipClientApi,
   type BeatRun,
+  type CellRange,
   type ClipDraft,
+  type ClipFragment,
   type ClipSourceAudio,
   type ClipSources,
   type SavedClip,
   type SourceId,
 } from '../beatifyClip';
 import { ClipTransport, type TransportHost } from '../clipTransport';
+import { isEditableTarget } from '../fileShortcuts';
 import { BeatifyClipEditor } from './BeatifyClipEditor';
 import { BeatifyClipList, type ClipListEntry } from './BeatifyClipList';
 import { BeatifyTrackView, type BeatifyTrackViewHandle } from './BeatifyTrackView';
@@ -76,6 +84,9 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
   const [selBeats, setSelBeats] = useState<{ startBeat: number; endBeat: number } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [dropAt, setDropAt] = useState<{ row: number; col: number; beats: number } | null>(null);
+  const [sel, setSel] = useState<CellRange | null>(null);
+  const [sweep, setSweep] = useState<{ row: number; col: number } | null>(null);
+  const [clipboard, setClipboard] = useState<ClipFragment | null>(null);
   const [clipPlaying, setClipPlaying] = useState(false);
   const [sounding, setLive] = useState<'source' | 'clip' | null>(null);
   const [clipHead, setClipHead] = useState(0);
@@ -234,13 +245,34 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
     return () => window.removeEventListener('mouseup', up);
   }, [drag]);
 
-  const hoverCell = useCallback(
+  /** Pressing a cell with nothing in hand starts a sweep: the chunk it
+   *  ends on is what copy and paste work with. */
+  const pressCell = useCallback(
     (row: number, col: number) => {
-      if (!drag) return;
-      setDropAt({ row, col, beats: drag.run.beats });
+      if (drag) return;
+      setSweep({ row, col });
+      setSel(cellRange({ row, col }, { row, col }));
     },
     [drag],
   );
+
+  const hoverCell = useCallback(
+    (row: number, col: number) => {
+      if (drag) {
+        setDropAt({ row, col, beats: drag.run.beats });
+        return;
+      }
+      if (sweep) setSel(cellRange(sweep, { row, col }));
+    },
+    [drag, sweep],
+  );
+
+  useEffect(() => {
+    if (!sweep) return;
+    const up = () => setSweep(null);
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, [sweep]);
 
   const dropCell = useCallback(
     (row: number, col: number) => {
@@ -255,6 +287,51 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
     [drag],
   );
 
+  // --- copy and paste ----------------------------------------------------
+  //
+  // The selection is a rectangle of the grid, and the clipboard holds
+  // what was inside it, trimmed at the edges and with its positions made
+  // relative. A paste lands at the selection's corner, so "select here,
+  // paste" reads the way it looks.
+  const copy = useCallback(() => {
+    if (!sel) return;
+    const fragment = copyRange(draft, sel);
+    if (fragmentIsEmpty(fragment)) {
+      setNote('Nothing in that selection to copy');
+      return;
+    }
+    setClipboard(fragment);
+    setNote(
+      `Copied ${fragment.placements.length} run${fragment.placements.length === 1 ? '' : 's'}`,
+    );
+  }, [draft, sel]);
+
+  const paste = useCallback(() => {
+    if (!clipboard) return;
+    const at = sel ?? { row0: 0, row1: 0, col0: 0, col1: 1 };
+    setDraft((cur) => pasteFragment(cur, clipboard, at.row0, at.col0));
+    setNote(null);
+  }, [clipboard, sel]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 'c') {
+        e.preventDefault();
+        copy();
+      } else if (mod && key === 'v') {
+        e.preventDefault();
+        paste();
+      } else if (!mod && e.key === 'Escape') {
+        setSel(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [copy, paste]);
+
   // --- saving ------------------------------------------------------------
   const save = useCallback(async () => {
     if (isEmpty(draft)) {
@@ -263,30 +340,45 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
     }
     setSaving(true);
     const wire = toWire(draft);
-    const list = await clips.save(trackId, {
-      id: draft.name === '' ? '' : (savedIdOf(saved, draft.name) ?? ''),
+    const filed = await clips.save(trackId, {
+      id: draft.id,
       name: draft.name,
       rows: wire.rows,
       columns: Math.max(wire.columns, usedColumns(draft)),
       placements: wire.placements,
     });
     setSaving(false);
+    if (!filed) return;
+    setSaved(filed.clips);
+    // A first save is filed under an id the backend picks; the draft has
+    // to learn it, or the next save would file a second copy and Delete
+    // would have nothing to delete.
+    setDraft((cur) => ({ ...cur, id: filed.id }));
+    setNote(`Saved "${draft.name}"`);
+  }, [clips, draft, trackId]);
+
+  /** Delete the clip this draft came from. The material stays on screen,
+   *  now unsaved: deleting a file is not the same as clearing the desk. */
+  const deleteClip = useCallback(async () => {
+    if (!isSaved(draft)) return;
+    setSaving(true);
+    const list = await clips.remove(trackId, draft.id);
+    setSaving(false);
     if (!list) return;
     setSaved(list);
-    setNote(`Saved "${draft.name}"`);
-  }, [clips, draft, saved, trackId]);
+    setDraft((cur) => ({ ...cur, id: '' }));
+    if (picked === `clip:${draft.id}`) setPicked(SEED_SOURCE);
+    setNote(`Deleted "${draft.name}" — what is on the grid is now unsaved`);
+  }, [clips, draft, picked, trackId]);
 
-  const remove = useCallback(
-    async (id: SourceId) => {
-      const spec = parseSourceId(id);
-      if (spec.kind !== 'clip') return;
-      const list = await clips.remove(trackId, spec.id);
-      if (!list) return;
-      setSaved(list);
-      if (picked === id) setPicked(SEED_SOURCE);
-    },
-    [clips, picked, trackId],
-  );
+  /** Clear the desk: a new, empty clip, and silence. */
+  const newClip = useCallback(() => {
+    transportRef.current?.stop(0);
+    setLive((cur) => (cur === 'clip' ? null : cur));
+    setDraft(emptyDraft());
+    setSel(null);
+    setNote(null);
+  }, []);
 
   // --- what the list shows ------------------------------------------------
   const entries = useMemo<ClipListEntry[]>(() => {
@@ -315,14 +407,18 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
     [entries],
   );
 
-  const openSaved = useCallback(
+  /** Load a saved clip into the EDITOR. The source pane is left where it
+   *  was: editing a clip and cutting beats from one are different jobs,
+   *  and doing both at once was never what the click meant. */
+  const editSaved = useCallback(
     (id: SourceId) => {
       const spec = parseSourceId(id);
-      if (spec.kind === 'clip') {
-        const clip = saved.find((c) => c.id === spec.id);
-        if (clip) setDraft(fromWire(clip));
-      }
-      setPicked(id);
+      if (spec.kind !== 'clip') return;
+      const clip = saved.find((c) => c.id === spec.id);
+      if (!clip) return;
+      setDraft(fromWire(clip));
+      setSel(null);
+      setNote(`Editing "${clip.name}"`);
     },
     [saved],
   );
@@ -339,8 +435,9 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
       <BeatifyClipList
         entries={entries}
         selected={picked}
-        onSelect={openSaved}
-        onDelete={(id) => void remove(id)}
+        onSelect={setPicked}
+        onEdit={editSaved}
+        onNew={newClip}
       />
       <div className="beatify-builder-main">
         <div className="beatify-builder-source">
@@ -380,8 +477,10 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
           playhead={clipHead}
           live={sounding}
           dropAt={dropAt}
+          selection={sel}
           onHoverCell={hoverCell}
           onDropCell={dropCell}
+          onPressCell={pressCell}
           onGrabPlacement={grabBlock}
           onRemovePlacement={(id) => setDraft((cur) => removePlacement(cur, id))}
           onTogglePlay={playClip}
@@ -391,6 +490,7 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
           onRename={(name) => setDraft((cur) => ({ ...cur, name }))}
           onSetLength={(beats) => setDraft((cur) => setColumns(cur, beats))}
           onSave={() => void save()}
+          onDelete={() => void deleteClip()}
           saving={saving}
           status={
             note && (
@@ -404,10 +504,4 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
       <audio ref={audioRef} data-testid="beatify-clip-audio" />
     </section>
   );
-}
-
-/** Saving under a name that is already taken overwrites that clip rather
- *  than filing a second one with the same name. */
-function savedIdOf(saved: readonly SavedClip[], name: string): string | null {
-  return saved.find((c) => c.name === name)?.id ?? null;
 }

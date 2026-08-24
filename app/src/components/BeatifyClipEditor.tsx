@@ -14,8 +14,10 @@ import { useCallback, type ReactNode } from 'react';
 import {
   abutsLeft,
   drawnColumns,
+  isSaved,
   rowPlacements,
   sourceTint,
+  type CellRange,
   type ClipDraft,
   type Placement,
   type SourceId,
@@ -43,8 +45,12 @@ export interface BeatifyClipEditorProps {
   live: 'source' | 'clip' | null;
   /** A drop is in progress and this is where it would land. */
   dropAt: { row: number; col: number; beats: number } | null;
+  /** The chunk of grid the user has swept out, for copy and paste. */
+  selection: CellRange | null;
   onHoverCell(row: number, col: number): void;
   onDropCell(row: number, col: number): void;
+  /** Pressing an empty cell: the start of a sweep, not a drop. */
+  onPressCell(row: number, col: number): void;
   onGrabPlacement(id: string, e: React.MouseEvent): void;
   onRemovePlacement(id: string): void;
   onTogglePlay(): void;
@@ -55,6 +61,8 @@ export interface BeatifyClipEditorProps {
   /** Set the clip's length in beats. */
   onSetLength(beats: number): void;
   onSave(): void;
+  /** Delete the saved clip this draft came from. */
+  onDelete(): void;
   saving: boolean;
   status: ReactNode;
 }
@@ -68,8 +76,10 @@ export function BeatifyClipEditor({
   playhead,
   live,
   dropAt,
+  selection,
   onHoverCell,
   onDropCell,
+  onPressCell,
   onGrabPlacement,
   onRemovePlacement,
   onTogglePlay,
@@ -79,6 +89,7 @@ export function BeatifyClipEditor({
   onRename,
   onSetLength,
   onSave,
+  onDelete,
   saving,
   status,
 }: BeatifyClipEditorProps) {
@@ -92,11 +103,17 @@ export function BeatifyClipEditor({
           className="beatify-clip-cell"
           data-testid={`beatify-clip-cell-${row}-${col}`}
           style={{ width: pct(1, columns) }}
+          onMouseDown={(e) => {
+            // The browser would otherwise start selecting the page's
+            // text under a sweep across the grid.
+            e.preventDefault();
+            onPressCell(row, col);
+          }}
           onMouseEnter={() => onHoverCell(row, col)}
           onMouseUp={() => onDropCell(row, col)}
         />
       )),
-    [columns, onDropCell, onHoverCell],
+    [columns, onDropCell, onHoverCell, onPressCell],
   );
 
   return (
@@ -109,6 +126,10 @@ export function BeatifyClipEditor({
           value={draft.name}
           aria-label="Clip name"
           onChange={(e) => onRename(e.target.value)}
+          onKeyDown={(e) => {
+            // Naming a clip and saving it are one thought.
+            if (e.key === 'Enter') onSave();
+          }}
         />
         <button
           data-testid="beatify-clip-play"
@@ -160,6 +181,17 @@ export function BeatifyClipEditor({
         <button data-testid="beatify-clip-save" onClick={onSave} disabled={saving}>
           Save clip
         </button>
+        <button
+          data-testid="beatify-clip-delete"
+          className="beatify-clip-danger"
+          onClick={onDelete}
+          disabled={saving || !isSaved(draft)}
+          title={
+            isSaved(draft) ? `Delete "${draft.name}"` : 'Nothing to delete until the clip is saved'
+          }
+        >
+          Delete clip
+        </button>
         {status}
       </header>
 
@@ -180,6 +212,17 @@ export function BeatifyClipEditor({
             style={{ height: ROW_H }}
           >
             <div className="beatify-clip-cells">{cellsOf(row)}</div>
+
+            {selection && row >= selection.row0 && row <= selection.row1 && (
+              <div
+                className="beatify-clip-marquee"
+                data-testid={`beatify-clip-marquee-${row}`}
+                style={{
+                  left: pct(selection.col0, columns),
+                  width: pct(selection.col1 - selection.col0, columns),
+                }}
+              />
+            )}
 
             {dropAt && dropAt.row === row && (
               <div

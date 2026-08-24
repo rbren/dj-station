@@ -173,7 +173,7 @@ function clipsMock(overrides: Partial<BeatifyClipClientApi> = {}): BeatifyClipCl
     open: vi.fn(async () => null),
     audio: vi.fn(async () => new ArrayBuffer(8)),
     preview: vi.fn(async () => new ArrayBuffer(8)),
-    save: vi.fn(async (_trackId: number, clip) => [{ ...clip, id: '1' }]),
+    save: vi.fn(async (_trackId: number, clip) => ({ id: '1', clips: [{ ...clip, id: '1' }] })),
     remove: vi.fn(async () => []),
     ...overrides,
   };

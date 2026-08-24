@@ -7,10 +7,14 @@ import {
   SEED_SOURCE,
   abutsLeft,
   addRow,
+  cellRange,
   clipSeconds,
+  copyRange,
   drawnColumns,
   emptyDraft,
+  isSaved,
   movePlacement,
+  pasteFragment,
   parseSourceId,
   placeRun,
   removeLastRow,
@@ -181,6 +185,81 @@ describe('setting the clip length', () => {
   it('never goes below one beat', () => {
     expect(setColumns(emptyDraft(), 0).columns).toBe(1);
     expect(setColumns(emptyDraft(), -9).columns).toBe(1);
+  });
+});
+
+describe('copying a chunk of the grid', () => {
+  /** Two runs on row 0: beats 0–3 and 4–7, from different sources. */
+  const two = () =>
+    placeRun(placeRun(emptyDraft(), run(4, 0), 0, 0), run(4, 8, stemSourceId('drums')), 0, 4);
+
+  it('reads a swept rectangle whichever way it was swept', () => {
+    expect(cellRange({ row: 0, col: 2 }, { row: 1, col: 5 })).toEqual({
+      row0: 0,
+      row1: 1,
+      col0: 2,
+      col1: 6,
+    });
+    // Backwards, and the same rectangle: the cell under the pointer is
+    // in it either way.
+    expect(cellRange({ row: 1, col: 5 }, { row: 0, col: 2 })).toEqual({
+      row0: 0,
+      row1: 1,
+      col0: 2,
+      col1: 6,
+    });
+  });
+
+  it('takes what is selected, not the whole run it belonged to', () => {
+    const frag = copyRange(two(), cellRange({ row: 0, col: 2 }, { row: 0, col: 5 }));
+    expect(frag.columns).toBe(4);
+    // Half of each run, each starting further into its own source.
+    expect(frag.placements.map((p) => [p.col, p.beats, p.sourceBeat])).toEqual([
+      [0, 2, 2],
+      [2, 2, 8],
+    ]);
+  });
+
+  it('pastes the shape it copied, wherever it lands', () => {
+    const draft = two();
+    const frag = copyRange(draft, cellRange({ row: 0, col: 0 }, { row: 0, col: 7 }));
+    const pasted = pasteFragment(draft, frag, 0, 8);
+    expect(shape(pasted)).toEqual([
+      { col: 0, beats: 4, from: 0 },
+      { col: 4, beats: 4, from: 8 },
+      { col: 8, beats: 4, from: 0 },
+      { col: 12, beats: 4, from: 8 },
+    ]);
+  });
+
+  it('pastes over what was there, like any other drop', () => {
+    const draft = two();
+    const frag = copyRange(draft, cellRange({ row: 0, col: 0 }, { row: 0, col: 1 }));
+    const pasted = pasteFragment(draft, frag, 0, 4);
+    // The drums run lost its first two beats to the paste.
+    expect(shape(pasted)).toEqual([
+      { col: 0, beats: 4, from: 0 },
+      { col: 4, beats: 2, from: 0 },
+      { col: 6, beats: 2, from: 10 },
+    ]);
+  });
+
+  it('copies rows as well as beats', () => {
+    let draft = placeRun(emptyDraft(), run(2, 0), 0, 0);
+    draft = placeRun(draft, run(2, 4), 1, 0);
+    const frag = copyRange(draft, cellRange({ row: 0, col: 0 }, { row: 1, col: 1 }));
+    expect(frag.rows).toBe(2);
+    const pasted = pasteFragment(draft, frag, 2, 4);
+    expect(pasted.rows).toBe(4);
+    expect(rowPlacements(pasted, 3).map((p) => [p.col, p.sourceBeat])).toEqual([[4, 4]]);
+  });
+});
+
+describe("a draft's identity", () => {
+  it('is the id it was filed under, not its name', () => {
+    expect(isSaved(emptyDraft())).toBe(false);
+    expect(isSaved({ ...emptyDraft(), name: 'Chorus' })).toBe(false);
+    expect(isSaved({ ...emptyDraft(), id: '3' })).toBe(true);
   });
 });
 
