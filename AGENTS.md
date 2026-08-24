@@ -1084,10 +1084,11 @@ The detail is in the `Conventions` bullets above; this is the map.
   The builder owns the live `ClipDraft`.
 - Commands, all `#[tauri::command(async)]`: `beatify_tracker_status`,
   `_analyze`, `_set_reading`, `_meters`, `_scope`, `_preview`,
-  `_sync_check`, `_save`, `_warp_map`, `_projects`, `_project_open`/
-  `_rename`/`_delete`, `_project_audio`, `_cancel`; clips add
-  `beatify_clip_sources`, `_open`, `_audio`, `_preview`, `_save`,
-  `_delete`.
+  `_sync_check`, `_save`, `_warp_map`, `_cancel`; projects add
+  `beatify_projects`, `_project_new`/`_open`/`_rename`/`_delete`,
+  `_project_set_bpm`, `_project_audio` (by `seedId`), `_seed_delete`,
+  `_seed_rename`; clips add `beatify_clip_sources`, `_open`, `_audio`,
+  `_preview`, `_save`, `_delete`.
 - Beats are the unit of every gesture, but MIND THE TIMEBASE: the modal
   snaps to `sourceGrid` (source seconds), the track view and the editor
   to `grid` (output seconds, beat 0 padded). Selections grow OUTWARD to
@@ -1098,28 +1099,48 @@ The detail is in the `Conventions` bullets above; this is the map.
   flush with the beat, because a clip has no head room of its own to
   reach back into and giving it one changes what a clip's beat 0 means.
   That is the open item, and it belongs to the clip builder.
-- A PROJECT is the unit of work, not a track. One project = one beatified
-  take on one source track: its grid, its constant-tempo render, and the
-  clips cut from them. A track can carry any number of projects (two
-  passes at different warp strengths, two sets of clips), so nothing is
-  keyed by the track any more. `beatify_projects` is the tab's front
-  door; `beatify_project_open` / `_rename` / `_delete` do the rest, and
-  `beatify_save` with an empty `projectId` is how one is born.
+- A PROJECT is a TEMPO with material on it — not a track, and not a take.
+  It is minted empty (`beatify_project_new`) and tracks are imported into
+  it as SEEDS, one modal pass each. INVARIANTS, do not break these: the
+  first seed sets `project.bpm`; every later seed is CONFORMED to it by
+  scaling its own warp map by `projectPeriod / ownPeriod` and rendering
+  once from the source (never a stretch on top of a stretch), so every
+  seed shares one `period`/`phase` and beat *n* means the same instant in
+  all of them — which is the whole point, since a clip may hold runs from
+  several seeds. A seed keeps `sourceBpm` and the derived `speed`
+  (`projectBpm / sourceBpm`). `beatify_project_set_bpm` re-renders every
+  seed and MUST leave clips alone (a placement is a run of beats, and a
+  beat is a beat at any tempo); a seed whose source has left the library
+  is re-rendered by stretching its own render instead. Re-beatify keeps
+  the seed's id and directory so clips keep resolving; deleting a seed
+  leaves the project's tempo and its clips intact. A track may appear in
+  any number of projects, so nothing is keyed by the track.
 - Persistence, all machine-local and gitignored, one directory per
-  project: `<data_dir>/beatify/<project-id>/` holding `project.json` (id,
-  name, `trackId`, `sourceHash`, `updated`), `meta.json` (the §5 record —
-  grid, warp map, quality; also the sidecar format), `warped.wav`,
-  `clips.json` and `stems/<name>.wav`. Ids are minted `p<n>`;
-  pre-projects directories were named by the source hash and are ADOPTED
-  as projects on sight (`store::project` synthesises the envelope from
-  `meta.json`), so old work opens untouched and nothing is migrated or
-  rewritten. Nothing about a project reaches the library DB.
+  project: `<data_dir>/beatify/<project-id>/` holds `project.json` (id,
+  name, `bpm`, `updated`, and the seed list: `id`, `dir`, `name`,
+  `trackId`, `sourceHash`, `sourceBpm`, `speed`) and `clips.json` — clips
+  belong to the PROJECT, not to a seed. Each seed owns
+  `seeds/<seed-id>/` with `meta.json` (the §5 record — grid, warp map,
+  quality; also the sidecar format), `warped.wav` and `stems/<name>.wav`.
+  Ids are minted `p<n>` / `s<n>`. Two older layouts are ADOPTED on read
+  and never migrated: a directory named by source hash, and a project
+  whose single seed's artifacts sit in the project root — `store::project`
+  synthesises the envelope, and `store::seed_dir` keeps reading them where
+  they are, so old work opens untouched. Writing always uses the current
+  layout. Nothing about a project reaches the library DB.
 - The two halves of the page. The SOURCE pane (`BeatifyTrackView`) shows
-  one source of the open project — the seed render, a stem, or a clip
-  saved earlier — and is where beats are cut FROM. The CLIP EDITOR
-  (`BeatifyClipEditor`) is the grid they are dropped INTO. The left
-  drawer (`BeatifyClipList`) lists the sources: clicking one changes the
-  source pane only, its pencil opens a clip in the editor only.
+  one source of the open project — a seed (whole, or with parts switched
+  off), or a clip saved earlier — and is where beats are cut FROM. The
+  CLIP EDITOR (`BeatifyClipEditor`) is the grid they are dropped INTO.
+  The left
+  drawer (`BeatifyClipList`) lists the seeds and clips: clicking one
+  changes the source pane only, its pencil opens a clip in the editor
+  only. A STEM IS NOT A SOURCE: it is a seed with parts switched off, so
+  stem toggles hang off the seed row and a source id names both —
+  `seed:s2/drums+bass`, and bare `seed:s2` (all parts on) resolves to the
+  render itself rather than a sum of stem files. Ids are built and read
+  ONLY through `seedSourceId`/`parseSourceId`/`seedOfSourceId`/
+  `stemsOfSourceId` in `app/src/beatifyClip.ts`.
 - The clip model is pure and lives in `app/src/beatifyClip.ts`: a
   `ClipDraft` is `{id, name, rows, columns, placements}`, and a
   `Placement` is a CONTIGUOUS RUN of beats from one source, never a
@@ -1136,13 +1157,16 @@ The detail is in the `Conventions` bullets above; this is the map.
   the LIVE draft, so a length change `invalidate()`s and everything else
   `refreshTone()`s.
 - Conventions for future work here: key every clip command by
-  `projectId`, never `trackId` (the track id is for STEMS alone, which
-  need the original file and degrade with a hint when it is gone); let
+  `projectId` + `seedId`, never `trackId` (the track id is for reaching
+  the ORIGINAL file — stems and re-render — and everything that needs it
+  degrades with a hint when it is gone; resolve it by `sourceHash` first,
+  since library ids are re-minted on re-import and audio is not); let
   the backend mint ids and say what it filed (`ClipSaved.id`,
-  `BeatifyTrack.projectId`) rather than inferring them; everything in
+  `BeatifySeed.id`) rather than inferring them; everything in
   `beatify*.rs` is offline `#[tauri::command(async)]` and must never
   touch the engine or the RT thread. Tests:
-  `app/tests/BeatifyView.test.tsx` (tab, projects, modal),
-  `BeatifyClipBuilder.test.tsx` (builder, mounted), `BeatifyClip.test.ts`
-  - `BeatifyGrid.test.ts` (pure model and grid math), and `cargo test -p
-dj-analysis --release --test beatify` (pipeline and store).
+  `app/tests/BeatifyView.test.tsx` (tab, projects, seeds, modal),
+  `BeatifyClipBuilder.test.tsx` (builder, mounted),
+  `BeatifyClip.test.ts` + `BeatifyGrid.test.ts` (pure model and grid
+  math), and `cargo test -p dj-analysis --release --test beatify`
+  (pipeline, conform, store).
