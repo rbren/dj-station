@@ -102,6 +102,9 @@ export class ClipTransport {
 
   private el: HTMLAudioElement | null = null;
   private url: string | null = null;
+  /** Seconds into the loaded window the element still has to seek to,
+   *  null once it has (seeking only sticks after `loadedmetadata`). */
+  private pendingSeek: number | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
   private toneTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -160,14 +163,14 @@ export class ClipTransport {
     }
     this.setPlayhead(at);
     const range = this.loopRange;
-    if (range && at >= range.start && at <= range.end) {
-      // Inside the loop: jump to that phase and keep looping.
-      void this.begin(range.start, range, at - range.start);
-    } else {
-      // Outside it: play on from there. The view owns whether a loop is
-      // still armed and tells us through `setLoop` if it is.
-      void this.begin(at, null, 0);
-    }
+    // Inside the loop, keep looping; outside it, play on from there (the
+    // view owns whether a loop is still armed and says so via `setLoop`).
+    // Either way `begin` is handed the ABSOLUTE position and works out
+    // which window holds it — a loop longer than one window does not have
+    // the target in its head window, so asking to start `at - range.start`
+    // into that window would seek past the end of what was loaded.
+    const inLoop = range !== null && at >= range.start && at <= range.end;
+    void this.begin(at, inLoop ? range : null, 0);
   }
 
   /** Stop, keeping the playhead where playback got to. */
@@ -279,6 +282,12 @@ export class ClipTransport {
     const duration = this.host.duration();
     let start: number;
     let end: number;
+    // Where in the loaded window playback starts. DERIVED here, never
+    // taken on trust: it is the one number the media element cannot
+    // survive being wrong about — a seek past the end of what it holds
+    // makes it end on the spot, which chains straight into the next
+    // window and reads as a playhead marching along in silence.
+    let within: number;
     // A loop longer than one window (looping a whole track, say) cannot be
     // held in a single buffer: it plays as chained windows that wrap at
     // the range end instead, so `wholeLoop` decides which backend runs.
@@ -286,19 +295,31 @@ export class ClipTransport {
     if (loopRange) {
       const lo = Math.max(0, loopRange.start);
       const hi = Math.min(duration, loopRange.end);
-      // A range that fits always loads from its head, so `seekWithin`
-      // carries the loop's phase; a longer one loads the window that
-      // `fromSecs` falls in, which is how a chain walks through it.
-      const inside = fromSecs > lo + EPS && fromSecs < hi - EPS;
-      start = hi - lo <= this.windowSecs || !inside ? lo : fromSecs;
-      end = Math.min(hi, start + this.windowSecs);
-      wholeLoop = start <= lo + EPS && end >= hi - EPS;
+      const at = Math.min(Math.max(fromSecs, lo), hi);
+      if (hi - lo <= this.windowSecs) {
+        // The whole range fits one buffer: load it and enter at its phase.
+        start = lo;
+        end = hi;
+        wholeLoop = true;
+        within = at - lo;
+      } else {
+        // Too long for one buffer: load the window `at` falls in and let
+        // `onEnded` chain through the rest, wrapping at the range end.
+        start = at >= hi - EPS ? lo : at;
+        end = Math.min(hi, start + this.windowSecs);
+        within = 0;
+      }
     } else {
       // Play again from the top when the playhead sits at the end.
       start = fromSecs >= duration - 0.01 ? 0 : Math.max(0, fromSecs);
       end = Math.min(duration, start + this.windowSecs);
+      within = 0;
     }
     if (end - start <= EPS) return;
+    // An explicit phase (a tone re-render resuming in place) wins, but it
+    // is clamped into the window like any other.
+    if (seekWithin > 0) within = seekWithin;
+    within = Math.max(0, Math.min(within, end - start - EPS));
 
     const bytes = await this.host.render(start, end - start);
     if (this.stale(epoch) || !bytes) return;
@@ -314,7 +335,7 @@ export class ClipTransport {
         // microseconds in between, which is the only ordering in which
         // two sources are never live at the same instant.
         this.release();
-        const handle = prepared.start(Math.max(0, seekWithin));
+        const handle = prepared.start(within);
         this.install({ kind: 'loop', handle }, { start, end, loop: true });
         this.setPlayhead(Math.min(duration, start + handle.position()));
         this.setPlaying(true);
@@ -330,12 +351,17 @@ export class ClipTransport {
     this.install({ kind: 'element', el }, { start, end, loop: loopRange !== null });
     this.revokeUrl();
     this.url = url;
+    // The seek belongs to THIS window, so the transport holds it rather
+    // than a one-shot listener on the element: a src replaced before the
+    // metadata arrives would otherwise leave the offset behind to be
+    // applied to the next window, which is a seek past its end.
+    this.pendingSeek = within > EPS ? within : null;
     el.src = url;
     // Only let the element loop what it holds; a longer range wraps in
     // `onEnded`, which knows where the range actually ends.
     el.loop = loopRange !== null && wholeLoop;
-    if (seekWithin > 0) seekElement(el, seekWithin);
-    this.setPlayhead(Math.min(duration, start + seekWithin));
+    this.applyPendingSeek(el);
+    this.setPlayhead(Math.min(duration, start + within));
     this.setPlaying(true);
     try {
       await el.play();
@@ -351,6 +377,7 @@ export class ClipTransport {
   private release(): void {
     const prev = this.source;
     this.source = null;
+    this.pendingSeek = null;
     this.stopTicker();
     if (!prev) return;
     if (prev.kind === 'loop') prev.handle.stop();
@@ -376,6 +403,25 @@ export class ClipTransport {
     if (this.disposed || source?.kind !== 'element' || !w) return;
     this.setPlayhead(Math.min(this.host.duration(), w.start + source.el.currentTime));
   };
+
+  private readonly onMeta = () => {
+    if (this.disposed || this.source?.kind !== 'element') return;
+    this.applyPendingSeek(this.source.el);
+  };
+
+  /** Put the element at the offset THIS window was loaded for. Tried as
+   *  soon as the src is set (some runtimes are ready at once) and again on
+   *  `loadedmetadata`, because a seek before the duration is known is
+   *  silently dropped. */
+  private applyPendingSeek(el: HTMLAudioElement): void {
+    const at = this.pendingSeek;
+    if (at === null) return;
+    try {
+      el.currentTime = at;
+    } catch {
+      // Not seekable yet; `loadedmetadata` will come back for it.
+    }
+  }
 
   private readonly onEnded = () => {
     const w = this.win;
@@ -407,6 +453,7 @@ export class ClipTransport {
     this.detach();
     if (el) {
       el.addEventListener('timeupdate', this.onTime);
+      el.addEventListener('loadedmetadata', this.onMeta);
       el.addEventListener('ended', this.onEnded);
       this.el = el;
     }
@@ -417,6 +464,7 @@ export class ClipTransport {
     const el = this.el;
     if (!el) return;
     el.removeEventListener('timeupdate', this.onTime);
+    el.removeEventListener('loadedmetadata', this.onMeta);
     el.removeEventListener('ended', this.onEnded);
     this.el = null;
   }
@@ -473,18 +521,4 @@ export class ClipTransport {
     if (this.disposed) return;
     this.host.onStatus({ playing: this.playingNow, playhead: this.playheadNow });
   }
-}
-
-function seekElement(el: HTMLAudioElement, to: number): void {
-  // Seeking only sticks once the duration is known, so try now (for
-  // runtimes that are ready immediately) and again on metadata.
-  const seek = () => {
-    try {
-      el.currentTime = to;
-    } catch {
-      // Not seekable yet.
-    }
-  };
-  el.addEventListener('loadedmetadata', seek, { once: true });
-  seek();
 }

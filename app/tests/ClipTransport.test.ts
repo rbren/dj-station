@@ -531,3 +531,152 @@ describe('ClipTransport', () => {
     });
   });
 });
+
+// A media element is not the obliging stub above: a src assignment starts
+// an async load, a seek before the metadata lands is dropped, and a seek
+// PAST what it holds ends the media on the spot. Getting any of that
+// wrong is inaudible in a fake that just flips a boolean, so the
+// selection bug — the playhead marching along in silence — needs a
+// stricter one.
+class StrictElement {
+  private srcValue = '';
+  loop = false;
+  currentTime = 0;
+  /** Seconds of audio the loaded blob holds. */
+  mediaSecs = 60;
+  loaded = false;
+  playing = false;
+  ended = false;
+  loads = 0;
+  private readonly listeners = new Map<string, Set<() => void>>();
+
+  get src(): string {
+    return this.srcValue;
+  }
+
+  set src(v: string) {
+    this.srcValue = v;
+    this.loaded = false;
+    this.ended = false;
+    this.currentTime = 0;
+    this.loads++;
+    // The blob arrives on a later task, like a real load.
+    setTimeout(() => {
+      if (this.srcValue !== v) return;
+      this.loaded = true;
+      this.emit('loadedmetadata');
+      if (this.currentTime >= this.mediaSecs) {
+        this.currentTime = this.mediaSecs;
+        this.ended = true;
+        this.emit('ended');
+      }
+    }, 0);
+  }
+
+  addEventListener(type: string, fn: () => void) {
+    const set = this.listeners.get(type) ?? new Set();
+    set.add(fn);
+    this.listeners.set(type, set);
+  }
+
+  removeEventListener(type: string, fn: () => void) {
+    this.listeners.get(type)?.delete(fn);
+  }
+
+  emit(type: string) {
+    for (const fn of [...(this.listeners.get(type) ?? [])]) fn();
+  }
+
+  async play() {
+    this.playing = true;
+  }
+
+  pause() {
+    this.playing = false;
+  }
+
+  /** Is sound actually coming out? */
+  get sounding(): boolean {
+    return this.playing && this.loaded && !this.ended;
+  }
+}
+
+describe('ClipTransport against a strict media element', () => {
+  let el: StrictElement;
+  let renders: { start: number; len: number }[];
+  let transport: ClipTransport;
+  const DURATION = 300;
+
+  beforeEach(() => {
+    el = new StrictElement();
+    renders = [];
+    Object.assign(URL, { createObjectURL: vi.fn(() => `blob:${renders.length}`) });
+    transport = new ClipTransport(
+      {
+        duration: () => DURATION,
+        element: () => el as unknown as HTMLAudioElement,
+        render: async (start, len) => {
+          renders.push({ start, len });
+          el.mediaSecs = len;
+          return new ArrayBuffer(44);
+        },
+        // No Web Audio: this is the media-element path.
+        prepareLoop: async () => null,
+        onStatus: () => {},
+      },
+      { windowSecs: 60, tickMs: 5, toneDelayMs: 0 },
+    );
+  });
+
+  afterEach(() => {
+    transport.dispose();
+  });
+
+  it('seeks inside a long loop by loading the window that HOLDS the target', async () => {
+    transport.play(0, { start: 0, end: DURATION });
+    await flush();
+    expect(el.sounding).toBe(true);
+
+    // Clicking at 200 s used to load the loop's HEAD window and then ask
+    // the element for 200 s into it: past the end, so it ended at once and
+    // chained into the next window, and the next, silently forever.
+    transport.seek(200);
+    await flush(6);
+    expect(renders).toEqual([
+      { start: 0, len: 60 },
+      { start: 200, len: 60 },
+    ]);
+    expect(transport.playhead).toBe(200);
+    expect(el.sounding).toBe(true);
+  });
+
+  it('never leaves a seek behind for the next window to apply', async () => {
+    // A short loop enters at its phase, which is a real seek…
+    transport.play(0, { start: 100, end: 130 });
+    await flush();
+    transport.seek(120);
+    // …and the window is REPLACED WHILE THAT LOAD IS STILL IN FLIGHT
+    // (microtasks only: the render resolves, the blob has not loaded).
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    expect(el.loaded).toBe(false);
+    transport.setLoop({ start: 100, end: 104 });
+    await flush(6);
+    expect(renders[renders.length - 1]).toEqual({ start: 100, len: 4 });
+    // The stale 20 s offset must not land on this 4 s window.
+    expect(el.currentTime).toBeLessThanOrEqual(4);
+    expect(el.sounding).toBe(true);
+    expect(transport.playing).toBe(true);
+  });
+
+  it('keeps sounding through a selection drag', async () => {
+    transport.play(0, { start: 0, end: DURATION });
+    await flush();
+    // mousedown seeks, then every mousemove re-arms the growing loop.
+    transport.seek(100);
+    for (let end = 100.5; end <= 108; end += 0.5) transport.setLoop({ start: 100, end });
+    await flush(8);
+    expect(renders[renders.length - 1]).toEqual({ start: 100, len: 8 });
+    expect(el.sounding).toBe(true);
+    expect(transport.playing).toBe(true);
+  });
+});

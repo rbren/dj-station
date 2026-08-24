@@ -855,6 +855,22 @@ fails if it's missing.
   track to keep the wav small — the stereo path is covered by the
   in-suite warp test. Everything else about the pipeline is pinned by
   `cargo test -p dj-analysis --release --test beatify`.
+- The transport DERIVES the offset it starts a window at; callers hand it
+  an ABSOLUTE position. Both halves of that rule were once broken and the
+  page went silent: seeking inside a loop longer than one window loaded
+  the loop's HEAD window and asked the element for `at - loop.start`
+  seconds into it, and the element seek was armed with a one-shot
+  `loadedmetadata` listener that outlived a replaced `src` and re-applied
+  its offset to the NEXT window. Either way the element lands past the end
+  of what it holds, ends on the spot, and `onEnded` chains into the next
+  window — a playhead marching forward in perfect silence. So: `begin`
+  computes the window AND the phase together and clamps the phase into the
+  window; the element's pending seek is transport state (`pendingSeek`)
+  applied by ONE permanent `loadedmetadata` listener owned by
+  `attach`/`detach`. Media-element semantics that a boolean fake cannot
+  show (async load, dropped early seeks, seek-past-end ⇒ `ended`) are
+  pinned by `StrictElement` in `tests/ClipTransport.test.ts` — reach for
+  it when a playback bug is about what the element actually does.
 - ONE audition timeline, `app/src/components/AudioTimeline.tsx`: waveform
   + ruler + selection gestures (sweep / edge-resize / slide /
   shift-extend) + wheel-zoom-around-cursor + transport row, extracted
