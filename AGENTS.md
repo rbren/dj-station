@@ -817,6 +817,20 @@ fails if it's missing.
   gitignored) plus a best-effort `<source>.beatify.json` sidecar; Beatify
   never rewrites the source file or the library DB row, so re-importing
   the same audio finds its grid again.
+- Beatify's frontend is three files: `BeatifyView.tsx` (tab shell: track
+  list, run/verdict state, owns which track is open), `BeatifyModal.tsx`
+  (the detection report + audition) and `BeatifyTrackView.tsx` (the
+  beatified track's waveform, grid ruler and selection work). The last
+  two each render an `AudioTimeline` and own a `ClipTransport`; grid
+  quantization is `beatSnap(grid)`, exported from BeatifyTrackView and
+  handed to the timeline's `snap` hooks, so beats are the unit of every
+  gesture there without the timeline knowing what a beat is. MOD-1 colour
+  semantics hold throughout: AMBER is what was played (detections,
+  source audio), TEAL is what the maths says (the fitted grid). All of it
+  is pinned by `app/tests/BeatifyView.test.tsx` (tab + modal + track view,
+  against a mocked client) and `app/tests/BeatifyGrid.test.ts` (the meter
+  law shared with `grid.rs`, plus `beatSnap`/`viewSpan`/`zoomView`); the
+  transport underneath has its own suite in `app/tests/ClipTransport.test.ts`.
 - Beatify detection degrades like the yt-dlp provider: `beat_this` (a
   PyTorch model) is an OPTIONAL runtime dep. `detect::probe_beat_this`
   FINDS it rather than assuming `python3`: it reads the shebang of a
@@ -871,6 +885,19 @@ fails if it's missing.
   show (async load, dropped early seeks, seek-past-end ⇒ `ended`) are
   pinned by `StrictElement` in `tests/ClipTransport.test.ts` — reach for
   it when a playback bug is about what the element actually does.
+- A LOOP ONLY DECIDES WHERE THE WRAP IS. `setLoop` never re-renders and
+  never repositions: arming Loop over a selection ahead of the playhead
+  plays INTO it, and dragging a selection edge while it plays does not
+  interrupt a note. Playback returns to `range.start` when it CROSSES
+  `range.end` (`wrapAt`, driven from `setPlayhead`), so a range left
+  behind the playhead is simply met on the next pass instead of yanking
+  it backwards. What `setLoop` does do is switch OFF native wrapping
+  (`el.loop` / `LoopHandle.setLooping`) whenever the loaded window is no
+  longer exactly the armed range — otherwise the old edges keep wrapping
+  and the new ones are never reached; the window then plays out and
+  `ranOut()` picks the next one from the range armed BY THEN. Before this,
+  every mousemove of a drag re-fetched a window, which is a stutter per
+  pixel dragged.
 - ONE audition timeline, `app/src/components/AudioTimeline.tsx`: waveform
   + ruler + selection gestures (sweep / edge-resize / slide /
   shift-extend) + wheel-zoom-around-cursor + transport row, extracted
@@ -888,13 +915,20 @@ fails if it's missing.
   `viewSpan`/`zoomView` (exported, pinned in BeatifyGrid.test.ts).
   BeatifyTrackView is keyed by track+render in BeatifyView so a
   re-beatify remounts it (fresh transport/viewport/selection) instead of
-  setState-in-effect resets, and follow-mode recentres the viewport from
-  the transport's `onStatus` callback, not an effect.
+  setState-in-effect resets.
+- THE VIEW NEVER MOVES ITSELF AND A SWEEP NEVER MOVES PLAYBACK. Two rules
+  that both come from the same complaint — the ground shifting under a
+  gesture. (a) Nothing auto-scrolls the viewport during playback: where
+  the track is zoomed and scrolled to belongs to the user, and the
+  playhead is allowed to travel out of the window (PRD TV-13's Follow
+  toggle is WITHDRAWN, not merely off). (b) In `AudioTimeline`, only a
+  CLICK seeks, and it seeks on release; a drag that swept anywhere is a
+  selection and leaves the playhead alone. `WaveDrag.swept/fresh` is what
+  tells them apart — do not move the seek back to mousedown.
 - Beatify §6 open questions, decided: (1) loops follow `ClipTransport`'s
-  `setLoop` policy — a change while the playhead is inside the new range
-  carries on from there, outside it restarts at the range head
-  (`loopWrapBeat` remains as pure math but the UI no longer schedules
-  group-boundary wraps; the shared transport's behavior won);
+  `setLoop` policy, which is now "arming or moving a loop NEVER moves
+  playback" (`loopWrapBeat` remains as pure math but the UI no longer
+  schedules group-boundary wraps; the shared transport's behavior won);
   (2) re-beatifying an already-beatified track is allowed
   but warns that anything cut from the old grid stops matching, and it
   overwrites the same hash-keyed record (no versions); (3) the lead-in is

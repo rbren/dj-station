@@ -338,6 +338,24 @@ describe('Beatify tab', () => {
     expect(screen.getByTestId('beatify-track-readout').textContent).not.toContain('view');
   });
 
+  it('leaves the view where it was put, even while playing', async () => {
+    const client = clientMock({ load: vi.fn(async () => beatified()) });
+    render(<BeatifyView client={client} library={libraryMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-open'));
+    await screen.findByTestId('beatify-track-waveform');
+    fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
+    fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
+    const view = () => screen.getByTestId('beatify-track-readout').textContent;
+    const before = view();
+
+    // Playing does not scroll the waveform under the user: the playhead
+    // simply travels across (and out of) the window they chose.
+    fireEvent.click(screen.getByTestId('beatify-track-play'));
+    await waitFor(() => expect(screen.getByTestId('beatify-track-play').textContent).toBe('❚❚'));
+    expect(view()).toBe(before);
+    expect(screen.queryByTestId('beatify-track-follow')).toBeNull();
+  });
+
   it('seeks and selects in whole beats in the track view (TV-6/TV-14)', async () => {
     const client = clientMock({ load: vi.fn(async () => beatified()) });
     render(<BeatifyView client={client} library={libraryMock()} />);

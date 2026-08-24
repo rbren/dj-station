@@ -43,6 +43,8 @@ export interface Range {
 export interface PlayWindow {
   start: number;
   end: number;
+  /** The source wraps itself at the end of this window — true only while
+   *  the window IS the armed loop range. */
   loop: boolean;
 }
 
@@ -106,6 +108,8 @@ export class ClipTransport {
    *  null once it has (seeking only sticks after `loadedmetadata`). */
   private pendingSeek: number | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
+  /** Guards the playhead write inside a wrap from re-entering it. */
+  private wrapping = false;
   private toneTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(host: TransportHost, opts: TransportOptions = {}) {
@@ -208,27 +212,37 @@ export class ClipTransport {
     this.setPlaying(false);
   }
 
-  /** The loop range changed (selection moved, Loop toggled). Re-fetches
-   *  while playing so the change is heard at once; otherwise just
-   *  remembers it for the next `play`. */
+  /** The loop range changed (selection moved, Loop toggled). Playback
+   *  carries on where it is either way — see below. */
   setLoop(range: Range | null): void {
     if (this.disposed) return;
     this.loopRange = range;
     const w = this.win;
     if (!this.playingNow || !w) return;
-    if (range) {
-      const end = Math.min(range.end, range.start + this.windowSecs);
-      const same = w.loop && Math.abs(w.start - range.start) < EPS && Math.abs(w.end - end) < EPS;
-      if (same) return;
-      // Arming a loop around where playback already is (looping the whole
-      // clip, say) carries on from there rather than rewinding to the head.
-      const at = this.position();
-      const inside = at !== null && at > range.start + EPS && at < range.end - EPS;
-      void this.begin(inside ? at : range.start, range, 0);
-    } else if (w.loop) {
-      // The loop is gone: carry on linearly from where it had got to.
-      void this.begin(this.position() ?? w.start, null, 0);
-    }
+    // A LOOP CHANGE NEVER MOVES PLAYBACK. Arming Loop, or dragging the
+    // selection while it plays, used to re-render at the loop head, so
+    // the audio jumped backwards under a live drag and stuttered on every
+    // mousemove. Playback runs on from where it is; the only thing a
+    // range does is decide WHERE THE WRAP IS, and that happens when
+    // playback reaches the right-hand edge (`wrapAt` below).
+    //
+    // All that is needed here is to stop the source wrapping somewhere
+    // else: a buffer or element looping ITSELF only stays right while it
+    // holds exactly the armed range.
+    const exact =
+      range !== null && Math.abs(w.start - range.start) < EPS && Math.abs(w.end - range.end) < EPS;
+    if (!exact) this.setNativeLoop(false);
+  }
+
+  /** Whether the running source wraps on its own at the end of what it
+   *  holds. Off means it runs out instead, and `onEnded`/`onLoopEnd`
+   *  picks the next window using the range armed by then. */
+  private setNativeLoop(on: boolean): void {
+    const source = this.source;
+    if (!source) return;
+    if (source.kind === 'loop') source.handle.setLooping(on);
+    else source.el.loop = on;
+    if (this.win) this.win.loop = on;
   }
 
   /** A TONE-ONLY edit (EQ, level) landed: the timeline still means what it
@@ -242,7 +256,7 @@ export class ClipTransport {
       this.toneTimer = null;
       const w = this.win;
       if (this.disposed || !this.playingNow || !w) return;
-      if (w.loop) {
+      if (this.loopRange) {
         // Resume at the same phase, so the audition keeps its place while
         // the tone changes underneath it.
         const phase = Math.max(0, (this.position() ?? w.start) - w.start);
@@ -336,6 +350,7 @@ export class ClipTransport {
         // two sources are never live at the same instant.
         this.release();
         const handle = prepared.start(within);
+        handle.onEnd = this.onLoopEnd;
         this.install({ kind: 'loop', handle }, { start, end, loop: true });
         this.setPlayhead(Math.min(duration, start + handle.position()));
         this.setPlaying(true);
@@ -348,7 +363,7 @@ export class ClipTransport {
     if (!el) return;
     const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
     this.release();
-    this.install({ kind: 'element', el }, { start, end, loop: loopRange !== null });
+    this.install({ kind: 'element', el }, { start, end, loop: loopRange !== null && wholeLoop });
     this.revokeUrl();
     this.url = url;
     // The seek belongs to THIS window, so the transport holds it rather
@@ -424,12 +439,26 @@ export class ClipTransport {
   }
 
   private readonly onEnded = () => {
+    if (this.source?.kind === 'element') this.ranOut();
+  };
+
+  /** A gapless buffer that was un-looped mid-pass (the selection moved on
+   *  from what it holds) has played itself out. */
+  private readonly onLoopEnd = () => {
+    if (this.source?.kind === 'loop') this.ranOut();
+  };
+
+  /** The loaded window has been played to its end. What comes next is
+   *  decided by the range armed NOW, not the one the window was fetched
+   *  for — the selection may have moved since. */
+  private ranOut(): void {
     const w = this.win;
-    if (this.disposed || this.source?.kind !== 'element' || !w) return;
+    if (this.disposed || !w) return;
     const duration = this.host.duration();
-    const range = w.loop ? this.loopRange : null;
+    const range = this.loopRange;
     if (range) {
-      // A loop too long for one window: chain through it, then wrap.
+      // More of the range past this window? Chain into it; otherwise the
+      // pass is over and the loop starts again at its head.
       const more = w.end < range.end - 0.01;
       void this.begin(more ? w.end : range.start, range, 0);
       return;
@@ -442,7 +471,7 @@ export class ClipTransport {
     this.release();
     this.setPlaying(false);
     this.setPlayhead(duration);
-  };
+  }
 
   /** The element to drive, with this transport's listeners on it. The
    *  editor only renders one once a track is open, so it is looked up
@@ -513,8 +542,27 @@ export class ClipTransport {
 
   private setPlayhead(at: number): void {
     if (this.playheadNow === at) return;
+    const from = this.playheadNow;
     this.playheadNow = at;
     this.notify();
+    this.wrapAt(from, at);
+  }
+
+  /** Loop by CROSSING the right-hand edge, not by jumping to the left one.
+   *  A range armed while playback is before it is simply played into; the
+   *  first time playback reaches its end, it goes back to its start. A
+   *  range that ends behind the playhead is never crossed, so nothing is
+   *  yanked backwards — playback keeps going and meets the loop when it
+   *  comes round. */
+  private wrapAt(from: number, to: number): void {
+    const range = this.loopRange;
+    if (!range || !this.playingNow || this.wrapping) return;
+    const edge = range.end;
+    if (!(from < edge - EPS && to >= edge - EPS)) return;
+    this.wrapping = true;
+    this.setPlayhead(range.start);
+    this.wrapping = false;
+    void this.begin(range.start, range, 0);
   }
 
   private notify(): void {

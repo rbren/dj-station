@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClipTransport, type TransportHost, type TransportStatus } from '../src/clipTransport';
-import type { PreparedLoop } from '../src/clipAudio';
+import type { LoopHandle, PreparedLoop } from '../src/clipAudio';
 
 /** Let queued microtasks and zero-delay timers run. */
 async function flush(times = 3) {
@@ -35,6 +35,10 @@ function deferred<T>(): Deferred<T> {
 interface LiveLoop {
   offset: number;
   stopped: boolean;
+  /** Whether the node still wraps itself at the end of its buffer. */
+  looping: boolean;
+  /** Play the pass out, as a node whose `loop` was turned off does. */
+  runOut?: () => void;
 }
 
 /**
@@ -145,16 +149,23 @@ class World {
       duration: 4,
       start: (offsetSecs = 0) => {
         this.preparedUnused--;
-        const live: LiveLoop = { offset: offsetSecs, stopped: false };
+        const live: LiveLoop = { offset: offsetSecs, stopped: false, looping: true };
         this.loops.push(live);
         this.check();
-        return {
+        const handle: LoopHandle = {
           duration: 4,
           position: () => offsetSecs,
+          setLooping: (on: boolean) => {
+            live.looping = on;
+          },
           stop: () => {
             live.stopped = true;
           },
         };
+        live.runOut = () => {
+          if (!live.stopped) handle.onEnd?.();
+        };
+        return handle;
       },
     });
   }
@@ -291,7 +302,7 @@ describe('ClipTransport', () => {
     expect(transport.playing).toBe(false);
   });
 
-  it('swaps the source when the loop range changes, keeping just one', async () => {
+  it('lets the pass finish when the loop range changes, then follows it', async () => {
     transport.play(2, { start: 2, end: 6 });
     await flush();
     world.finishRender();
@@ -300,16 +311,17 @@ describe('ClipTransport', () => {
     await flush();
     const first = world.loops[0];
 
+    // Moving the loop does NOT re-render: the buffer plays on, it just
+    // stops wrapping at an end that is no longer the loop's.
     transport.setLoop({ start: 3, end: 9 });
     await flush();
-    // The old node plays on until the new one is ready — but only one of
-    // them is ever live.
     expect(first.stopped).toBe(false);
-    world.finishRender();
-    await flush();
-    world.finishDecode();
-    await flush();
+    expect(first.looping).toBe(false);
+    expect(world.renders.filter((r) => !r.done)).toHaveLength(0);
 
+    // When the pass runs out, the range armed BY THEN is what loads.
+    first.runOut?.();
+    await world.settle();
     expect(first.stopped).toBe(true);
     expect(world.loops.filter((l) => !l.stopped)).toHaveLength(1);
     expect(transport.loaded).toMatchObject({ start: 3, end: 9 });
@@ -337,11 +349,14 @@ describe('ClipTransport', () => {
     world.finishDecode();
     await flush();
 
+    // Un-arming Loop leaves the pass alone too — it just stops wrapping.
     transport.setLoop(null);
     await flush();
-    world.finishRender();
-    await flush();
+    expect(world.loops[0].looping).toBe(false);
+    expect(world.loops[0].stopped).toBe(false);
 
+    world.loops[0].runOut?.();
+    await world.settle();
     expect(world.loops[0].stopped).toBe(true);
     expect(world.elementPlaying).toBe(true);
     expect(world.element.loop).toBe(false);
@@ -661,22 +676,62 @@ describe('ClipTransport against a strict media element', () => {
     expect(el.loaded).toBe(false);
     transport.setLoop({ start: 100, end: 104 });
     await flush(6);
-    expect(renders[renders.length - 1]).toEqual({ start: 100, len: 4 });
-    // The stale 20 s offset must not land on this 4 s window.
-    expect(el.currentTime).toBeLessThanOrEqual(4);
+    // The stale 20 s offset must not land on a window it was not meant
+    // for: the seek belongs to the window loaded with it.
+    expect(el.currentTime).toBeLessThanOrEqual(renders[renders.length - 1].len);
     expect(el.sounding).toBe(true);
     expect(transport.playing).toBe(true);
   });
 
-  it('keeps sounding through a selection drag', async () => {
+  it('plays straight through a selection drag, without a single re-render', async () => {
     transport.play(0, { start: 0, end: DURATION });
     await flush();
-    // mousedown seeks, then every mousemove re-arms the growing loop.
     transport.seek(100);
+    await flush(4);
+    const before = renders.length;
+
+    // Every mousemove re-arms a growing loop. None of them may touch
+    // playback: dragging a selection is not a transport command.
     for (let end = 100.5; end <= 108; end += 0.5) transport.setLoop({ start: 100, end });
-    await flush(8);
+    await flush(4);
+    expect(renders).toHaveLength(before);
+    expect(el.sounding).toBe(true);
+    expect(transport.playhead).toBe(100);
+
+    // The loop happens where the user drew its right-hand edge.
+    el.currentTime = 7.9;
+    el.emit('timeupdate');
+    expect(transport.playhead).toBeCloseTo(107.9);
+    el.currentTime = 8.1;
+    el.emit('timeupdate');
+    await flush(4);
+    expect(transport.playhead).toBe(100);
     expect(renders[renders.length - 1]).toEqual({ start: 100, len: 8 });
     expect(el.sounding).toBe(true);
-    expect(transport.playing).toBe(true);
+  });
+
+  it('plays INTO a loop armed ahead of the playhead rather than jumping to it', async () => {
+    transport.play(0, null);
+    await flush();
+    expect(renders).toEqual([{ start: 0, len: 60 }]);
+
+    // Loop armed over a selection further down the track: nothing moves.
+    transport.setLoop({ start: 30, end: 34 });
+    await flush(4);
+    expect(renders).toHaveLength(1);
+    expect(transport.playhead).toBe(0);
+
+    // Playing through the selection is not a wrap either — only reaching
+    // its right-hand edge is.
+    el.currentTime = 31;
+    el.emit('timeupdate');
+    expect(transport.playhead).toBe(31);
+    expect(renders).toHaveLength(1);
+
+    el.currentTime = 34;
+    el.emit('timeupdate');
+    await flush(4);
+    expect(transport.playhead).toBe(30);
+    expect(renders[renders.length - 1]).toEqual({ start: 30, len: 4 });
   });
 });

@@ -308,7 +308,7 @@ What the user lands in after import. The track, gridded, playable.
 **TV-10.** Zoom levels snap to powers of two in beats: whole track / 512 / 128 / 32 / 8 / 2 / 1 beat.
 **TV-11.** `+` / `−` zoom around the **playhead**. Scroll-wheel zoom (or trackpad pinch) centres on the **mouse**. Both behaviours are expected and they're expected in those places.
 **TV-12.** **Zoom to fit** (whole track) and **zoom to selection** as single keys.
-**TV-13.** **Follow playhead** toggle for auto-scroll during playback, on by default, and automatically suspended when the user scrolls manually so it doesn't fight them.
+**TV-13.** ~~**Follow playhead** toggle for auto-scroll during playback~~ — WITHDRAWN after use: the view never scrolls itself. Where the track is zoomed and scrolled to is the user's, and moving it under a playing playhead makes the waveform impossible to work against.
 
 ### 4.4 Selection
 

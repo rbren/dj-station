@@ -89,9 +89,15 @@ export interface TimelineSnap {
  *  against a fixed `anchor` (for a resize, the end you did NOT grab) —
  *  so they share a kind. Dragging from inside the selection slides the
  *  selection itself; `onSelectionSlid` tells the parent how far (and
- *  whether alt asked for the audio to follow), on release only. */
+ *  whether alt asked for the audio to follow), on release only.
+ *
+ *  A sweep NEVER moves the playhead: choosing what to loop is not a
+ *  request to restart playback, and jumping the audio under a live drag
+ *  is exactly the stutter this gesture used to cause. `swept` records
+ *  whether the pointer actually moved, so a plain click — which is a seek
+ *  — can still be told apart on release. */
 type WaveDrag =
-  | { kind: 'select'; anchor: number }
+  | { kind: 'select'; anchor: number; swept: boolean; fresh: boolean; free: boolean }
   | { kind: 'move'; base: Range; anchor: number; delta: number; audio: boolean };
 
 export interface AudioTimelineProps {
@@ -230,16 +236,27 @@ export function AudioTimeline({
       if (sel && edge) {
         // Anchor the end you did not grab and sweep from there; the
         // playhead stays put (only a fresh sweep moves it).
-        dragRef.current = { kind: 'select', anchor: edge === 'start' ? sel.end : sel.start };
+        dragRef.current = {
+          kind: 'select',
+          anchor: edge === 'start' ? sel.end : sel.start,
+          swept: true,
+          fresh: false,
+          free: false,
+        };
         onSelectionChange(snapRange(resizeSelection(sel, edge, t, duration)));
       } else if (allowSlide && sel && t >= sel.start && t <= sel.end) {
         // Inside the selection: slide WHICH PART is selected. Holding alt
         // slides the audio with it — an edit, so it must be asked for.
         dragRef.current = { kind: 'move', base: sel, anchor: t, delta: 0, audio: e.altKey };
       } else {
-        dragRef.current = { kind: 'select', anchor: t };
+        dragRef.current = {
+          kind: 'select',
+          anchor: t,
+          swept: false,
+          fresh: true,
+          free: e.metaKey || e.ctrlKey,
+        };
         onSelectionChange({ start: t, end: t });
-        onSeek(snapSeek(t, e.metaKey || e.ctrlKey));
       }
       setDragging(true);
     },
@@ -253,6 +270,7 @@ export function AudioTimeline({
       if (!drag) return;
       const t = timeAt(e.clientX, dragRect.current);
       if (drag.kind === 'select') {
+        if (Math.abs(t - drag.anchor) > 1e-4) drag.swept = true;
         onSelectionChange(
           snapRange({ start: Math.min(drag.anchor, t), end: Math.max(drag.anchor, t) }),
         );
@@ -272,6 +290,12 @@ export function AudioTimeline({
       const drag = dragRef.current;
       dragRef.current = null;
       setDragging(false);
+      if (drag?.kind === 'select') {
+        // A click that never swept anywhere is a seek, and it clears the
+        // selection it collapsed to a point.
+        if (drag.fresh && !drag.swept) onSeek(snapSeek(drag.anchor, drag.free));
+        return;
+      }
       if (drag?.kind !== 'move') return;
       if (Math.abs(drag.delta) > 1e-3) {
         onSelectionSlid?.(drag.base, drag.delta, drag.audio);

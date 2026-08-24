@@ -102,8 +102,12 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
 /** A recorded AudioBufferSourceNode start. */
 interface FakeLoop {
   loop: boolean;
+  /** Whether it still wraps at the end of its buffer. */
+  looping: boolean;
   offset: number;
   stopped: boolean;
+  /** Play the pass out, as an un-looped node does. */
+  end?: () => void;
 }
 
 /** jsdom has no Web Audio. Install just enough of it to observe how the
@@ -112,15 +116,24 @@ function installWebAudio(bufferSecs = 4): FakeLoop[] {
   const starts: FakeLoop[] = [];
   class FakeSource {
     buffer: unknown = null;
-    loop = false;
     loopStart = 0;
     loopEnd = 0;
-    rec: FakeLoop = { loop: false, offset: 0, stopped: false };
+    onended: (() => void) | null = null;
+    rec: FakeLoop = { loop: false, looping: false, offset: 0, stopped: false };
+    private wraps = false;
+    get loop() {
+      return this.wraps;
+    }
+    set loop(on: boolean) {
+      this.wraps = on;
+      this.rec.looping = on;
+    }
     connect() {}
     disconnect() {}
     start(_when = 0, offset = 0) {
-      this.rec.loop = this.loop;
+      this.rec.loop = this.wraps;
       this.rec.offset = offset;
+      this.rec.end = () => this.onended?.();
       starts.push(this.rec);
     }
     stop() {
@@ -574,6 +587,26 @@ describe('ClipView', () => {
     expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ title: 'Basement Edit' }));
   });
 
+  it('seeks on a click but never on a sweep', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    const readout = () => screen.getByTestId('clip-playhead-readout').textContent;
+    const wave = sizeTimeline('clip-waveform');
+
+    // A click is a seek…
+    fireEvent.mouseDown(wave, { clientX: 300 });
+    fireEvent.mouseUp(window);
+    expect(readout()).toBe('0:03.00');
+
+    // …but choosing what to loop is not: a sweep leaves the playhead
+    // exactly where it was, so playback under it is undisturbed.
+    fireEvent.mouseDown(wave, { clientX: 500 });
+    fireEvent.mouseMove(window, { clientX: 800 });
+    fireEvent.mouseUp(window);
+    expect(readout()).toBe('0:03.00');
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:05.00–0:08.00');
+  });
+
   it('plays the rendered edit and tracks the playhead', async () => {
     const clip = clipMock();
     await openTrack(clip);
@@ -639,8 +672,16 @@ describe('ClipView', () => {
     await waitFor(() => expect(starts).toHaveLength(1));
     expect(starts[0].loop).toBe(true);
 
-    // Selecting something afterwards narrows the loop to it, live.
+    // Selecting something afterwards does not interrupt the pass that is
+    // sounding — it only stops it wrapping at an end that is no longer
+    // the loop's…
+    const before = (clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls.length;
     select(2, 6);
+    await waitFor(() => expect(starts[0].looping).toBe(false));
+    expect((clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(before);
+
+    // …and the selection is what loops from the moment it runs out.
+    await act(async () => starts[0].end?.());
     await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 4));
   });
 
@@ -675,30 +716,34 @@ describe('ClipView', () => {
     await waitFor(() => expect(audio.loop).toBe(true));
   });
 
-  it('follows the selection while looping, without a pause/play', async () => {
+  it('takes new loop edges at the end of the pass, not under it', async () => {
     const clip = clipMock();
     await openTrack(clip);
     select(2, 6);
     fireEvent.click(screen.getByTestId('clip-loop'));
     fireEvent.click(screen.getByTestId('clip-play'));
     await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 4));
+    const audio = screen.getByTestId('clip-audio') as HTMLAudioElement;
+    await waitFor(() => expect(audio.loop).toBe(true));
+    const before = (clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls.length;
 
-    // Resizing the loop while it plays re-fetches at once — the old span
-    // must not keep looping until the transport is cycled.
+    // Dragging the loop's right edge while it plays leaves playback
+    // alone: it used to re-fetch on every mousemove, which is a stutter
+    // per pixel dragged.
     const wave = sizeTimeline('clip-waveform');
     fireEvent.mouseDown(wave, { clientX: 600 });
     fireEvent.mouseMove(window, { clientX: 900 });
     fireEvent.mouseUp(window);
-    await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 7));
+    await waitFor(() => expect(audio.loop).toBe(false));
+    expect((clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(before);
     expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
 
-    // Clearing the selection widens the loop to the whole clip rather
-    // than disarming it — Loop is a toggle, and it stays on.
-    fireEvent.mouseDown(wave, { clientX: 100 });
-    fireEvent.mouseUp(window);
-    await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 0, 10));
-    const audio = screen.getByTestId('clip-audio') as HTMLAudioElement;
-    expect(audio.loop).toBe(true);
+    // The new edges take over when the pass runs out: the widened range
+    // is loaded whole (it still fits one window) and re-entered where
+    // playback had got to, so the wrap lands on the edge just dragged.
+    fireEvent(audio, new Event('ended'));
+    await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 7));
+    await waitFor(() => expect(audio.loop).toBe(true));
     expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
 
     // Turning it off is what carries on linearly.

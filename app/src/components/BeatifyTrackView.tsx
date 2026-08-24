@@ -78,7 +78,6 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
   const [vp, setVp] = useState<Range | null>(null);
   const [selection, setSelection] = useState<Range | null>(null);
   const [loop, setLoop] = useState(false);
-  const [follow, setFollow] = useState(true);
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
 
@@ -91,9 +90,9 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
   // against the new audio.
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const transportRef = useRef<ClipTransport | null>(null);
-  const live = useRef({ track, loadAudio, duration, follow });
+  const live = useRef({ track, loadAudio, duration });
   useLayoutEffect(() => {
-    live.current = { track, loadAudio, duration, follow };
+    live.current = { track, loadAudio, duration };
   });
 
   useEffect(() => {
@@ -101,19 +100,13 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
       duration: () => live.current.duration,
       element: () => audioRef.current,
       render: (start, len) => live.current.loadAudio(live.current.track.trackId, start, len),
+      // The view NEVER scrolls itself: where the track is zoomed and
+      // scrolled to is the user's, and yanking it around under a playing
+      // playhead makes the waveform impossible to work against (TV-13
+      // asked for follow; using it said otherwise).
       onStatus: (s) => {
         setPlaying(s.playing);
         setPlayhead(s.playhead);
-        // TV-13: follow keeps the playhead centred while playing zoomed
-        // in; a manual scroll (wheel) simply overwrites the viewport.
-        if (s.playing && live.current.follow) {
-          setVp((cur) => {
-            if (!cur) return cur;
-            const { len } = viewSpan(cur, live.current.duration);
-            const start = Math.max(0, Math.min(s.playhead - len / 2, live.current.duration - len));
-            return Math.abs(start - cur.start) > len / 8 ? { start, end: start + len } : cur;
-          });
-        }
       },
     };
     const transport = new ClipTransport(host, { windowSecs: WINDOW_SECS, tickMs: LOOP_TICK_MS });
@@ -286,15 +279,6 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
         loopTitle={sel ? 'Loop the selection (l)' : 'Loop the whole track (l)'}
         transportExtra={
           <>
-            <button
-              data-testid="beatify-track-follow"
-              className={follow ? 'clip-toggle-on' : undefined}
-              aria-pressed={follow}
-              title="Keep the playhead centred while zoomed in"
-              onClick={() => setFollow((v) => !v)}
-            >
-              Follow
-            </button>
             <label className="beatify-group">
               group
               <input

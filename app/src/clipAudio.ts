@@ -27,6 +27,12 @@ export interface LoopHandle {
   position(): number;
   /** Length of one pass, in seconds. */
   readonly duration: number;
+  /** Wrap at the end of the buffer, or run out there. Turned off when the
+   *  loop the caller wants is no longer the one this buffer holds — the
+   *  pass finishes and `onEnd` asks for the right window instead. */
+  setLooping(on: boolean): void;
+  /** Called once when a NON-looping pass reaches the end of the buffer. */
+  onEnd?: () => void;
   stop(): void;
 }
 
@@ -119,12 +125,18 @@ function startLoop(ctx: AudioContext, buffer: AudioBuffer, offsetSecs: number): 
   source.start(0, offset);
 
   let stopped = false;
-  return {
+  let looping = true;
+  const handle: LoopHandle = {
     duration: buffer.duration,
     position() {
       if (stopped || buffer.duration <= 0) return 0;
       const elapsed = Math.max(0, ctx.currentTime - startedAt);
-      return (offset + elapsed) % buffer.duration;
+      const at = offset + elapsed;
+      return looping ? at % buffer.duration : Math.min(at, buffer.duration);
+    },
+    setLooping(on: boolean) {
+      looping = on;
+      source.loop = on;
     },
     stop() {
       if (stopped) return;
@@ -137,4 +149,8 @@ function startLoop(ctx: AudioContext, buffer: AudioBuffer, offsetSecs: number): 
       source.disconnect();
     },
   };
+  source.onended = () => {
+    if (!stopped) handle.onEnd?.();
+  };
+  return handle;
 }
