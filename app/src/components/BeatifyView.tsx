@@ -357,7 +357,11 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
 
       {open && (
         <BeatifyClipBuilder
-          key={`${open.id}:${open.seeds.map((s) => `${s.id}@${s.record.grid.bpm}`).join(',')}`}
+          // Keyed by the PROJECT and nothing else. Everything else about
+          // it — the tempo, a seed imported, a seed re-beatified — is a
+          // change the builder takes as a prop and fetches around,
+          // because a remount takes the half-built clip with it.
+          key={open.id}
           project={open}
           clips={clips}
           onImport={importSeed}

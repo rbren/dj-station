@@ -57,10 +57,15 @@ const LOOP_TICK_MS = 50;
 /** Height of the confidence band, viewBox units (TV-5). */
 const DENSITY_H = 20;
 
-/** What the clip builder shows in this pane instead of the seed render:
- *  a stem, or a clip built earlier. Everything else — the grid, the
- *  snapping, the ruler — is the track's, because they share its grid. */
+/** What the clip builder shows in this pane instead of the whole seed
+ *  render: the seed with some of its stems switched off, or a clip built
+ *  earlier. Everything else — the grid, the snapping, the ruler — is the
+ *  track's, because they share its grid. */
 export interface TrackViewSource {
+  /** Identifies the MIX. Changing it while the timeline stays put (a
+   *  stem switched off) swaps the audio under the playhead; the view
+   *  keeps its zoom, its selection and its playback. */
+  id?: string;
   label: string;
   durationSecs: number;
   peaks: number[];
@@ -133,9 +138,10 @@ export function BeatifyTrackView({
 
   // --- playback: one ClipTransport owns everything that sounds ----------
   //
-  // The parent keys this component by track+render, so a re-beatify
-  // remounts it: the transport, viewport and selection all start fresh
-  // against the new audio.
+  // The parent keys this component by the MATERIAL, so a re-beatify or a
+  // different seed remounts it and the transport, viewport and selection
+  // all start fresh against the new audio. A change of MIX does not: see
+  // the re-render below.
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const transportRef = useRef<ClipTransport | null>(null);
   const live = useRef({ track, loadAudio, duration, onPlayingChange });
@@ -167,6 +173,18 @@ export function BeatifyTrackView({
       transport.dispose();
     };
   }, []);
+
+  // A stem was switched off (or back on): the audio is different, the
+  // TIMELINE is not — beat n is still beat n, of the same length. So the
+  // window in flight is re-rendered in place, at its own phase, exactly
+  // as a tone edit is on the Clip page. Nothing here touches the
+  // viewport, the selection or the playhead, and playback carries on;
+  // while stopped there is nothing to re-render, and the next Play
+  // fetches the new mix anyway.
+  const mix = source?.id ?? '';
+  useEffect(() => {
+    transportRef.current?.refreshTone();
+  }, [mix]);
 
   // What Loop loops: the selection if there is one, otherwise everything
   // (TV-23: the bounds follow the selection live).

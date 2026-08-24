@@ -731,6 +731,33 @@ describe('beatify projects', () => {
     );
   });
 
+  it('re-tempos without throwing away the clip on the bench', async () => {
+    const seed = beatified();
+    const client = clientMock({
+      projects: vi.fn(async () => [project()]),
+      setProjectBpm: vi.fn(async (_id: string, bpm: number) =>
+        opened({
+          bpm,
+          seeds: [
+            { ...seed, record: { ...seed.record, grid: { ...GRID, bpm, period: 60 / bpm } } },
+          ],
+        }),
+      ),
+    });
+    await openProject(client);
+    const grid = await screen.findByTestId('beatify-clip-grid');
+
+    const box = screen.getByTestId('beatify-project-bpm');
+    fireEvent.change(box, { target: { value: '128' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(client.setProjectBpm).toHaveBeenCalled());
+
+    // THE SAME NODE. The builder is handed the new tempo, not torn down
+    // and rebuilt — a rebuild takes the half-built clip with it, and the
+    // clip is the work.
+    expect(screen.getByTestId('beatify-clip-grid')).toBe(grid);
+  });
+
   it('refuses a tempo that is not a tempo', async () => {
     const client = clientMock({ projects: vi.fn(async () => [project()]) });
     await openProject(client);
