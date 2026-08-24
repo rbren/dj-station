@@ -21,9 +21,12 @@ import {
   type SourceId,
 } from '../beatifyClip';
 
-/** Pixels per beat. Wide enough to read a beat number in. */
-const COL_W = 34;
-const ROW_H = 46;
+/** The grid fills the width of the pane, so a beat is a FRACTION of it
+ *  rather than a fixed number of pixels: the columns then line up with
+ *  the source waveform directly above, which is the point of stacking
+ *  them in one column. */
+const pct = (n: number, columns: number) => `${(n / Math.max(1, columns)) * 100}%`;
+const ROW_H = 72;
 
 export interface BeatifyClipEditorProps {
   draft: ClipDraft;
@@ -49,6 +52,8 @@ export interface BeatifyClipEditorProps {
   onAddRow(): void;
   onRemoveRow(): void;
   onRename(name: string): void;
+  /** Set the clip's length in beats. */
+  onSetLength(beats: number): void;
   onSave(): void;
   saving: boolean;
   status: ReactNode;
@@ -72,12 +77,12 @@ export function BeatifyClipEditor({
   onAddRow,
   onRemoveRow,
   onRename,
+  onSetLength,
   onSave,
   saving,
   status,
 }: BeatifyClipEditorProps) {
   const columns = drawnColumns(draft);
-  const width = columns * COL_W;
 
   const cellsOf = useCallback(
     (row: number) =>
@@ -86,7 +91,7 @@ export function BeatifyClipEditor({
           key={col}
           className="beatify-clip-cell"
           data-testid={`beatify-clip-cell-${row}-${col}`}
-          style={{ width: COL_W }}
+          style={{ width: pct(1, columns) }}
           onMouseEnter={() => onHoverCell(row, col)}
           onMouseUp={() => onDropCell(row, col)}
         />
@@ -127,6 +132,17 @@ export function BeatifyClipEditor({
               ? 'playing the source'
               : 'stopped'}
         </span>
+        <label className="beatify-clip-length">
+          beats
+          <input
+            type="number"
+            min={1}
+            max={512}
+            data-testid="beatify-clip-length"
+            value={columns}
+            onChange={(e) => onSetLength(Number(e.target.value) || 1)}
+          />
+        </label>
         <span className="beatify-clip-count" data-testid="beatify-clip-count">
           {draft.placements.length} run{draft.placements.length === 1 ? '' : 's'} · {draft.rows}{' '}
           track{draft.rows === 1 ? '' : 's'}
@@ -148,9 +164,9 @@ export function BeatifyClipEditor({
       </header>
 
       <div className="beatify-clip-grid" data-testid="beatify-clip-grid">
-        <div className="beatify-clip-ruler" style={{ width }}>
+        <div className="beatify-clip-ruler">
           {Array.from({ length: columns }, (_, col) => (
-            <div key={col} className="beatify-clip-tick" style={{ width: COL_W }}>
+            <div key={col} className="beatify-clip-tick" style={{ width: pct(1, columns) }}>
               {col % 4 === 0 ? col + 1 : ''}
             </div>
           ))}
@@ -161,7 +177,7 @@ export function BeatifyClipEditor({
             key={row}
             className="beatify-clip-row"
             data-testid={`beatify-clip-row-${row}`}
-            style={{ width, height: ROW_H }}
+            style={{ height: ROW_H }}
           >
             <div className="beatify-clip-cells">{cellsOf(row)}</div>
 
@@ -169,13 +185,14 @@ export function BeatifyClipEditor({
               <div
                 className="beatify-clip-ghost"
                 data-testid="beatify-clip-ghost"
-                style={{ left: dropAt.col * COL_W, width: dropAt.beats * COL_W }}
+                style={{ left: pct(dropAt.col, columns), width: pct(dropAt.beats, columns) }}
               />
             )}
 
             {rowPlacements(draft, row).map((p) => (
               <Block
                 key={p.id}
+                columns={columns}
                 placement={p}
                 seam={abutsLeft(draft, p)}
                 tint={sourceTint(p.source, sourceOrder)}
@@ -191,7 +208,7 @@ export function BeatifyClipEditor({
           <div
             className="beatify-clip-playhead"
             data-testid="beatify-clip-playhead"
-            style={{ left: (playhead / Math.max(1e-6, period)) * COL_W }}
+            style={{ left: pct(playhead / Math.max(1e-6, period), columns) }}
           />
         )}
       </div>
@@ -201,6 +218,8 @@ export function BeatifyClipEditor({
 
 interface BlockProps {
   placement: Placement;
+  /** The clip's length, which is what the geometry is a fraction of. */
+  columns: number;
   /** Something ends exactly where this starts: draw the join. */
   seam: boolean;
   tint: number;
@@ -209,7 +228,7 @@ interface BlockProps {
   onRemove(id: string): void;
 }
 
-function Block({ placement, seam, tint, label, onGrab, onRemove }: BlockProps) {
+function Block({ placement, columns, seam, tint, label, onGrab, onRemove }: BlockProps) {
   const p = placement;
   return (
     <div
@@ -217,7 +236,7 @@ function Block({ placement, seam, tint, label, onGrab, onRemove }: BlockProps) {
       data-testid={`beatify-clip-block-${p.id}`}
       data-beats={p.beats}
       data-col={p.col}
-      style={{ left: p.col * COL_W, width: p.beats * COL_W }}
+      style={{ left: pct(p.col, columns), width: pct(p.beats, columns) }}
       title={`${label} · beats ${p.sourceBeat + 1}–${p.sourceBeat + p.beats}`}
       onMouseDown={(e) => onGrab(p.id, e)}
     >

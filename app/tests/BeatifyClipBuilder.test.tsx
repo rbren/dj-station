@@ -111,10 +111,11 @@ async function mount(clips: BeatifyClipClientApi = clipsMock()) {
 /** Sweep a selection over the source waveform. The pane is 325 px wide
  *  for 32.5 s, so a beat (0.5 s) is 5 px and beat n starts at
  *  `(0.5 + 0.5n) × 10` px. */
+const x = (beat: number) => (0.5 + 0.5 * beat) * 10;
+
 function selectBeats(fromBeat: number, beats: number) {
   const wave = screen.getByTestId('beatify-track-waveform');
   wave.getBoundingClientRect = () => ({ left: 0, width: 325, top: 0, height: 100 }) as DOMRect;
-  const x = (beat: number) => (0.5 + 0.5 * beat) * 10;
   fireEvent.mouseDown(wave, { clientX: x(fromBeat) });
   fireEvent.mouseMove(wave, { clientX: x(fromBeat + beats) });
   fireEvent.mouseUp(wave, { clientX: x(fromBeat + beats) });
@@ -174,8 +175,10 @@ describe('dragging beats into the clip', () => {
     expect(placed).toHaveLength(1);
     expect(placed[0].dataset.beats).toBe('3');
     expect(placed[0].dataset.col).toBe('2');
-    // Three beats is three columns wide, not three separate cells.
-    expect(placed[0].style.width).toBe(`${3 * 34}px`);
+    // Three beats is three columns wide, not three separate cells —
+    // and the grid fills the pane, so that width is a fraction of it.
+    expect(placed[0].style.width).toBe(`${(3 / 16) * 100}%`);
+    expect(placed[0].style.left).toBe(`${(2 / 16) * 100}%`);
   });
 
   it('keeps a six-beat run and a three-beat run visibly different', async () => {
@@ -241,6 +244,47 @@ describe('dragging beats into the clip', () => {
     expect(blocks()[0].dataset.beats).toBe('4');
   });
 
+  it('drags the beats straight down out of the source waveform', async () => {
+    await mount();
+    selectBeats(8, 4);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('4 beats'),
+    );
+
+    // Press the MIDDLE of the selection (its edges are resize handles)
+    // and pull DOWN: no handle, no menu — the material comes with the
+    // pointer.
+    const wave = screen.getByTestId('beatify-track-waveform');
+    fireEvent.mouseDown(wave, { clientX: x(10), clientY: 40 });
+    fireEvent.mouseMove(window, { clientX: x(10), clientY: 90 });
+    const cell = screen.getByTestId('beatify-clip-cell-0-2');
+    fireEvent.mouseEnter(cell);
+    expect(screen.getByTestId('beatify-clip-ghost')).toBeTruthy();
+    fireEvent.mouseUp(cell);
+
+    const placed = blocks();
+    expect(placed).toHaveLength(1);
+    expect(placed[0].dataset.beats).toBe('4');
+    expect(placed[0].dataset.col).toBe('2');
+  });
+
+  it('slides sideways as before — only DOWN pulls material out', async () => {
+    await mount();
+    selectBeats(8, 4);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('4 beats'),
+    );
+    const wave = screen.getByTestId('beatify-track-waveform');
+    fireEvent.mouseDown(wave, { clientX: x(10), clientY: 40 });
+    fireEvent.mouseMove(window, { clientX: x(14), clientY: 44 });
+    fireEvent.mouseUp(window);
+    // Nothing was dropped into the clip; the selection just moved.
+    expect(blocks()).toHaveLength(0);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('4 beats'),
+    );
+  });
+
   it('has nothing to drag until beats are selected', async () => {
     await mount();
     expect((screen.getByTestId('beatify-drag-beats') as HTMLButtonElement).disabled).toBe(true);
@@ -278,8 +322,9 @@ describe('playback', () => {
     const [, draft, start, secs] = (clips.preview as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(draft.placements).toHaveLength(1);
     expect(start).toBe(0);
-    // Four beats at 120 BPM: the whole clip, which is what loops.
-    expect(secs).toBeCloseTo(2, 6);
+    // Sixteen beats at 120 BPM: the clip's LENGTH, not the four beats of
+    // material in it — the rest is silence, and it loops with the rest.
+    expect(secs).toBeCloseTo(8, 6);
     await waitFor(() =>
       expect(screen.getByTestId('beatify-clip-live').textContent).toBe('playing the clip'),
     );
@@ -307,6 +352,47 @@ describe('playback', () => {
     );
     // …and the clip really did stop, not just lose the label.
     expect(screen.getByTestId('beatify-clip-play').textContent).toBe('\u25b6');
+  });
+});
+
+describe('the clip length', () => {
+  it('is sixteen beats to begin with, and is what plays', async () => {
+    const clips = await mount();
+    expect((screen.getByTestId('beatify-clip-length') as HTMLInputElement).value).toBe('16');
+    expect(screen.getByTestId('beatify-clip-cell-0-15')).toBeTruthy();
+    expect(screen.queryByTestId('beatify-clip-cell-0-16')).toBeNull();
+    expect(clips.preview).not.toHaveBeenCalled();
+  });
+
+  it('is set in beats, and the grid follows', async () => {
+    const clips = await mount();
+    selectBeats(0, 4);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('4 beats'),
+    );
+    dragInto(0, 0);
+
+    fireEvent.change(screen.getByTestId('beatify-clip-length'), { target: { value: '8' } });
+    expect(screen.getByTestId('beatify-clip-cell-0-7')).toBeTruthy();
+    expect(screen.queryByTestId('beatify-clip-cell-0-8')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('beatify-clip-play'));
+    await waitFor(() => expect(clips.preview).toHaveBeenCalled());
+    const [, , , secs] = (clips.preview as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(secs).toBeCloseTo(4, 6);
+  });
+
+  it('trims material that a shorter clip no longer has room for', async () => {
+    await mount();
+    selectBeats(0, 6);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('6 beats'),
+    );
+    dragInto(0, 4);
+    expect(blocks()[0].dataset.beats).toBe('6');
+
+    fireEvent.change(screen.getByTestId('beatify-clip-length'), { target: { value: '6' } });
+    expect(blocks()[0].dataset.beats).toBe('2');
   });
 });
 

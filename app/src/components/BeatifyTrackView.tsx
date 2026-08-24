@@ -88,6 +88,9 @@ export interface BeatifyTrackViewProps {
   /** Extra transport controls (the clip builder's drag handle). */
   transportExtra?: ReactNode;
   onPlayingChange?(playing: boolean): void;
+  /** Dragging the selected beats down out of the waveform, where the
+   *  page below has somewhere to put them. */
+  onPullOut?(): void;
   handle?: Ref<BeatifyTrackViewHandle>;
 }
 
@@ -115,6 +118,7 @@ export function BeatifyTrackView({
   onSelectionBeats,
   transportExtra,
   onPlayingChange,
+  onPullOut,
   handle,
 }: BeatifyTrackViewProps) {
   const grid = track.record.grid;
@@ -330,6 +334,7 @@ export function BeatifyTrackView({
         ticks={ticks}
         tickGrid="all"
         onDoubleClickAt={onDoubleClickAt}
+        onPullOut={onPullOut}
         timecode={timecode}
         loopTitle={sel ? 'Loop the selection (l)' : 'Loop the whole track (l)'}
         transportExtra={

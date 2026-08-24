@@ -855,7 +855,25 @@ fails if it's missing.
   grid rather than being refused, and EXACTLY ONE of the source pane and
   the clip editor ever sounds — starting either pauses the other
   (`BeatifyTrackViewHandle.pause` one way, `onPlayingChange` the other)
-  and a badge says which. The editor's transport renders the LIVE draft,
+  and a badge says which.
+- A CLIP IS AS LONG AS IT WAS SET TO BE. `draft.columns` (the `beats`
+  box in the editor header, `setColumns`) is the clip's length in beats,
+  trailing silence included — it is what the grid draws, what loops and
+  what the backend renders (`ClipDraft::length_columns`); `usedColumns`
+  is only "where the material ends". Shortening TRIMS what no longer
+  fits, because a beat that cannot be heard must not be pretended about.
+- The builder is ONE COLUMN: source pane above, clip grid below,
+  `.beatify-builder-main`, with the source list beside both. The grid's
+  geometry is therefore PERCENTAGES of that column (`pct(n, columns)` in
+  BeatifyClipEditor, no fixed px-per-beat), so the beats line up under
+  the waveform at any width — do not reintroduce a `COL_W`.
+- Beats reach the clip TWO ways and both go through `liftSelection`: the
+  `⠿ N beats` handle in the transport row, and dragging the selection
+  DOWN out of the waveform (`AudioTimeline.onPullOut`, fired mid-drag
+  when travel is downward, past `PULL_PX` and steeper than it is wide;
+  the timeline then abandons its own gesture and the page owns the
+  drag). Sideways is still slide/sweep, and the edge handles still win
+  near an edge — press the MIDDLE of a selection to pull it out. The editor's transport renders the LIVE draft,
   so an edit mid-playback is heard: length changes `invalidate()`,
   everything else `refreshTone()`, the same split the Clip page makes.
 - Clip-builder storage: saved clips are JSON only —

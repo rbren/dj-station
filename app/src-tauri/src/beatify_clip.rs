@@ -79,14 +79,19 @@ pub struct ClipDraft {
 }
 
 impl ClipDraft {
-    /// Beats up to the end of the last thing in it — the clip's length,
-    /// as opposed to the grid the editor draws around it.
+    /// Beats up to the end of the last thing in it.
     fn used_columns(&self) -> usize {
         self.placements
             .iter()
             .map(|p| p.col + p.beats)
             .max()
             .unwrap_or(0)
+    }
+
+    /// How long the clip IS: the length it was set to, trailing silence
+    /// and all, never shorter than the material in it and never zero.
+    fn length_columns(&self) -> usize {
+        self.columns.max(self.used_columns()).max(1)
     }
 }
 
@@ -289,7 +294,7 @@ impl<'a> Resolver<'a> {
     /// Lay every placement down on the shared grid and mix.
     fn assemble(&mut self, draft: &ClipDraft, depth: usize) -> CmdResult<AudioData> {
         let grid = *self.grid();
-        let columns = draft.used_columns().max(1);
+        let columns = draft.length_columns();
         let out_secs = build::clip_secs(&grid, columns).min(MAX_PREVIEW_SECS);
 
         // Resolve first: `Lay` borrows the audio, so every source has to

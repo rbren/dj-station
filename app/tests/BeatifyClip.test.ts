@@ -16,6 +16,7 @@ import {
   removeLastRow,
   removePlacement,
   rowPlacements,
+  setColumns,
   stemSourceId,
   usedColumns,
 } from '../src/beatifyClip';
@@ -155,10 +156,31 @@ describe('editing what is in the clip', () => {
     expect(removeLastRow(draft).rows).toBe(1);
   });
 
-  it('always draws a spare beat past the end to drop into', () => {
-    const draft = placeRun(emptyDraft(), run(20, 0), 0, 0);
-    expect(drawnColumns(draft)).toBe(21);
+  it('is drawn as long as it was set to be', () => {
     expect(drawnColumns(emptyDraft())).toBe(DEFAULT_COLUMNS);
+    // A run that hangs off the end takes the clip with it.
+    expect(drawnColumns(placeRun(emptyDraft(), run(20, 0), 0, 0))).toBe(20);
+  });
+});
+
+describe('setting the clip length', () => {
+  it('is the length, silence and all', () => {
+    const draft = setColumns(placeRun(emptyDraft(), run(4, 0), 0, 0), 32);
+    expect(drawnColumns(draft)).toBe(32);
+    expect(usedColumns(draft)).toBe(4);
+    expect(clipSeconds(drawnColumns(draft), 0.5)).toBe(16);
+  });
+
+  it('trims what no longer fits and drops what is wholly past the end', () => {
+    let draft = placeRun(emptyDraft(), run(6, 0), 0, 2);
+    draft = placeRun(draft, run(4, 0), 0, 10);
+    draft = setColumns(draft, 6);
+    expect(shape(draft)).toEqual([{ col: 2, beats: 4, from: 0 }]);
+  });
+
+  it('never goes below one beat', () => {
+    expect(setColumns(emptyDraft(), 0).columns).toBe(1);
+    expect(setColumns(emptyDraft(), -9).columns).toBe(1);
   });
 });
 

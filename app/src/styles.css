@@ -3715,20 +3715,22 @@ body {
    that was actually played is amber. */
 .beatify-builder {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-}
-
-.beatify-builder-top {
-  display: flex;
   gap: 10px;
   align-items: flex-start;
   min-height: 0;
 }
 
-.beatify-builder-source {
+/* Source above, clip below, in ONE column: same left edge, same width,
+   so a beat in the grid sits under the same pixel as the waveform. */
+.beatify-builder-main {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.beatify-builder-source {
   min-width: 0;
 }
 
@@ -3739,7 +3741,7 @@ body {
   border: 1px solid #262b34;
   border-radius: 6px;
   padding: 8px;
-  max-height: 320px;
+  max-height: 620px;
   overflow-y: auto;
 }
 
@@ -3860,9 +3862,25 @@ body {
   color: #7c869a;
 }
 
+.beatify-clip-length {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: #7c869a;
+}
+
+.beatify-clip-length input {
+  width: 4.5em;
+  background: #12151a;
+  border: 1px solid #262b34;
+  border-radius: 4px;
+  color: #e6e6e6;
+  padding: 3px 6px;
+}
+
 .beatify-clip-grid {
   position: relative;
-  overflow-x: auto;
   background: #12151a;
   border: 1px solid #262b34;
   border-radius: 6px;
@@ -3871,7 +3889,8 @@ body {
 
 .beatify-clip-ruler {
   display: flex;
-  height: 14px;
+  height: 16px;
+  width: 100%;
 }
 
 .beatify-clip-tick {
@@ -3885,6 +3904,7 @@ body {
 
 .beatify-clip-row {
   position: relative;
+  width: 100%;
   margin-top: 4px;
 }
 

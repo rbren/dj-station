@@ -44,6 +44,9 @@ export const HANDLE_PX = 7;
 /** Pointer travel that turns a press into a sweep. Below it the gesture
  *  is a click, however shaky the hand. */
 const DRAG_PX = 3;
+/** Downward travel that turns a press on the selection into a pull-out.
+ *  Further than DRAG_PX: taking material out of a track is deliberate. */
+const PULL_PX = 10;
 /** Below this a selection is a click, not a range. */
 const SELECTION_EPS = 1e-4;
 
@@ -145,6 +148,10 @@ export interface AudioTimelineProps {
   /** Slide-from-inside is an editing gesture; pages that only select
    *  (Beatify's modal) turn it off so inside-drags sweep instead. */
   allowSlide?: boolean;
+  /** Pulling the selection DOWNWARD out of the timeline, if the page has
+   *  somewhere for it to go (Beatify's clip editor does). Called once,
+   *  mid-drag, after which the gesture belongs to the caller. */
+  onPullOut?(): void;
   /** A slide ended: `delta` seconds from `base`; `audio` means alt asked
    *  for the material to move too (the Clip page re-splices). */
   onSelectionSlid?(base: Range, delta: number, audio: boolean): void;
@@ -187,6 +194,7 @@ export function AudioTimeline({
   ticks,
   tickGrid = 'major',
   allowSlide = true,
+  onPullOut,
   onSelectionSlid,
   onDoubleClickAt,
   transportExtra,
@@ -205,6 +213,9 @@ export function AudioTimeline({
   const waveRef = useRef<SVGSVGElement | null>(null);
   const dragRect = useRef<DOMRect | null>(null);
   const dragRef = useRef<WaveDrag | null>(null);
+  /** Where the press landed and whether it landed on the selection —
+   *  what a downward pull needs to know. */
+  const pressRef = useRef<{ x: number; y: number; onSel: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
 
   const timeAt = useCallback(
@@ -235,6 +246,11 @@ export function AudioTimeline({
       const rect = e.currentTarget.getBoundingClientRect();
       dragRect.current = rect;
       const t = timeAt(e.clientX, rect);
+      pressRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        onSel: !!sel && t >= sel.start && t <= sel.end,
+      };
       // Grabbing an end expands/shrinks the selection; that beats the
       // "slide the whole thing" case, whose zone contains both edges.
       // Shift-click resizes the NEAREST edge from anywhere.
@@ -287,6 +303,21 @@ export function AudioTimeline({
     const move = (e: MouseEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
+      // A drag DOWN off the selection is not a timeline gesture at all:
+      // it is the selection being carried somewhere else. Direction is
+      // what tells it from a slide or a sweep, and the caller owns
+      // everything after the handover.
+      const press = pressRef.current;
+      if (onPullOut && press?.onSel) {
+        const down = e.clientY - press.y;
+        if (down > PULL_PX && down > Math.abs(e.clientX - press.x)) {
+          dragRef.current = null;
+          pressRef.current = null;
+          setDragging(false);
+          onPullOut();
+          return;
+        }
+      }
       const t = timeAt(e.clientX, dragRect.current);
       if (drag.kind === 'select') {
         if (Math.abs(e.clientX - drag.anchorX) > DRAG_PX) drag.swept = true;
@@ -333,6 +364,7 @@ export function AudioTimeline({
   }, [
     dragging,
     duration,
+    onPullOut,
     onSeek,
     onSelectionChange,
     onSelectionSlid,

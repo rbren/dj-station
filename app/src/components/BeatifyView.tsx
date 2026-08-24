@@ -55,9 +55,10 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
       const saved = await client.load(trackId, BUCKETS);
       setBusy(false);
       if (saved) {
+        // No announcement: the track appearing with its grid on it says
+        // everything the message did.
         setBeatified(saved);
         setModal(null);
-        setStatus('Already beatified — opened its saved grid');
         return;
       }
       setBeatified(null);

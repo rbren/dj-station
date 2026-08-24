@@ -17,14 +17,18 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { BeatifyTrack } from '../beatify';
 import {
   SEED_SOURCE,
+  addRow,
   clipSeconds,
+  drawnColumns,
   emptyDraft,
   fromWire,
   isEmpty,
   movePlacement,
   parseSourceId,
   placeRun,
+  removeLastRow,
   removePlacement,
+  setColumns,
   sourceIdOf,
   toWire,
   usedColumns,
@@ -107,7 +111,10 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
   // --- the clip's own transport -----------------------------------------
   //
   // Its `render` reads the LIVE draft, so what plays is what is on screen.
-  const clipSecs = clipSeconds(usedColumns(draft), grid.period);
+  // The clip is as long as it was SET to be, trailing silence included:
+  // a sixteen-beat clip with four beats of drums in it loops every
+  // sixteen beats, which is the loop the user asked for.
+  const clipSecs = clipSeconds(drawnColumns(draft), grid.period);
   const live = useRef({ draft, trackId, clips, clipSecs });
   useLayoutEffect(() => {
     live.current = { draft, trackId, clips, clipSecs };
@@ -182,16 +189,24 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
   // --- dragging beats down ----------------------------------------------
   const beatsSelected = selBeats ? selBeats.endBeat - selBeats.startBeat : 0;
 
+  /** Lift the selected beats off the source; the drop decides where they
+   *  land. Reached two ways — the handle in the transport row, and
+   *  dragging the selection down out of the waveform itself. */
+  const liftSelection = useCallback(() => {
+    if (!selBeats || beatsSelected <= 0) return;
+    setDrag({
+      run: { source: picked, sourceBeat: selBeats.startBeat, beats: beatsSelected },
+      moving: null,
+    });
+  }, [beatsSelected, picked, selBeats]);
+
   const startDrag = useCallback(
     (e: React.MouseEvent) => {
-      if (e.button !== 0 || !selBeats || beatsSelected <= 0) return;
+      if (e.button !== 0) return;
       e.preventDefault();
-      setDrag({
-        run: { source: picked, sourceBeat: selBeats.startBeat, beats: beatsSelected },
-        moving: null,
-      });
+      liftSelection();
     },
-    [beatsSelected, picked, selBeats],
+    [liftSelection],
   );
 
   const grabBlock = useCallback(
@@ -317,14 +332,17 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
     : null;
 
   return (
+    // The list runs down the left of BOTH panes, so the source and the
+    // clip share one column: the grid below lines up, beat for beat,
+    // with the waveform above it.
     <section className="beatify-builder" data-testid="beatify-builder">
-      <div className="beatify-builder-top">
-        <BeatifyClipList
-          entries={entries}
-          selected={picked}
-          onSelect={openSaved}
-          onDelete={(id) => void remove(id)}
-        />
+      <BeatifyClipList
+        entries={entries}
+        selected={picked}
+        onSelect={openSaved}
+        onDelete={(id) => void remove(id)}
+      />
+      <div className="beatify-builder-main">
         <div className="beatify-builder-source">
           <BeatifyTrackView
             key={picked}
@@ -338,12 +356,13 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
             onRebeatify={onRebeatify}
             onSelectionBeats={setSelBeats}
             onPlayingChange={onSourcePlaying}
+            onPullOut={liftSelection}
             transportExtra={
               <button
                 className="beatify-drag-beats"
                 data-testid="beatify-drag-beats"
                 disabled={beatsSelected <= 0}
-                title="Drag the selected beats into the clip editor"
+                title="Drag these beats into the clip below — or drag them straight down out of the waveform"
                 onMouseDown={startDrag}
               >
                 ⠿ {beatsSelected} beat{beatsSelected === 1 ? '' : 's'}
@@ -351,46 +370,37 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
             }
           />
         </div>
-      </div>
 
-      <BeatifyClipEditor
-        draft={draft}
-        sourceOrder={order}
-        labelOf={labelOf}
-        period={grid.period}
-        playing={clipPlaying}
-        playhead={clipHead}
-        live={sounding}
-        dropAt={dropAt}
-        onHoverCell={hoverCell}
-        onDropCell={dropCell}
-        onGrabPlacement={grabBlock}
-        onRemovePlacement={(id) => setDraft((cur) => removePlacement(cur, id))}
-        onTogglePlay={playClip}
-        onStop={stopClip}
-        onAddRow={() => setDraft((cur) => ({ ...cur, rows: cur.rows + 1 }))}
-        onRemoveRow={() =>
-          setDraft((cur) =>
-            cur.rows <= 1
-              ? cur
-              : {
-                  ...cur,
-                  rows: cur.rows - 1,
-                  placements: cur.placements.filter((p) => p.row !== cur.rows - 1),
-                },
-          )
-        }
-        onRename={(name) => setDraft((cur) => ({ ...cur, name }))}
-        onSave={() => void save()}
-        saving={saving}
-        status={
-          note && (
-            <span className="beatify-clip-note" data-testid="beatify-clip-note">
-              {note}
-            </span>
-          )
-        }
-      />
+        <BeatifyClipEditor
+          draft={draft}
+          sourceOrder={order}
+          labelOf={labelOf}
+          period={grid.period}
+          playing={clipPlaying}
+          playhead={clipHead}
+          live={sounding}
+          dropAt={dropAt}
+          onHoverCell={hoverCell}
+          onDropCell={dropCell}
+          onGrabPlacement={grabBlock}
+          onRemovePlacement={(id) => setDraft((cur) => removePlacement(cur, id))}
+          onTogglePlay={playClip}
+          onStop={stopClip}
+          onAddRow={() => setDraft(addRow)}
+          onRemoveRow={() => setDraft(removeLastRow)}
+          onRename={(name) => setDraft((cur) => ({ ...cur, name }))}
+          onSetLength={(beats) => setDraft((cur) => setColumns(cur, beats))}
+          onSave={() => void save()}
+          saving={saving}
+          status={
+            note && (
+              <span className="beatify-clip-note" data-testid="beatify-clip-note">
+                {note}
+              </span>
+            )
+          }
+        />
+      </div>
       <audio ref={audioRef} data-testid="beatify-clip-audio" />
     </section>
   );

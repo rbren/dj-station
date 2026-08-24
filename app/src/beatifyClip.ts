@@ -173,11 +173,22 @@ export function removeLastRow(draft: ClipDraft): ClipDraft {
   return { ...draft, rows: row, placements: draft.placements.filter((p) => p.row !== row) };
 }
 
-/** Beats the editor draws: never fewer than `DEFAULT_COLUMNS`, never
- *  fewer than what is in it, and one clear beat past the end so there is
- *  somewhere to drop the next run. */
+/** How long the clip IS, in beats — the length the editor draws, loops
+ *  and renders, trailing silence included. A clip is as long as it was
+ *  set to be, not as long as the material in it happens to reach. */
 export function drawnColumns(draft: ClipDraft): number {
-  return Math.max(DEFAULT_COLUMNS, usedColumns(draft) + 1, draft.columns);
+  return Math.max(1, draft.columns);
+}
+
+/** Set the clip's length. Material that no longer fits is trimmed, and a
+ *  run left entirely past the end goes: a shorter clip is a shorter clip,
+ *  and pretending otherwise would hide beats that cannot be heard. */
+export function setColumns(draft: ClipDraft, columns: number): ClipDraft {
+  const n = Math.max(1, Math.round(columns));
+  const placements = draft.placements.flatMap((p) =>
+    p.col >= n ? [] : p.col + p.beats <= n ? [p] : [{ ...p, beats: n - p.col }],
+  );
+  return { ...draft, columns: n, placements };
 }
 
 /** Placements of one row, left to right. */
