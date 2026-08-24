@@ -539,6 +539,27 @@ describe('Beatify tab', () => {
     await screen.findByTestId('beatify-modal');
   });
 
+  // The verdict and the flam figures are how the IMPORT is decided; once
+  // it is decided they are just a red line over a track that is already
+  // on the grid, so the track view carries the tempo and nothing else.
+  it('does not re-litigate the analysis in the track view', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    const head = await screen.findByTestId('beatify-track-view');
+    expect(screen.queryByTestId('beatify-track-quality')).toBeNull();
+    expect(head.textContent).not.toContain('AGREED');
+    expect(head.textContent).not.toContain('flam');
+    expect(head.textContent).toContain('120.00 BPM');
+  });
+
+  it('says nothing at all after a successful import', async () => {
+    const client = clientMock();
+    await openTrack(client);
+    fireEvent.click(await screen.findByTestId('beatify-commit'));
+    await screen.findByTestId('beatify-track-view');
+    expect(screen.queryByTestId('beatify-status')).toBeNull();
+  });
+
   it('loops the region it auditions and takes the spacebar (MOD-A16/A18)', async () => {
     const client = clientMock();
     await openTrack(client);

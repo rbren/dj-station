@@ -38,12 +38,10 @@ import {
   clampBeat,
   gridLines,
   gridLod,
-  qualityLevel,
   selectionLabel,
   snapSelection,
   snapTime,
   timecode,
-  verdictLabel,
   type BeatifyTrack,
   type Grid,
 } from '../beatify';
@@ -292,8 +290,6 @@ export function BeatifyTrackView({
     return () => window.removeEventListener('keydown', onKey);
   }, [duration, grid, group, playhead, seek, sel, stepBeats, togglePlay]);
 
-  const quality = track.record.quality;
-  const level = qualityLevel(quality);
   const confidence = track.record.analysis.confidence;
   const selBeats = sel ? snapSelection(grid, sel.start, sel.end) : null;
 
@@ -303,11 +299,6 @@ export function BeatifyTrackView({
         <h2 data-testid="beatify-track-title">{source ? source.label : track.title}</h2>
         <span className="beatify-line">
           {grid.bpm.toFixed(2)} BPM · {grid.beats} beats · {timecode(duration)}
-        </span>
-        {/* OUT-3: the provenance travels with the track. */}
-        <span className={`beatify-verdict ${level}`} data-testid="beatify-track-quality">
-          ● {verdictLabel(track.record.analysis.agreement)} · flam {quality.worstFlamMs.toFixed(1)}{' '}
-          ms · stretch {quality.peakStretchPct.toFixed(2)} %
         </span>
         <button data-testid="beatify-rebeatify" onClick={onRebeatify}>
           Re-beatify…

@@ -123,16 +123,13 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     });
   }, [open, pick, tracks]);
 
+  // No "imported X" banner: the seed appears in the list with its beats
+  // and its speed on it, which is the same news said by the thing itself.
   const committed = useCallback(
     (project: BeatifyProject) => {
       setOpen(project);
       setModal(null);
-      const seed = project.seeds[project.seeds.length - 1];
-      setStatus(
-        seed
-          ? `Imported "${seed.title}" — ${seed.record.grid.beats} beats at ${project.bpm?.toFixed(2) ?? '—'} BPM`
-          : null,
-      );
+      setStatus(null);
       void refreshShelf();
     },
     [refreshShelf],
