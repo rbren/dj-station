@@ -11,6 +11,7 @@ import { BeatifyView } from '../src/components/BeatifyView';
 import type {
   BeatifyAnalysis,
   BeatifyClientApi,
+  BeatifyProject,
   BeatifyTrack,
   TrackerStatus,
 } from '../src/beatify';
@@ -81,8 +82,10 @@ function analysis(overrides: Partial<BeatifyAnalysis> = {}): BeatifyAnalysis {
   };
 }
 
-function beatified(): BeatifyTrack {
+function beatified(overrides: Partial<BeatifyTrack> = {}): BeatifyTrack {
   return {
+    projectId: 'p1',
+    projectName: 'Live Set A',
     trackId: 3,
     title: TRACK.title,
     artist: TRACK.artist,
@@ -114,6 +117,23 @@ function beatified(): BeatifyTrack {
       },
       reading: { factor: 1, halfShift: false },
     },
+    ...overrides,
+  };
+}
+
+/** A project as the list shows it. */
+function project(overrides: Partial<BeatifyProject> = {}): BeatifyProject {
+  return {
+    id: 'p1',
+    name: 'Live Set A',
+    trackId: 3,
+    title: TRACK.title,
+    artist: TRACK.artist,
+    bpm: 120,
+    beats: 64,
+    updated: 1000,
+    sourceMissing: false,
+    ...overrides,
   };
 }
 
@@ -148,8 +168,11 @@ function clientMock(overrides: Partial<BeatifyClientApi> = {}): BeatifyClientApi
     preview: vi.fn(async () => new ArrayBuffer(8)),
     syncCheck: vi.fn(async () => new ArrayBuffer(8)),
     save: vi.fn(async () => beatified()),
-    load: vi.fn(async () => null),
-    trackAudio: vi.fn(async () => new ArrayBuffer(8)),
+    projects: vi.fn(async () => []),
+    openProject: vi.fn(async () => beatified()),
+    renameProject: vi.fn(async () => [project({ name: 'Slower take' })]),
+    deleteProject: vi.fn(async () => []),
+    projectAudio: vi.fn(async () => new ArrayBuffer(8)),
     cancel: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -173,7 +196,7 @@ function clipsMock(overrides: Partial<BeatifyClipClientApi> = {}): BeatifyClipCl
     open: vi.fn(async () => null),
     audio: vi.fn(async () => new ArrayBuffer(8)),
     preview: vi.fn(async () => new ArrayBuffer(8)),
-    save: vi.fn(async (_trackId: number, clip) => ({ id: '1', clips: [{ ...clip, id: '1' }] })),
+    save: vi.fn(async (_projectId: string, clip) => ({ id: '1', clips: [{ ...clip, id: '1' }] })),
     remove: vi.fn(async () => []),
     ...overrides,
   };
@@ -186,11 +209,24 @@ beforeEach(() => {
   window.HTMLMediaElement.prototype.pause = vi.fn();
 });
 
-async function openTrack(client: BeatifyClientApi) {
-  render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
-  await screen.findByTestId('beatify-open');
-  fireEvent.click(screen.getByTestId('beatify-open'));
+/** Start a new project from the picked track: the modal is how one is
+ *  born, so every modal case goes through here. */
+async function openTrack(client: BeatifyClientApi, clips: BeatifyClipClientApi = clipsMock()) {
+  render(<BeatifyView client={client} library={libraryMock()} clips={clips} />);
+  await screen.findByTestId('beatify-new-project');
+  fireEvent.click(screen.getByTestId('beatify-new-project'));
   return screen.findByTestId('beatify-modal');
+}
+
+/** Open a saved project from the shelf. */
+async function openProject(
+  client: BeatifyClientApi,
+  id = 'p1',
+  clips: BeatifyClipClientApi = clipsMock(),
+) {
+  render(<BeatifyView client={client} library={libraryMock()} clips={clips} />);
+  fireEvent.click(await screen.findByTestId(`beatify-project-open-${id}`));
+  return screen.findByTestId('beatify-track-view');
 }
 
 describe('Beatify tab', () => {
@@ -307,11 +343,10 @@ describe('Beatify tab', () => {
     expect(screen.queryByTestId('beatify-modal')).toBeNull();
   });
 
-  it('skips the modal for an already-beatified track (MOD-A31)', async () => {
-    const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
-    fireEvent.click(await screen.findByTestId('beatify-open'));
-    await screen.findByTestId('beatify-track-view');
+  it('opens a saved project straight into the builder, no modal (MOD-A31)', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    expect(client.openProject).toHaveBeenCalledWith('p1', expect.any(Number));
     expect(screen.queryByTestId('beatify-modal')).toBeNull();
     // Re-beatify warns before it invalidates anything cut from the old grid.
     fireEvent.click(screen.getByTestId('beatify-rebeatify'));
@@ -338,9 +373,8 @@ describe('Beatify tab', () => {
   });
 
   it('selects a group on double-click in the track view (TV-18)', async () => {
-    const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
-    fireEvent.click(await screen.findByTestId('beatify-open'));
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
     const wave = await screen.findByTestId('beatify-track-waveform');
     wave.getBoundingClientRect = () => ({ left: 0, width: 320, top: 0, height: 100 }) as DOMRect;
     fireEvent.doubleClick(wave, { clientX: 100 });
@@ -349,9 +383,8 @@ describe('Beatify tab', () => {
   });
 
   it('zooms the track view and offers the way back (TV-10)', async () => {
-    const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
-    fireEvent.click(await screen.findByTestId('beatify-open'));
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
     await screen.findByTestId('beatify-track-waveform');
     expect((screen.getByTestId('beatify-track-zoom-out') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
@@ -364,9 +397,8 @@ describe('Beatify tab', () => {
   });
 
   it('leaves the view where it was put, even while playing', async () => {
-    const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
-    fireEvent.click(await screen.findByTestId('beatify-open'));
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
     await screen.findByTestId('beatify-track-waveform');
     fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
     fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
@@ -382,9 +414,8 @@ describe('Beatify tab', () => {
   });
 
   it('seeks and selects in whole beats in the track view (TV-6/TV-14)', async () => {
-    const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
-    fireEvent.click(await screen.findByTestId('beatify-open'));
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
     const wave = await screen.findByTestId('beatify-track-waveform');
     wave.getBoundingClientRect = () => ({ left: 0, width: 320, top: 0, height: 100 }) as DOMRect;
     fireEvent.mouseDown(wave, { clientX: 40 });
@@ -395,5 +426,120 @@ describe('Beatify tab', () => {
     await waitFor(() =>
       expect(screen.getByTestId('beatify-track-readout').textContent).toMatch(/\d+ beats/),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Projects (a track is not a project, and never was one)
+// ---------------------------------------------------------------------------
+
+describe('beatify projects', () => {
+  it('shows the shelf of saved projects, newest first', async () => {
+    const client = clientMock({
+      projects: vi.fn(async () => [
+        project({ id: 'p2', name: 'Slower take', updated: 2000 }),
+        project({ id: 'p1', name: 'First pass', updated: 1000 }),
+      ]),
+    });
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+
+    const shelf = await screen.findByTestId('beatify-projects');
+    const names = Array.from(shelf.querySelectorAll('.beatify-project-name')).map(
+      (n) => n.textContent,
+    );
+    expect(names).toEqual(['Slower take', 'First pass']);
+    // Both came from the same track, and both say so.
+    expect(shelf.textContent).toContain('Live Set A');
+  });
+
+  it('says what to do when there are none yet', async () => {
+    render(<BeatifyView client={clientMock()} library={libraryMock()} clips={clipsMock()} />);
+    const empty = await screen.findByText(/No projects yet/);
+    expect(empty.textContent).toContain('as many projects as you like');
+  });
+
+  it('starts a NEW project from a track that already has one', async () => {
+    // The old tab refused: a beatified track opened its one grid. Now the
+    // same track can be beatified again, into a project of its own.
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-new-project'));
+
+    await screen.findByTestId('beatify-modal');
+    fireEvent.click(await screen.findByTestId('beatify-commit'));
+    await waitFor(() => expect(client.save).toHaveBeenCalled());
+    const [request] = (client.save as ReturnType<typeof vi.fn>).mock.calls[0];
+    // No id: the backend mints one rather than overwriting the project
+    // that track already has.
+    expect(request.projectId).toBe('');
+    expect(request.name).toBe('Live Set A');
+  });
+
+  it('re-beatifies IN PLACE, into the project that is open', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-rebeatify'));
+    fireEvent.click(await screen.findByTestId('beatify-rebeatify-confirm'));
+    fireEvent.click(await screen.findByTestId('beatify-commit'));
+
+    await waitFor(() => expect(client.save).toHaveBeenCalled());
+    const [request] = (client.save as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(request.projectId).toBe('p1');
+  });
+
+  it('keys the clip builder by the PROJECT, not the track', async () => {
+    // Two projects of one track must not share a clip drawer.
+    const client = clientMock({
+      projects: vi.fn(async () => [project({ id: 'p2', name: 'Slower take' })]),
+      openProject: vi.fn(async () => beatified({ projectId: 'p2', projectName: 'Slower take' })),
+    });
+    const clips = clipsMock();
+    await openProject(client, 'p2', clips);
+    await waitFor(() => expect(clips.sources).toHaveBeenCalledWith('p2'));
+  });
+
+  it('renames a project from the shelf', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-project-rename-p1'));
+    const box = screen.getByTestId('beatify-project-rename-input') as HTMLInputElement;
+    fireEvent.change(box, { target: { value: 'Slower take' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    await waitFor(() => expect(client.renameProject).toHaveBeenCalledWith('p1', 'Slower take'));
+    await screen.findByText('Slower take');
+  });
+
+  it('deletes a project and leaves the shelf without it', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-project-delete-p1'));
+
+    await waitFor(() => expect(client.deleteProject).toHaveBeenCalledWith('p1'));
+    await waitFor(() => expect(screen.queryByTestId('beatify-project-p1')).toBeNull());
+    expect(screen.getByTestId('beatify-status').textContent).toContain('Deleted');
+  });
+
+  it('closes a project without deleting it', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-close-project'));
+
+    await screen.findByTestId('beatify-projects');
+    expect(client.deleteProject).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('beatify-track-view')).toBeNull();
+  });
+
+  it('still opens a project whose source track has left the library', async () => {
+    // The render belongs to the project, so it plays; only the things
+    // that need the ORIGINAL file are out of reach, and it says so.
+    const client = clientMock({
+      projects: vi.fn(async () => [project({ sourceMissing: true, title: '(source missing)' })]),
+    });
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+    const note = await screen.findByTestId('beatify-project-source-missing');
+    expect(note.textContent).toContain('re-beatify need it back');
+    fireEvent.click(screen.getByTestId('beatify-project-open-p1'));
+    await screen.findByTestId('beatify-track-view');
   });
 });

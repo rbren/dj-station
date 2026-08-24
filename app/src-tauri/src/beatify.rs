@@ -137,6 +137,10 @@ pub struct BeatifyMeters {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BeatifyTrack {
+    /// The project this render belongs to. Every clip command is keyed by
+    /// it, because a track can have several.
+    pub project_id: String,
+    pub project_name: String,
     pub track_id: i64,
     pub title: String,
     pub artist: String,
@@ -153,6 +157,33 @@ pub struct SaveRequest {
     pub strength: f64,
     pub lead_in: f64,
     pub ruler_group: u32,
+    /// The project to write into. Empty mints a new one — which is what
+    /// "new project" does; re-beatifying passes the id it is replacing.
+    #[serde(default)]
+    pub project_id: String,
+    /// What to call a newly minted project. Ignored for an existing one,
+    /// which keeps the name it already has (rename is its own command).
+    #[serde(default)]
+    pub name: String,
+}
+
+/// A project as the tab's list shows it: the envelope, plus the facts
+/// about the track and grid a person needs to tell two of them apart.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSummary {
+    pub id: String,
+    pub name: String,
+    pub track_id: i64,
+    pub title: String,
+    pub artist: String,
+    pub bpm: f64,
+    pub beats: usize,
+    pub updated: u64,
+    /// The source track is missing from the library (deleted, or a
+    /// different machine): the project still opens, since its render is
+    /// its own, but stems and re-beatify need the source.
+    pub source_missing: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -342,9 +373,13 @@ pub fn beatify_sync_check(
     })
 }
 
-/// Commit (MOD-29/MOD-A24): render the warp once, write the two artifacts
-/// under `<data_dir>/beatify/<hash>/` plus the sidecar, and hand the track
-/// view its record.
+/// Commit (MOD-29/MOD-A24): render the warp once, write the artifacts
+/// under `<data_dir>/beatify/<project>/` plus the sidecar, and hand the
+/// builder its project.
+///
+/// An empty `project_id` MINTS a project; a given one overwrites that
+/// project's grid and render (re-beatify), keeping its clips — which is
+/// why the builder warns that they may no longer line up.
 #[tauri::command(async)]
 pub fn beatify_save(
     state: State<AppState>,
@@ -353,6 +388,8 @@ pub fn beatify_save(
 ) -> CmdResult<BeatifyTrack> {
     let track_id = state.beatify.with(|s| Ok(s.track_id))?;
     let track = state.library.track(track_id).map_err(err)?;
+    let data_dir = state.library.data_dir().to_path_buf();
+    let existing = store::list(&data_dir).map_err(err)?;
     state.beatify.with(|session| {
         let (warped, map) = beatify::render(&session.audio, &session.analysis, request.strength);
         let warped_name = warped_name(&session.source_path);
@@ -370,14 +407,28 @@ pub fn beatify_save(
             },
             &map,
         );
-        store::save(
-            state.library.data_dir(),
-            &session.source_hash,
-            &record,
-            &warped,
-        )
-        .map_err(err)?;
+        let previous = if request.project_id.is_empty() {
+            None
+        } else {
+            store::project(&data_dir, &request.project_id).map_err(err)?
+        };
+        let project = store::Project {
+            id: previous
+                .as_ref()
+                .map(|p| p.id.clone())
+                .unwrap_or_else(|| store::new_id(&existing)),
+            name: previous
+                .as_ref()
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| project_name(&request.name, &track)),
+            track_id,
+            source_hash: session.source_hash.clone(),
+            updated: store::now_secs(),
+        };
+        store::save(&data_dir, &project, &record, &warped).map_err(err)?;
         Ok(BeatifyTrack {
+            project_id: project.id,
+            project_name: project.name,
             track_id,
             title: track.title.clone(),
             artist: track.artist.clone(),
@@ -390,6 +441,19 @@ pub fn beatify_save(
     })
 }
 
+/// A new project is named for its track unless the user said otherwise.
+fn project_name(asked: &str, track: &Track) -> String {
+    let asked = asked.trim();
+    if !asked.is_empty() {
+        return asked.to_string();
+    }
+    if track.title.trim().is_empty() {
+        format!("project {}", track.id)
+    } else {
+        track.title.clone()
+    }
+}
+
 /// `boys.wav` → `boys.beatified.wav` (§3.11), display only: the file on
 /// disk is always `warped.wav` inside the hash-keyed record directory.
 fn warped_name(source: &std::path::Path) -> String {
@@ -400,26 +464,71 @@ fn warped_name(source: &std::path::Path) -> String {
     format!("{stem}.beatified.wav")
 }
 
-/// The saved record for a track, if it has one (MOD-A31: a beatified track
-/// skips the modal and goes straight to the track view).
+/// Every project in the store, newest first. This is the tab's front
+/// door: a project, not a track, is what gets opened.
 #[tauri::command(async)]
-pub fn beatify_load(
+pub fn beatify_projects(state: State<AppState>) -> CmdResult<Vec<ProjectSummary>> {
+    let data_dir = state.library.data_dir();
+    let mut out = Vec::new();
+    for project in store::list(data_dir).map_err(err)? {
+        let Some(record) = store::load(data_dir, &project.id).map_err(err)? else {
+            continue;
+        };
+        let track = resolve_track(&state, &project);
+        out.push(ProjectSummary {
+            id: project.id,
+            name: project.name,
+            track_id: track.as_ref().map(|t| t.id).unwrap_or(project.track_id),
+            title: track
+                .as_ref()
+                .map(|t| t.title.clone())
+                .unwrap_or_else(|| "(source missing)".into()),
+            artist: track.as_ref().map(|t| t.artist.clone()).unwrap_or_default(),
+            bpm: record.grid.bpm,
+            beats: record.grid.beats,
+            updated: project.updated,
+            source_missing: track.is_none(),
+        });
+    }
+    Ok(out)
+}
+
+/// The library row a project came from: by hash first, because ids are
+/// re-assigned when a track is re-imported and the audio is not.
+fn resolve_track(state: &AppState, project: &store::Project) -> Option<Track> {
+    if let Ok(Some(found)) = state.library.track_by_hash(&project.source_hash) {
+        return Some(found);
+    }
+    state.library.track(project.track_id).ok()
+}
+
+/// Open a project: its record and its render, ready for the builder.
+#[tauri::command(async)]
+pub fn beatify_project_open(
     state: State<AppState>,
-    track_id: i64,
+    project_id: String,
     buckets: usize,
 ) -> CmdResult<Option<BeatifyTrack>> {
-    let track = state.library.track(track_id).map_err(err)?;
-    let Some(record) = store::load(state.library.data_dir(), &track.content_hash).map_err(err)?
-    else {
+    let data_dir = state.library.data_dir();
+    let (Some(project), Some(record)) = (
+        store::project(data_dir, &project_id).map_err(err)?,
+        store::load(data_dir, &project_id).map_err(err)?,
+    ) else {
         return Ok(None);
     };
-    let path = store::warped_path(state.library.data_dir(), &track.content_hash);
+    let track = resolve_track(&state, &project);
+    let path = store::warped_path(data_dir, &project_id);
     let warped = dj_analysis::decode_audio(&path)
         .map_err(|e| err(format!("reading the beatified render: {e}")))?;
     Ok(Some(BeatifyTrack {
-        track_id,
-        title: track.title,
-        artist: track.artist,
+        project_id: project.id,
+        project_name: project.name,
+        track_id: track.as_ref().map(|t| t.id).unwrap_or(project.track_id),
+        title: track
+            .as_ref()
+            .map(|t| t.title.clone())
+            .unwrap_or_else(|| "(source missing)".into()),
+        artist: track.map(|t| t.artist).unwrap_or_default(),
         duration_secs: warped.duration_secs(),
         sample_rate: warped.sample_rate,
         channels: warped.channels.len(),
@@ -428,16 +537,47 @@ pub fn beatify_load(
     }))
 }
 
-/// A window of a saved beatified track, for the track view's transport.
+/// Rename a project. The name is a label, nothing keys off it.
 #[tauri::command(async)]
-pub fn beatify_track_audio(
+pub fn beatify_project_rename(
     state: State<AppState>,
-    track_id: i64,
+    project_id: String,
+    name: String,
+) -> CmdResult<Vec<ProjectSummary>> {
+    let data_dir = state.library.data_dir();
+    let mut project = store::project(data_dir, &project_id)
+        .map_err(err)?
+        .ok_or_else(|| CmdError::invalid(format!("beatify: no project {project_id}")))?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(CmdError::invalid("beatify: a project needs a name"));
+    }
+    project.name = name.to_string();
+    project.updated = store::now_secs();
+    store::save_project(data_dir, &project).map_err(err)?;
+    beatify_projects(state)
+}
+
+/// Delete a project: its grid, its render, its clips, its warped stems.
+/// The source track and the library are untouched.
+#[tauri::command(async)]
+pub fn beatify_project_delete(
+    state: State<AppState>,
+    project_id: String,
+) -> CmdResult<Vec<ProjectSummary>> {
+    store::remove(state.library.data_dir(), &project_id).map_err(err)?;
+    beatify_projects(state)
+}
+
+/// A window of a project's render, for the track view's transport.
+#[tauri::command(async)]
+pub fn beatify_project_audio(
+    state: State<AppState>,
+    project_id: String,
     start_secs: f64,
     secs: f64,
 ) -> CmdResult<tauri::ipc::Response> {
-    let track = state.library.track(track_id).map_err(err)?;
-    let path = store::warped_path(state.library.data_dir(), &track.content_hash);
+    let path = store::warped_path(state.library.data_dir(), &project_id);
     let warped = dj_analysis::decode_audio(&path)
         .map_err(|e| err(format!("reading the beatified render: {e}")))?;
     wav(&dj_analysis::clip::slice(

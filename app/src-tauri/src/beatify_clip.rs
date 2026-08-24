@@ -27,6 +27,11 @@ use tauri::State;
 
 use crate::{err, AppState, CmdError, CmdResult};
 
+/// A project outlives its source: the render is its own, but anything
+/// that needs the ORIGINAL file (stems, re-beatify) cannot be done.
+const SOURCE_GONE: &str =
+    "beatify: this project's source track is no longer in the library — re-import it for stems";
+
 /// Same cap as the rest of Beatify: preview bytes cross IPC in one piece.
 const MAX_PREVIEW_SECS: f64 = 120.0;
 const MAX_BUCKETS: usize = 20_000;
@@ -179,29 +184,31 @@ pub struct ClipSourceAudio {
 /// cache so a draft that uses the seed twenty times decodes it once.
 struct Resolver<'a> {
     state: &'a AppState,
-    track_id: i64,
-    hash: String,
+    /// The library row the project was cut from — only stems need it, and
+    /// only if the source is still in the library.
+    track_id: Option<i64>,
+    project_id: String,
     record: BeatifyRecord,
     clips: Vec<SavedClip>,
     cache: HashMap<String, Arc<AudioData>>,
 }
 
 impl<'a> Resolver<'a> {
-    fn new(state: &'a AppState, track_id: i64) -> CmdResult<Self> {
-        let track = state.library.track(track_id).map_err(err)?;
-        let record = store::load(state.library.data_dir(), &track.content_hash)
+    fn new(state: &'a AppState, project_id: &str) -> CmdResult<Self> {
+        let data_dir = state.library.data_dir();
+        let project = store::project(data_dir, project_id)
+            .map_err(err)?
+            .ok_or_else(|| CmdError::invalid(format!("beatify: no project {project_id}")))?;
+        let record = store::load(data_dir, project_id)
             .map_err(err)?
             .ok_or_else(|| {
-                CmdError::invalid(format!(
-                    "beatify: {} has not been beatified yet — open it first",
-                    track.title
-                ))
+                CmdError::invalid(format!("beatify: project {project_id} has no grid"))
             })?;
-        let clips = read_clips(state, &track.content_hash)?;
+        let clips = read_clips(state, project_id)?;
         Ok(Resolver {
             state,
-            track_id,
-            hash: track.content_hash,
+            track_id: track_of(state, &project),
+            project_id: project.id,
             record,
             clips,
             cache: HashMap::new(),
@@ -248,7 +255,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn seed(&self) -> CmdResult<Arc<AudioData>> {
-        let path = store::warped_path(self.state.library.data_dir(), &self.hash);
+        let path = store::warped_path(self.state.library.data_dir(), &self.project_id);
         Ok(Arc::new(decode(&path, "the beatified render")?))
     }
 
@@ -271,7 +278,10 @@ impl<'a> Resolver<'a> {
         let paths = self
             .state
             .stems
-            .cached_paths(self.track_id)
+            .cached_paths(
+                self.track_id
+                    .ok_or_else(|| CmdError::invalid(SOURCE_GONE))?,
+            )
             .ok_or_else(|| CmdError::invalid(stem_hint(self.state)))?;
         let raw = decode(&paths[index], name)?;
         let map = WarpMap {
@@ -296,7 +306,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn stem_path(&self, name: &str) -> PathBuf {
-        store::record_dir(self.state.library.data_dir(), &self.hash)
+        store::project_dir(self.state.library.data_dir(), &self.project_id)
             .join("stems")
             .join(format!("{name}.wav"))
     }
@@ -369,12 +379,12 @@ fn wav(audio: &AudioData) -> CmdResult<tauri::ipc::Response> {
 // Saved clips
 // ---------------------------------------------------------------------------
 
-fn clips_path(state: &AppState, hash: &str) -> PathBuf {
-    store::record_dir(state.library.data_dir(), hash).join(CLIPS_NAME)
+fn clips_path(state: &AppState, project_id: &str) -> PathBuf {
+    store::project_dir(state.library.data_dir(), project_id).join(CLIPS_NAME)
 }
 
-fn read_clips(state: &AppState, hash: &str) -> CmdResult<Vec<SavedClip>> {
-    let path = clips_path(state, hash);
+fn read_clips(state: &AppState, project_id: &str) -> CmdResult<Vec<SavedClip>> {
+    let path = clips_path(state, project_id);
     if !path.is_file() {
         return Ok(Vec::new());
     }
@@ -382,8 +392,8 @@ fn read_clips(state: &AppState, hash: &str) -> CmdResult<Vec<SavedClip>> {
     serde_json::from_str(&text).map_err(|e| err(format!("reading clips: {e}")))
 }
 
-fn write_clips(state: &AppState, hash: &str, clips: &[SavedClip]) -> CmdResult<()> {
-    let path = clips_path(state, hash);
+fn write_clips(state: &AppState, project_id: &str, clips: &[SavedClip]) -> CmdResult<()> {
+    let path = clips_path(state, project_id);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| err(format!("writing clips: {e}")))?;
     }
@@ -392,16 +402,36 @@ fn write_clips(state: &AppState, hash: &str, clips: &[SavedClip]) -> CmdResult<(
     std::fs::write(&path, json).map_err(|e| err(format!("writing clips: {e}")))
 }
 
+/// Which library row a project was cut from, by hash first: ids are
+/// re-assigned on re-import, the audio is not.
+fn track_of(state: &AppState, project: &store::Project) -> Option<i64> {
+    if let Ok(Some(found)) = state.library.track_by_hash(&project.source_hash) {
+        return Some(found.id);
+    }
+    state.library.track(project.track_id).ok().map(|t| t.id)
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
 /// What this track can be cut up into (BC-1).
 #[tauri::command(async)]
-pub fn beatify_clip_sources(state: State<AppState>, track_id: i64) -> CmdResult<ClipSources> {
-    let resolver = Resolver::new(&state, track_id)?;
-    let stems_ready = state.stems.cached_paths(track_id).is_some();
-    let hint = (!stems_ready).then(|| stem_hint(&state));
+pub fn beatify_clip_sources(
+    state: State<AppState>,
+    project_id: String,
+) -> CmdResult<ClipSources> {
+    let resolver = Resolver::new(&state, &project_id)?;
+    let stems_ready = resolver
+        .track_id
+        .is_some_and(|id| state.stems.cached_paths(id).is_some());
+    let hint = (!stems_ready).then(|| {
+        if resolver.track_id.is_some() {
+            stem_hint(&state)
+        } else {
+            SOURCE_GONE.to_string()
+        }
+    });
     let mut sources = vec![ClipSourceInfo {
         source: ClipSourceRef::Seed,
         label: "Seed track".into(),
@@ -427,11 +457,11 @@ pub fn beatify_clip_sources(state: State<AppState>, track_id: i64) -> CmdResult<
 #[tauri::command(async)]
 pub fn beatify_clip_open(
     state: State<AppState>,
-    track_id: i64,
+    project_id: String,
     source: ClipSourceRef,
     buckets: usize,
 ) -> CmdResult<ClipSourceAudio> {
-    let mut resolver = Resolver::new(&state, track_id)?;
+    let mut resolver = Resolver::new(&state, &project_id)?;
     let label = match &source {
         ClipSourceRef::Seed => "Seed track".to_string(),
         ClipSourceRef::Stem { name } => name.clone(),
@@ -460,12 +490,12 @@ pub fn beatify_clip_open(
 #[tauri::command(async)]
 pub fn beatify_clip_audio(
     state: State<AppState>,
-    track_id: i64,
+    project_id: String,
     source: ClipSourceRef,
     start_secs: f64,
     secs: f64,
 ) -> CmdResult<tauri::ipc::Response> {
-    let mut resolver = Resolver::new(&state, track_id)?;
+    let mut resolver = Resolver::new(&state, &project_id)?;
     let audio = resolver.audio(&source, 0)?;
     wav(&dj_analysis::clip::slice(
         &audio,
@@ -479,12 +509,12 @@ pub fn beatify_clip_audio(
 #[tauri::command(async)]
 pub fn beatify_clip_preview(
     state: State<AppState>,
-    track_id: i64,
+    project_id: String,
     draft: ClipDraft,
     start_secs: f64,
     secs: f64,
 ) -> CmdResult<tauri::ipc::Response> {
-    let mut resolver = Resolver::new(&state, track_id)?;
+    let mut resolver = Resolver::new(&state, &project_id)?;
     let clip = resolver.assemble(&draft, 0)?;
     wav(&dj_analysis::clip::slice(
         &clip,
@@ -498,11 +528,10 @@ pub fn beatify_clip_preview(
 #[tauri::command(async)]
 pub fn beatify_clip_save(
     state: State<AppState>,
-    track_id: i64,
+    project_id: String,
     clip: SavedClip,
 ) -> CmdResult<ClipSaved> {
-    let track = state.library.track(track_id).map_err(err)?;
-    let mut clips = read_clips(&state, &track.content_hash)?;
+    let mut clips = read_clips(&state, &project_id)?;
     let mut clip = clip;
     if clip.id.is_empty() {
         clip.id = next_id(&clips);
@@ -512,20 +541,19 @@ pub fn beatify_clip_save(
         Some(existing) => *existing = clip,
         None => clips.push(clip),
     }
-    write_clips(&state, &track.content_hash, &clips)?;
+    write_clips(&state, &project_id, &clips)?;
     Ok(ClipSaved { id, clips })
 }
 
 #[tauri::command(async)]
 pub fn beatify_clip_delete(
     state: State<AppState>,
-    track_id: i64,
+    project_id: String,
     id: String,
 ) -> CmdResult<Vec<SavedClip>> {
-    let track = state.library.track(track_id).map_err(err)?;
-    let mut clips = read_clips(&state, &track.content_hash)?;
+    let mut clips = read_clips(&state, &project_id)?;
     clips.retain(|c| c.id != id);
-    write_clips(&state, &track.content_hash, &clips)?;
+    write_clips(&state, &project_id, &clips)?;
     Ok(clips)
 }
 

@@ -74,7 +74,9 @@ interface Drag {
 
 export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBuilderProps) {
   const grid = track.record.grid;
-  const trackId = track.trackId;
+  // Clips belong to the PROJECT, not the track: the same song may be
+  // open in two projects with different grids and different clips.
+  const projectId = track.projectId;
 
   const [sources, setSources] = useState<ClipSources | null>(null);
   const [saved, setSaved] = useState<SavedClip[]>([]);
@@ -100,24 +102,24 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
   // --- what can be cut up -----------------------------------------------
   useEffect(() => {
     void (async () => {
-      const list = await clips.sources(trackId);
+      const list = await clips.sources(projectId);
       if (!list) return;
       setSources(list);
       setSaved(list.clips);
     })();
-  }, [clips, trackId]);
+  }, [clips, projectId]);
 
   useEffect(() => {
     let live = true;
     void (async () => {
       const spec = parseSourceId(picked);
-      const opened = await clips.open(trackId, spec, BUCKETS);
+      const opened = await clips.open(projectId, spec, BUCKETS);
       if (live && opened) setOpen(opened);
     })();
     return () => {
       live = false;
     };
-  }, [clips, picked, trackId]);
+  }, [clips, picked, projectId]);
 
   // --- the clip's own transport -----------------------------------------
   //
@@ -126,9 +128,9 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
   // a sixteen-beat clip with four beats of drums in it loops every
   // sixteen beats, which is the loop the user asked for.
   const clipSecs = clipSeconds(drawnColumns(draft), grid.period);
-  const live = useRef({ draft, trackId, clips, clipSecs });
+  const live = useRef({ draft, projectId, clips, clipSecs });
   useLayoutEffect(() => {
-    live.current = { draft, trackId, clips, clipSecs };
+    live.current = { draft, projectId, clips, clipSecs };
   });
 
   useEffect(() => {
@@ -136,7 +138,7 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
       duration: () => live.current.clipSecs,
       element: () => audioRef.current,
       render: (start, secs) =>
-        live.current.clips.preview(live.current.trackId, live.current.draft, start, secs),
+        live.current.clips.preview(live.current.projectId, live.current.draft, start, secs),
       onStatus: (s) => {
         setClipPlaying(s.playing);
         setClipHead(s.playhead);
@@ -340,7 +342,7 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
     }
     setSaving(true);
     const wire = toWire(draft);
-    const filed = await clips.save(trackId, {
+    const filed = await clips.save(projectId, {
       id: draft.id,
       name: draft.name,
       rows: wire.rows,
@@ -355,21 +357,21 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
     // would have nothing to delete.
     setDraft((cur) => ({ ...cur, id: filed.id }));
     setNote(`Saved "${draft.name}"`);
-  }, [clips, draft, trackId]);
+  }, [clips, draft, projectId]);
 
   /** Delete the clip this draft came from. The material stays on screen,
    *  now unsaved: deleting a file is not the same as clearing the desk. */
   const deleteClip = useCallback(async () => {
     if (!isSaved(draft)) return;
     setSaving(true);
-    const list = await clips.remove(trackId, draft.id);
+    const list = await clips.remove(projectId, draft.id);
     setSaving(false);
     if (!list) return;
     setSaved(list);
     setDraft((cur) => ({ ...cur, id: '' }));
     if (picked === `clip:${draft.id}`) setPicked(SEED_SOURCE);
     setNote(`Deleted "${draft.name}" — what is on the grid is now unsaved`);
-  }, [clips, draft, picked, trackId]);
+  }, [clips, draft, picked, projectId]);
 
   /** Clear the desk: a new, empty clip, and silence. */
   const newClip = useCallback(() => {
@@ -448,7 +450,7 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
             source={sourceView}
             waveHeight={SOURCE_WAVE_H}
             loadAudio={(_id, startSecs, secs) =>
-              clips.audio(trackId, parseSourceId(picked), startSecs, secs)
+              clips.audio(projectId, parseSourceId(picked), startSecs, secs)
             }
             onRebeatify={onRebeatify}
             onSelectionBeats={setSelBeats}

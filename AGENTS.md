@@ -35,7 +35,7 @@ as an iteration loop.
 - Do exactly ONE full CI-equivalent pass at the end of a milestone/task:
   `cargo test --workspace --release`, workspace clippy `-D warnings`,
   `cargo fmt --all --check`, `cd app && npm run lint && npm test &&
-  npm run build`, then `cargo build --manifest-path app/src-tauri/Cargo.toml`.
+npm run build`, then `cargo build --manifest-path app/src-tauri/Cargo.toml`.
   If a late fix lands after that pass, re-verify only the affected scope.
 
 ## Build ordering
@@ -297,7 +297,7 @@ fails if it's missing.
   285 at 1 Hz" bug); KnobMath.test.ts pins both sides.
 - Wired-input blend (knob.rs docs are canonical): knob-backed inputs
   blend in POSITION space — `curve(clamp01(base_pos + sig·atten/10 +
-  offset))`, offset in position units — so the knob's curve shapes the
+offset))`, offset in position units — so the knob's curve shapes the
   CV and the spread tracks the baseline (exp rate knobs get a geometric
   spread; a linear knob spanning 10 units reduces to the old additive
   law). Plain wire jacks (no knob declared: audio ins, gate thrus) keep
@@ -510,9 +510,9 @@ fails if it's missing.
   (the undo/redo restore path in the app's `restore_doc`, returning the
   ids it had to recreate so deck metadata can be re-applied). Untouched
   modules keep DSP state AND telemetry across edits (`modules_sequencing`
-  + `graph_edit` tests pin this; `live_edit` pins the running-edit path)
-  — `Engine::from_doc` is ONLY for loading patches into a fresh engine.
-  `PatchDoc::remove_module` edits the document, not a live engine.
+  - `graph_edit` tests pin this; `live_edit` pins the running-edit path)
+    — `Engine::from_doc` is ONLY for loading patches into a fresh engine.
+    `PatchDoc::remove_module` edits the document, not a live engine.
 - Module renaming (`engine/rename.rs`): instance ids ARE normalized names
   (`normalize_module_name`: lowercase ASCII alphanumerics, other runs
   collapse to one `_`). `Engine::rename_module` takes the user-typed form,
@@ -813,10 +813,9 @@ fails if it's missing.
   period of head padding so beat 0 has audio behind it; there are no bars,
   no meter and no beat array anywhere — `ruler.group` is a display
   preference nothing else reads. Artifacts are content-hash keyed under
-  `<data_dir>/beatify/<hash>/{meta.json,warped.wav}` (machine-local,
-  gitignored) plus a best-effort `<source>.beatify.json` sidecar; Beatify
-  never rewrites the source file or the library DB row, so re-importing
-  the same audio finds its grid again.
+  `<data_dir>/beatify/<project-id>/{project.json,meta.json,warped.wav}`
+  (machine-local, gitignored) plus a best-effort `<source>.beatify.json`
+  sidecar; Beatify never rewrites the source file or the library DB row.
 - Beatify's frontend: `BeatifyView.tsx` (tab shell: track list,
   run/verdict state, owns which track is open), `BeatifyModal.tsx` (the
   detection report + audition) and, once a track is beatified,
@@ -848,7 +847,7 @@ fails if it's missing.
   (`span`, `clip_secs`, `assemble`) is the audio math, declick ramps and
   all. Tested at each layer: `app/tests/BeatifyClip.test.ts`,
   `BeatifyClipBuilder.test.tsx`, `cargo test -p dj-analysis --lib
-  beatify::build`.
+beatify::build`.
 - Clip-builder invariants worth not breaking: a run dropped in stays ONE
   block (three beats read as three-wide, not three cells), runs that abut
   keep a drawn seam (`abutsLeft`), a drop that does not fit GROWS the
@@ -900,12 +899,12 @@ fails if it's missing.
   so an edit mid-playback is heard: length changes `invalidate()`,
   everything else `refreshTone()`, the same split the Clip page makes.
 - Clip-builder storage: saved clips are JSON only —
-  `<data_dir>/beatify/<hash>/clips.json`, one array, overwritten by id
+  `<data_dir>/beatify/<project-id>/clips.json`, one array, overwritten by id
   (saving under an existing NAME overwrites that clip rather than
   breeding copies) — because a clip is placements, not audio; it is
   re-assembled on demand. Stems become grid-aligned sources by being
   pulled through the seed's OWN warp map (`record.warp.map`) and cached
-  as `<hash>/stems/<name>.wav`; an unseparated stem is listed but
+  as `<project-id>/stems/<name>.wav`; an unseparated stem is listed but
   disabled with the Clip-page hint, like every other optional dependency
   here. Nothing is written to the library: a clip is not a track.
 - Beatify detection degrades like the yt-dlp provider: `beat_this` (a
@@ -976,23 +975,23 @@ fails if it's missing.
   every mousemove of a drag re-fetched a window, which is a stutter per
   pixel dragged.
 - ONE audition timeline, `app/src/components/AudioTimeline.tsx`: waveform
-  + ruler + selection gestures (sweep / edge-resize / slide /
-  shift-extend) + wheel-zoom-around-cursor + transport row, extracted
-  from the Clip page and reused by Beatify's modal AND track view. It
-  draws and gestures only — audio stays in the parent's `ClipTransport`
-  (all three pages now share that owner), selection/viewport are
-  controlled props, and testids/classes are `${idPrefix}-…` so the Clip
-  page's `clip-*` DOM contract is unchanged (it also emits the `clip-*`
-  layout classes for shared styling; per-prefix CSS overrides colour and
-  size). Domain drawings go through `renderUnder`/`renderOver(xOf)` so
-  they follow zoom; quantization goes through the `snap` hooks —
-  Beatify's `beatSnap(grid)` (BeatifyTrackView.tsx) snaps seeks to the
-  nearest beat (⌘ frees), selections OUTWARD to whole beats, slides by
-  whole beats; the Clip page passes no snap. Zoom law is
-  `viewSpan`/`zoomView` (exported, pinned in BeatifyGrid.test.ts).
-  BeatifyTrackView is keyed by track+render in BeatifyView so a
-  re-beatify remounts it (fresh transport/viewport/selection) instead of
-  setState-in-effect resets.
+  - ruler + selection gestures (sweep / edge-resize / slide /
+    shift-extend) + wheel-zoom-around-cursor + transport row, extracted
+    from the Clip page and reused by Beatify's modal AND track view. It
+    draws and gestures only — audio stays in the parent's `ClipTransport`
+    (all three pages now share that owner), selection/viewport are
+    controlled props, and testids/classes are `${idPrefix}-…` so the Clip
+    page's `clip-*` DOM contract is unchanged (it also emits the `clip-*`
+    layout classes for shared styling; per-prefix CSS overrides colour and
+    size). Domain drawings go through `renderUnder`/`renderOver(xOf)` so
+    they follow zoom; quantization goes through the `snap` hooks —
+    Beatify's `beatSnap(grid)` (BeatifyTrackView.tsx) snaps seeks to the
+    nearest beat (⌘ frees), selections OUTWARD to whole beats, slides by
+    whole beats; the Clip page passes no snap. Zoom law is
+    `viewSpan`/`zoomView` (exported, pinned in BeatifyGrid.test.ts).
+    BeatifyTrackView is keyed by track+render in BeatifyView so a
+    re-beatify remounts it (fresh transport/viewport/selection) instead of
+    setState-in-effect resets.
 - THE VIEW NEVER MOVES ITSELF AND A SWEEP NEVER MOVES PLAYBACK. Two rules
   that both come from the same complaint — the ground shifting under a
   gesture. (a) Nothing auto-scrolls the viewport during playback: where
@@ -1014,9 +1013,10 @@ fails if it's missing.
   `setLoop` policy, which is now "arming or moving a loop NEVER moves
   playback" (`loopWrapBeat` remains as pure math but the UI no longer
   schedules group-boundary wraps; the shared transport's behavior won);
-  (2) re-beatifying an already-beatified track is allowed
-  but warns that anything cut from the old grid stops matching, and it
-  overwrites the same hash-keyed record (no versions); (3) the lead-in is
+  (2) re-beatifying is allowed but warns that anything cut from the old
+  grid stops matching, and it overwrites THAT PROJECT's record (no
+  versions) — to keep both takes, start a second project from the same
+  track; (3) the lead-in is
   ONE global value (median onset offset + pad, `grid::lead_in`), because
   uniformity is what keeps cuts sync-safe; (4) the phase-1 click track
   ticks the DETECTIONS (over unwarped audio that is what proves the
@@ -1041,3 +1041,56 @@ fails if it's missing.
   are produced, and a failed download job logs in
   `dj-library::downloads`. Pinned by
   `app/tests/ErrorHandling.test.tsx`.
+
+## The Beatify page at a glance
+
+The detail is in the `Conventions` bullets above; this is the map.
+
+- A PROJECT is the unit of work, not a track. One project = one beatified
+  take on one source track: its grid, its constant-tempo render, and the
+  clips cut from them. A track can carry any number of projects (two
+  passes at different warp strengths, two sets of clips), so nothing is
+  keyed by the track any more. `beatify_projects` is the tab's front
+  door; `beatify_project_open` / `_rename` / `_delete` do the rest, and
+  `beatify_save` with an empty `projectId` is how one is born.
+- Persistence, all machine-local and gitignored, one directory per
+  project: `<data_dir>/beatify/<project-id>/` holding `project.json` (id,
+  name, `trackId`, `sourceHash`, `updated`), `meta.json` (the §5 record —
+  grid, warp map, quality; also the sidecar format), `warped.wav`,
+  `clips.json` and `stems/<name>.wav`. Ids are minted `p<n>`;
+  pre-projects directories were named by the source hash and are ADOPTED
+  as projects on sight (`store::project` synthesises the envelope from
+  `meta.json`), so old work opens untouched and nothing is migrated or
+  rewritten. Nothing about a project reaches the library DB.
+- The two halves of the page. The SOURCE pane (`BeatifyTrackView`) shows
+  one source of the open project — the seed render, a stem, or a clip
+  saved earlier — and is where beats are cut FROM. The CLIP EDITOR
+  (`BeatifyClipEditor`) is the grid they are dropped INTO. The left
+  drawer (`BeatifyClipList`) lists the sources: clicking one changes the
+  source pane only, its pencil opens a clip in the editor only.
+- The clip model is pure and lives in `app/src/beatifyClip.ts`: a
+  `ClipDraft` is `{id, name, rows, columns, placements}`, and a
+  `Placement` is a CONTIGUOUS RUN of beats from one source, never a
+  per-cell thing. Columns are beats of the project's grid, rows are
+  material that sounds together, `draft.columns` is the clip's length
+  (trailing silence included). Backend twin:
+  `app/src-tauri/src/beatify_clip.rs` (resolves sources, files clips);
+  audio math: `dj_analysis::beatify::build`; the IPC client sits at the
+  bottom of `beatifyClip.ts` and is keyed by `projectId` throughout.
+- Playback ownership: EXACTLY ONE of the source pane and the clip editor
+  sounds at a time. Starting either pauses the other
+  (`BeatifyTrackViewHandle.pause` one way, `onPlayingChange` the other)
+  and a badge says which. Both drive `ClipTransport`; the editor renders
+  the LIVE draft, so a length change `invalidate()`s and everything else
+  `refreshTone()`s.
+- Conventions for future work here: key every clip command by
+  `projectId`, never `trackId` (the track id is for STEMS alone, which
+  need the original file and degrade with a hint when it is gone); let
+  the backend mint ids and say what it filed (`ClipSaved.id`,
+  `BeatifyTrack.projectId`) rather than inferring them; everything in
+  `beatify*.rs` is offline `#[tauri::command(async)]` and must never
+  touch the engine or the RT thread. Tests:
+  `app/tests/BeatifyView.test.tsx` (tab, projects, modal),
+  `BeatifyClipBuilder.test.tsx` (builder, mounted), `BeatifyClip.test.ts`
+  - `BeatifyGrid.test.ts` (pure model and grid math), and `cargo test -p
+dj-analysis --release --test beatify` (pipeline and store).

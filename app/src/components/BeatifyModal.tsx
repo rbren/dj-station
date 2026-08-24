@@ -46,11 +46,24 @@ export interface BeatifyModalProps {
   client: BeatifyClientApi;
   trackId: number;
   title: string;
+  /** The project Save commits into. Empty means a NEW one — the modal is
+   *  how a project is born; a re-beatify passes the id it replaces. */
+  projectId?: string;
+  /** What to call a new project. Ignored when replacing an existing one. */
+  projectName?: string;
   onCommitted(track: BeatifyTrack): void;
   onCancel(): void;
 }
 
-export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: BeatifyModalProps) {
+export function BeatifyModal({
+  client,
+  trackId,
+  title,
+  projectId = '',
+  projectName = '',
+  onCommitted,
+  onCancel,
+}: BeatifyModalProps) {
   const [analysis, setAnalysis] = useState<BeatifyAnalysis | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -271,7 +284,16 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
   const commit = useCallback(async () => {
     setBusy(true);
     setError(null);
-    const track = await client.save({ strength, leadIn: leadInMs / 1000, rulerGroup }, BUCKETS);
+    const track = await client.save(
+      {
+        strength,
+        leadIn: leadInMs / 1000,
+        rulerGroup,
+        projectId,
+        name: projectName,
+      },
+      BUCKETS,
+    );
     setBusy(false);
     if (!track) {
       logError('beatify.save', `render failed for track ${trackId}`);
@@ -279,7 +301,7 @@ export function BeatifyModal({ client, trackId, title, onCommitted, onCancel }: 
       return;
     }
     onCommitted(track);
-  }, [client, leadInMs, onCommitted, rulerGroup, strength, trackId]);
+  }, [client, leadInMs, onCommitted, projectId, projectName, rulerGroup, strength, trackId]);
 
   const dismiss = useCallback(() => {
     void client.cancel();

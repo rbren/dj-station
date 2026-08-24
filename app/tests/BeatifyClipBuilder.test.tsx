@@ -18,6 +18,8 @@ const DURATION = 32.5;
 
 function beatified(): BeatifyTrack {
   return {
+    projectId: 'p1',
+    projectName: 'Live Set A',
     trackId: 3,
     title: 'Live Set A',
     artist: 'Band',
@@ -181,7 +183,7 @@ describe('the clip list', () => {
     fireEvent.click(screen.getByTestId('beatify-clip-source-stem:drums'));
     await waitFor(() =>
       expect(clips.open).toHaveBeenCalledWith(
-        3,
+        'p1',
         { kind: 'stem', name: 'drums' },
         expect.any(Number),
       ),
@@ -526,7 +528,7 @@ describe('the clips drawer and the editor are separate', () => {
 
     fireEvent.click(screen.getByTestId('beatify-clip-source-clip:1'));
     await waitFor(() =>
-      expect(clips.open).toHaveBeenCalledWith(3, { kind: 'clip', id: '1' }, expect.any(Number)),
+      expect(clips.open).toHaveBeenCalledWith('p1', { kind: 'clip', id: '1' }, expect.any(Number)),
     );
     // The editor is still the empty clip we started: opening material to
     // cut up is not opening it to edit.
@@ -600,7 +602,7 @@ describe('saving and deleting the clip in front of you', () => {
     expect((screen.getByTestId('beatify-clip-delete') as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.click(screen.getByTestId('beatify-clip-delete'));
-    await waitFor(() => expect(clips.remove).toHaveBeenCalledWith(3, '1'));
+    await waitFor(() => expect(clips.remove).toHaveBeenCalledWith('p1', '1'));
     await waitFor(() => expect(screen.queryByTestId('beatify-clip-source-clip:1')).toBeNull());
 
     expect(blocks()).toHaveLength(1);

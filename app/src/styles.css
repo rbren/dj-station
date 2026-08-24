@@ -3443,6 +3443,68 @@ body {
   max-width: 46em;
 }
 
+/* The shelf of projects: the tab's front door, so the name leads and the
+   track it came from is the small print under it. */
+.beatify-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 60em;
+}
+
+.beatify-project {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.beatify-project-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: #14161a;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.beatify-project-open:hover {
+  border-color: #3a4150;
+}
+
+.beatify-project-name {
+  color: #e6e9ef;
+}
+
+.beatify-project-facts {
+  color: #7c869a;
+  font-size: 0.8rem;
+}
+
+.beatify-project-edit {
+  background: transparent;
+  border: none;
+  color: #7c869a;
+  cursor: pointer;
+}
+
+.beatify-project-edit:hover {
+  color: #dce8ff;
+}
+
+.beatify-project-warn {
+  color: #e0b78f;
+  font-size: 0.8rem;
+}
+
+.beatify-open-name {
+  color: #e6e9ef;
+}
+
 .beatify-status {
   color: #7dd88f;
   font-size: 0.85rem;

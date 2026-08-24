@@ -533,20 +533,110 @@ fn the_record_round_trips_through_the_store() {
     assert!(json.contains("\"anchorStride\""));
 
     let dir = tempfile::tempdir().expect("tempdir");
-    store::save(dir.path(), &record.source_hash, &record, &warped).expect("save");
-    let loaded = store::load(dir.path(), &record.source_hash)
+    let project = store::Project {
+        id: "p1".into(),
+        name: "boys".into(),
+        track_id: 7,
+        source_hash: record.source_hash.clone(),
+        updated: 1000,
+    };
+    store::save(dir.path(), &project, &record, &warped).expect("save");
+    let loaded = store::load(dir.path(), "p1")
         .expect("load")
         .expect("record exists");
     assert_eq!(loaded.grid, record.grid);
     assert_eq!(loaded.source_hash, record.source_hash);
-    assert!(store::warped_path(dir.path(), &record.source_hash).exists());
-    // Keyed by the hash prefix, not the path (MOD-A28).
-    assert!(store::record_dir(dir.path(), &record.source_hash).ends_with("0123456789abcdef"));
+    assert!(store::warped_path(dir.path(), "p1").exists());
+    // Keyed by the PROJECT, so one track can have several.
+    assert!(store::project_dir(dir.path(), "p1").ends_with("p1"));
 
-    store::remove(dir.path(), &record.source_hash).expect("remove");
-    assert!(store::load(dir.path(), &record.source_hash)
-        .expect("load")
-        .is_none());
+    store::remove(dir.path(), "p1").expect("remove");
+    assert!(store::load(dir.path(), "p1").expect("load").is_none());
+}
+
+/// One track, two projects: the whole point of the store being keyed by
+/// project. They share a source hash and nothing else.
+#[test]
+fn a_track_can_have_more_than_one_project() {
+    let (record, warped) = a_saved_record();
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    for (id, name, updated) in [("p1", "first pass", 100), ("p2", "slower take", 200)] {
+        let project = store::Project {
+            id: id.into(),
+            name: name.into(),
+            track_id: 7,
+            source_hash: record.source_hash.clone(),
+            updated,
+        };
+        store::save(dir.path(), &project, &record, &warped).expect("save");
+    }
+
+    let list = store::list(dir.path()).expect("list");
+    // Newest first: the list is a place you continue work from.
+    assert_eq!(
+        list.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        ["p2", "p1"]
+    );
+    assert_eq!(list[0].name, "slower take");
+    assert!(list.iter().all(|p| p.source_hash == record.source_hash));
+    assert_eq!(store::new_id(&list), "p3");
+
+    // Deleting one leaves the other's artifacts alone.
+    store::remove(dir.path(), "p2").expect("remove");
+    assert!(store::warped_path(dir.path(), "p1").exists());
+    assert_eq!(store::list(dir.path()).expect("list").len(), 1);
+}
+
+/// A directory written before projects existed is a project: same files,
+/// its name is the hash prefix, and the envelope is inferred. Nobody has
+/// to migrate anything by hand, and nothing is rewritten to read it.
+#[test]
+fn a_legacy_hash_keyed_record_is_adopted_as_a_project() {
+    let (record, warped) = a_saved_record();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let hash_dir = store::project_dir(dir.path(), &store::short_hash(&record.source_hash));
+    std::fs::create_dir_all(&hash_dir).expect("mkdir");
+    std::fs::write(
+        hash_dir.join(store::META_NAME),
+        serde_json::to_string(&record).expect("json"),
+    )
+    .expect("write meta");
+    std::fs::write(
+        hash_dir.join(store::WARPED_NAME),
+        dj_analysis::clip::wav16_bytes(&warped),
+    )
+    .expect("write wav");
+
+    let list = store::list(dir.path()).expect("list");
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, "0123456789abcdef");
+    // Named for the file it came from, and it knows its full hash.
+    assert_eq!(list[0].name, "boys");
+    assert_eq!(list[0].source_hash, record.source_hash);
+    // Adoption is read-only: no envelope is written behind the user's back.
+    assert!(!hash_dir.join(store::PROJECT_NAME).exists());
+    // A minted id cannot collide with it.
+    assert_eq!(store::new_id(&list), "p2");
+}
+
+/// The record + render the store tests share.
+fn a_saved_record() -> (beatify::BeatifyRecord, dj_analysis::AudioData) {
+    let (audio, analysis) = analyze_drifting(120.0, 125.0, 40);
+    let (warped, map) = beatify::render(&audio, &analysis, analysis.sweep.default_strength);
+    let record = beatify::record(
+        &analysis,
+        &beatify::Commit {
+            source: std::path::Path::new("/music/boys.wav"),
+            source_hash: "0123456789abcdef0123456789abcdef",
+            warped_name: "boys.beatified.wav",
+            strength: analysis.sweep.default_strength,
+            lead_in: analysis.lead_in,
+            ruler: Ruler::default(),
+        },
+        &map,
+    );
+    (record, warped)
 }
 
 // ---------------------------------------------------------------------------

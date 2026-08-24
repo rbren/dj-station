@@ -118,7 +118,27 @@ export interface BeatifyRecord {
   reading: Reading;
 }
 
+/** A beatified take on one track: its grid, its render, its clips. One
+ *  track can have any number of them, so the PROJECT id — not the track
+ *  id — is what every clip command is keyed by. */
+export interface BeatifyProject {
+  id: string;
+  name: string;
+  trackId: number;
+  title: string;
+  artist: string;
+  bpm: number;
+  beats: number;
+  /** Unix seconds; the list is newest first. */
+  updated: number;
+  /** The source track has left the library: the project still opens and
+   *  plays, but stems and re-beatify need the original file. */
+  sourceMissing: boolean;
+}
+
 export interface BeatifyTrack {
+  projectId: string;
+  projectName: string;
   trackId: number;
   title: string;
   artist: string;
@@ -297,6 +317,16 @@ export function timecode(secs: number): string {
 // IPC
 // ---------------------------------------------------------------------------
 
+/** What Save commits. An empty `projectId` mints a project (that is what
+ *  "new project" sends); re-beatifying passes the id it is replacing. */
+export interface SaveRequest {
+  strength: number;
+  leadIn: number;
+  rulerGroup: number;
+  projectId: string;
+  name: string;
+}
+
 /** What the Beatify page needs; tests substitute a mock. */
 export interface BeatifyClientApi {
   trackerStatus(): Promise<TrackerStatus | null>;
@@ -315,12 +345,12 @@ export interface BeatifyClientApi {
     click: boolean,
   ): Promise<ArrayBuffer | null>;
   syncCheck(strength: number): Promise<ArrayBuffer | null>;
-  save(
-    request: { strength: number; leadIn: number; rulerGroup: number },
-    buckets: number,
-  ): Promise<BeatifyTrack | null>;
-  load(trackId: number, buckets: number): Promise<BeatifyTrack | null>;
-  trackAudio(trackId: number, startSecs: number, secs: number): Promise<ArrayBuffer | null>;
+  save(request: SaveRequest, buckets: number): Promise<BeatifyTrack | null>;
+  projects(): Promise<BeatifyProject[] | null>;
+  openProject(projectId: string, buckets: number): Promise<BeatifyTrack | null>;
+  renameProject(projectId: string, name: string): Promise<BeatifyProject[] | null>;
+  deleteProject(projectId: string): Promise<BeatifyProject[] | null>;
+  projectAudio(projectId: string, startSecs: number, secs: number): Promise<ArrayBuffer | null>;
   cancel(): Promise<void>;
 }
 
@@ -349,14 +379,23 @@ export class BeatifyClient extends IpcClient implements BeatifyClientApi {
   syncCheck(strength: number) {
     return this.call<ArrayBuffer>('beatify_sync_check', { strength });
   }
-  save(request: { strength: number; leadIn: number; rulerGroup: number }, buckets: number) {
+  save(request: SaveRequest, buckets: number) {
     return this.call<BeatifyTrack>('beatify_save', { request, buckets });
   }
-  load(trackId: number, buckets: number) {
-    return this.call<BeatifyTrack>('beatify_load', { trackId, buckets });
+  projects() {
+    return this.call<BeatifyProject[]>('beatify_projects');
   }
-  trackAudio(trackId: number, startSecs: number, secs: number) {
-    return this.call<ArrayBuffer>('beatify_track_audio', { trackId, startSecs, secs });
+  openProject(projectId: string, buckets: number) {
+    return this.call<BeatifyTrack>('beatify_project_open', { projectId, buckets });
+  }
+  renameProject(projectId: string, name: string) {
+    return this.call<BeatifyProject[]>('beatify_project_rename', { projectId, name });
+  }
+  deleteProject(projectId: string) {
+    return this.call<BeatifyProject[]>('beatify_project_delete', { projectId });
+  }
+  projectAudio(projectId: string, startSecs: number, secs: number) {
+    return this.call<ArrayBuffer>('beatify_project_audio', { projectId, startSecs, secs });
   }
   async cancel() {
     await this.call<null>('beatify_cancel');

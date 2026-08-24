@@ -422,47 +422,47 @@ export function fromWire(clip: SavedClip): ClipDraft {
 
 /** What the clip builder needs; tests substitute a mock. */
 export interface BeatifyClipClientApi {
-  sources(trackId: number): Promise<ClipSources | null>;
-  open(trackId: number, source: SourceSpec, buckets: number): Promise<ClipSourceAudio | null>;
+  sources(projectId: string): Promise<ClipSources | null>;
+  open(projectId: string, source: SourceSpec, buckets: number): Promise<ClipSourceAudio | null>;
   audio(
-    trackId: number,
+    projectId: string,
     source: SourceSpec,
     startSecs: number,
     secs: number,
   ): Promise<ArrayBuffer | null>;
   preview(
-    trackId: number,
+    projectId: string,
     draft: ClipDraft,
     startSecs: number,
     secs: number,
   ): Promise<ArrayBuffer | null>;
-  save(trackId: number, clip: SavedClip): Promise<ClipSaved | null>;
-  remove(trackId: number, id: string): Promise<SavedClip[] | null>;
+  save(projectId: string, clip: SavedClip): Promise<ClipSaved | null>;
+  remove(projectId: string, id: string): Promise<SavedClip[] | null>;
 }
 
 export class BeatifyClipClient extends IpcClient implements BeatifyClipClientApi {
-  sources(trackId: number) {
-    return this.call<ClipSources>('beatify_clip_sources', { trackId });
+  sources(projectId: string) {
+    return this.call<ClipSources>('beatify_clip_sources', { projectId });
   }
-  open(trackId: number, source: SourceSpec, buckets: number) {
-    return this.call<ClipSourceAudio>('beatify_clip_open', { trackId, source, buckets });
+  open(projectId: string, source: SourceSpec, buckets: number) {
+    return this.call<ClipSourceAudio>('beatify_clip_open', { projectId, source, buckets });
   }
-  audio(trackId: number, source: SourceSpec, startSecs: number, secs: number) {
-    return this.call<ArrayBuffer>('beatify_clip_audio', { trackId, source, startSecs, secs });
+  audio(projectId: string, source: SourceSpec, startSecs: number, secs: number) {
+    return this.call<ArrayBuffer>('beatify_clip_audio', { projectId, source, startSecs, secs });
   }
-  preview(trackId: number, draft: ClipDraft, startSecs: number, secs: number) {
+  preview(projectId: string, draft: ClipDraft, startSecs: number, secs: number) {
     return this.call<ArrayBuffer>('beatify_clip_preview', {
-      trackId,
+      projectId,
       draft: toWire(draft),
       startSecs,
       secs,
     });
   }
-  save(trackId: number, clip: SavedClip) {
-    return this.call<ClipSaved>('beatify_clip_save', { trackId, clip });
+  save(projectId: string, clip: SavedClip) {
+    return this.call<ClipSaved>('beatify_clip_save', { projectId, clip });
   }
-  remove(trackId: number, id: string) {
-    return this.call<SavedClip[]>('beatify_clip_delete', { trackId, id });
+  remove(projectId: string, id: string) {
+    return this.call<SavedClip[]>('beatify_clip_delete', { projectId, id });
   }
 }
 
