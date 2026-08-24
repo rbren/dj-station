@@ -58,6 +58,8 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const [warn, setWarn] = useState<ModalFor | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [bpmDraft, setBpmDraft] = useState<string | null>(null);
+  /** The open project's name, while it is being typed. */
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -80,6 +82,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const openProject = useCallback(
     async (projectId: string) => {
       setBusy(true);
+      setNameDraft(null);
       const project = await client.openProject(projectId, BUCKETS);
       setBusy(false);
       // A failed command has already said so, in the banner and in the
@@ -99,6 +102,11 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     if (!project) return;
     setOpen(project);
     setModal(null);
+    // A project is a place to work in, so it is named at birth rather
+    // than inheriting whatever gets imported into it first: the name it
+    // came with is already in the box, selected, waiting to be typed
+    // over. Ignore it and the default stands.
+    setNameDraft(project.name);
     void refreshShelf();
   }, [client, refreshShelf]);
 
@@ -160,14 +168,37 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     [client, open, refreshShelf],
   );
 
+  /** Write a project's name down. One path for both boxes — the shelf's
+   *  pencil and the open project's own header — because they are two
+   *  views of the same label. */
+  const renameTo = useCallback(
+    async (projectId: string, asked: string) => {
+      const name = asked.trim();
+      // A nameless project cannot be told from its neighbour on the
+      // shelf, so an emptied box is an abandoned edit, not a rename.
+      if (!name) return;
+      const saved = await client.renameProject(projectId, name);
+      if (!saved) return;
+      setProjects(saved);
+      setOpen((cur) => (cur && cur.id === projectId ? { ...cur, name } : cur));
+    },
+    [client],
+  );
+
   const rename = useCallback(async () => {
     if (!renaming) return;
-    const saved = await client.renameProject(renaming.id, renaming.name);
+    const { id, name } = renaming;
     setRenaming(null);
-    if (!saved) return;
-    setProjects(saved);
-    setOpen((cur) => (cur && cur.id === renaming.id ? { ...cur, name: renaming.name } : cur));
-  }, [client, renaming]);
+    await renameTo(id, name);
+  }, [renaming, renameTo]);
+
+  /** Commit what was typed into the open project's header. */
+  const commitName = useCallback(async () => {
+    const asked = nameDraft?.trim() ?? '';
+    setNameDraft(null);
+    if (!open || asked === open.name) return;
+    await renameTo(open.id, asked);
+  }, [nameDraft, open, renameTo]);
 
   const remove = useCallback(
     async (project: BeatifyProjectSummary) => {
@@ -188,9 +219,31 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
       <div className="beatify-bar">
         {open ? (
           <>
-            <span className="beatify-open-name" data-testid="beatify-open-project">
-              {open.name}
-            </span>
+            {nameDraft === null ? (
+              <button
+                className="beatify-open-name"
+                data-testid="beatify-open-project"
+                title="Rename this project"
+                onClick={() => setNameDraft(open.name)}
+              >
+                {open.name}
+              </button>
+            ) : (
+              <input
+                autoFocus
+                className="beatify-open-name-input"
+                data-testid="beatify-project-name-input"
+                aria-label="Project name"
+                value={nameDraft}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitName();
+                  if (e.key === 'Escape') setNameDraft(null);
+                }}
+                onBlur={() => void commitName()}
+              />
+            )}
             <label>
               <span>BPM</span>
               <input
@@ -237,7 +290,13 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
             >
               + Import track
             </button>
-            <button data-testid="beatify-close-project" onClick={() => setOpen(null)}>
+            <button
+              data-testid="beatify-close-project"
+              onClick={() => {
+                setNameDraft(null);
+                setOpen(null);
+              }}
+            >
               Close
             </button>
           </>

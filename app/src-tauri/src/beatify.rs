@@ -497,10 +497,11 @@ pub fn beatify_save(
         id => store::project(&data_dir, id).map_err(err)?,
     }
     .unwrap_or_else(|| {
-        store::Project::new(
-            store::new_id(&existing),
-            project_name(&request.name, &track),
-        )
+        let name = match request.name.trim() {
+            "" => default_project_name(&existing),
+            given => given.to_string(),
+        };
+        store::Project::new(store::new_id(&existing), name)
     });
 
     state.beatify.with(|session| {
@@ -571,7 +572,7 @@ pub fn beatify_project_new(state: State<AppState>, name: String) -> CmdResult<Be
     let data_dir = state.library.data_dir();
     let existing = store::list(data_dir).map_err(err)?;
     let name = match name.trim() {
-        "" => format!("project {}", existing.len() + 1),
+        "" => default_project_name(&existing),
         given => given.to_string(),
     };
     let project = store::Project::new(store::new_id(&existing), name);
@@ -735,13 +736,13 @@ fn source_audio(
     dj_analysis::decode_audio(&path).ok()
 }
 
-/// A new project is named for its track unless the user said otherwise.
-fn project_name(asked: &str, track: &Track) -> String {
-    let asked = asked.trim();
-    if !asked.is_empty() {
-        return asked.to_string();
-    }
-    seed_name(track)
+/// What a project is called when nobody has named it: its number on the
+/// shelf. Deliberately NOT the title of the first track imported into
+/// it — a project is a place to work in, holds any number of seeds, and
+/// the track's title is already on the seed. Naming it is the user's
+/// job, from the header or the shelf's pencil.
+fn default_project_name(existing: &[store::Project]) -> String {
+    format!("project {}", existing.len() + 1)
 }
 
 fn seed_name(track: &Track) -> String {

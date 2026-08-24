@@ -1089,6 +1089,18 @@ The detail is in the `Conventions` bullets above; this is the map.
   `_project_set_bpm`, `_project_audio` (by `seedId`), `_seed_delete`,
   `_seed_rename`; clips add `beatify_clip_sources`, `_open`, `_audio`,
   `_preview`, `_save`, `_delete`.
+- A project's name is the user's, never a track's. `beatify_project_new`
+  and the mint-from-a-save path both fall back to `default_project_name`
+  ("project 4" — its number on the shelf), and the label is typed in two
+  places that share one path (`renameTo` in `BeatifyView`): the shelf's
+  pencil, and the open project's own header, which turns into a box on
+  click and is opened ALREADY in that state for a project just made, so
+  it is named at birth. Enter/blur writes through `beatify_project_rename`
+  (which persists and rejects an empty name), Escape abandons; an emptied
+  box is an abandoned edit, not a rename. There is no Save button because
+  there is nothing to save: every change to a project — its name, its
+  tempo, its seeds, its clips — is written to disk by the command that
+  makes it.
 - Beats are the unit of every gesture, but MIND THE TIMEBASE: the modal
   snaps to `sourceGrid` (source seconds), the track view and the editor
   to `grid` (output seconds, beat 0 padded). Selections grow OUTWARD to

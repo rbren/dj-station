@@ -731,6 +731,69 @@ describe('beatify projects', () => {
     expect(screen.queryByTestId('beatify-conform')).toBeNull();
   });
 
+  // A project is a place to work, so it gets a name of its own — not the
+  // title of whatever happened to be imported into it first.
+  it('offers the name for typing the moment a project is made', async () => {
+    const client = clientMock({
+      newProject: vi.fn(async () => opened({ name: 'project 1', bpm: null, seeds: [] })),
+      renameProject: vi.fn(async () => [project({ name: 'Warehouse' })]),
+    });
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-new-project'));
+
+    const box = (await screen.findByTestId('beatify-project-name-input')) as HTMLInputElement;
+    expect(box.value).toBe('project 1');
+    fireEvent.change(box, { target: { value: 'Warehouse' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    await waitFor(() => expect(client.renameProject).toHaveBeenCalledWith('p1', 'Warehouse'));
+    expect((await screen.findByTestId('beatify-open-project')).textContent).toContain('Warehouse');
+  });
+
+  it('renames the open project from its own header, shelf and all', async () => {
+    const client = clientMock({
+      projects: vi.fn(async () => [project()]),
+      renameProject: vi.fn(async () => [project({ name: 'Warehouse' })]),
+    });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-open-project'));
+
+    const box = screen.getByTestId('beatify-project-name-input') as HTMLInputElement;
+    expect(box.value).toBe('Live Set A');
+    fireEvent.change(box, { target: { value: 'Warehouse' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    await waitFor(() => expect(client.renameProject).toHaveBeenCalledWith('p1', 'Warehouse'));
+    expect(screen.getByTestId('beatify-open-project').textContent).toContain('Warehouse');
+    // The shelf is the same project seen from outside: it agrees.
+    fireEvent.click(screen.getByTestId('beatify-close-project'));
+    expect(await screen.findByText('Warehouse')).toBeTruthy();
+  });
+
+  it('keeps the name it had when the typing is abandoned', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-open-project'));
+    const box = screen.getByTestId('beatify-project-name-input');
+    fireEvent.change(box, { target: { value: 'Warehouse' } });
+    fireEvent.keyDown(box, { key: 'Escape' });
+
+    expect(client.renameProject).not.toHaveBeenCalled();
+    expect(screen.getByTestId('beatify-open-project').textContent).toContain('Live Set A');
+  });
+
+  it('will not let a project be left with no name at all', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-open-project'));
+    const box = screen.getByTestId('beatify-project-name-input');
+    fireEvent.change(box, { target: { value: '   ' } });
+    fireEvent.blur(box);
+
+    expect(client.renameProject).not.toHaveBeenCalled();
+    expect(screen.getByTestId('beatify-open-project').textContent).toContain('Live Set A');
+  });
+
   it('re-tempos the whole project from the BPM box, leaving clips alone', async () => {
     const client = clientMock({ projects: vi.fn(async () => [project()]) });
     await openProject(client);

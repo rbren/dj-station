@@ -420,6 +420,14 @@ the envelope (name, bpm, seeds); each seed owns
 `seeds/<seed-id>/{meta.json,warped.wav,stems/}`. A project written before
 seeds existed keeps its artifacts in the project root and is adopted,
 read-only, as a project with exactly one seed.
+**PRJ-8.** A project's name is its own, given by the user: a new one is
+called "project N" until it is typed over, never the title of the track
+imported into it first (a project holds any number of seeds, and each
+seed already carries its track's title). It is renamed in place — from
+the shelf's pencil, or by clicking the name in the open project's header
+— and a project just created opens with that box already live, so it can
+be named at birth. A project cannot be left nameless. There is no Save:
+the name, the tempo, the seeds and the clips are written as they change.
 
 ---
 
