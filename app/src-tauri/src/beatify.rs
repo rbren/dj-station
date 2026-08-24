@@ -164,12 +164,18 @@ pub struct BeatifyTrace {
     pub attack: Option<f64>,
 }
 
-/// A beatified track as the track view needs it.
+/// One seed of a project, as the track view needs it.
+///
+/// Structurally this is what a "beatified track" always was, plus the
+/// three things that only make sense once a project can hold more than
+/// one: which seed it is, the tempo it was played at, and the ratio it
+/// now runs at.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BeatifyTrack {
-    /// The project this render belongs to. Every clip command is keyed by
-    /// it, because a track can have several.
+pub struct BeatifySeed {
+    /// Seed id within the project (`s1`), NOT a library id.
+    pub id: String,
+    /// The project it belongs to. Every clip command is keyed by that.
     pub project_id: String,
     pub project_name: String,
     pub track_id: i64,
@@ -180,6 +186,24 @@ pub struct BeatifyTrack {
     pub sample_rate: u32,
     pub channels: usize,
     pub peaks: Vec<f32>,
+    /// Tempo of the performance, before it was conformed.
+    pub source_bpm: f64,
+    /// Playback ratio that put it on the project's grid (1.0 = none).
+    pub speed: f64,
+    /// The source track is no longer in the library: the render is the
+    /// project's own, but stems, re-beatify and re-tempo need the file.
+    pub source_missing: bool,
+}
+
+/// An open project: the tempo, and everything beatified onto it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatifyProject {
+    pub id: String,
+    pub name: String,
+    /// `None` until the first seed sets it.
+    pub bpm: Option<f64>,
+    pub seeds: Vec<BeatifySeed>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -188,32 +212,32 @@ pub struct SaveRequest {
     pub strength: f64,
     pub lead_in: f64,
     pub ruler_group: u32,
-    /// The project to write into. Empty mints a new one — which is what
-    /// "new project" does; re-beatifying passes the id it is replacing.
+    /// The project to import into. Empty mints one, which is how a
+    /// project can still be started straight from a track.
     #[serde(default)]
     pub project_id: String,
+    /// The seed being REPLACED (re-beatify). Empty adds a new one.
+    #[serde(default)]
+    pub seed_id: String,
     /// What to call a newly minted project. Ignored for an existing one,
     /// which keeps the name it already has (rename is its own command).
     #[serde(default)]
     pub name: String,
 }
 
-/// A project as the tab's list shows it: the envelope, plus the facts
-/// about the track and grid a person needs to tell two of them apart.
+/// A project as the tab's shelf shows it: the envelope plus enough to
+/// tell two of them apart at a glance.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSummary {
     pub id: String,
     pub name: String,
-    pub track_id: i64,
-    pub title: String,
-    pub artist: String,
-    pub bpm: f64,
-    pub beats: usize,
+    /// `None` for a project with nothing in it yet.
+    pub bpm: Option<f64>,
+    /// Seed names in import order — what the shelf lists under the name.
+    pub seeds: Vec<String>,
     pub updated: u64,
-    /// The source track is missing from the library (deleted, or a
-    /// different machine): the project still opens, since its render is
-    /// its own, but stems and re-beatify need the source.
+    /// At least one seed's source track is missing from the library.
     pub source_missing: bool,
 }
 
@@ -444,72 +468,271 @@ pub fn beatify_scope(
     })
 }
 
-/// Commit (MOD-29/MOD-A24): render the warp once, write the artifacts
-/// under `<data_dir>/beatify/<project>/` plus the sidecar, and hand the
-/// builder its project.
+/// Commit (MOD-29/MOD-A24): render the warp once, write the seed's
+/// artifacts under `<data_dir>/beatify/<project>/seeds/<seed>/` plus the
+/// sidecar, and hand the builder the project it now belongs to.
 ///
-/// An empty `project_id` MINTS a project; a given one overwrites that
-/// project's grid and render (re-beatify), keeping its clips — which is
-/// why the builder warns that they may no longer line up.
+/// THE FIRST SEED SETS THE TEMPO. A project with no BPM takes the one
+/// this analysis fitted; a project that already has one conforms the
+/// seed to it ([`beatify::render_at`]) so everything on the page shares a
+/// grid — which is the only reason beats from two different records can
+/// be laid side by side. Conforming costs no extra pass over the audio:
+/// it is a scale of the warp map the render was going to use anyway.
+///
+/// An empty `project_id` MINTS a project; a `seed_id` REPLACES that seed
+/// (re-beatify), keeping its clips — which is why the builder warns that
+/// they may no longer line up.
 #[tauri::command(async)]
 pub fn beatify_save(
     state: State<AppState>,
     request: SaveRequest,
     buckets: usize,
-) -> CmdResult<BeatifyTrack> {
+) -> CmdResult<BeatifyProject> {
     let track_id = state.beatify.with(|s| Ok(s.track_id))?;
     let track = state.library.track(track_id).map_err(err)?;
     let data_dir = state.library.data_dir().to_path_buf();
     let existing = store::list(&data_dir).map_err(err)?;
+    let mut project = match request.project_id.as_str() {
+        "" => None,
+        id => store::project(&data_dir, id).map_err(err)?,
+    }
+    .unwrap_or_else(|| {
+        store::Project::new(
+            store::new_id(&existing),
+            project_name(&request.name, &track),
+        )
+    });
+
     state.beatify.with(|session| {
-        let (warped, map) = beatify::render(&session.audio, &session.analysis, request.strength);
-        let warped_name = warped_name(&session.source_path);
+        let analysis = &session.analysis;
+        let period = project.period().unwrap_or(analysis.grid.period);
+        let (warped, map, grid) =
+            beatify::render_at(&session.audio, analysis, request.strength, period);
         let record = beatify::record(
-            &session.analysis,
+            analysis,
             &beatify::Commit {
                 source: &session.source_path,
                 source_hash: &session.source_hash,
-                warped_name: &warped_name,
+                warped_name: &warped_name(&session.source_path),
                 strength: request.strength,
                 lead_in: request.lead_in.clamp(0.0, grid::LEAD_IN_MAX),
                 ruler: Ruler {
                     group: request.ruler_group.max(1),
                 },
+                grid,
             },
             &map,
         );
-        let previous = if request.project_id.is_empty() {
-            None
+        // Playback ratio in the DJ sense: >1 means it runs faster than it
+        // was played. The seed that set the tempo is exactly 1.
+        let speed = analysis.grid.period / period;
+        let seed = match project.seed(&request.seed_id) {
+            // Re-beatify keeps the seed's identity and its directory, so
+            // the render it replaces is the one the clips point at.
+            Some(previous) => store::Seed {
+                name: previous.name.clone(),
+                track_id,
+                source_hash: session.source_hash.clone(),
+                source_bpm: analysis.grid.bpm,
+                speed,
+                ..previous.clone()
+            },
+            None => {
+                let id = project.new_seed_id();
+                store::Seed {
+                    dir: store::seed_dir_name(&id),
+                    id,
+                    name: seed_name(&track),
+                    track_id,
+                    source_hash: session.source_hash.clone(),
+                    source_bpm: analysis.grid.bpm,
+                    speed,
+                }
+            }
+        };
+        match project.seeds.iter_mut().find(|s| s.id == seed.id) {
+            Some(slot) => *slot = seed.clone(),
+            None => project.seeds.push(seed.clone()),
+        }
+        project.bpm = Some(grid.bpm);
+        project.updated = store::now_secs();
+        store::save_seed(&data_dir, &project, &seed, &record, &warped).map_err(err)?;
+        Ok(())
+    })?;
+
+    open(&state, &project, buckets)
+}
+
+/// Start a project with nothing in it (§3.11): a name and a tempo it has
+/// not been told yet. Seeds are imported into it afterwards, which is
+/// what makes a project a place rather than one take on one track.
+#[tauri::command(async)]
+pub fn beatify_project_new(state: State<AppState>, name: String) -> CmdResult<BeatifyProject> {
+    let data_dir = state.library.data_dir();
+    let existing = store::list(data_dir).map_err(err)?;
+    let name = match name.trim() {
+        "" => format!("project {}", existing.len() + 1),
+        given => given.to_string(),
+    };
+    let project = store::Project::new(store::new_id(&existing), name);
+    store::save_project(data_dir, &project).map_err(err)?;
+    open(&state, &project, 0)
+}
+
+/// Re-tempo the whole project (the BPM box): every seed is re-rendered
+/// onto the new grid.
+///
+/// Clips survive untouched, and that is not luck — a placement is a run
+/// of BEATS, so it means the same thing at any tempo. What has to be
+/// rebuilt is audio: each seed's stored map is scaled to the new period
+/// and re-rendered from the ORIGINAL file where it is still in the
+/// library (one stretch, no generation loss), or by stretching its
+/// existing render where it is not.
+#[tauri::command(async)]
+pub fn beatify_project_set_bpm(
+    state: State<AppState>,
+    project_id: String,
+    bpm: f64,
+    buckets: usize,
+) -> CmdResult<BeatifyProject> {
+    if !bpm.is_finite() || !(MIN_BPM..=MAX_BPM).contains(&bpm) {
+        return Err(CmdError::invalid(format!(
+            "beatify: {bpm} BPM is outside {MIN_BPM}–{MAX_BPM}"
+        )));
+    }
+    let data_dir = state.library.data_dir().to_path_buf();
+    let mut project = store::project(&data_dir, &project_id)
+        .map_err(err)?
+        .ok_or_else(|| CmdError::invalid(format!("beatify: no project {project_id}")))?;
+    let period = 60.0 / bpm;
+
+    for seed in &mut project.seeds {
+        let Some(record) = store::load_seed(&data_dir, &project_id, seed).map_err(err)? else {
+            continue;
+        };
+        seed.speed = if seed.source_bpm > 0.0 {
+            bpm / seed.source_bpm
         } else {
-            store::project(&data_dir, &request.project_id).map_err(err)?
+            1.0
         };
-        let project = store::Project {
-            id: previous
-                .as_ref()
-                .map(|p| p.id.clone())
-                .unwrap_or_else(|| store::new_id(&existing)),
-            name: previous
-                .as_ref()
-                .map(|p| p.name.clone())
-                .unwrap_or_else(|| project_name(&request.name, &track)),
-            track_id,
-            source_hash: session.source_hash.clone(),
-            updated: store::now_secs(),
+        let k = period / record.grid.period;
+        if (k - 1.0).abs() < 1e-9 {
+            continue;
+        }
+        let grid = Grid {
+            bpm,
+            period,
+            phase: period,
+            beats: record.grid.beats,
         };
-        store::save(&data_dir, &project, &record, &warped).map_err(err)?;
-        Ok(BeatifyTrack {
-            project_id: project.id,
-            project_name: project.name,
-            track_id,
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            duration_secs: warped.duration_secs(),
-            sample_rate: warped.sample_rate,
-            channels: warped.channels.len(),
-            peaks: dj_analysis::clip::peaks(&warped, buckets.min(MAX_BUCKETS)),
-            record,
-        })
-    })
+        let out_secs = (grid.beats as f64 + 1.0) * grid.period;
+        let stored = WarpMap {
+            points: record.warp.map.iter().map(|p| (p[0], p[1])).collect(),
+        };
+        let map = beatify::conform(&stored, k);
+        let warped = match source_audio(&state, seed, &record) {
+            Some(source) => beatify::warp::render(&source, &map, out_secs),
+            None => stretch(
+                &dj_analysis::decode_audio(&store::seed_warped_path(&data_dir, &project_id, seed))
+                    .map_err(|e| err(format!("reading the beatified render: {e}")))?,
+                k,
+                out_secs,
+            ),
+        };
+        let record = beatify::BeatifyRecord {
+            grid,
+            warp: beatify::WarpSpec {
+                map: map.pairs(),
+                ..record.warp.clone()
+            },
+            ..record
+        };
+        store::save_seed_render(&data_dir, &project_id, seed, &record, &warped).map_err(err)?;
+    }
+
+    project.bpm = Some(bpm);
+    project.updated = store::now_secs();
+    store::save_project(&data_dir, &project).map_err(err)?;
+    open(&state, &project, buckets)
+}
+
+/// Drop one seed. Its clips keep their placements — what they lost is
+/// audio, not arithmetic — and the project keeps its tempo, because the
+/// tempo is the project's, not the seed's.
+#[tauri::command(async)]
+pub fn beatify_seed_delete(
+    state: State<AppState>,
+    project_id: String,
+    seed_id: String,
+    buckets: usize,
+) -> CmdResult<BeatifyProject> {
+    let data_dir = state.library.data_dir().to_path_buf();
+    let mut project = store::project(&data_dir, &project_id)
+        .map_err(err)?
+        .ok_or_else(|| CmdError::invalid(format!("beatify: no project {project_id}")))?;
+    let Some(seed) = project.seed(&seed_id).cloned() else {
+        return open(&state, &project, buckets);
+    };
+    store::remove_seed(&data_dir, &project_id, &seed).map_err(err)?;
+    project.seeds.retain(|s| s.id != seed_id);
+    project.updated = store::now_secs();
+    store::save_project(&data_dir, &project).map_err(err)?;
+    open(&state, &project, buckets)
+}
+
+/// Rename a seed. Like a project's name it is a label: nothing keys off
+/// it, and the clips that use the seed are unaffected.
+#[tauri::command(async)]
+pub fn beatify_seed_rename(
+    state: State<AppState>,
+    project_id: String,
+    seed_id: String,
+    name: String,
+    buckets: usize,
+) -> CmdResult<BeatifyProject> {
+    let data_dir = state.library.data_dir().to_path_buf();
+    let mut project = store::project(&data_dir, &project_id)
+        .map_err(err)?
+        .ok_or_else(|| CmdError::invalid(format!("beatify: no project {project_id}")))?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(CmdError::invalid("beatify: a seed needs a name"));
+    }
+    if let Some(seed) = project.seeds.iter_mut().find(|s| s.id == seed_id) {
+        seed.name = name.to_string();
+    }
+    project.updated = store::now_secs();
+    store::save_project(&data_dir, &project).map_err(err)?;
+    open(&state, &project, buckets)
+}
+
+/// The tempo range the BPM box accepts. Wide on purpose: half-time and
+/// double-time are legitimate places to put a project.
+const MIN_BPM: f64 = 20.0;
+const MAX_BPM: f64 = 400.0;
+
+/// Stretch a finished render by `k` — the fallback for a seed whose
+/// source has left the library. A straight line through the map, so it is
+/// the same renderer doing the same job with less to work from.
+fn stretch(audio: &AudioData, k: f64, out_secs: f64) -> AudioData {
+    let secs = audio.duration_secs();
+    let map = WarpMap {
+        points: vec![(0.0, 0.0), (secs, secs * k)],
+    };
+    beatify::warp::render(audio, &map, out_secs)
+}
+
+/// The source audio of a seed, if the library still has the track.
+fn source_audio(
+    state: &AppState,
+    seed: &store::Seed,
+    record: &beatify::BeatifyRecord,
+) -> Option<AudioData> {
+    let path = seed_track(state, seed)
+        .map(|t| PathBuf::from(t.file_path))
+        .filter(|p| p.is_file())
+        .or_else(|| Some(PathBuf::from(&record.source)).filter(|p| p.is_file()))?;
+    dj_analysis::decode_audio(&path).ok()
 }
 
 /// A new project is named for its track unless the user said otherwise.
@@ -518,15 +741,19 @@ fn project_name(asked: &str, track: &Track) -> String {
     if !asked.is_empty() {
         return asked.to_string();
     }
+    seed_name(track)
+}
+
+fn seed_name(track: &Track) -> String {
     if track.title.trim().is_empty() {
-        format!("project {}", track.id)
+        format!("track {}", track.id)
     } else {
         track.title.clone()
     }
 }
 
 /// `boys.wav` → `boys.beatified.wav` (§3.11), display only: the file on
-/// disk is always `warped.wav` inside the hash-keyed record directory.
+/// disk is always `warped.wav` inside the seed's directory.
 fn warped_name(source: &std::path::Path) -> String {
     let stem = source
         .file_stem()
@@ -542,70 +769,80 @@ pub fn beatify_projects(state: State<AppState>) -> CmdResult<Vec<ProjectSummary>
     let data_dir = state.library.data_dir();
     let mut out = Vec::new();
     for project in store::list(data_dir).map_err(err)? {
-        let Some(record) = store::load(data_dir, &project.id).map_err(err)? else {
-            continue;
-        };
-        let track = resolve_track(&state, &project);
         out.push(ProjectSummary {
-            id: project.id,
-            name: project.name,
-            track_id: track.as_ref().map(|t| t.id).unwrap_or(project.track_id),
-            title: track
-                .as_ref()
-                .map(|t| t.title.clone())
-                .unwrap_or_else(|| "(source missing)".into()),
-            artist: track.as_ref().map(|t| t.artist.clone()).unwrap_or_default(),
-            bpm: record.grid.bpm,
-            beats: record.grid.beats,
+            id: project.id.clone(),
+            name: project.name.clone(),
+            bpm: project.bpm,
+            seeds: project.seeds.iter().map(|s| s.name.clone()).collect(),
+            source_missing: project
+                .seeds
+                .iter()
+                .any(|s| seed_track(&state, s).is_none()),
             updated: project.updated,
-            source_missing: track.is_none(),
         });
     }
     Ok(out)
 }
 
-/// The library row a project came from: by hash first, because ids are
+/// The library row a seed came from: by hash first, because ids are
 /// re-assigned when a track is re-imported and the audio is not.
-fn resolve_track(state: &AppState, project: &store::Project) -> Option<Track> {
-    if let Ok(Some(found)) = state.library.track_by_hash(&project.source_hash) {
+fn seed_track(state: &AppState, seed: &store::Seed) -> Option<Track> {
+    if let Ok(Some(found)) = state.library.track_by_hash(&seed.source_hash) {
         return Some(found);
     }
-    state.library.track(project.track_id).ok()
+    state.library.track(seed.track_id).ok()
 }
 
-/// Open a project: its record and its render, ready for the builder.
+/// Open a project: its tempo and every seed's record and render.
 #[tauri::command(async)]
 pub fn beatify_project_open(
     state: State<AppState>,
     project_id: String,
     buckets: usize,
-) -> CmdResult<Option<BeatifyTrack>> {
-    let data_dir = state.library.data_dir();
-    let (Some(project), Some(record)) = (
-        store::project(data_dir, &project_id).map_err(err)?,
-        store::load(data_dir, &project_id).map_err(err)?,
-    ) else {
+) -> CmdResult<Option<BeatifyProject>> {
+    let Some(project) = store::project(state.library.data_dir(), &project_id).map_err(err)? else {
         return Ok(None);
     };
-    let track = resolve_track(&state, &project);
-    let path = store::warped_path(data_dir, &project_id);
-    let warped = dj_analysis::decode_audio(&path)
-        .map_err(|e| err(format!("reading the beatified render: {e}")))?;
-    Ok(Some(BeatifyTrack {
-        project_id: project.id,
-        project_name: project.name,
-        track_id: track.as_ref().map(|t| t.id).unwrap_or(project.track_id),
-        title: track
-            .as_ref()
-            .map(|t| t.title.clone())
-            .unwrap_or_else(|| "(source missing)".into()),
-        artist: track.map(|t| t.artist).unwrap_or_default(),
-        duration_secs: warped.duration_secs(),
-        sample_rate: warped.sample_rate,
-        channels: warped.channels.len(),
-        peaks: dj_analysis::clip::peaks(&warped, buckets.min(MAX_BUCKETS)),
-        record,
-    }))
+    open(&state, &project, buckets).map(Some)
+}
+
+/// Assemble the payload for an open project. A seed whose render has gone
+/// missing is left out rather than taking the project down with it.
+fn open(state: &AppState, project: &store::Project, buckets: usize) -> CmdResult<BeatifyProject> {
+    let data_dir = state.library.data_dir();
+    let mut seeds = Vec::new();
+    for seed in &project.seeds {
+        let Some(record) = store::load_seed(data_dir, &project.id, seed).map_err(err)? else {
+            continue;
+        };
+        let path = store::seed_warped_path(data_dir, &project.id, seed);
+        let Ok(warped) = dj_analysis::decode_audio(&path) else {
+            continue;
+        };
+        let track = seed_track(state, seed);
+        seeds.push(BeatifySeed {
+            id: seed.id.clone(),
+            project_id: project.id.clone(),
+            project_name: project.name.clone(),
+            track_id: track.as_ref().map(|t| t.id).unwrap_or(seed.track_id),
+            title: seed.name.clone(),
+            artist: track.as_ref().map(|t| t.artist.clone()).unwrap_or_default(),
+            duration_secs: warped.duration_secs(),
+            sample_rate: warped.sample_rate,
+            channels: warped.channels.len(),
+            peaks: dj_analysis::clip::peaks(&warped, buckets.min(MAX_BUCKETS)),
+            source_bpm: seed.source_bpm,
+            speed: seed.speed,
+            source_missing: track.is_none(),
+            record,
+        });
+    }
+    Ok(BeatifyProject {
+        id: project.id.clone(),
+        name: project.name.clone(),
+        bpm: project.bpm,
+        seeds,
+    })
 }
 
 /// Rename a project. The name is a label, nothing keys off it.
@@ -629,8 +866,8 @@ pub fn beatify_project_rename(
     beatify_projects(state)
 }
 
-/// Delete a project: its grid, its render, its clips, its warped stems.
-/// The source track and the library are untouched.
+/// Delete a project: its tempo, its seeds, its renders, its clips.
+/// The source tracks and the library are untouched.
 #[tauri::command(async)]
 pub fn beatify_project_delete(
     state: State<AppState>,
@@ -640,15 +877,25 @@ pub fn beatify_project_delete(
     beatify_projects(state)
 }
 
-/// A window of a project's render, for the track view's transport.
+/// A window of one seed's render, for a transport that has nothing to do
+/// with the clip builder's source list.
 #[tauri::command(async)]
 pub fn beatify_project_audio(
     state: State<AppState>,
     project_id: String,
+    seed_id: String,
     start_secs: f64,
     secs: f64,
 ) -> CmdResult<tauri::ipc::Response> {
-    let path = store::warped_path(state.library.data_dir(), &project_id);
+    let data_dir = state.library.data_dir();
+    let project = store::project(data_dir, &project_id)
+        .map_err(err)?
+        .ok_or_else(|| CmdError::invalid(format!("beatify: no project {project_id}")))?;
+    let seed = project
+        .seed(&seed_id)
+        .or_else(|| project.seeds.first())
+        .ok_or_else(|| CmdError::invalid("beatify: this project has no seeds yet"))?;
+    let path = store::seed_warped_path(data_dir, &project_id, seed);
     let warped = dj_analysis::decode_audio(&path)
         .map_err(|e| err(format!("reading the beatified render: {e}")))?;
     wav(&dj_analysis::clip::slice(

@@ -1,17 +1,28 @@
 // Beatify tab: a shelf of PROJECTS, and one of them open.
 //
-// A project is one beatified take on one source track — its grid, its
-// render, its clips — and a track can have as many as the user likes. So
-// the tab's front door is the project list, not the library: "new
-// project" picks a track and proves its grid in the import modal, and
-// opening a project picks up where it was left.
+// A PROJECT IS A TEMPO AND THE MATERIAL BEATIFIED ONTO IT. It is started
+// empty — "new project" asks for nothing but a name — and tracks are
+// imported into it afterwards, each one proved in the import modal. The
+// first import sets the project's BPM; every one after it is conformed to
+// that BPM, which is what makes beats from two different records line up.
+// The BPM box re-tempos the lot: seeds are re-rendered, clips are not
+// touched, because a clip is a run of beats and a beat is a beat at any
+// tempo.
 //
 // `beat_this` is optional (PyTorch): when it is missing the tab still
 // works on the built-in DSP tracker and says so, with the install hint —
 // the same contract as the YouTube provider without `yt-dlp`.
 
 import { useCallback, useEffect, useState } from 'react';
-import type { BeatifyClientApi, BeatifyProject, BeatifyTrack, TrackerStatus } from '../beatify';
+import {
+  MAX_PROJECT_BPM,
+  MIN_PROJECT_BPM,
+  type BeatifyClientApi,
+  type BeatifyProject,
+  type BeatifyProjectSummary,
+  type BeatifySeed,
+  type TrackerStatus,
+} from '../beatify';
 import type { BeatifyClipClientApi } from '../beatifyClip';
 import type { LibraryClientApi, Track } from '../library';
 import { BeatifyClipBuilder } from './BeatifyClipBuilder';
@@ -26,24 +37,27 @@ export interface BeatifyViewProps {
   clips: BeatifyClipClientApi;
 }
 
-/** What the modal is currently for: a brand-new project, or re-beatifying
- *  one that exists (which keeps its id, its name and its clips). */
+/** What the modal is currently for: importing a track into a project, or
+ *  re-beatifying a seed that is already in one (which keeps its id, and
+ *  so keeps the clips that point at it). */
 interface ModalFor {
   trackId: number;
   title: string;
   projectId: string;
   projectName: string;
+  seedId: string;
 }
 
 export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
-  const [projects, setProjects] = useState<BeatifyProject[]>([]);
+  const [projects, setProjects] = useState<BeatifyProjectSummary[]>([]);
   const [pick, setPick] = useState<number | null>(null);
   const [tracker, setTracker] = useState<TrackerStatus | null>(null);
-  const [open, setOpen] = useState<BeatifyTrack | null>(null);
+  const [open, setOpen] = useState<BeatifyProject | null>(null);
   const [modal, setModal] = useState<ModalFor | null>(null);
   const [warn, setWarn] = useState<ModalFor | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [bpmDraft, setBpmDraft] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -59,6 +73,11 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     })();
   }, [client, library]);
 
+  const refreshShelf = useCallback(async () => {
+    const saved = await client.projects();
+    if (saved) setProjects(saved);
+  }, [client]);
+
   const openProject = useCallback(
     async (projectId: string) => {
       setBusy(true);
@@ -66,7 +85,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
       const project = await client.openProject(projectId, BUCKETS);
       setBusy(false);
       if (!project) {
-        setStatus('That project could not be opened — its render may have been deleted');
+        setStatus('That project could not be opened — its renders may have been deleted');
         return;
       }
       setOpen(project);
@@ -75,31 +94,87 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     [client],
   );
 
-  /** Start a project: beatify the picked track into a new one. */
-  const newProject = useCallback(() => {
-    if (pick === null) return;
+  /** Start a project: a name and nothing else. Material comes later. */
+  const newProject = useCallback(async () => {
+    setBusy(true);
+    setStatus(null);
+    const project = await client.newProject('');
+    setBusy(false);
+    if (!project) {
+      setStatus('That project could not be created');
+      return;
+    }
+    setOpen(project);
+    setModal(null);
+    void refreshShelf();
+  }, [client, refreshShelf]);
+
+  /** Import the picked library track into the open project. */
+  const importSeed = useCallback(() => {
+    if (pick === null || !open) return;
     const track = tracks.find((t) => t.id === pick);
     setStatus(null);
-    setOpen(null);
     setModal({
       trackId: pick,
       title: track?.title ?? `track ${pick}`,
-      projectId: '',
-      projectName: track?.title ?? '',
+      projectId: open.id,
+      projectName: open.name,
+      seedId: '',
     });
-  }, [pick, tracks]);
+  }, [open, pick, tracks]);
 
   const committed = useCallback(
-    async (track: BeatifyTrack) => {
-      setOpen(track);
+    (project: BeatifyProject) => {
+      setOpen(project);
       setModal(null);
+      const seed = project.seeds[project.seeds.length - 1];
       setStatus(
-        `Beatified "${track.projectName}" — ${track.record.grid.beats} beats at ${track.record.grid.bpm.toFixed(2)} BPM`,
+        seed
+          ? `Imported "${seed.title}" — ${seed.record.grid.beats} beats at ${project.bpm?.toFixed(2) ?? '—'} BPM`
+          : null,
       );
-      const saved = await client.projects();
-      if (saved) setProjects(saved);
+      void refreshShelf();
     },
-    [client],
+    [refreshShelf],
+  );
+
+  /** Re-tempo everything in the project (§3.11). */
+  const setBpm = useCallback(
+    async (value: string) => {
+      setBpmDraft(null);
+      const bpm = Number(value);
+      if (!open || !Number.isFinite(bpm)) return;
+      if (bpm < MIN_PROJECT_BPM || bpm > MAX_PROJECT_BPM) {
+        setStatus(`A project's tempo has to be between ${MIN_PROJECT_BPM} and ${MAX_PROJECT_BPM}`);
+        return;
+      }
+      if (open.bpm !== null && Math.abs(open.bpm - bpm) < 0.005) return;
+      setBusy(true);
+      setStatus(`Re-rendering ${open.seeds.length} seed${open.seeds.length === 1 ? '' : 's'}…`);
+      const project = await client.setProjectBpm(open.id, bpm, BUCKETS);
+      setBusy(false);
+      if (!project) {
+        setStatus('That tempo could not be applied');
+        return;
+      }
+      setOpen(project);
+      setStatus(`Everything now runs at ${bpm.toFixed(2)} BPM — clips are unchanged`);
+      void refreshShelf();
+    },
+    [client, open, refreshShelf],
+  );
+
+  const removeSeed = useCallback(
+    async (seedId: string) => {
+      if (!open) return;
+      setBusy(true);
+      const project = await client.deleteSeed(open.id, seedId, BUCKETS);
+      setBusy(false);
+      if (!project) return;
+      setOpen(project);
+      void refreshShelf();
+    },
+    [client, open, refreshShelf],
   );
 
   const rename = useCallback(async () => {
@@ -108,55 +183,90 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     setRenaming(null);
     if (!saved) return;
     setProjects(saved);
-    setOpen((cur) =>
-      cur && cur.projectId === renaming.id ? { ...cur, projectName: renaming.name } : cur,
-    );
+    setOpen((cur) => (cur && cur.id === renaming.id ? { ...cur, name: renaming.name } : cur));
   }, [client, renaming]);
 
   const remove = useCallback(
-    async (project: BeatifyProject) => {
+    async (project: BeatifyProjectSummary) => {
       const saved = await client.deleteProject(project.id);
       if (!saved) return;
       setProjects(saved);
-      setOpen((cur) => (cur && cur.projectId === project.id ? null : cur));
+      setOpen((cur) => (cur && cur.id === project.id ? null : cur));
       setStatus(`Deleted "${project.name}"`);
     },
     [client],
   );
 
+  const bpmValue =
+    bpmDraft ??
+    (open?.bpm !== null && open?.bpm !== undefined ? String(Math.round(open.bpm * 100) / 100) : '');
+
   return (
     <section className="beatify-view" data-testid="beatify-view">
       <div className="beatify-bar">
-        <label>
-          <span>Source</span>
-          <select
-            data-testid="beatify-track-select"
-            value={pick ?? ''}
-            onChange={(e) => setPick(Number(e.target.value))}
-          >
-            {tracks.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.title} — {t.artist}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          data-testid="beatify-new-project"
-          disabled={pick === null || busy}
-          onClick={newProject}
-        >
-          + New project
-        </button>
-        {open && (
+        {open ? (
           <>
             <span className="beatify-open-name" data-testid="beatify-open-project">
-              {open.projectName}
+              {open.name}
             </span>
+            <label>
+              <span>BPM</span>
+              <input
+                className="beatify-bpm"
+                data-testid="beatify-project-bpm"
+                type="number"
+                step="0.01"
+                min={MIN_PROJECT_BPM}
+                max={MAX_PROJECT_BPM}
+                disabled={busy || open.seeds.length === 0}
+                title={
+                  open.seeds.length === 0
+                    ? 'The first track imported sets the tempo'
+                    : 'Re-render every seed at this tempo. Clips are unaffected.'
+                }
+                placeholder="—"
+                value={bpmValue}
+                onChange={(e) => setBpmDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void setBpm((e.target as HTMLInputElement).value);
+                  if (e.key === 'Escape') setBpmDraft(null);
+                }}
+                onBlur={(e) => void setBpm(e.target.value)}
+              />
+            </label>
+            <label>
+              <span>Import</span>
+              <select
+                data-testid="beatify-track-select"
+                value={pick ?? ''}
+                onChange={(e) => setPick(Number(e.target.value))}
+              >
+                {tracks.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title} — {t.artist}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              data-testid="beatify-import-track"
+              disabled={pick === null || busy}
+              onClick={importSeed}
+            >
+              + Import track
+            </button>
             <button data-testid="beatify-close-project" onClick={() => setOpen(null)}>
               Close
             </button>
           </>
+        ) : (
+          <button
+            data-testid="beatify-new-project"
+            disabled={busy}
+            onClick={() => void newProject()}
+          >
+            + New project
+          </button>
         )}
         {tracker && (
           <span
@@ -180,9 +290,10 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
         <div className="beatify-projects" data-testid="beatify-projects">
           {projects.length === 0 && (
             <p className="beatify-empty">
-              No projects yet. Pick a source track and start one: Beatify detects its beats, fits a
-              grid and renders it at constant tempo — beats only: no bars, no meter, no time
-              signature. The same track can carry as many projects as you like.
+              No projects yet. A project is a tempo and the tracks beatified onto it: start one,
+              import a track to set its BPM, then import as many more as you like — they are
+              conformed to that BPM, so beats from any of them line up. Beats only: no bars, no
+              meter, no time signature.
             </p>
           )}
           {projects.map((project) => (
@@ -212,9 +323,12 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
                 >
                   <span className="beatify-project-name">{project.name}</span>
                   <span className="beatify-project-facts">
-                    {project.title}
-                    {project.artist && ` — ${project.artist}`} · {project.bpm.toFixed(2)} BPM ·{' '}
-                    {project.beats} beats
+                    {project.bpm === null
+                      ? 'empty — no tempo yet'
+                      : `${project.bpm.toFixed(2)} BPM · ${project.seeds.length} seed${
+                          project.seeds.length === 1 ? '' : 's'
+                        }`}
+                    {project.seeds.length > 0 && ` · ${project.seeds.join(', ')}`}
                   </span>
                 </button>
               )}
@@ -229,14 +343,14 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
               <button
                 className="beatify-project-edit"
                 data-testid={`beatify-project-delete-${project.id}`}
-                title="Delete this project, its clips and its render"
+                title="Delete this project, its seeds, its renders and its clips"
                 onClick={() => void remove(project)}
               >
                 ×
               </button>
               {project.sourceMissing && (
                 <span className="beatify-project-warn" data-testid="beatify-project-source-missing">
-                  source track missing — stems and re-beatify need it back
+                  a source track is missing — stems and re-beatify need it back
                 </span>
               )}
             </div>
@@ -246,15 +360,18 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
 
       {open && (
         <BeatifyClipBuilder
-          key={`${open.projectId}:${open.record.warped}`}
-          track={open}
+          key={`${open.id}:${open.seeds.map((s) => `${s.id}@${s.record.grid.bpm}`).join(',')}`}
+          project={open}
           clips={clips}
-          onRebeatify={() =>
+          onImport={importSeed}
+          onRemoveSeed={(seedId) => void removeSeed(seedId)}
+          onRebeatify={(seed: BeatifySeed) =>
             setWarn({
-              trackId: open.trackId,
-              title: open.title,
-              projectId: open.projectId,
-              projectName: open.projectName,
+              trackId: seed.trackId,
+              title: seed.title,
+              projectId: open.id,
+              projectName: open.name,
+              seedId: seed.id,
             })
           }
         />
@@ -264,9 +381,9 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
         <div className="beatify-modal-backdrop" data-testid="beatify-rebeatify-warning">
           <div className="beatify-warn">
             <p>
-              Re-beatifying re-renders this project. Anything already cut from the old grid —
-              including its boundaries — stops matching. To keep both, start a new project from the
-              same track instead.
+              Re-beatifying re-renders this seed. Anything already cut from its old grid — including
+              its boundaries — stops matching. To keep both, import the track again as a second seed
+              instead.
             </p>
             <button data-testid="beatify-rebeatify-cancel" onClick={() => setWarn(null)}>
               Cancel
@@ -275,7 +392,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
               data-testid="beatify-rebeatify-confirm"
               onClick={() => {
                 setModal(warn);
-                setOpen(null);
                 setWarn(null);
               }}
             >
@@ -291,8 +407,14 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
           trackId={modal.trackId}
           title={modal.title}
           projectId={modal.projectId}
+          seedId={modal.seedId}
           projectName={modal.projectName}
-          onCommitted={(track) => void committed(track)}
+          // A project's tempo is the project's: an import is conformed to
+          // it, and so is a re-beatify. The BPM box is the only thing that
+          // changes it (§3.11), so re-rendering one seed can never move
+          // the grid the others — and the clips — are sitting on.
+          projectBpm={open?.bpm ?? null}
+          onCommitted={committed}
           onCancel={() => setModal(null)}
         />
       )}

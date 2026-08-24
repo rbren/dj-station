@@ -40,11 +40,25 @@ const MAX_DEPTH: usize = 4;
 const CLIPS_NAME: &str = "clips.json";
 
 /// Which audio a run of beats was cut from.
+///
+/// A STEM IS NOT A SOURCE OF ITS OWN: it is a seed with some of its parts
+/// switched off, exactly as on the Clip page. `stems` empty means the
+/// whole mix — and then the render itself is played, rather than four
+/// separated files summed back together.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ClipSourceRef {
-    /// The beatified render of the track itself.
-    Seed,
+    /// The beatified render of one seed, whole or in parts.
+    Seed {
+        /// Which seed. Empty means the project's first, which is what a
+        /// clip saved before projects held more than one seed says.
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        stems: Vec<String>,
+    },
+    /// A stem as its own entry — the shape clips were saved in before
+    /// stems became a switch on their seed. Read, never written.
     Stem { name: String },
     Clip { id: String },
 }
@@ -52,9 +66,27 @@ pub enum ClipSourceRef {
 impl ClipSourceRef {
     fn key(&self) -> String {
         match self {
-            ClipSourceRef::Seed => "seed".into(),
+            ClipSourceRef::Seed { id, stems } if stems.is_empty() => format!("seed:{id}"),
+            ClipSourceRef::Seed { id, stems } => format!("seed:{id}/{}", stems.join("+")),
             ClipSourceRef::Stem { name } => format!("stem:{name}"),
             ClipSourceRef::Clip { id } => format!("clip:{id}"),
+        }
+    }
+
+    /// The seed this refers to, once it is known which seed "" means.
+    /// Adopting the old per-stem shape here is what keeps clips saved
+    /// against the single-seed layout playable.
+    fn resolved(&self, first_seed: &str) -> ClipSourceRef {
+        match self {
+            ClipSourceRef::Seed { id, stems } if id.is_empty() => ClipSourceRef::Seed {
+                id: first_seed.to_string(),
+                stems: stems.clone(),
+            },
+            ClipSourceRef::Stem { name } => ClipSourceRef::Seed {
+                id: first_seed.to_string(),
+                stems: vec![name.clone()],
+            },
+            other => other.clone(),
         }
     }
 }
@@ -121,19 +153,40 @@ pub struct SavedClip {
     pub placements: Vec<ClipPlacement>,
 }
 
-/// What the left-hand list shows for one source.
+/// One seed in the left-hand list: what it is, and which of its parts can
+/// be switched on.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipSourceInfo {
+    /// The whole mix of this seed — what clicking its name opens.
     pub source: ClipSourceRef,
+    pub seed_id: String,
     pub label: String,
+    /// Beats of grid this seed's render carries.
+    pub beats: usize,
+    /// Tempo it was played at, and the ratio it now runs at.
+    pub source_bpm: f64,
+    pub speed: f64,
+    /// False when the render is not readable at all.
+    pub available: bool,
+    pub hint: Option<String>,
+    /// Stems belong to the seed they came out of, not to the list.
+    pub stems: Vec<ClipStemInfo>,
+}
+
+/// One switchable part of a seed (BC-1, the Clip page's stem toggles).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipStemInfo {
+    pub name: String,
     /// False when the audio is not there yet (stems not separated).
     pub available: bool,
     /// Why not, and what to do about it — shown in the list.
     pub hint: Option<String>,
 }
 
-/// The left-hand list: the seed, its stems, and everything built so far.
+/// The left-hand list: every seed with its stems, and everything built so
+/// far.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipSources {
@@ -181,14 +234,13 @@ pub struct ClipSourceAudio {
 // ---------------------------------------------------------------------------
 
 /// Everything a request needs to turn a source into samples, including a
-/// cache so a draft that uses the seed twenty times decodes it once.
+/// cache so a draft that uses one seed twenty times decodes it once.
 struct Resolver<'a> {
     state: &'a AppState,
-    /// The library row the project was cut from — only stems need it, and
-    /// only if the source is still in the library.
-    track_id: Option<i64>,
-    project_id: String,
-    record: BeatifyRecord,
+    project: store::Project,
+    /// Each seed's record, by seed id — the warp map a stem has to be
+    /// pulled through, and the grid its render landed on.
+    records: HashMap<String, BeatifyRecord>,
     clips: Vec<SavedClip>,
     cache: HashMap<String, Arc<AudioData>>,
 }
@@ -199,24 +251,87 @@ impl<'a> Resolver<'a> {
         let project = store::project(data_dir, project_id)
             .map_err(err)?
             .ok_or_else(|| CmdError::invalid(format!("beatify: no project {project_id}")))?;
-        let record = store::load(data_dir, project_id)
-            .map_err(err)?
-            .ok_or_else(|| {
-                CmdError::invalid(format!("beatify: project {project_id} has no grid"))
-            })?;
+        let mut records = HashMap::new();
+        for seed in &project.seeds {
+            if let Some(record) = store::load_seed(data_dir, &project.id, seed).map_err(err)? {
+                records.insert(seed.id.clone(), record);
+            }
+        }
         let clips = read_clips(state, project_id)?;
         Ok(Resolver {
             state,
-            track_id: track_of(state, &project),
-            project_id: project.id,
-            record,
+            project,
+            records,
             clips,
             cache: HashMap::new(),
         })
     }
 
-    fn grid(&self) -> &Grid {
-        &self.record.grid
+    /// Which seed a bare reference means. Clips saved when a project held
+    /// exactly one seed do not name it.
+    fn first_seed(&self) -> String {
+        self.project
+            .seeds
+            .first()
+            .map(|s| s.id.clone())
+            .unwrap_or_default()
+    }
+
+    /// THE GRID IS THE PROJECT'S, NOT A SEED'S. Every seed was rendered
+    /// onto it — conformed if it was played at another tempo — so beat n
+    /// of any of them is the same instant, which is what lets one clip
+    /// hold runs from several tracks.
+    fn grid(&self) -> Grid {
+        let period = self
+            .project
+            .period()
+            .or_else(|| self.records.values().next().map(|r| r.grid.period))
+            .unwrap_or(0.5);
+        let beats = self
+            .records
+            .values()
+            .map(|r| r.grid.beats)
+            .max()
+            .unwrap_or(0);
+        Grid {
+            bpm: 60.0 / period,
+            period,
+            // OUT-1a: a beat of head padding, the same for every seed.
+            phase: period,
+            beats,
+        }
+    }
+
+    /// What the pane above calls what it is showing. A submix says which
+    /// parts are on, because "Boys" playing only its drums is not "Boys".
+    fn label(&self, source: &ClipSourceRef) -> String {
+        match source.resolved(&self.first_seed()) {
+            ClipSourceRef::Seed { id, stems } => {
+                let name = self
+                    .project
+                    .seed(&id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| format!("seed {id}"));
+                if stems.is_empty() {
+                    name
+                } else {
+                    format!("{name} · {}", stems.join(" + "))
+                }
+            }
+            ClipSourceRef::Clip { id } => self
+                .clips
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| format!("clip {id}")),
+            ClipSourceRef::Stem { name } => name,
+        }
+    }
+
+    fn seed_of(&self, id: &str) -> CmdResult<&store::Seed> {
+        self.project
+            .seed(id)
+            .ok_or_else(|| CmdError::invalid(format!("beatify: no seed {id} in this project")))
     }
 
     fn audio(&mut self, source: &ClipSourceRef, depth: usize) -> CmdResult<Arc<AudioData>> {
@@ -225,13 +340,20 @@ impl<'a> Resolver<'a> {
                 "beatify: this clip is built out of itself",
             ));
         }
+        let source = source.resolved(&self.first_seed());
         let key = source.key();
         if let Some(hit) = self.cache.get(&key) {
             return Ok(Arc::clone(hit));
         }
-        let audio = match source {
-            ClipSourceRef::Seed => self.seed()?,
-            ClipSourceRef::Stem { name } => self.stem(name)?,
+        let audio = match &source {
+            ClipSourceRef::Seed { id, stems } if stems.is_empty() => self.seed(id)?,
+            ClipSourceRef::Seed { id, stems } => self.submix(id, stems)?,
+            // `resolved` has turned every legacy stem into a seed.
+            ClipSourceRef::Stem { name } => {
+                return Err(CmdError::invalid(format!(
+                    "beatify: stem {name:?} belongs to no seed"
+                )))
+            }
             ClipSourceRef::Clip { id } => {
                 let clip = self
                     .clips
@@ -239,7 +361,7 @@ impl<'a> Resolver<'a> {
                     .find(|c| &c.id == id)
                     .cloned()
                     .ok_or_else(|| {
-                        CmdError::invalid(format!("beatify: no saved clip {id} for this track"))
+                        CmdError::invalid(format!("beatify: no saved clip {id} in this project"))
                     })?;
                 let draft = ClipDraft {
                     name: clip.name,
@@ -254,15 +376,31 @@ impl<'a> Resolver<'a> {
         Ok(audio)
     }
 
-    fn seed(&self) -> CmdResult<Arc<AudioData>> {
-        let path = store::warped_path(self.state.library.data_dir(), &self.project_id);
+    fn seed(&self, seed_id: &str) -> CmdResult<Arc<AudioData>> {
+        let seed = self.seed_of(seed_id)?;
+        let path = store::seed_warped_path(self.state.library.data_dir(), &self.project.id, seed);
         Ok(Arc::new(decode(&path, "the beatified render")?))
     }
 
-    /// A stem on the grid: the separated FLAC pulled through the seed's
-    /// warp map, cached as a wav so the WSOLA render is paid once.
-    fn stem(&self, name: &str) -> CmdResult<Arc<AudioData>> {
-        let cached = self.stem_path(name);
+    /// The seed with only some of its parts switched on: the chosen stems
+    /// summed. Four-of-four is never asked for — the list turns all-on
+    /// back into the whole mix, which is the render itself.
+    fn submix(&self, seed_id: &str, stems: &[String]) -> CmdResult<Arc<AudioData>> {
+        let mut parts = Vec::new();
+        for name in stems {
+            parts.push(self.stem(seed_id, name)?);
+        }
+        let refs: Vec<&AudioData> = parts.iter().map(|p| p.as_ref()).collect();
+        Ok(Arc::new(build::mix(&refs)))
+    }
+
+    /// A stem on the grid: the separated FLAC pulled through ITS OWN
+    /// seed's warp map, cached beside that seed so the WSOLA render is
+    /// paid once.
+    fn stem(&self, seed_id: &str, name: &str) -> CmdResult<Arc<AudioData>> {
+        let seed = self.seed_of(seed_id)?;
+        let cached = store::seed_stems_dir(self.state.library.data_dir(), &self.project.id, seed)
+            .join(format!("{name}.wav"));
         if cached.is_file() {
             return Ok(Arc::new(decode(&cached, name)?));
         }
@@ -275,27 +413,24 @@ impl<'a> Resolver<'a> {
                     dj_analysis::STEM_NAMES.join(", ")
                 ))
             })?;
+        let track_id = track_of(self.state, seed).ok_or_else(|| CmdError::invalid(SOURCE_GONE))?;
         let paths = self
             .state
             .stems
-            .cached_paths(
-                self.track_id
-                    .ok_or_else(|| CmdError::invalid(SOURCE_GONE))?,
-            )
+            .cached_paths(track_id)
             .ok_or_else(|| CmdError::invalid(stem_hint(self.state)))?;
+        let record = self
+            .records
+            .get(seed_id)
+            .ok_or_else(|| CmdError::invalid(format!("beatify: seed {seed_id} has no grid")))?;
         let raw = decode(&paths[index], name)?;
         let map = WarpMap {
-            points: self
-                .record
-                .warp
-                .map
-                .iter()
-                .map(|p| (p[0], p[1]))
-                .collect::<Vec<_>>(),
+            points: record.warp.map.iter().map(|p| (p[0], p[1])).collect(),
         };
-        // The output is as long as the seed's render, so every stem lines
+        // The output is as long as that seed's render, so every stem lines
         // up with it sample for sample.
-        let out_secs = self.grid().phase + self.grid().beats as f64 * self.grid().period;
+        let grid = record.grid;
+        let out_secs = grid.phase + grid.beats as f64 * grid.period;
         let warped = build_warp(&raw, &map, out_secs);
         if let Some(dir) = cached.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -305,15 +440,13 @@ impl<'a> Resolver<'a> {
         Ok(Arc::new(warped))
     }
 
-    fn stem_path(&self, name: &str) -> PathBuf {
-        store::project_dir(self.state.library.data_dir(), &self.project_id)
-            .join("stems")
-            .join(format!("{name}.wav"))
-    }
-
     /// Lay every placement down on the shared grid and mix.
+    ///
+    /// A placement whose seed has been deleted is SKIPPED rather than
+    /// fatal: losing one source should cost a clip that source, not the
+    /// ability to play at all.
     fn assemble(&mut self, draft: &ClipDraft, depth: usize) -> CmdResult<AudioData> {
-        let grid = *self.grid();
+        let grid = self.grid();
         let columns = draft.length_columns();
         let out_secs = build::clip_secs(&grid, columns).min(MAX_PREVIEW_SECS);
 
@@ -321,8 +454,11 @@ impl<'a> Resolver<'a> {
         // be in hand before any of them is pointed at.
         let mut parts: Vec<(Arc<AudioData>, &ClipPlacement)> = Vec::new();
         for placement in &draft.placements {
-            let audio = self.audio(&placement.source, depth)?;
-            parts.push((audio, placement));
+            match self.audio(&placement.source, depth) {
+                Ok(audio) => parts.push((audio, placement)),
+                Err(_) if self.missing(&placement.source) => continue,
+                Err(e) => return Err(e),
+            }
         }
         let (sample_rate, channels) = parts
             .first()
@@ -343,6 +479,14 @@ impl<'a> Resolver<'a> {
             })
             .collect();
         Ok(build::assemble(&lays, out_secs, sample_rate, channels))
+    }
+
+    /// Is this reference to a seed the project no longer has?
+    fn missing(&self, source: &ClipSourceRef) -> bool {
+        match source.resolved(&self.first_seed()) {
+            ClipSourceRef::Seed { id, .. } => self.project.seed(&id).is_none(),
+            _ => false,
+        }
     }
 }
 
@@ -402,54 +546,73 @@ fn write_clips(state: &AppState, project_id: &str, clips: &[SavedClip]) -> CmdRe
     std::fs::write(&path, json).map_err(|e| err(format!("writing clips: {e}")))
 }
 
-/// Which library row a project was cut from, by hash first: ids are
+/// Which library row a seed was cut from, by hash first: ids are
 /// re-assigned on re-import, the audio is not.
-fn track_of(state: &AppState, project: &store::Project) -> Option<i64> {
-    if let Ok(Some(found)) = state.library.track_by_hash(&project.source_hash) {
+fn track_of(state: &AppState, seed: &store::Seed) -> Option<i64> {
+    if let Ok(Some(found)) = state.library.track_by_hash(&seed.source_hash) {
         return Some(found.id);
     }
-    state.library.track(project.track_id).ok().map(|t| t.id)
+    state.library.track(seed.track_id).ok().map(|t| t.id)
 }
 
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
-/// What this track can be cut up into (BC-1).
+/// What this project can be cut up into (BC-1): every seed, the stems
+/// each of them can be broken into, and the clips built so far.
 #[tauri::command(async)]
 pub fn beatify_clip_sources(
     state: State<AppState>,
     project_id: String,
 ) -> CmdResult<ClipSources> {
     let resolver = Resolver::new(&state, &project_id)?;
-    let stems_ready = resolver
-        .track_id
-        .is_some_and(|id| state.stems.cached_paths(id).is_some());
-    let hint = (!stems_ready).then(|| {
-        if resolver.track_id.is_some() {
-            stem_hint(&state)
-        } else {
-            SOURCE_GONE.to_string()
-        }
-    });
-    let mut sources = vec![ClipSourceInfo {
-        source: ClipSourceRef::Seed,
-        label: "Seed track".into(),
-        available: true,
-        hint: None,
-    }];
-    sources.extend(dj_analysis::STEM_NAMES.iter().map(|name| ClipSourceInfo {
-        source: ClipSourceRef::Stem {
-            name: (*name).into(),
-        },
-        label: (*name).into(),
-        available: stems_ready,
-        hint: hint.clone(),
-    }));
+    let grid = resolver.grid();
+    let sources = resolver
+        .project
+        .seeds
+        .iter()
+        .map(|seed| {
+            let track = track_of(&state, seed);
+            let stems_ready = track.is_some_and(|id| state.stems.cached_paths(id).is_some());
+            let hint = (!stems_ready).then(|| {
+                if track.is_some() {
+                    stem_hint(&state)
+                } else {
+                    SOURCE_GONE.to_string()
+                }
+            });
+            ClipSourceInfo {
+                source: ClipSourceRef::Seed {
+                    id: seed.id.clone(),
+                    stems: Vec::new(),
+                },
+                seed_id: seed.id.clone(),
+                label: seed.name.clone(),
+                beats: resolver
+                    .records
+                    .get(&seed.id)
+                    .map(|r| r.grid.beats)
+                    .unwrap_or(0),
+                source_bpm: seed.source_bpm,
+                speed: seed.speed,
+                available: resolver.records.contains_key(&seed.id),
+                hint: None,
+                stems: dj_analysis::STEM_NAMES
+                    .iter()
+                    .map(|name| ClipStemInfo {
+                        name: (*name).into(),
+                        available: stems_ready,
+                        hint: hint.clone(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
     Ok(ClipSources {
         sources,
         clips: resolver.clips.clone(),
-        grid: GridInfo::from(resolver.grid()),
+        grid: GridInfo::from(&grid),
     })
 }
 
@@ -462,18 +625,9 @@ pub fn beatify_clip_open(
     buckets: usize,
 ) -> CmdResult<ClipSourceAudio> {
     let mut resolver = Resolver::new(&state, &project_id)?;
-    let label = match &source {
-        ClipSourceRef::Seed => "Seed track".to_string(),
-        ClipSourceRef::Stem { name } => name.clone(),
-        ClipSourceRef::Clip { id } => resolver
-            .clips
-            .iter()
-            .find(|c| &c.id == id)
-            .map(|c| c.name.clone())
-            .unwrap_or_else(|| format!("clip {id}")),
-    };
+    let label = resolver.label(&source);
     let audio = resolver.audio(&source, 0)?;
-    let grid = *resolver.grid();
+    let grid = resolver.grid();
     let duration = audio.duration_secs();
     Ok(ClipSourceAudio {
         source,

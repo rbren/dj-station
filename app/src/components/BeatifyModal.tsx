@@ -28,12 +28,13 @@ import {
   scopePreMs,
   selectionLabel,
   snapSelection,
+  speedLabel,
   timecode,
   verdictLabel,
   type BeatifyAnalysis,
   type BeatifyClientApi,
+  type BeatifyProject,
   type BeatifyScope,
-  type BeatifyTrack,
   type Quality,
 } from '../beatify';
 import { ClipTransport, type TransportHost } from '../clipTransport';
@@ -62,12 +63,17 @@ export interface BeatifyModalProps {
   client: BeatifyClientApi;
   trackId: number;
   title: string;
-  /** The project Save commits into. Empty means a NEW one — the modal is
-   *  how a project is born; a re-beatify passes the id it replaces. */
+  /** The project Save imports into. Empty mints one — a project can also
+   *  be started straight from a track. */
   projectId?: string;
-  /** What to call a new project. Ignored when replacing an existing one. */
+  /** The seed being REPLACED (re-beatify). Empty imports a new one. */
+  seedId?: string;
+  /** What to call a new project. Ignored when importing into one. */
   projectName?: string;
-  onCommitted(track: BeatifyTrack): void;
+  /** The tempo the project already runs at, if it has one: this seed
+   *  will be conformed to it rather than setting its own (§3.11). */
+  projectBpm?: number | null;
+  onCommitted(project: BeatifyProject): void;
   onCancel(): void;
 }
 
@@ -76,7 +82,9 @@ export function BeatifyModal({
   trackId,
   title,
   projectId = '',
+  seedId = '',
   projectName = '',
+  projectBpm = null,
   onCommitted,
   onCancel,
 }: BeatifyModalProps) {
@@ -334,24 +342,35 @@ export function BeatifyModal({
   const commit = useCallback(async () => {
     setBusy(true);
     setError(null);
-    const track = await client.save(
+    const project = await client.save(
       {
         strength,
         leadIn: leadInMs / 1000,
         rulerGroup,
         projectId,
+        seedId,
         name: projectName,
       },
       BUCKETS,
     );
     setBusy(false);
-    if (!track) {
+    if (!project) {
       logError('beatify.save', `render failed for track ${trackId}`);
       setError('Rendering the warp failed');
       return;
     }
-    onCommitted(track);
-  }, [client, leadInMs, onCommitted, projectId, projectName, rulerGroup, strength, trackId]);
+    onCommitted(project);
+  }, [
+    client,
+    leadInMs,
+    onCommitted,
+    projectId,
+    projectName,
+    rulerGroup,
+    seedId,
+    strength,
+    trackId,
+  ]);
 
   const dismiss = useCallback(() => {
     void client.cancel();
@@ -752,6 +771,17 @@ export function BeatifyModal({
         </div>
 
         <footer className="beatify-modal-foot">
+          {/* A project has ONE tempo. Say what joining it will do to this
+              material before it is done, not after. */}
+          {projectBpm !== null && analysis && (
+            <span className="beatify-conform" data-testid="beatify-conform">
+              {Math.abs(analysis.grid.bpm - projectBpm) < 0.005
+                ? `already at the project's ${projectBpm.toFixed(2)} BPM`
+                : `played at ${analysis.grid.bpm.toFixed(2)} BPM · will run ${speedLabel(
+                    projectBpm / analysis.grid.bpm,
+                  )} to sit at the project's ${projectBpm.toFixed(2)}`}
+            </span>
+          )}
           <span className={`beatify-verdict ${level}`} data-testid="beatify-quality">
             ● {quality ? quality.rmsMs.toFixed(2) : '—'} ms rms ·{' '}
             {quality ? quality.inBandPct.toFixed(0) : '—'}% in band · {analysis?.grid.beats ?? 0}{' '}

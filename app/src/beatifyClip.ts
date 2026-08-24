@@ -19,20 +19,40 @@ import { IpcClient } from './ipc';
  *  thing that takes one apart, for IPC. */
 export type SourceId = string;
 
-export const SEED_SOURCE: SourceId = 'seed';
+/** A seed, whole: `seed:s1`. With only some of its parts switched on the
+ *  id says which — `seed:s1/drums+bass` — because a run cut from the
+ *  drums alone has to remember that it was the drums alone. */
+export const seedSourceId = (seedId: string, stems: readonly string[] = []): SourceId =>
+  stems.length === 0 ? `seed:${seedId}` : `seed:${seedId}/${[...stems].join('+')}`;
 
-export const stemSourceId = (name: string): SourceId => `stem:${name}`;
 export const clipSourceId = (id: string): SourceId => `clip:${id}`;
 
 /** IPC shape of a source: what the backend needs to find the audio. */
 export type SourceSpec =
-  { kind: 'seed' } | { kind: 'stem'; name: string } | { kind: 'clip'; id: string };
+  { kind: 'seed'; id: string; stems: string[] } | { kind: 'clip'; id: string };
 
 export function parseSourceId(id: SourceId): SourceSpec {
-  if (id === SEED_SOURCE) return { kind: 'seed' };
-  if (id.startsWith('stem:')) return { kind: 'stem', name: id.slice(5) };
+  if (id.startsWith('seed:')) {
+    const [seed, stems] = id.slice(5).split('/');
+    return { kind: 'seed', id: seed, stems: stems ? stems.split('+') : [] };
+  }
   if (id.startsWith('clip:')) return { kind: 'clip', id: id.slice(5) };
   throw new Error(`beatify clip: unknown source ${id}`);
+}
+
+/** Which seed a source belongs to: '' for a clip, and '' for nothing at
+ *  all — an empty project has no source open, which is not an error. */
+export function seedOfSourceId(id: SourceId): string {
+  if (!id.startsWith('seed:')) return '';
+  const spec = parseSourceId(id);
+  return spec.kind === 'seed' ? spec.id : '';
+}
+
+/** The stems switched on for a source; empty means the whole mix. */
+export function stemsOfSourceId(id: SourceId): string[] {
+  if (!id.startsWith('seed:')) return [];
+  const spec = parseSourceId(id);
+  return spec.kind === 'seed' ? spec.stems : [];
 }
 
 /** One contiguous run of beats, taken from one source, placed once. */
@@ -347,9 +367,23 @@ export interface WirePlacement {
   sourceBeat: number;
 }
 
+/** One seed in the left-hand list, with the parts it can be broken into.
+ *  A stem is not a source of its own: it is this seed with some of its
+ *  parts switched off, the way the Clip page treats stems. */
 export interface ClipSourceInfo {
   source: SourceSpec;
+  seedId: string;
   label: string;
+  beats: number;
+  sourceBpm: number;
+  speed: number;
+  available: boolean;
+  hint: string | null;
+  stems: ClipStemInfo[];
+}
+
+export interface ClipStemInfo {
+  name: string;
   available: boolean;
   hint: string | null;
 }
@@ -395,9 +429,7 @@ export function toWire(draft: ClipDraft): {
 export function sourceIdOf(spec: SourceSpec): SourceId {
   switch (spec.kind) {
     case 'seed':
-      return SEED_SOURCE;
-    case 'stem':
-      return stemSourceId(spec.name);
+      return seedSourceId(spec.id, spec.stems ?? []);
     case 'clip':
       return clipSourceId(spec.id);
   }

@@ -8,7 +8,7 @@
 
 import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BeatifyTrack } from '../src/beatify';
+import type { BeatifyProject, BeatifySeed } from '../src/beatify';
 import type { BeatifyClipClientApi, SavedClip } from '../src/beatifyClip';
 import { BeatifyClipBuilder } from '../src/components/BeatifyClipBuilder';
 
@@ -16,12 +16,16 @@ const GRID = { bpm: 120, period: 0.5, phase: 0.5, beats: 64 };
 /** The warped render: 64 beats of half a second, plus the head padding. */
 const DURATION = 32.5;
 
-function beatified(): BeatifyTrack {
+function beatified(id = 's1', title = 'Live Set A'): BeatifySeed {
   return {
+    id,
+    sourceBpm: 120,
+    speed: 1,
+    sourceMissing: false,
     projectId: 'p1',
     projectName: 'Live Set A',
     trackId: 3,
-    title: 'Live Set A',
+    title,
     artist: 'Band',
     durationSecs: DURATION,
     sampleRate: 44100,
@@ -54,31 +58,45 @@ function beatified(): BeatifyTrack {
   };
 }
 
+function project(seeds: BeatifySeed[] = [beatified()]): BeatifyProject {
+  return { id: 'p1', name: 'Live Set A', bpm: seeds.length ? GRID.bpm : null, seeds };
+}
+
+/** One seed's entry in the source list, stems and all. */
+function seedInfo(seedId: string, label: string, stemsReady = true) {
+  return {
+    source: { kind: 'seed' as const, id: seedId, stems: [] },
+    seedId,
+    label,
+    beats: 64,
+    sourceBpm: 120,
+    speed: 1,
+    available: true,
+    hint: null,
+    stems: ['drums', 'bass', 'other', 'vocals'].map((name) => ({
+      name,
+      available: stemsReady,
+      hint: stemsReady ? null : 'no demucs stems yet — separate this track on the Clip page first',
+    })),
+  };
+}
+
 function clipsMock(overrides: Partial<BeatifyClipClientApi> = {}): BeatifyClipClientApi {
   const saved: SavedClip[] = [];
   return {
     sources: vi.fn(async () => ({
-      sources: [
-        { source: { kind: 'seed' as const }, label: 'Seed track', available: true, hint: null },
-        {
-          source: { kind: 'stem' as const, name: 'drums' },
-          label: 'drums',
-          available: true,
-          hint: null,
-        },
-        {
-          source: { kind: 'stem' as const, name: 'vocals' },
-          label: 'vocals',
-          available: false,
-          hint: 'no demucs stems yet — separate this track on the Clip page first',
-        },
-      ],
+      sources: [seedInfo('s1', 'Live Set A')],
       clips: saved,
       grid: GRID,
     })),
     open: vi.fn(async (_trackId, source) => ({
       source,
-      label: source.kind === 'stem' ? source.name : 'Seed track',
+      label:
+        source.kind === 'seed'
+          ? source.stems.length
+            ? `Live Set A · ${source.stems.join(' + ')}`
+            : 'Live Set A'
+          : 'clip',
       durationSecs: DURATION,
       sampleRate: 44100,
       channels: 2,
@@ -110,8 +128,16 @@ beforeEach(() => {
   window.HTMLMediaElement.prototype.pause = vi.fn();
 });
 
-async function mount(clips: BeatifyClipClientApi = clipsMock()) {
-  render(<BeatifyClipBuilder track={beatified()} clips={clips} onRebeatify={() => {}} />);
+async function mount(clips: BeatifyClipClientApi = clipsMock(), open: BeatifyProject = project()) {
+  render(
+    <BeatifyClipBuilder
+      project={open}
+      clips={clips}
+      onRebeatify={() => {}}
+      onImport={() => {}}
+      onRemoveSeed={() => {}}
+    />,
+  );
   await screen.findByTestId('beatify-clip-list');
   await screen.findByTestId('beatify-track-waveform');
   return clips;
@@ -164,33 +190,109 @@ async function saveAs(name: string) {
   await screen.findByTestId('beatify-clip-source-clip:1');
 }
 
-describe('the clip list', () => {
-  it('offers the seed track and its stems as the same kind of thing', async () => {
-    await mount();
-    expect(screen.getByTestId('beatify-clip-source-seed').textContent).toContain('Seed track');
-    expect(screen.getByTestId('beatify-clip-source-stem:drums')).toBeTruthy();
+describe('the source list', () => {
+  it('lists the seeds of the project, each with its own stem switches', async () => {
+    const clips = clipsMock({
+      sources: vi.fn(async () => ({
+        sources: [seedInfo('s1', 'Live Set A'), seedInfo('s2', 'Boys')],
+        clips: [],
+        grid: GRID,
+      })),
+    });
+    await mount(clips, project([beatified('s1'), beatified('s2', 'Boys')]));
+    expect(screen.getByTestId('beatify-clip-source-s1').textContent).toContain('Live Set A');
+    expect(screen.getByTestId('beatify-clip-source-s2').textContent).toContain('Boys');
+    // Stems hang off the seed they came out of, not off the list: the
+    // same stem name appears once per seed and means a different thing.
+    expect(screen.getByTestId('beatify-stem-s1-drums')).toBeTruthy();
+    expect(screen.getByTestId('beatify-stem-s2-drums')).toBeTruthy();
   });
 
-  it('lists a stem that has not been separated, disabled, with the fix', async () => {
-    await mount();
-    const vocals = screen.getByTestId('beatify-clip-source-stem:vocals') as HTMLButtonElement;
+  it("shows a seed's stems as unavailable, with the fix, until they are separated", async () => {
+    const clips = clipsMock({
+      sources: vi.fn(async () => ({
+        sources: [seedInfo('s1', 'Live Set A', false)],
+        clips: [],
+        grid: GRID,
+      })),
+    });
+    await mount(clips);
+    const vocals = screen.getByTestId('beatify-stem-s1-vocals') as HTMLButtonElement;
     expect(vocals.disabled).toBe(true);
     expect(screen.getByTestId('beatify-clip-list').textContent).toContain('separate this track');
   });
 
-  it('opens the source you click into the pane above', async () => {
-    const clips = await mount();
-    fireEvent.click(screen.getByTestId('beatify-clip-source-stem:drums'));
+  it('opens the seed you click into the pane above', async () => {
+    const clips = clipsMock({
+      sources: vi.fn(async () => ({
+        sources: [seedInfo('s1', 'Live Set A'), seedInfo('s2', 'Boys')],
+        clips: [],
+        grid: GRID,
+      })),
+    });
+    await mount(clips, project([beatified('s1'), beatified('s2', 'Boys')]));
+    fireEvent.click(screen.getByTestId('beatify-clip-source-s2'));
     await waitFor(() =>
       expect(clips.open).toHaveBeenCalledWith(
         'p1',
-        { kind: 'stem', name: 'drums' },
+        { kind: 'seed', id: 's2', stems: [] },
         expect.any(Number),
       ),
     );
+  });
+
+  // Switching a part off is not a different source: it is the same seed,
+  // with less of it playing — which is what gets dragged into a clip.
+  it('opens the seed with only the parts left switched on', async () => {
+    const clips = await mount();
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
     await waitFor(() =>
-      expect(screen.getByTestId('beatify-track-title').textContent).toBe('drums'),
+      expect(clips.open).toHaveBeenCalledWith(
+        'p1',
+        { kind: 'seed', id: 's1', stems: ['drums', 'bass', 'other'] },
+        expect.any(Number),
+      ),
     );
+    // Turning it back on is the whole render again, not three stems summed.
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
+    await waitFor(() =>
+      expect(clips.open).toHaveBeenLastCalledWith(
+        'p1',
+        { kind: 'seed', id: 's1', stems: [] },
+        expect.any(Number),
+      ),
+    );
+  });
+
+  it('will not let you switch off the last part of a seed', async () => {
+    await mount();
+    for (const name of ['drums', 'bass', 'other']) {
+      fireEvent.click(screen.getByTestId(`beatify-stem-s1-${name}`));
+    }
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-clip-note').textContent).toContain('at least one stem on'),
+    );
+    expect(screen.getByTestId('beatify-stem-s1-vocals').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('says so, rather than drawing an empty pane, when nothing is imported yet', async () => {
+    const clips = clipsMock({
+      sources: vi.fn(async () => ({ sources: [], clips: [], grid: GRID })),
+    });
+    render(
+      <BeatifyClipBuilder
+        project={project([])}
+        clips={clips}
+        onRebeatify={() => {}}
+        onImport={() => {}}
+        onRemoveSeed={() => {}}
+      />,
+    );
+    expect((await screen.findByTestId('beatify-builder-empty')).textContent).toContain(
+      'sets the tempo',
+    );
+    expect(clips.open).not.toHaveBeenCalled();
   });
 });
 
@@ -443,7 +545,13 @@ describe('saving', () => {
     const [, clip] = (clips.save as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(clip.name).toBe('Intro loop');
     expect(clip.placements).toEqual([
-      expect.objectContaining({ row: 0, col: 0, beats: 16, source: { kind: 'seed' } }),
+      expect.objectContaining({
+        row: 0,
+        col: 0,
+        beats: 16,
+        // The run remembers the seed it came from, by id.
+        source: { kind: 'seed', id: 's1', stems: [] },
+      }),
     ]);
     await screen.findByTestId('beatify-clip-source-clip:1');
   });
@@ -550,7 +658,7 @@ describe('the clips drawer and the editor are separate', () => {
     expect(blocks()).toHaveLength(1);
     expect((screen.getByTestId('beatify-clip-name') as HTMLInputElement).value).toBe('Intro loop');
     expect((clips.open as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(opens);
-    expect(screen.getByTestId('beatify-track-title').textContent).toBe('Seed track');
+    expect(screen.getByTestId('beatify-track-title').textContent).toBe('Live Set A');
   });
 
   it('starts a fresh clip on "+ new clip"', async () => {

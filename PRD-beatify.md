@@ -387,6 +387,42 @@ The contract with the rest of dj-station.
 
 ---
 
+## 5a. Projects and seeds
+
+A **project** is a tempo and the material beatified onto it. It is created
+empty — a name and nothing else — and tracks are imported into it one at a
+time, each proved in the import modal (§3).
+
+**PRJ-1.** The FIRST seed imported sets the project's BPM. Every seed after
+it is conformed to that BPM: its warp map's output times are scaled by
+`projectPeriod / itsOwnPeriod` and re-rendered in ONE pass from the source,
+so there is no generation loss from stacking a stretch on a stretch.
+**PRJ-2.** Every seed's render therefore satisfies OUT-1 against the SAME
+`period` and `phase`. Beat *n* of any seed is the same instant as beat *n*
+of any other, which is what lets one clip hold runs from two records.
+**PRJ-3.** A seed keeps its own `sourceBpm` (what it was played at) and
+`speed` (the ratio it now runs at). Speed is a fact about the seed, not a
+setting: it falls out of the two tempos.
+**PRJ-4.** The project's BPM is editable. Changing it re-renders every
+seed and touches no clip — a placement is a run of BEATS, and a beat is a
+beat at any tempo. A seed whose source has left the library is re-rendered
+by stretching its existing render instead.
+**PRJ-5.** Re-beatifying a seed keeps its id, so the clips that point at
+it keep pointing at it (MOD-A31's warning still applies to its grid).
+Deleting a seed leaves the project, its tempo and its clips alone: what a
+clip loses is audio, not arithmetic.
+**PRJ-6.** A clip source names the seed AND the parts of it that were
+playing — `seed:s2/drums+bass`. A stem is not a source of its own: it is a
+seed with some of its parts switched off, and all parts on is the render
+itself rather than four stems summed.
+**PRJ-7.** On disk: `<data_dir>/beatify/<project-id>/project.json` holds
+the envelope (name, bpm, seeds); each seed owns
+`seeds/<seed-id>/{meta.json,warped.wav,stems/}`. A project written before
+seeds existed keeps its artifacts in the project root and is adopted,
+read-only, as a project with exactly one seed.
+
+---
+
 ## 6. Open questions
 
 1. **Loop wrap quantization** — next group (recommended) or next beat? See TV-25.
@@ -397,7 +433,7 @@ The contract with the rest of dj-station.
 6. **Ruler grouping default.** 4 is the obvious default. Per-track (stored in metadata) or a global app preference? Per-track is more useful and costs one field.
 7. **Overlay density.** Three things share the waveform (MOD-3a). Prototype before deciding which become toggles.
 8. **Re-beatify on a track with existing clips.** MOD-A31 warns. Re-render affected clips against the new grid, or just invalidate them? Note this now also covers *re-trimming* — a re-beatify can change the track's boundaries, not only its grid, so a clip can lose its source audio outright.
-9. **Two regions from one file.** Supported by construction (two records, same source hash, different `sourceSpan`) but they are separate tracks with independently fitted grids, so they will *not* layer. If someone imports a verse and a chorus expecting them to lock, they won't. Worth detecting and offering to share a grid.
+9. ~~**Two regions from one file.**~~ **Resolved by projects (§5a).** Two regions imported into ONE project are conformed to that project's tempo and phase, so they layer by construction. Two imported into different projects still will not — a project is the unit that shares a grid.
 
 ---
 

@@ -423,6 +423,90 @@ fn warping_puts_the_beats_on_the_grid() {
     );
 }
 
+/// The second seed of a project: played at one tempo, landing on
+/// another's grid. This is the whole promise of a multi-seed project —
+/// two records, two performances, one set of beat times.
+#[test]
+fn a_conformed_seed_lands_on_the_projects_grid() {
+    // The project's tempo comes from a first seed at 120.
+    let (_, first) = analyze_drifting(120.0, 120.0, 32);
+    let period = first.grid.period;
+    assert!((first.grid.bpm - 120.0).abs() < 0.5);
+
+    // The second was played at 132 and drifts on top of that.
+    let (audio, analysis) = analyze_drifting(132.0, 137.0, 48);
+    let strength = analysis.sweep.default_strength;
+    let (warped, map, grid) = beatify::render_at(&audio, &analysis, strength, period);
+
+    assert!(
+        (grid.bpm - 60.0 / period).abs() < 1e-9,
+        "the project's tempo"
+    );
+    assert_eq!(grid.beats, analysis.grid.beats, "same beats, longer ones");
+    assert!(
+        (grid.phase - grid.period).abs() < 1e-12,
+        "OUT-1a still holds"
+    );
+    let expected_frames = ((grid.beats as f64 + 1.0) * grid.period * SR as f64).round() as usize;
+    assert_eq!(warped.frames(), expected_frames);
+
+    // Every beat is on the PROJECT's line, not on the tempo it was
+    // played at: 120 BPM lines, from 132 BPM material.
+    let expected: Vec<f64> = (1..grid.beats - 1)
+        .map(|n| grid.beat_time(n as f64))
+        .collect();
+    let offsets = measured_offsets(&warped, &expected, 0.030);
+    assert!(offsets.len() > 40, "measured {} beats", offsets.len());
+    assert!(
+        spread(&offsets) < 0.008,
+        "conformed beat spread {:.4}s",
+        spread(&offsets)
+    );
+
+    // And it is ONE stretch: the map is the warp's, with its output
+    // times scaled, rather than a second pass over the render.
+    let own = analysis.map_at(strength);
+    assert_eq!(map.points.len(), own.points.len());
+    let k = period / analysis.grid.period;
+    for ((s0, d0), (s1, d1)) in own.points.iter().zip(map.points.iter()) {
+        assert!((s0 - s1).abs() < 1e-12, "source times are untouched");
+        assert!((d0 * k - d1).abs() < 1e-9, "output times are scaled by k");
+    }
+}
+
+/// Conforming to the tempo the material was already at changes nothing —
+/// the first seed of a project is never stretched for the project's sake.
+#[test]
+fn the_first_seed_sets_the_tempo_and_is_not_conformed() {
+    let (audio, analysis) = analyze_drifting(124.0, 124.0, 40);
+    let strength = analysis.sweep.default_strength;
+    let (a, map, grid) = beatify::render_at(&audio, &analysis, strength, analysis.grid.period);
+    let (b, own) = beatify::render(&audio, &analysis, strength);
+
+    assert_eq!(grid, analysis.grid);
+    assert_eq!(map.pairs(), own.pairs());
+    assert_eq!(a.frames(), b.frames());
+    assert_eq!(a.channels[0][SR as usize], b.channels[0][SR as usize]);
+}
+
+/// Changing the project's tempo is a scale of the seed's stored map, so a
+/// beat stays the same beat and lands where the new grid says.
+#[test]
+fn conforming_scales_output_times_and_nothing_else() {
+    let map = beatify::WarpMap {
+        points: vec![(0.0, 0.5), (10.0, 10.5), (20.0, 20.0)],
+    };
+    let out = beatify::conform(&map, 1.25);
+    assert_eq!(
+        out.pairs(),
+        vec![[0.0, 0.625], [10.0, 13.125], [20.0, 25.0]]
+    );
+    // A nonsense ratio is refused rather than turning the map into NaN.
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(beatify::conform(&map, bad).pairs(), map.pairs());
+    }
+}
+
 #[test]
 fn the_no_warp_position_only_trims() {
     let (audio, analysis) = analyze_drifting(124.0, 124.0, 40);
@@ -711,6 +795,7 @@ fn the_record_round_trips_through_the_store() {
             strength,
             lead_in: analysis.lead_in,
             ruler: Ruler::default(),
+            grid: analysis.grid,
         },
         &map,
     );
@@ -726,43 +811,118 @@ fn the_record_round_trips_through_the_store() {
     assert!(json.contains("\"anchorStride\""));
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let project = store::Project {
-        id: "p1".into(),
-        name: "boys".into(),
-        track_id: 7,
-        source_hash: record.source_hash.clone(),
-        updated: 1000,
-    };
-    store::save(dir.path(), &project, &record, &warped).expect("save");
-    let loaded = store::load(dir.path(), "p1")
+    let mut project = store::Project::new("p1".into(), "boys".into());
+    let seed = a_seed("s1", &record, 7);
+    project.bpm = Some(record.grid.bpm);
+    project.seeds.push(seed.clone());
+    store::save_seed(dir.path(), &project, &seed, &record, &warped).expect("save");
+    let loaded = store::load_seed(dir.path(), "p1", &seed)
         .expect("load")
         .expect("record exists");
     assert_eq!(loaded.grid, record.grid);
     assert_eq!(loaded.source_hash, record.source_hash);
-    assert!(store::warped_path(dir.path(), "p1").exists());
-    // Keyed by the PROJECT, so one track can have several.
+    assert!(store::seed_warped_path(dir.path(), "p1", &seed).exists());
+    // Keyed by the PROJECT, and inside it by the SEED: one project holds
+    // several tracks, and one track can be in several projects.
     assert!(store::project_dir(dir.path(), "p1").ends_with("p1"));
+    assert!(store::seed_dir(dir.path(), "p1", &seed).ends_with("seeds/s1"));
+
+    let reopened = store::project(dir.path(), "p1")
+        .expect("project")
+        .expect("exists");
+    assert_eq!(reopened.seeds.len(), 1);
+    assert_eq!(reopened.bpm, Some(record.grid.bpm));
 
     store::remove(dir.path(), "p1").expect("remove");
-    assert!(store::load(dir.path(), "p1").expect("load").is_none());
+    assert!(store::project(dir.path(), "p1").expect("project").is_none());
 }
 
-/// One track, two projects: the whole point of the store being keyed by
-/// project. They share a source hash and nothing else.
+/// A project is a place, not a take on a track: it exists before anything
+/// has been imported, and it has no tempo until the first seed sets one.
 #[test]
-fn a_track_can_have_more_than_one_project() {
+fn a_project_can_be_started_with_nothing_in_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let project = store::Project::new("p1".into(), "tuesday".into());
+    assert!(project.bpm.is_none());
+    assert!(project.period().is_none());
+    store::save_project(dir.path(), &project).expect("save");
+
+    let list = store::list(dir.path()).expect("list");
+    assert_eq!(list.len(), 1, "an empty project is still a project");
+    assert!(list[0].seeds.is_empty());
+    assert!(list[0].bpm.is_none());
+    // And the next seed id does not depend on there being seeds.
+    assert_eq!(list[0].new_seed_id(), "s1");
+}
+
+/// Several tracks, one tempo. Each seed keeps its own render and its own
+/// stem cache; the project keeps the BPM they all agree on.
+#[test]
+fn a_project_holds_more_than_one_seed() {
+    let (record, warped) = a_saved_record();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut project = store::Project::new("p1".into(), "tuesday".into());
+    project.bpm = Some(128.0);
+
+    for (id, name, track_id, source_bpm) in [
+        ("s1", "boys", 7, 128.0),
+        ("s2", "girls", 9, 122.0),
+        ("s3", "drums", 11, 174.0),
+    ] {
+        let seed = store::Seed {
+            id: id.into(),
+            name: name.into(),
+            track_id,
+            source_hash: format!("hash-{id}"),
+            dir: store::seed_dir_name(id),
+            source_bpm,
+            speed: 128.0 / source_bpm,
+        };
+        project.seeds.push(seed.clone());
+        store::save_seed(dir.path(), &project, &seed, &record, &warped).expect("save");
+    }
+
+    let reopened = store::project(dir.path(), "p1")
+        .expect("project")
+        .expect("exists");
+    assert_eq!(reopened.seeds.len(), 3);
+    assert_eq!(reopened.new_seed_id(), "s4");
+    // The seed that set the tempo runs at 1.0; the others are conformed.
+    assert!((reopened.seeds[0].speed - 1.0).abs() < 1e-9);
+    assert!(reopened.seeds[1].speed > 1.0, "122 has to speed up to 128");
+    assert!(reopened.seeds[2].speed < 1.0, "174 has to slow down");
+    assert!((reopened.seeds[2].speed_pct() + 26.4).abs() < 0.1);
+
+    // Each seed's artifacts are its own.
+    for seed in &reopened.seeds {
+        assert!(store::seed_warped_path(dir.path(), "p1", seed).exists());
+        assert!(store::load_seed(dir.path(), "p1", seed)
+            .expect("load")
+            .is_some());
+    }
+
+    // Dropping one leaves the others, and the project, alone.
+    let gone = reopened.seeds[1].clone();
+    store::remove_seed(dir.path(), "p1", &gone).expect("remove seed");
+    assert!(!store::seed_warped_path(dir.path(), "p1", &gone).exists());
+    assert!(store::seed_warped_path(dir.path(), "p1", &reopened.seeds[0]).exists());
+    assert!(store::project(dir.path(), "p1").expect("project").is_some());
+}
+
+/// One track, two projects: still true, and still nothing shared but the
+/// source hash.
+#[test]
+fn a_track_can_be_in_more_than_one_project() {
     let (record, warped) = a_saved_record();
     let dir = tempfile::tempdir().expect("tempdir");
 
     for (id, name, updated) in [("p1", "first pass", 100), ("p2", "slower take", 200)] {
-        let project = store::Project {
-            id: id.into(),
-            name: name.into(),
-            track_id: 7,
-            source_hash: record.source_hash.clone(),
-            updated,
-        };
-        store::save(dir.path(), &project, &record, &warped).expect("save");
+        let seed = a_seed("s1", &record, 7);
+        let mut project = store::Project::new(id.into(), name.into());
+        project.updated = updated;
+        project.bpm = Some(record.grid.bpm);
+        project.seeds.push(seed.clone());
+        store::save_seed(dir.path(), &project, &seed, &record, &warped).expect("save");
     }
 
     let list = store::list(dir.path()).expect("list");
@@ -772,13 +932,99 @@ fn a_track_can_have_more_than_one_project() {
         ["p2", "p1"]
     );
     assert_eq!(list[0].name, "slower take");
-    assert!(list.iter().all(|p| p.source_hash == record.source_hash));
+    assert!(list
+        .iter()
+        .all(|p| p.seeds[0].source_hash == record.source_hash));
     assert_eq!(store::new_id(&list), "p3");
 
     // Deleting one leaves the other's artifacts alone.
     store::remove(dir.path(), "p2").expect("remove");
-    assert!(store::warped_path(dir.path(), "p1").exists());
+    let left = store::project(dir.path(), "p1")
+        .expect("project")
+        .expect("exists");
+    assert!(store::seed_warped_path(dir.path(), "p1", &left.seeds[0]).exists());
     assert_eq!(store::list(dir.path()).expect("list").len(), 1);
+}
+
+/// A project written when one project meant one track opens as a project
+/// with ONE seed, whose artifacts stay exactly where they are. Nobody has
+/// to migrate anything, and nothing is rewritten to read it.
+#[test]
+fn a_single_track_project_is_adopted_as_one_seed() {
+    let (record, warped) = a_saved_record();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = store::project_dir(dir.path(), "p1");
+    std::fs::create_dir_all(&root).expect("mkdir");
+    std::fs::write(
+        root.join(store::META_NAME),
+        serde_json::to_string(&record).expect("json"),
+    )
+    .expect("write meta");
+    std::fs::write(
+        root.join(store::WARPED_NAME),
+        dj_analysis::clip::wav16_bytes(&warped),
+    )
+    .expect("write wav");
+    // The pre-seeds envelope: a name, the track it came from, no seeds.
+    std::fs::write(
+        root.join(store::PROJECT_NAME),
+        serde_json::json!({
+            "id": "p1",
+            "name": "boys",
+            "trackId": 7,
+            "sourceHash": record.source_hash,
+            "updated": 1000,
+        })
+        .to_string(),
+    )
+    .expect("write project");
+
+    let project = store::project(dir.path(), "p1")
+        .expect("project")
+        .expect("exists");
+    assert_eq!(project.name, "boys");
+    assert_eq!(project.seeds.len(), 1);
+    let seed = &project.seeds[0];
+    // Its artifacts are the project root — that is what an empty dir is.
+    assert!(seed.dir.is_empty());
+    assert_eq!(seed.track_id, 7, "it remembers which track it came from");
+    assert_eq!(
+        store::seed_warped_path(dir.path(), "p1", seed),
+        root.join(store::WARPED_NAME)
+    );
+    assert!(store::load_seed(dir.path(), "p1", seed)
+        .expect("load")
+        .is_some());
+    // Its render's tempo is the project's tempo: it was the first seed.
+    assert_eq!(project.bpm, Some(record.grid.bpm));
+    assert!((seed.speed - 1.0).abs() < 1e-9);
+    // Adoption is read-only: the file on disk still has no seed list.
+    let on_disk: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join(store::PROJECT_NAME)).unwrap())
+            .unwrap();
+    assert!(on_disk.get("seeds").is_none());
+
+    // A second seed can be imported alongside it, and the adopted one is
+    // left where it lies rather than being moved under `seeds/`.
+    let mut project = project;
+    let next = store::Seed {
+        id: "s2".into(),
+        name: "girls".into(),
+        track_id: 9,
+        source_hash: "otherhash".into(),
+        dir: store::seed_dir_name("s2"),
+        source_bpm: 122.0,
+        speed: record.grid.bpm / 122.0,
+    };
+    project.seeds.push(next.clone());
+    store::save_seed(dir.path(), &project, &next, &record, &warped).expect("save");
+    let reopened = store::project(dir.path(), "p1")
+        .expect("project")
+        .expect("exists");
+    assert_eq!(reopened.seeds.len(), 2);
+    assert!(reopened.seeds[0].dir.is_empty());
+    assert!(root.join(store::WARPED_NAME).exists());
+    assert!(store::seed_warped_path(dir.path(), "p1", &next).exists());
 }
 
 /// A directory written before projects existed is a project: same files,
@@ -806,11 +1052,25 @@ fn a_legacy_hash_keyed_record_is_adopted_as_a_project() {
     assert_eq!(list[0].id, "0123456789abcdef");
     // Named for the file it came from, and it knows its full hash.
     assert_eq!(list[0].name, "boys");
-    assert_eq!(list[0].source_hash, record.source_hash);
+    assert_eq!(list[0].seeds.len(), 1);
+    assert_eq!(list[0].seeds[0].source_hash, record.source_hash);
     // Adoption is read-only: no envelope is written behind the user's back.
     assert!(!hash_dir.join(store::PROJECT_NAME).exists());
     // A minted id cannot collide with it.
     assert_eq!(store::new_id(&list), "p2");
+}
+
+/// The seed the store tests file.
+fn a_seed(id: &str, record: &beatify::BeatifyRecord, track_id: i64) -> store::Seed {
+    store::Seed {
+        id: id.into(),
+        name: "boys".into(),
+        track_id,
+        source_hash: record.source_hash.clone(),
+        dir: store::seed_dir_name(id),
+        source_bpm: record.grid.bpm,
+        speed: 1.0,
+    }
 }
 
 /// The record + render the store tests share.
@@ -826,6 +1086,7 @@ fn a_saved_record() -> (beatify::BeatifyRecord, dj_analysis::AudioData) {
             strength: analysis.sweep.default_strength,
             lead_in: analysis.lead_in,
             ruler: Ruler::default(),
+            grid: analysis.grid,
         },
         &map,
     );
@@ -1128,6 +1389,7 @@ fn golden_warped_render() {
             ruler: Ruler {
                 group: case.ruler_group,
             },
+            grid: analysis.grid,
         },
         &map,
     );

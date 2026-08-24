@@ -78,6 +78,35 @@ fn mix_lay(out: &mut AudioData, lay: &Lay, sample_rate: u32) {
     }
 }
 
+/// Sum whole buffers on top of each other: a submix of the stems that
+/// are switched on.
+///
+/// No fades and no placement, because these are the SAME audio split
+/// apart — drums + bass + other + vocals is the mix it came from, sample
+/// for sample. The output is as long as the longest part, so a stem that
+/// was rendered a frame short does not truncate the rest.
+pub fn mix(parts: &[&AudioData]) -> AudioData {
+    let frames = parts.iter().map(|p| p.frames()).max().unwrap_or(0);
+    let channels = parts.iter().map(|p| p.channels.len()).max().unwrap_or(1);
+    let sample_rate = parts.first().map(|p| p.sample_rate).unwrap_or(44_100);
+    let mut out = AudioData {
+        channels: vec![vec![0.0; frames]; channels.max(1)],
+        sample_rate,
+    };
+    for part in parts {
+        if part.channels.is_empty() {
+            continue;
+        }
+        for ch in 0..out.channels.len() {
+            let src = &part.channels[ch.min(part.channels.len() - 1)];
+            for (i, s) in src.iter().enumerate() {
+                out.channels[ch][i] += *s;
+            }
+        }
+    }
+    out
+}
+
 /// Where a run of beats reads from, where it lands and how long it is —
 /// the arithmetic that makes a clip possible.
 ///

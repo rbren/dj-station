@@ -1,11 +1,15 @@
 // The clip builder: sources on the left, the one you are listening to
 // across the top, the clip you are building underneath.
 //
-// This component owns the three things that have to agree:
+// This component owns the four things that have to agree:
 //
-//   1. WHICH SOURCE is open. Seed, stem or saved clip — all the same kind
-//      of thing, because they share the track's grid — opened into the
-//      pane above, which is the ordinary track view made shorter.
+//   1. WHICH SOURCE is open. A seed (whole, or with some of its stems
+//      switched off) or a saved clip — all the same kind of thing,
+//      because every one of them sits on the PROJECT's grid — opened into
+//      the pane above, which is the ordinary track view made shorter.
+//   0. WHICH STEMS are on, per seed. Switching one off does not make a
+//      new kind of source: it changes what the seed's source id says, so
+//      a run dragged from it remembers it was the drums.
 //   2. THE DRAFT. Beats selected in the source are dragged down into the
 //      grid; the model in `beatifyClip.ts` decides what a drop does.
 //   3. WHAT IS SOUNDING. Exactly one of the two panes, ever: starting one
@@ -14,9 +18,8 @@
 //      rendering the draft as it stands rather than as it was saved.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { BeatifyTrack } from '../beatify';
+import type { BeatifyProject, BeatifySeed } from '../beatify';
 import {
-  SEED_SOURCE,
   addRow,
   cellRange,
   clipSeconds,
@@ -33,8 +36,10 @@ import {
   placeRun,
   removeLastRow,
   removePlacement,
+  seedOfSourceId,
+  seedSourceId,
+  stemsOfSourceId,
   setColumns,
-  sourceIdOf,
   toWire,
   usedColumns,
   type BeatifyClipClientApi,
@@ -50,19 +55,26 @@ import {
 import { ClipTransport, type TransportHost } from '../clipTransport';
 import { isEditableTarget } from '../fileShortcuts';
 import { BeatifyClipEditor } from './BeatifyClipEditor';
-import { BeatifyClipList, type ClipListEntry } from './BeatifyClipList';
+import { BeatifyClipList, type ClipListClip, type ClipListSeed } from './BeatifyClipList';
 import { BeatifyTrackView, type BeatifyTrackViewHandle } from './BeatifyTrackView';
 
 const BUCKETS = 1400;
+/** What the editor draws before a project has a tempo of its own. */
+const EMPTY_GRID = { bpm: 120, period: 0.5, phase: 0.5, beats: 0 };
 /** The source pane is shorter here than it is on its own: the clip
  *  editor has to fit under it. */
 const SOURCE_WAVE_H = 110;
 const WINDOW_SECS = 120;
 
 export interface BeatifyClipBuilderProps {
-  track: BeatifyTrack;
+  project: BeatifyProject;
   clips: BeatifyClipClientApi;
-  onRebeatify(): void;
+  /** Re-beatify the seed currently open in the source pane. */
+  onRebeatify(seed: BeatifySeed): void;
+  /** Import another track into this project. */
+  onImport(): void;
+  /** Drop a seed from the project. */
+  onRemoveSeed(seedId: string): void;
 }
 
 interface Drag {
@@ -72,15 +84,39 @@ interface Drag {
   moving: string | null;
 }
 
-export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBuilderProps) {
-  const grid = track.record.grid;
-  // Clips belong to the PROJECT, not the track: the same song may be
-  // open in two projects with different grids and different clips.
-  const projectId = track.projectId;
+export function BeatifyClipBuilder({
+  project,
+  clips,
+  onRebeatify,
+  onImport,
+  onRemoveSeed,
+}: BeatifyClipBuilderProps) {
+  // Clips belong to the PROJECT, and so does the grid: every seed was
+  // rendered onto it, which is what lets runs from two different tracks
+  // sit in one clip.
+  const projectId = project.id;
+  const firstSeed = project.seeds[0] ?? null;
+  // A project with nothing in it still draws a grid to put things on.
+  const grid = firstSeed?.record.grid ?? EMPTY_GRID;
 
   const [sources, setSources] = useState<ClipSources | null>(null);
   const [saved, setSaved] = useState<SavedClip[]>([]);
-  const [picked, setPicked] = useState<SourceId>(SEED_SOURCE);
+  // What the user last clicked. It is a WISH, not the truth: a seed can
+  // be deleted out from under it, so `picked` below is what it resolves
+  // to now.
+  const [wanted, setPicked] = useState<SourceId>(() =>
+    firstSeed ? seedSourceId(firstSeed.id) : '',
+  );
+  const picked = useMemo<SourceId>(() => {
+    const seedId = seedOfSourceId(wanted);
+    if (seedId && project.seeds.some((s) => s.id === seedId)) return wanted;
+    if (wanted.startsWith('clip:')) return wanted;
+    return firstSeed ? seedSourceId(firstSeed.id) : '';
+  }, [firstSeed, project.seeds, wanted]);
+  /** Which stems are switched OFF, per seed. Off rather than on, so a
+   *  seed nobody has touched is its whole mix without having to know
+   *  what its stems are called. */
+  const [stemsOff, setStemsOff] = useState<Record<string, string[]>>({});
   const [open, setOpen] = useState<ClipSourceAudio | null>(null);
   const [draft, setDraft] = useState<ClipDraft>(() => emptyDraft());
   const [selBeats, setSelBeats] = useState<{ startBeat: number; endBeat: number } | null>(null);
@@ -110,10 +146,11 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
   }, [clips, projectId]);
 
   useEffect(() => {
+    // An empty project has nothing to open, which is not an error.
+    if (!picked) return;
     let live = true;
     void (async () => {
-      const spec = parseSourceId(picked);
-      const opened = await clips.open(projectId, spec, BUCKETS);
+      const opened = await clips.open(projectId, parseSourceId(picked), BUCKETS);
       if (live && opened) setOpen(opened);
     })();
     return () => {
@@ -369,9 +406,11 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
     if (!list) return;
     setSaved(list);
     setDraft((cur) => ({ ...cur, id: '' }));
-    if (picked === `clip:${draft.id}`) setPicked(SEED_SOURCE);
+    if (picked === `clip:${draft.id}`) {
+      setPicked(project.seeds[0] ? seedSourceId(project.seeds[0].id) : '');
+    }
     setNote(`Deleted "${draft.name}" — what is on the grid is now unsaved`);
-  }, [clips, draft, picked, projectId]);
+  }, [clips, draft, picked, project.seeds, projectId]);
 
   /** Clear the desk: a new, empty clip, and silence. */
   const newClip = useCallback(() => {
@@ -383,31 +422,91 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
   }, []);
 
   // --- what the list shows ------------------------------------------------
-  const entries = useMemo<ClipListEntry[]>(() => {
-    const fromBackend: ClipListEntry[] = (sources?.sources ?? []).map((info) => ({
-      id: sourceIdOf(info.source),
-      label: info.label,
-      kind: info.source.kind === 'stem' ? 'stem' : '',
-      available: info.available,
-      hint: info.hint,
-    }));
-    return [
-      ...fromBackend,
-      ...saved.map((clip) => ({
-        id: `clip:${clip.id}`,
-        label: clip.name,
-        kind: 'clip',
-        available: true,
-        hint: null,
-      })),
-    ];
-  }, [saved, sources]);
-
-  const order = useMemo(() => entries.map((e) => e.id), [entries]);
-  const labelOf = useCallback(
-    (id: SourceId) => entries.find((e) => e.id === id)?.label ?? id,
-    [entries],
+  //
+  // A seed's entry carries its own switches, and the id it opens is the
+  // seed PLUS whatever is switched on: that is the only place the stem
+  // selection lives, so a run dragged out of the pane cannot disagree
+  // with what the pane was playing.
+  const seedEntries = useMemo<ClipListSeed[]>(
+    () =>
+      (sources?.sources ?? []).map((info) => {
+        const off = stemsOff[info.seedId] ?? [];
+        const on = info.stems.map((s) => s.name).filter((name) => !off.includes(name));
+        const all = on.length === info.stems.length;
+        return {
+          seedId: info.seedId,
+          // All four on IS the whole mix — the render itself, which
+          // needs no separated stems and no summing.
+          id: seedSourceId(info.seedId, all ? [] : on),
+          label: info.label,
+          beats: info.beats,
+          sourceBpm: info.sourceBpm,
+          speed: info.speed,
+          available: info.available,
+          stems: info.stems.map((stem) => ({
+            name: stem.name,
+            on: !off.includes(stem.name),
+            available: stem.available,
+            hint: stem.hint,
+          })),
+        };
+      }),
+    [sources, stemsOff],
   );
+
+  const clipEntries = useMemo<ClipListClip[]>(
+    () => saved.map((clip) => ({ id: `clip:${clip.id}`, label: clip.name })),
+    [saved],
+  );
+
+  /** Flip one of a seed's parts. Muting the last one is silence, so the
+   *  last one on stays on — the Clip page's rule, for the same reason. */
+  const toggleStem = useCallback(
+    (seedId: string, name: string) => {
+      const info = sources?.sources.find((s) => s.seedId === seedId);
+      if (!info) return;
+      const off = stemsOff[seedId] ?? [];
+      const next = off.includes(name) ? off.filter((s) => s !== name) : [...off, name];
+      if (next.length >= info.stems.length) {
+        setNote('Leave at least one stem on — muting them all is silence');
+        return;
+      }
+      const on = info.stems.map((s) => s.name).filter((s) => !next.includes(s));
+      setStemsOff({ ...stemsOff, [seedId]: next });
+      setNote(null);
+      // Only follow the switches in the pane that is showing this seed:
+      // toggling one seed's stems must not steal the source from another.
+      setPicked((cur) =>
+        seedOfSourceId(cur) === seedId ? seedSourceId(seedId, next.length === 0 ? [] : on) : cur,
+      );
+    },
+    [sources, stemsOff],
+  );
+
+  const order = useMemo(
+    () => [...seedEntries.map((e) => e.id), ...clipEntries.map((e) => e.id)],
+    [clipEntries, seedEntries],
+  );
+  const labelOf = useCallback(
+    (id: SourceId) => {
+      const seedId = seedOfSourceId(id);
+      if (seedId) {
+        const seed = seedEntries.find((e) => e.seedId === seedId);
+        const stems = stemsOfSourceId(id);
+        if (!seed) return id;
+        return stems.length ? `${seed.label} · ${stems.join(' + ')}` : seed.label;
+      }
+      return clipEntries.find((e) => e.id === id)?.label ?? id;
+    },
+    [clipEntries, seedEntries],
+  );
+
+  /** The seed the source pane is showing — what the track view draws its
+   *  grid, its verdict and its confidence band from. */
+  const openSeed = useMemo(() => {
+    const seedId = seedOfSourceId(picked);
+    return project.seeds.find((s) => s.id === seedId) ?? firstSeed;
+  }, [firstSeed, picked, project.seeds]);
 
   /** Load a saved clip into the EDITOR. The source pane is left where it
    *  was: editing a clip and cutting beats from one are different jobs,
@@ -435,39 +534,50 @@ export function BeatifyClipBuilder({ track, clips, onRebeatify }: BeatifyClipBui
     // with the waveform above it.
     <section className="beatify-builder" data-testid="beatify-builder">
       <BeatifyClipList
-        entries={entries}
+        seeds={seedEntries}
+        clips={clipEntries}
         selected={picked}
         onSelect={setPicked}
+        onToggleStem={toggleStem}
         onEdit={editSaved}
+        onRemoveSeed={onRemoveSeed}
         onNew={newClip}
+        onImport={onImport}
       />
       <div className="beatify-builder-main">
         <div className="beatify-builder-source">
-          <BeatifyTrackView
-            key={picked}
-            handle={sourceRef}
-            track={track}
-            source={sourceView}
-            waveHeight={SOURCE_WAVE_H}
-            loadAudio={(_id, startSecs, secs) =>
-              clips.audio(projectId, parseSourceId(picked), startSecs, secs)
-            }
-            onRebeatify={onRebeatify}
-            onSelectionBeats={setSelBeats}
-            onPlayingChange={onSourcePlaying}
-            onPullOut={liftSelection}
-            transportExtra={
-              <button
-                className="beatify-drag-beats"
-                data-testid="beatify-drag-beats"
-                disabled={beatsSelected <= 0}
-                title="Drag these beats into the clip below — or drag them straight down out of the waveform"
-                onMouseDown={startDrag}
-              >
-                ⠿ {beatsSelected} beat{beatsSelected === 1 ? '' : 's'}
-              </button>
-            }
-          />
+          {openSeed ? (
+            <BeatifyTrackView
+              key={picked}
+              handle={sourceRef}
+              track={openSeed}
+              source={sourceView}
+              waveHeight={SOURCE_WAVE_H}
+              loadAudio={(_id, startSecs, secs) =>
+                clips.audio(projectId, parseSourceId(picked), startSecs, secs)
+              }
+              onRebeatify={() => onRebeatify(openSeed)}
+              onSelectionBeats={setSelBeats}
+              onPlayingChange={onSourcePlaying}
+              onPullOut={liftSelection}
+              transportExtra={
+                <button
+                  className="beatify-drag-beats"
+                  data-testid="beatify-drag-beats"
+                  disabled={beatsSelected <= 0}
+                  title="Drag these beats into the clip below — or drag them straight down out of the waveform"
+                  onMouseDown={startDrag}
+                >
+                  ⠿ {beatsSelected} beat{beatsSelected === 1 ? '' : 's'}
+                </button>
+              }
+            />
+          ) : (
+            <p className="beatify-empty" data-testid="beatify-builder-empty">
+              This project has no material yet. Import a track — the first one sets the tempo, and
+              everything after it is conformed to that tempo, so beats from any of them line up.
+            </p>
+          )}
         </div>
 
         <BeatifyClipEditor

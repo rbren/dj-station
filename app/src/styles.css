@@ -4086,6 +4086,67 @@ body {
   margin-bottom: 6px;
 }
 
+/* A seed is a block, not a line: its name, and under it the parts of it
+   that can be switched off. */
+.beatify-seed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+
+.beatify-seed-empty {
+  color: #7c869a;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  padding: 4px 6px;
+}
+
+.beatify-seed-stems {
+  flex-basis: 100%;
+  display: flex;
+  gap: 3px;
+  padding-left: 6px;
+}
+
+.beatify-seed-stems button {
+  background: transparent;
+  border: 1px solid #333a46;
+  border-radius: 3px;
+  color: #5a6273;
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  cursor: pointer;
+}
+
+.beatify-seed-stems button.beatify-stem-on {
+  border-color: #47707a;
+  color: #9ff0e6;
+}
+
+.beatify-seed-stems button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* The tempo a whole project runs at: small, and next to its name. */
+.beatify-bpm {
+  width: 5.5rem;
+}
+
+.beatify-open-name {
+  color: #dce8ff;
+  font-weight: 600;
+}
+
+/* What joining this project will do to the material being imported. */
+.beatify-conform {
+  color: #8a7048;
+  font-size: 0.72rem;
+  margin-right: auto;
+}
+
 /* Amber is what was played, teal is what the maths says — a selection is
    neither, so it stays a neutral wash over whatever it covers. */
 .beatify-clip-marquee {

@@ -4,7 +4,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_COLUMNS,
-  SEED_SOURCE,
   abutsLeft,
   addRow,
   cellRange,
@@ -21,12 +20,15 @@ import {
   removePlacement,
   rowPlacements,
   setColumns,
-  stemSourceId,
+  seedSourceId,
+  seedOfSourceId,
+  stemsOfSourceId,
   usedColumns,
 } from '../src/beatifyClip';
 import type { BeatRun, ClipDraft } from '../src/beatifyClip';
 
-const run = (beats: number, sourceBeat = 0, source = SEED_SOURCE): BeatRun => ({
+const SEED = seedSourceId('s1');
+const run = (beats: number, sourceBeat = 0, source = SEED): BeatRun => ({
   source,
   sourceBeat,
   beats,
@@ -191,7 +193,12 @@ describe('setting the clip length', () => {
 describe('copying a chunk of the grid', () => {
   /** Two runs on row 0: beats 0–3 and 4–7, from different sources. */
   const two = () =>
-    placeRun(placeRun(emptyDraft(), run(4, 0), 0, 0), run(4, 8, stemSourceId('drums')), 0, 4);
+    placeRun(
+      placeRun(emptyDraft(), run(4, 0), 0, 0),
+      run(4, 8, seedSourceId('s1', ['drums'])),
+      0,
+      4,
+    );
 
   it('reads a swept rectangle whichever way it was swept', () => {
     expect(cellRange({ row: 0, col: 2 }, { row: 1, col: 5 })).toEqual({
@@ -265,9 +272,27 @@ describe("a draft's identity", () => {
 
 describe('source ids', () => {
   it('round-trip to what the backend needs', () => {
-    expect(parseSourceId(SEED_SOURCE)).toEqual({ kind: 'seed' });
-    expect(parseSourceId(stemSourceId('drums'))).toEqual({ kind: 'stem', name: 'drums' });
+    expect(parseSourceId(seedSourceId('s1'))).toEqual({ kind: 'seed', id: 's1', stems: [] });
     expect(parseSourceId('clip:7')).toEqual({ kind: 'clip', id: '7' });
     expect(() => parseSourceId('nonsense')).toThrow(/unknown source/);
+  });
+
+  // A project holds several tracks, so a run has to remember WHICH one it
+  // came from — and which parts of it were playing at the time.
+  it('name the seed, and the parts of it that were on', () => {
+    const drums = seedSourceId('s2', ['drums', 'bass']);
+    expect(drums).toBe('seed:s2/drums+bass');
+    expect(parseSourceId(drums)).toEqual({ kind: 'seed', id: 's2', stems: ['drums', 'bass'] });
+    expect(seedOfSourceId(drums)).toBe('s2');
+    expect(stemsOfSourceId(drums)).toEqual(['drums', 'bass']);
+    // The whole mix names no parts: it is the render, not a sum of stems.
+    expect(seedSourceId('s2', [])).toBe('seed:s2');
+    expect(stemsOfSourceId('seed:s2')).toEqual([]);
+    // A clip belongs to no seed.
+    expect(seedOfSourceId('clip:7')).toBe('');
+  });
+
+  it('keep two seeds apart even when the same stem is soloed', () => {
+    expect(seedSourceId('s1', ['drums'])).not.toBe(seedSourceId('s2', ['drums']));
   });
 });
