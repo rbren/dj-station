@@ -222,6 +222,25 @@ describe('dragging beats into the clip', () => {
     expect(screen.getByTestId('beatify-clip-count').textContent).toContain('2 tracks');
   });
 
+  it('survives a click-to-seek: the beats stay selected and still drag', async () => {
+    await mount();
+    selectBeats(8, 4);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('4 beats'),
+    );
+
+    // Auditioning somewhere else must not cost the selection — clicking
+    // the waveform moves the playhead and nothing more.
+    const wave = screen.getByTestId('beatify-track-waveform');
+    fireEvent.mouseDown(wave, { clientX: 200 });
+    fireEvent.mouseUp(wave, { clientX: 200 });
+    expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('4 beats');
+    expect(screen.getByTestId('beatify-track-selection')).toBeTruthy();
+
+    dragInto(0, 0);
+    expect(blocks()[0].dataset.beats).toBe('4');
+  });
+
   it('has nothing to drag until beats are selected', async () => {
     await mount();
     expect((screen.getByTestId('beatify-drag-beats') as HTMLButtonElement).disabled).toBe(true);

@@ -960,7 +960,15 @@ fails if it's missing.
   toggle is WITHDRAWN, not merely off). (b) In `AudioTimeline`, only a
   CLICK seeks, and it seeks on release; a drag that swept anywhere is a
   selection and leaves the playhead alone. `WaveDrag.swept/fresh` is what
-  tells them apart — do not move the seek back to mousedown.
+  tells them apart — do not move the seek back to mousedown. (c) A CLICK
+  ALSO LEAVES THE SELECTION ALONE: a press must not touch the selection,
+  because at mousedown nobody yet knows whether it is a seek or a sweep.
+  `swept` is a PIXEL test (`DRAG_PX`, against the press's `anchorX`, not a
+  time epsilon — one pixel of jitter is not a gesture) and the first
+  `onSelectionChange` of a fresh drag comes from the mousemove that passes
+  it. Selections die only by an explicit act: Escape (both the Beatify
+  track view and the Clip page), an edit that consumes them, undo/redo, or
+  a new sweep.
 - Beatify §6 open questions, decided: (1) loops follow `ClipTransport`'s
   `setLoop` policy, which is now "arming or moving a loop NEVER moves
   playback" (`loopWrapBeat` remains as pure math but the UI no longer

@@ -607,6 +607,28 @@ describe('ClipView', () => {
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:05.00–0:08.00');
   });
 
+  it('keeps the selection when you click to seek', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    const wave = sizeTimeline('clip-waveform');
+    fireEvent.mouseDown(wave, { clientX: 500 });
+    fireEvent.mouseMove(window, { clientX: 800 });
+    fireEvent.mouseUp(window);
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:05.00\u20130:08.00');
+
+    // Moving the playhead is not choosing new material: a click seeks and
+    // leaves the selection — and therefore the loop — exactly as it was.
+    fireEvent.mouseDown(wave, { clientX: 200 });
+    fireEvent.mouseUp(window);
+    expect(screen.getByTestId('clip-playhead-readout').textContent).toBe('0:02.00');
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:05.00\u20130:08.00');
+    expect(screen.getByTestId('clip-selection')).toBeTruthy();
+
+    // Escape is the way to be rid of it.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.getByTestId('clip-readout').textContent).toContain('no selection');
+  });
+
   it('plays the rendered edit and tracks the playhead', async () => {
     const clip = clipMock();
     await openTrack(clip);

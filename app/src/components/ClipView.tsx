@@ -641,6 +641,10 @@ export function ClipView({
         // Space would otherwise click a focused button / scroll the page.
         e.preventDefault();
         togglePlay();
+      } else if (!mod && e.key === 'Escape') {
+        // Clicking no longer drops the selection, so this is the way out
+        // of one — the same key the Beatify track view uses.
+        setSelection(null);
       }
     };
     window.addEventListener('keydown', onKey);

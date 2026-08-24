@@ -41,6 +41,9 @@ export interface Range {
 export const MIN_VIEW_SECS = 0.05;
 /** Grab radius for the selection's edge handles, in waveform pixels. */
 export const HANDLE_PX = 7;
+/** Pointer travel that turns a press into a sweep. Below it the gesture
+ *  is a click, however shaky the hand. */
+const DRAG_PX = 3;
 /** Below this a selection is a click, not a range. */
 const SELECTION_EPS = 1e-4;
 
@@ -97,7 +100,16 @@ export interface TimelineSnap {
  *  whether the pointer actually moved, so a plain click — which is a seek
  *  — can still be told apart on release. */
 type WaveDrag =
-  | { kind: 'select'; anchor: number; swept: boolean; fresh: boolean; free: boolean }
+  | {
+      kind: 'select';
+      anchor: number;
+      /** Where the press landed, in client pixels: what tells a click
+       *  from a sweep, since a pixel of jitter is not a gesture. */
+      anchorX: number;
+      swept: boolean;
+      fresh: boolean;
+      free: boolean;
+    }
   | { kind: 'move'; base: Range; anchor: number; delta: number; audio: boolean };
 
 export interface AudioTimelineProps {
@@ -111,8 +123,9 @@ export interface AudioTimelineProps {
    *  siblings (Clip's level lane) can share the window. */
   vp: Range | null;
   onVpChange(vp: Range | null): void;
-  /** Selection, raw: a just-clicked `{t, t}` is kept (and treated as
-   *  none) so a sweep can grow out of it. */
+  /** Selection, raw: a zero-length one is kept (and treated as none) so a
+   *  sweep can grow out of it. Only a sweep changes it — a click seeks
+   *  and leaves it alone. */
   selection: Range | null;
   onSelectionChange(sel: Range | null): void;
   playing: boolean;
@@ -239,6 +252,7 @@ export function AudioTimeline({
         dragRef.current = {
           kind: 'select',
           anchor: edge === 'start' ? sel.end : sel.start,
+          anchorX: e.clientX,
           swept: true,
           fresh: false,
           free: false,
@@ -249,14 +263,19 @@ export function AudioTimeline({
         // slides the audio with it — an edit, so it must be asked for.
         dragRef.current = { kind: 'move', base: sel, anchor: t, delta: 0, audio: e.altKey };
       } else {
+        // A PRESS IS NOT YET A GESTURE. This used to collapse the
+        // selection to a point here, which meant every click-to-seek
+        // threw away the selection (and the loop with it) before anyone
+        // knew whether the pointer was going to move. Nothing happens to
+        // the selection until the sweep below says so.
         dragRef.current = {
           kind: 'select',
           anchor: t,
+          anchorX: e.clientX,
           swept: false,
           fresh: true,
           free: e.metaKey || e.ctrlKey,
         };
-        onSelectionChange({ start: t, end: t });
       }
       setDragging(true);
     },
@@ -270,7 +289,8 @@ export function AudioTimeline({
       if (!drag) return;
       const t = timeAt(e.clientX, dragRect.current);
       if (drag.kind === 'select') {
-        if (Math.abs(t - drag.anchor) > 1e-4) drag.swept = true;
+        if (Math.abs(e.clientX - drag.anchorX) > DRAG_PX) drag.swept = true;
+        if (!drag.swept) return;
         onSelectionChange(
           snapRange({ start: Math.min(drag.anchor, t), end: Math.max(drag.anchor, t) }),
         );
@@ -291,8 +311,8 @@ export function AudioTimeline({
       dragRef.current = null;
       setDragging(false);
       if (drag?.kind === 'select') {
-        // A click that never swept anywhere is a seek, and it clears the
-        // selection it collapsed to a point.
+        // A press that never swept anywhere is a seek, and a seek leaves
+        // the selection (and so the loop) alone.
         if (drag.fresh && !drag.swept) onSeek(snapSeek(drag.anchor, drag.free));
         return;
       }
