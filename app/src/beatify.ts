@@ -112,6 +112,26 @@ export interface BeatifyMeters {
   anchors: number[];
 }
 
+/** One beat of the cut point inspector (§3.5). `samples` is peak-reduced
+ *  source audio across the window; `attack` is where the transient starts
+ *  relative to the grid line, or null where nothing in there rises. */
+export interface BeatifyTrace {
+  beat: number;
+  samples: number[];
+  attack: number | null;
+}
+
+/** The cut point inspector's payload (MOD-8/11). Seconds throughout. */
+export interface BeatifyScope {
+  preSecs: number;
+  postSecs: number;
+  traces: BeatifyTrace[];
+  /** How far before the grid line the attacks begin, median. */
+  attackLead: number;
+  /** Horizontal smear across the traces — flam, in the units on screen. */
+  spread: number;
+}
+
 export interface BeatifyRecord {
   source: string;
   sourceHash: string;
@@ -177,8 +197,37 @@ export const IN_BAND_MS = 5;
 /** Meter thresholds — mirror `grid::FLAM_GREEN_MS` / `STRETCH_GREEN_PCT`. */
 export const FLAM_GREEN_MS = 5;
 export const STRETCH_GREEN_PCT = 1.2;
-/** Lead-in range in milliseconds (MOD-20). */
-export const LEAD_IN_MAX_MS = 40;
+/** Lead-in range in milliseconds (MOD-20) — mirrors `grid::LEAD_IN_MAX`. */
+export const LEAD_IN_MAX_MS = 250;
+
+/** The inspector's window in front of the grid line (MOD-8), ms. */
+export const SCOPE_PRE_MS = 40;
+/** As far as that window will ever stretch. */
+export const SCOPE_PRE_MAX_MS = 400;
+/** Room kept in front of the cut line so it never sits on the edge. */
+const SCOPE_EDGE_MS = 8;
+
+/** How much of the track before the beat the inspector shows.
+ *
+ *  The PRD's window is a fixed −40 ms (MOD-8) and stays that way for any
+ *  ordinary lead-in, because traces are only comparable at one scale.
+ *  A lead-in can now reach further back than the window does, though, and
+ *  an inspector that cannot show the cut is worse than useless — so past
+ *  that point the window grows, in 25 ms steps so that dragging the
+ *  slider does not make the traces breathe. */
+export function scopePreMs(leadInMs: number): number {
+  if (leadInMs <= SCOPE_PRE_MS - SCOPE_EDGE_MS) return SCOPE_PRE_MS;
+  return Math.min(SCOPE_PRE_MAX_MS, Math.ceil((leadInMs + SCOPE_EDGE_MS) / 25) * 25);
+}
+
+/** How much room a lead-in leaves in front of the attack (MOD-11), in
+ *  milliseconds. Negative means the cut lands inside the attack and will
+ *  chop it — which is the one thing the number beside the slider has to
+ *  be able to say. */
+export function cutClearanceMs(scope: BeatifyScope | null, leadInMs: number): number | null {
+  if (!scope || scope.traces.every((t) => t.attack === null)) return null;
+  return leadInMs - scope.attackLead * 1000;
+}
 
 export function beatTime(grid: Grid, n: number): number {
   return grid.phase + n * grid.period;
@@ -352,7 +401,8 @@ export interface BeatifyClientApi {
     strength: number,
     click: boolean,
   ): Promise<ArrayBuffer | null>;
-  syncCheck(strength: number): Promise<ArrayBuffer | null>;
+  syncCheck(strength: number, leadIn: number): Promise<ArrayBuffer | null>;
+  scope(strength: number, points: number, preSecs: number): Promise<BeatifyScope | null>;
   save(request: SaveRequest, buckets: number): Promise<BeatifyTrack | null>;
   projects(): Promise<BeatifyProject[] | null>;
   openProject(projectId: string, buckets: number): Promise<BeatifyTrack | null>;
@@ -384,8 +434,11 @@ export class BeatifyClient extends IpcClient implements BeatifyClientApi {
       click,
     });
   }
-  syncCheck(strength: number) {
-    return this.call<ArrayBuffer>('beatify_sync_check', { strength });
+  syncCheck(strength: number, leadIn: number) {
+    return this.call<ArrayBuffer>('beatify_sync_check', { strength, leadIn });
+  }
+  scope(strength: number, points: number, preSecs: number) {
+    return this.call<BeatifyScope>('beatify_scope', { strength, points, preSecs });
   }
   save(request: SaveRequest, buckets: number) {
     return this.call<BeatifyTrack>('beatify_save', { request, buckets });

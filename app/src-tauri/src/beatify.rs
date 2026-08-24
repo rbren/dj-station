@@ -17,7 +17,7 @@
 //! two.
 
 use dj_analysis::beatify::{
-    self, audition, detect, grid, store, Agreement, Analysis, Grid, Quality, Reading, Ruler,
+    self, audition, detect, grid, scope, store, Agreement, Analysis, Grid, Quality, Reading, Ruler,
     Sweep, WarpMap,
 };
 use dj_analysis::AudioData;
@@ -138,6 +138,30 @@ pub struct BeatifyMeters {
     pub quality: Quality,
     pub residuals: Vec<f64>,
     pub anchors: Vec<f64>,
+}
+
+/// The cut point inspector (§3.5). Traces are peak-reduced source
+/// samples, not a render: the slider can ask for these as often as it
+/// likes.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatifyScope {
+    pub pre_secs: f64,
+    pub post_secs: f64,
+    pub traces: Vec<BeatifyTrace>,
+    /// Median distance the attacks begin BEFORE the grid line, seconds.
+    pub attack_lead: f64,
+    /// Horizontal smear across the traces, seconds.
+    pub spread: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatifyTrace {
+    pub beat: usize,
+    pub samples: Vec<f32>,
+    /// Attack position relative to the line, or null where nothing rises.
+    pub attack: Option<f64>,
 }
 
 /// A beatified track as the track view needs it.
@@ -370,15 +394,53 @@ pub fn beatify_preview(
 }
 
 /// The sync check (MOD-28): four beats from each end of the track,
-/// layered and looped.
+/// layered and looped. Cut at the lead-in, because that is where the
+/// user can hear whether the lead-in is doing its job (§3.7).
 #[tauri::command(async)]
 pub fn beatify_sync_check(
     state: State<AppState>,
     strength: f64,
+    lead_in: f64,
 ) -> CmdResult<tauri::ipc::Response> {
     state.beatify.with(|session| {
-        let layered = audition::sync_check(&session.audio, &session.analysis, strength);
+        let layered = audition::sync_check(
+            &session.audio,
+            &session.analysis,
+            strength,
+            lead_in.clamp(0.0, grid::LEAD_IN_MAX),
+        );
         wav(&layered)
+    })
+}
+
+/// The cut point inspector (§3.5): a dozen beats sampled across the
+/// track, drawn on top of each other around the grid line. No render —
+/// these are source samples where the warp maps each line back to
+/// (MOD-A22), so the strength slider can refresh it freely.
+#[tauri::command(async)]
+pub fn beatify_scope(
+    state: State<AppState>,
+    strength: f64,
+    points: usize,
+    pre_secs: f64,
+) -> CmdResult<BeatifyScope> {
+    state.beatify.with(|session| {
+        let s = scope::scope(&session.audio, &session.analysis, strength, points, pre_secs);
+        Ok(BeatifyScope {
+            pre_secs: s.pre_secs,
+            post_secs: s.post_secs,
+            attack_lead: s.attack_lead,
+            spread: s.spread,
+            traces: s
+                .traces
+                .into_iter()
+                .map(|t| BeatifyTrace {
+                    beat: t.beat,
+                    samples: t.samples,
+                    attack: t.attack,
+                })
+                .collect(),
+        })
     })
 }
 

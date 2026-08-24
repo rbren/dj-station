@@ -223,7 +223,7 @@ Choosing a region by looking at a waveform is guesswork. The user needs to hear 
 
 **MOD-18.** The lead-in is **measured, not chosen**: the median offset between grid line and actual transient onset across all beats, plus a small safety pad. On typical material this lands near 12–16 ms, not 100 ms.
 **MOD-19.** One global value, applied at every cut. Uniformity is what keeps it sync-safe — per-beat onset snapping would be more precise per cut and would quietly break the layering guarantee.
-**MOD-20.** Adjustable 0–40 ms with the cut line moving live in the inspector, so the user can see they're clearing the attack rather than trusting a number.
+**MOD-20.** Adjustable 0–250 ms (raised from 40 ms: material with a long swell in front of the beat needs more room than a drum hit does) with the cut line moving live in the inspector, so the user can see they're clearing the attack rather than trusting a number. Past ~30 ms the cut leaves the inspector's 40 ms window, so the window widens in 25 ms steps to keep it in view.
 **MOD-21.** Optional zero-crossing snap on the final cut point (sub-0.1 ms adjustment, kills clicks).
 **MOD-22.** Stored as project metadata, **separate from the grid**, applied at cut time. Beat 0 stays beat 0 and the value stays changeable.
 

@@ -11,8 +11,8 @@
 //! and must never be a CI dependency (same rule as the ONNX separator).
 
 use dj_analysis::beatify::{
-    self, detect::BeatTracker, detect::DspTracker, grid, store, warp::WarpMap, Reading, Ruler,
-    Verdict,
+    self, audition, detect::BeatTracker, detect::DspTracker, grid, scope, store, warp::WarpMap,
+    Reading, Ruler, Verdict,
 };
 use dj_analysis::AudioData;
 use serde::{Deserialize, Serialize};
@@ -538,6 +538,127 @@ fn every_residual_knows_which_beat_it_is_about() {
         // later dot under the wrong beat.
         assert_eq!(n - beats[0], b.index - fitted[0].index);
     }
+}
+
+#[test]
+fn the_lead_in_is_measured_within_a_beat_not_within_the_sliders_range() {
+    // MOD-18 vs MOD-20: the slider reaches 250 ms so that material which
+    // wants a long reach-back can have it, but what the ANALYSIS reports
+    // is a fact about the attacks and stays inside the search radius. If
+    // widening the control ever widened the measurement, a click track
+    // would suddenly claim a fifth of a second of lead-in.
+    let times = drifting_beats(120.0, 120.0, 48, 0.5);
+    let audio = click_track(&times, 1.0);
+    let analysis =
+        beatify::analyze(&audio, &DspTracker, None, Reading::default()).expect("analyze");
+    assert!(
+        analysis.lead_in <= grid::ATTACK_RADIUS + grid::LEAD_IN_PAD,
+        "measured {} s",
+        analysis.lead_in
+    );
+    // The slider reaches far past anything a measurement will produce:
+    // its range is for material with a swell in front of the beat, not
+    // for the drum hits the measurement is calibrated on.
+    const _: () = assert!(grid::LEAD_IN_MAX > grid::ATTACK_RADIUS * 4.0);
+}
+
+#[test]
+fn the_sync_check_cuts_at_the_lead_in() {
+    // The sync check is made of cuts, so it is where the lead-in becomes
+    // audible: the take starts `lead_in` before the beat, which puts the
+    // beat that far into the loop instead of at its very seam.
+    let times = drifting_beats(120.0, 120.0, 40, 0.5);
+    let audio = click_track(&times, 1.0);
+    let analysis =
+        beatify::analyze(&audio, &DspTracker, None, Reading::default()).expect("analyze");
+    let strength = analysis.sweep.default_strength;
+
+    let flush = audition::sync_check(&audio, &analysis, strength, 0.0);
+    let led = audition::sync_check(&audio, &analysis, strength, 0.100);
+    let onset = |a: &AudioData| -> f64 {
+        let mono = a.mono_mix();
+        let peak = mono.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        mono.iter().position(|s| s.abs() > peak * 0.5).unwrap_or(0) as f64 / a.sample_rate as f64
+    };
+    let moved = onset(&led) - onset(&flush);
+    assert!(
+        (moved - 0.100).abs() < 0.010,
+        "the first attack should sit 100 ms into the take, moved {moved} s"
+    );
+}
+
+#[test]
+fn the_inspector_finds_the_attack_the_cut_has_to_clear() {
+    // §3.5: the traces exist so the user can SEE the cut land in front of
+    // the attack. That only works if the window really is centred on the
+    // grid line and the attack really is where the lead-in says it is.
+    let times = drifting_beats(120.0, 120.0, 64, 0.7);
+    let audio = click_track(&times, 1.0);
+    let analysis =
+        beatify::analyze(&audio, &DspTracker, None, Reading::default()).expect("analyze");
+    let s = scope::scope(
+        &audio,
+        &analysis,
+        analysis.sweep.default_strength,
+        200,
+        scope::SCOPE_PRE,
+    );
+
+    assert_eq!(s.pre_secs, scope::SCOPE_PRE);
+    assert_eq!(s.traces.len(), scope::SCOPE_TRACES);
+    assert!(s.traces.iter().all(|t| t.samples.len() == 200));
+    // Sampled ACROSS the song (MOD-8): comparing the first beats with the
+    // last is the whole point.
+    assert!(s.traces[0].beat < s.traces[s.traces.len() - 1].beat / 2);
+    // A click track's transient is at the beat, so a locked grid leaves
+    // no lead and no smear worth speaking of.
+    assert!(s.attack_lead.abs() < 0.010, "attack lead {}", s.attack_lead);
+    assert!(s.spread < 0.010, "spread {}", s.spread);
+    // Clearance is what the slider buys: room in front of the attack.
+    assert!(s.clearance(0.020) > s.clearance(0.0));
+    assert!(s.clearance(0.020) > 0.0);
+
+    // A lead-in can now reach back further than the PRD's 40 ms window,
+    // and a cut drawn off-screen would be worse than no drawing at all,
+    // so the window opens on request — around the same line, so what it
+    // says about the attack does not change with how wide it is.
+    let wide = scope::scope(
+        &audio,
+        &analysis,
+        analysis.sweep.default_strength,
+        200,
+        0.200,
+    );
+    assert!((wide.pre_secs - 0.200).abs() < 1e-9);
+    assert!((wide.attack_lead - s.attack_lead).abs() < 1e-9);
+    let capped = scope::scope(&audio, &analysis, analysis.sweep.default_strength, 200, 9.0);
+    assert_eq!(capped.pre_secs, scope::SCOPE_PRE_MAX);
+}
+
+#[test]
+fn the_traces_converge_as_the_warp_pulls_the_beats_in() {
+    // MOD-9, and the reason the inspector is worth drawing: at no warp a
+    // drifting track's attacks scatter across the window; with the warp
+    // on they land on the line together.
+    let (audio, analysis) = analyze_drifting(120.0, 126.0, 64);
+    let spread_of = |strength: f64| {
+        let s = scope::scope(&audio, &analysis, strength, 64, scope::SCOPE_PRE);
+        let offs: Vec<f64> = s.traces.iter().filter_map(|t| t.attack).collect();
+        let lo = offs.iter().cloned().fold(f64::INFINITY, f64::min);
+        let hi = offs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        (hi - lo, offs.len())
+    };
+    let (loose, loose_found) = spread_of(0.0);
+    let (tight, tight_found) = spread_of(1.0);
+    assert!(
+        tight < loose,
+        "warped spread {tight} should beat unwarped {loose}"
+    );
+    // And with the warp on, every sampled beat HAS a findable attack near
+    // its line — at no warp some have drifted out of the search radius
+    // altogether, which is the same story told by absence.
+    assert_eq!(tight_found, scope::SCOPE_TRACES);
+    assert!(loose_found <= tight_found);
 }
 
 #[test]

@@ -45,12 +45,27 @@ pub const SYNC_REPEATS: usize = 4;
 /// The acceptance test as a button (MOD-28): layer `SYNC_BEATS` beats from
 /// two far-apart parts of the warped track and loop them. Clean means
 /// commit; flam means the warp is wrong.
-pub fn sync_check(audio: &AudioData, analysis: &Analysis, strength: f64) -> AudioData {
+///
+/// These takes are CUTS, so they honour the lead-in (§3.7): each one
+/// starts `lead_in` before its first beat and is looped, which puts the
+/// cut point at the seam of the loop. That is what makes the lead-in
+/// audible — too little and the attack is sliced and thuds at the seam,
+/// enough and the loop turns over cleanly. Both takes shift by the same
+/// amount, so what the button is actually testing is untouched.
+pub fn sync_check(
+    audio: &AudioData,
+    analysis: &Analysis,
+    strength: f64,
+    lead_in: f64,
+) -> AudioData {
     let grid = analysis.grid;
     let take_secs = SYNC_BEATS as f64 * grid.period;
-    let first = grid.beat_time(0.0);
+    // A beat of head padding exists precisely so the first cut has audio
+    // to reach back into (MOD-A14), so this cannot go negative.
+    let lead_in = lead_in.clamp(0.0, grid.period);
+    let first = grid.beat_time(0.0) - lead_in;
     let last_beat = grid.beats.saturating_sub(SYNC_BEATS + 1) as f64;
-    let last = grid.beat_time(last_beat.max(0.0));
+    let last = grid.beat_time(last_beat.max(0.0)) - lead_in;
 
     let a = crate::beatify::render_window(audio, analysis, strength, first, take_secs);
     let b = crate::beatify::render_window(audio, analysis, strength, last, take_secs);

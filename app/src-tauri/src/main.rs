@@ -2981,6 +2981,7 @@ fn main() {
             beatify::beatify_meters,
             beatify::beatify_preview,
             beatify::beatify_sync_check,
+            beatify::beatify_scope,
             beatify::beatify_save,
             beatify::beatify_projects,
             beatify::beatify_project_open,

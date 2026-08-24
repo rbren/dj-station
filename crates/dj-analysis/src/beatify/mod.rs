@@ -23,6 +23,7 @@ pub mod audition;
 pub mod build;
 pub mod detect;
 pub mod grid;
+pub mod scope;
 pub mod store;
 pub mod warp;
 

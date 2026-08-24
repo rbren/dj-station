@@ -1063,6 +1063,41 @@ beatify::build`.
 
 The detail is in the `Conventions` bullets above; this is the map.
 
+- Where the code is. Frontend: `app/src/beatify.ts` (wire types, the grid
+  and slider LAWS — `beatTime`/`beatAt`/`snapSelection`/`gridLod`/
+  `anchorStride`/`scopePreMs`/`cutClearanceMs` — and `BeatifyClient`),
+  `app/src/beatifyClip.ts` (the pure clip model and its client), and
+  `app/src/components/Beatify{View,Modal,CutScope,TrackView,ClipBuilder,
+  ClipList,ClipEditor}.tsx` over the shared `AudioTimeline`/
+  `WaveformView`/`clipTransport`. Backend: `app/src-tauri/src/beatify.rs`
+  (analysis + projects) and `beatify_clip.rs` (clips), both thin over
+  `crates/dj-analysis/src/beatify/`: `detect` (beat_this or the built-in
+  DSP tracker), `grid` (fit, reading, sweep, residuals, lead-in),
+  `warp` (map + render), `scope` (the cut point inspector), `audition`
+  (click track, sync check), `build` (clip assembly), `store` (the
+  on-disk project).
+- State ownership: there is no store. `BeatifyView` owns which project or
+  track is open and nothing else; the modal owns the phase-2 controls
+  (strength, lead-in, ruler group, region) while the ANALYSIS itself
+  lives in the backend `BeatifySession` until Save — reading changes and
+  the warp slider re-query it, so the frontend never recomputes a grid.
+  The builder owns the live `ClipDraft`.
+- Commands, all `#[tauri::command(async)]`: `beatify_tracker_status`,
+  `_analyze`, `_set_reading`, `_meters`, `_scope`, `_preview`,
+  `_sync_check`, `_save`, `_warp_map`, `_projects`, `_project_open`/
+  `_rename`/`_delete`, `_project_audio`, `_cancel`; clips add
+  `beatify_clip_sources`, `_open`, `_audio`, `_preview`, `_save`,
+  `_delete`.
+- Beats are the unit of every gesture, but MIND THE TIMEBASE: the modal
+  snaps to `sourceGrid` (source seconds), the track view and the editor
+  to `grid` (output seconds, beat 0 padded). Selections grow OUTWARD to
+  whole beats; a plain click seeks to the nearest beat, ⌘ frees it.
+- The lead-in (§3.7) is measured, stored in the record, and applied at
+  CUTS ONLY — the grid never moves for it (MOD-22). Today the cuts that
+  honour it are the modal's sync check; `build::span` still cuts clips
+  flush with the beat, because a clip has no head room of its own to
+  reach back into and giving it one changes what a clip's beat 0 means.
+  That is the open item, and it belongs to the clip builder.
 - A PROJECT is the unit of work, not a track. One project = one beatified
   take on one source track: its grid, its constant-tempo render, and the
   clips cut from them. A track can carry any number of projects (two

@@ -18,10 +18,18 @@ pub const IN_BAND_SECS: f64 = 0.005;
 /// Meter thresholds (MOD-14).
 pub const FLAM_GREEN_MS: f64 = 5.0;
 pub const STRETCH_GREEN_PCT: f64 = 1.2;
-/// Lead-in bounds (MOD-20), seconds.
-pub const LEAD_IN_MAX: f64 = 0.040;
+/// How far the lead-in slider reaches (MOD-20), seconds. The measured
+/// value lands near 12–16 ms on typical material; the range is wide
+/// because material that wants a long reach-back (a swelling pad, a
+/// pickup note) exists and 40 ms could not express it.
+pub const LEAD_IN_MAX: f64 = 0.250;
 /// Safety pad added to the measured attack offset (MOD-18).
 pub const LEAD_IN_PAD: f64 = 0.002;
+/// How far either side of a grid line an attack is looked for. This
+/// bounds what MEASUREMENT can return, and it is deliberately much
+/// tighter than `LEAD_IN_MAX`: an onset further than this from the beat
+/// belongs to a different beat.
+pub const ATTACK_RADIUS: f64 = 0.025;
 /// Densest and sparsest anchor spacing the warp slider can reach.
 pub const MIN_STRIDE: usize = 1;
 pub const MAX_STRIDE: usize = 64;
@@ -787,46 +795,83 @@ pub fn drift_spans(fit: &Fit, first: f64, last: f64) -> Vec<DriftSpan> {
 // Lead-in (§3.7)
 // ---------------------------------------------------------------------------
 
-/// Measure the lead-in (MOD-18): the median offset between the grid line
-/// and the actual transient onset, plus a small safety pad. One global
-/// value, because uniformity is what keeps cuts sync-safe (MOD-19).
-pub fn measure_lead_in(mono: &[f32], sample_rate: u32, beats: &[f64]) -> f64 {
-    let sr = sample_rate as f64;
-    let rms_win = (0.003 * sr) as usize;
-    let radius = (0.025 * sr) as usize;
-    if rms_win < 4 || mono.len() < 4 * rms_win || beats.is_empty() {
-        return LEAD_IN_PAD;
-    }
-    let mut prefix = vec![0.0f64; mono.len() + 1];
-    for (i, &s) in mono.iter().enumerate() {
-        prefix[i + 1] = prefix[i] + (s as f64) * (s as f64);
-    }
-    let rms = |i: usize| -> f64 {
-        let a = i.min(mono.len() - rms_win);
-        ((prefix[a + rms_win] - prefix[a]) / rms_win as f64).sqrt()
-    };
-    let step = (rms_win / 2).max(1);
-    let mut offsets: Vec<f64> = Vec::new();
-    for &t in beats {
-        let center = (t * sr) as usize;
-        if center <= radius || center + radius + rms_win >= mono.len() {
-            continue;
+/// Short-window RMS over a mono mix, prepared once so that many beats can
+/// be probed cheaply.
+///
+/// Both users of this — the lead-in measurement (MOD-18) and the cut
+/// point inspector (§3.5) — have to agree about where an attack begins,
+/// or the inspector would draw the attack somewhere other than where the
+/// number says it is. Sharing the scan is what makes that structural.
+pub struct OnsetScan<'a> {
+    mono: &'a [f32],
+    sr: f64,
+    win: usize,
+    prefix: Vec<f64>,
+}
+
+impl<'a> OnsetScan<'a> {
+    pub fn new(mono: &'a [f32], sample_rate: u32) -> Option<Self> {
+        let sr = sample_rate as f64;
+        let win = (0.003 * sr) as usize;
+        if win < 4 || mono.len() < 4 * win {
+            return None;
         }
-        let mut best_i = center;
-        let mut best_d = f64::NEG_INFINITY;
+        let mut prefix = vec![0.0f64; mono.len() + 1];
+        for (i, &s) in mono.iter().enumerate() {
+            prefix[i + 1] = prefix[i] + (s as f64) * (s as f64);
+        }
+        Some(Self {
+            mono,
+            sr,
+            win,
+            prefix,
+        })
+    }
+
+    fn rms(&self, i: usize) -> f64 {
+        let a = i.min(self.mono.len() - self.win);
+        ((self.prefix[a + self.win] - self.prefix[a]) / self.win as f64).sqrt()
+    }
+
+    /// Absolute time of the steepest energy rise within [`ATTACK_RADIUS`]
+    /// of `t`, or `None` when nothing in there rises — a held note or a
+    /// rest has no attack, and reporting one at the line would be a lie
+    /// the inspector then draws.
+    pub fn attack_near(&self, t: f64) -> Option<f64> {
+        let radius = (ATTACK_RADIUS * self.sr) as usize;
+        let center = (t * self.sr) as usize;
+        if center <= radius || center + radius + self.win >= self.mono.len() {
+            return None;
+        }
+        let step = (self.win / 2).max(1);
+        let mut best = (f64::NEG_INFINITY, center);
         let mut i = center - radius;
         while i + step <= center + radius {
-            let d = rms(i + step) - rms(i);
-            if d > best_d {
-                best_d = d;
-                best_i = i + step;
+            let d = self.rms(i + step) - self.rms(i);
+            if d > best.0 {
+                best = (d, i + step);
             }
             i += step;
         }
-        if best_d > 0.0 {
-            offsets.push(best_i as f64 / sr - t);
-        }
+        (best.0 > 0.0).then(|| best.1 as f64 / self.sr)
     }
+}
+
+/// Measure the lead-in (MOD-18): the median offset between the grid line
+/// and the actual transient onset, plus a small safety pad. One global
+/// value, because uniformity is what keeps cuts sync-safe (MOD-19).
+///
+/// The measurement is bounded by [`ATTACK_RADIUS`], not by
+/// [`LEAD_IN_MAX`]: what a track's attacks do is a fact about the audio,
+/// while the maximum is only how far the user may then push it.
+pub fn measure_lead_in(mono: &[f32], sample_rate: u32, beats: &[f64]) -> f64 {
+    let Some(scan) = OnsetScan::new(mono, sample_rate) else {
+        return LEAD_IN_PAD;
+    };
+    let mut offsets: Vec<f64> = beats
+        .iter()
+        .filter_map(|&t| scan.attack_near(t).map(|a| a - t))
+        .collect();
     if offsets.len() < 4 {
         return LEAD_IN_PAD;
     }

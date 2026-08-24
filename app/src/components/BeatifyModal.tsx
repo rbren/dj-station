@@ -25,18 +25,21 @@ import {
   LEAD_IN_MAX_MS,
   qualityLevel,
   readingOf,
+  scopePreMs,
   selectionLabel,
   snapSelection,
   timecode,
   verdictLabel,
   type BeatifyAnalysis,
   type BeatifyClientApi,
+  type BeatifyScope,
   type BeatifyTrack,
   type Quality,
 } from '../beatify';
 import { ClipTransport, type TransportHost } from '../clipTransport';
 import { logError } from '../errors';
 import { AudioTimeline, viewSpan, type Range } from './AudioTimeline';
+import { BeatifyCutScope } from './BeatifyCutScope';
 import type { TimeTick } from '../clip';
 import { beatSnap } from './BeatifyTrackView';
 import { WAVEFORM_VIEW_W as W } from './WaveformView';
@@ -48,6 +51,9 @@ const BUCKETS = 1400;
 const AUDITION_SECS = 20;
 /** Error strip scale (MOD-4), milliseconds. */
 const STRIP_MS = 40;
+/** Samples per inspector trace: enough for a transient to keep its shape
+ *  across a pane a few hundred pixels wide. */
+const SCOPE_POINTS = 300;
 /** Where a dot stops being amber and turns red — the legend and the
  *  colour law read the same number. */
 const STRIP_BAD_MS = 15;
@@ -81,6 +87,7 @@ export function BeatifyModal({
   const [strength, setStrength] = useState(0);
   const [quality, setQuality] = useState<Quality | null>(null);
   const [residuals, setResiduals] = useState<number[]>([]);
+  const [scope, setScope] = useState<BeatifyScope | null>(null);
   const [leadInMs, setLeadInMs] = useState(0);
   const [rulerGroup, setRulerGroup] = useState(DEFAULT_RULER_GROUP);
   const [region, setRegion] = useState<[number, number] | null>(null);
@@ -104,6 +111,9 @@ export function BeatifyModal({
   );
 
   const duration = analysis?.source.durationSecs ?? 0;
+  /** How far in front of the beat the inspector looks — wide enough to
+   *  hold the cut, whatever the lead-in has been pushed to. */
+  const scopePre = scopePreMs(leadInMs);
 
   // --- playback: one ClipTransport owns everything that sounds ----------
   //
@@ -266,6 +276,25 @@ export function BeatifyModal({
     };
   }, [analysis, client, strength]);
 
+  // The inspector's traces (§3.5). They follow the warp — that is MOD-9,
+  // the traces converging as strength rises — and the window width, which
+  // only changes when the lead-in outgrows it. Moving the lead-in inside
+  // the window costs nothing: the cut line is drawn client-side.
+  useEffect(() => {
+    if (!analysis) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const next = await client.scope(strength, SCOPE_POINTS, scopePre / 1000);
+        if (!cancelled) setScope(next);
+      })();
+    }, 60);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [analysis, client, scopePre, strength]);
+
   // MOD-A16: spacebar plays/pauses, like every other transport here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -280,7 +309,7 @@ export function BeatifyModal({
   }, [togglePlay]);
 
   const syncCheck = useCallback(async () => {
-    const bytes = await client.syncCheck(strength);
+    const bytes = await client.syncCheck(strength, leadInMs / 1000);
     if (!bytes) return;
     // The sync render is its own little file, outside the audition
     // timeline: park the transport, then borrow the element.
@@ -291,14 +320,16 @@ export function BeatifyModal({
     const el = audioRef.current;
     if (!el) return;
     el.src = url;
-    setStatus('Sync check: four beats from each end, layered. Clean means commit.');
+    setStatus(
+      `Sync check: four beats from each end, layered and looped, cut ${leadInMs} ms before the beat. Clean means commit.`,
+    );
     try {
       await el.play();
     } catch {
       // jsdom (and a webview with no output device) cannot play; the
       // element still holds the rendered audio.
     }
-  }, [client, strength]);
+  }, [client, leadInMs, strength]);
 
   const commit = useCallback(async () => {
     setBusy(true);
@@ -669,6 +700,7 @@ export function BeatifyModal({
               worst flam {quality ? quality.worstFlamMs.toFixed(1) : '—'} ms · peak stretch{' '}
               {quality ? quality.peakStretchPct.toFixed(2) : '—'} %
             </p>
+            <BeatifyCutScope scope={analysis ? scope : null} leadInMs={leadInMs} />
             <label className="beatify-slider">
               <span>lead-in</span>
               <input
@@ -683,6 +715,10 @@ export function BeatifyModal({
               />
               <span>{leadInMs} ms</span>
             </label>
+            <p className="beatify-line" data-testid="beatify-leadin-note">
+              every cut starts this far before its beat; the grid itself does not move. Sync check
+              is made of cuts, so it plays what this does.
+            </p>
             <label className="beatify-slider">
               <span>ruler group</span>
               <input

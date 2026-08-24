@@ -10,16 +10,21 @@ import {
   anchorStride,
   beatAt,
   beatTime,
+  cutClearanceMs,
   FLAM_GREEN_MS,
   gridLines,
   gridLod,
   IN_BAND_MS,
   LEAD_IN_MAX_MS,
   loopWrapBeat,
+  SCOPE_PRE_MAX_MS,
+  SCOPE_PRE_MS,
+  scopePreMs,
   selectionLabel,
   snapSelection,
   snapTime,
   STRETCH_GREEN_PCT,
+  type BeatifyScope,
   type Grid,
 } from '../src/beatify';
 
@@ -97,9 +102,13 @@ describe('warp slider', () => {
       join(__dirname, '../../crates/dj-analysis/src/beatify/grid.rs'),
       'utf8',
     );
-    const num = (name: string): number => {
-      const m = src.match(new RegExp(`${name}: f64 = ([0-9.]+)`));
-      if (!m) throw new Error(`${name} not found in grid.rs`);
+    const scopeSrc = readFileSync(
+      join(__dirname, '../../crates/dj-analysis/src/beatify/scope.rs'),
+      'utf8',
+    );
+    const num = (name: string, from: string = src): number => {
+      const m = from.match(new RegExp(`${name}: f64 = ([0-9.]+)`));
+      if (!m) throw new Error(`${name} not found`);
       return Number(m[1]);
     };
     const usize = (name: string): number => {
@@ -111,6 +120,8 @@ describe('warp slider', () => {
     expect(STRETCH_GREEN_PCT).toBe(num('STRETCH_GREEN_PCT'));
     expect(IN_BAND_MS).toBe(num('IN_BAND_SECS') * 1000);
     expect(LEAD_IN_MAX_MS).toBe(num('LEAD_IN_MAX') * 1000);
+    expect(SCOPE_PRE_MS).toBe(num('SCOPE_PRE', scopeSrc) * 1000);
+    expect(SCOPE_PRE_MAX_MS).toBe(num('SCOPE_PRE_MAX', scopeSrc) * 1000);
     // The slider's own law, recomputed from the Rust bounds.
     const min = usize('MIN_STRIDE');
     const max = usize('MAX_STRIDE');
@@ -149,6 +160,41 @@ describe('beatSnap', () => {
     const r = snap.slide({ start: 7.7, end: 9.7 });
     expect(r.start).toBeCloseTo(7.5);
     expect(r.end - r.start).toBeCloseTo(2);
+  });
+});
+
+describe('cut point inspector law (§3.5)', () => {
+  const scope = (attackLead: number, hasAttack = true): BeatifyScope => ({
+    preSecs: 0.04,
+    postSecs: 0.07,
+    traces: [{ beat: 0, samples: [0, 1], attack: hasAttack ? -attackLead : null }],
+    attackLead,
+    spread: 0.002,
+  });
+
+  it('keeps the PRD window until the cut would fall outside it (MOD-8)', () => {
+    expect(scopePreMs(0)).toBe(SCOPE_PRE_MS);
+    expect(scopePreMs(14)).toBe(SCOPE_PRE_MS);
+    expect(scopePreMs(32)).toBe(SCOPE_PRE_MS);
+    // Past that the window opens, in steps, so the traces do not breathe
+    // while the slider is being dragged.
+    expect(scopePreMs(33)).toBe(50);
+    expect(scopePreMs(40)).toBe(50);
+    expect(scopePreMs(250)).toBe(275);
+    expect(scopePreMs(9000)).toBe(SCOPE_PRE_MAX_MS);
+    // Whatever it lands on, the cut is inside the window it asked for.
+    for (const lead of [0, 14, 33, 120, 250]) {
+      expect(scopePreMs(lead)).toBeGreaterThan(lead);
+    }
+  });
+
+  it('says how much room the cut leaves in front of the attack (MOD-11)', () => {
+    expect(cutClearanceMs(scope(0.006), 14)).toBeCloseTo(8, 6);
+    // Negative is the interesting case: the cut lands inside the attack.
+    expect(cutClearanceMs(scope(0.006), 2)).toBeCloseTo(-4, 6);
+    // Nothing to measure is not the same as clearing by zero.
+    expect(cutClearanceMs(scope(0, false), 14)).toBeNull();
+    expect(cutClearanceMs(null, 14)).toBeNull();
   });
 });
 

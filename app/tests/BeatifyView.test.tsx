@@ -12,6 +12,7 @@ import type {
   BeatifyAnalysis,
   BeatifyClientApi,
   BeatifyProject,
+  BeatifyScope,
   BeatifyTrack,
   TrackerStatus,
 } from '../src/beatify';
@@ -148,6 +149,22 @@ function project(overrides: Partial<BeatifyProject> = {}): BeatifyProject {
   };
 }
 
+/** A cut point inspector payload: attacks 6 ms before the line, with a
+ *  couple of milliseconds of smear between the traces. */
+function scopeOf(preSecs = 0.04, points = 8): BeatifyScope {
+  return {
+    preSecs,
+    postSecs: 0.07,
+    traces: Array.from({ length: 4 }, (_, i) => ({
+      beat: i * 10,
+      samples: Array.from({ length: points }, (_, j) => (j % 2 ? 0.4 : -0.4)),
+      attack: -0.006 + i * 0.0005,
+    })),
+    attackLead: 0.006,
+    spread: 0.0015,
+  };
+}
+
 const STATUS: TrackerStatus = {
   tracker: 'dsp',
   beatThis: false,
@@ -178,6 +195,9 @@ function clientMock(overrides: Partial<BeatifyClientApi> = {}): BeatifyClientApi
     })),
     preview: vi.fn(async () => new ArrayBuffer(8)),
     syncCheck: vi.fn(async () => new ArrayBuffer(8)),
+    scope: vi.fn(async (_strength: number, points: number, preSecs: number) =>
+      scopeOf(preSecs, points),
+    ),
     save: vi.fn(async () => beatified()),
     projects: vi.fn(async () => []),
     openProject: vi.fn(async () => beatified()),
@@ -382,6 +402,70 @@ describe('Beatify tab', () => {
     await waitFor(() =>
       expect(screen.getByTestId('beatify-meters').textContent).toContain('1.2 ms'),
     );
+  });
+
+  it('moves the cut line as the lead-in moves (MOD-20)', async () => {
+    // The complaint this answers: the lead-in "does not seem to do
+    // anything". It cannot move the waveform — the grid is not allowed to
+    // move (MOD-22) — so what has to move is the CUT, in a window zoomed
+    // far enough in for a millisecond to be a distance.
+    const client = clientMock();
+    await openTrack(client);
+    const cutX = async () =>
+      Number((await screen.findByTestId('beatify-scope-cut')).getAttribute('x1'));
+    // The window is −40..+70 ms across 1000 units; the analysis measured
+    // 14 ms, so the cut starts 14 ms before the line.
+    await waitFor(async () => expect(await cutX()).toBeCloseTo(((-0.014 + 0.04) / 0.11) * 1000, 1));
+    fireEvent.change(screen.getByTestId('beatify-leadin'), { target: { value: '30' } });
+    await waitFor(async () => expect(await cutX()).toBeCloseTo(((-0.03 + 0.04) / 0.11) * 1000, 1));
+    // And what it discards grows with it.
+    expect(Number(screen.getByTestId('beatify-scope-drop').getAttribute('width'))).toBeCloseTo(
+      ((-0.03 + 0.04) / 0.11) * 1000,
+      1,
+    );
+  });
+
+  it('says whether the cut clears the attack or slices it (MOD-11)', async () => {
+    const client = clientMock();
+    await openTrack(client);
+    const readout = await screen.findByTestId('beatify-scope-clearance');
+    // Attacks begin 6 ms early; the measured 14 ms lead-in clears them.
+    await waitFor(() => expect(readout.textContent).toContain('clears them by 8.0 ms'));
+    expect(readout.className).toContain('good');
+    fireEvent.change(screen.getByTestId('beatify-leadin'), { target: { value: '0' } });
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-scope-clearance').textContent).toContain(
+        '6.0 ms INSIDE the attack',
+      ),
+    );
+    expect(screen.getByTestId('beatify-scope-clearance').className).toContain('bad');
+  });
+
+  it('reaches 250 ms, and opens the window so the cut stays in view', async () => {
+    const client = clientMock();
+    await openTrack(client);
+    const slider = await screen.findByTestId('beatify-leadin');
+    expect(slider.getAttribute('max')).toBe('250');
+    fireEvent.change(slider, { target: { value: '250' } });
+    // A cut a quarter of a second back is outside the PRD's 40 ms window,
+    // so the inspector asks for a wider one instead of drawing the line
+    // off the edge of itself.
+    await waitFor(() =>
+      expect(client.scope).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), 0.275),
+    );
+    await waitFor(() => {
+      const x = Number(screen.getByTestId('beatify-scope-cut').getAttribute('x1'));
+      expect(x).toBeGreaterThan(0);
+      expect(x).toBeLessThan(1000);
+    });
+  });
+
+  it('cuts the sync check at the lead-in, so it can be heard (§3.7)', async () => {
+    const client = clientMock();
+    await openTrack(client);
+    fireEvent.change(await screen.findByTestId('beatify-leadin'), { target: { value: '30' } });
+    fireEvent.click(screen.getByTestId('beatify-sync'));
+    await waitFor(() => expect(client.syncCheck).toHaveBeenCalledWith(0.3, 0.03));
   });
 
   it('auditions windows, not whole tracks (MOD-A23)', async () => {

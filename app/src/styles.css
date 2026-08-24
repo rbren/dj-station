@@ -3784,6 +3784,114 @@ body {
   text-transform: uppercase;
 }
 
+/* The cut point inspector (§3.5). A hundred-odd milliseconds across the
+   whole pane: this is the one place where a 14 ms lead-in is a distance
+   you can see rather than a number you have to believe. */
+.beatify-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0 2px;
+}
+
+.beatify-scope-title,
+.beatify-scope-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  color: #7c869a;
+  font-size: 0.75rem;
+}
+
+.beatify-scope-svg {
+  width: 100%;
+  height: 130px;
+  background: #101216;
+  border: 1px solid #23262d;
+  border-radius: 6px;
+}
+
+/* Persistence style (MOD-8): each trace faint, the pile-up is the point.
+   Amber, because a trace is what was played (MOD-1). */
+.beatify-scope-trace {
+  fill: none;
+  stroke: #d8a15f;
+  stroke-opacity: 0.45;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Audio the cut throws away. */
+.beatify-scope-drop {
+  fill: #05060a;
+  fill-opacity: 0.66;
+}
+
+/* Where attacks begin across all the traces (MOD-10). */
+.beatify-scope-attacks {
+  fill: #d8a15f;
+  fill-opacity: 0.12;
+}
+
+.beatify-scope-line {
+  stroke: #5fd0c5;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.beatify-scope-cut {
+  stroke: #e6e9ef;
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.beatify-scope-plot {
+  position: relative;
+}
+
+/* Positioned in percent over the drawing, so they follow the lines as the
+   pane resizes without being stretched along with it. */
+.beatify-scope-tag {
+  position: absolute;
+  top: 2px;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.beatify-scope-tag.beat {
+  margin-left: 5px;
+  color: #5fd0c5;
+}
+
+.beatify-scope-tag.cut {
+  transform: translateX(-100%);
+  margin-left: -5px;
+  color: #e6e9ef;
+}
+
+.beatify-scope-tag.cut.after {
+  transform: none;
+  margin-left: 5px;
+}
+
+.beatify-scope-axis {
+  display: flex;
+  justify-content: space-between;
+  color: #626b7c;
+  font-size: 0.72rem;
+}
+
+.beatify-scope-clear.good {
+  color: #5fd0c5;
+}
+
+.beatify-scope-clear.bad {
+  color: #e08f8f;
+}
+
 .beatify-slider {
   display: flex;
   align-items: center;
