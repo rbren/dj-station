@@ -118,6 +118,50 @@ impl Analysis {
         grid::drift_spans(&self.fit, self.first_index, self.last_index)
     }
 
+    /// Fitted index of the first grid line at or after the file start.
+    /// Beat numbering in the import modal counts from here, so beat 0 is
+    /// a line you can actually see rather than an extrapolation.
+    fn lattice_origin(&self) -> f64 {
+        (-self.fit.phase / self.fit.period).ceil()
+    }
+
+    /// The fitted grid in SOURCE seconds, spanning the whole file: what
+    /// the import modal draws over the source waveform and snaps its
+    /// region to.
+    ///
+    /// [`Analysis::grid`] cannot do this job — it is the OUTPUT timebase,
+    /// where phase is the head pad (MOD-A14) and beat 0 is a beat of the
+    /// render that does not exist yet. This one is where the beats are in
+    /// the file you are looking at. It deliberately runs past the
+    /// analyzed region, because the region is an INPUT to the next
+    /// detection run: a grid line has to exist outside it for the region
+    /// to be moved by whole beats.
+    pub fn source_grid(&self, duration_secs: f64) -> Grid {
+        let period = self.fit.period;
+        let phase = self.fit.line(self.lattice_origin());
+        let span = ((duration_secs - phase) / period).floor();
+        Grid {
+            bpm: self.fit.bpm(),
+            period,
+            phase,
+            beats: span.max(0.0) as usize + 1,
+        }
+    }
+
+    /// Which [`Analysis::source_grid`] beat each residual belongs to, so
+    /// the error strip can sit over the beat it is about. Detections that
+    /// outlier rejection threw away have no residual, so these indices
+    /// skip — they are not `0..residuals.len()`.
+    pub fn residual_beats(&self) -> Vec<f64> {
+        let origin = self.lattice_origin();
+        self.fit
+            .beats
+            .iter()
+            .filter(|b| b.index >= self.first_index)
+            .map(|b| b.index - origin)
+            .collect()
+    }
+
     /// Source-time positions of the fitted grid lines — what the click
     /// track ticks against while phase 1 plays the unwarped audio.
     pub fn source_grid_times(&self) -> Vec<f64> {

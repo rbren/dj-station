@@ -3673,6 +3673,87 @@ body {
   fill: #e08f8f;
 }
 
+/* The error strip and everything that says what it is. It rides inside
+   the timeline pane so it shares the waveform's width, and therefore its
+   x: a dot sits under the beat it measures. */
+.beatify-strip-lane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.beatify-strip-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  color: #7c869a;
+  font-size: 0.75rem;
+}
+
+.beatify-strip-key {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #626b7c;
+}
+
+.beatify-key-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: 50%;
+}
+
+.beatify-key-dot.good {
+  background: #5fd0c5;
+}
+
+.beatify-key-dot.warn {
+  background: #d8a15f;
+}
+
+.beatify-key-dot.bad {
+  background: #e08f8f;
+}
+
+.beatify-strip-plot {
+  position: relative;
+  display: flex;
+}
+
+/* Axis marks hug the right edge, where a track's beats are least likely
+   to be the ones being read. */
+.beatify-strip-mark {
+  position: absolute;
+  right: 8px;
+  color: #626b7c;
+  font-size: 0.65rem;
+  pointer-events: none;
+}
+
+.beatify-strip-mark.hi {
+  top: 3px;
+}
+
+.beatify-strip-mark.zero {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.beatify-strip-mark.lo {
+  bottom: 3px;
+}
+
+.beatify-strip-caption {
+  margin: 0;
+  max-width: 72em;
+  color: #626b7c;
+  font-size: 0.75rem;
+}
+
 .beatify-panes {
   display: flex;
   gap: 16px;

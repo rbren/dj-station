@@ -16,6 +16,10 @@ import type {
   TrackerStatus,
 } from '../src/beatify';
 import type { LibraryClientApi, Track } from '../src/library';
+import { WAVEFORM_VIEW_W } from '../src/components/WaveformView';
+
+/** x of a source-time second in a timeline drawn at full zoom. */
+const xAt = (secs: number) => (secs / 60) * WAVEFORM_VIEW_W;
 
 const TRACK: Track = {
   id: 3,
@@ -39,6 +43,10 @@ const TRACK: Track = {
 };
 
 const GRID = { bpm: 120, period: 0.5, phase: 0.5, beats: 64 };
+/** Where those beats are in the SOURCE file. Deliberately a different
+ *  phase from GRID (whose beat 0 is head padding, not audio), so a test
+ *  can tell which of the two the modal is quantizing against. */
+const SOURCE_GRID = { bpm: 120, period: 0.5, phase: 0.2, beats: 120 };
 
 function analysis(overrides: Partial<BeatifyAnalysis> = {}): BeatifyAnalysis {
   return {
@@ -54,6 +62,7 @@ function analysis(overrides: Partial<BeatifyAnalysis> = {}): BeatifyAnalysis {
     tracker: 'dsp',
     region: [0, 60],
     grid: GRID,
+    sourceGrid: SOURCE_GRID,
     reading: { factor: 1, halfShift: false },
     agreement: {
       verdict: 'singleTracker',
@@ -74,6 +83,8 @@ function analysis(overrides: Partial<BeatifyAnalysis> = {}): BeatifyAnalysis {
     strength: 0.3,
     quality: { worstFlamMs: 2.1, peakStretchPct: 0.84, rmsMs: 0.7, inBandPct: 99 },
     residuals: [0.001, -0.002, 0.004],
+    // Beat 5 is missing: the tracker found nothing there.
+    residualBeats: [3, 4, 6],
     anchors: [0.5, 4.5],
     leadIn: 0.014,
     metricalFlag: false,
@@ -271,8 +282,10 @@ describe('Beatify tab', () => {
     fireEvent.mouseMove(wave, { clientX: 50 });
     fireEvent.mouseUp(wave, { clientX: 50 });
     fireEvent.click(screen.getByTestId('beatify-rerun'));
+    // 10–50 px of a 100 px wide, 60 s track is 6–30 s, rounded OUTWARD to
+    // the source grid's beats 11 and 60 (phase 0.2, period 0.5).
     await waitFor(() =>
-      expect(client.analyze).toHaveBeenLastCalledWith(3, [6, 30], expect.any(Number)),
+      expect(client.analyze).toHaveBeenLastCalledWith(3, [5.7, 30.2], expect.any(Number)),
     );
   });
 
@@ -296,6 +309,67 @@ describe('Beatify tab', () => {
     );
     // One analyze call: the tracker ran once, on open.
     expect((client.analyze as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
+  it('quantizes the region to the beats it can see, not to the render (MOD-A9)', async () => {
+    // The modal draws SOURCE audio, so it must snap to the source grid.
+    // Snapping to `grid` — the output timebase, whose beat 0 is head
+    // padding — would put every line in a plausible but wrong place.
+    const client = clientMock();
+    await openTrack(client);
+    const wave = await screen.findByTestId('beatify-waveform');
+    wave.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 100 }) as DOMRect;
+    fireEvent.mouseDown(wave, { clientX: 21 });
+    fireEvent.mouseMove(wave, { clientX: 44 });
+    fireEvent.mouseUp(wave, { clientX: 44 });
+
+    // 12.6–26.4 s, grown outward onto source beats 24 (12.2 s) and 53
+    // (26.7 s) — whole beats of the fitted line, phase 0.2.
+    const sel = await screen.findByTestId('beatify-selection');
+    expect(Number(sel.getAttribute('x'))).toBeCloseTo(xAt(12.2), 1);
+    const readout = screen.getByTestId('beatify-readout').textContent ?? '';
+    expect(readout).toContain('region beats 24–53');
+    expect(readout).toContain('29 beats');
+  });
+
+  it('rules the source waveform in beats, numbered from the file', async () => {
+    const client = clientMock();
+    await openTrack(client);
+    const ruler = await screen.findByTestId('beatify-ruler');
+    // The marks count BEATS, not seconds: 64 of them in a 60 s file, and
+    // the first is at 0.2 s where the fitted line starts — the same ruler
+    // the track view has, over the audio the beats are actually in.
+    await waitFor(() => expect(ruler.textContent).toBe('064'));
+    const marks = ruler.querySelectorAll('.clip-tick');
+    expect(marks.length).toBeGreaterThan(4);
+    expect((marks[0] as HTMLElement).style.left).toBe(`${(0.2 / 60) * 100}%`);
+  });
+
+  it('says what the strip below the waveform is measuring', async () => {
+    const client = clientMock();
+    await openTrack(client);
+    const caption = await screen.findByTestId('beatify-strip-caption');
+    expect(caption.textContent).toContain('from the grid line');
+    // The scale, the sign and the colour law are all written down.
+    const plot = screen.getByTestId('beatify-strip').parentElement;
+    expect(plot?.textContent).toContain('+40 ms late');
+    expect(plot?.textContent).toContain('−40 ms early');
+    expect(plot?.textContent).toContain('on the grid');
+    expect(screen.getByTestId('beatify-strip-key').textContent).toContain('within ±5 ms');
+  });
+
+  it('puts each residual under the beat it measures', async () => {
+    // The fixture's third residual is beat 6, because beat 5 was never
+    // detected. Spacing the dots evenly would draw it at beat 2's x and
+    // quietly mis-attribute every error after a dropped beat.
+    const client = clientMock();
+    await openTrack(client);
+    const dots = (await screen.findByTestId('beatify-strip')).querySelectorAll('circle');
+    expect(dots.length).toBe(3);
+    const x = (n: number) => xAt(0.2 + n * 0.5);
+    expect(Number(dots[0].getAttribute('cx'))).toBeCloseTo(x(3), 1);
+    expect(Number(dots[2].getAttribute('cx'))).toBeCloseTo(x(6), 1);
+    expect(dots[2].querySelector('title')?.textContent).toBe('beat 6: +4.0 ms');
   });
 
   it('moves the warp slider without rendering audio (MOD-A22)', async () => {

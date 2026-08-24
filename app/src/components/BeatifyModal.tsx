@@ -16,12 +16,17 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   anchorStride,
+  beatAt,
+  beatTime,
   DEFAULT_RULER_GROUP,
+  gridLines,
+  gridLod,
   IN_BAND_MS,
   LEAD_IN_MAX_MS,
   qualityLevel,
   readingOf,
-  snapTime,
+  selectionLabel,
+  snapSelection,
   timecode,
   verdictLabel,
   type BeatifyAnalysis,
@@ -31,7 +36,9 @@ import {
 } from '../beatify';
 import { ClipTransport, type TransportHost } from '../clipTransport';
 import { logError } from '../errors';
-import { AudioTimeline, type Range } from './AudioTimeline';
+import { AudioTimeline, viewSpan, type Range } from './AudioTimeline';
+import type { TimeTick } from '../clip';
+import { beatSnap } from './BeatifyTrackView';
 import { WAVEFORM_VIEW_W as W } from './WaveformView';
 
 const WAVE_H = 110;
@@ -41,6 +48,9 @@ const BUCKETS = 1400;
 const AUDITION_SECS = 20;
 /** Error strip scale (MOD-4), milliseconds. */
 const STRIP_MS = 40;
+/** Where a dot stops being amber and turns red — the legend and the
+ *  colour law read the same number. */
+const STRIP_BAD_MS = 15;
 
 export interface BeatifyModalProps {
   client: BeatifyClientApi;
@@ -174,7 +184,16 @@ export function BeatifyModal({
     setQuality(next.quality);
     setResiduals(next.residuals);
     setLeadInMs(Math.round(next.leadIn * 1000));
-    setRegion(next.region);
+    // On whole beats from the start, so the bracket, the readout and what
+    // Re-run would send are the same span. The sub-beat head and tail are
+    // dimmed because they really are dropped: the render begins and ends
+    // on a beat.
+    const [from, to] = next.region;
+    const beats = snapSelection(next.sourceGrid, from, to);
+    setRegion([
+      beatTime(next.sourceGrid, beats.startBeat),
+      beatTime(next.sourceGrid, beats.endBeat),
+    ]);
     // A new grid: whatever was rendered belongs to the old one.
     transportRef.current?.invalidate();
   }, []);
@@ -314,7 +333,16 @@ export function BeatifyModal({
   // plain click seeks to the nearest beat (MOD-A17, ⌘ frees it) and puts
   // the region back to what the analysis covered — an empty region would
   // mean "discard everything".
-  const grid = analysis?.grid ?? null;
+  //
+  // Beats are the unit here exactly as they are in the track view, and
+  // for the same reason: a region that starts a third of a beat late is
+  // not a thing anyone means. The lattice is the SOURCE grid — the fitted
+  // line where it lands in the file — which is also what ÷2, ×2 and
+  // Shift ½ move, so the reading buttons can be judged against the audio
+  // they are claiming to describe. It runs past the analyzed region on
+  // purpose: the region is an input to the next detection run, so it has
+  // to be growable, not trapped inside the last one.
+  const sourceGrid = analysis?.sourceGrid ?? null;
   const onRegionChange = useCallback(
     (r: Range | null) => {
       if (!analysis) return;
@@ -323,11 +351,99 @@ export function BeatifyModal({
     },
     [analysis],
   );
-  const snap = useMemo(
-    () => ({
-      seek: (secs: number, free: boolean) => (free || !grid ? secs : snapTime(grid, secs)),
-    }),
-    [grid],
+  const snap = useMemo(() => (sourceGrid ? beatSnap(sourceGrid) : undefined), [sourceGrid]);
+
+  // --- the beat grid over the source (TV-1's law, one octave down) ------
+  const { start: vpStart, end: vpEnd, len: vpLen } = viewSpan(vp, duration);
+  const lod = gridLod(vpLen / Math.max(1e-6, sourceGrid?.period ?? 1), rulerGroup);
+  const ticks = useMemo<TimeTick[]>(() => {
+    if (!sourceGrid) return [];
+    const period = Math.max(1e-6, sourceGrid.period);
+    const fromBeat = Math.floor((vpStart - sourceGrid.phase) / period);
+    const toBeat = Math.ceil((vpEnd - sourceGrid.phase) / period);
+    const emphasized = new Set(gridLines(sourceGrid, fromBeat, toBeat, lod.emphasis));
+    return gridLines(sourceGrid, fromBeat, toBeat, lod.step).map((t) => ({
+      secs: t,
+      major: emphasized.has(t),
+      label: String(beatAt(sourceGrid, t)),
+    }));
+  }, [lod.emphasis, lod.step, sourceGrid, vpEnd, vpStart]);
+
+  /** The region in beats — what "16 beats · 4 groups" is counting. */
+  const regionBeats = sourceGrid && region ? snapSelection(sourceGrid, region[0], region[1]) : null;
+
+  // --- error strip (§3.4) -----------------------------------------------
+  //
+  // It rides under the waveform and shares its x, so a dot sits beneath
+  // the beat it is about (MOD-4) — which is only true if each residual is
+  // placed by the BEAT IT MEASURES rather than by its position in the
+  // array: a beat the tracker missed leaves a hole, and spacing the dots
+  // evenly would slide everything after it under the wrong audio.
+  //
+  // Everything the strip means is written next to it. It was a field of
+  // unlabelled dots, on a scale nobody could read, measuring a quantity
+  // nobody had been told.
+  const xOf = useCallback(
+    (secs: number) => ((secs - vpStart) / Math.max(1e-9, vpLen)) * W,
+    [vpLen, vpStart],
+  );
+  const strip = (
+    <div className="beatify-strip-lane">
+      <p className="beatify-strip-title">
+        <span>Timing error, one dot per beat, under the beat it measures</span>
+        <span className="beatify-strip-key" data-testid="beatify-strip-key">
+          <i className="beatify-key-dot good" /> within ±{IN_BAND_MS} ms
+          <i className="beatify-key-dot warn" /> to ±{STRIP_BAD_MS} ms
+          <i className="beatify-key-dot bad" /> beyond
+        </span>
+      </p>
+      <div className="beatify-strip-plot">
+        <svg
+          className="beatify-strip"
+          data-testid="beatify-strip"
+          viewBox={`0 0 ${W} ${STRIP_H}`}
+          preserveAspectRatio="none"
+        >
+          <rect
+            className="beatify-inband"
+            x={0}
+            y={STRIP_H / 2 - (IN_BAND_MS / STRIP_MS) * (STRIP_H / 2)}
+            width={W}
+            height={((IN_BAND_MS * 2) / STRIP_MS) * (STRIP_H / 2)}
+          />
+          <line className="beatify-zero" x1={0} x2={W} y1={STRIP_H / 2} y2={STRIP_H / 2} />
+          {residuals.map((r, i) => {
+            const beat = analysis?.residualBeats[i];
+            if (!sourceGrid || beat === undefined) return null;
+            const t = beatTime(sourceGrid, beat);
+            if (t < vpStart || t > vpEnd) return null;
+            const ms = r * 1000;
+            const y = STRIP_H / 2 - Math.max(-1, Math.min(1, ms / STRIP_MS)) * (STRIP_H / 2);
+            const cls =
+              Math.abs(ms) <= IN_BAND_MS
+                ? 'beatify-res good'
+                : Math.abs(ms) <= STRIP_BAD_MS
+                  ? 'beatify-res warn'
+                  : 'beatify-res bad';
+            return (
+              <circle key={i} className={cls} cx={xOf(t)} cy={y} r={1.6}>
+                <title>{`beat ${beat}: ${ms >= 0 ? '+' : ''}${ms.toFixed(1)} ms`}</title>
+              </circle>
+            );
+          })}
+        </svg>
+        {/* HTML, not SVG text: the plot is stretched to the pane width
+            (preserveAspectRatio="none"), which would stretch text with it. */}
+        <span className="beatify-strip-mark hi">+{STRIP_MS} ms late</span>
+        <span className="beatify-strip-mark zero">on the grid</span>
+        <span className="beatify-strip-mark lo">−{STRIP_MS} ms early</span>
+      </div>
+      <p className="beatify-strip-caption" data-testid="beatify-strip-caption">
+        How far each beat lands from the grid line it is being pulled onto, after warping. Flat
+        scatter inside the band is a locked track; a ramp means the tempo is slightly off; a step is
+        a real tempo change; lone spikes are outliers and can be ignored.
+      </p>
+    </div>
   );
 
   const agreement = analysis?.agreement;
@@ -376,13 +492,21 @@ export function BeatifyModal({
           onToggleLoop={() => setLoop((v) => !v)}
           onSeek={(t) => transportRef.current?.seek(t)}
           snap={snap}
+          ticks={ticks}
+          tickGrid="all"
           allowSlide={false}
           selectionTitle="The region being beatified — everything outside it is discarded"
           loopTitle="Loop the region (MOD-A18)"
           timecode={timecode}
           readoutExtra={
-            region ? ` · region ${region[0].toFixed(2)}–${region[1].toFixed(2)}s` : null
+            regionBeats
+              ? ` · region beats ${regionBeats.startBeat}–${regionBeats.endBeat} · ${selectionLabel(
+                  regionBeats.endBeat - regionBeats.startBeat,
+                  rulerGroup,
+                )}`
+              : null
           }
+          belowWave={strip}
           transportExtra={
             <label className="beatify-click-toggle">
               <input
@@ -443,35 +567,6 @@ export function BeatifyModal({
             </>
           )}
         />
-
-        {/* Error strip (§3.4): signed per-beat residual, ±40 ms. */}
-        <svg
-          className="beatify-strip"
-          data-testid="beatify-strip"
-          viewBox={`0 0 ${W} ${STRIP_H}`}
-          preserveAspectRatio="none"
-        >
-          <rect
-            className="beatify-inband"
-            x={0}
-            y={STRIP_H / 2 - (IN_BAND_MS / STRIP_MS) * (STRIP_H / 2)}
-            width={W}
-            height={((IN_BAND_MS * 2) / STRIP_MS) * (STRIP_H / 2)}
-          />
-          <line className="beatify-zero" x1={0} x2={W} y1={STRIP_H / 2} y2={STRIP_H / 2} />
-          {residuals.map((r, i) => {
-            const ms = r * 1000;
-            const y = STRIP_H / 2 - Math.max(-1, Math.min(1, ms / STRIP_MS)) * (STRIP_H / 2);
-            const cls =
-              Math.abs(ms) <= IN_BAND_MS
-                ? 'beatify-res good'
-                : Math.abs(ms) <= 15
-                  ? 'beatify-res warn'
-                  : 'beatify-res bad';
-            const x = residuals.length > 1 ? (i / (residuals.length - 1)) * W : 0;
-            return <circle key={i} className={cls} cx={x} cy={y} r={1.6} />;
-          })}
-        </svg>
 
         <div className="beatify-panes">
           <section className="beatify-phase" data-testid="beatify-phase1">

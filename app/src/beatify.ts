@@ -80,7 +80,12 @@ export interface BeatifyAnalysis {
   source: BeatifySource;
   tracker: string;
   region: [number, number];
+  /** The OUTPUT timebase: beat 0 is the head pad, so it cannot say where
+   *  a beat is in the file you are looking at. */
   grid: Grid;
+  /** The same beats in SOURCE seconds, spanning the whole file — what the
+   *  modal draws over the source waveform and snaps its region to. */
+  sourceGrid: Grid;
   reading: Reading;
   agreement: Agreement;
   beats: number[];
@@ -90,6 +95,9 @@ export interface BeatifyAnalysis {
   strength: number;
   quality: Quality;
   residuals: number[];
+  /** Which `sourceGrid` beat each residual is about. Detections the
+   *  tracker never found leave gaps, so this is NOT `0..residuals`. */
+  residualBeats: number[];
   anchors: number[];
   leadIn: number;
   metricalFlag: boolean;

@@ -102,6 +102,10 @@ pub struct BeatifyAnalysis {
     /// Analyzed span in source seconds — and therefore the import (MOD-A8).
     pub region: [f64; 2],
     pub grid: Grid,
+    /// The same beats in SOURCE seconds, spanning the whole file: what the
+    /// modal draws over the source waveform and snaps its region to.
+    /// `grid` is the OUTPUT timebase and says nothing about the file.
+    pub source_grid: Grid,
     pub reading: Reading,
     pub agreement: Agreement,
     /// Detections in source seconds (amber: what was played).
@@ -114,6 +118,9 @@ pub struct BeatifyAnalysis {
     pub quality: Quality,
     /// Per-beat residuals at `strength`, seconds (the error strip).
     pub residuals: Vec<f64>,
+    /// `source_grid` beat each residual belongs to — the strip is drawn
+    /// over the beat it is about, and dropped detections leave gaps.
+    pub residual_beats: Vec<f64>,
     pub anchors: Vec<f64>,
     pub lead_in: f64,
     /// MOD-23 auto-flag: the interval histogram is bimodal at 2:1.
@@ -210,6 +217,7 @@ fn summarize(session: &Session, buckets: usize, track: &Track) -> BeatifyAnalysi
         tracker: a.tracker.clone(),
         region: a.region,
         grid: a.grid,
+        source_grid: a.source_grid(session.audio.duration_secs()),
         reading: a.reading,
         agreement: a.agreement.clone(),
         beats: a.beats.clone(),
@@ -219,6 +227,7 @@ fn summarize(session: &Session, buckets: usize, track: &Track) -> BeatifyAnalysi
         strength,
         quality: a.quality_at(strength),
         residuals: a.residuals_at(strength),
+        residual_beats: a.residual_beats(),
         anchors: a.anchors_at(strength).iter().map(|x| x.dst).collect(),
         lead_in: a.lead_in,
         metrical_flag: a.metrical_flag,

@@ -469,6 +469,78 @@ fn a_region_is_the_import() {
 }
 
 #[test]
+fn the_source_grid_says_where_the_beats_are_in_the_file() {
+    // The modal draws and snaps against the SOURCE timebase: `grid` is the
+    // output one, whose beat 0 is head padding, and using it over the
+    // source waveform puts every line in the wrong place.
+    let times = drifting_beats(120.0, 120.0, 64, 0.7);
+    let audio = click_track(&times, 1.0);
+    let analysis =
+        beatify::analyze(&audio, &DspTracker, None, Reading::default()).expect("analyze");
+    let source = analysis.source_grid(audio.duration_secs());
+
+    assert!((source.bpm - 120.0).abs() < 0.5, "bpm {}", source.bpm);
+    // Beat 0 is the first line inside the file, and the lattice covers it
+    // to the end — the region can be swept anywhere, not just where the
+    // detections were.
+    assert!(source.phase >= 0.0 && source.phase < source.period);
+    let last = source.beat_time((source.beats - 1) as f64);
+    assert!(
+        last <= audio.duration_secs() && last > audio.duration_secs() - source.period,
+        "last line {last} of {}",
+        audio.duration_secs()
+    );
+    // Every detection sits on a line of it, which is what makes snapping
+    // to the lattice the same thing as snapping to the beats.
+    for &t in &analysis.beats {
+        let n = ((t - source.phase) / source.period).round();
+        assert!(
+            (source.beat_time(n) - t).abs() < 0.02,
+            "detection {t} is {} from its line",
+            (source.beat_time(n) - t).abs()
+        );
+    }
+}
+
+#[test]
+fn every_residual_knows_which_beat_it_is_about() {
+    // The error strip is drawn over the waveform, so each dot needs the
+    // beat it belongs to — and a beat the tracker never found leaves a
+    // GAP rather than shifting everything after it along by one.
+    let times = drifting_beats(120.0, 126.0, 48, 0.4);
+    let audio = click_track(&times, 1.0);
+    let analysis =
+        beatify::analyze(&audio, &DspTracker, None, Reading::default()).expect("analyze");
+    let source = analysis.source_grid(audio.duration_secs());
+    let beats = analysis.residual_beats();
+
+    assert_eq!(beats.len(), analysis.residuals_at(0.5).len());
+    assert!(
+        beats.windows(2).all(|w| w[1] - w[0] >= 1.0),
+        "indices ascend by whole beats: {beats:?}"
+    );
+    let fitted: Vec<&grid::FittedBeat> = analysis
+        .fit
+        .beats
+        .iter()
+        .filter(|b| b.index >= analysis.first_index)
+        .collect();
+    for (n, b) in beats.iter().zip(&fitted) {
+        // The dot sits on the grid line of the beat it measures...
+        let line = analysis.fit.line(b.index);
+        assert!(
+            (source.beat_time(*n) - line).abs() < 1e-9,
+            "beat {n} sits at {} but its grid line is at {line}",
+            source.beat_time(*n)
+        );
+        // ...and it is numbered by the FIT's index, so a beat the tracker
+        // never found leaves a hole in the strip instead of sliding every
+        // later dot under the wrong beat.
+        assert_eq!(n - beats[0], b.index - fitted[0].index);
+    }
+}
+
+#[test]
 fn head_padding_is_silence_when_the_source_starts_at_zero() {
     let times = drifting_beats(120.0, 120.0, 40, 0.02);
     let audio = click_track(&times, 1.0);

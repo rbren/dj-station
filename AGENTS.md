@@ -826,7 +826,24 @@ offset))`, offset in position units — so the knob's curve shapes the
   own a `ClipTransport`; grid
   quantization is `beatSnap(grid)`, exported from BeatifyTrackView and
   handed to the timeline's `snap` hooks, so beats are the unit of every
-  gesture there without the timeline knowing what a beat is. MOD-1 colour
+  gesture there without the timeline knowing what a beat is.
+- TWO GRIDS, AND USING THE WRONG ONE IS SILENT. `analysis.grid` is the
+  OUTPUT timebase (beat 0 is the head pad), so it says nothing about
+  where a beat sits in the file; `analysis.sourceGrid`
+  (`Analysis::source_grid(duration)`) is the same beats in SOURCE
+  seconds, its beat 0 the first fitted line inside the file, and it spans
+  the WHOLE file rather than the analyzed region — the import region is
+  an input to the next detection run, so it has to be growable. Anything
+  drawn over or snapped to source audio (the modal's region, ruler and
+  error strip) uses `sourceGrid`; only the render and the track view use
+  `grid`. Likewise `analysis.residualBeats` gives the sourceGrid beat
+  each residual measures: residuals are per DETECTION, so a beat the
+  tracker missed leaves a gap and `residuals[i]` is not beat `i`. The
+  modal's error strip rides in the timeline's `belowWave` slot so it
+  shares the waveform's width and viewport, and each dot is drawn under
+  the beat it is about; its scale, sign and colour law are written beside
+  it (`beatify-strip-title`/`-mark`/`-caption`) rather than left to be
+  guessed. MOD-1 colour
   semantics hold throughout: AMBER is what was played (detections,
   source audio), TEAL is what the maths says (the fitted grid). All of it
   is pinned by `app/tests/BeatifyView.test.tsx` (tab + modal + track view,
