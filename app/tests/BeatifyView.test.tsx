@@ -6,6 +6,7 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BeatifyClipClientApi } from '../src/beatifyClip';
 import { BeatifyView } from '../src/components/BeatifyView';
 import type {
   BeatifyAnalysis,
@@ -154,6 +155,30 @@ function clientMock(overrides: Partial<BeatifyClientApi> = {}): BeatifyClientApi
   };
 }
 
+function clipsMock(overrides: Partial<BeatifyClipClientApi> = {}): BeatifyClipClientApi {
+  return {
+    sources: vi.fn(async () => ({
+      sources: [
+        { source: { kind: 'seed' as const }, label: 'Seed track', available: true, hint: null },
+        {
+          source: { kind: 'stem' as const, name: 'drums' },
+          label: 'drums',
+          available: false,
+          hint: 'no demucs stems yet \u2014 separate this track on the Clip page first',
+        },
+      ],
+      clips: [],
+      grid: GRID,
+    })),
+    open: vi.fn(async () => null),
+    audio: vi.fn(async () => new ArrayBuffer(8)),
+    preview: vi.fn(async () => new ArrayBuffer(8)),
+    save: vi.fn(async (_trackId: number, clip) => [{ ...clip, id: '1' }]),
+    remove: vi.fn(async () => []),
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   globalThis.URL.createObjectURL = vi.fn(() => 'blob:beatify');
   globalThis.URL.revokeObjectURL = vi.fn();
@@ -162,7 +187,7 @@ beforeEach(() => {
 });
 
 async function openTrack(client: BeatifyClientApi) {
-  render(<BeatifyView client={client} library={libraryMock()} />);
+  render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
   await screen.findByTestId('beatify-open');
   fireEvent.click(screen.getByTestId('beatify-open'));
   return screen.findByTestId('beatify-modal');
@@ -170,7 +195,7 @@ async function openTrack(client: BeatifyClientApi) {
 
 describe('Beatify tab', () => {
   it('says which tracker it has and how to install the good one', async () => {
-    render(<BeatifyView client={clientMock()} library={libraryMock()} />);
+    render(<BeatifyView client={clientMock()} library={libraryMock()} clips={clipsMock()} />);
     const status = await screen.findByTestId('beatify-tracker-status');
     expect(status.textContent).toContain('beat_this not installed');
     expect(status.textContent).toContain('pip install beat-this');
@@ -284,7 +309,7 @@ describe('Beatify tab', () => {
 
   it('skips the modal for an already-beatified track (MOD-A31)', async () => {
     const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} />);
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-open'));
     await screen.findByTestId('beatify-track-view');
     expect(screen.queryByTestId('beatify-modal')).toBeNull();
@@ -314,7 +339,7 @@ describe('Beatify tab', () => {
 
   it('selects a group on double-click in the track view (TV-18)', async () => {
     const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} />);
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-open'));
     const wave = await screen.findByTestId('beatify-track-waveform');
     wave.getBoundingClientRect = () => ({ left: 0, width: 320, top: 0, height: 100 }) as DOMRect;
@@ -325,7 +350,7 @@ describe('Beatify tab', () => {
 
   it('zooms the track view and offers the way back (TV-10)', async () => {
     const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} />);
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-open'));
     await screen.findByTestId('beatify-track-waveform');
     expect((screen.getByTestId('beatify-track-zoom-out') as HTMLButtonElement).disabled).toBe(true);
@@ -340,7 +365,7 @@ describe('Beatify tab', () => {
 
   it('leaves the view where it was put, even while playing', async () => {
     const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} />);
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-open'));
     await screen.findByTestId('beatify-track-waveform');
     fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
@@ -358,7 +383,7 @@ describe('Beatify tab', () => {
 
   it('seeks and selects in whole beats in the track view (TV-6/TV-14)', async () => {
     const client = clientMock({ load: vi.fn(async () => beatified()) });
-    render(<BeatifyView client={client} library={libraryMock()} />);
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-open'));
     const wave = await screen.findByTestId('beatify-track-waveform');
     wave.getBoundingClientRect = () => ({ left: 0, width: 320, top: 0, height: 100 }) as DOMRect;

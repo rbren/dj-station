@@ -20,6 +20,7 @@
 //! and never zero.
 
 pub mod audition;
+pub mod build;
 pub mod detect;
 pub mod grid;
 pub mod store;
@@ -29,6 +30,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::decode::AudioData;
+pub use build::Lay;
 pub use detect::{BeatRun, BeatThisTracker, BeatTracker, DspTracker, TrackerStatus};
 pub use grid::{
     Agreement, Anchor, Fit, Grid, Quality, Reading, SeedReading, Sweep, SweepPoint, Verdict,

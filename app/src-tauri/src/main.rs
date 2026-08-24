@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod beatify;
+mod beatify_clip;
 mod clip;
 
 use dj_engine::{
@@ -2985,6 +2986,12 @@ fn main() {
             beatify::beatify_track_audio,
             beatify::beatify_cancel,
             beatify::beatify_warp_map,
+            beatify_clip::beatify_clip_sources,
+            beatify_clip::beatify_clip_open,
+            beatify_clip::beatify_clip_audio,
+            beatify_clip::beatify_clip_preview,
+            beatify_clip::beatify_clip_save,
+            beatify_clip::beatify_clip_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

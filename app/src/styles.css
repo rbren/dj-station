@@ -3708,3 +3708,280 @@ body {
   flex-direction: column;
   gap: 8px;
 }
+
+/* --- Beatify clip builder ------------------------------------------------
+   Sources on the left, the open one across the top, the clip underneath.
+   MOD-1 holds here too: the grid the maths says is teal, the material
+   that was actually played is amber. */
+.beatify-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.beatify-builder-top {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-height: 0;
+}
+
+.beatify-builder-source {
+  flex: 1;
+  min-width: 0;
+}
+
+.beatify-clip-list {
+  width: 180px;
+  flex: none;
+  background: #191c22;
+  border: 1px solid #262b34;
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.beatify-clip-list h3 {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7c869a;
+}
+
+.beatify-clip-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.beatify-clip-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.beatify-clip-list li > button:first-child {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #d5dae4;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+
+.beatify-clip-list li > button:first-child:hover:not(:disabled) {
+  background: #21262f;
+}
+
+.beatify-clip-list li > button.selected {
+  border-color: #5fd0c5;
+  color: #9ff0e6;
+}
+
+.beatify-clip-list li > button:disabled {
+  color: #5a6273;
+}
+
+.beatify-clip-source-kind {
+  color: #7c869a;
+  font-size: 0.7rem;
+}
+
+.beatify-clip-source-hint {
+  flex-basis: 100%;
+  color: #8a7048;
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
+.beatify-clip-source-x {
+  background: transparent;
+  border: none;
+  color: #7c869a;
+  cursor: pointer;
+}
+
+.beatify-clip-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.beatify-clip-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.beatify-clip-head h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.beatify-clip-name {
+  width: 12em;
+  background: #12151a;
+  border: 1px solid #262b34;
+  border-radius: 4px;
+  color: #e6e6e6;
+  padding: 3px 6px;
+}
+
+.beatify-clip-live {
+  font-size: 0.75rem;
+  color: #626b7c;
+}
+
+.beatify-clip-live.on.clip {
+  color: #5fd0c5;
+}
+
+.beatify-clip-live.on.source {
+  color: #d8a15f;
+}
+
+.beatify-clip-count,
+.beatify-clip-note {
+  font-size: 0.75rem;
+  color: #7c869a;
+}
+
+.beatify-clip-grid {
+  position: relative;
+  overflow-x: auto;
+  background: #12151a;
+  border: 1px solid #262b34;
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.beatify-clip-ruler {
+  display: flex;
+  height: 14px;
+}
+
+.beatify-clip-tick {
+  flex: none;
+  font-size: 0.62rem;
+  color: #5fd0c5;
+  border-left: 1px solid #24333a;
+  padding-left: 2px;
+  box-sizing: border-box;
+}
+
+.beatify-clip-row {
+  position: relative;
+  margin-top: 4px;
+}
+
+.beatify-clip-cells {
+  display: flex;
+  height: 100%;
+}
+
+.beatify-clip-cell {
+  flex: none;
+  height: 100%;
+  border-left: 1px solid #1e242b;
+  box-sizing: border-box;
+  background: #171b21;
+}
+
+.beatify-clip-cell:nth-child(4n + 1) {
+  border-left-color: #24333a;
+}
+
+.beatify-clip-ghost {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(95, 208, 197, 0.18);
+  border: 1px dashed #5fd0c5;
+  pointer-events: none;
+}
+
+.beatify-clip-block {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 4px;
+  font-size: 0.7rem;
+  color: #14161a;
+  cursor: grab;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* Two runs that abut are still two runs: the join is drawn. */
+.beatify-clip-block.seam {
+  border-left: 2px solid #14161a;
+}
+
+.beatify-clip-block-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.beatify-clip-block-x {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.beatify-clip-block.tint-0 {
+  background: #d8a15f;
+}
+.beatify-clip-block.tint-1 {
+  background: #c78bb0;
+}
+.beatify-clip-block.tint-2 {
+  background: #8fb9e0;
+}
+.beatify-clip-block.tint-3 {
+  background: #a7c98a;
+}
+.beatify-clip-block.tint-4 {
+  background: #e0a98f;
+}
+.beatify-clip-block.tint-5 {
+  background: #9f9ada;
+}
+
+.beatify-clip-playhead {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: #f2f5fa;
+  pointer-events: none;
+}
+
+.beatify-drag-beats {
+  cursor: grab;
+}
+
+.beatify-drag-beats:disabled {
+  cursor: default;
+}

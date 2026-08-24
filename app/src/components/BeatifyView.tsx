@@ -12,18 +12,21 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { BeatifyClientApi, BeatifyTrack, TrackerStatus } from '../beatify';
+import type { BeatifyClipClientApi } from '../beatifyClip';
 import type { LibraryClientApi, Track } from '../library';
+import { BeatifyClipBuilder } from './BeatifyClipBuilder';
 import { BeatifyModal } from './BeatifyModal';
-import { BeatifyTrackView } from './BeatifyTrackView';
 
 const BUCKETS = 1400;
 
 export interface BeatifyViewProps {
   client: BeatifyClientApi;
   library: LibraryClientApi;
+  /** The clip builder's own commands (sources, assembly, saved clips). */
+  clips: BeatifyClipClientApi;
 }
 
-export function BeatifyView({ client, library }: BeatifyViewProps) {
+export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [pick, setPick] = useState<number | null>(null);
   const [tracker, setTracker] = useState<TrackerStatus | null>(null);
@@ -110,10 +113,10 @@ export function BeatifyView({ client, library }: BeatifyViewProps) {
       {status && <p className="beatify-status">{status}</p>}
 
       {beatified && (
-        <BeatifyTrackView
+        <BeatifyClipBuilder
           key={`${beatified.trackId}:${beatified.record.warped}`}
           track={beatified}
-          loadAudio={(trackId, startSecs, secs) => client.trackAudio(trackId, startSecs, secs)}
+          clips={clips}
           onRebeatify={() => setWarn({ trackId: beatified.trackId, title: beatified.title })}
         />
       )}

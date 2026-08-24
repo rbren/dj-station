@@ -260,7 +260,7 @@ export function AudioTimeline({
       }
       setDragging(true);
     },
-    [allowSlide, duration, handleSecs, onSeek, onSelectionChange, sel, snapRange, snapSeek, timeAt],
+    [allowSlide, duration, handleSecs, onSelectionChange, sel, snapRange, timeAt],
   );
 
   useEffect(() => {

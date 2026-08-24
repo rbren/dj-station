@@ -817,20 +817,56 @@ fails if it's missing.
   gitignored) plus a best-effort `<source>.beatify.json` sidecar; Beatify
   never rewrites the source file or the library DB row, so re-importing
   the same audio finds its grid again.
-- Beatify's frontend is three files: `BeatifyView.tsx` (tab shell: track
-  list, run/verdict state, owns which track is open), `BeatifyModal.tsx`
-  (the detection report + audition) and `BeatifyTrackView.tsx` (the
-  beatified track's waveform, grid ruler and selection work). The last
-  two each render an `AudioTimeline` and own a `ClipTransport`; grid
+- Beatify's frontend: `BeatifyView.tsx` (tab shell: track list,
+  run/verdict state, owns which track is open), `BeatifyModal.tsx` (the
+  detection report + audition) and, once a track is beatified,
+  `BeatifyClipBuilder.tsx` — the clip builder, which owns
+  `BeatifyClipList.tsx` (sources), `BeatifyTrackView.tsx` (the source
+  pane: the same track view, shorter) and `BeatifyClipEditor.tsx` (the
+  grid). The modal and the track view each render an `AudioTimeline` and
+  own a `ClipTransport`; grid
   quantization is `beatSnap(grid)`, exported from BeatifyTrackView and
   handed to the timeline's `snap` hooks, so beats are the unit of every
   gesture there without the timeline knowing what a beat is. MOD-1 colour
   semantics hold throughout: AMBER is what was played (detections,
   source audio), TEAL is what the maths says (the fitted grid). All of it
   is pinned by `app/tests/BeatifyView.test.tsx` (tab + modal + track view,
-  against a mocked client) and `app/tests/BeatifyGrid.test.ts` (the meter
-  law shared with `grid.rs`, plus `beatSnap`/`viewSpan`/`zoomView`); the
+  against a mocked client), `app/tests/BeatifyClipBuilder.test.tsx` (the
+  builder, mounted) and `app/tests/BeatifyGrid.test.ts` (the meter law
+  shared with `grid.rs`, plus `beatSnap`/`viewSpan`/`zoomView`); the
   transport underneath has its own suite in `app/tests/ClipTransport.test.ts`.
+- THE CLIP BUILDER: a clip is a GRID OF BEATS — columns are beats of the
+  track's grid, rows are material that sounds together — and every source
+  on the page (seed render, stems, clips saved earlier) sits on that one
+  grid, which is what makes assembling one arithmetic instead of another
+  stretch. Three layers, and they do not overlap:
+  `app/src/beatifyClip.ts` is the pure model (a `Placement` is a
+  CONTIGUOUS RUN of beats from one source, never a per-cell thing;
+  `placeRun` carves/splits what a drop lands on, grows columns right and
+  rows down) plus the IPC client; `app/src-tauri/src/beatify_clip.rs`
+  resolves sources and files clips; `dj_analysis::beatify::build`
+  (`span`, `clip_secs`, `assemble`) is the audio math, declick ramps and
+  all. Tested at each layer: `app/tests/BeatifyClip.test.ts`,
+  `BeatifyClipBuilder.test.tsx`, `cargo test -p dj-analysis --lib
+  beatify::build`.
+- Clip-builder invariants worth not breaking: a run dropped in stays ONE
+  block (three beats read as three-wide, not three cells), runs that abut
+  keep a drawn seam (`abutsLeft`), a drop that does not fit GROWS the
+  grid rather than being refused, and EXACTLY ONE of the source pane and
+  the clip editor ever sounds — starting either pauses the other
+  (`BeatifyTrackViewHandle.pause` one way, `onPlayingChange` the other)
+  and a badge says which. The editor's transport renders the LIVE draft,
+  so an edit mid-playback is heard: length changes `invalidate()`,
+  everything else `refreshTone()`, the same split the Clip page makes.
+- Clip-builder storage: saved clips are JSON only —
+  `<data_dir>/beatify/<hash>/clips.json`, one array, overwritten by id
+  (saving under an existing NAME overwrites that clip rather than
+  breeding copies) — because a clip is placements, not audio; it is
+  re-assembled on demand. Stems become grid-aligned sources by being
+  pulled through the seed's OWN warp map (`record.warp.map`) and cached
+  as `<hash>/stems/<name>.wav`; an unseparated stem is listed but
+  disabled with the Clip-page hint, like every other optional dependency
+  here. Nothing is written to the library: a clip is not a track.
 - Beatify detection degrades like the yt-dlp provider: `beat_this` (a
   PyTorch model) is an OPTIONAL runtime dep. `detect::probe_beat_this`
   FINDS it rather than assuming `python3`: it reads the shebang of a

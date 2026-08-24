@@ -21,7 +21,17 @@
 // loops follow the selection live, and the view only renders the status
 // it is handed back.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from 'react';
 import {
   beatAt,
   beatTime,
@@ -49,11 +59,36 @@ const LOOP_TICK_MS = 50;
 /** Height of the confidence band, viewBox units (TV-5). */
 const DENSITY_H = 20;
 
+/** What the clip builder shows in this pane instead of the seed render:
+ *  a stem, or a clip built earlier. Everything else — the grid, the
+ *  snapping, the ruler — is the track's, because they share its grid. */
+export interface TrackViewSource {
+  label: string;
+  durationSecs: number;
+  peaks: number[];
+}
+
+/** Lets the owner stop this pane sounding, which is how "only one of
+ *  source and clip plays at a time" is enforced. */
+export interface BeatifyTrackViewHandle {
+  pause(): void;
+}
+
 export interface BeatifyTrackViewProps {
   track: BeatifyTrack;
   /** Fetches `secs` of the warped render from `startSecs`. */
   loadAudio(trackId: number, startSecs: number, secs: number): Promise<ArrayBuffer | null>;
   onRebeatify(): void;
+  source?: TrackViewSource | null;
+  /** Shorter waveform when the pane shares the page with the editor. */
+  waveHeight?: number;
+  /** The selection in whole beats, whenever it changes — what a drag into
+   *  the clip editor carries. */
+  onSelectionBeats?(sel: { startBeat: number; endBeat: number } | null): void;
+  /** Extra transport controls (the clip builder's drag handle). */
+  transportExtra?: ReactNode;
+  onPlayingChange?(playing: boolean): void;
+  handle?: Ref<BeatifyTrackViewHandle>;
 }
 
 /** Beat-quantizing gesture hooks for AudioTimeline (TV-6/TV-9/TV-14). */
@@ -71,9 +106,20 @@ export function beatSnap(grid: Grid) {
   };
 }
 
-export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrackViewProps) {
+export function BeatifyTrackView({
+  track,
+  loadAudio,
+  onRebeatify,
+  source = null,
+  waveHeight = WAVE_H,
+  onSelectionBeats,
+  transportExtra,
+  onPlayingChange,
+  handle,
+}: BeatifyTrackViewProps) {
   const grid = track.record.grid;
-  const duration = track.durationSecs;
+  const duration = source ? source.durationSecs : track.durationSecs;
+  const peaks = source ? source.peaks : track.peaks;
   const [group, setGroup] = useState(track.record.ruler.group || 4);
   const [vp, setVp] = useState<Range | null>(null);
   const [selection, setSelection] = useState<Range | null>(null);
@@ -90,10 +136,12 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
   // against the new audio.
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const transportRef = useRef<ClipTransport | null>(null);
-  const live = useRef({ track, loadAudio, duration });
+  const live = useRef({ track, loadAudio, duration, onPlayingChange });
   useLayoutEffect(() => {
-    live.current = { track, loadAudio, duration };
+    live.current = { track, loadAudio, duration, onPlayingChange };
   });
+
+  useImperativeHandle(handle, () => ({ pause: () => transportRef.current?.pause() }), []);
 
   useEffect(() => {
     const host: TransportHost = {
@@ -107,6 +155,7 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
       onStatus: (s) => {
         setPlaying(s.playing);
         setPlayhead(s.playhead);
+        live.current.onPlayingChange?.(s.playing);
       },
     };
     const transport = new ClipTransport(host, { windowSecs: WINDOW_SECS, tickMs: LOOP_TICK_MS });
@@ -153,6 +202,12 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
   );
 
   const snap = useMemo(() => beatSnap(grid), [grid]);
+
+  // The builder needs the selection in BEATS, not seconds: that is what a
+  // drag into the clip editor carries.
+  useEffect(() => {
+    onSelectionBeats?.(sel ? snapSelection(grid, sel.start, sel.end) : null);
+  }, [grid, onSelectionBeats, sel]);
 
   /** TV-18: double-click selects the group under the cursor. */
   const onDoubleClickAt = useCallback(
@@ -241,9 +296,9 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
   return (
     <section className="beatify-track" data-testid="beatify-track-view">
       <header className="beatify-track-head">
-        <h2>{track.title}</h2>
+        <h2 data-testid="beatify-track-title">{source ? source.label : track.title}</h2>
         <span className="beatify-line">
-          {grid.bpm.toFixed(2)} BPM · {grid.beats} beats · {timecode(track.durationSecs)}
+          {grid.bpm.toFixed(2)} BPM · {grid.beats} beats · {timecode(duration)}
         </span>
         {/* OUT-3: the provenance travels with the track. */}
         <span className={`beatify-verdict ${level}`} data-testid="beatify-track-quality">
@@ -258,8 +313,8 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
       <AudioTimeline
         idPrefix="beatify-track"
         duration={duration}
-        peaks={track.peaks}
-        waveHeight={WAVE_H}
+        peaks={peaks}
+        waveHeight={waveHeight}
         vp={vp}
         onVpChange={setVp}
         selection={selection}
@@ -290,6 +345,7 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
                 onChange={(e) => setGroup(Math.max(1, Number(e.target.value) || 1))}
               />
             </label>
+            {transportExtra}
           </>
         }
         readoutExtra={` · beat ${clampBeat(grid, beatAt(grid, playhead))}${
@@ -306,7 +362,7 @@ export function BeatifyTrackView({ track, loadAudio, onRebeatify }: BeatifyTrack
                     key={`c-${i}`}
                     className="beatify-density"
                     x={xOf(t) - 2}
-                    y={WAVE_H - c * DENSITY_H}
+                    y={waveHeight - c * DENSITY_H}
                     width={4}
                     height={c * DENSITY_H}
                   />

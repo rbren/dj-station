@@ -22,6 +22,7 @@ import { ErrorBanner } from './components/ErrorBanner';
 import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
 import { ClipView, type ClipViewHandle } from './components/ClipView';
+import { beatifyClipClient } from './beatifyClip';
 import { BeatifyView } from './components/BeatifyView';
 import { clipClient } from './clip';
 import { beatifyClient } from './beatify';
@@ -2102,7 +2103,9 @@ export default function App() {
         onSaved={() => void refresh()}
         ref={clipView}
       />
-      {view === 'beatify' && <BeatifyView client={beatifyClient} library={library} />}
+      {view === 'beatify' && (
+        <BeatifyView client={beatifyClient} library={library} clips={beatifyClipClient} />
+      )}
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}
