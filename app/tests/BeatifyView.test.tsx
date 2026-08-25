@@ -570,6 +570,7 @@ describe('Beatify tab', () => {
     fireEvent.click(screen.getByTestId('beatify-close-project'));
     await screen.findByTestId('beatify-projects');
     fireEvent.click(await screen.findByTestId('beatify-project-delete-p1'));
+    fireEvent.click(await screen.findByTestId('beatify-delete-confirm'));
     await waitFor(() => expect(client.deleteProject).toHaveBeenCalled());
     expect(screen.queryByTestId('beatify-status')).toBeNull();
     expect(document.body.textContent).not.toContain('Deleted');
@@ -902,13 +903,31 @@ describe('beatify projects', () => {
     await screen.findByText('Slower take');
   });
 
-  it('deletes a project and leaves the shelf without it', async () => {
+  it('deletes a project only after the warning is accepted', async () => {
     const client = clientMock({ projects: vi.fn(async () => [project()]) });
     render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-project-delete-p1'));
 
+    // Nothing is deleted yet — the warning is up instead.
+    await screen.findByTestId('beatify-delete-warning');
+    expect(client.deleteProject).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('beatify-delete-confirm'));
     await waitFor(() => expect(client.deleteProject).toHaveBeenCalledWith('p1'));
     await waitFor(() => expect(screen.queryByTestId('beatify-project-p1')).toBeNull());
+    expect(screen.queryByTestId('beatify-delete-warning')).toBeNull();
+  });
+
+  it('cancelling the delete warning leaves the project untouched', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-project-delete-p1'));
+    await screen.findByTestId('beatify-delete-warning');
+
+    fireEvent.click(screen.getByTestId('beatify-delete-cancel'));
+    expect(screen.queryByTestId('beatify-delete-warning')).toBeNull();
+    expect(client.deleteProject).not.toHaveBeenCalled();
+    expect(screen.getByTestId('beatify-project-p1')).toBeTruthy();
   });
 
   it('closes a project without deleting it', async () => {

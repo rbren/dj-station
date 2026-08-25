@@ -57,6 +57,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const [modal, setModal] = useState<ModalFor | null>(null);
   const [warn, setWarn] = useState<ModalFor | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState<BeatifyProjectSummary | null>(null);
   const [bpmDraft, setBpmDraft] = useState<string | null>(null);
   /** The open project's name, while it is being typed. */
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -379,7 +380,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
                 className="beatify-project-edit"
                 data-testid={`beatify-project-delete-${project.id}`}
                 title="Delete this project, its seeds, its renders and its clips"
-                onClick={() => void remove(project)}
+                onClick={() => setDeleting(project)}
               >
                 ×
               </button>
@@ -414,6 +415,30 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
             })
           }
         />
+      )}
+
+      {deleting && (
+        <div className="beatify-modal-backdrop" data-testid="beatify-delete-warning">
+          <div className="beatify-warn">
+            <p>
+              Deleting “{deleting.name}” removes the project, its seeds, its renders and its clips.
+              The library tracks it was built from stay put; everything else is gone for good.
+            </p>
+            <button data-testid="beatify-delete-cancel" onClick={() => setDeleting(null)}>
+              Cancel
+            </button>
+            <button
+              data-testid="beatify-delete-confirm"
+              onClick={() => {
+                const project = deleting;
+                setDeleting(null);
+                void remove(project);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
       )}
 
       {warn && (
