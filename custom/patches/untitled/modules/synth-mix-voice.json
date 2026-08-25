@@ -1,18 +1,28 @@
 {
-  "ext": "macro.synth-multi-voice",
+  "ext": "macro.synth-mix-voice",
   "knobs": {
     "attack": {
-      "position": 0.007966014,
+      "position": 0.006660666,
+      "atten": 0.060006,
+      "offset": 0.023342334
+    },
+    "atten": {
+      "position": 0.645,
       "atten": 1.0,
       "offset": 0.0
     },
-    "atten": {
+    "bass_att_atten": {
       "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
+    "bass_att_offset": {
+      "position": 0.4,
+      "atten": 1.0,
+      "offset": 0.0
+    },
     "bass_in": {
-      "position": 0.58666664,
+      "position": 0.52666664,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -27,7 +37,7 @@
       "offset": 0.0
     },
     "decay": {
-      "position": 0.01980396,
+      "position": 0.047278736,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -43,6 +53,11 @@
     },
     "fm": {
       "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "fm_index": {
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -106,6 +121,41 @@
       "atten": 1.0,
       "offset": 0.0
     },
+    "lfo1_clock": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lfo1_phase": {
+      "position": 0.25,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lfo1_pw": {
+      "position": 0.49999997,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lfo1_rate": {
+      "position": 0.5074056,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lfo1_ratio": {
+      "position": 0.4375,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lfo1_reset": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lfo1_shape": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
     "lvl1": {
       "position": 0.8,
       "atten": 1.0,
@@ -127,7 +177,7 @@
       "offset": 0.0
     },
     "lvl5": {
-      "position": 0.099999994,
+      "position": 0.8,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -141,28 +191,58 @@
       "atten": 1.0,
       "offset": 0.0
     },
-    "note_env_attack": {
-      "position": 0.006660666,
-      "atten": 0.060006,
-      "offset": 0.023342334
-    },
-    "note_env_decay": {
-      "position": 0.047278736,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "note_env_release": {
-      "position": 0.01990199,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "note_env_retrig": {
+    "mute1": {
       "position": 4.5474735e-13,
       "atten": 1.0,
       "offset": 0.0
     },
-    "note_env_sustain": {
-      "position": 0.3809524,
+    "mute2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mute3": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mute4": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mute5": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mute6": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "noise_env_attack": {
+      "position": 0.007966014,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "noise_env_decay": {
+      "position": 0.01980396,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "noise_env_release": {
+      "position": 0.01990199,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "noise_env_retrig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "noise_env_sustain": {
+      "position": 0.11904762,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -182,7 +262,7 @@
       "offset": 0.0
     },
     "offset": {
-      "position": 0.4,
+      "position": 0.6265,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -267,12 +347,12 @@
       "offset": 0.0
     },
     "saw_in": {
-      "position": 0.62666667,
+      "position": 0.5466667,
       "atten": 1.0,
       "offset": 0.0
     },
-    "saw_voice_fm": {
-      "position": 0.503,
+    "saw_voice_fm_index": {
+      "position": 0.25,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -292,12 +372,12 @@
       "offset": 0.0
     },
     "shape_in": {
-      "position": 0.0,
+      "position": 0.52666664,
       "atten": 1.0,
       "offset": 0.0
     },
     "shaped_in": {
-      "position": 0.7133333,
+      "position": 0.48,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -311,6 +391,11 @@
       "atten": 1.0,
       "offset": 0.0
     },
+    "sine_voice_fm_index": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
     "sine_voice_sync": {
       "position": 4.5474735e-13,
       "atten": 1.0,
@@ -321,8 +406,38 @@
       "atten": 1.0,
       "offset": 0.0
     },
+    "solo1": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "solo2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "solo3": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "solo4": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "solo5": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "solo6": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
     "sustain": {
-      "position": 0.11904762,
+      "position": 0.3809524,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -332,6 +447,146 @@
       "offset": 0.0
     },
     "topology": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_in1_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_in2_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_in3_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_in4_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_in5_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_in6_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_in6_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_lvl5": {
+      "position": 0.099999994,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_lvl6": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_master": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_mute1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_mute2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_mute3": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_mute4": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_mute5": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_mute6": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_pan1": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_pan2": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_pan3": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_pan4": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_pan5": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_pan6": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_solo1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_solo2": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_solo3": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_solo4": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_solo5": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voice_mix_solo6": {
       "position": 4.5474735e-13,
       "atten": 1.0,
       "offset": 0.0
@@ -363,96 +618,6 @@
     },
     "warble_env_sustain": {
       "position": 0.52380955,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_filter_atten": {
-      "position": 0.645,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_filter_offset": {
-      "position": 0.6265,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_in1_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_in2_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_in3_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_in4_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_in5_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_in6_l": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_in6_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_lvl5": {
-      "position": 0.8,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_lvl6": {
-      "position": 0.8,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_master": {
-      "position": 1.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_pan1": {
-      "position": 0.5,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_pan2": {
-      "position": 0.5,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_pan3": {
-      "position": 0.5,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_pan4": {
-      "position": 0.5,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_pan5": {
-      "position": 0.5,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "warble_mix_pan6": {
-      "position": 0.5,
       "atten": 1.0,
       "offset": 0.0
     },
