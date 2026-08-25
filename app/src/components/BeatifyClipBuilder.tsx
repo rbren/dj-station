@@ -59,6 +59,15 @@ import { BeatifyClipList, type ClipListClip, type ClipListSeed } from './Beatify
 import { BeatifyTrackView, type BeatifyTrackViewHandle } from './BeatifyTrackView';
 
 const BUCKETS = 1400;
+
+/** What a seed IS, as far as anything fetched from it goes: change any of
+ *  this and the render behind it is different audio. Re-tempo a project
+ *  and every seed's changes at once. */
+function seedRevision(seed: BeatifySeed): string {
+  const g = seed.record.grid;
+  return `${seed.id}@${g.bpm}/${g.beats}/${seed.durationSecs}/${seed.record.warp.strength}`;
+}
+
 /** What the editor draws before a project has a tempo of its own. */
 const EMPTY_GRID = { bpm: 120, period: 0.5, phase: 0.5, beats: 0 };
 /** The source pane is shorter here than it is on its own: the clip
@@ -98,6 +107,12 @@ export function BeatifyClipBuilder({
   const firstSeed = project.seeds[0] ?? null;
   // A project with nothing in it still draws a grid to put things on.
   const grid = firstSeed?.record.grid ?? EMPTY_GRID;
+
+  // The project as the BACKEND would answer about it. A tempo change or a
+  // re-beatify moves this, and the sources and the open render are
+  // fetched again — the page itself is not rebuilt, because the clip
+  // half-built on the grid is still the clip.
+  const revision = useMemo(() => project.seeds.map(seedRevision).join(','), [project.seeds]);
 
   const [sources, setSources] = useState<ClipSources | null>(null);
   const [saved, setSaved] = useState<SavedClip[]>([]);
@@ -143,7 +158,7 @@ export function BeatifyClipBuilder({
       setSources(list);
       setSaved(list.clips);
     })();
-  }, [clips, projectId]);
+  }, [clips, projectId, revision]);
 
   useEffect(() => {
     // An empty project has nothing to open, which is not an error.
@@ -156,7 +171,7 @@ export function BeatifyClipBuilder({
     return () => {
       live = false;
     };
-  }, [clips, picked, projectId]);
+  }, [clips, picked, projectId, revision]);
 
   // --- the clip's own transport -----------------------------------------
   //
@@ -393,7 +408,9 @@ export function BeatifyClipBuilder({
     // to learn it, or the next save would file a second copy and Delete
     // would have nothing to delete.
     setDraft((cur) => ({ ...cur, id: filed.id }));
-    setNote(`Saved "${draft.name}"`);
+    // No "Saved X": the clip is in the list on the left under that name,
+    // which is the receipt. The note line is for refusals and hints.
+    setNote(null);
   }, [clips, draft, projectId]);
 
   /** Delete the clip this draft came from. The material stays on screen,
@@ -409,7 +426,9 @@ export function BeatifyClipBuilder({
     if (picked === `clip:${draft.id}`) {
       setPicked(project.seeds[0] ? seedSourceId(project.seeds[0].id) : '');
     }
-    setNote(`Deleted "${draft.name}" — what is on the grid is now unsaved`);
+    // Not a congratulation: the file is gone but the material is still on
+    // the grid, and only this says so.
+    setNote(`"${draft.name}" is deleted — what is on the grid is now unsaved`);
   }, [clips, draft, picked, project.seeds, projectId]);
 
   /** Clear the desk: a new, empty clip, and silence. */
@@ -525,8 +544,16 @@ export function BeatifyClipBuilder({
   );
 
   const sourceView = open
-    ? { label: open.label, durationSecs: open.durationSecs, peaks: open.peaks }
+    ? { id: picked, label: open.label, durationSecs: open.durationSecs, peaks: open.peaks }
     : null;
+
+  // What the pane is MOUNTED against: the material, not the mix. A stem
+  // switched off is the same seed on the same grid, so the view sits
+  // through it (zoom, selection, playhead and all, see `sourceView.id`);
+  // a different seed, a clip, or the same seed re-rendered at another
+  // tempo is a different timeline, and starts fresh — seconds do not
+  // mean what they meant.
+  const openKey = `${seedOfSourceId(picked) || picked}@${openSeed ? seedRevision(openSeed) : ''}`;
 
   return (
     // The list runs down the left of BOTH panes, so the source and the
@@ -548,7 +575,7 @@ export function BeatifyClipBuilder({
         <div className="beatify-builder-source">
           {openSeed ? (
             <BeatifyTrackView
-              key={picked}
+              key={openKey}
               handle={sourceRef}
               track={openSeed}
               source={sourceView}

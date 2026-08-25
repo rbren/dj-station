@@ -128,19 +128,28 @@ beforeEach(() => {
   window.HTMLMediaElement.prototype.pause = vi.fn();
 });
 
-async function mount(clips: BeatifyClipClientApi = clipsMock(), open: BeatifyProject = project()) {
-  render(
+function builder(open: BeatifyProject, clips: BeatifyClipClientApi) {
+  return (
     <BeatifyClipBuilder
       project={open}
       clips={clips}
       onRebeatify={() => {}}
       onImport={() => {}}
       onRemoveSeed={() => {}}
-    />,
+    />
   );
+}
+
+async function mount(clips: BeatifyClipClientApi = clipsMock(), open: BeatifyProject = project()) {
+  const { rerender } = render(builder(open, clips));
   await screen.findByTestId('beatify-clip-list');
   await screen.findByTestId('beatify-track-waveform');
-  return clips;
+  return Object.assign(clips, {
+    /** The page re-rendered with a changed project — a tempo change, a
+     *  seed imported — WITHOUT being torn down, which is what the view
+     *  above does to it. */
+    reopen: (next: BeatifyProject) => rerender(builder(next, clips)),
+  });
 }
 
 /** Sweep a selection over the source waveform. The pane is 325 px wide
@@ -293,6 +302,130 @@ describe('the source list', () => {
       'sets the tempo',
     );
     expect(clips.open).not.toHaveBeenCalled();
+  });
+});
+
+// Switching a part off is a MIX change, not a new source: the pane must
+// carry on where it was — same zoom, same selection, same playhead, and
+// still sounding — with the new mix swapped in underneath.
+describe('switching a stem off leaves the source where it was', () => {
+  const readout = () => screen.getByTestId('beatify-track-readout').textContent;
+  const mixOf = (clips: BeatifyClipClientApi) =>
+    (clips.audio as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
+
+  it('keeps the zoom, the scroll and the selection', async () => {
+    const clips = await mount();
+    selectBeats(4, 6);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('6 beats'),
+    );
+    fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
+    fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
+    const zoomed = readout();
+
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
+    await waitFor(() =>
+      expect(clips.open).toHaveBeenLastCalledWith(
+        'p1',
+        { kind: 'seed', id: 's1', stems: ['drums', 'bass', 'other'] },
+        expect.any(Number),
+      ),
+    );
+
+    expect(readout()).toBe(zoomed);
+    expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('6 beats');
+    // Still the same six beats, so they can still be dragged in.
+    dragInto(0, 0);
+    expect(blocks()).toHaveLength(1);
+    expect(blocks()[0].dataset.beats).toBe('6');
+  });
+
+  it('keeps playing, and swaps the mix under the playhead', async () => {
+    const clips = await mount();
+    fireEvent.click(screen.getByTestId('beatify-track-play'));
+    await waitFor(() => expect(screen.getByTestId('beatify-track-play').textContent).toBe('❚❚'));
+    expect(mixOf(clips)).toEqual({ kind: 'seed', id: 's1', stems: [] });
+
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
+
+    // The window in flight is re-rendered from the new mix rather than
+    // the transport being torn down: it never stops sounding.
+    await waitFor(() =>
+      expect(mixOf(clips)).toEqual({ kind: 'seed', id: 's1', stems: ['drums', 'bass', 'other'] }),
+    );
+    expect(screen.getByTestId('beatify-track-play').textContent).toBe('❚❚');
+  });
+
+  // The boundary: a DIFFERENT seed is different material, so that pane
+  // does start fresh. Only the mix is a change the view can sit through.
+  it('does start fresh when another seed is opened', async () => {
+    const clips = clipsMock({
+      sources: vi.fn(async () => ({
+        sources: [seedInfo('s1', 'Live Set A'), seedInfo('s2', 'Boys')],
+        clips: [],
+        grid: GRID,
+      })),
+    });
+    await mount(clips, project([beatified('s1'), beatified('s2', 'Boys')]));
+    fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
+    expect(readout()).toContain('view');
+
+    fireEvent.click(screen.getByTestId('beatify-clip-source-s2'));
+    await waitFor(() => expect(readout()).not.toContain('view'));
+  });
+});
+
+// The tempo belongs to the PROJECT, so changing it re-renders every
+// seed — but a clip is a run of BEATS, and a beat is a beat at any
+// tempo. Whatever is half-built on the grid has to survive it.
+describe('the project tempo changing under the builder', () => {
+  const retempo = (bpm: number) => {
+    const seed = beatified();
+    const period = 60 / bpm;
+    return project([{ ...seed, record: { ...seed.record, grid: { ...GRID, bpm, period } } }]);
+  };
+
+  it('leaves the clip in progress exactly where it was', async () => {
+    const clips = await mount();
+    await fourBeatsAt(2);
+    fireEvent.change(screen.getByTestId('beatify-clip-name'), { target: { value: 'Intro loop' } });
+
+    clips.reopen(retempo(128));
+
+    // Same block, same beats, same column — and the name box is still
+    // the one that was being typed into.
+    await waitFor(() => expect(blocks()).toHaveLength(1));
+    expect(blocks()[0].dataset.beats).toBe('4');
+    expect(blocks()[0].dataset.col).toBe('2');
+    expect((screen.getByTestId('beatify-clip-name') as HTMLInputElement).value).toBe('Intro loop');
+  });
+
+  it('plays the clip at the NEW tempo', async () => {
+    const clips = await mount();
+    await fourBeatsAt(0);
+    clips.reopen(retempo(60));
+    fireEvent.click(screen.getByTestId('beatify-clip-play'));
+
+    // Sixteen beats at 60 BPM is sixteen seconds of audio to render,
+    // where at 120 it was eight.
+    await waitFor(() => {
+      const call = (clips.preview as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+      expect(call?.[3]).toBeCloseTo(16, 5);
+    });
+  });
+
+  it('fetches the re-rendered source, and shows it at the new tempo', async () => {
+    const clips = await mount();
+    const opens = (clips.open as ReturnType<typeof vi.fn>).mock.calls.length;
+    clips.reopen(retempo(128));
+
+    // Every seed was re-rendered under the tempo change, so what the
+    // pane is holding is last week's audio: it asks again.
+    await waitFor(() =>
+      expect((clips.open as ReturnType<typeof vi.fn>).mock.calls.length).toBe(opens + 1),
+    );
+    expect(clips.sources).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('beatify-track-view').textContent).toContain('128.00 BPM');
   });
 });
 
@@ -554,6 +687,17 @@ describe('saving', () => {
       }),
     ]);
     await screen.findByTestId('beatify-clip-source-clip:1');
+  });
+
+  // The clip in the list under that name is the receipt; a line saying
+  // "Saved" is the same news twice, and the note line has refusals to
+  // carry.
+  it('does not congratulate you for saving', async () => {
+    await mount();
+    await fourBeatsAt(0);
+    await saveAs('Intro loop');
+    expect(screen.queryByTestId('beatify-clip-note')).toBeNull();
+    expect(screen.getByTestId('beatify-clip-source-clip:1').textContent).toContain('Intro loop');
   });
 
   it('refuses to save an empty clip', async () => {

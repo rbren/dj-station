@@ -1089,6 +1089,18 @@ The detail is in the `Conventions` bullets above; this is the map.
   `_project_set_bpm`, `_project_audio` (by `seedId`), `_seed_delete`,
   `_seed_rename`; clips add `beatify_clip_sources`, `_open`, `_audio`,
   `_preview`, `_save`, `_delete`.
+- A project's name is the user's, never a track's. `beatify_project_new`
+  and the mint-from-a-save path both fall back to `default_project_name`
+  ("project 4" — its number on the shelf), and the label is typed in two
+  places that share one path (`renameTo` in `BeatifyView`): the shelf's
+  pencil, and the open project's own header, which turns into a box on
+  click and is opened ALREADY in that state for a project just made, so
+  it is named at birth. Enter/blur writes through `beatify_project_rename`
+  (which persists and rejects an empty name), Escape abandons; an emptied
+  box is an abandoned edit, not a rename. There is no Save button because
+  there is nothing to save: every change to a project — its name, its
+  tempo, its seeds, its clips — is written to disk by the command that
+  makes it.
 - Beats are the unit of every gesture, but MIND THE TIMEBASE: the modal
   snaps to `sourceGrid` (source seconds), the track view and the editor
   to `grid` (output seconds, beat 0 padded). Selections grow OUTWARD to
@@ -1150,6 +1162,32 @@ The detail is in the `Conventions` bullets above; this is the map.
   `app/src-tauri/src/beatify_clip.rs` (resolves sources, files clips);
   audio math: `dj_analysis::beatify::build`; the IPC client sits at the
   bottom of `beatifyClip.ts` and is keyed by `projectId` throughout.
+- WHAT REMOUNTS WHAT, and why it matters: a remount throws away the work
+  in the panes below it, so `key` is only ever the identity of the WORK.
+  `BeatifyClipBuilder` is keyed by the project id ALONE — a tempo change,
+  an import, a re-beatify are props it fetches around (`seedRevision`
+  drives the `sources`/`open` effects), never a rebuild, because the
+  half-built clip on the grid is the work. The source pane is keyed by
+  the open seed AND its revision: a different seed or the same seed
+  re-rendered at another tempo is a different timeline, so the viewport
+  (which is in seconds) starts fresh. A MIX change — a stem switched off
+  — is neither: same seed, same grid, same length, so the pane stays
+  mounted with its zoom, selection and playhead, and `TrackViewSource.id`
+  changing makes the transport `refreshTone()` the window in flight, the
+  same move the Clip page makes for an EQ tweak. Pinned by
+  `BeatifyClipBuilder.test.tsx` ("switching a stem off leaves the source
+  where it was", "the project tempo changing under the builder") and by
+  the DOM-node-identity check in `BeatifyView.test.tsx`.
+- The page does not congratulate anybody. There is no success line on it:
+  a re-tempo is announced by the BPM box and the re-rendered seeds, a
+  saved clip by its name appearing in the list, a deleted one by its
+  absence. Failures are not silent — every beatify command goes through
+  `ipc.ts`, which puts a rejection in the banner AND the console — so a
+  "could not …" line next to one is the same news twice. What is left in
+  the builder's note line is refusals and consequences only ("Leave at
+  least one stem on", "what is on the grid is now unsaved"), and a
+  refused BPM is answered by the box springing back to the tempo the
+  project still has.
 - Playback ownership: EXACTLY ONE of the source pane and the clip editor
   sounds at a time. Starting either pauses the other
   (`BeatifyTrackViewHandle.pause` one way, `onPlayingChange` the other)

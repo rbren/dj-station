@@ -4138,6 +4138,26 @@ body {
 .beatify-open-name {
   color: #dce8ff;
   font-weight: 600;
+  /* A name that can be typed over, not a button: it looks like the label
+     it is until it is clicked. */
+  background: none;
+  border: 1px solid transparent;
+  padding: 2px 6px;
+  cursor: text;
+}
+
+.beatify-open-name:hover {
+  border-color: #2b3446;
+}
+
+.beatify-open-name-input {
+  color: #dce8ff;
+  font-weight: 600;
+  background: #10141c;
+  border: 1px solid #3a465c;
+  border-radius: 3px;
+  padding: 2px 6px;
+  min-width: 12rem;
 }
 
 /* What joining this project will do to the material being imported. */

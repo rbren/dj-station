@@ -8,6 +8,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BeatifyClipClientApi } from '../src/beatifyClip';
 import { BeatifyView } from '../src/components/BeatifyView';
+import { MAX_PROJECT_BPM, MIN_PROJECT_BPM } from '../src/beatify';
 import type {
   BeatifyAnalysis,
   BeatifyClientApi,
@@ -560,6 +561,21 @@ describe('Beatify tab', () => {
     expect(screen.queryByTestId('beatify-status')).toBeNull();
   });
 
+  // Nothing on this page congratulates the user: the page IS the receipt.
+  // Failures are not silent either — every beatify command goes through
+  // `ipc.ts`, which puts a failed one in the banner and the console.
+  it('has no success line to congratulate anybody with', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-close-project'));
+    await screen.findByTestId('beatify-projects');
+    fireEvent.click(await screen.findByTestId('beatify-project-delete-p1'));
+    fireEvent.click(await screen.findByTestId('beatify-delete-confirm'));
+    await waitFor(() => expect(client.deleteProject).toHaveBeenCalled());
+    expect(screen.queryByTestId('beatify-status')).toBeNull();
+    expect(document.body.textContent).not.toContain('Deleted');
+  });
+
   it('loops the region it auditions and takes the spacebar (MOD-A16/A18)', async () => {
     const client = clientMock();
     await openTrack(client);
@@ -716,6 +732,69 @@ describe('beatify projects', () => {
     expect(screen.queryByTestId('beatify-conform')).toBeNull();
   });
 
+  // A project is a place to work, so it gets a name of its own — not the
+  // title of whatever happened to be imported into it first.
+  it('offers the name for typing the moment a project is made', async () => {
+    const client = clientMock({
+      newProject: vi.fn(async () => opened({ name: 'project 1', bpm: null, seeds: [] })),
+      renameProject: vi.fn(async () => [project({ name: 'Warehouse' })]),
+    });
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-new-project'));
+
+    const box = (await screen.findByTestId('beatify-project-name-input')) as HTMLInputElement;
+    expect(box.value).toBe('project 1');
+    fireEvent.change(box, { target: { value: 'Warehouse' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    await waitFor(() => expect(client.renameProject).toHaveBeenCalledWith('p1', 'Warehouse'));
+    expect((await screen.findByTestId('beatify-open-project')).textContent).toContain('Warehouse');
+  });
+
+  it('renames the open project from its own header, shelf and all', async () => {
+    const client = clientMock({
+      projects: vi.fn(async () => [project()]),
+      renameProject: vi.fn(async () => [project({ name: 'Warehouse' })]),
+    });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-open-project'));
+
+    const box = screen.getByTestId('beatify-project-name-input') as HTMLInputElement;
+    expect(box.value).toBe('Live Set A');
+    fireEvent.change(box, { target: { value: 'Warehouse' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    await waitFor(() => expect(client.renameProject).toHaveBeenCalledWith('p1', 'Warehouse'));
+    expect(screen.getByTestId('beatify-open-project').textContent).toContain('Warehouse');
+    // The shelf is the same project seen from outside: it agrees.
+    fireEvent.click(screen.getByTestId('beatify-close-project'));
+    expect(await screen.findByText('Warehouse')).toBeTruthy();
+  });
+
+  it('keeps the name it had when the typing is abandoned', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-open-project'));
+    const box = screen.getByTestId('beatify-project-name-input');
+    fireEvent.change(box, { target: { value: 'Warehouse' } });
+    fireEvent.keyDown(box, { key: 'Escape' });
+
+    expect(client.renameProject).not.toHaveBeenCalled();
+    expect(screen.getByTestId('beatify-open-project').textContent).toContain('Live Set A');
+  });
+
+  it('will not let a project be left with no name at all', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    fireEvent.click(screen.getByTestId('beatify-open-project'));
+    const box = screen.getByTestId('beatify-project-name-input');
+    fireEvent.change(box, { target: { value: '   ' } });
+    fireEvent.blur(box);
+
+    expect(client.renameProject).not.toHaveBeenCalled();
+    expect(screen.getByTestId('beatify-open-project').textContent).toContain('Live Set A');
+  });
+
   it('re-tempos the whole project from the BPM box, leaving clips alone', async () => {
     const client = clientMock({ projects: vi.fn(async () => [project()]) });
     await openProject(client);
@@ -726,20 +805,54 @@ describe('beatify projects', () => {
     await waitFor(() =>
       expect(client.setProjectBpm).toHaveBeenCalledWith('p1', 128, expect.any(Number)),
     );
+    // The box now reads 128 and every seed is re-rendered: no banner
+    // announces what the page is already showing.
     await waitFor(() =>
-      expect(screen.getByTestId('beatify-status').textContent).toContain('clips are unchanged'),
+      expect((screen.getByTestId('beatify-project-bpm') as HTMLInputElement).value).toBe('128'),
     );
+    expect(screen.queryByTestId('beatify-status')).toBeNull();
   });
 
-  it('refuses a tempo that is not a tempo', async () => {
+  it('re-tempos without throwing away the clip on the bench', async () => {
+    const seed = beatified();
+    const client = clientMock({
+      projects: vi.fn(async () => [project()]),
+      setProjectBpm: vi.fn(async (_id: string, bpm: number) =>
+        opened({
+          bpm,
+          seeds: [
+            { ...seed, record: { ...seed.record, grid: { ...GRID, bpm, period: 60 / bpm } } },
+          ],
+        }),
+      ),
+    });
+    await openProject(client);
+    const grid = await screen.findByTestId('beatify-clip-grid');
+
+    const box = screen.getByTestId('beatify-project-bpm');
+    fireEvent.change(box, { target: { value: '128' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(client.setProjectBpm).toHaveBeenCalled());
+
+    // THE SAME NODE. The builder is handed the new tempo, not torn down
+    // and rebuilt — a rebuild takes the half-built clip with it, and the
+    // clip is the work.
+    expect(screen.getByTestId('beatify-clip-grid')).toBe(grid);
+  });
+
+  it('refuses a tempo that is not a tempo, by springing back to the one it has', async () => {
     const client = clientMock({ projects: vi.fn(async () => [project()]) });
     await openProject(client);
-    const box = screen.getByTestId('beatify-project-bpm');
+    const box = screen.getByTestId('beatify-project-bpm') as HTMLInputElement;
     fireEvent.change(box, { target: { value: '4' } });
     fireEvent.keyDown(box, { key: 'Enter' });
 
     expect(client.setProjectBpm).not.toHaveBeenCalled();
-    expect(screen.getByTestId('beatify-status').textContent).toContain('has to be between');
+    // The box says no by showing the tempo the project still runs at —
+    // and carries the range it will take in its own min/max.
+    expect(box.value).toBe('120');
+    expect(box.min).toBe(String(MIN_PROJECT_BPM));
+    expect(box.max).toBe(String(MAX_PROJECT_BPM));
   });
 
   it('re-beatifies a SEED in place, keeping its id', async () => {
@@ -790,14 +903,31 @@ describe('beatify projects', () => {
     await screen.findByText('Slower take');
   });
 
-  it('deletes a project and leaves the shelf without it', async () => {
+  it('deletes a project only after the warning is accepted', async () => {
     const client = clientMock({ projects: vi.fn(async () => [project()]) });
     render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-project-delete-p1'));
 
+    // Nothing is deleted yet — the warning is up instead.
+    await screen.findByTestId('beatify-delete-warning');
+    expect(client.deleteProject).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('beatify-delete-confirm'));
     await waitFor(() => expect(client.deleteProject).toHaveBeenCalledWith('p1'));
     await waitFor(() => expect(screen.queryByTestId('beatify-project-p1')).toBeNull());
-    expect(screen.getByTestId('beatify-status').textContent).toContain('Deleted');
+    expect(screen.queryByTestId('beatify-delete-warning')).toBeNull();
+  });
+
+  it('cancelling the delete warning leaves the project untouched', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-project-delete-p1'));
+    await screen.findByTestId('beatify-delete-warning');
+
+    fireEvent.click(screen.getByTestId('beatify-delete-cancel'));
+    expect(screen.queryByTestId('beatify-delete-warning')).toBeNull();
+    expect(client.deleteProject).not.toHaveBeenCalled();
+    expect(screen.getByTestId('beatify-project-p1')).toBeTruthy();
   });
 
   it('closes a project without deleting it', async () => {

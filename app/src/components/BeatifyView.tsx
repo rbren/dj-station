@@ -57,8 +57,10 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const [modal, setModal] = useState<ModalFor | null>(null);
   const [warn, setWarn] = useState<ModalFor | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState<BeatifyProjectSummary | null>(null);
   const [bpmDraft, setBpmDraft] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  /** The open project's name, while it is being typed. */
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -81,13 +83,12 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const openProject = useCallback(
     async (projectId: string) => {
       setBusy(true);
-      setStatus(null);
+      setNameDraft(null);
       const project = await client.openProject(projectId, BUCKETS);
       setBusy(false);
-      if (!project) {
-        setStatus('That project could not be opened — its renders may have been deleted');
-        return;
-      }
+      // A failed command has already said so, in the banner and in the
+      // console (`ipc.ts`): saying it again here is the same news twice.
+      if (!project) return;
       setOpen(project);
       setModal(null);
     },
@@ -97,15 +98,16 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   /** Start a project: a name and nothing else. Material comes later. */
   const newProject = useCallback(async () => {
     setBusy(true);
-    setStatus(null);
     const project = await client.newProject('');
     setBusy(false);
-    if (!project) {
-      setStatus('That project could not be created');
-      return;
-    }
+    if (!project) return;
     setOpen(project);
     setModal(null);
+    // A project is a place to work in, so it is named at birth rather
+    // than inheriting whatever gets imported into it first: the name it
+    // came with is already in the box, selected, waiting to be typed
+    // over. Ignore it and the default stands.
+    setNameDraft(project.name);
     void refreshShelf();
   }, [client, refreshShelf]);
 
@@ -113,7 +115,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const importSeed = useCallback(() => {
     if (pick === null || !open) return;
     const track = tracks.find((t) => t.id === pick);
-    setStatus(null);
     setModal({
       trackId: pick,
       title: track?.title ?? `track ${pick}`,
@@ -129,7 +130,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     (project: BeatifyProject) => {
       setOpen(project);
       setModal(null);
-      setStatus(null);
       void refreshShelf();
     },
     [refreshShelf],
@@ -141,21 +141,16 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
       setBpmDraft(null);
       const bpm = Number(value);
       if (!open || !Number.isFinite(bpm)) return;
-      if (bpm < MIN_PROJECT_BPM || bpm > MAX_PROJECT_BPM) {
-        setStatus(`A project's tempo has to be between ${MIN_PROJECT_BPM} and ${MAX_PROJECT_BPM}`);
-        return;
-      }
+      // Out of range is refused by the box itself: the draft is already
+      // dropped, so it springs back to the tempo the project still has,
+      // which is the answer. Its min/max say what the range is.
+      if (bpm < MIN_PROJECT_BPM || bpm > MAX_PROJECT_BPM) return;
       if (open.bpm !== null && Math.abs(open.bpm - bpm) < 0.005) return;
       setBusy(true);
-      setStatus(`Re-rendering ${open.seeds.length} seed${open.seeds.length === 1 ? '' : 's'}…`);
       const project = await client.setProjectBpm(open.id, bpm, BUCKETS);
       setBusy(false);
-      if (!project) {
-        setStatus('That tempo could not be applied');
-        return;
-      }
+      if (!project) return;
       setOpen(project);
-      setStatus(`Everything now runs at ${bpm.toFixed(2)} BPM — clips are unchanged`);
       void refreshShelf();
     },
     [client, open, refreshShelf],
@@ -174,14 +169,37 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     [client, open, refreshShelf],
   );
 
+  /** Write a project's name down. One path for both boxes — the shelf's
+   *  pencil and the open project's own header — because they are two
+   *  views of the same label. */
+  const renameTo = useCallback(
+    async (projectId: string, asked: string) => {
+      const name = asked.trim();
+      // A nameless project cannot be told from its neighbour on the
+      // shelf, so an emptied box is an abandoned edit, not a rename.
+      if (!name) return;
+      const saved = await client.renameProject(projectId, name);
+      if (!saved) return;
+      setProjects(saved);
+      setOpen((cur) => (cur && cur.id === projectId ? { ...cur, name } : cur));
+    },
+    [client],
+  );
+
   const rename = useCallback(async () => {
     if (!renaming) return;
-    const saved = await client.renameProject(renaming.id, renaming.name);
+    const { id, name } = renaming;
     setRenaming(null);
-    if (!saved) return;
-    setProjects(saved);
-    setOpen((cur) => (cur && cur.id === renaming.id ? { ...cur, name: renaming.name } : cur));
-  }, [client, renaming]);
+    await renameTo(id, name);
+  }, [renaming, renameTo]);
+
+  /** Commit what was typed into the open project's header. */
+  const commitName = useCallback(async () => {
+    const asked = nameDraft?.trim() ?? '';
+    setNameDraft(null);
+    if (!open || asked === open.name) return;
+    await renameTo(open.id, asked);
+  }, [nameDraft, open, renameTo]);
 
   const remove = useCallback(
     async (project: BeatifyProjectSummary) => {
@@ -189,7 +207,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
       if (!saved) return;
       setProjects(saved);
       setOpen((cur) => (cur && cur.id === project.id ? null : cur));
-      setStatus(`Deleted "${project.name}"`);
     },
     [client],
   );
@@ -203,9 +220,31 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
       <div className="beatify-bar">
         {open ? (
           <>
-            <span className="beatify-open-name" data-testid="beatify-open-project">
-              {open.name}
-            </span>
+            {nameDraft === null ? (
+              <button
+                className="beatify-open-name"
+                data-testid="beatify-open-project"
+                title="Rename this project"
+                onClick={() => setNameDraft(open.name)}
+              >
+                {open.name}
+              </button>
+            ) : (
+              <input
+                autoFocus
+                className="beatify-open-name-input"
+                data-testid="beatify-project-name-input"
+                aria-label="Project name"
+                value={nameDraft}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitName();
+                  if (e.key === 'Escape') setNameDraft(null);
+                }}
+                onBlur={() => void commitName()}
+              />
+            )}
             <label>
               <span>BPM</span>
               <input
@@ -252,7 +291,13 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
             >
               + Import track
             </button>
-            <button data-testid="beatify-close-project" onClick={() => setOpen(null)}>
+            <button
+              data-testid="beatify-close-project"
+              onClick={() => {
+                setNameDraft(null);
+                setOpen(null);
+              }}
+            >
               Close
             </button>
           </>
@@ -277,12 +322,6 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
           </span>
         )}
       </div>
-      {status && (
-        <p className="beatify-status" data-testid="beatify-status">
-          {status}
-        </p>
-      )}
-
       {!open && (
         <div className="beatify-projects" data-testid="beatify-projects">
           {projects.length === 0 && (
@@ -341,7 +380,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
                 className="beatify-project-edit"
                 data-testid={`beatify-project-delete-${project.id}`}
                 title="Delete this project, its seeds, its renders and its clips"
-                onClick={() => void remove(project)}
+                onClick={() => setDeleting(project)}
               >
                 ×
               </button>
@@ -357,7 +396,11 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
 
       {open && (
         <BeatifyClipBuilder
-          key={`${open.id}:${open.seeds.map((s) => `${s.id}@${s.record.grid.bpm}`).join(',')}`}
+          // Keyed by the PROJECT and nothing else. Everything else about
+          // it — the tempo, a seed imported, a seed re-beatified — is a
+          // change the builder takes as a prop and fetches around,
+          // because a remount takes the half-built clip with it.
+          key={open.id}
           project={open}
           clips={clips}
           onImport={importSeed}
@@ -372,6 +415,30 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
             })
           }
         />
+      )}
+
+      {deleting && (
+        <div className="beatify-modal-backdrop" data-testid="beatify-delete-warning">
+          <div className="beatify-warn">
+            <p>
+              Deleting “{deleting.name}” removes the project, its seeds, its renders and its clips.
+              The library tracks it was built from stay put; everything else is gone for good.
+            </p>
+            <button data-testid="beatify-delete-cancel" onClick={() => setDeleting(null)}>
+              Cancel
+            </button>
+            <button
+              data-testid="beatify-delete-confirm"
+              onClick={() => {
+                const project = deleting;
+                setDeleting(null);
+                void remove(project);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
       )}
 
       {warn && (
