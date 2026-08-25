@@ -1,9 +1,0 @@
-{
-  "wires": [
-    {
-      "from_jack": "out",
-      "to": "voice_mix",
-      "to_jack": "lvl4"
-    }
-  ]
-}

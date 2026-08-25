@@ -2,8 +2,8 @@
   "wires": [
     {
       "from_jack": "out_l",
-      "to": "filter",
-      "to_jack": "cutoff"
+      "to": "mixout1",
+      "to_jack": "in3_l"
     }
   ]
 }

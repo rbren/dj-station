@@ -1,9 +1,0 @@
-{
-  "wires": [
-    {
-      "from_jack": "out",
-      "to": "warble",
-      "to_jack": "rate"
-    }
-  ]
-}

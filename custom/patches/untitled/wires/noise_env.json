@@ -1,9 +1,0 @@
-{
-  "wires": [
-    {
-      "from_jack": "env",
-      "to": "noise_vca",
-      "to_jack": "cv"
-    }
-  ]
-}

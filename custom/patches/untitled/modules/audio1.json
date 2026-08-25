@@ -1,31 +1,27 @@
 {
-  "ext": "com.dj.waveshaper",
+  "ext": "builtin.audio",
   "knobs": {
-    "bias": {
-      "position": 0.5,
+    "bpm": {
+      "position": 0.345942,
       "atten": 1.0,
       "offset": 0.0
     },
-    "drive": {
-      "position": 0.3,
+    "loop": {
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "in": {
+    "play": {
       "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "level": {
+    "speed": {
       "position": 0.5,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "mode": {
-      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     }
   },
-  "params": {}
+  "params": {},
+  "track": "/Users/rbren/git/dj-station/custom/clips/Lizzo Boys Beat Rev.flac"
 }

@@ -1,134 +1,162 @@
 {
-  "bass": [
-    -720.0,
-    1104.0
+  "audio1": [
+    1104.0,
+    816.0
   ],
-  "bass_att": [
-    -240.0,
-    -144.0
+  "drumseq1/drum1": [
+    1152.0,
+    1440.0
   ],
-  "bass_voice": [
-    0.0,
-    -144.0
+  "drumseq1/eq2": [
+    1008.0,
+    1872.0
   ],
-  "drive": [
-    -336.0,
-    720.0
+  "drumseq1/gridseq1": [
+    576.0,
+    1344.0
   ],
-  "filter": [
-    144.0,
-    576.0
+  "drumseq1/lfo1": [
+    624.0,
+    1824.0
   ],
-  "gate": [
-    -528.0,
-    336.0
+  "drumseq1/mixer2": [
+    1440.0,
+    1344.0
+  ],
+  "drumseq1/reverb2": [
+    1440.0,
+    1920.0
   ],
   "mixout1/audioout1": [
     1536.0,
-    336.0
+    0.0
   ],
   "mixout1/left_scope": [
     1104.0,
-    -96.0
+    -432.0
   ],
   "mixout1/mixer1": [
-    1104.0,
-    336.0
+    1392.0,
+    192.0
   ],
   "mixout1/right_scope": [
     1536.0,
-    -96.0
-  ],
-  "noise": [
-    240.0,
-    -144.0
-  ],
-  "noise_env": [
-    240.0,
-    48.0
-  ],
-  "noise_vca": [
-    624.0,
-    -144.0
-  ],
-  "note": [
-    -528.0,
-    144.0
-  ],
-  "note_env": [
-    480.0,
-    528.0
-  ],
-  "note_filter": [
-    48.0,
-    1008.0
-  ],
-  "out": [
-    864.0,
-    528.0
-  ],
-  "pitch_match": [
-    240.0,
-    816.0
+    -432.0
   ],
   "qwerty1": [
     -1344.0,
     432.0
   ],
-  "saw": [
-    -720.0,
-    912.0
+  "synth-multi-voice/bass": [
+    -912.0,
+    -288.0
   ],
-  "saw_voice": [
-    0.0,
-    48.0
+  "synth-multi-voice/bass_att": [
+    -432.0,
+    -1536.0
   ],
-  "shape": [
+  "synth-multi-voice/bass_voice": [
+    -192.0,
+    -1536.0
+  ],
+  "synth-multi-voice/drive": [
     -528.0,
-    720.0
+    -672.0
   ],
-  "shaped": [
+  "synth-multi-voice/filter": [
+    -48.0,
+    -816.0
+  ],
+  "synth-multi-voice/gate": [
     -720.0,
-    720.0
+    -1056.0
   ],
-  "sine": [
-    -720.0,
-    528.0
-  ],
-  "sine_voice": [
-    -240.0,
-    48.0
-  ],
-  "voice_mix": [
-    624.0,
-    96.0
-  ],
-  "warble": [
-    528.0,
-    912.0
-  ],
-  "warble_env": [
-    480.0,
-    1200.0
-  ],
-  "warble_filter": [
-    288.0,
-    1008.0
-  ],
-  "warble_mix": [
+  "synth-multi-voice/noise": [
     48.0,
-    1200.0
+    -1536.0
   ],
-  "warble_speed": [
-    -528.0,
-    528.0
+  "synth-multi-voice/noise_env": [
+    48.0,
+    -1344.0
   ],
-  "warble_vca": [
-    864.0,
-    1200.0
+  "synth-multi-voice/noise_vca": [
+    432.0,
+    -1536.0
   ],
-  "waveshap1": [
-    -240.0,
-    240.0
+  "synth-multi-voice/note": [
+    -720.0,
+    -1248.0
+  ],
+  "synth-multi-voice/note_env": [
+    288.0,
+    -864.0
+  ],
+  "synth-multi-voice/note_filter": [
+    -144.0,
+    -384.0
+  ],
+  "synth-multi-voice/out": [
+    672.0,
+    -864.0
+  ],
+  "synth-multi-voice/pitch_match": [
+    48.0,
+    -576.0
+  ],
+  "synth-multi-voice/saw": [
+    -912.0,
+    -480.0
+  ],
+  "synth-multi-voice/saw_voice": [
+    -192.0,
+    -1344.0
+  ],
+  "synth-multi-voice/shape": [
+    -720.0,
+    -672.0
+  ],
+  "synth-multi-voice/shaped": [
+    -912.0,
+    -672.0
+  ],
+  "synth-multi-voice/sine": [
+    -912.0,
+    -864.0
+  ],
+  "synth-multi-voice/sine_voice": [
+    -432.0,
+    -1344.0
+  ],
+  "synth-multi-voice/voice_mix": [
+    624.0,
+    -2064.0
+  ],
+  "synth-multi-voice/warble": [
+    336.0,
+    -480.0
+  ],
+  "synth-multi-voice/warble_env": [
+    288.0,
+    -192.0
+  ],
+  "synth-multi-voice/warble_filter": [
+    96.0,
+    -384.0
+  ],
+  "synth-multi-voice/warble_mix": [
+    -144.0,
+    -192.0
+  ],
+  "synth-multi-voice/warble_speed": [
+    -720.0,
+    -864.0
+  ],
+  "synth-multi-voice/warble_vca": [
+    672.0,
+    -192.0
+  ],
+  "synth-multi-voice/waveshap1": [
+    -432.0,
+    -1152.0
   ]
 }

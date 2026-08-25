@@ -1,9 +1,0 @@
-{
-  "wires": [
-    {
-      "from_jack": "pink",
-      "to": "noise_vca",
-      "to_jack": "in"
-    }
-  ]
-}

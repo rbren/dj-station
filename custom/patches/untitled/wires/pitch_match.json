@@ -1,9 +1,0 @@
-{
-  "wires": [
-    {
-      "from_jack": "out",
-      "to": "filter",
-      "to_jack": "cutoff"
-    }
-  ]
-}

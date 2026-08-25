@@ -2,13 +2,13 @@
   "wires": [
     {
       "from_jack": "gate",
-      "to": "gate",
+      "to": "synth-multi-voice",
       "to_jack": "in"
     },
     {
       "from_jack": "note",
-      "to": "note",
-      "to_jack": "in"
+      "to": "synth-multi-voice",
+      "to_jack": "note_in"
     }
   ]
 }
