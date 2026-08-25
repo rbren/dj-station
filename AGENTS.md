@@ -371,7 +371,9 @@ offset))`, offset in position units — so the knob's curve shapes the
   the rest of the workspace on a loaded 4-core host (proc-deadline
   assert); it passes standalone — rerun
   `cargo test -p dj-engine --release --test rt_safety` before assuming a
-  regression.
+  regression. `perf_m4.rs` flakes the same way and for the same reason
+  ("exceeded the block deadline N times"): rerun
+  `cargo test -p dj-engine --release --test perf_m4` on its own.
 - Frontend rack state lives in `app/src/rackStore.ts` (hand-rolled
   external store read via `useSyncExternalStore`, no zustand), provided
   through `RackStoreContext`; each `RackModule` subscribes to its own
@@ -842,6 +844,21 @@ offset))`, offset in position units — so the knob's curve shapes the
   `<data_dir>/beatify/<project-id>/{project.json,meta.json,warped.wav}`
   (machine-local, gitignored) plus a best-effort `<source>.beatify.json`
   sidecar; Beatify never rewrites the source file or the library DB row.
+- THE IMPORT MODAL OWNS THE CHOICE AND THE PAGE (MOD-A0/A0a). "+ Import
+  track" opens `BeatifyModal` with NO track: `chosen` is the modal's own
+  state, every fetch is keyed on it and returns early while it is null,
+  so opening the dialog costs nothing. The picker is
+  `TrackPicker.tsx` — a generic searchable combobox (all typed words must
+  appear in title/artist/album, ↑/↓/Enter, `idPrefix` for its testids,
+  `stopPropagation` on its keydowns so the page's transports never hear
+  typing) — and it stays in the modal header, so re-choosing restarts the
+  analysis. There is no track `<select>` on the page, and no re-beatify
+  button anywhere: a second take is a second seed. While the modal is up
+  the page is `inert` (bar, shelf, and `BeatifyClipBuilder` via its
+  `suspended` prop) and both window keydown handlers — the builder's and
+  `BeatifyTrackView`'s — return early, after pausing what was sounding.
+  Pinned by `app/tests/TrackPicker.test.tsx` and the MOD-A0 cases in
+  `BeatifyView.test.tsx`.
 - Beatify's frontend: `BeatifyView.tsx` (tab shell: track list,
   run/verdict state, owns which track is open), `BeatifyModal.tsx` (the
   detection report + audition) and, once a track is beatified,
@@ -1079,8 +1096,8 @@ beatify::build`.
     nearest beat (⌘ frees), selections OUTWARD to whole beats, slides by
     whole beats; the Clip page passes no snap. Zoom law is
     `viewSpan`/`zoomView` (exported, pinned in BeatifyGrid.test.ts).
-    BeatifyTrackView is keyed by track+render in BeatifyView so a
-    re-beatify remounts it (fresh transport/viewport/selection) instead of
+    BeatifyTrackView is keyed by track+render in BeatifyView so a new
+    render remounts it (fresh transport/viewport/selection) instead of
     setState-in-effect resets.
 - THE VIEW NEVER MOVES ITSELF AND A SWEEP NEVER MOVES PLAYBACK. Two rules
   that both come from the same complaint — the ground shifting under a
@@ -1103,10 +1120,10 @@ beatify::build`.
   `setLoop` policy, which is now "arming or moving a loop NEVER moves
   playback" (`loopWrapBeat` remains as pure math but the UI no longer
   schedules group-boundary wraps; the shared transport's behavior won);
-  (2) re-beatifying is allowed but warns that anything cut from the old
-  grid stops matching, and it overwrites THAT PROJECT's record (no
-  versions) — to keep both takes, start a second project from the same
-  track; (3) the lead-in is
+  (2) re-beatifying HAS NO UI (MOD-A31): re-rendering a seed under the
+  clips cut from it is a trap, so a second take is imported as a second
+  seed and the first is deleted if it is not wanted (the backend's
+  replace-a-seed path survives, unused, behind `save`'s `seedId`); (3) the lead-in is
   ONE global value (median onset offset + pad, `grid::lead_in`), because
   uniformity is what keeps cuts sync-safe; (4) the phase-1 click track
   ticks the DETECTIONS (over unwarped audio that is what proves the
@@ -1222,8 +1239,9 @@ The detail is in the `Conventions` bullets above; this is the map.
   (`projectBpm / sourceBpm`). `beatify_project_set_bpm` re-renders every
   seed and MUST leave clips alone (a placement is a run of beats, and a
   beat is a beat at any tempo); a seed whose source has left the library
-  is re-rendered by stretching its own render instead. Re-beatify keeps
-  the seed's id and directory so clips keep resolving; deleting a seed
+  is re-rendered by stretching its own render instead. The backend's
+  re-render-in-place path keeps the seed's id and directory so clips keep
+  resolving, but no button reaches it any more; deleting a seed
   leaves the project's tempo and its clips intact. A track may appear in
   any number of projects, so nothing is keyed by the track.
 - Persistence, all machine-local and gitignored, one directory per
@@ -1264,7 +1282,7 @@ The detail is in the `Conventions` bullets above; this is the map.
 - WHAT REMOUNTS WHAT, and why it matters: a remount throws away the work
   in the panes below it, so `key` is only ever the identity of the WORK.
   `BeatifyClipBuilder` is keyed by the project id ALONE — a tempo change,
-  an import, a re-beatify are props it fetches around (`seedRevision`
+  an import, a re-render are props it fetches around (`seedRevision`
   drives the `sources`/`open` effects), never a rebuild, because the
   half-built clip on the grid is the work. The source pane is keyed by
   the open seed AND its revision: a different seed or the same seed

@@ -37,12 +37,14 @@ import {
   type BeatifyScope,
   type Quality,
 } from '../beatify';
+import type { Track } from '../library';
 import { ClipTransport, type TransportHost } from '../clipTransport';
 import { logError } from '../errors';
 import { AudioTimeline, viewSpan, type Range } from './AudioTimeline';
 import { BeatifyCutScope } from './BeatifyCutScope';
 import type { TimeTick } from '../clip';
 import { beatSnap } from './BeatifyTrackView';
+import { TrackPicker } from './TrackPicker';
 import { WAVEFORM_VIEW_W as W } from './WaveformView';
 
 const WAVE_H = 110;
@@ -61,13 +63,16 @@ const STRIP_BAD_MS = 15;
 
 export interface BeatifyModalProps {
   client: BeatifyClientApi;
-  trackId: number;
-  title: string;
+  /** The library, to choose from. The CHOICE IS MADE HERE (MOD-A0): the
+   *  modal opens with nothing loaded and analyzes only once a track has
+   *  been picked, so opening it costs nothing and changing your mind
+   *  costs one click. */
+  tracks: Track[];
+  /** Chosen up front, if the caller already knows. Normally null. */
+  trackId?: number | null;
   /** The project Save imports into. Empty mints one — a project can also
    *  be started straight from a track. */
   projectId?: string;
-  /** The seed being REPLACED (re-beatify). Empty imports a new one. */
-  seedId?: string;
   /** What to call a new project. Ignored when importing into one. */
   projectName?: string;
   /** The tempo the project already runs at, if it has one: this seed
@@ -79,17 +84,19 @@ export interface BeatifyModalProps {
 
 export function BeatifyModal({
   client,
-  trackId,
-  title,
+  tracks,
+  trackId = null,
   projectId = '',
-  seedId = '',
   projectName = '',
   projectBpm = null,
   onCommitted,
   onCancel,
 }: BeatifyModalProps) {
+  /** WHICH TRACK — the first decision, and the modal's own. Until it is
+   *  made nothing has been fetched, analyzed or rendered. */
+  const [chosen, setChosen] = useState<number | null>(trackId);
   const [analysis, setAnalysis] = useState<BeatifyAnalysis | null>(null);
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy] = useState(trackId !== null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [strength, setStrength] = useState(0);
@@ -218,12 +225,13 @@ export function BeatifyModal({
 
   const run = useCallback(
     async (span: [number, number] | null) => {
+      if (chosen === null) return;
       setBusy(true);
       setError(null);
-      const next = await client.analyze(trackId, span, BUCKETS);
+      const next = await client.analyze(chosen, span, BUCKETS);
       setBusy(false);
       if (!next) {
-        logError('beatify.analyze', `no analysis for track ${trackId} (span: ${span ?? 'whole'})`);
+        logError('beatify.analyze', `no analysis for track ${chosen} (span: ${span ?? 'whole'})`);
         setError('Could not track beats in that audio');
         return;
       }
@@ -232,19 +240,22 @@ export function BeatifyModal({
         span ? 'Re-detected on the selected region — alignment reset to the recommendation' : null,
       );
     },
-    [adopt, client, trackId],
+    [adopt, chosen, client],
   );
 
-  // MOD-A1: analysis starts automatically on open — no "Analyze" button,
-  // because the common case should present a finished result, not a form.
+  // MOD-A1: analysis starts as soon as there IS a track — no "Analyze"
+  // button, because the common case should present a finished result,
+  // not a form. Choosing another track starts again from scratch: the
+  // old analysis described other audio.
   useEffect(() => {
+    if (chosen === null) return;
     let cancelled = false;
     void (async () => {
-      const next = await client.analyze(trackId, null, BUCKETS);
+      const next = await client.analyze(chosen, null, BUCKETS);
       if (cancelled) return;
       setBusy(false);
       if (!next) {
-        logError('beatify.analyze', `no analysis for track ${trackId}`);
+        logError('beatify.analyze', `no analysis for track ${chosen}`);
         setError('Could not track beats in that audio');
         return;
       }
@@ -253,7 +264,7 @@ export function BeatifyModal({
     return () => {
       cancelled = true;
     };
-  }, [adopt, client, trackId]);
+  }, [adopt, chosen, client]);
 
   const applyReading = useCallback(
     async (factor: number, halfShift: boolean) => {
@@ -348,29 +359,31 @@ export function BeatifyModal({
         leadIn: leadInMs / 1000,
         rulerGroup,
         projectId,
-        seedId,
+        // Always a NEW seed: re-rendering one in place is a thing the
+        // backend still does and the page no longer asks for.
+        seedId: '',
         name: projectName,
       },
       BUCKETS,
     );
     setBusy(false);
     if (!project) {
-      logError('beatify.save', `render failed for track ${trackId}`);
+      logError('beatify.save', `render failed for track ${chosen}`);
       setError('Rendering the warp failed');
       return;
     }
     onCommitted(project);
-  }, [
-    client,
-    leadInMs,
-    onCommitted,
-    projectId,
-    projectName,
-    rulerGroup,
-    seedId,
-    strength,
-    trackId,
-  ]);
+  }, [client, leadInMs, onCommitted, chosen, projectId, projectName, rulerGroup, strength]);
+
+  /** Another track: everything on show describes the old one. */
+  const choose = useCallback((id: number) => {
+    setChosen(id);
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    setAnalysis(null);
+    transportRef.current?.stop(0);
+  }, []);
 
   const dismiss = useCallback(() => {
     void client.cancel();
@@ -502,12 +515,50 @@ export function BeatifyModal({
   const zone = analysis?.sweep.zone ?? null;
   const level = quality ? qualityLevel(quality) : 'warn';
 
+  const picker = (
+    <TrackPicker
+      idPrefix="beatify-import"
+      tracks={tracks}
+      value={chosen}
+      onChange={choose}
+      autoFocus
+      placeholder="Search the library…"
+    />
+  );
+
+  // MOD-A0: nothing is fetched, analyzed or rendered until a track has
+  // been chosen, so opening the modal costs nothing and closing it
+  // again costs nothing either.
+  if (chosen === null) {
+    return (
+      <div className="beatify-modal-backdrop" data-testid="beatify-modal">
+        <div className="beatify-modal beatify-modal-choose" data-testid="beatify-modal-choose">
+          <header className="beatify-modal-head">
+            <h2>Beatify · Import</h2>
+          </header>
+          <p className="beatify-choose-hint">
+            Which track? Nothing is analyzed until you say — and a track can be imported into as
+            many projects as you like.
+          </p>
+          {picker}
+          <footer className="beatify-modal-foot">
+            <button data-testid="beatify-cancel" onClick={dismiss}>
+              Cancel
+            </button>
+          </footer>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="beatify-modal-backdrop" data-testid="beatify-modal">
       <div className="beatify-modal">
         <header className="beatify-modal-head">
           <h2>Beatify · Import</h2>
-          <span className="beatify-file">{title}</span>
+          {/* Still the picker: changing your mind about the track is one
+              click, and it starts the analysis over on the new one. */}
+          <div className="beatify-file">{picker}</div>
           {/* MOD-31: provenance is never a click away. */}
           <span className="beatify-agreement" data-testid="beatify-verdict">
             {agreement

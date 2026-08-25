@@ -78,8 +78,10 @@ const WINDOW_SECS = 120;
 export interface BeatifyClipBuilderProps {
   project: BeatifyProject;
   clips: BeatifyClipClientApi;
-  /** Re-beatify the seed currently open in the source pane. */
-  onRebeatify(seed: BeatifySeed): void;
+  /** Something else owns the keyboard and the speakers — the import
+   *  modal. Everything here goes quiet, takes no keys and cannot be
+   *  reached with the pointer until it is gone. */
+  suspended?: boolean;
   /** Import another track into this project. */
   onImport(): void;
   /** Drop a seed from the project. */
@@ -96,7 +98,7 @@ interface Drag {
 export function BeatifyClipBuilder({
   project,
   clips,
-  onRebeatify,
+  suspended = false,
   onImport,
   onRemoveSeed,
 }: BeatifyClipBuilderProps) {
@@ -377,7 +379,7 @@ export function BeatifyClipBuilder({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return;
+      if (suspended || isEditableTarget(e.target)) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (mod && key === 'c') {
@@ -392,7 +394,15 @@ export function BeatifyClipBuilder({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [copy, paste]);
+  }, [copy, paste, suspended]);
+
+  // Going quiet is not a pause the user asked for, so it takes the
+  // playhead nowhere: the modal simply must be the only thing sounding.
+  useEffect(() => {
+    if (!suspended) return;
+    sourceRef.current?.pause();
+    transportRef.current?.pause();
+  }, [suspended]);
 
   // --- saving ------------------------------------------------------------
   const save = useCallback(async () => {
@@ -567,7 +577,7 @@ export function BeatifyClipBuilder({
     // The list runs down the left of BOTH panes, so the source and the
     // clip share one column: the grid below lines up, beat for beat,
     // with the waveform above it.
-    <section className="beatify-builder" data-testid="beatify-builder">
+    <section className="beatify-builder" data-testid="beatify-builder" inert={suspended}>
       <BeatifyClipList
         seeds={seedEntries}
         clips={clipEntries}
@@ -591,7 +601,7 @@ export function BeatifyClipBuilder({
               loadAudio={(_id, startSecs, secs) =>
                 clips.audio(projectId, parseSourceId(picked), startSecs, secs)
               }
-              onRebeatify={() => onRebeatify(openSeed)}
+              suspended={suspended}
               onSelectionBeats={setSelBeats}
               onPlayingChange={onSourcePlaying}
               onPullOut={liftSelection}

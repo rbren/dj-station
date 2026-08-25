@@ -82,8 +82,9 @@ export interface BeatifyTrackViewProps {
   track: BeatifyTrack;
   /** Fetches `secs` of the warped render from `startSecs`. */
   loadAudio(trackId: number, startSecs: number, secs: number): Promise<ArrayBuffer | null>;
-  onRebeatify(): void;
   source?: TrackViewSource | null;
+  /** A modal owns the keyboard: take none of it, and stay quiet. */
+  suspended?: boolean;
   /** Shorter waveform when the pane shares the page with the editor. */
   waveHeight?: number;
   /** The selection in whole beats, whenever it changes — what a drag into
@@ -116,8 +117,8 @@ export function beatSnap(grid: Grid) {
 export function BeatifyTrackView({
   track,
   loadAudio,
-  onRebeatify,
   source = null,
+  suspended = false,
   waveHeight = WAVE_H,
   onSelectionBeats,
   transportExtra,
@@ -259,6 +260,7 @@ export function BeatifyTrackView({
   // --- keyboard (§4.7) ---------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (suspended) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT')) return;
       const step = e.shiftKey ? group : 1;
@@ -309,7 +311,7 @@ export function BeatifyTrackView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [duration, grid, group, playhead, seek, sel, stepBeats, togglePlay]);
+  }, [duration, grid, group, playhead, seek, sel, stepBeats, suspended, togglePlay]);
 
   const confidence = track.record.analysis.confidence;
   const selBeats = sel ? beatsBetween(grid, sel.start, sel.end) : null;
@@ -321,9 +323,6 @@ export function BeatifyTrackView({
         <span className="beatify-line">
           {grid.bpm.toFixed(2)} BPM · {grid.beats} beats · {timecode(duration)}
         </span>
-        <button data-testid="beatify-rebeatify" onClick={onRebeatify}>
-          Re-beatify…
-        </button>
       </header>
 
       <AudioTimeline

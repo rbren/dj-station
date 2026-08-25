@@ -20,7 +20,6 @@ import {
   type BeatifyClientApi,
   type BeatifyProject,
   type BeatifyProjectSummary,
-  type BeatifySeed,
   type TrackerStatus,
 } from '../beatify';
 import type { BeatifyClipClientApi } from '../beatifyClip';
@@ -37,25 +36,14 @@ export interface BeatifyViewProps {
   clips: BeatifyClipClientApi;
 }
 
-/** What the modal is currently for: importing a track into a project, or
- *  re-beatifying a seed that is already in one (which keeps its id, and
- *  so keeps the clips that point at it). */
-interface ModalFor {
-  trackId: number;
-  title: string;
-  projectId: string;
-  projectName: string;
-  seedId: string;
-}
-
 export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [projects, setProjects] = useState<BeatifyProjectSummary[]>([]);
-  const [pick, setPick] = useState<number | null>(null);
   const [tracker, setTracker] = useState<TrackerStatus | null>(null);
   const [open, setOpen] = useState<BeatifyProject | null>(null);
-  const [modal, setModal] = useState<ModalFor | null>(null);
-  const [warn, setWarn] = useState<ModalFor | null>(null);
+  /** Is the import modal up? WHICH track it is for is the modal's own
+   *  business now, so this is a yes or a no. */
+  const [importing, setImporting] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<BeatifyProjectSummary | null>(null);
   const [bpmDraft, setBpmDraft] = useState<string | null>(null);
@@ -66,10 +54,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
   useEffect(() => {
     void (async () => {
       const [list, saved] = await Promise.all([library.tracks(), client.projects()]);
-      if (list) {
-        setTracks(list);
-        setPick((cur) => cur ?? list[0]?.id ?? null);
-      }
+      if (list) setTracks(list);
       if (saved) setProjects(saved);
       setTracker(await client.trackerStatus());
     })();
@@ -90,7 +75,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
       // console (`ipc.ts`): saying it again here is the same news twice.
       if (!project) return;
       setOpen(project);
-      setModal(null);
+      setImporting(false);
     },
     [client],
   );
@@ -102,7 +87,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     setBusy(false);
     if (!project) return;
     setOpen(project);
-    setModal(null);
+    setImporting(false);
     // A project is a place to work in, so it is named at birth rather
     // than inheriting whatever gets imported into it first: the name it
     // came with is already in the box, selected, waiting to be typed
@@ -111,25 +96,15 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
     void refreshShelf();
   }, [client, refreshShelf]);
 
-  /** Import the picked library track into the open project. */
-  const importSeed = useCallback(() => {
-    if (pick === null || !open) return;
-    const track = tracks.find((t) => t.id === pick);
-    setModal({
-      trackId: pick,
-      title: track?.title ?? `track ${pick}`,
-      projectId: open.id,
-      projectName: open.name,
-      seedId: '',
-    });
-  }, [open, pick, tracks]);
+  /** Put up the import modal. The track is chosen in there (MOD-A0). */
+  const importSeed = useCallback(() => setImporting(true), []);
 
   // No "imported X" banner: the seed appears in the list with its beats
   // and its speed on it, which is the same news said by the thing itself.
   const committed = useCallback(
     (project: BeatifyProject) => {
       setOpen(project);
-      setModal(null);
+      setImporting(false);
       void refreshShelf();
     },
     [refreshShelf],
@@ -217,7 +192,10 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
 
   return (
     <section className="beatify-view" data-testid="beatify-view">
-      <div className="beatify-bar">
+      {/* While the import modal is up it owns the page: the bar is
+          unreachable (`inert`), the builder below is suspended, and the
+          keyboard belongs to the modal alone. */}
+      <div className="beatify-bar" inert={importing}>
         {open ? (
           <>
             {nameDraft === null ? (
@@ -270,25 +248,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
                 onBlur={(e) => void setBpm(e.target.value)}
               />
             </label>
-            <label>
-              <span>Import</span>
-              <select
-                data-testid="beatify-track-select"
-                value={pick ?? ''}
-                onChange={(e) => setPick(Number(e.target.value))}
-              >
-                {tracks.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.title} — {t.artist}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              data-testid="beatify-import-track"
-              disabled={pick === null || busy}
-              onClick={importSeed}
-            >
+            <button data-testid="beatify-import-track" disabled={busy} onClick={importSeed}>
               + Import track
             </button>
             <button
@@ -323,7 +283,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
         )}
       </div>
       {!open && (
-        <div className="beatify-projects" data-testid="beatify-projects">
+        <div className="beatify-projects" data-testid="beatify-projects" inert={importing}>
           {projects.length === 0 && (
             <p className="beatify-empty">
               No projects yet. A project is a tempo and the tracks beatified onto it: start one,
@@ -386,7 +346,7 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
               </button>
               {project.sourceMissing && (
                 <span className="beatify-project-warn" data-testid="beatify-project-source-missing">
-                  a source track is missing — stems and re-beatify need it back
+                  a source track is missing — stems need it back
                 </span>
               )}
             </div>
@@ -405,15 +365,8 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
           clips={clips}
           onImport={importSeed}
           onRemoveSeed={(seedId) => void removeSeed(seedId)}
-          onRebeatify={(seed: BeatifySeed) =>
-            setWarn({
-              trackId: seed.trackId,
-              title: seed.title,
-              projectId: open.id,
-              projectName: open.name,
-              seedId: seed.id,
-            })
-          }
+          // A modal owns the keyboard and the speakers while it is up.
+          suspended={importing}
         />
       )}
 
@@ -441,45 +394,19 @@ export function BeatifyView({ client, library, clips }: BeatifyViewProps) {
         </div>
       )}
 
-      {warn && (
-        <div className="beatify-modal-backdrop" data-testid="beatify-rebeatify-warning">
-          <div className="beatify-warn">
-            <p>
-              Re-beatifying re-renders this seed. Anything already cut from its old grid — including
-              its boundaries — stops matching. To keep both, import the track again as a second seed
-              instead.
-            </p>
-            <button data-testid="beatify-rebeatify-cancel" onClick={() => setWarn(null)}>
-              Cancel
-            </button>
-            <button
-              data-testid="beatify-rebeatify-confirm"
-              onClick={() => {
-                setModal(warn);
-                setWarn(null);
-              }}
-            >
-              Re-beatify
-            </button>
-          </div>
-        </div>
-      )}
-
-      {modal && (
+      {importing && open && (
         <BeatifyModal
           client={client}
-          trackId={modal.trackId}
-          title={modal.title}
-          projectId={modal.projectId}
-          seedId={modal.seedId}
-          projectName={modal.projectName}
+          tracks={tracks}
+          projectId={open.id}
+          projectName={open.name}
           // A project's tempo is the project's: an import is conformed to
           // it, and so is a re-beatify. The BPM box is the only thing that
           // changes it (§3.11), so re-rendering one seed can never move
           // the grid the others — and the clips — are sitting on.
           projectBpm={open?.bpm ?? null}
           onCommitted={committed}
-          onCancel={() => setModal(null)}
+          onCancel={() => setImporting(false)}
         />
       )}
     </section>

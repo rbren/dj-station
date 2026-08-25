@@ -108,7 +108,9 @@ The modal runs in **two phases**, and they are sequential because the second is 
                     [ Cut into beats ]
 ```
 
-**MOD-A1.** Analysis starts **automatically on open**, whole track, all three seeds. No "Analyze" button — the common case should present a finished result, not a form.
+**MOD-A0.** **The track is chosen in the modal, first, before anything loads.** "+ Import track" opens a dialog whose only content is a searchable picker over the library — type words from the title, artist or album in any order, ↑/↓ to walk, Enter or a click to take. Nothing is decoded, analyzed or rendered until a track has been named, so opening the dialog costs nothing and changing your mind costs nothing. The picker stays in the header afterwards: choosing a different track abandons the analysis and starts again on the new one. There is no track picker anywhere else on the page.
+**MOD-A0a.** While the modal is up it owns the page: the material behind it stops playing, takes no keyboard, and cannot be clicked or tabbed into (`inert`). Two transports answering one spacebar is how a decision gets auditioned against the wrong audio.
+**MOD-A1.** Analysis starts **automatically once a track is chosen**, whole track, all three seeds. No "Analyze" button — the common case should present a finished result, not a form.
 **MOD-A2.** Phase 2 controls are visible but inert until phase 1 has a result. They don't hide; hiding controls that will appear later is disorienting. They dim.
 **MOD-A3.** Re-running detection **resets phase 2** to the recommended default and says so. A warp strength tuned against old detections is meaningless against new ones.
 
@@ -270,7 +272,7 @@ This is a deliberate simplification and it has a useful consequence for the impl
 
 **MOD-A29.** Optionally also drop a sidecar (`boys.beatify.json`) next to the source for portability. The hash-keyed store is authoritative; the sidecar is a convenience and is re-derivable.
 **MOD-A30.** The record includes everything needed to reproduce the render: source file, source offset, region, seed agreement, warp strength, anchor stride, grid, lead-in. Re-opening a beatified track restores the modal to its saved state rather than re-analyzing.
-**MOD-A31.** **Loading an already-beatified track skips the modal entirely** and goes straight to the track view. The modal is reachable from there via a "Re-beatify" action, which warns that re-saving invalidates anything already cut from the old grid.
+**MOD-A31.** **Opening a project skips the modal entirely** and goes straight to the builder. There is no "re-beatify" action: re-rendering a seed under the clips already cut from it is a trap dressed as a convenience, so a second take on a track is imported as a second SEED (MOD-A0), which leaves the first — and everything cut from it — alone. Deleting the old seed afterwards is the user's call.
 
 ---
 
@@ -408,10 +410,10 @@ setting: it falls out of the two tempos.
 seed and touches no clip — a placement is a run of BEATS, and a beat is a
 beat at any tempo. A seed whose source has left the library is re-rendered
 by stretching its existing render instead.
-**PRJ-5.** Re-beatifying a seed keeps its id, so the clips that point at
-it keep pointing at it (MOD-A31's warning still applies to its grid).
-Deleting a seed leaves the project, its tempo and its clips alone: what a
-clip loses is audio, not arithmetic.
+**PRJ-5.** The backend can still re-render a seed in place, keeping its
+id so the clips that point at it keep pointing at it, but nothing in the
+UI asks for it (MOD-A31). Deleting a seed leaves the project, its tempo
+and its clips alone: what a clip loses is audio, not arithmetic.
 **PRJ-6.** A clip source names the seed AND the parts of it that were
 playing — `seed:s2/drums+bass`. A stem is not a source of its own: it is a
 seed with some of its parts switched off, and all parts on is the render
@@ -441,7 +443,7 @@ the name, the tempo, the seeds and the clips are written as they change.
 5. ~~**Clips cut from outside the analysis region.**~~ **Resolved by making the region the import.** There is no outside.
 6. **Ruler grouping default.** 4 is the obvious default. Per-track (stored in metadata) or a global app preference? Per-track is more useful and costs one field.
 7. **Overlay density.** Three things share the waveform (MOD-3a). Prototype before deciding which become toggles.
-8. **Re-beatify on a track with existing clips.** MOD-A31 warns. Re-render affected clips against the new grid, or just invalidate them? Note this now also covers *re-trimming* — a re-beatify can change the track's boundaries, not only its grid, so a clip can lose its source audio outright.
+8. ~~**Re-beatify on a track with existing clips.**~~ **Resolved by removing re-beatify (MOD-A31).** A second take is a second seed; the clips cut from the first go on meaning what they meant.
 9. ~~**Two regions from one file.**~~ **Resolved by projects (§5a).** Two regions imported into ONE project are conformed to that project's tempo and phase, so they layer by construction. Two imported into different projects still will not — a project is the unit that shares a grid.
 
 ---

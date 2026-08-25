@@ -266,12 +266,20 @@ beforeEach(() => {
   window.HTMLMediaElement.prototype.pause = vi.fn();
 });
 
-/** Start a project and import the picked track into it: the modal is how
- *  material gets in, so every modal case goes through here. */
+/** The import modal opens with nothing loaded (MOD-A0): say which track
+ *  before anything can happen. */
+async function chooseTrack(id: number = TRACK.id) {
+  fireEvent.focus(await screen.findByTestId('beatify-import-search'));
+  fireEvent.click(await screen.findByTestId(`beatify-import-option-${id}`));
+}
+
+/** Start a project and import a track into it: the modal is how material
+ *  gets in, so every modal case goes through here. */
 async function openTrack(client: BeatifyClientApi, clips: BeatifyClipClientApi = clipsMock()) {
   render(<BeatifyView client={client} library={libraryMock()} clips={clips} />);
   fireEvent.click(await screen.findByTestId('beatify-new-project'));
   fireEvent.click(await screen.findByTestId('beatify-import-track'));
+  await chooseTrack();
   return screen.findByTestId('beatify-modal');
 }
 
@@ -292,6 +300,77 @@ describe('Beatify tab', () => {
     const status = await screen.findByTestId('beatify-tracker-status');
     expect(status.textContent).toContain('beat_this not installed');
     expect(status.textContent).toContain('pip install beat-this');
+  });
+
+  // The track is chosen INSIDE the modal, and choosing it is what starts
+  // the work: opening the modal must cost nothing, so that changing your
+  // mind about importing at all costs nothing either.
+  it('asks which track before it loads anything (MOD-A0)', async () => {
+    const client = clientMock();
+    render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-new-project'));
+    fireEvent.click(await screen.findByTestId('beatify-import-track'));
+
+    await screen.findByTestId('beatify-modal-choose');
+    expect(client.analyze).not.toHaveBeenCalled();
+    // Nothing to inspect yet, so none of the report is on show.
+    expect(screen.queryByTestId('beatify-verdict')).toBeNull();
+    expect(screen.queryByTestId('beatify-commit')).toBeNull();
+
+    fireEvent.focus(screen.getByTestId('beatify-import-search'));
+    fireEvent.change(screen.getByTestId('beatify-import-search'), { target: { value: 'live' } });
+    fireEvent.click(screen.getByTestId(`beatify-import-option-${TRACK.id}`));
+
+    await waitFor(() => expect(client.analyze).toHaveBeenCalledWith(3, null, expect.any(Number)));
+    await screen.findByTestId('beatify-commit');
+  });
+
+  it('has no track picker on the page itself', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    expect(screen.queryByTestId('beatify-track-select')).toBeNull();
+    expect(screen.queryByTestId('beatify-import-search')).toBeNull();
+  });
+
+  // While the modal is up it is the only thing on the page that can be
+  // played, typed at or clicked: two transports answering one spacebar is
+  // how you end up auditioning a decision against the wrong audio.
+  it('takes the keyboard and the speakers from the page below it', async () => {
+    const client = clientMock({ projects: vi.fn(async () => [project()]) });
+    await openProject(client);
+    fireEvent.keyDown(window, { key: ' ' });
+    await waitFor(() => expect(screen.getByTestId('beatify-track-play').textContent).toBe('❚❚'));
+
+    fireEvent.click(screen.getByTestId('beatify-import-track'));
+    await screen.findByTestId('beatify-modal-choose');
+
+    await waitFor(() => expect(screen.getByTestId('beatify-track-play').textContent).toBe('▶'));
+    expect(screen.getByTestId('beatify-builder').hasAttribute('inert')).toBe(true);
+    fireEvent.keyDown(window, { key: ' ' });
+    expect(screen.getByTestId('beatify-track-play').textContent).toBe('▶');
+
+    // Dismissed, the page has itself back.
+    fireEvent.click(screen.getByTestId('beatify-cancel'));
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-builder').hasAttribute('inert')).toBe(false),
+    );
+    fireEvent.keyDown(window, { key: ' ' });
+    await waitFor(() => expect(screen.getByTestId('beatify-track-play').textContent).toBe('❚❚'));
+  });
+
+  it('starts over when the track is changed under it', async () => {
+    const other = { ...TRACK, id: 9, title: 'Second Set' };
+    const library = { tracks: vi.fn(async () => [TRACK, other]) } as unknown as LibraryClientApi;
+    const client = clientMock();
+    render(<BeatifyView client={client} library={library} clips={clipsMock()} />);
+    fireEvent.click(await screen.findByTestId('beatify-new-project'));
+    fireEvent.click(await screen.findByTestId('beatify-import-track'));
+    await chooseTrack();
+    await screen.findByTestId('beatify-commit');
+
+    fireEvent.focus(screen.getByTestId('beatify-import-search'));
+    fireEvent.click(screen.getByTestId('beatify-import-option-9'));
+    await waitFor(() => expect(client.analyze).toHaveBeenCalledWith(9, null, expect.any(Number)));
   });
 
   it('analyzes automatically on open, with no Analyze button (MOD-A1)', async () => {
@@ -532,12 +611,9 @@ describe('Beatify tab', () => {
     await openProject(client);
     expect(client.openProject).toHaveBeenCalledWith('p1', expect.any(Number));
     expect(screen.queryByTestId('beatify-modal')).toBeNull();
-    // Re-beatify warns before it invalidates anything cut from the old grid.
-    fireEvent.click(screen.getByTestId('beatify-rebeatify'));
-    const warning = await screen.findByTestId('beatify-rebeatify-warning');
-    expect(warning.textContent).toContain('stops matching');
-    fireEvent.click(screen.getByTestId('beatify-rebeatify-confirm'));
-    await screen.findByTestId('beatify-modal');
+    // And no way to re-render the seed under the clips cut from it: a
+    // second take on a track is a second seed, imported like any other.
+    expect(screen.queryByTestId('beatify-rebeatify')).toBeNull();
   });
 
   // The verdict and the flam figures are how the IMPORT is decided; once
@@ -719,6 +795,7 @@ describe('beatify projects', () => {
     render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
     fireEvent.click(await screen.findByTestId('beatify-project-open-p1'));
     fireEvent.click(await screen.findByTestId('beatify-import-track'));
+    await chooseTrack();
 
     const note = await screen.findByTestId('beatify-conform');
     expect(note.textContent).toContain('132.00 BPM');
@@ -855,19 +932,6 @@ describe('beatify projects', () => {
     expect(box.max).toBe(String(MAX_PROJECT_BPM));
   });
 
-  it('re-beatifies a SEED in place, keeping its id', async () => {
-    const client = clientMock({ projects: vi.fn(async () => [project()]) });
-    await openProject(client);
-    fireEvent.click(screen.getByTestId('beatify-rebeatify'));
-    fireEvent.click(await screen.findByTestId('beatify-rebeatify-confirm'));
-    fireEvent.click(await screen.findByTestId('beatify-commit'));
-
-    await waitFor(() => expect(client.save).toHaveBeenCalled());
-    const [request] = (client.save as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(request.projectId).toBe('p1');
-    expect(request.seedId).toBe('s1');
-  });
-
   it('drops a seed from the project without touching the project', async () => {
     const client = clientMock({ projects: vi.fn(async () => [project()]) });
     await openProject(client);
@@ -948,7 +1012,7 @@ describe('beatify projects', () => {
     });
     render(<BeatifyView client={client} library={libraryMock()} clips={clipsMock()} />);
     const note = await screen.findByTestId('beatify-project-source-missing');
-    expect(note.textContent).toContain('re-beatify need it back');
+    expect(note.textContent).toContain('stems need it back');
     fireEvent.click(screen.getByTestId('beatify-project-open-p1'));
     await screen.findByTestId('beatify-track-view');
   });

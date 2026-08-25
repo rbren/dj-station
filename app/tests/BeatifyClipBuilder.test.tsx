@@ -130,13 +130,7 @@ beforeEach(() => {
 
 function builder(open: BeatifyProject, clips: BeatifyClipClientApi) {
   return (
-    <BeatifyClipBuilder
-      project={open}
-      clips={clips}
-      onRebeatify={() => {}}
-      onImport={() => {}}
-      onRemoveSeed={() => {}}
-    />
+    <BeatifyClipBuilder project={open} clips={clips} onImport={() => {}} onRemoveSeed={() => {}} />
   );
 }
 
@@ -303,7 +297,6 @@ describe('the source list', () => {
       <BeatifyClipBuilder
         project={project([])}
         clips={clips}
-        onRebeatify={() => {}}
         onImport={() => {}}
         onRemoveSeed={() => {}}
       />,

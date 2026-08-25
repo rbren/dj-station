@@ -3678,6 +3678,88 @@ body {
 .beatify-file {
   color: #c8cdd6;
   font-size: 0.85rem;
+  min-width: 260px;
+}
+
+/* The import modal before a track has been chosen: the picker IS the
+   dialog, so it gets the room it needs and nothing else is drawn. */
+.beatify-modal-choose {
+  width: min(560px, 92vw);
+}
+
+.beatify-choose-hint {
+  margin: 0;
+  color: #9aa3b2;
+  font-size: 0.85rem;
+}
+
+/* A page that a modal has taken over: still readable, plainly not
+   yours. `inert` does the blocking; this only says so. */
+.beatify [inert] {
+  opacity: 0.45;
+  filter: saturate(0.6);
+}
+
+.track-picker {
+  position: relative;
+  flex: 1 1 240px;
+}
+
+.track-picker-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.track-picker-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #14171c;
+  border: 1px solid #2b2f38;
+  border-radius: 6px;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+}
+
+.track-picker-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.track-picker-option.active {
+  background: #232833;
+}
+
+.track-picker-title {
+  font-size: 0.9rem;
+}
+
+.track-picker-sub,
+.track-picker-empty,
+.track-picker-more {
+  color: #8b93a1;
+  font-size: 0.78rem;
+}
+
+.track-picker-empty,
+.track-picker-more {
+  padding: 6px 8px;
 }
 
 .beatify-agreement {
