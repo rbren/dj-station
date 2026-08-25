@@ -1158,6 +1158,17 @@ The detail is in the `Conventions` bullets above; this is the map.
   there is nothing to save: every change to a project — its name, its
   tempo, its seeds, its clips — is written to disk by the command that
   makes it.
+- Switching a stem off or back on is a change of TONE, not of source:
+  `BeatifyClipBuilder` keys the pane by the MATERIAL (seed + revision,
+  never the mix) and the mix rides in on `TrackViewSource.id`, which
+  `BeatifyTrackView` turns into `transport.refreshTone()`. Zoom, scroll,
+  selection, loop, playhead and playback all sit through it, both ways
+  round — pinned by "keeps the view, the loop and the playhead, off and
+  back on" in `BeatifyClipBuilder.test.tsx`, which fails the moment the
+  key picks up the mix again. A submix that fails to open leaves the pane
+  on the audio it already has (`setOpen` is never handed a null, and
+  `ClipTransport.begin` drops a null render without releasing what is
+  sounding), so a missing stem cache costs the switch, not the session.
 - Beats are the unit of every gesture, but MIND THE TIMEBASE: the modal
   snaps to `sourceGrid` (source seconds), the track view and the editor
   to `grid` (output seconds, beat 0 padded). Selections grow OUTWARD to

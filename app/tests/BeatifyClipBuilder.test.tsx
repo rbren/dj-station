@@ -313,6 +313,42 @@ describe('switching a stem off leaves the source where it was', () => {
   const mixOf = (clips: BeatifyClipClientApi) =>
     (clips.audio as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
 
+  /** The pane's title is the mix it is showing, so this waits for the new
+   *  audio to have LANDED rather than merely been asked for. */
+  const showing = (label: string) =>
+    waitFor(() => expect(screen.getByTestId('beatify-track-title').textContent).toBe(label));
+
+  const wave = () => {
+    const el = screen.getByTestId('beatify-track-waveform');
+    el.getBoundingClientRect = () => ({ left: 0, width: 325, top: 0, height: 100 }) as DOMRect;
+    return el;
+  };
+  const zoomTo = (times: number) => {
+    for (let i = 0; i < times; i++) fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
+  };
+  /** Scroll the zoomed view sideways, the way the trackpad does. */
+  const pan = (deltaX: number) => fireEvent.wheel(wave(), { deltaX, deltaY: 0, shiftKey: true });
+  /** A press that goes nowhere is a seek, snapped to the nearest beat. */
+  const seekAt = (clientX: number) => {
+    fireEvent.mouseDown(wave(), { clientX });
+    fireEvent.mouseUp(wave(), { clientX });
+  };
+
+  /** A submix is its own audio — its own peaks and its own label — on the
+   *  seed's grid and so exactly as long as the whole render. */
+  const openMix: BeatifyClipClientApi['open'] = async (_projectId, source) => {
+    const stems = source.kind === 'seed' ? source.stems : [];
+    return {
+      source,
+      label: stems.length ? `Live Set A · ${stems.join(' + ')}` : 'Live Set A',
+      durationSecs: DURATION,
+      sampleRate: 44100,
+      channels: 2,
+      beats: 64,
+      peaks: Array.from({ length: 40 }, (_, i) => ((i + stems.length) % 8) / 8),
+    };
+  };
+
   it('keeps the zoom, the scroll and the selection', async () => {
     const clips = await mount();
     selectBeats(4, 6);
@@ -354,6 +390,37 @@ describe('switching a stem off leaves the source where it was', () => {
       expect(mixOf(clips)).toEqual({ kind: 'seed', id: 's1', stems: ['drums', 'bass', 'other'] }),
     );
     expect(screen.getByTestId('beatify-track-play').textContent).toBe('❚❚');
+  });
+
+  // The whole of it, both ways round, against a backend that answers a
+  // submix with its OWN audio (as the real one does): switching a part
+  // off and back on is a change of tone, and a change of tone leaves the
+  // zoom, the scroll, the selection, the loop and the playhead alone.
+  it('keeps the view, the loop and the playhead, off and back on', async () => {
+    await mount(clipsMock({ open: openMix }));
+    selectBeats(20, 4);
+    await waitFor(() => expect(readout()).toContain('selection'));
+    zoomTo(2);
+    pan(30);
+    fireEvent.click(screen.getByTestId('beatify-track-loop'));
+    seekAt(120);
+    const before = readout();
+    const head = screen.getByTestId('beatify-track-playhead-readout').textContent;
+    expect(before).toContain('view');
+    expect(before).toContain('selection');
+    expect(head).not.toBe('0:00.000');
+
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
+    await showing('Live Set A · drums + bass + other');
+    expect(readout()).toBe(before);
+    expect(screen.getByTestId('beatify-track-loop').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('beatify-track-playhead-readout').textContent).toBe(head);
+
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
+    await showing('Live Set A');
+    expect(readout()).toBe(before);
+    expect(screen.getByTestId('beatify-track-loop').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('beatify-track-playhead-readout').textContent).toBe(head);
   });
 
   // The boundary: a DIFFERENT seed is different material, so that pane
