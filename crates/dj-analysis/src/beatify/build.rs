@@ -113,9 +113,15 @@ pub fn mix(parts: &[&AudioData]) -> AudioData {
 /// Both ends use the SAME grid: beat `n` of any source on the page is
 /// `phase + n × period`, and column `c` of the clip is `c × period` (a
 /// clip starts at its first beat, with no head padding of its own).
-pub fn span(grid: &Grid, source_beat: usize, col: usize, beats: usize) -> (f64, f64, f64) {
+///
+/// `source_beat` is FRACTIONAL: a selection whose ends were freed from
+/// the grid (⌘ in the source pane) reads from part-way into a beat. The
+/// clip end of it stays whole — a run lands on a column and covers
+/// columns — so a fraction only ever shifts what is read, never where it
+/// is heard.
+pub fn span(grid: &Grid, source_beat: f64, col: usize, beats: usize) -> (f64, f64, f64) {
     (
-        grid.beat_time(source_beat as f64),
+        grid.beat_time(source_beat),
         col as f64 * grid.period,
         beats as f64 * grid.period,
     )
@@ -163,11 +169,28 @@ mod tests {
             beats: 64,
         };
         // Beats 8..12 of a source, dropped at column 4 of the clip.
-        let (from, at, secs) = span(&grid, 8, 4, 4);
+        let (from, at, secs) = span(&grid, 8.0, 4, 4);
         assert!((from - 4.5).abs() < 1e-12, "phase + 8 periods");
         assert!((at - 2.0).abs() < 1e-12, "a clip has no padding of its own");
         assert!((secs - 2.0).abs() < 1e-12);
         assert!((clip_secs(&grid, 16) - 8.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_freed_cut_reads_from_part_way_into_a_beat() {
+        let grid = Grid {
+            bpm: 120.0,
+            period: 0.5,
+            phase: 0.5,
+            beats: 64,
+        };
+        // Three quarters of a beat into beat 7 — a cut dragged off the
+        // grid to catch a pickup. Only the READ moves: the run still
+        // lands on column 4 and still covers four whole columns.
+        let (from, at, secs) = span(&grid, 7.75, 4, 4);
+        assert!((from - 4.375).abs() < 1e-12, "phase + 7.75 periods");
+        assert!((at - 2.0).abs() < 1e-12);
+        assert!((secs - 2.0).abs() < 1e-12);
     }
 
     #[test]

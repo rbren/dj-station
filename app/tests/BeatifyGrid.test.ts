@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   anchorStride,
   beatAt,
+  beatsBetween,
   beatTime,
   cutClearanceMs,
   FLAM_GREEN_MS,
@@ -62,6 +63,34 @@ describe('grid arithmetic', () => {
     expect(selectionLabel(4, 4)).toBe('4 beats · 1 group');
     expect(selectionLabel(13, 4)).toBe('13 beats');
     expect(selectionLabel(1, 4)).toBe('1 beat');
+  });
+
+  // A ⌘-drag frees the ends of the selection from the grid, so a count
+  // of beats is no longer always whole. Groups are a fact about whole
+  // beats and go quiet for a fraction, which is itself the signal that
+  // this selection is off the grid.
+  it('counts a freed selection in fractions of a beat', () => {
+    expect(selectionLabel(3.5, 4)).toBe('3.5 beats');
+    expect(selectionLabel(8.25, 4)).toBe('8.25 beats');
+    // Float noise is not a fraction: 4 beats swept on the grid reads as 4.
+    expect(selectionLabel(4.0000001, 4)).toBe('4 beats · 1 group');
+    expect(selectionLabel(0.5, 4)).toBe('0.5 beats');
+  });
+
+  // What the source pane hands to the clip editor once the ends are free:
+  // where the cut REALLY starts and ends, in beats, unrounded.
+  it('measures a selection in beats without snapping it', () => {
+    expect(beatsBetween(GRID, 2.6, 4.1)).toMatchObject({ startBeat: 4.2, endBeat: 7.2 });
+    // Clamped into the track at both ends.
+    expect(beatsBetween(GRID, -3, 0.5).startBeat).toBe(0);
+    expect(beatsBetween(GRID, 100, 200).endBeat).toBe(GRID.beats - 1);
+    // A fifth of a beat is a cut; a millionth of one is a slip of the
+    // hand, and measures as nothing.
+    expect(beatsBetween(GRID, 3, 3.1)).toMatchObject({ startBeat: 5, endBeat: 5.2 });
+    const slip = beatsBetween(GRID, 3, 3.000001);
+    expect(slip.endBeat).toBe(slip.startBeat);
+    // On the grid it agrees with the snapping version, to the beat.
+    expect(beatsBetween(GRID, 2.5, 4.5)).toMatchObject({ startBeat: 4, endBeat: 8 });
   });
 
   it('draws lines by zoom, emphasized on the ruler grouping (TV-2)', () => {

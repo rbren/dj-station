@@ -102,7 +102,10 @@ pub struct ClipPlacement {
     pub col: usize,
     pub beats: usize,
     pub source: ClipSourceRef,
-    pub source_beat: usize,
+    /// Where in the source this run starts, in beats — FRACTIONAL, since
+    /// a ⌘-freed selection can cut into a beat. Whole beats (every clip
+    /// saved before that existed) read back unchanged.
+    pub source_beat: f64,
 }
 
 /// A clip, saved or still being dragged around.

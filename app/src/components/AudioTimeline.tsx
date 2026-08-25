@@ -84,9 +84,12 @@ export interface TimelineSnap {
   /** Snap a click/seek time. `free` is true when ⌘/ctrl frees the click
    *  from the grid. */
   seek?(secs: number, free: boolean): number;
-  /** Snap a swept/resized selection (Beatify: outward to whole beats). */
+  /** Snap a swept/resized selection (Beatify: outward to whole beats).
+   *  Bypassed while ⌘/ctrl is held, which is how an end is dragged off
+   *  the grid onto a pickup or short of a tail. */
   range?(r: Range): Range;
-  /** Snap a slid selection (Beatify: keep length, move by whole beats). */
+  /** Snap a slid selection (Beatify: keep length, move by whole beats).
+   *  ⌘/ctrl frees this one too. */
   slide?(r: Range): Range;
 }
 
@@ -266,6 +269,7 @@ export function AudioTimeline({
               : 'end'
             : null))
         : null;
+      const free = e.metaKey || e.ctrlKey;
       if (sel && edge) {
         // Anchor the end you did not grab and sweep from there; the
         // playhead stays put (only a fresh sweep moves it).
@@ -275,9 +279,10 @@ export function AudioTimeline({
           anchorX: e.clientX,
           swept: true,
           fresh: false,
-          free: false,
+          free,
         };
-        onSelectionChange(snapRange(resizeSelection(sel, edge, t, duration)));
+        const resized = resizeSelection(sel, edge, t, duration);
+        onSelectionChange(free ? resized : snapRange(resized));
       } else if (allowSlide && sel && t >= sel.start && t <= sel.end) {
         // Inside the selection: slide WHICH PART is selected. Holding alt
         // slides the audio with it — an edit, so it must be asked for.
@@ -294,7 +299,7 @@ export function AudioTimeline({
           anchorX: e.clientX,
           swept: false,
           fresh: true,
-          free: e.metaKey || e.ctrlKey,
+          free,
         };
       }
       setDragging(true);
@@ -323,12 +328,15 @@ export function AudioTimeline({
         }
       }
       const t = timeAt(e.clientX, dragRect.current);
+      // ⌘/ctrl frees the drag from the grid, read LIVE: a cut can be
+      // swept to the beat and then eased off it (or back onto it)
+      // without letting go, which is how a pickup gets caught.
+      const free = e.metaKey || e.ctrlKey;
       if (drag.kind === 'select') {
         if (Math.abs(e.clientX - drag.anchorX) > DRAG_PX) drag.swept = true;
         if (!drag.swept) return;
-        onSelectionChange(
-          snapRange({ start: Math.min(drag.anchor, t), end: Math.max(drag.anchor, t) }),
-        );
+        const swept = { start: Math.min(drag.anchor, t), end: Math.max(drag.anchor, t) };
+        onSelectionChange(free ? swept : snapRange(swept));
       } else {
         const len = drag.base.end - drag.base.start;
         const delta = Math.min(
@@ -336,7 +344,7 @@ export function AudioTimeline({
           Math.max(-drag.base.start, t - drag.anchor),
         );
         const slid = { start: drag.base.start + delta, end: drag.base.end + delta };
-        const snapped = snap?.slide ? snap.slide(slid) : slid;
+        const snapped = free || !snap?.slide ? slid : snap.slide(slid);
         drag.delta = snapped.start - drag.base.start;
         onSelectionChange(snapped);
       }

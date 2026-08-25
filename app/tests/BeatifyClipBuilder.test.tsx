@@ -165,6 +165,16 @@ function selectBeats(fromBeat: number, beats: number) {
   fireEvent.mouseUp(wave, { clientX: x(fromBeat + beats) });
 }
 
+/** Drag one END of the selection with ⌘ held: off the grid, where the
+ *  ends are the user's to the millisecond. */
+function cmdDragEdge(fromX: number, toX: number) {
+  const wave = screen.getByTestId('beatify-track-waveform');
+  wave.getBoundingClientRect = () => ({ left: 0, width: 325, top: 0, height: 100 }) as DOMRect;
+  fireEvent.mouseDown(wave, { clientX: fromX, metaKey: true });
+  fireEvent.mouseMove(wave, { clientX: toX, metaKey: true });
+  fireEvent.mouseUp(wave, { clientX: toX, metaKey: true });
+}
+
 /** Drag whatever is selected into a cell of the clip editor. */
 function dragInto(row: number, col: number) {
   fireEvent.mouseDown(screen.getByTestId('beatify-drag-beats'), { button: 0 });
@@ -302,6 +312,63 @@ describe('the source list', () => {
       'sets the tempo',
     );
     expect(clips.open).not.toHaveBeenCalled();
+  });
+});
+
+// ⌘ frees the ends of a selection from the beat grid (TV-14a): a cut can
+// start inside a beat to catch a pickup, or stop short of one to leave a
+// tail behind. What lands in the clip is still whole beats of the clip's
+// grid — the fraction bought you the OFFSET into the source, not a
+// fractional column.
+describe('⌘-dragging the ends of the selection off the grid', () => {
+  const readout = () => screen.getByTestId('beatify-track-readout').textContent;
+  const handle = () => screen.getByTestId('beatify-drag-beats').textContent;
+
+  it('measures what was really selected, in fractions of a beat', async () => {
+    await mount();
+    selectBeats(4, 8);
+    await waitFor(() => expect(handle()).toContain('8 beats'));
+    // A whole-beat count reads out its groups; a fraction has none,
+    // which is how the readout says the selection is off the grid.
+    expect(readout()).toContain('8 beats · 2 groups');
+    // The END, half a beat further on.
+    cmdDragEdge(x(12), x(12) + 2.5);
+    expect(readout()).toContain('8.5 beats');
+    expect(readout()).not.toContain('group');
+    expect(handle()).toContain('8.5 beats');
+  });
+
+  it('lands on the clip grid, from where the cut really started', async () => {
+    const clips = await mount();
+    selectBeats(4, 6);
+    await waitFor(() => expect(handle()).toContain('6 beats'));
+    // The START, a quarter of a beat earlier: beats 3.75–10.
+    cmdDragEdge(x(4), x(4) - 1.25);
+    expect(readout()).toContain('6.25 beats');
+
+    dragInto(0, 0);
+    const block = blocks()[0];
+    // Whole columns, at a column — the clip's grid is beats, and stays
+    // beats. The quarter beat lives in where it reads FROM.
+    expect(block.dataset.beats).toBe('6');
+    expect(block.dataset.col).toBe('0');
+    expect(block.title).toContain('4.75');
+
+    await saveAs('Pickup');
+    const draft = (clips.save as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
+    expect(draft.placements[0]).toMatchObject({ col: 0, beats: 6, sourceBeat: 3.75 });
+  });
+
+  it('still snaps when ⌘ is not held', async () => {
+    await mount();
+    selectBeats(4, 6);
+    await waitFor(() => expect(handle()).toContain('6 beats'));
+    const wave = screen.getByTestId('beatify-track-waveform');
+    wave.getBoundingClientRect = () => ({ left: 0, width: 325, top: 0, height: 100 }) as DOMRect;
+    fireEvent.mouseDown(wave, { clientX: x(10) });
+    fireEvent.mouseMove(wave, { clientX: x(10) + 2.5 });
+    fireEvent.mouseUp(wave, { clientX: x(10) + 2.5 });
+    expect(handle()).toContain('7 beats');
   });
 });
 

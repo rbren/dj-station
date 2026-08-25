@@ -853,6 +853,22 @@ offset))`, offset in position units — so the knob's curve shapes the
   quantization is `beatSnap(grid)`, exported from BeatifyTrackView and
   handed to the timeline's `snap` hooks, so beats are the unit of every
   gesture there without the timeline knowing what a beat is.
+- Beatify's shape, in one bullet (the map is "The Beatify page at a
+  glance" below; the law is `PRD-beatify.md`). There is NO store: state
+  is React and disk. `BeatifyView` owns which project/track is open,
+  `BeatifySession` (backend) owns an analysis until Save, and
+  `BeatifyClipBuilder` owns the live `ClipDraft`. A PROJECT is a tempo
+  with material on it: the first imported seed sets `project.bpm`, every
+  later seed is conformed to it (its warp map scaled, re-rendered ONCE
+  from the source), so beat n is the same instant in all of them; stems
+  are not sources but a seed with parts switched off (`seed:s2/drums`).
+  Everything is written by the command that changes it, under
+  `<data_dir>/beatify/<project-id>/`: `project.json` (name, bpm, seeds),
+  `clips.json` (clips belong to the PROJECT), `seeds/<id>/` (`meta.json`
+  record, `warped.wav`, `stems/`). INVARIANTS: a re-tempo never touches
+  clips; a re-beatify keeps the seed id and directory; ids are minted
+  `p<n>`/`s<n>` and nothing is keyed by a library track; older on-disk
+  layouts are adopted on read, never migrated.
 - TWO GRIDS, AND USING THE WRONG ONE IS SILENT. `analysis.grid` is the
   OUTPUT timebase (beat 0 is the head pad), so it says nothing about
   where a beat sits in the file; `analysis.sourceGrid`
@@ -1173,6 +1189,21 @@ The detail is in the `Conventions` bullets above; this is the map.
   snaps to `sourceGrid` (source seconds), the track view and the editor
   to `grid` (output seconds, beat 0 padded). Selections grow OUTWARD to
   whole beats; a plain click seeks to the nearest beat, ⌘ frees it.
+- ⌘ FREES ANY SELECTION GESTURE from the grid (TV-14a): `AudioTimeline`
+  reads the modifier LIVE in the drag handler and skips `snap.range` /
+  `snap.slide`, so a sweep, an end-drag or a slide can be eased off the
+  beat and back on without letting go. Downstream of that the count of
+  beats is a FLOAT: `beatsBetween` (never `snapSelection`) is what
+  `BeatifyTrackView` reports, `beatCount` tidies float noise and formats
+  it, and `selectionLabel` drops the group line for a fraction. The clip
+  end stays whole — a run lands on a column and covers
+  `Math.max(1, round(beats))` of them — and the fraction survives as
+  `Placement.sourceBeat`, which is `f64` on both sides of the wire
+  (`build::span` takes it; integers in older `clips.json` read back
+  unchanged). So: free ends buy you the OFFSET into the source, never a
+  fractional column. Pinned in `BeatifyGrid.test.ts`,
+  `BeatifyClipBuilder.test.tsx` ("⌘-dragging the ends of the selection
+  off the grid") and `beatify::build::a_freed_cut_reads_from_part_way_into_a_beat`.
 - The lead-in (§3.7) is measured, stored in the record, and applied at
   CUTS ONLY — the grid never moves for it (MOD-22). Today the cuts that
   honour it are the modal's sync check; `build::span` still cuts clips

@@ -34,6 +34,7 @@ import {
 } from 'react';
 import {
   beatAt,
+  beatsBetween,
   beatTime,
   clampBeat,
   gridLines,
@@ -224,9 +225,11 @@ export function BeatifyTrackView({
   const snap = useMemo(() => beatSnap(grid), [grid]);
 
   // The builder needs the selection in BEATS, not seconds: that is what a
-  // drag into the clip editor carries.
+  // drag into the clip editor carries. Measured, never re-snapped — the
+  // gesture has already decided whether it wanted the grid (⌘ frees the
+  // ends, TV-14a), and rounding here would quietly undo that.
   useEffect(() => {
-    onSelectionBeats?.(sel ? snapSelection(grid, sel.start, sel.end) : null);
+    onSelectionBeats?.(sel ? beatsBetween(grid, sel.start, sel.end) : null);
   }, [grid, onSelectionBeats, sel]);
 
   /** TV-18: double-click selects the group under the cursor. */
@@ -309,7 +312,7 @@ export function BeatifyTrackView({
   }, [duration, grid, group, playhead, seek, sel, stepBeats, togglePlay]);
 
   const confidence = track.record.analysis.confidence;
-  const selBeats = sel ? snapSelection(grid, sel.start, sel.end) : null;
+  const selBeats = sel ? beatsBetween(grid, sel.start, sel.end) : null;
 
   return (
     <section className="beatify-track" data-testid="beatify-track-view">
@@ -346,6 +349,7 @@ export function BeatifyTrackView({
         onPullOut={onPullOut}
         timecode={timecode}
         loopTitle={sel ? 'Loop the selection (l)' : 'Loop the whole track (l)'}
+        selectionTitle="Drag an end to resize — hold ⌘ to leave the beat grid"
         transportExtra={
           <>
             <label className="beatify-group">

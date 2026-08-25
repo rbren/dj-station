@@ -293,14 +293,41 @@ export function snapSelection(
   return { startBeat, endBeat: Math.max(endBeat, startBeat + 1) };
 }
 
-/** TV-15: "12 beats · 3 groups" when the count divides evenly. */
+/** The same measurement WITHOUT the snapping: where a selection really
+ *  starts and ends, in beats, fractions and all. What a ⌘-freed drag
+ *  (TV-14a) hands on — the ends are the user's to the millisecond, and
+ *  rounding them here would throw away the whole point of freeing them.
+ *  Still clamped into the track, since audio outside it does not exist. */
+export function beatsBetween(
+  grid: Grid,
+  fromSecs: number,
+  toSecs: number,
+): { startBeat: number; endBeat: number } {
+  if (grid.period <= 0) return { startBeat: 0, endBeat: 0 };
+  const lo = Math.min(fromSecs, toSecs);
+  const hi = Math.max(fromSecs, toSecs);
+  const at = (secs: number) => beatCount(clampBeat(grid, (secs - grid.phase) / grid.period));
+  return { startBeat: at(lo), endBeat: at(hi) };
+}
+
+/** Beat counts are floats once the ends are free, but a beat swept along
+ *  the grid must still read as a round number: `12`, not `11.999999998`. */
+export function beatCount(beats: number): number {
+  const whole = Math.round(beats);
+  return Math.abs(beats - whole) < 1e-6 ? whole : Number(beats.toFixed(3));
+}
+
+/** TV-15: "12 beats · 3 groups" when the count divides evenly. A count
+ *  that is not whole names no groups: groups are made of whole beats, and
+ *  the silence is how a freed selection says so. */
 export function selectionLabel(beats: number, group: number): string {
-  const plural = beats === 1 ? 'beat' : 'beats';
-  if (group > 1 && beats % group === 0) {
-    const groups = beats / group;
-    return `${beats} ${plural} · ${groups} ${groups === 1 ? 'group' : 'groups'}`;
+  const n = beatCount(beats);
+  const plural = n === 1 ? 'beat' : 'beats';
+  if (group > 1 && Number.isInteger(n) && n % group === 0) {
+    const groups = n / group;
+    return `${n} ${plural} · ${groups} ${groups === 1 ? 'group' : 'groups'}`;
   }
-  return `${beats} ${plural}`;
+  return `${n} ${plural}`;
 }
 
 /** Grid line times over a beat range, every `step` beats (TV-1: pure

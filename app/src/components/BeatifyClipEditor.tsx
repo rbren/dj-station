@@ -11,6 +11,7 @@
 // owns the transport (and the rule that only one thing sounds at a time).
 
 import { useCallback, type ReactNode } from 'react';
+import { beatCount } from '../beatify';
 import {
   abutsLeft,
   drawnColumns,
@@ -280,7 +281,7 @@ function Block({ placement, columns, seam, tint, label, onGrab, onRemove }: Bloc
       data-beats={p.beats}
       data-col={p.col}
       style={{ left: pct(p.col, columns), width: pct(p.beats, columns) }}
-      title={`${label} · beats ${p.sourceBeat + 1}–${p.sourceBeat + p.beats}`}
+      title={`${label} · beats ${beatCount(p.sourceBeat + 1)}–${beatCount(p.sourceBeat + p.beats)}`}
       onMouseDown={(e) => onGrab(p.id, e)}
     >
       <span className="beatify-clip-block-label">

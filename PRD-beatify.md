@@ -313,9 +313,10 @@ What the user lands in after import. The track, gridded, playable.
 ### 4.4 Selection
 
 **TV-14.** Drag selects a range. Edges snap **outward** to enclosing beats, so a selection is always an integer number of beats.
-**TV-15.** Selection readout shows beats, plus groups when the count divides evenly ("12 beats · 3 groups").
+**TV-14a.** Holding ⌘ (ctrl on Windows/Linux) during a selection drag frees it from the grid: sweeping, dragging either end and sliding all follow the pointer to the millisecond, so a cut can start inside a beat to catch a pickup or stop short of one to leave a tail. The modifier is read live, so a drag can be eased off the grid and back on without letting go. A freed selection is reported in fractional beats; dropping it into the clip editor still lands it on a whole column and covers the nearest whole number of columns, and the fraction survives as the offset the run reads from.
+**TV-15.** Selection readout shows beats, plus groups when the count divides evenly ("12 beats · 3 groups"). A fractional count ("8.5 beats") names no groups — that silence is how the readout says the selection is off the grid.
 **TV-16.** Shift-click extends the selection to the nearest beat.
-**TV-17.** Drag the selection edges to resize, still beat-snapped.
+**TV-17.** Drag the selection edges to resize, still beat-snapped unless ⌘ frees them (TV-14a).
 **TV-18.** Double-click selects the group under the cursor; double-click on the ruler selects 16 groups.
 **TV-19.** Selection persists across zoom changes and playback. Escape clears it.
 

@@ -18,7 +18,7 @@
 //      rendering the draft as it stands rather than as it was saved.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { BeatifyProject, BeatifySeed } from '../beatify';
+import { beatCount, type BeatifyProject, type BeatifySeed } from '../beatify';
 import {
   addRow,
   cellRange,
@@ -252,7 +252,15 @@ export function BeatifyClipBuilder({
   }, [clipSecs, draft]);
 
   // --- dragging beats down ----------------------------------------------
+  //
+  // The selection can be off the grid at both ends (⌘, TV-14a), so what
+  // is selected is a length in beats and a fraction: 6.25 beats from
+  // beat 3.75. The CLIP is a grid of whole beats and stays one, so a run
+  // occupies the nearest whole number of columns and carries the
+  // fraction in where it READS FROM — the offset is what the free drag
+  // was for, and the downbeat is what the grid is for.
   const beatsSelected = selBeats ? selBeats.endBeat - selBeats.startBeat : 0;
+  const columnsSelected = Math.max(1, Math.round(beatsSelected));
 
   /** Lift the selected beats off the source; the drop decides where they
    *  land. Reached two ways — the handle in the transport row, and
@@ -260,10 +268,10 @@ export function BeatifyClipBuilder({
   const liftSelection = useCallback(() => {
     if (!selBeats || beatsSelected <= 0) return;
     setDrag({
-      run: { source: picked, sourceBeat: selBeats.startBeat, beats: beatsSelected },
+      run: { source: picked, sourceBeat: selBeats.startBeat, beats: columnsSelected },
       moving: null,
     });
-  }, [beatsSelected, picked, selBeats]);
+  }, [beatsSelected, columnsSelected, picked, selBeats]);
 
   const startDrag = useCallback(
     (e: React.MouseEvent) => {
@@ -595,7 +603,7 @@ export function BeatifyClipBuilder({
                   title="Drag these beats into the clip below — or drag them straight down out of the waveform"
                   onMouseDown={startDrag}
                 >
-                  ⠿ {beatsSelected} beat{beatsSelected === 1 ? '' : 's'}
+                  ⠿ {beatCount(beatsSelected)} beat{beatsSelected === 1 ? '' : 's'}
                 </button>
               }
             />
