@@ -10,6 +10,7 @@ import {
   nextInstanceId,
   PICKER_SCALE,
 } from '../src/components/ModulePicker';
+import { BEAT_CLIP_TYPE, type BeatClipEntry } from '../src/beatClip';
 import type { MacroPreviewNode } from '../src/engine';
 import type { Manifest } from '../src/types';
 
@@ -381,6 +382,98 @@ describe('ModulePicker macro management', () => {
     fireEvent.click(screen.getByTestId('macro-delete-confirm'));
     expect(onDeleteMacro).toHaveBeenCalledWith('macro.tone');
     expect(screen.queryByTestId('macro-delete-dialog')).toBeNull();
+  });
+});
+
+describe('ModulePicker clips tab', () => {
+  const CLIPS: BeatClipEntry[] = [
+    {
+      projectId: 'p1',
+      projectName: 'Night Bus',
+      clipId: '1',
+      name: 'intro loop',
+      bpm: 128,
+      beats: 8,
+    },
+    {
+      projectId: 'p2',
+      projectName: 'Sunroom',
+      clipId: '3',
+      name: 'chorus stack',
+      bpm: 92.5,
+      beats: 4,
+    },
+  ];
+
+  const beatClipModule: Manifest = {
+    id: BEAT_CLIP_TYPE,
+    name: 'Beat Clip',
+    version: '0.1.0',
+    abi: 'native',
+    category: 'Sources',
+    inputs: [{ id: 'clock', name: 'Clock' }],
+    outputs: [{ id: 'audio_l', name: 'L' }],
+    params: [],
+  };
+
+  function renderClips(clips: BeatClipEntry[] = CLIPS) {
+    const onAdd = vi.fn();
+    const onAddClip = vi.fn();
+    render(
+      <ModulePicker
+        modules={[...MODULES, beatClipModule]}
+        clips={clips}
+        onAdd={onAdd}
+        onAddClip={onAddClip}
+        onClose={vi.fn()}
+      />,
+    );
+    return { onAdd, onAddClip };
+  }
+
+  it('offers a Clips tab listing every Beatify clip with its tempo and length', () => {
+    renderClips();
+    // The gallery is module types: clips appear once the tab is picked.
+    expect(screen.queryByTestId('picker-clip-p1-1')).toBeNull();
+    fireEvent.click(screen.getByTestId('picker-category-Clips'));
+    expect(screen.getByText('intro loop')).toBeTruthy();
+    expect(screen.getByText('Night Bus')).toBeTruthy();
+    expect(screen.getByText('8 beats')).toBeTruthy();
+    expect(screen.getByText('128.0 BPM')).toBeTruthy();
+    expect(screen.getByTestId('picker-clip-p2-3')).toBeTruthy();
+    // The tab replaces the module gallery rather than adding to it.
+    expect(screen.queryByTestId('module-preview-com.dj.oscillator')).toBeNull();
+  });
+
+  it('clicking a clip imports it as a Beat Clip module', () => {
+    const { onAddClip, onAdd } = renderClips();
+    fireEvent.click(screen.getByTestId('picker-category-Clips'));
+    fireEvent.click(screen.getByTestId('picker-clip-p2-3'));
+    expect(onAddClip).toHaveBeenCalledWith(CLIPS[1]);
+    // A clip is not a module type: the plain add path stays untouched.
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('the Beat Clip module type itself is not in the module gallery', () => {
+    renderClips();
+    expect(screen.queryByTestId(`library-add-${BEAT_CLIP_TYPE}`)).toBeNull();
+    expect(screen.getByTestId('library-add-com.dj.oscillator')).toBeTruthy();
+  });
+
+  it('search filters clips by name or project, and says when nothing matches', () => {
+    renderClips();
+    fireEvent.click(screen.getByTestId('picker-category-Clips'));
+    fireEvent.change(screen.getByTestId('library-search'), { target: { value: 'sunroom' } });
+    expect(screen.getByTestId('picker-clip-p2-3')).toBeTruthy();
+    expect(screen.queryByTestId('picker-clip-p1-1')).toBeNull();
+    fireEvent.change(screen.getByTestId('library-search'), { target: { value: 'zzz' } });
+    expect(screen.getByTestId('picker-no-clips')).toBeTruthy();
+  });
+
+  it('an empty Clips tab points at the Beatify tab', () => {
+    renderClips([]);
+    fireEvent.click(screen.getByTestId('picker-category-Clips'));
+    expect(screen.getByTestId('picker-no-clips').textContent).toContain('Beatify');
   });
 });
 

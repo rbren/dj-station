@@ -556,6 +556,51 @@ fn track_of(state: &AppState, seed: &store::Seed) -> Option<i64> {
 }
 
 // ---------------------------------------------------------------------------
+// Clips outside the builder
+// ---------------------------------------------------------------------------
+
+/// A saved clip, assembled: what the rack's Beat Clip module plays, and
+/// the tempo it is laid out at (see `beat_clip.rs`).
+pub struct RenderedClip {
+    pub audio: AudioData,
+    pub bpm: f64,
+    pub name: String,
+}
+
+/// The clips a project has saved. Read-only, and the same file the
+/// builder writes — a clip belongs to its project, not to a surface.
+pub fn project_clips(state: &AppState, project_id: &str) -> CmdResult<Vec<SavedClip>> {
+    read_clips(state, project_id)
+}
+
+/// Assemble a saved clip. Same path the builder's preview takes, so the
+/// module in the rack sounds like the clip in the editor.
+pub fn render_clip(state: &AppState, project_id: &str, clip_id: &str) -> CmdResult<RenderedClip> {
+    let mut resolver = Resolver::new(state, project_id)?;
+    let clip = resolver
+        .clips
+        .iter()
+        .find(|c| c.id == clip_id)
+        .cloned()
+        .ok_or_else(|| {
+            CmdError::invalid(format!("beatify: no saved clip {clip_id} in {project_id}"))
+        })?;
+    let bpm = resolver.grid().bpm;
+    let draft = ClipDraft {
+        name: clip.name.clone(),
+        rows: clip.rows,
+        columns: clip.columns,
+        placements: clip.placements,
+    };
+    let audio = resolver.assemble(&draft, 0)?;
+    Ok(RenderedClip {
+        audio,
+        bpm,
+        name: clip.name,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::audio::{AudioControl, AudioModule, AudioShared};
+use crate::beat_clip::{BeatClipControl, BeatClipModule, BeatClipRef, BeatClipShared};
 use crate::builtin::{
     AudioOutModule, BuiltinKind, MidiEvent, MidiMapKind, MidiModule, MidiOutEvent, MidiOutSink,
     MidiShared,
@@ -29,6 +30,7 @@ use crate::wasm_host::WasmRuntime;
 // Facade modules: additional `impl Engine` blocks grouped by feature area.
 // This file keeps construction, graph editing, knobs and telemetry.
 mod audio_api;
+mod beat_clip_api;
 mod choreo_api;
 mod deck_api;
 mod gesture_api;
@@ -142,6 +144,10 @@ pub struct NodeInfo {
     /// Path of the track loaded into a Playback/Deck node (persisted in the
     /// patch).
     pub track_path: Option<String>,
+    /// Which Beatify clip a Beat Clip node plays (persisted in the patch;
+    /// the audio itself is re-assembled by the app layer after a load, the
+    /// way deck metadata is re-applied).
+    pub clip: Option<BeatClipRef>,
     /// Rack position (unzoomed rack coordinates) — pure UI passthrough,
     /// control-side only, never touches the RT thread. Persisted in the
     /// patch's `layout` map so undo/redo restores module moves and puts
@@ -376,6 +382,9 @@ pub struct Engine {
     playback_garbage: HashMap<usize, rtrb::Consumer<Arc<TrackData>>>,
     /// Control-side state per Audio node (track handoff + decoded track).
     audios: HashMap<usize, AudioControl>,
+    /// Control-side state per Beat Clip node (clip handoff + the binding
+    /// the loaded audio came from).
+    beat_clips: HashMap<usize, BeatClipControl>,
     /// Control-side state per DJ Deck node (M2).
     decks: HashMap<usize, DeckControl>,
     xruns: Arc<AtomicU64>,
@@ -487,6 +496,7 @@ impl Engine {
             playback_producers: HashMap::new(),
             playback_garbage: HashMap::new(),
             audios: HashMap::new(),
+            beat_clips: HashMap::new(),
             decks: HashMap::new(),
             xruns: Arc::new(AtomicU64::new(0)),
             proc_misses: Arc::new(AtomicU64::new(0)),
@@ -689,6 +699,7 @@ impl Engine {
                 | BuiltinKind::Hands
                 | BuiltinKind::Playback
                 | BuiltinKind::Audio
+                | BuiltinKind::BeatClip
                 | BuiltinKind::Deck,
             ) => Err(anyhow!("{ext_id} modules are created via add_module")),
             None => {
@@ -764,6 +775,7 @@ impl Engine {
         let mut choreo_ctl = None;
         let mut playback_plumbing = None;
         let mut audio_ctl = None;
+        let mut beat_clip_ctl = None;
         let mut deck_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
             Some(BuiltinKind::Midi) => {
@@ -831,6 +843,24 @@ impl Engine {
                     shared: shared.clone(),
                 });
                 Box::new(AudioModule::new(
+                    rx,
+                    garbage_tx,
+                    self.config.sample_rate,
+                    shared,
+                ))
+            }
+            Some(BuiltinKind::BeatClip) => {
+                let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let shared = Arc::new(BeatClipShared::default());
+                beat_clip_ctl = Some(BeatClipControl {
+                    tx,
+                    garbage_rx,
+                    track: None,
+                    loaded: None,
+                    shared: shared.clone(),
+                });
+                Box::new(BeatClipModule::new(
                     rx,
                     garbage_tx,
                     self.config.sample_rate,
@@ -911,6 +941,7 @@ impl Engine {
                 None
             },
             track_path: None,
+            clip: None,
             position: None,
         };
 
@@ -988,6 +1019,9 @@ impl Engine {
         }
         if let Some(ctl) = audio_ctl {
             self.audios.insert(idx, ctl);
+        }
+        if let Some(ctl) = beat_clip_ctl {
+            self.beat_clips.insert(idx, ctl);
         }
         if let Some(ctl) = deck_ctl {
             self.decks.insert(idx, ctl);
@@ -1069,6 +1103,7 @@ impl Engine {
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);
         self.audios.remove(&slot);
+        self.beat_clips.remove(&slot);
         self.decks.remove(&slot);
         // Other decks sync-locked to this one lose their master.
         for ctl in self.decks.values_mut() {

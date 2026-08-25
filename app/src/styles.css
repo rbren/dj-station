@@ -2171,6 +2171,69 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/* Beat Clip panel + the picker's Clips tab                            */
+/* ------------------------------------------------------------------ */
+
+.beat-clip-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.beat-clip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.beat-clip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: #9aa7b5;
+  font-variant-numeric: tabular-nums;
+}
+
+.beat-clip-beats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.beat-clip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #22303c;
+}
+
+.beat-clip-dot.on {
+  background: #4fd6c8;
+}
+
+/* A clip has no panel to preview: the card says what it is instead. */
+.picker-clip-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #9aa7b5;
+}
+
+.picker-clip-beats {
+  font-size: 1.4rem;
+  color: #4fd6c8;
+}
+
+.picker-clip-bpm {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
 /* DJ Deck panel (M2)                                                  */
 /* ------------------------------------------------------------------ */
 

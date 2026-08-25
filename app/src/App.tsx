@@ -22,6 +22,7 @@ import { ErrorBanner } from './components/ErrorBanner';
 import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
 import { ClipView, type ClipViewHandle } from './components/ClipView';
+import { beatClip, type BeatClipEntry, BEAT_CLIP_TYPE } from './beatClip';
 import { beatifyClipClient } from './beatifyClip';
 import { BeatifyView } from './components/BeatifyView';
 import { clipClient } from './clip';
@@ -164,6 +165,9 @@ export default function App() {
   const [docs, setDocs] = useState<null | { typeId: string; manifest: Manifest }>(null);
   // Cmd+M module picker modal.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Beatify clips offered in the picker's Clips tab, fetched while it is
+  // open (a clip saved in another tab shows up the next time it opens).
+  const [beatClips, setBeatClips] = useState<BeatClipEntry[]>([]);
   const [zoom, setZoom] = useState<number>(() => loadZoom());
   // Infinite canvas: the rack is translated by `pan` (screen px) before the
   // zoom scale, so scrolling/dragging the background opens up new area in
@@ -1019,6 +1023,7 @@ export default function App() {
         moveModule(instance, spot.x, spot.y);
       }
       await refresh();
+      return instance;
     },
     [store, refresh, moveModule, moduleLib, placeMacroGroup],
   );
@@ -1417,6 +1422,41 @@ export default function App() {
       void addModule(typeId, at);
     },
     [rackEl, pan, zoom, addModule],
+  );
+
+  // The picker's Clips tab lists what Beatify has saved; only refetched
+  // while the modal is up, so a rack session costs nothing.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let live = true;
+    void beatClip.list().then((cs) => {
+      if (live && cs) setBeatClips(cs);
+    });
+    return () => {
+      live = false;
+    };
+  }, [pickerOpen]);
+
+  // Import a clip: a Beat Clip module at the center of the view, loaded
+  // with that clip (which is also what its patch entry will name).
+  const addClipFromPicker = useCallback(
+    (clip: BeatClipEntry) => {
+      let at: { x: number; y: number } | undefined;
+      if (rackEl) {
+        const rect = rackEl.getBoundingClientRect();
+        at = {
+          x: snap((rect.width / 2 - pan.x) / zoom),
+          y: snap((rect.height / 2 - pan.y) / zoom),
+        };
+      }
+      setPickerOpen(false);
+      void (async () => {
+        const instance = await addModule(BEAT_CLIP_TYPE, at);
+        await beatClip.load(instance, clip.projectId, clip.clipId);
+        await refresh();
+      })();
+    },
+    [rackEl, pan, zoom, addModule, refresh],
   );
 
   // Drop a module dragged out of the library at the pointer position,
@@ -2109,7 +2149,9 @@ export default function App() {
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}
+          clips={beatClips}
           onAdd={addFromPicker}
+          onAddClip={addClipFromPicker}
           onClose={() => setPickerOpen(false)}
           onRenameMacro={renameMacroDef}
           onDeleteMacro={deleteMacroDef}

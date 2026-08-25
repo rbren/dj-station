@@ -760,6 +760,16 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
+  // Beat Clip: the clock owns tempo AND phase, so its two triggers sit
+  // together; the clip's own tempo is the reference they are read against.
+  'builtin.beat_clip': () => ({
+    groups: [
+      { title: 'clock', inputs: ['clock', 'reset'] },
+      { title: 'clip', inputs: ['bpm'] },
+    ],
+    outputGroups: [{ title: 'audio', outputs: ['audio_l', 'audio_r'] }],
+  }),
+
   'builtin.deck': () => ({
     groups: [
       {

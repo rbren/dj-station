@@ -333,6 +333,7 @@ fn macros_may_not_nest() {
             gesture: None,
             choreo: None,
             track: None,
+            clip: None,
             sync_to: None,
         },
     );

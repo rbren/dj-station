@@ -10,6 +10,7 @@
 //! - Hot reload: watch extension folders, save/load state, atomic block-boundary swap.
 
 pub mod audio;
+pub mod beat_clip;
 pub mod builtin;
 pub mod choreo;
 pub mod deck;

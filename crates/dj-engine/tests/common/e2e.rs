@@ -189,6 +189,13 @@ fn render_case(case: &str) -> PathBuf {
             engine
                 .audio_load(&t.instance, &case_dir.join(&t.file), t.bpm)
                 .unwrap();
+        } else if ext == "builtin.beat_clip" {
+            // A clip is assembled by the app layer from a Beatify project,
+            // so cases carry the rendered audio (and the tempo it was
+            // rendered at) in the sidecar, like deck metadata.
+            engine
+                .beat_clip_load_file(&t.instance, &case_dir.join(&t.file), t.bpm.unwrap_or(120.0))
+                .unwrap();
         } else {
             engine
                 .playback_load(&t.instance, &case_dir.join(&t.file))

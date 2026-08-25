@@ -1,0 +1,31 @@
+{
+  "ext": "com.dj.clock",
+  "knobs": {
+    "beats": {
+      "position": 0.16666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "bpm": {
+      "position": 0.78571427,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "run": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "swing": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

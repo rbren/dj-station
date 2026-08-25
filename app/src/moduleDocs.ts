@@ -1215,6 +1215,27 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'audio_l/audio_r -> Audio Output; ride the BPM control to tempo-match a jam.',
     ],
   },
+  'builtin.beat_clip': {
+    summary:
+      'Plays a clip built in the Beatify tab, locked to a clock. Import ' +
+      'one from the Clips tab of the module picker and the module arrives ' +
+      'loaded with that clip and the tempo its project is laid out at. ' +
+      'The clock does the rest: the gap between its last two ticks is the ' +
+      'beat, so the clip runs at whatever tempo the patch is running at, ' +
+      'and every tick re-anchors the phase \u2014 the clip starts ON a ' +
+      'tick and comes back around on one, never in between. Reset parks ' +
+      'it at beat 0 to wait for the next tick.',
+    inputs: {
+      clock: 'A rising edge is a beat: it sets the tempo and the phase.',
+      reset: 'Back to beat 0, silent until the next clock edge.',
+      bpm: 'Tempo the clip was rendered at \u2014 what one of its beats means.',
+    },
+    outputs: { audio_l: 'Left audio.', audio_r: 'Right audio.' },
+    examples: [
+      'Clock -> clock: every clip in the rack rides one tempo.',
+      'Step Sequencer trigger -> reset: drop the clip back to its head on cue.',
+    ],
+  },
   'builtin.crossfader': {
     summary:
       'DJ crossfader: blends stereo pair A and pair B under one fader. ' +

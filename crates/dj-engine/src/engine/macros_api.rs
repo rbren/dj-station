@@ -546,6 +546,7 @@ impl Engine {
                 gesture: None,
                 choreo: None,
                 track: None,
+                clip: None,
                 sync_to: None,
             },
         );

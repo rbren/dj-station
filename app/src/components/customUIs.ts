@@ -23,6 +23,7 @@ import TuringUI from '../../../extensions/turing/ui-src/TuringUI';
 import WaveshaperUI from '../../../extensions/waveshaper/ui-src/WaveshaperUI';
 import type { ModuleHandle } from '../types';
 import { AudioCustomUI } from './AudioPanel';
+import { BeatClipCustomUI } from './BeatClipPanel';
 import { DeckCustomUI } from './DeckPanel';
 import { CompressorUI, FilterUI, MixerUI, VcaDualUI, VcaUI } from './LevelMeter';
 
@@ -49,6 +50,7 @@ export const CUSTOM_UIS: Record<string, CustomUI> = {
   'com.dj.vca_dual': VcaDualUI,
   'com.dj.waveshaper': WaveshaperUI,
   'builtin.audio': AudioCustomUI,
+  'builtin.beat_clip': BeatClipCustomUI,
   'builtin.deck': DeckCustomUI,
 };
 
@@ -56,7 +58,12 @@ export const CUSTOM_UIS: Record<string, CustomUI> = {
  *  have mount-time side effects beyond the handle — the camera auto-starts
  *  getUserMedia, the deck and audio panels poll their IPC clients for a
  *  (nonexistent) instance. Their previews show the bare panel instead. */
-const PREVIEW_UNSAFE = new Set(['com.dj.camera', 'builtin.deck', 'builtin.audio']);
+const PREVIEW_UNSAFE = new Set([
+  'com.dj.camera',
+  'builtin.deck',
+  'builtin.audio',
+  'builtin.beat_clip',
+]);
 
 /** The custom UI to render in a picker preview, if any. */
 export function previewUI(typeId: string): CustomUI | undefined {

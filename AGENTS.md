@@ -950,6 +950,37 @@ beatify::build`.
   as `<project-id>/stems/<name>.wav`; an unseparated stem is listed but
   disabled with the Clip-page hint, like every other optional dependency
   here. Nothing is written to the library: a clip is not a track.
+- Beat Clip module (`builtin.beat_clip`, `crates/dj-engine/src/beat_clip.rs`
+  + `engine/beat_clip_api.rs`): a saved Beatify clip played in the rack.
+  THE CLOCK OWNS TEMPO AND PHASE — the interval between the last two
+  rising edges on `clock` is one clip beat (so the playhead advances
+  `beat_frames / interval` per output frame, and a clock at 2x the clip's
+  tempo plays it at 2x), and every edge re-anchors `pos` to
+  `beat * beat_frames`, so a multi-beat clip is never heard starting
+  between ticks. `reset` (and a fresh load) re-arms: parked at beat 0,
+  SILENT until the next edge, the `armed` convention `choreo` uses. `bpm`
+  is the tempo the audio was rendered at — what one clip beat means —
+  written by the loader from the project's grid. Panel readout comes from
+  `BeatClipShared` (position/clock BPM/beat/playing atomics published once
+  per block), like `AudioShared`.
+- What a patch persists for a Beat Clip is the BINDING, never the audio:
+  `ModuleFile.clip` (`BeatClipRef` = project id + clip id + display name),
+  because a clip is placements re-assembled on demand. `Engine::
+  beat_clip_bind` sets the binding alone; `beat_clip_pending()` lists the
+  nodes whose binding has no audio behind it, and the app layer
+  (`app/src-tauri/src/beat_clip.rs::hydrate`, called after patch load and
+  after `apply_doc`, i.e. undo/redo/paste) assembles them via
+  `beatify_clip::render_clip` — the deck-metadata pattern. A clip whose
+  project is gone leaves the module silent and logs; it never fails the
+  load. E2E cases instead carry rendered audio in the `events.json`
+  sidecar (`beat_clip_load_file`), like deck tracks.
+- Clips are imported from the module picker's CLIPS TAB (`CLIPS_TAB` in
+  `ModulePicker.tsx`), which lists `beat_clip_list` rather than module
+  types; the `builtin.beat_clip` type itself is filtered OUT of the module
+  gallery, since an unbound one plays nothing. Picking one adds the module
+  and calls `beat_clip_load` (undoable under `EditKey::Track`, `async`
+  because assembling decodes audio — assemble BEFORE taking the engine
+  lock).
 - Beatify detection degrades like the yt-dlp provider: `beat_this` (a
   PyTorch model) is an OPTIONAL runtime dep. `detect::probe_beat_this`
   FINDS it rather than assuming `python3`: it reads the shebang of a

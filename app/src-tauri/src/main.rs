@@ -4,6 +4,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod beat_clip;
 mod beatify;
 mod beatify_clip;
 mod clip;
@@ -259,6 +260,8 @@ fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> 
             apply_deck_metadata(state, engine, &instance)?;
         }
     }
+    // Beat Clip modules apply_doc recreated hold a binding but no audio.
+    beat_clip::hydrate(state, engine);
     Ok(())
 }
 
@@ -1750,6 +1753,8 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     for instance in deck_instances {
         apply_deck_metadata(state, &mut engine, &instance)?;
     }
+    // Beat Clip modules: the patch names the clip, the app assembles it.
+    beat_clip::hydrate(state, &mut engine);
     restart_backend(&mut engine, backend, "patch load")?;
     mark_saved(state, &engine);
     let warnings = engine.load_warnings.clone();
@@ -3007,6 +3012,9 @@ fn main() {
             beatify_clip::beatify_clip_preview,
             beatify_clip::beatify_clip_save,
             beatify_clip::beatify_clip_delete,
+            beat_clip::beat_clip_list,
+            beat_clip::beat_clip_load,
+            beat_clip::beat_clip_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

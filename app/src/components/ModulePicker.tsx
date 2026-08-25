@@ -6,6 +6,7 @@
 // filter and a search box.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { BEAT_CLIP_TYPE, type BeatClipEntry } from '../beatClip';
 import { engine, type MacroPreviewNode } from '../engine';
 import type { KnobState, Manifest, ModuleHandle } from '../types';
 import { ContextMenu } from './ContextMenu';
@@ -32,6 +33,23 @@ export const CATEGORY_ORDER = [
 ];
 
 const UNCATEGORIZED = 'Other';
+
+/** The Clips tab: not a module category but a tab beside them, because
+ *  the entries in it are CLIPS rather than module types — each one adds a
+ *  Beat Clip module already loaded with that clip. The module itself is
+ *  therefore hidden from the ordinary gallery: an unbound one plays
+ *  nothing, and this tab is where its clips live. */
+export const CLIPS_TAB = 'Clips';
+
+/** Clips whose name or project matches every term of `query`. */
+export function filterClips(clips: BeatClipEntry[], query: string): BeatClipEntry[] {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return clips;
+  return clips.filter((c) => {
+    const haystack = `${c.name} ${c.projectName}`.toLowerCase();
+    return terms.every((t) => haystack.includes(t));
+  });
+}
 
 function categoryOf(m: Manifest): string {
   // Macros (PRD §6) always group together regardless of their synthesized
@@ -321,15 +339,48 @@ interface PickerEntryProps {
   onMacroMenu?(m: Manifest, x: number, y: number): void;
 }
 
+/** One clip in the Clips tab: what it is, where it came from and how long
+ *  it runs. A clip has no panel to preview — it is material, not a module
+ *  type — so the entry says what a card can say. */
+function ClipEntry({ clip, onAdd }: { clip: BeatClipEntry; onAdd(clip: BeatClipEntry): void }) {
+  return (
+    <div
+      className="picker-entry picker-clip"
+      data-testid={`picker-clip-${clip.projectId}-${clip.clipId}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => onAdd(clip)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onAdd(clip);
+      }}
+    >
+      <div className="picker-preview picker-clip-preview">
+        <span className="picker-clip-beats">{clip.beats} beats</span>
+        <span className="picker-clip-bpm">{clip.bpm > 0 ? `${clip.bpm.toFixed(1)} BPM` : '—'}</span>
+      </div>
+      <div className="picker-entry-caption">
+        <span className="picker-entry-name">{clip.name}</span>
+        <span className="picker-entry-io">{clip.projectName}</span>
+      </div>
+    </div>
+  );
+}
+
 export function ModulePicker({
   modules,
+  clips,
   onAdd,
+  onAddClip,
   onClose,
   onRenameMacro,
   onDeleteMacro,
 }: {
   modules: Manifest[];
+  /** Beatify clips offered in the Clips tab (empty without a backend). */
+  clips?: BeatClipEntry[];
   onAdd(typeId: string): void;
+  /** Add a Beat Clip module loaded with this clip. */
+  onAddClip?(clip: BeatClipEntry): void;
   onClose(): void;
   onRenameMacro?(macroId: string, name: string): Promise<void> | void;
   onDeleteMacro?(macroId: string): Promise<void> | void;
@@ -343,12 +394,21 @@ export function ModulePicker({
   const [deleting, setDeleting] = useState<Manifest | null>(null);
   const manageMacros = Boolean(onRenameMacro || onDeleteMacro);
 
-  const allGroups = useMemo(() => groupByCategory(modules), [modules]);
+  // The Beat Clip module type never stands on its own in the gallery: its
+  // entries are the clips in the Clips tab.
+  const moduleTypes = useMemo(() => modules.filter((m) => m.id !== BEAT_CLIP_TYPE), [modules]);
+  const allGroups = useMemo(() => groupByCategory(moduleTypes), [moduleTypes]);
   const categories = allGroups.map(([c]) => c);
+  const clipsTab = category === CLIPS_TAB;
   const shown = useMemo(() => {
-    const matched = filterModules(modules, query);
-    return groupByCategory(category ? matched.filter((m) => categoryOf(m) === category) : matched);
-  }, [modules, query, category]);
+    const matched = filterModules(moduleTypes, query);
+    return groupByCategory(
+      category && category !== CLIPS_TAB
+        ? matched.filter((m) => categoryOf(m) === category)
+        : matched,
+    );
+  }, [moduleTypes, query, category]);
+  const shownClips = useMemo(() => filterClips(clips ?? [], query), [clips, query]);
 
   const dialogUp = macroMenu !== null || renaming !== null || deleting !== null;
   useEffect(() => {
@@ -416,28 +476,59 @@ export function ModulePicker({
               {c}
             </button>
           ))}
+          <button
+            className={`picker-category${clipsTab ? ' active' : ''}`}
+            data-testid={`picker-category-${CLIPS_TAB}`}
+            onClick={() => setCategory((prev) => (prev === CLIPS_TAB ? null : CLIPS_TAB))}
+          >
+            {CLIPS_TAB}
+          </button>
         </div>
         <div className="picker-body">
-          {shown.map(([cat, entries]) => (
-            <section key={cat} className="picker-group">
-              <h3 className="picker-group-title">{cat}</h3>
+          {clipsTab && (
+            <section className="picker-group">
+              <h3 className="picker-group-title">{CLIPS_TAB}</h3>
               <div className="picker-grid">
-                {entries.map((m) => (
-                  <PickerEntry
-                    key={m.id}
-                    m={m}
-                    onAdd={onAdd}
-                    onDragging={setDragging}
-                    onMacroMenu={
-                      manageMacros ? (mm, x, y) => setMacroMenu({ m: mm, x, y }) : undefined
-                    }
+                {shownClips.map((c) => (
+                  <ClipEntry
+                    key={`${c.projectId}/${c.clipId}`}
+                    clip={c}
+                    onAdd={(clip) => onAddClip?.(clip)}
                   />
                 ))}
               </div>
+              {shownClips.length === 0 && (
+                <p className="library-empty" data-testid="picker-no-clips">
+                  {(clips ?? []).length === 0
+                    ? 'no clips yet — build one in the Beatify tab'
+                    : `no clips match “${query}”`}
+                </p>
+              )}
             </section>
-          ))}
-          {modules.length === 0 && <p className="library-empty">no modules found</p>}
-          {modules.length > 0 && shown.length === 0 && (
+          )}
+          {!clipsTab &&
+            shown.map(([cat, entries]) => (
+              <section key={cat} className="picker-group">
+                <h3 className="picker-group-title">{cat}</h3>
+                <div className="picker-grid">
+                  {entries.map((m) => (
+                    <PickerEntry
+                      key={m.id}
+                      m={m}
+                      onAdd={onAdd}
+                      onDragging={setDragging}
+                      onMacroMenu={
+                        manageMacros ? (mm, x, y) => setMacroMenu({ m: mm, x, y }) : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          {!clipsTab && moduleTypes.length === 0 && (
+            <p className="library-empty">no modules found</p>
+          )}
+          {!clipsTab && moduleTypes.length > 0 && shown.length === 0 && (
             <p className="library-empty" data-testid="library-no-results">
               no modules match “{query}”
             </p>
