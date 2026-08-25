@@ -15,6 +15,7 @@ mod e2e_choreo;
 mod e2e_effects;
 mod e2e_golden;
 mod e2e_hands;
+mod e2e_launch_control;
 mod e2e_quantizer_custom;
 mod e2e_qwerty;
 mod e2e_sequencing;

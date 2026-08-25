@@ -1007,6 +1007,34 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Map a knob to map0 and wire it to Filter cutoff.',
     ],
   },
+  'builtin.launchcontrol': {
+    summary:
+      'The Novation Launch Control XL as CV: eight columns matching the ' +
+      'surface, each with three knobs (send A, send B, pan), a mixer-style ' +
+      'fader and two buttons. Knobs and faders read 0..+10 V (fader down = ' +
+      '0 V); the buttons are gates, 10 V while held. The panel light shows ' +
+      'whether the controller is plugged in, and Active decides which ' +
+      'module it drives \u2014 only one at a time, so several of these can ' +
+      'sit on the rack as saved control layouts and you hand the surface ' +
+      'to whichever one you are playing. Values hold when the controller ' +
+      'goes away, so unplugging never jumps the patch.',
+    outputs: {
+      'c#_a': 'Column #, top knob (Send A), 0..+10 V.',
+      'c#_b': 'Column #, middle knob (Send B), 0..+10 V.',
+      'c#_pan': 'Column #, bottom knob (Pan/Device), 0..+10 V.',
+      'c#_fader': 'Column #, fader: 0 V down, +10 V up.',
+      'c#_focus': 'Column #, upper button: 10 V while held.',
+      'c#_ctrl': 'Column #, lower button: 10 V while held.',
+    },
+    params: {
+      active: 'Which module the controller drives (exclusive; the panel button).',
+    },
+    examples: [
+      'c1_fader -> Mixer lvl1: real faders on a six-channel mix.',
+      'c1_a -> Filter cutoff, c1_b -> resonance: a knob per column, a voice per column.',
+      'c1_focus -> ADSR gate for finger-drumming; c1_ctrl -> sequencer reset.',
+    ],
+  },
   'builtin.qwerty': {
     summary:
       'The computer keyboard as a gate source: one output jack per ' +

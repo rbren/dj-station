@@ -7,6 +7,7 @@
 mod beatify;
 mod beatify_clip;
 mod clip;
+mod launch_control;
 
 use dj_engine::{
     Backend, Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle,
@@ -2784,6 +2785,10 @@ fn main() {
                     }
                 }
             }
+            // Launch Control XL (PRD §7.1): hot-plug watcher for the
+            // control surface. No device, no thread work — it simply
+            // never finds a port (CI and headless runs included).
+            launch_control::spawn_watcher(app.handle().clone());
             // System menu: platform defaults (App/Edit/Window on macOS)
             // plus File (save/load) and Debug (web inspector) submenus.
             let new_patch = MenuItemBuilder::with_id("file_new", "New Patch")
@@ -2903,6 +2908,8 @@ fn main() {
             break_macro,
             inject_midi,
             qwerty_key,
+            launch_control::launchcontrol_status,
+            launch_control::launchcontrol_set_active,
             add_midi_mapping,
             remove_midi_mapping,
             add_midi_led_mapping,

@@ -19,6 +19,7 @@ pub mod graph;
 pub mod hands;
 pub mod history;
 pub mod knob;
+pub mod launch_control;
 pub mod macro_store;
 pub mod macros;
 pub mod manifest;
@@ -43,9 +44,14 @@ pub use engine::{
 pub use gesture::{GestureMappingInfo, GestureState, GESTURE_ID};
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle, WireStyle};
+pub use launch_control::LAUNCH_CONTROL_ID;
 pub use macro_store::{MacroImport, MacroStore, MACROS_DIR_NAME};
 pub use macros::{MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroParam, MacroPreviewNode};
 pub use manifest::Manifest;
+/// Re-exported so the shell can hold a hardware MIDI connection alive
+/// (`Engine::connect_launchcontrol_hardware`) without depending on midir.
+#[cfg(feature = "midi-hw")]
+pub use midir;
 pub use patch::{MacroInstanceFile, PatchDoc};
 pub use registry::ExtensionRegistry;
 pub use telemetry::JackTelemetry;

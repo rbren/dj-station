@@ -1976,6 +1976,51 @@ body {
   font-size: 0.8rem;
 }
 
+/* --- Launch Control XL: device light + ownership button -------------- */
+
+.launchcontrol-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+  color: #8a93a2;
+}
+
+.launchcontrol-led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2a2e35;
+  border: 1px solid #3a4049;
+}
+
+.launchcontrol-led-on {
+  background: #49d17a;
+  border-color: #49d17a;
+  box-shadow: 0 0 6px rgba(73, 209, 122, 0.7);
+}
+
+.launchcontrol-active {
+  padding: 2px 10px;
+  border-radius: 4px;
+  border: 1px solid #3a4049;
+  background: #1b1f26;
+  color: #b8c0cc;
+  cursor: pointer;
+}
+
+.launchcontrol-active-on {
+  border-color: #49d17a;
+  color: #0e1319;
+  background: #49d17a;
+}
+
+.launchcontrol-owner {
+  color: #6f7787;
+  font-style: italic;
+}
+
 /* --- QWERTY module: hint line above the keyboard-row jacks ----------- */
 
 .qwerty-panel {

@@ -81,6 +81,7 @@ impl ExtensionRegistry {
             crate::mixer::crossfader_manifest(),
             crate::gesture::gesture_manifest(),
             crate::hands::hands_manifest(),
+            crate::launch_control::launch_control_manifest(),
         ];
         out.extend(self.extensions.values().map(|e| e.manifest.clone()));
         out.sort_by(|a, b| {

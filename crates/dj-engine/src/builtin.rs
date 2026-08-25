@@ -16,6 +16,7 @@ pub const MIDI_ID: &str = "builtin.midi";
 pub enum BuiltinKind {
     AudioOut,
     Midi,
+    LaunchControl,
     Qwerty,
     Choreo,
     Gesture,
@@ -31,6 +32,7 @@ impl BuiltinKind {
         match ext_id {
             AUDIO_OUT_ID => Some(BuiltinKind::AudioOut),
             MIDI_ID => Some(BuiltinKind::Midi),
+            crate::launch_control::LAUNCH_CONTROL_ID => Some(BuiltinKind::LaunchControl),
             crate::qwerty::QWERTY_ID => Some(BuiltinKind::Qwerty),
             crate::choreo::CHOREO_ID => Some(BuiltinKind::Choreo),
             crate::gesture::GESTURE_ID => Some(BuiltinKind::Gesture),
@@ -47,6 +49,7 @@ impl BuiltinKind {
         match self {
             BuiltinKind::AudioOut => AUDIO_OUT_ID,
             BuiltinKind::Midi => MIDI_ID,
+            BuiltinKind::LaunchControl => crate::launch_control::LAUNCH_CONTROL_ID,
             BuiltinKind::Qwerty => crate::qwerty::QWERTY_ID,
             BuiltinKind::Choreo => crate::choreo::CHOREO_ID,
             BuiltinKind::Gesture => crate::gesture::GESTURE_ID,
@@ -62,6 +65,7 @@ impl BuiltinKind {
         match self {
             BuiltinKind::AudioOut => audio_out_manifest(),
             BuiltinKind::Midi => midi_manifest(),
+            BuiltinKind::LaunchControl => crate::launch_control::launch_control_manifest(),
             BuiltinKind::Qwerty => crate::qwerty::qwerty_manifest(),
             BuiltinKind::Choreo => crate::choreo::choreo_manifest(),
             BuiltinKind::Gesture => crate::gesture::gesture_manifest(),

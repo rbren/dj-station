@@ -260,6 +260,32 @@ fails if it's missing.
   `@tauri-apps/api/core` external (dynamic import, absent in tests).
   E2E sidecars carry `hands` fixture specs (`HandsTrace` JSON, synthetic
   — never video); `hands_feed_trace` is the offline/golden path.
+- Launch Control XL module (`builtin.launchcontrol`,
+  `crates/dj-engine/src/launch_control.rs` + `engine/launch_control_api.rs`):
+  one KNOWN controller as a fixed 48-jack set — 8 columns × (3 knobs,
+  fader, 2 buttons), column-major (`c1_a`…`c8_ctrl`, index =
+  `col*6 + row`) so a column's jacks are contiguous. Knobs/faders are
+  unipolar 0..10 V, buttons momentary gates; the device map is the
+  factory-template CC/note numbers and the CHANNEL NIBBLE IS IGNORED (the
+  device changes channel per template, and every template uses the same
+  control numbers). Data path mirrors Hands: raw MIDI -> control-thread
+  `decode`/dedup (`LaunchControlControl`) -> SPSC ring ->
+  `LaunchControlRtModule` (holds last value; no allocations or locks).
+  OWNERSHIP is exclusive and lives in the `active` PARAM (mode-style
+  toggle, per the params-vs-inputs rule — never a wireable input), so it
+  round-trips through the patch: `launchcontrol_set_active` deactivates
+  every other module, a freshly added module claims an UNOWNED surface
+  (`launchcontrol_claim_if_unowned`, so the common single-module case
+  needs no ceremony) and a second one never steals it. TWO feed entry
+  points, deliberately: `launchcontrol_feed` is the DEVICE feed (active
+  modules only) and `launchcontrol_inject` addresses one module directly
+  — the synthetic seam tests, offline renders and the
+  `launchcontrol-fader-button` golden use, so CI never depends on
+  hardware. Presence is a plain control-side flag
+  (`launchcontrol_set_connected`, the panel's indicator light), published
+  by the shell's hot-plug watcher (`app/src-tauri/src/launch_control.rs`:
+  1 s port scan behind `midi-hw`; device messages cross a channel to a
+  forwarder thread so midir's callback never waits on the engine lock).
 - Params vs. inputs (post-M5 refactor): ALL WASM-module controls
   (oscillator `waveform`, ADSR `attack/decay/sustain/release`, playback
   `loop`) are ordinary knob-backed input jacks — wireable, per-patch

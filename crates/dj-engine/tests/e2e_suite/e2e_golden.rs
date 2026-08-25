@@ -182,6 +182,7 @@ fn regen_patches() {
                 decks: vec![],
                 gestures: vec![],
                 hands: vec![],
+                launch_control: vec![],
             },
         );
     }
@@ -227,6 +228,7 @@ fn regen_deck_patches() {
                 }],
                 gestures: vec![],
                 hands: vec![],
+                launch_control: vec![],
             },
         );
     }
@@ -293,6 +295,7 @@ fn regen_deck_patches() {
                 ],
                 gestures: vec![],
                 hands: vec![],
+                launch_control: vec![],
             },
         );
     }
@@ -365,6 +368,7 @@ fn regen_stem_patches() {
                 }],
                 gestures: vec![],
                 hands: vec![],
+                launch_control: vec![],
             },
         );
     }

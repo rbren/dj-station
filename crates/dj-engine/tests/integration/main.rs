@@ -28,6 +28,7 @@ mod envelope;
 mod gesture;
 mod graph_edit;
 mod hands;
+mod launch_control;
 mod live_edit;
 mod macro_store;
 mod macros;

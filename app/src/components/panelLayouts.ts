@@ -85,6 +85,10 @@ const seqIds = (prefix: string, from: number, to: number): string[] => {
   return out;
 };
 
+/** One row of the Launch Control XL surface, left to right: the jack ids
+ *  are column-major (`c1_a` … `c8_ctrl`), the panel shows them by row. */
+const lcRow = (suffix: string): string[] => [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `c${n}_${suffix}`);
+
 type LayoutFactory = (manifest: Manifest) => PanelLayout;
 
 /** Per-module layouts, keyed by manifest id. */
@@ -739,6 +743,20 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     outputGroups: [
       { title: 'audio', outputs: ['audio_l', 'audio_r'] },
       { title: 'clock', outputs: ['clock'] },
+    ],
+  }),
+
+  // The physical surface, top to bottom: three knob rows, the faders,
+  // then the two button rows — eight columns each.
+  'builtin.launchcontrol': () => ({
+    groups: [],
+    outputGroups: [
+      { title: 'send a', outputs: lcRow('a'), columns: 8, break: true },
+      { title: 'send b', outputs: lcRow('b'), columns: 8, break: true },
+      { title: 'pan', outputs: lcRow('pan'), columns: 8, break: true },
+      { title: 'fader', outputs: lcRow('fader'), columns: 8, break: true },
+      { title: 'focus', outputs: lcRow('focus'), columns: 8, break: true },
+      { title: 'control', outputs: lcRow('ctrl'), columns: 8, break: true },
     ],
   }),
 

@@ -87,6 +87,17 @@ pub struct QwertyEventSpec {
     pub down: bool,
 }
 
+/// A raw Launch Control XL surface message into one module at an engine
+/// frame. Hardware never runs in CI, so golden cases drive the module
+/// through the same synthetic `launchcontrol_inject` seam the engine
+/// tests use.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LaunchControlEventSpec {
+    pub instance: String,
+    pub frame: u64,
+    pub data: [u8; 3],
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EventsFile {
     pub seconds: f32,
@@ -94,6 +105,8 @@ pub struct EventsFile {
     pub midi: Vec<MidiEventSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub qwerty: Vec<QwertyEventSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub launch_control: Vec<LaunchControlEventSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracks: Vec<TrackLoadSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -204,6 +217,11 @@ fn render_case(case: &str) -> PathBuf {
     for ev in &events.qwerty {
         engine
             .qwerty_key(&ev.instance, ev.frame, &ev.key, ev.down)
+            .unwrap();
+    }
+    for ev in &events.launch_control {
+        engine
+            .launchcontrol_inject(&ev.instance, ev.frame, ev.data)
             .unwrap();
     }
     for g in &events.gestures {

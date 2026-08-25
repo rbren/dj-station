@@ -34,6 +34,7 @@ mod deck_api;
 mod gesture_api;
 mod hands_api;
 mod hot_reload;
+mod launch_control_api;
 mod lifecycle;
 mod macros_api;
 mod midi;
@@ -348,6 +349,19 @@ pub struct Engine {
     >,
     /// Key gate events toward the RT thread, per QWERTY node.
     qwerty_producers: HashMap<usize, rtrb::Producer<crate::qwerty::QwertyEvent>>,
+    /// Launch Control XL jack values toward the RT thread plus the decode/
+    /// dedup control state, per Launch Control node.
+    launch_control_producers: HashMap<
+        usize,
+        (
+            rtrb::Producer<crate::launch_control::LaunchControlEvent>,
+            crate::launch_control::LaunchControlControl,
+        ),
+    >,
+    /// Whether a Launch Control XL surface is currently attached. Set by the
+    /// app's device watcher (or tests); purely control-side status — module
+    /// ownership of the surface is the `active` param.
+    launch_control_connected: bool,
     /// Compiled-program handoff + playhead per Choreography node.
     choreos: HashMap<usize, crate::choreo::ChoreoControl>,
     /// LED feedback messages coming back from the RT thread, per MIDI node.
@@ -394,6 +408,9 @@ const GESTURE_QUEUE_CAP: usize = 4096;
 const HANDS_QUEUE_CAP: usize = 4096;
 /// Pending key events per QWERTY node (same sizing rationale).
 const QWERTY_QUEUE_CAP: usize = 4096;
+/// Pending control-surface values per Launch Control node (same sizing
+/// rationale; one full sweep of the surface is 48 values).
+const LAUNCH_CONTROL_QUEUE_CAP: usize = 4096;
 /// Pending compiled choreography programs per Choreo node (drained at the
 /// next block; edits are UI-rate).
 const CHOREO_QUEUE_CAP: usize = 64;
@@ -461,6 +478,8 @@ impl Engine {
             gesture_producers: HashMap::new(),
             hands_producers: HashMap::new(),
             qwerty_producers: HashMap::new(),
+            launch_control_producers: HashMap::new(),
+            launch_control_connected: false,
             choreos: HashMap::new(),
             midi_out_consumers: HashMap::new(),
             macros: MacroLibrary::default(),
@@ -665,6 +684,7 @@ impl Engine {
                 BuiltinKind::Midi
                 | BuiltinKind::Choreo
                 | BuiltinKind::Qwerty
+                | BuiltinKind::LaunchControl
                 | BuiltinKind::Gesture
                 | BuiltinKind::Hands
                 | BuiltinKind::Playback
@@ -740,6 +760,7 @@ impl Engine {
         let mut gesture_tx = None;
         let mut hands_plumbing = None;
         let mut qwerty_plumbing = None;
+        let mut launch_control_plumbing = None;
         let mut choreo_ctl = None;
         let mut playback_plumbing = None;
         let mut audio_ctl = None;
@@ -768,6 +789,14 @@ impl Engine {
                 let (tx, rx) = rtrb::RingBuffer::new(QWERTY_QUEUE_CAP);
                 qwerty_plumbing = Some(tx);
                 Box::new(crate::qwerty::QwertyRtModule::new(rx, self.current_frame()))
+            }
+            Some(BuiltinKind::LaunchControl) => {
+                let (tx, rx) = rtrb::RingBuffer::new(LAUNCH_CONTROL_QUEUE_CAP);
+                launch_control_plumbing = Some(tx);
+                Box::new(crate::launch_control::LaunchControlRtModule::new(
+                    rx,
+                    self.current_frame(),
+                ))
             }
             Some(BuiltinKind::Choreo) => {
                 let (tx, rx) = rtrb::RingBuffer::new(CHOREO_QUEUE_CAP);
@@ -944,6 +973,12 @@ impl Engine {
         if let Some(tx) = qwerty_plumbing {
             self.qwerty_producers.insert(idx, tx);
         }
+        if let Some(tx) = launch_control_plumbing {
+            self.launch_control_producers.insert(
+                idx,
+                (tx, crate::launch_control::LaunchControlControl::default()),
+            );
+        }
         if let Some(ctl) = choreo_ctl {
             self.choreos.insert(idx, ctl);
         }
@@ -959,6 +994,9 @@ impl Engine {
         }
         self.node_by_id.insert(instance_id.to_string(), idx);
         self.nodes.insert(idx, info);
+        if BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::LaunchControl) {
+            self.launchcontrol_claim_if_unowned(idx);
+        }
         Ok(())
     }
 
@@ -1026,6 +1064,7 @@ impl Engine {
         self.gesture_producers.remove(&slot);
         self.hands_producers.remove(&slot);
         self.qwerty_producers.remove(&slot);
+        self.launch_control_producers.remove(&slot);
         self.choreos.remove(&slot);
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);

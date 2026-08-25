@@ -26,6 +26,7 @@ const byId = (id: string) => {
 const BUILTIN_IDS = [
   'builtin.audio_out',
   'builtin.midi',
+  'builtin.launchcontrol',
   'builtin.qwerty',
   'builtin.gesture',
   'builtin.hands',
