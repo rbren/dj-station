@@ -7,6 +7,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BEAT_CLIP_TYPE, type BeatClipEntry } from '../beatClip';
+import { StemTags } from './StemTags';
 import { engine, type MacroPreviewNode } from '../engine';
 import { loadJson, saveJson } from '../rackStore';
 import type { KnobState, Manifest, ModuleHandle } from '../types';
@@ -378,6 +379,7 @@ function ClipRow({
     >
       <span className="picker-clip-name">{clip.name}</span>
       <span className="picker-clip-project">{clip.projectName}</span>
+      <StemTags stems={clip.stems} testId={`picker-clip-stems-${clip.projectId}-${clip.clipId}`} />
       <span className="picker-clip-beats">{clip.beats} beats</span>
       <span className="picker-clip-bpm">{clip.bpm > 0 ? `${clip.bpm.toFixed(1)} BPM` : '—'}</span>
     </li>

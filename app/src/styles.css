@@ -2825,15 +2825,35 @@ body {
   padding: 0;
 }
 
+/* WHAT A CLIP IS MADE OF (`StemTags`), wherever one is offered: the
+   picker's Clips tab, the Beat Clip panel, the builder's own list. Quiet
+   by design — these are a property of the row, not a call to action, so
+   they read as one muted chip each rather than four colours. */
+.stem-tags {
+  display: inline-flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.stem-tag {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink-muted);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
 .picker-clip-row {
   align-items: baseline;
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
   display: grid;
-  /* The clip's name and the project it came from belong together; only
-     the two numeric columns are pushed to the right. */
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto;
+  /* The clip's name, the project it came from and what it is made of
+     belong together; only the two numeric columns are pushed right. */
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto auto;
   gap: 4px 14px;
   padding: 7px 10px;
 }

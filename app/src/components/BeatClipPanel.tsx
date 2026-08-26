@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { beatClip as defaultApi, type BeatClipApi, type BeatClipStatus } from '../beatClip';
 import { fixed } from '../format';
+import { StemTags } from './StemTags';
 
 const POLL_MS = 100;
 
@@ -49,6 +50,7 @@ export function BeatClipPanel(props: BeatClipPanelProps) {
       <div className="beat-clip-name" data-testid="beat-clip-name">
         {status?.clip?.name || 'no clip'}
       </div>
+      <StemTags stems={status?.clip?.stems} testId="beat-clip-stems" />
       <div className="beat-clip-row">
         <span data-testid="beat-clip-length">
           {beats} beats · {fixed(status?.bpm, 1)} BPM

@@ -604,6 +604,44 @@ describe('switching a stem off leaves the source where it was', () => {
   });
 });
 
+// A clip is cut from seeds whose parts can be switched off, so two clips
+// from one track can hold nothing in common — a drum loop and an a
+// cappella are the same row until the list says what is in them. The
+// backend reads that off the placements; the list only shows it.
+describe('what a saved clip is made of', () => {
+  const listed = (clips: readonly SavedClip[]) =>
+    clipsMock({
+      sources: vi.fn(async () => ({
+        sources: [seedInfo('s1', 'Live Set A')],
+        clips: [...clips],
+        grid: GRID,
+      })),
+    });
+  const clip = (id: string, name: string, stems?: string[]): SavedClip => ({
+    id,
+    name,
+    rows: 1,
+    columns: 16,
+    placements: [],
+    stems,
+  });
+
+  it('is written on the clip, in the list it is offered from', async () => {
+    await mount(
+      listed([
+        clip('1', 'Rhythm', ['drums', 'bass']),
+        clip('2', 'Whole thing', ['vocals', 'drums', 'bass', 'other']),
+        clip('3', 'Filed before clips said'),
+      ]),
+    );
+    await waitFor(() => expect(screen.getByTestId('beatify-clip-source-clip:1')).toBeTruthy());
+    expect(screen.getByTestId('beatify-clip-stems-clip:1').textContent).toBe('drumsbass');
+    // Everything is one tag, not four; nothing known is no tags at all.
+    expect(screen.getByTestId('beatify-clip-stems-clip:2').textContent).toBe('mix');
+    expect(screen.queryByTestId('beatify-clip-stems-clip:3')).toBeNull();
+  });
+});
+
 // The tempo belongs to the PROJECT, so changing it re-renders every
 // seed — but a clip is a run of BEATS, and a beat is a beat at any
 // tempo. Whatever is half-built on the grid has to survive it.

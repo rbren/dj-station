@@ -18,7 +18,7 @@
 //! `async`: warping a stem is a multi-second job the first time.
 
 use dj_analysis::beatify::{build, store, BeatifyRecord, Grid, WarpMap};
-use dj_analysis::AudioData;
+use dj_analysis::{stem_union, AudioData};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -169,6 +169,48 @@ pub struct SavedClip {
     pub rows: usize,
     pub columns: usize,
     pub placements: Vec<ClipPlacement>,
+    /// Which parts of a track this clip is made of, [`STEM_NAMES`] order
+    /// — what the lists that offer it show as tags. DERIVED from the
+    /// placements every time the file is read, so a clip filed before
+    /// this existed is tagged too, and written back out with it: the
+    /// editor saves what it now knows, and nothing else has to.
+    #[serde(default)]
+    pub stems: Vec<String>,
+}
+
+/// Which stems a clip contains: the parts of the seed each run was cut
+/// from — no parts named being the whole mix — and, for a run taken from
+/// an earlier clip, whatever THAT clip contains.
+fn stems_of_clip(clip: &SavedClip, all: &[SavedClip], depth: usize) -> Vec<String> {
+    let mut selections: Vec<Vec<String>> = Vec::new();
+    for p in &clip.placements {
+        match &p.source {
+            ClipSourceRef::Seed { stems, .. } => selections.push(stems.clone()),
+            ClipSourceRef::Stem { name } => selections.push(vec![name.clone()]),
+            ClipSourceRef::Clip { id } if depth < MAX_DEPTH => {
+                let Some(inner) = all.iter().find(|c| &c.id == id) else {
+                    continue;
+                };
+                let inner = stems_of_clip(inner, all, depth + 1);
+                // Empty from a nested clip means it holds nothing worth
+                // naming — passing it on would read as "the whole mix".
+                if !inner.is_empty() {
+                    selections.push(inner);
+                }
+            }
+            ClipSourceRef::Clip { .. } => {}
+        }
+    }
+    stem_union(&selections)
+}
+
+/// Tag every clip in a list with what it contains. Done on the way out of
+/// the store and on the way back in, so no caller has to remember.
+fn tag_stems(clips: &mut [SavedClip]) {
+    let all = clips.to_vec();
+    for clip in clips.iter_mut() {
+        clip.stems = stems_of_clip(clip, &all, 0);
+    }
 }
 
 /// One seed in the left-hand list: what it is, and which of its parts can
@@ -575,7 +617,10 @@ fn read_clips(state: &AppState, project_id: &str) -> CmdResult<Vec<SavedClip>> {
         return Ok(Vec::new());
     }
     let text = std::fs::read_to_string(&path).map_err(|e| err(format!("reading clips: {e}")))?;
-    serde_json::from_str(&text).map_err(|e| err(format!("reading clips: {e}")))
+    let mut clips: Vec<SavedClip> =
+        serde_json::from_str(&text).map_err(|e| err(format!("reading clips: {e}")))?;
+    tag_stems(&mut clips);
+    Ok(clips)
 }
 
 fn write_clips(state: &AppState, project_id: &str, clips: &[SavedClip]) -> CmdResult<()> {
@@ -607,6 +652,8 @@ pub struct RenderedClip {
     pub audio: AudioData,
     pub bpm: f64,
     pub name: String,
+    /// What it is made of, for the module that ends up playing it.
+    pub stems: Vec<String>,
 }
 
 /// The clips a project has saved. Read-only, and the same file the
@@ -638,6 +685,7 @@ pub fn render_clip(state: &AppState, project_id: &str, clip_id: &str) -> CmdResu
     Ok(RenderedClip {
         audio,
         bpm,
+        stems: clip.stems,
         name: clip.name,
     })
 }
@@ -782,6 +830,7 @@ pub fn beatify_clip_save(
         Some(existing) => *existing = clip,
         None => clips.push(clip),
     }
+    tag_stems(&mut clips);
     write_clips(&state, &project_id, &clips)?;
     Ok(ClipSaved { id, clips })
 }

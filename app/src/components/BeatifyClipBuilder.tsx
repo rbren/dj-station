@@ -520,7 +520,7 @@ export function BeatifyClipBuilder({
   );
 
   const clipEntries = useMemo<ClipListClip[]>(
-    () => saved.map((clip) => ({ id: `clip:${clip.id}`, label: clip.name })),
+    () => saved.map((clip) => ({ id: `clip:${clip.id}`, label: clip.name, stems: clip.stems })),
     [saved],
   );
 

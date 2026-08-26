@@ -1087,6 +1087,22 @@ beatify::build`.
   project is gone leaves the module silent and logs; it never fails the
   load. E2E cases instead carry rendered audio in the `events.json`
   sidecar (`beat_clip_load_file`), like deck tracks.
+- A CLIP SAYS WHAT IT IS MADE OF. Every surface that offers a clip shows
+  which parts of a track it holds, through the one `StemTags` component
+  (`app/src/components/StemTags.tsx`, `.stem-tag` in `styles.css`): the
+  picker's Clips tab, the Beat Clip panel, and the builder's own list. The
+  answer is DERIVED, never authored — `beatify_clip::stems_of_clip` reads
+  it off the placements (a run naming no stems is the whole mix; a run
+  taken from an earlier clip contributes what that clip holds, to
+  `MAX_DEPTH`) and folds them with `dj_analysis::stem_union`, which is
+  where the "empty means all four" rule is pinned. `read_clips` tags every
+  clip on the way out of the store and `beatify_clip_save` on the way back
+  in, so clips filed before this are tagged the moment they are read and
+  the field lands in `clips.json` from the next save without a migration.
+  It rides to the rack on `SavedClip.stems` → `BeatClipEntry.stems` →
+  `BeatClipRef.stems` (patch, `#[serde(default)]`, display-only like
+  `name`, re-read on `hydrate`). In the UI all four parts are ONE `mix`
+  chip rather than four, and an empty list draws nothing at all.
 - The module picker has TWO TABS, not one gallery: Modules (the panel
   gallery, with its category pills) and Clips (`PickerTab` in
   `ModulePicker.tsx`), which lists `beat_clip_list` rather than module

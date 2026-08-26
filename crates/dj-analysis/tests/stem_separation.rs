@@ -6,8 +6,8 @@
 //!   not invoke the separator and are near-instant).
 
 use dj_analysis::{
-    ensure_stems, mix_stems, stem_paths, stems_cached, AudioData, BandSeparator, StemSeparator,
-    Stems,
+    ensure_stems, mix_stems, stem_paths, stem_union, stems_cached, AudioData, BandSeparator,
+    StemSeparator, Stems,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1107,4 +1107,30 @@ exit 1
     // max_attempts is 2 here: it stops there rather than hammering.
     std::thread::sleep(std::time::Duration::from_millis(400));
     assert_eq!(model_runs(&runs), 2, "retried past max_attempts");
+}
+
+/// What a clip made of these parts CONTAINS. Empty is the whole mix,
+/// which is how every stem-aware surface here reads "no stems named".
+#[test]
+fn stem_union_reads_empty_as_the_whole_mix() {
+    let v = |names: &[&str]| names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    assert_eq!(stem_union(&[]), Vec::<String>::new(), "nothing is nothing");
+    assert_eq!(
+        stem_union(&[v(&[])]),
+        v(&["vocals", "drums", "bass", "other"])
+    );
+    // Named parts come back in STEM_NAMES order, however they went in,
+    // and once each.
+    assert_eq!(
+        stem_union(&[v(&["bass"]), v(&["vocals"]), v(&["bass"])]),
+        v(&["vocals", "bass"])
+    );
+    // One untouched run brings everything with it.
+    assert_eq!(
+        stem_union(&[v(&["drums"]), v(&[])]),
+        v(&["vocals", "drums", "bass", "other"])
+    );
+    // A name from no known stem is not a tag.
+    assert_eq!(stem_union(&[v(&["kazoo", "drums"])]), v(&["drums"]));
 }

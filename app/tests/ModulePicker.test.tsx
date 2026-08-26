@@ -398,6 +398,7 @@ describe('ModulePicker clips tab', () => {
       name: 'intro loop',
       bpm: 128,
       beats: 8,
+      stems: ['vocals', 'drums', 'bass', 'other'],
     },
     {
       projectId: 'p2',
@@ -406,6 +407,7 @@ describe('ModulePicker clips tab', () => {
       name: 'chorus stack',
       bpm: 92.5,
       beats: 4,
+      stems: ['drums', 'bass'],
     },
   ];
 
@@ -451,6 +453,15 @@ describe('ModulePicker clips tab', () => {
     expect(screen.queryByTestId('picker-categories')).toBeNull();
     // The tab replaces the module gallery rather than adding to it.
     expect(screen.queryByTestId('module-preview-com.dj.oscillator')).toBeNull();
+  });
+
+  it('says what each clip is made of, so a drum loop is not mistaken for a mix', () => {
+    renderClips();
+    fireEvent.click(screen.getByTestId('picker-tab-clips'));
+    // Two clips from two projects: one cut from whole mixes, one that is
+    // only the rhythm section. The row says which without opening it.
+    expect(screen.getByTestId('picker-clip-stems-p1-1').textContent).toBe('mix');
+    expect(screen.getByTestId('picker-clip-stems-p2-3').textContent).toBe('drumsbass');
   });
 
   it('reopens on the tab that was used last', () => {

@@ -27,6 +27,7 @@ const CLIP: BeatClipEntry = {
   name: 'chorus stack',
   bpm: 92.5,
   beats: 4,
+  stems: ['drums', 'bass'],
 };
 
 const state = { nodes: [] as unknown[] };

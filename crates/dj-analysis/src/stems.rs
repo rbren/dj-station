@@ -33,6 +33,34 @@ use crate::stft::Stft;
 pub const STEM_NAMES: [&str; 4] = ["vocals", "drums", "bass", "other"];
 pub const N_STEMS: usize = 4;
 
+/// What a pile of stem selections adds up to, in [`STEM_NAMES`] order.
+///
+/// An EMPTY selection is the whole mix, the way every stem-aware surface
+/// in this app reads it — so one run of the untouched render brings all
+/// four in, and a clip made only of "drums off" runs says so by naming
+/// the three that are left. Unknown names are ignored rather than shown:
+/// this is a reading of what a clip CONTAINS, not a passthrough.
+pub fn stem_union(selections: &[Vec<String>]) -> Vec<String> {
+    let mut on = [false; N_STEMS];
+    for selection in selections {
+        if selection.is_empty() {
+            on = [true; N_STEMS];
+            continue;
+        }
+        for name in selection {
+            if let Some(i) = STEM_NAMES.iter().position(|s| s == name) {
+                on[i] = true;
+            }
+        }
+    }
+    STEM_NAMES
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| on[*i])
+        .map(|(_, s)| s.to_string())
+        .collect()
+}
+
 /// Separated stems, same sample rate / length as the input, ordered per
 /// [`STEM_NAMES`].
 pub struct Stems(pub [AudioData; N_STEMS]);

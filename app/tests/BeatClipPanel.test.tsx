@@ -8,7 +8,7 @@ import type { BeatClipApi, BeatClipStatus } from '../src/beatClip';
 
 function makeStatus(over: Partial<BeatClipStatus> = {}): BeatClipStatus {
   return {
-    clip: { project: 'p1', clip: '2', name: 'intro loop' },
+    clip: { project: 'p1', clip: '2', name: 'intro loop', stems: ['drums', 'bass'] },
     duration_secs: 3.75,
     position_secs: 0.94,
     beats: 8,
@@ -37,6 +37,22 @@ describe('BeatClipPanel', () => {
     );
     expect(screen.getByTestId('beat-clip-length').textContent).toBe('8 beats · 128.0 BPM');
     expect(screen.getByTestId('beat-clip-clock').textContent).toBe('clock 132.5 BPM');
+  });
+
+  it('says which parts of a track the clip it plays is made of', async () => {
+    const api = makeApi(makeStatus());
+    render(<BeatClipPanel instanceId="beatclip1" api={api} pollMs={100000} />);
+    await waitFor(() => expect(screen.getByTestId('beat-clip-stems')).toBeTruthy());
+    expect(screen.getByTestId('beat-clip-stems').textContent).toBe('drumsbass');
+  });
+
+  it('shows no tags at all for a clip bound before clips said', async () => {
+    const api = makeApi(makeStatus({ clip: { project: 'p1', clip: '2', name: 'intro loop' } }));
+    render(<BeatClipPanel instanceId="beatclip1" api={api} pollMs={100000} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('beat-clip-name').textContent).toBe('intro loop'),
+    );
+    expect(screen.queryByTestId('beat-clip-stems')).toBeNull();
   });
 
   it('lights the beat the engine says it is playing', async () => {

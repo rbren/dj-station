@@ -72,6 +72,11 @@ pub struct BeatClipRef {
     /// The clip's name when it was bound — display only.
     #[serde(default)]
     pub name: String,
+    /// Which parts of a track the clip is made of ("drums", "bass", …),
+    /// as it was when bound — display only, like the name. Empty for a
+    /// patch saved before clips said, and re-filled on the next load.
+    #[serde(default)]
+    pub stems: Vec<String>,
 }
 
 pub fn beat_clip_manifest() -> Manifest {

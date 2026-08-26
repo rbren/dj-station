@@ -19,6 +19,9 @@ export interface BeatClipEntry {
   bpm: number;
   /** Clip length in beats (trailing silence included). */
   beats: number;
+  /** Which parts of a track it is made of, `STEM_NAMES` order — the tags
+   *  the row shows. All four means it was cut from whole mixes. */
+  stems: string[];
 }
 
 /** Which clip a module is bound to. The patch persists this, never the
@@ -27,6 +30,9 @@ export interface BeatClipRef {
   project: string;
   clip: string;
   name: string;
+  /** What the clip held when it was bound — display only, and absent in
+   *  a patch saved before clips said. Refreshed on every load. */
+  stems?: string[];
 }
 
 export interface BeatClipStatus {

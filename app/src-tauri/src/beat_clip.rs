@@ -33,6 +33,9 @@ pub struct BeatClipEntry {
     pub bpm: f64,
     /// Clip length in beats (trailing silence included).
     pub beats: usize,
+    /// Which parts of a track it is made of, `STEM_NAMES` order — all
+    /// four for a clip cut from whole mixes, and empty for an empty clip.
+    pub stems: Vec<String>,
 }
 
 /// Every clip in every Beatify project, newest project first (the order
@@ -54,6 +57,7 @@ pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
                 name: clip.name,
                 bpm,
                 beats: clip.columns.max(1),
+                stems: clip.stems,
             });
         }
     }
@@ -78,6 +82,7 @@ pub fn beat_clip_load(
         project: project_id,
         clip: clip_id,
         name: rendered.name.clone(),
+        stems: rendered.stems.clone(),
     };
     let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
     engine
@@ -135,6 +140,14 @@ pub fn hydrate(state: &AppState, engine: &mut Engine) {
             Ok(rendered) => {
                 let audio = track_data(&rendered);
                 let bpm = rendered.bpm;
+                // Re-read the display fields off the clip as it now
+                // stands: a patch saved before clips said what they hold
+                // carries no stems, and re-cutting one can change them.
+                let clip = BeatClipRef {
+                    name: rendered.name.clone(),
+                    stems: rendered.stems.clone(),
+                    ..clip
+                };
                 if let Err(e) = engine.beat_clip_load(&instance, Some(clip), audio, bpm) {
                     eprintln!("[dj-audio] loading a clip into {instance}: {e:#}");
                 }

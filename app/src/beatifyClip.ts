@@ -144,7 +144,8 @@ function holding(p: Placement, audio: number): Placement[] {
   if (audio <= BEAT_EPS) return [];
   const held = Math.min(audio, p.beats);
   if (held >= p.beats - BEAT_EPS) {
-    const { audioBeats: _dropped, ...whole } = p;
+    const whole = { ...p };
+    delete whole.audioBeats;
     return [whole];
   }
   return [{ ...p, audioBeats: held }];
@@ -463,6 +464,11 @@ export interface SavedClip {
   rows: number;
   columns: number;
   placements: WirePlacement[];
+  /** Which parts of a track it is made of, `STEM_NAMES` order. The
+   *  backend reads this off the placements every time it opens the file,
+   *  so it is never stale and never absent for a clip that has runs in
+   *  it — the frontend only ever displays it. */
+  stems?: string[];
 }
 
 /** A placement on the wire: the same fields, with the source expanded

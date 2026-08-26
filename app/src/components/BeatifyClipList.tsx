@@ -21,6 +21,7 @@
 
 import { speedLabel } from '../beatify';
 import type { SourceId } from '../beatifyClip';
+import { StemTags } from './StemTags';
 
 export interface ClipListStem {
   name: string;
@@ -46,6 +47,9 @@ export interface ClipListSeed {
 export interface ClipListClip {
   id: SourceId;
   label: string;
+  /** Which parts of a track it holds — the backend reads this off the
+   *  clip's placements, the list only shows it. */
+  stems?: string[];
 }
 
 export interface BeatifyClipListProps {
@@ -175,6 +179,7 @@ export function BeatifyClipList({
             >
               <span className="beatify-clip-source-label">{clip.label}</span>
               <span className="beatify-clip-source-kind">clip</span>
+              <StemTags stems={clip.stems} testId={`beatify-clip-stems-${clip.id}`} />
             </button>
             <button
               className="beatify-clip-source-edit"
