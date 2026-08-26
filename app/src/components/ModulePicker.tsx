@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BEAT_CLIP_TYPE, type BeatClipEntry } from '../beatClip';
 import { engine, type MacroPreviewNode } from '../engine';
+import { loadJson, saveJson } from '../rackStore';
 import type { KnobState, Manifest, ModuleHandle } from '../types';
 import { ContextMenu } from './ContextMenu';
 import { previewUI } from './customUIs';
@@ -34,12 +35,22 @@ export const CATEGORY_ORDER = [
 
 const UNCATEGORIZED = 'Other';
 
-/** The Clips tab: not a module category but a tab beside them, because
- *  the entries in it are CLIPS rather than module types — each one adds a
- *  Beat Clip module already loaded with that clip. The module itself is
- *  therefore hidden from the ordinary gallery: an unbound one plays
- *  nothing, and this tab is where its clips live. */
-export const CLIPS_TAB = 'Clips';
+/** The picker's two halves. Clips are a TAB, not a module category: what
+ *  they hold are clips rather than module types (each adds a Beat Clip
+ *  module already loaded with that clip), and each half has its own way of
+ *  showing things — a gallery of panels against a list of clips. The Beat
+ *  Clip module type is therefore hidden from the gallery: an unbound one
+ *  plays nothing, and its clips live here. */
+export type PickerTab = 'modules' | 'clips';
+
+/** Which half was open last: the picker reopens on it, because a session
+ *  spent building beats is all clips and one spent patching is all
+ *  modules. */
+export const PICKER_TAB_KEY = 'dj-picker-tab';
+
+function loadTab(): PickerTab {
+  return loadJson<PickerTab>(PICKER_TAB_KEY, 'modules') === 'clips' ? 'clips' : 'modules';
+}
 
 /** Clips whose name or project matches every term of `query`. */
 export function filterClips(clips: BeatClipEntry[], query: string): BeatClipEntry[] {
@@ -339,30 +350,37 @@ interface PickerEntryProps {
   onMacroMenu?(m: Manifest, x: number, y: number): void;
 }
 
-/** One clip in the Clips tab: what it is, where it came from and how long
- *  it runs. A clip has no panel to preview — it is material, not a module
- *  type — so the entry says what a card can say. */
-function ClipEntry({ clip, onAdd }: { clip: BeatClipEntry; onAdd(clip: BeatClipEntry): void }) {
+/** One clip in the Clips tab: a LIST row, not a tile. A clip has no panel
+ *  to preview — it is material, not a module type — so a row of name,
+ *  the Beatify project it was cut in, and its length says everything a
+ *  card could, and keeps the list scannable while you type at it. */
+function ClipRow({
+  clip,
+  active,
+  onHover,
+  onAdd,
+}: {
+  clip: BeatClipEntry;
+  /** The row Enter would choose (keyboard cursor), highlighted. */
+  active: boolean;
+  onHover(): void;
+  onAdd(clip: BeatClipEntry): void;
+}) {
   return (
-    <div
-      className="picker-entry picker-clip"
+    <li
+      className={`picker-clip-row${active ? ' active' : ''}`}
       data-testid={`picker-clip-${clip.projectId}-${clip.clipId}`}
-      role="button"
-      tabIndex={0}
+      data-active={active ? 'true' : undefined}
+      role="option"
+      aria-selected={active}
+      onMouseEnter={onHover}
       onClick={() => onAdd(clip)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onAdd(clip);
-      }}
     >
-      <div className="picker-preview picker-clip-preview">
-        <span className="picker-clip-beats">{clip.beats} beats</span>
-        <span className="picker-clip-bpm">{clip.bpm > 0 ? `${clip.bpm.toFixed(1)} BPM` : '—'}</span>
-      </div>
-      <div className="picker-entry-caption">
-        <span className="picker-entry-name">{clip.name}</span>
-        <span className="picker-entry-io">{clip.projectName}</span>
-      </div>
-    </div>
+      <span className="picker-clip-name">{clip.name}</span>
+      <span className="picker-clip-project">{clip.projectName}</span>
+      <span className="picker-clip-beats">{clip.beats} beats</span>
+      <span className="picker-clip-bpm">{clip.bpm > 0 ? `${clip.bpm.toFixed(1)} BPM` : '—'}</span>
+    </li>
   );
 }
 
@@ -386,8 +404,13 @@ export function ModulePicker({
   onDeleteMacro?(macroId: string): Promise<void> | void;
 }) {
   const [query, setQuery] = useState('');
+  const [tab, setTab] = useState<PickerTab>(loadTab);
   const [category, setCategory] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Keyboard cursor in the clips list: the row Enter drops on the rack.
+  const [cursor, setCursor] = useState({ query: '', index: 0 });
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   // Right-clicked macro entry: menu position + which dialog is up.
   const [macroMenu, setMacroMenu] = useState<null | { m: Manifest; x: number; y: number }>(null);
   const [renaming, setRenaming] = useState<null | { m: Manifest; name: string }>(null);
@@ -399,16 +422,26 @@ export function ModulePicker({
   const moduleTypes = useMemo(() => modules.filter((m) => m.id !== BEAT_CLIP_TYPE), [modules]);
   const allGroups = useMemo(() => groupByCategory(moduleTypes), [moduleTypes]);
   const categories = allGroups.map(([c]) => c);
-  const clipsTab = category === CLIPS_TAB;
+  const clipsTab = tab === 'clips';
   const shown = useMemo(() => {
     const matched = filterModules(moduleTypes, query);
-    return groupByCategory(
-      category && category !== CLIPS_TAB
-        ? matched.filter((m) => categoryOf(m) === category)
-        : matched,
-    );
+    return groupByCategory(category ? matched.filter((m) => categoryOf(m) === category) : matched);
   }, [moduleTypes, query, category]);
   const shownClips = useMemo(() => filterClips(clips ?? [], query), [clips, query]);
+  // The cursor is remembered PER QUERY, so typing re-aims it at the best
+  // match (the first row) by derivation rather than by an effect.
+  const activeIndex = cursor.query === query ? Math.min(cursor.index, shownClips.length - 1) : 0;
+  useEffect(() => {
+    // jsdom has no scrollIntoView; the optional call keeps tests honest.
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex]);
+
+  const openTab = (next: PickerTab) => {
+    setTab(next);
+    saveJson(PICKER_TAB_KEY, next);
+    // Both tabs are searched from the same box: keep typing.
+    searchRef.current?.focus();
+  };
 
   const dialogUp = macroMenu !== null || renaming !== null || deleting !== null;
   useEffect(() => {
@@ -423,13 +456,28 @@ export function ModulePicker({
         } else {
           onClose();
         }
+        return;
+      }
+      // The clips list is driven from the search box: arrows walk it,
+      // Enter drops the row under the cursor on the rack.
+      if (!clipsTab || dialogUp || shownClips.length === 0) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        // Clamped, not wrapping: the ends of the list stay put under a
+        // held arrow key.
+        const next = Math.max(0, Math.min(activeIndex + step, shownClips.length - 1));
+        setCursor({ query, index: next });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        onAddClip?.(shownClips[activeIndex]);
       }
     };
     // Capture phase so the app's global Escape handler (clear selection /
     // pending wire) doesn't also fire while the picker is up.
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, dialogUp]);
+  }, [onClose, dialogUp, clipsTab, shownClips, activeIndex, query, onAddClip]);
 
   return (
     <div
@@ -439,13 +487,14 @@ export function ModulePicker({
     >
       <div className="module-picker" onClick={(e) => e.stopPropagation()}>
         <header className="module-picker-header">
-          <h2>Add Module</h2>
+          <h2>{clipsTab ? 'Add Clip' : 'Add Module'}</h2>
           <input
+            ref={searchRef}
             className="library-search"
             data-testid="library-search"
             type="search"
-            placeholder="Search modules…"
-            aria-label="Search modules"
+            placeholder={clipsTab ? 'Search clips…' : 'Search modules…'}
+            aria-label={clipsTab ? 'Search clips' : 'Search modules'}
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -458,53 +507,73 @@ export function ModulePicker({
             ✕
           </button>
         </header>
-        <div className="picker-categories">
+        <div className="picker-tabs" role="tablist">
           <button
-            className={`picker-category${category === null ? ' active' : ''}`}
-            data-testid="picker-category-all"
-            onClick={() => setCategory(null)}
+            className={`picker-tab${clipsTab ? '' : ' active'}`}
+            data-testid="picker-tab-modules"
+            role="tab"
+            aria-selected={!clipsTab}
+            onClick={() => openTab('modules')}
           >
-            All
+            Modules
           </button>
-          {categories.map((c) => (
-            <button
-              key={c}
-              className={`picker-category${category === c ? ' active' : ''}`}
-              data-testid={`picker-category-${c}`}
-              onClick={() => setCategory((prev) => (prev === c ? null : c))}
-            >
-              {c}
-            </button>
-          ))}
           <button
-            className={`picker-category${clipsTab ? ' active' : ''}`}
-            data-testid={`picker-category-${CLIPS_TAB}`}
-            onClick={() => setCategory((prev) => (prev === CLIPS_TAB ? null : CLIPS_TAB))}
+            className={`picker-tab${clipsTab ? ' active' : ''}`}
+            data-testid="picker-tab-clips"
+            role="tab"
+            aria-selected={clipsTab}
+            onClick={() => openTab('clips')}
           >
-            {CLIPS_TAB}
+            Clips
           </button>
         </div>
+        {!clipsTab && (
+          <div className="picker-categories">
+            <button
+              className={`picker-category${category === null ? ' active' : ''}`}
+              data-testid="picker-category-all"
+              onClick={() => setCategory(null)}
+            >
+              All
+            </button>
+            {categories.map((c) => (
+              <button
+                key={c}
+                className={`picker-category${category === c ? ' active' : ''}`}
+                data-testid={`picker-category-${c}`}
+                onClick={() => setCategory((prev) => (prev === c ? null : c))}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="picker-body">
-          {clipsTab && (
-            <section className="picker-group">
-              <h3 className="picker-group-title">{CLIPS_TAB}</h3>
-              <div className="picker-grid">
-                {shownClips.map((c) => (
-                  <ClipEntry
-                    key={`${c.projectId}/${c.clipId}`}
-                    clip={c}
-                    onAdd={(clip) => onAddClip?.(clip)}
-                  />
-                ))}
-              </div>
-              {shownClips.length === 0 && (
-                <p className="library-empty" data-testid="picker-no-clips">
-                  {(clips ?? []).length === 0
-                    ? 'no clips yet — build one in the Beatify tab'
-                    : `no clips match “${query}”`}
-                </p>
-              )}
-            </section>
+          {clipsTab && shownClips.length > 0 && (
+            <ul
+              ref={listRef}
+              className="picker-clip-list"
+              data-testid="picker-clip-list"
+              role="listbox"
+              aria-label="Clips"
+            >
+              {shownClips.map((c, i) => (
+                <ClipRow
+                  key={`${c.projectId}/${c.clipId}`}
+                  clip={c}
+                  active={i === activeIndex}
+                  onHover={() => setCursor({ query, index: i })}
+                  onAdd={(clip) => onAddClip?.(clip)}
+                />
+              ))}
+            </ul>
+          )}
+          {clipsTab && shownClips.length === 0 && (
+            <p className="library-empty" data-testid="picker-no-clips">
+              {(clips ?? []).length === 0
+                ? 'no clips yet — build one in the Beatify tab'
+                : `no clips match “${query}”`}
+            </p>
           )}
           {!clipsTab &&
             shown.map(([cat, entries]) => (

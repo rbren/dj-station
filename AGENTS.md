@@ -1043,10 +1043,17 @@ beatify::build`.
   project is gone leaves the module silent and logs; it never fails the
   load. E2E cases instead carry rendered audio in the `events.json`
   sidecar (`beat_clip_load_file`), like deck tracks.
-- Clips are imported from the module picker's CLIPS TAB (`CLIPS_TAB` in
+- The module picker has TWO TABS, not one gallery: Modules (the panel
+  gallery, with its category pills) and Clips (`PickerTab` in
   `ModulePicker.tsx`), which lists `beat_clip_list` rather than module
   types; the `builtin.beat_clip` type itself is filtered OUT of the module
-  gallery, since an unbound one plays nothing. Picking one adds the module
+  gallery, since an unbound one plays nothing. Which tab was last open
+  persists in `localStorage` under `PICKER_TAB_KEY`, so the picker reopens
+  where you left it. The Clips tab is a LIST (clip name + Beatify project
+  + length/tempo), driven entirely from the always-focused search box:
+  the first match is selected as you type, ↑/↓ walk the rows (clamped at
+  the ends), Enter drops the selected clip on the rack — so cmd+M, type,
+  Enter is the whole gesture. Picking one adds the module
   and calls `beat_clip_load` (undoable under `EditKey::Track`, `async`
   because assembling decodes audio — assemble BEFORE taking the engine
   lock). That command also NAMES the module after the clip ("chorus stack",

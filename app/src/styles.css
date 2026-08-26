@@ -1607,6 +1607,35 @@ body {
   color: #e6e6e6;
 }
 
+/* Modules | Clips — the picker's two halves, above the category pills. */
+.picker-tabs {
+  display: flex;
+  gap: 18px;
+  padding: 0 16px;
+  border-bottom: 1px solid #2a2e35;
+}
+
+.picker-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #8a93a2;
+  cursor: pointer;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  padding: 8px 2px;
+  text-transform: uppercase;
+}
+
+.picker-tab:hover {
+  color: #e6e6e6;
+}
+
+.picker-tab.active {
+  border-bottom-color: #62d0ff;
+  color: #62d0ff;
+}
+
 .picker-categories {
   display: flex;
   flex-wrap: wrap;
@@ -2213,24 +2242,62 @@ body {
   background: #4fd6c8;
 }
 
-/* A clip has no panel to preview: the card says what it is instead. */
-.picker-clip-preview {
+/* A clip has no panel to preview: the Clips tab lists rows instead of
+   rendering tiles, so a long shelf of clips stays scannable. */
+.picker-clip-list {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: #9aa7b5;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.picker-clip-row {
+  align-items: baseline;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  gap: 12px;
+  padding: 7px 10px;
+}
+
+.picker-clip-row.active {
+  background: #1d2026;
+  border-color: #62d0ff;
+}
+
+.picker-clip-name {
+  color: #e6e6e6;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-clip-project {
+  color: #8a93a2;
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .picker-clip-beats {
-  font-size: 1.4rem;
   color: #4fd6c8;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .picker-clip-bpm {
-  font-size: 0.8rem;
+  color: #9aa7b5;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
+  min-width: 5.5em;
+  text-align: right;
 }
 
 /* ------------------------------------------------------------------ */

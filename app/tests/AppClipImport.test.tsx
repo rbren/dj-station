@@ -105,7 +105,7 @@ describe('importing a clip from the picker', () => {
 
     fireEvent.keyDown(window, { key: 'm', metaKey: true });
     await waitFor(() => expect(beatClipMock.list).toHaveBeenCalled());
-    fireEvent.click(screen.getByTestId('picker-category-Clips'));
+    fireEvent.click(screen.getByTestId('picker-tab-clips'));
     fireEvent.click(await screen.findByTestId('picker-clip-p2-3'));
 
     await waitFor(() => expect(beatClipMock.load).toHaveBeenCalledWith('beatclip1', 'p2', '3'));
