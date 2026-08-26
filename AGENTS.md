@@ -1187,6 +1187,19 @@ beatify::build`.
   started the loop again a moment after the button said "paused" —
   `invalidate` had the same shape, and a seek past the loop end jumped
   the user back to its head instead of where they clicked.
+- A ⌘-FREED CUT KEEPS ITS FRACTION. The clip's grid is whole beats and
+  stays whole, but a selection freed from the grid is not: the run
+  (`runOfSelection`) occupies every column its audio TOUCHES — `ceil`,
+  never `round` — and records how much of that is audio in
+  `Placement.audioBeats`; the rest of the last column is SILENCE, drawn
+  as a dimmed tail on the block. Absent `audioBeats` means audio all the
+  way across, so every grid-aligned run and every clip saved before this
+  is unchanged on disk (`#[serde(default, skip_serializing_if)]` on the
+  Rust `audio_beats`, and `build::span` takes fractional `take_beats`).
+  Carving one (a drop over it, a copied range) clamps the audio each
+  piece still has, and a piece left holding none is dropped rather than
+  kept as an invisible silent block. Rounding the length was throwing
+  away the very part of the take the user went off the grid to catch.
 - NO STOP BUTTON ON BEATIFY. Pause keeps the playhead and Play carries on
   from it, which leaves Stop as "pause, and also lose your place" —
   `AudioTimeline`'s `onStop` is optional and Beatify's three surfaces

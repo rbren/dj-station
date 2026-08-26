@@ -10,6 +10,7 @@ import {
   clipSeconds,
   copyRange,
   drawnColumns,
+  audioBeats,
   emptyDraft,
   freshClipName,
   isSaved,
@@ -22,10 +23,13 @@ import {
   removePlacement,
   rowPlacements,
   setColumns,
+  runOfSelection,
   seedMix,
   seedSourceId,
   seedOfSourceId,
   stemsOfSourceId,
+  toWire,
+  fromWire,
   usedColumns,
 } from '../src/beatifyClip';
 import type { BeatRun, ClipDraft } from '../src/beatifyClip';
@@ -262,6 +266,77 @@ describe('copying a chunk of the grid', () => {
     const pasted = pasteFragment(draft, frag, 2, 4);
     expect(pasted.rows).toBe(4);
     expect(rowPlacements(pasted, 3).map((p) => [p.col, p.sourceBeat])).toEqual([[4, 4]]);
+  });
+});
+
+// A ⌘-freed selection is not a whole number of beats (TV-14a) — that is
+// what ⌘ is FOR: catching a pickup, or a tail that runs a quarter beat
+// long. The clip's grid is whole beats and stays whole, so the run takes
+// every column its audio touches and holds exactly the audio that was
+// selected; the rest of the last column is silence. Rounding the length
+// threw away the very part of the take the user went off the grid to
+// catch.
+describe('a run of fractional beats', () => {
+  const placed = () => placeRun(emptyDraft(), runOfSelection(SEED, 3.75, 6.25), 0, 0);
+
+  it('takes every column its audio touches, and no audio it was not given', () => {
+    expect(runOfSelection(SEED, 3.75, 6.25)).toEqual({
+      source: SEED,
+      sourceBeat: 3.75,
+      beats: 7,
+      audioBeats: 6.25,
+    });
+    // Whole beats are what they always were: no fraction, nothing extra
+    // written down, and no silent column bolted on the end.
+    expect(runOfSelection(SEED, 4, 6)).toEqual({ source: SEED, sourceBeat: 4, beats: 6 });
+    // A selection is never nothing.
+    expect(runOfSelection(SEED, 0, 0.1).beats).toBe(1);
+  });
+
+  it('says how much of a placement is audio', () => {
+    const p = placed().placements[0];
+    expect(audioBeats(p)).toBe(6.25);
+    // Absent means audio all the way across — which is what every clip
+    // saved before this could be written down says.
+    expect(audioBeats({ ...p, audioBeats: undefined })).toBe(7);
+  });
+
+  it('keeps the audio each piece still has when a drop carves it', () => {
+    // A two-beat run dropped over the middle leaves a whole three-beat
+    // front and a back holding what is left of the audio.
+    const after = placeRun(placed(), run(2, 0, seedSourceId('s2')), 0, 3);
+    const runs = after.placements.filter((p) => p.source === SEED).sort((a, b) => a.col - b.col);
+    expect(runs.map((p) => [p.col, p.beats, p.audioBeats])).toEqual([
+      [0, 3, undefined],
+      [5, 2, 1.25],
+    ]);
+    expect(runs[1].sourceBeat).toBe(3.75 + 5);
+  });
+
+  it('copies the audio the swept cells actually cover', () => {
+    const draft = placed();
+    expect(copyRange(draft, { row0: 0, col0: 0, row1: 0, col1: 7 }).placements[0].audioBeats).toBe(
+      6.25,
+    );
+    // Only the tail: a quarter beat of audio, the rest silence.
+    expect(copyRange(draft, { row0: 0, col0: 6, row1: 0, col1: 7 }).placements[0]).toMatchObject({
+      col: 0,
+      beats: 1,
+      audioBeats: 0.25,
+    });
+    // Only the front: whole beats again, so nothing extra is written.
+    expect(
+      copyRange(draft, { row0: 0, col0: 0, row1: 0, col1: 2 }).placements[0].audioBeats,
+    ).toBeUndefined();
+  });
+
+  it('crosses the wire with the audio it holds', () => {
+    const wire = toWire(placed());
+    expect(wire.placements[0]).toMatchObject({ beats: 7, sourceBeat: 3.75, audioBeats: 6.25 });
+    expect(fromWire({ ...wire, id: '1' }).placements[0]).toMatchObject({
+      beats: 7,
+      audioBeats: 6.25,
+    });
   });
 });
 

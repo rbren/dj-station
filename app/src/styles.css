@@ -5218,6 +5218,20 @@ body {
   box-sizing: border-box;
 }
 
+/* The silent end of a run cut off the grid: the block keeps its colour
+   (it is one run), but the part that holds no audio is dimmed back
+   towards the grid it sits on, so a fractional cut is visible. */
+.beatify-clip-block-rest {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--surface);
+  opacity: 0.55;
+  border-left: 1px dashed var(--canvas);
+  pointer-events: none;
+}
+
 /* Two runs that abut are still two runs: the join is drawn. */
 .beatify-clip-block.seam {
   border-left: 2px solid var(--canvas);

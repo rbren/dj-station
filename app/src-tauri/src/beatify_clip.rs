@@ -106,6 +106,21 @@ pub struct ClipPlacement {
     /// a ⌘-freed selection can cut into a beat. Whole beats (every clip
     /// saved before that existed) read back unchanged.
     pub source_beat: f64,
+    /// How much AUDIO the run holds, in beats — fractional, never more
+    /// than `beats`, and absent when it holds audio all the way across.
+    /// A ⌘-freed selection is not a whole number of beats and the clip's
+    /// grid is: the run covers every column its audio touches and the
+    /// rest of the last one is SILENCE, rather than the take being
+    /// rounded to the nearest beat behind the user's back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_beats: Option<f64>,
+}
+
+impl ClipPlacement {
+    /// Beats of audio this run lays down.
+    fn take_beats(&self) -> f64 {
+        self.audio_beats.unwrap_or(self.beats as f64).clamp(0.0, self.beats as f64)
+    }
 }
 
 /// A clip, saved or still being dragged around.
@@ -484,7 +499,8 @@ impl<'a> Resolver<'a> {
             .map(|(audio, p)| {
                 // Beat times are the grid's, whichever source this is:
                 // that is what beatifying bought.
-                let (from_secs, at_secs, secs) = build::span(&grid, p.source_beat, p.col, p.beats);
+                let (from_secs, at_secs, secs) =
+                    build::span(&grid, p.source_beat, p.col, p.take_beats());
                 build::Lay {
                     audio: audio.as_ref(),
                     from_secs,

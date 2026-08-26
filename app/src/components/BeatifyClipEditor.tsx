@@ -14,6 +14,7 @@ import { useCallback, type ReactNode } from 'react';
 import { beatCount } from '../beatify';
 import {
   abutsLeft,
+  audioBeats,
   drawnColumns,
   isSaved,
   rowPlacements,
@@ -269,18 +270,34 @@ interface BlockProps {
 
 function Block({ placement, columns, seam, tint, label, onGrab, onRemove }: BlockProps) {
   const p = placement;
+  const audio = audioBeats(p);
+  // A run cut with ⌘ holds less audio than the columns it occupies; the
+  // rest of the last column is silence, and it is drawn as such so a
+  // fractional cut is something you can SEE in the clip.
+  const rest = p.beats - audio;
   return (
     <div
       className={`beatify-clip-block tint-${tint}${seam ? ' seam' : ''}`}
       data-testid={`beatify-clip-block-${p.id}`}
       data-beats={p.beats}
+      data-audio-beats={rest > 0 ? beatCount(audio) : undefined}
       data-col={p.col}
       style={{ left: pct(p.col, columns), width: pct(p.beats, columns) }}
-      title={`${label} · beats ${beatCount(p.sourceBeat + 1)}–${beatCount(p.sourceBeat + p.beats)}`}
+      title={
+        `${label} · beats ${beatCount(p.sourceBeat + 1)}–${beatCount(p.sourceBeat + audio)}` +
+        (rest > 0 ? ` · ${beatCount(rest)} silent` : '')
+      }
       onMouseDown={(e) => onGrab(p.id, e)}
     >
+      {rest > 0 && (
+        <span
+          className="beatify-clip-block-rest"
+          style={{ width: pct(rest, p.beats) }}
+          data-testid={`beatify-clip-rest-${p.id}`}
+        />
+      )}
       <span className="beatify-clip-block-label">
-        {label} · {p.beats}
+        {label} · {beatCount(audio)}
       </span>
       <button
         className="beatify-clip-block-x"

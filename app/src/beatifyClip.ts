@@ -93,11 +93,17 @@ export interface Placement {
   row: number;
   /** Column (beat) it starts at in the clip. */
   col: number;
-  /** How many beats it covers. Always ≥ 1. */
+  /** How many COLUMNS it covers. Always ≥ 1. */
   beats: number;
   source: SourceId;
   /** The beat of the SOURCE its first column came from. */
   sourceBeat: number;
+  /** How much AUDIO it holds, in beats — fractional, never more than
+   *  `beats`, and ABSENT when the run is audio all the way across (which
+   *  is every run cut on the grid, and every clip saved before a run
+   *  could be anything else). The rest of the last column is silence:
+   *  see `runOfSelection`. */
+  audioBeats?: number;
 }
 
 /** A clip being built (or a saved one, loaded back for editing). */
@@ -116,7 +122,48 @@ export interface ClipDraft {
 export interface BeatRun {
   source: SourceId;
   sourceBeat: number;
+  /** Columns it will occupy. */
   beats: number;
+  /** Beats of audio it holds; absent means all of them. */
+  audioBeats?: number;
+}
+
+/** Below this a fraction of a beat is arithmetic noise, not a cut. */
+const BEAT_EPS = 1e-6;
+
+/** How much of a run is audio: what it says, or all of it. */
+export function audioBeats(p: Placement | BeatRun): number {
+  return p.audioBeats ?? p.beats;
+}
+
+/** Set (or clear) how much audio a run holds, dropping it entirely when
+ *  there is none left — a block that can only be silence is not material,
+ *  it is a gap. Audio that fills every column says so by saying nothing,
+ *  which is what keeps grid-aligned clips on disk exactly as they were. */
+function holding(p: Placement, audio: number): Placement[] {
+  if (audio <= BEAT_EPS) return [];
+  const held = Math.min(audio, p.beats);
+  if (held >= p.beats - BEAT_EPS) {
+    const { audioBeats: _dropped, ...whole } = p;
+    return [whole];
+  }
+  return [{ ...p, audioBeats: held }];
+}
+
+/** The run a selection of `beats` beats from `sourceBeat` becomes.
+ *
+ *  A ⌘-freed selection is not a whole number of beats — that is what ⌘ is
+ *  for: a pickup that starts a quarter beat early, a tail that runs a
+ *  quarter beat long. The clip's grid is whole beats and stays whole, so
+ *  the run occupies every column its audio TOUCHES (ceil) and holds
+ *  exactly the audio that was selected; the remainder of the last column
+ *  is silence. Rounding the length to the nearest beat, as this used to,
+ *  threw away the part of the take the user went off the grid to catch. */
+export function runOfSelection(source: SourceId, sourceBeat: number, beats: number): BeatRun {
+  const audio = Math.max(0, beats);
+  const columns = Math.max(1, Math.ceil(audio - BEAT_EPS));
+  const run: BeatRun = { source, sourceBeat, beats: columns };
+  return columns - audio > BEAT_EPS ? { ...run, audioBeats: audio } : run;
 }
 
 export const DEFAULT_COLUMNS = 16;
@@ -173,20 +220,29 @@ function covers(p: Placement, from: number, to: number): boolean {
  *  the hole is punched out of its middle. Returns what is left. */
 function carve(p: Placement, from: number, to: number): Placement[] {
   const end = p.col + p.beats;
+  const audio = audioBeats(p);
   const left: Placement[] = [];
   if (p.col < from) {
-    left.push({ ...p, beats: from - p.col });
+    // The front keeps as much of the audio as still fits under it.
+    left.push(...holding({ ...p, beats: from - p.col }, audio));
   }
   if (end > to) {
     // The right-hand piece is a NEW run: it starts further into the
-    // source by exactly as much as was cut off its front.
-    left.push({
-      ...p,
-      id: placementId(),
-      col: to,
-      beats: end - to,
-      sourceBeat: p.sourceBeat + (to - p.col),
-    });
+    // source by exactly as much as was cut off its front, and holds
+    // whatever audio is left that far in.
+    const cut = to - p.col;
+    left.push(
+      ...holding(
+        {
+          ...p,
+          id: placementId(),
+          col: to,
+          beats: end - to,
+          sourceBeat: p.sourceBeat + cut,
+        },
+        audio - cut,
+      ),
+    );
   }
   return left;
 }
@@ -202,14 +258,19 @@ export function placeRun(draft: ClipDraft, run: BeatRun, row: number, col: numbe
   const placements = draft.placements.flatMap((p) =>
     p.row === into && covers(p, at, end) ? carve(p, at, end) : [p],
   );
-  placements.push({
-    id: placementId(),
-    row: into,
-    col: at,
-    beats: run.beats,
-    source: run.source,
-    sourceBeat: run.sourceBeat,
-  });
+  placements.push(
+    ...holding(
+      {
+        id: placementId(),
+        row: into,
+        col: at,
+        beats: run.beats,
+        source: run.source,
+        sourceBeat: run.sourceBeat,
+      },
+      audioBeats(run),
+    ),
+  );
   return {
     ...draft,
     rows: Math.max(draft.rows, into + 1),
@@ -285,16 +346,18 @@ export function copyRange(draft: ClipDraft, range: CellRange): ClipFragment {
     const from = Math.max(p.col, range.col0);
     const to = Math.min(p.col + p.beats, range.col1);
     if (to <= from) return [];
-    return [
+    const cut = from - p.col;
+    return holding(
       {
         ...p,
         row: p.row - range.row0,
         col: from - range.col0,
         beats: to - from,
         // Cutting the front off a run starts it further into its source.
-        sourceBeat: p.sourceBeat + (from - p.col),
+        sourceBeat: p.sourceBeat + cut,
       },
-    ];
+      audioBeats(p) - cut,
+    );
   });
   return { rows: range.row1 - range.row0 + 1, columns: range.col1 - range.col0, placements };
 }
@@ -411,6 +474,7 @@ export interface WirePlacement {
   beats: number;
   source: SourceSpec;
   sourceBeat: number;
+  audioBeats?: number;
 }
 
 /** One seed in the left-hand list, with the parts it can be broken into.
@@ -468,6 +532,7 @@ export function toWire(draft: ClipDraft): {
       beats: p.beats,
       source: parseSourceId(p.source),
       sourceBeat: p.sourceBeat,
+      ...(p.audioBeats === undefined ? {} : { audioBeats: p.audioBeats }),
     })),
   };
 }
@@ -494,6 +559,8 @@ export function fromWire(clip: SavedClip): ClipDraft {
       beats: p.beats,
       source: sourceIdOf(p.source),
       sourceBeat: p.sourceBeat,
+      // Older clips say nothing here, and mean "audio all the way".
+      ...(p.audioBeats === undefined ? {} : { audioBeats: p.audioBeats }),
     })),
   };
 }

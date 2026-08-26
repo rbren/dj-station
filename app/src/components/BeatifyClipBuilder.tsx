@@ -38,6 +38,7 @@ import {
   placeRun,
   removeLastRow,
   removePlacement,
+  runOfSelection,
   seedMix,
   seedOfSourceId,
   seedSourceId,
@@ -273,12 +274,12 @@ export function BeatifyClipBuilder({
   //
   // The selection can be off the grid at both ends (⌘, TV-14a), so what
   // is selected is a length in beats and a fraction: 6.25 beats from
-  // beat 3.75. The CLIP is a grid of whole beats and stays one, so a run
-  // occupies the nearest whole number of columns and carries the
-  // fraction in where it READS FROM — the offset is what the free drag
-  // was for, and the downbeat is what the grid is for.
+  // beat 3.75. The CLIP is a grid of whole beats and stays one, so the
+  // run takes EXACTLY the audio selected (`runOfSelection`) and spreads
+  // it over every column it touches, silence to the end of the last —
+  // both ends of the free drag survive the trip down, which is the only
+  // reason to have made it.
   const beatsSelected = selBeats ? selBeats.endBeat - selBeats.startBeat : 0;
-  const columnsSelected = Math.max(1, Math.round(beatsSelected));
 
   /** Lift the selected beats off the source; the drop decides where they
    *  land. Reached two ways — the handle in the transport row, and
@@ -286,10 +287,10 @@ export function BeatifyClipBuilder({
   const liftSelection = useCallback(() => {
     if (!selBeats || beatsSelected <= 0) return;
     setDrag({
-      run: { source: picked, sourceBeat: selBeats.startBeat, beats: columnsSelected },
+      run: runOfSelection(picked, selBeats.startBeat, beatsSelected),
       moving: null,
     });
-  }, [beatsSelected, columnsSelected, picked, selBeats]);
+  }, [beatsSelected, picked, selBeats]);
 
   const startDrag = useCallback(
     (e: React.MouseEvent) => {

@@ -323,9 +323,11 @@ describe('the source list', () => {
 
 // ⌘ frees the ends of a selection from the beat grid (TV-14a): a cut can
 // start inside a beat to catch a pickup, or stop short of one to leave a
-// tail behind. What lands in the clip is still whole beats of the clip's
-// grid — the fraction bought you the OFFSET into the source, not a
-// fractional column.
+// tail behind. Both ends survive the trip down into the clip: the run
+// holds EXACTLY the audio that was selected, spread over every column it
+// touches, and whatever is left of the last column is silence. (It used
+// to round the length to the nearest beat, which threw away the part of
+// the take the ⌘ was for.)
 describe('⌘-dragging the ends of the selection off the grid', () => {
   const readout = () => screen.getByTestId('beatify-track-readout').textContent;
   const handle = () => screen.getByTestId('beatify-drag-beats').textContent;
@@ -344,7 +346,7 @@ describe('⌘-dragging the ends of the selection off the grid', () => {
     expect(handle()).toContain('8.5 beats');
   });
 
-  it('lands on the clip grid, from where the cut really started', async () => {
+  it('brings the whole cut down, and fills the rest of the beat with silence', async () => {
     const clips = await mount();
     selectBeats(4, 6);
     await waitFor(() => expect(handle()).toContain('6 beats'));
@@ -354,15 +356,26 @@ describe('⌘-dragging the ends of the selection off the grid', () => {
 
     dragInto(0, 0);
     const block = blocks()[0];
-    // Whole columns, at a column — the clip's grid is beats, and stays
-    // beats. The quarter beat lives in where it reads FROM.
-    expect(block.dataset.beats).toBe('6');
+    // Seven columns, because a quarter of the seventh is sounding — the
+    // clip's grid is whole beats and stays whole, but nothing selected
+    // is thrown away to fit it.
+    expect(block.dataset.beats).toBe('7');
     expect(block.dataset.col).toBe('0');
+    expect(block.dataset.audioBeats).toBe('6.25');
     expect(block.title).toContain('4.75');
+    expect(block.title).toContain('0.75 silent');
+    // …and the silence is drawn, three quarters of one column wide.
+    const rest = block.querySelector('.beatify-clip-block-rest') as HTMLElement;
+    expect(rest.style.width).toBe(`${(0.75 / 7) * 100}%`);
 
     await saveAs('Pickup');
     const draft = (clips.save as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
-    expect(draft.placements[0]).toMatchObject({ col: 0, beats: 6, sourceBeat: 3.75 });
+    expect(draft.placements[0]).toMatchObject({
+      col: 0,
+      beats: 7,
+      sourceBeat: 3.75,
+      audioBeats: 6.25,
+    });
   });
 
   it('still snaps when ⌘ is not held', async () => {

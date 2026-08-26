@@ -119,11 +119,11 @@ pub fn mix(parts: &[&AudioData]) -> AudioData {
 /// clip end of it stays whole — a run lands on a column and covers
 /// columns — so a fraction only ever shifts what is read, never where it
 /// is heard.
-pub fn span(grid: &Grid, source_beat: f64, col: usize, beats: usize) -> (f64, f64, f64) {
+pub fn span(grid: &Grid, source_beat: f64, col: usize, take_beats: f64) -> (f64, f64, f64) {
     (
         grid.beat_time(source_beat),
         col as f64 * grid.period,
-        beats as f64 * grid.period,
+        take_beats.max(0.0) * grid.period,
     )
 }
 
@@ -169,7 +169,7 @@ mod tests {
             beats: 64,
         };
         // Beats 8..12 of a source, dropped at column 4 of the clip.
-        let (from, at, secs) = span(&grid, 8.0, 4, 4);
+        let (from, at, secs) = span(&grid, 8.0, 4, 4.0);
         assert!((from - 4.5).abs() < 1e-12, "phase + 8 periods");
         assert!((at - 2.0).abs() < 1e-12, "a clip has no padding of its own");
         assert!((secs - 2.0).abs() < 1e-12);
@@ -187,10 +187,52 @@ mod tests {
         // Three quarters of a beat into beat 7 — a cut dragged off the
         // grid to catch a pickup. Only the READ moves: the run still
         // lands on column 4 and still covers four whole columns.
-        let (from, at, secs) = span(&grid, 7.75, 4, 4);
+        let (from, at, secs) = span(&grid, 7.75, 4, 4.0);
         assert!((from - 4.375).abs() < 1e-12, "phase + 7.75 periods");
         assert!((at - 2.0).abs() < 1e-12);
         assert!((secs - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_freed_cut_takes_the_audio_it_selected_and_no_more() {
+        let grid = Grid {
+            bpm: 120.0,
+            period: 0.5,
+            phase: 0.5,
+            beats: 64,
+        };
+        // 6.25 beats selected with ⌘ occupy seven columns of the clip,
+        // and the take is 6.25 beats long — the three quarters of a beat
+        // left over at the end are silence, not a rounded-off take.
+        let (from, at, secs) = span(&grid, 3.75, 0, 6.25);
+        assert!((from - 2.375).abs() < 1e-12);
+        assert!((at - 0.0).abs() < 1e-12);
+        assert!((secs - 3.125).abs() < 1e-12, "6.25 × the period");
+    }
+
+    #[test]
+    fn silence_fills_what_a_short_take_leaves() {
+        // A run of one second laid into a two-second clip: the second
+        // half is untouched, which is what the silent tail of a
+        // fractional run is made of.
+        let src = tone(2.0, 0.5);
+        let out = assemble(
+            &[Lay {
+                audio: &src,
+                from_secs: 0.0,
+                at_secs: 0.0,
+                secs: 1.0,
+            }],
+            2.0,
+            1000,
+            1,
+        );
+        assert_eq!(out.frames(), 2000);
+        assert!(out.channels[0][500] > 0.4, "the take sounds");
+        assert!(
+            out.channels[0][1200..].iter().all(|s| *s == 0.0),
+            "and stops dead where it ends"
+        );
     }
 
     #[test]
