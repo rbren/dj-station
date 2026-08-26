@@ -27,6 +27,7 @@ import {
   drawnColumns,
   emptyDraft,
   fragmentIsEmpty,
+  freshClipName,
   fromWire,
   isEmpty,
   isSaved,
@@ -425,6 +426,19 @@ export function BeatifyClipBuilder({
   }, [suspended]);
 
   // --- saving ------------------------------------------------------------
+
+  /** Clear the desk: a new, empty clip, and silence. `filed` is the shelf
+   *  the fresh clip must not collide with by name — passed in rather than
+   *  read off `saved`, because a save clears the desk with a list the
+   *  state has not caught up to yet. */
+  const clearDesk = useCallback((filed: SavedClip[]) => {
+    transportRef.current?.stop(0);
+    setLive((cur) => (cur === 'clip' ? null : cur));
+    setDraft(emptyDraft(freshClipName(filed.map((c) => c.name))));
+    setSel(null);
+    setNote(null);
+  }, []);
+
   const save = useCallback(async () => {
     if (isEmpty(draft)) {
       setNote('Nothing to save yet');
@@ -442,14 +456,16 @@ export function BeatifyClipBuilder({
     setSaving(false);
     if (!filed) return;
     setSaved(filed.clips);
-    // A first save is filed under an id the backend picks; the draft has
-    // to learn it, or the next save would file a second copy and Delete
-    // would have nothing to delete.
-    setDraft((cur) => ({ ...cur, id: filed.id }));
-    // No "Saved X": the clip is in the list on the left under that name,
-    // which is the receipt. The note line is for refusals and hints.
-    setNote(null);
-  }, [clips, draft, projectId]);
+    // SAVING IS FILING: the clip is on the shelf now, and the desk is
+    // clear for the next one, which is how a set gets built. The one that
+    // was just filed is not "still open" — it is a row in the list, and
+    // the ✎ brings it back to be edited or deleted.
+    clearDesk(filed.clips);
+    // No congratulation — the row in the list under that name is the
+    // receipt. This says where the material WENT, because a grid that
+    // empties itself is otherwise a fright.
+    setNote(`"${draft.name}" is saved — the desk is clear for the next clip`);
+  }, [clearDesk, clips, draft, projectId]);
 
   /** Delete the clip this draft came from. The material stays on screen,
    *  now unsaved: deleting a file is not the same as clearing the desk. */
@@ -469,14 +485,8 @@ export function BeatifyClipBuilder({
     setNote(`"${draft.name}" is deleted — what is on the grid is now unsaved`);
   }, [clips, draft, picked, project.seeds, projectId]);
 
-  /** Clear the desk: a new, empty clip, and silence. */
-  const newClip = useCallback(() => {
-    transportRef.current?.stop(0);
-    setLive((cur) => (cur === 'clip' ? null : cur));
-    setDraft(emptyDraft());
-    setSel(null);
-    setNote(null);
-  }, []);
+  /** "+ new clip": the same clearing a save does, asked for by hand. */
+  const newClip = useCallback(() => clearDesk(saved), [clearDesk, saved]);
 
   // --- what the list shows ------------------------------------------------
   //

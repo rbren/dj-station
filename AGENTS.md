@@ -997,13 +997,29 @@ beatify::build`.
   loads it into the editor, never the source. "+ new clip" clears the
   editor (and stops the clip's transport). Doing both at once was one
   click doing two jobs.
+- SAVING IS FILING, AND FILING CLEARS THE DESK. A successful save puts
+  the clip in the list and leaves the editor on a FRESH empty draft —
+  building a set is building clip after clip, and the filed one used to
+  sit there to be cleared by hand. One `clearDesk(filed)` does it for
+  both the save and "+ new clip"; it takes the shelf as an argument
+  because a save clears with a list `saved` has not caught up to yet. The
+  clip transport stops (the editor renders the LIVE draft, so a cleared
+  desk could only play silence) and the SOURCE pane is untouched — same
+  seed, zoom, selection, playhead, still sounding — because that is where
+  the next clip is cut from. The desk emptying is the one thing the note
+  line reports on success (`"X" is saved — the desk is clear…`): not a
+  congratulation, but the material's whereabouts. Reaching a filed clip
+  again is the ✎, which is also the only way to Delete it now. A fresh
+  draft is named `freshClipName(shelf)` ("Untitled clip", "Untitled clip
+  2", …) because clips are filed by ID and the default name is now landed
+  on after every save — two rows with one name are indistinguishable.
 - A DRAFT'S IDENTITY IS `ClipDraft.id`, not its name: '' until it has
-  been saved (`isSaved`), which is also what enables Delete. The backend
-  answers a save with `ClipSaved { id, clips }` precisely so the draft
-  can learn the id it was filed under — do not go back to inferring it
-  by diffing the list (a mutated-in-place list makes that silently
-  wrong). Deleting the open clip removes the FILE and leaves the
-  material on the grid, unsaved.
+  been saved (`isSaved`), which is also what enables Delete. A draft with
+  an id got it from the ✎ (`fromWire`), and saving it overwrites that row
+  rather than breeding a copy — the id is the frontend's half of that, so
+  do not go back to matching clips up by name or by diffing the list (a
+  mutated-in-place list makes that silently wrong). Deleting the open
+  clip removes the FILE and leaves the material on the grid, unsaved.
 - The editor has its own selection: a swept rectangle of cells
   (`CellRange`, `cellRange`), drawn per row as `.beatify-clip-marquee`,
   with ⌘/Ctrl+C copying what is inside it (`copyRange`, TRIMMED at the

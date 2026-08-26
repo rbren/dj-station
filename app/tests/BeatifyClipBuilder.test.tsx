@@ -196,6 +196,9 @@ async function fourBeatsAt(col: number) {
   dragInto(0, col);
 }
 
+/** What the editor's name box says the clip in front of you is called. */
+const name = () => (screen.getByTestId('beatify-clip-name') as HTMLInputElement).value;
+
 /** Save the current draft under a name, and wait for it to be filed. */
 async function saveAs(name: string) {
   fireEvent.change(screen.getByTestId('beatify-clip-name'), { target: { value: name } });
@@ -897,15 +900,87 @@ describe('saving', () => {
     await screen.findByTestId('beatify-clip-source-clip:1');
   });
 
-  // The clip in the list under that name is the receipt; a line saying
-  // "Saved" is the same news twice, and the note line has refusals to
-  // carry.
-  it('does not congratulate you for saving', async () => {
+  // The clip in the list under that name is the receipt, so there is no
+  // "Saved!" — but the desk clearing is a change nobody asked for out
+  // loud, and one line has to account for it.
+  it('says where the material went, rather than congratulating you', async () => {
     await mount();
     await fourBeatsAt(0);
     await saveAs('Intro loop');
-    expect(screen.queryByTestId('beatify-clip-note')).toBeNull();
+    const note = screen.getByTestId('beatify-clip-note').textContent ?? '';
+    expect(note).toContain('Intro loop');
+    expect(note).toContain('clear');
+    expect(note).not.toMatch(/saved!|well done|success/i);
     expect(screen.getByTestId('beatify-clip-source-clip:1').textContent).toContain('Intro loop');
+  });
+
+  // SAVING IS FILING. What was on the desk is a clip in the list now, and
+  // the desk is clear for the next one — building a set is building clip
+  // after clip, and the old behaviour left the last one lying there to be
+  // deleted by hand before the next could start.
+  it('clears the desk for the next clip', async () => {
+    await mount();
+    await fourBeatsAt(0);
+    fireEvent.click(screen.getByTestId('beatify-clip-add-row'));
+    await saveAs('Intro loop');
+
+    expect(blocks()).toHaveLength(0);
+    expect(screen.queryByTestId('beatify-clip-marquee-0')).toBeNull();
+    // A fresh clip, not the filed one with its material removed: it has
+    // no id (so there is nothing to delete), the default length, and the
+    // extra row is gone.
+    expect((screen.getByTestId('beatify-clip-delete') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('beatify-clip-length') as HTMLInputElement).value).toBe('16');
+    expect(screen.getAllByTestId(/^beatify-clip-row-/)).toHaveLength(1);
+  });
+
+  // The desk clears; the bench does not. The pane is where the next clip
+  // is cut from, so a save must not cost the zoom, the selection or the
+  // place in the track — let alone stop the music.
+  it('leaves the source pane exactly where it was, still playing', async () => {
+    const clips = await mount();
+    const wave = screen.getByTestId('beatify-track-waveform');
+    wave.getBoundingClientRect = () => ({ left: 0, width: 325, top: 0, height: 100 }) as DOMRect;
+    await fourBeatsAt(0);
+    fireEvent.click(screen.getByTestId('beatify-track-zoom-in'));
+    fireEvent.wheel(wave, { deltaX: 30, deltaY: 0, shiftKey: true });
+    fireEvent.click(screen.getByTestId('beatify-track-play'));
+    await waitFor(() => expect(screen.getByTestId('beatify-track-play').textContent).toBe('❚❚'));
+
+    const view = screen.getByTestId('beatify-track-readout').textContent;
+    const head = screen.getByTestId('beatify-track-playhead-readout').textContent;
+    const opens = (clips.open as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    await saveAs('Intro loop');
+
+    expect(screen.getByTestId('beatify-track-title').textContent).toBe('Live Set A');
+    expect(screen.getByTestId('beatify-track-readout').textContent).toBe(view);
+    expect(screen.getByTestId('beatify-track-playhead-readout').textContent).toBe(head);
+    expect(screen.getByTestId('beatify-track-play').textContent).toBe('❚❚');
+    // Not even reloaded: filing a clip is not a change of source.
+    expect((clips.open as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(opens);
+  });
+
+  // Two rows called "Untitled clip" are two rows nobody can tell apart,
+  // and now that every save lands back on the default name they would
+  // breed. The next one is named off the shelf.
+  it('names the next clip so it cannot be mistaken for the one just filed', async () => {
+    await mount();
+    await fourBeatsAt(0);
+    fireEvent.click(screen.getByTestId('beatify-clip-save'));
+    await screen.findByTestId('beatify-clip-source-clip:1');
+    expect(name()).toBe('Untitled clip 2');
+
+    // Somewhere else in the track, because the old selection's edge is
+    // still under the cursor at beat 0.
+    selectBeats(8, 4);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('4 beats'),
+    );
+    dragInto(0, 0);
+    fireEvent.click(screen.getByTestId('beatify-clip-save'));
+    await screen.findByTestId('beatify-clip-source-clip:2');
+    expect(name()).toBe('Untitled clip 3');
   });
 
   it('refuses to save an empty clip', async () => {
@@ -1037,16 +1112,22 @@ describe('saving and deleting the clip in front of you', () => {
     expect((clips.save as ReturnType<typeof vi.fn>).mock.calls[0][1].name).toBe('Verse');
   });
 
+  // Saving files the clip and clears the desk, so a second save of the
+  // same clip means fetching it back with the ✎ — and that one has to
+  // land on the same row rather than breeding a copy.
   it('files the same clip twice under one id rather than two', async () => {
     const clips = await mount();
     await fourBeatsAt(0);
     await saveAs('Intro loop');
 
+    fireEvent.click(screen.getByTestId('beatify-clip-edit-clip:1'));
+    expect(name()).toBe('Intro loop');
     fireEvent.click(screen.getByTestId('beatify-clip-save'));
     await waitFor(() =>
       expect((clips.save as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2),
     );
     expect((clips.save as ReturnType<typeof vi.fn>).mock.calls[1][1].id).toBe('1');
+    expect(await screen.findAllByTestId(/^beatify-clip-source-clip:/)).toHaveLength(1);
   });
 
   it('cannot delete a clip that was never saved', async () => {
@@ -1059,6 +1140,10 @@ describe('saving and deleting the clip in front of you', () => {
     const clips = await mount();
     await fourBeatsAt(0);
     await saveAs('Intro loop');
+    // Saving cleared the desk, so there is nothing in front of you to
+    // delete until the clip is fetched back.
+    expect((screen.getByTestId('beatify-clip-delete') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('beatify-clip-edit-clip:1'));
     expect((screen.getByTestId('beatify-clip-delete') as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.click(screen.getByTestId('beatify-clip-delete'));

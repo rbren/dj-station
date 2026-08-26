@@ -121,8 +121,23 @@ export interface BeatRun {
 
 export const DEFAULT_COLUMNS = 16;
 
-export function emptyDraft(name = 'Untitled clip'): ClipDraft {
+/** What a clip nobody has named yet is called. */
+export const UNTITLED_CLIP = 'Untitled clip';
+
+export function emptyDraft(name = UNTITLED_CLIP): ClipDraft {
   return { id: '', name, rows: 1, columns: DEFAULT_COLUMNS, placements: [] };
+}
+
+/** A default name that is not already on the shelf: "Untitled clip", then
+ *  "Untitled clip 2", and so on. Saving clears the desk, so the default
+ *  is landed on again and again — and clips are filed by id, so nothing
+ *  stops two of them being called the same thing and becoming two rows
+ *  the user cannot tell apart. A name typed over is never touched. */
+export function freshClipName(taken: readonly string[]): string {
+  if (!taken.includes(UNTITLED_CLIP)) return UNTITLED_CLIP;
+  let n = 2;
+  while (taken.includes(`${UNTITLED_CLIP} ${n}`)) n += 1;
+  return `${UNTITLED_CLIP} ${n}`;
 }
 
 /** Has this draft ever been saved? What the Delete button waits for. */

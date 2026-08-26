@@ -11,6 +11,7 @@ import {
   copyRange,
   drawnColumns,
   emptyDraft,
+  freshClipName,
   isSaved,
   movePlacement,
   pasteFragment,
@@ -269,6 +270,20 @@ describe("a draft's identity", () => {
     expect(isSaved(emptyDraft())).toBe(false);
     expect(isSaved({ ...emptyDraft(), name: 'Chorus' })).toBe(false);
     expect(isSaved({ ...emptyDraft(), id: '3' })).toBe(true);
+  });
+
+  // Saving clears the desk, so the default name is landed on over and
+  // over. Clips are filed by id, so nothing but this stops a shelf of
+  // rows all called the same thing.
+  it('starts life with a name no clip on the shelf has', () => {
+    expect(freshClipName([])).toBe('Untitled clip');
+    expect(freshClipName(['Intro', 'Chorus'])).toBe('Untitled clip');
+    expect(freshClipName(['Untitled clip'])).toBe('Untitled clip 2');
+    expect(freshClipName(['Untitled clip', 'Untitled clip 2'])).toBe('Untitled clip 3');
+    // Gaps get filled rather than counted past — the number is only there
+    // to tell two rows apart.
+    expect(freshClipName(['Untitled clip', 'Untitled clip 3'])).toBe('Untitled clip 2');
+    expect(emptyDraft(freshClipName(['Untitled clip'])).name).toBe('Untitled clip 2');
   });
 });
 
