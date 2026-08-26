@@ -7,7 +7,8 @@
 //!
 //! Gain law: with x = (xfade + 10) / 20 clamped to [0, 1],
 //! `gain_a = cos(x·π/2)`, `gain_b = sin(x·π/2)` — constant combined power
-//! across the sweep, and each side reaches exactly 1.0 at its end stop.
+//! across the sweep, and each side reaches exactly 1.0 at its end stop and
+//! exactly 0.0 at the other (a fader hard over is digital silence).
 
 use crate::knob::{Curve, KnobConfig, KnobStyle};
 use crate::manifest::{categories, JackDecl, Manifest, OutputDecl};
@@ -78,7 +79,12 @@ pub fn crossfader_manifest() -> Manifest {
 pub fn crossfader_gains(xfade: f32) -> (f32, f32) {
     let x = ((xfade + 10.0) / 20.0).clamp(0.0, 1.0);
     let theta = x * std::f32::consts::FRAC_PI_2;
-    (theta.cos(), theta.sin())
+    // f32 `FRAC_PI_2` rounds up, so `cos` undershoots to ~-4.4e-8 at the top
+    // of the sweep — a fader hard over would leak a phase-inverted copy of
+    // the closed side instead of muting it. The cosine is non-negative
+    // across the sweep by construction, so clamping only removes that
+    // rounding residue and makes both end stops exactly silent.
+    (theta.cos().max(0.0), theta.sin().max(0.0))
 }
 
 pub struct CrossfaderModule;

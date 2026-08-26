@@ -85,6 +85,50 @@ fn mixer_sums_stereo_channels_with_levels() {
     assert_near(tail[0], 0.0, "mixer silent with faders down");
 }
 
+/// A fader at 0 kills its channel EXACTLY — with every input jack wired,
+/// pans off centre and the other channels playing.
+#[test]
+fn mixer_level_at_zero_is_exact_silence_on_a_full_desk() {
+    let peaks = |e: &mut Engine| {
+        let out = e.render_offline((0.05 * SR) as usize).unwrap();
+        let p = |c: &Vec<f32>| c.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+        (p(&out[0]), p(&out[1]))
+    };
+
+    let mut e = probe_engine(2);
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("mx", "com.dj.mixer").unwrap();
+    probe(&mut e, "mx", "out_l", 0);
+    probe(&mut e, "mx", "out_r", 1);
+    for ch in 1..=6 {
+        e.connect("osc1", "audio", "mx", &format!("in{ch}_l"))
+            .unwrap();
+        // Odd channels take a wired R, even ones keep the L normal.
+        if ch % 2 == 1 {
+            e.connect("osc1", "audio", "mx", &format!("in{ch}_r"))
+                .unwrap();
+        }
+        e.connect("lfo1", "bi", "mx", &format!("pan{ch}")).unwrap();
+        e.set_knob_value("mx", &format!("lvl{ch}"), 10.0).unwrap();
+    }
+    let (loud_l, loud_r) = peaks(&mut e);
+    assert!(loud_l > 4.9 && loud_r > 4.9, "desk should be loud first");
+
+    // Every fader down: digital silence, not a residue of six channels.
+    for ch in 1..=6 {
+        e.set_knob_value("mx", &format!("lvl{ch}"), 0.0).unwrap();
+    }
+    assert_eq!(peaks(&mut e), (0.0, 0.0), "faders down must be silent");
+
+    // ... and a single fader brings its own channel back, so the silence
+    // above was the faders' doing and not a dead patch. (Its pan sits
+    // wherever the LFO left it, so only the favoured side is at unity.)
+    e.set_knob_value("mx", "lvl4", 10.0).unwrap();
+    let (l, r) = peaks(&mut e);
+    assert!(l.max(r) > 4.9, "channel 4 alone should play: {l}, {r}");
+}
+
 #[test]
 fn mixer_pan_places_a_mono_source_in_the_field() {
     let mut e = probe_engine(2);

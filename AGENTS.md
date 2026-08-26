@@ -586,6 +586,14 @@ offset))`, offset in position units — so the knob's curve shapes the
   `position_for_value`; frontend imports the same manifest). Defaults only
   affect freshly added modules: patches serialize explicit knob positions,
   so goldens are unaffected by default tweaks.
+- A gain of zero must be EXACT silence, not a rounding residue: the
+  crossfader's equal-power law (`crossfader_gains` in
+  `crates/dj-engine/src/mixer.rs`) clamps `cos`/`sin` at 0 because f32
+  `FRAC_PI_2` rounds up and `cos` undershoots to ~-4.4e-8 — a fader hard
+  over used to leak a phase-inverted copy of the closed side. Pinned by
+  `crossfader_end_stops_silence_the_closed_channel_exactly` (deck.rs) and
+  `mixer_level_at_zero_is_exact_silence_on_a_full_desk`
+  (modules_utilities.rs); hold any new taper to the same bar.
 - Structural edits (add/remove module, wire changes, paste) go through the
   Tauri shell's `with_stopped` wrapper: engine.stop() → edit →
   restart_backend(). This causes an audible blip (~50–150 ms hard-cut
