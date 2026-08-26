@@ -62,19 +62,29 @@ Priority levels used below:
 
 ## Status
 
-The visual pass described here has landed in `app/src/styles.css` (plus
-small class/markup touch-ups in `App.tsx`, `ClipEqUI.tsx`). Every rule
-written for a finding carries that finding's id in its comment, so
-`grep -n '§B4' app/src/styles.css` shows what a section actually changed
-and why. Behaviour is untouched: the full frontend suite (881 tests,
-including the ones that pin copy and measured layout) passes unchanged,
-and no transition or animation added here touches a layout property.
+This document doubles as the tracker for the overhaul: **a struck-through
+heading means the fix has landed**, and the body text is kept as the record
+of what was wrong and why it changed. Items with no strike are still open;
+items marked *partial* landed in part, with the remainder spelled out.
+
+Everything so far is in `app/src/styles.css` plus small class/copy touch-ups
+in `App.tsx`, `ClipEqUI.tsx` and `LibraryView.tsx`. Behaviour is untouched:
+the full frontend suite (881 tests, including the ones that pin copy and
+measured layout) passes unchanged, no transition or animation added here
+touches a layout property, and every screen below was re-shot and re-read
+after the change.
+
+Where the numbers stand against the audit: 607 hex literals (176 distinct)
+→ 145 (104 distinct, 27 of which are `#fff` inside a `color-mix`); 145
+`font-size` declarations across ~26 hand-picked values → every declaration
+but ten on a 8-step scale; 0 focus rings → one global `:focus-visible`;
+0 `prefers-reduced-motion` blocks → 1; 17 `:hover` rules → 25.
 
 ---
 
 ## A. Tokens: the app has them by accident, not by decision
 
-**A1 — There is no type scale (P0).**
+~~**A1 — There is no type scale (P0).**~~ ✔
 `app/src/styles.css` (4788 lines) has **145** `font-size` declarations
 across ~26 distinct values: `0.55 … 1.9 rem` plus `7, 8, 9, 10, 11, 12, 13,
 14, 20 px`. Sizes were chosen locally to make things fit, and the hierarchy
@@ -85,7 +95,7 @@ names beside it.
 (`--fs-micro … --fs-display`, 11 / 12 / 13 / 15 / 18 / 22 / 30 px), every
 declaration re-mapped onto it, nothing below 11 px except true axis marks.
 
-**A2 — The font stack asks for a face that is never loaded (P1).**
+~~**A2 — The font stack asks for a face that is never loaded (P1).**~~ ✔
 `styles.css:3` requests `'Inter', system-ui, sans-serif`, but nothing in
 `app/index.html` or the CSS loads Inter (no `@font-face`, no `<link>`), so
 the app renders in whatever the webview's `system-ui` is — a different face
@@ -97,7 +107,10 @@ BPM, timecode, jack legends, library BPM/key/length), with tabular figures
 so digits stop dancing. (Vendoring custom faces was cut: binary assets and
 offline-loading policy are out of scope for a CSS pass.)
 
-**A3 — 176 ad-hoc hex values, no palette (P1).**
+~~**A3 — 176 ad-hoc hex values, no palette (P1).**~~ ✔
+*partial — the palette exists and the repeated literals are re-mapped (607 →
+145). What is left is material shading (knob metal, socket gradients) and a
+handful of one-off panel colours.*
 607 literal hex colors, 176 distinct, versus 45 uses of any variable
 (nearly all `--accent`). The comment at `styles.css:630` is the tell: a
 color chosen because it is "deliberately distinct from the gold
@@ -109,7 +122,7 @@ re-map the repeated literals onto it. Category accents
 (`ModulePanel.tsx:33`) stay, but as a 2 px panel edge only, so a rack reads
 as one instrument instead of a toy box.
 
-**A4 — Buttons are re-invented per feature area (P1).**
+~~**A4 — Buttons are re-invented per feature area (P1).**~~ ✔
 `.store-tab`, `.add-module-btn`, `.clip-tools button`, `.file-dialog
 button`, `.deck-cue`, `.context-menu-item`, `.beatify-clip-new`,
 `.beatify-commit`, `.track-picker-more` each redefine background / border /
@@ -122,7 +135,7 @@ built from the tokens, one disabled treatment (dimmed *and* de-bordered),
 and the per-area recipes reduced to the differences that matter. (A shared
 `<Button>` component was cut: it would touch every screen's markup.)
 
-**A5 — Selectors that cancel each other out (P2).**
+~~**A5 — Selectors that cancel each other out (P2).**~~ ✔
 Eight top-level selectors are defined twice — `.jack` (`:258`, `:1911`),
 `.deck-cue`, `.library-empty`, `.track-picker-more`, `.beatify-builder`,
 `.beatify-open-name` (two *different* colors), `.beatify-track-waveform`,
@@ -135,7 +148,7 @@ hover/active convention through the shared primitives.
 
 ## B. Identity and hierarchy
 
-**B1 — The header is a debug strip (P1).**
+~~**B1 — The header is a debug strip (P1).**~~ ✔
 An 1.1 rem wordmark, four identical tabs, and `engine connected (cpal)` in
 0.8 rem `#8a93a2` — the same size and color as the patch name, and the
 *error* state ("no engine (dev)") is styled identically to the healthy one.
@@ -145,7 +158,7 @@ document title it is, and engine state as a colored status pill (ok / warn)
 so healthy and broken never look the same. (A master strip with meters and
 clock was cut: new UI and new state.)
 
-**B2 — The most important number is the smallest (P0).**
+~~**B2 — The most important number is the smallest (P0).**~~ ✔
 `.deck-time` / `.deck-bpm` are 0.72 rem `#9aa7b5` in a corner
 (`styles.css:2458`) while the module *name* is 1.9 rem. During a mix,
 position and BPM are the only numbers that matter.
@@ -153,20 +166,23 @@ position and BPM are the only numbers that matter.
 title down to `--fs-lg`; utility buttons quieter. Title-bar geometry
 (56 px) is untouched — AGENTS.md's rule is "resize fonts, not bar heights".
 
-**B3 — Micro-labels are illegible (P2).**
+~~**B3 — Micro-labels are illegible (P2).**~~ ✔
+*the 11 px floor holds for every label; the in-glyph numerals (EQ handle,
+quantizer key) sit at `--fs-mark` 8 px, which is documented in the token
+block as the one exception.*
 Group titles are 0.58 rem uppercase `#6f7987` — 4.1:1 contrast, below AA,
 at 9 px. Beatify's `#7c869a` facts lines and 7 px axis marks are worse.
 **Fix:** 11 px floor, `--ink-dim` at ≥ 4.5:1, and one casing rule applied
 with `text-transform` (never by rewriting label text, which tests pin).
 
-**B4 — Panels have no depth language (P2).**
+~~**B4 — Panels have no depth language (P2).**~~ ✔
 Overlapping panels (macro placement, restored layouts) render flat with a
 1 px border, so it is unclear which is on top; selection is a flat glow;
 drag has no lift.
 **Fix:** an elevation scale — resting / hover / selected / dragging — in
 box-shadow only, so nothing in the collision geometry moves.
 
-**B5 — Waveforms change color per page for no reason (P1).**
+~~**B5 — Waveforms change color per page for no reason (P1).**~~ ✔
 `.beatify-peaks / .beatify-track-peaks { fill: #d8a15f }`
 (`styles.css:3999`) against `.waveform-peaks { fill: #3f7fbf }`
 (`styles.css:2482`) on deck and Clip. Tan here, blue there, and neither
@@ -178,7 +194,7 @@ selected, muted stem), never which page you are on.
 
 ## C. Quality floor (the SKILL's non-negotiables)
 
-**C1 — No visible keyboard focus anywhere (P0).**
+~~**C1 — No visible keyboard focus anywhere (P0).**~~ ✔
 Zero `:focus-visible` rules in the stylesheet, and the two places that
 mention `outline` remove it (`:170`, `:1712`). Every button, tab, jack,
 knob and dialog control is keyboard-reachable and invisible when focused.
@@ -187,7 +203,7 @@ knob and dialog control is keyboard-reachable and invisible when focused.
 `:focus-visible` treatment for the two fields that opt out today. (Focus
 trapping and `role="dialog"` were cut: behavior, not paint.)
 
-**C2 — Motion ignores `prefers-reduced-motion` (P0).**
+~~**C2 — Motion ignores `prefers-reduced-motion` (P0).**~~ ✔
 Three `@keyframes` — `jack-volatile-pulse` (`:331`, infinite 0.5 s
 brightness on *every* volatile jack, i.e. dozens at once), `search-spin`,
 `beatify-stems-settling` — and **zero** matches for `prefers-reduced-motion`
@@ -196,20 +212,20 @@ in the codebase.
 collapses transitions; the volatile jack keeps a static ring in that mode
 so no information is lost.
 
-**C3 — There is no motion vocabulary at all (P2).**
+~~**C3 — There is no motion vocabulary at all (P2).**~~ ✔
 Three `transition` declarations in 4788 lines: modals appear instantly,
 tabs cut, hovers snap.
 **Fix:** two durations (`--dur-fast` 120 ms for state, `--dur-slow` 180 ms
 for overlays) on color/border/shadow only — never on layout properties, so
 nothing can shift a measurement — and one overlay fade-in. Guarded by C2.
 
-**C4 — Hit targets are smaller than the gesture (P2).**
+~~**C4 — Hit targets are smaller than the gesture (P2).**~~ ✔
 `.jack-socket` is 16 px (`:278`), `.deck-cue` 26 × 22 px (`:2529`), title
 glyphs ~14 px, Beatify's seed ✎/× ~12 px. Patching is the core gesture.
 **Fix:** grow the *hit* area with a transparent `::after` inset overlay,
 leaving the painted size and every measured box exactly as it is.
 
-**C5 — Contrast at the bottom of the scale (P2).**
+~~**C5 — Contrast at the bottom of the scale (P2).**~~ ✔
 `#6f7987` on panel background = 4.11:1; `#8a93a2` on the header = 5.8:1 but
 used for both labels and status; disabled `#5c626c` is 3.2:1.
 **Fix:** `--ink` / `--ink-muted` / `--ink-dim` chosen at ≥ 7 / ≥ 5.5 / ≥
@@ -220,7 +236,7 @@ opacity + border removal rather than an unreadable gray.
 
 ## D. Screens
 
-**D1 — The library is a bare table (P1).**
+~~**D1 — The library is a bare table (P1).**~~ ✔
 `LibraryView.tsx` renders an unstyled `<table>` stretched to the full
 viewport: at 1600 px, Title and Analysis sit 1400 px apart; rows have no
 hover; BPM/Key/Length are proportional-figure text in the same weight as
@@ -232,13 +248,15 @@ BPM/Key/Length, a sticky header row, and one pill language — neutral for
 provenance, semantic color only for analysis state. (Sorting, artwork,
 preview and "load to deck" were cut: new behavior.)
 
-**D2 — Store results and downloads throw metadata to the far wall (P2).**
+~~**D2 — Store results and downloads throw metadata to the far wall (P2).**~~ ✔
 Title at x = 28, provider pill and "42 %" at x = 1340–1570, nothing
 between.
 **Fix:** the same max width and a tighter row grid; the download progress
 bar picks up the accent token instead of its own blue.
 
-**D3 — The Clip page's EQ has no place to stand (P2).**
+~~**D3 — The Clip page's EQ has no place to stand (P2).**~~ ✔
+*the container, axis and readout strip landed; the `Q1.0` printed under each
+knob *and* in the readout is still duplicated — that is markup.*
 `ClipEqUI` is the right widget — curve, band handles, Q knobs — but it
 floats as a ~350 px island at the far left of a 1600 px page, its axis is
 7 px, and every band prints `Q1.0` under its knob *and* again in a
@@ -247,21 +265,23 @@ four-color readout strip.
 an 11 px axis, and the readout strip on the type scale in muted ink with
 the band colors kept only as small swatches.
 
-**D4 — The automation lane reads as a rendering bug (P1).**
+~~**D4 — The automation lane reads as a rendering bug (P1).**~~ ✔
+*the lane now has gridlines and a label. Unity gain still sits at the very top
+of the lane because the dB→y mapping lives in `ClipView`, not in CSS.*
 With no breakpoints the level lane is an empty black strip with a green
 line pinned to its top edge, no axis, no label.
 **Fix:** dB gridlines painted in CSS (`repeating-linear-gradient`), a
 CSS-generated lane label, and a dimmed "no automation" treatment for the
 default line — all background, no new DOM.
 
-**D5 — The primary action is not primary (P2).**
+~~**D5 — The primary action is not primary (P2).**~~ ✔
 "Save as new track" carries `#24503a`, barely distinguishable from the
 neutral buttons around it, at the end of a row of eight equal-weight tools
 of which seven are disabled but look enabled.
 **Fix:** `.is-primary` on the save action, the real disabled treatment from
 A4, and the tool row visually grouped away from it.
 
-**D6 — Beatify's shelf rows do not align (P1).**
+~~**D6 — Beatify’s shelf rows do not align (P1).**~~ ✔
 `.beatify-project` is a flex row whose `.beatify-project-open` child is
 `flex: 1` with the source-missing warning as a *sibling*
 (`styles.css:3755-3772`), so a row with a warning is shorter and its ✎ / ×
@@ -270,7 +290,7 @@ land at a different x than every other row (screenshot: x ≈ 627 vs 937).
 every row, the warning inside the card, and the cards on the shared surface
 tokens.
 
-**D7 — Beatify's seed rail is 180 px and everything in it wraps (P1).**
+~~**D7 — Beatify’s seed rail is 180 px and everything in it wraps (P1).**~~ ✔
 `.beatify-clip-list { width: 180px }` (`:4395`) holds a title that wraps to
 three lines, a facts line that wraps to three, four 0.65 rem stem chips,
 and a three-line hint repeated under *every* seed — while ~1400 × 400 px of
@@ -280,7 +300,7 @@ nearly identical.
 and three visually distinct chip states (`.beatify-stem-on` /
 `-off` / `:disabled` already exist as hooks).
 
-**D8 — Beatify's tracker banner shouts a shell command forever (P1).**
+~~**D8 — Beatify’s tracker banner shouts a shell command forever (P1).**~~ ✔
 `beat_this not installed — using the built-in DSP tracker. pip install
 beat-this torch` sits in warning amber beside the primary actions, on every
 visit. Its text is pinned by `BeatifyView.test.tsx`, so this is a styling
@@ -289,7 +309,7 @@ fix only: it must stop looking like an error.
 (`--ink-dim`, panel-raised background, no alert hue); reserve amber for
 states the user must act on.
 
-**D9 — The analysis modal hides its own Save (P1).**
+~~**D9 — The analysis modal hides its own Save (P1).**~~ ✔
 `.beatify-modal` is `max-height: 92vh; overflow-y: auto` (`:3843`) with a
 static footer, so at a 1000 px viewport the commit row scrolls out of
 sight. Its two sliders are native `<input type=range>` with the browser's
@@ -298,7 +318,10 @@ default blue thumb — the inconsistency the Clip page already fixed.
 `.is-primary` on the commit button, and one styled `input[type=range]`
 appearance shared by every range in the app.
 
-**D10 — Add Module cards leak and get sliced (P2).**
+~~**D10 — Add Module cards leak and get sliced (P2).**~~ ✔
+*previews are clipped to their card and faded at the bottom edge, and the
+modal hugs its content instead of always being 720 px tall. Wide panels still
+clip at the right edge of the card.*
 Card previews render real panels at `PICKER_SCALE = 0.55`
 (`ModulePicker.tsx:152`); several (Wavetable, Waveshaper) overflow their
 card border into the next column, and the fixed 1040 × 720 modal always
@@ -309,7 +332,10 @@ reads as intentional, and put the category hue on a small dot/edge rather
 than the title text. (Replacing previews with docs summaries was cut:
 markup and data plumbing.)
 
-**D11 — Empty states are unreadable dead ends (P2).**
+~~**D11 — Empty states are unreadable dead ends (P2).**~~ ✔
+*one `.empty-state` treatment covers rack, library, clip and picker, and the
+store tabs (which showed *nothing* before a search) now say so. The Beatify
+clip grid is still a silent empty box.*
 Rack: *"No engine connection — run via `./run.sh` (Tauri)…"*. Library:
 *"No tracks yet — search a store tab…"* at 11 px gray. Clip: one gray
 sentence at the top-left of a black 1600 px page. Picker: lowercase *"no
@@ -319,13 +345,37 @@ modules match"* in a modal that stays 1040 × 720.
 padding — applied to the existing markup, plus copy edits *only* where no
 test pins the string. (New buttons/CTAs were cut: new behavior.)
 
-**D12 — Overlays are six different objects (P2).**
+~~**D12 — Overlays are six different objects (P2).**~~ ✔
 `.module-picker`, `.file-dialog`, `.beatify-modal`, `.track-picker`,
 `.docs-panel`, `.context-menu`, `.knob-config-menu`: six paddings, six
 radii, three scrim opacities (0.5 / 0.55 / 0.72).
 **Fix:** one scrim value, one radius, one elevation shadow and one padding
 step shared by all of them, and the same `--dur-slow` fade. (A shared
 overlay component with focus trapping was cut.)
+
+---
+
+## G. Still open after this pass
+
+Small, concrete, and each one honest about why it did not land yet.
+
+1. **Clip automation lane, unity at the ceiling (P2).** The lane spans
+   +6 … −60 dB, so the default 0 dB line sits 8 px from the top edge. The
+   gridlines now explain the scale, but the mapping itself lives in
+   `ClipView.tsx`, not in CSS.
+2. **`Q1.0` is printed twice per EQ band (P3).** Once under the knob, once
+   in the readout strip (`ClipEqUI.tsx`). Removing one is markup.
+3. **Add Module previews clip at the right edge (P3).** Wide panels
+   (Wavetable, Drum Voice) are cut off mid-panel; a scale-to-fit would
+   need `PICKER_SCALE` to become per-card in `ModulePicker.tsx`.
+4. **Beatify's clip grid is a silent empty box (P3).** 0 runs renders an
+   empty 90 px lane with no invitation; the string would be new markup in
+   `BeatifyClipEditor.tsx`.
+5. **The seed rail prints "clip" under every clip name (P3).** A subtitle
+   that repeats the section header — copy, in `BeatifyClipList.tsx`.
+6. **In-glyph numerals sit at 8 px (`--fs-mark`) (P3).** EQ handles and
+   quantizer keys. Legible at 1× because they are single digits on a solid
+   disc, but they are the last thing below the 11 px floor.
 
 ---
 

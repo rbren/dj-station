@@ -358,8 +358,9 @@ export function ClipEqUI({ bands, onBegin, onChange }: ClipEqUIProps) {
           <span
             key={i}
             className="eq-readout-band"
-            /* §D3 — the band's colour is a swatch, not the text colour:
-               four coloured strings of numbers were unreadable. */
+            /* The band's colour rides as a swatch (see .eq-readout-band),
+               not as the text colour: four coloured strings of numbers
+               are unreadable. */
             style={{ '--band': BAND_COLORS[i % BAND_COLORS.length] } as CSSProperties}
           >
             {hzLabel(Math.round(b.freq_hz))}Hz {b.gain_db >= 0 ? '+' : ''}

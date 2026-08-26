@@ -51,9 +51,9 @@ fails if it's missing.
   three inks, `--brand/--cue/--ok/--fault`, `--shadow-*`, `--dur-*`,
   `--scrim`). Do not add a fresh hex literal or font-size when a token
   fits; per-module category hue lives only on a panel's inline `--accent`.
-  `DESIGN_OVERHAUL.md` is the review those tokens came from, and each rule
-  written for a finding carries its id (`§A4`, `§D9`, …) in a comment —
-  grep for the id before changing that area. Motion is colour/opacity only
+  `DESIGN_OVERHAUL.md` is the review those tokens came from and the place
+  the remaining design work is tracked (completed findings struck through)
+  — update it there, not in code comments. Motion is colour/opacity only
   and must survive the `prefers-reduced-motion` block at the top of the
   file.
 - ALL persistent state roots in ONE directory resolved by

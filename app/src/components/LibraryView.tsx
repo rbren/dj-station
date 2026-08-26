@@ -361,6 +361,13 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
         </div>
       )}
 
+      {active && results.length === 0 && !searching && (
+        <p className="library-empty" data-testid="store-empty">
+          Nothing from {active.name} on screen — search above, and results land here with a Download
+          button.
+        </p>
+      )}
+
       {active && results.length > 0 && (
         <div className="provider-results">
           <h2>{active.name} results</h2>

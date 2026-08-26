@@ -1,4 +1,4 @@
-/* Design tokens (DESIGN_OVERHAUL.md §A). Everything visual should reach
+/* Design tokens. Everything visual should reach
    for one of these instead of a fresh literal: sizes come from ONE scale,
    ink from three contrast levels, and colour meaning is fixed —
    --brand for signal/selection, --cue for "armed, look here", --fault for
@@ -14,6 +14,9 @@
 
   /* Type scale. --fs-nano/-micro are panel legends and axis marks only;
      anything a user reads as a sentence starts at --fs-sm. */
+  /* Numerals painted inside a glyph (an EQ handle, a piano key) — never
+     prose, and never a size for a label. */
+  --fs-mark: 8px;
   --fs-nano: 10px;
   --fs-micro: 11px;
   --fs-xs: 12px;
@@ -32,9 +35,9 @@
   --line: #2a2e35;
   --line-strong: #414854;
 
-  /* Ink: 14.4 / 8.4 / 5.9 : 1 on --canvas. */
-  /* §C5 — three inks, and the dimmest of them still clears 4.5:1 on
-     --surface; nothing a user has to read goes below --ink-dim. */
+  /* Three inks — 14.4 / 8.4 / 5.9 : 1 on --canvas. The dimmest still
+     clears 4.5:1 on --surface, so nothing a user has to read is allowed
+     below --ink-dim. */
   --ink: #e8eaee;
   --ink-muted: #aab3c0;
   --ink-dim: #8b95a3;
@@ -49,8 +52,10 @@
   --warn: #e0b78f;
   --fault: #e05c5c;
 
-  /* One waveform colour for the whole app (deck, clip, beatify). */
+  /* One waveform colour for the whole app (deck, clip, beatify), and one
+     violet that means "loop" wherever a loop is drawn. */
   --wave: #3f7fbf;
+  --loop: #7a5fd4;
   --wave-strong: #6fa8dc;
 
   --radius-sm: 4px;
@@ -76,17 +81,17 @@
   color: var(--ink);
 }
 
-/* Quality floor (DESIGN_OVERHAUL.md §C1): every interactive surface shows
-   where the keyboard is. Applied globally so a new control cannot opt out
-   by omission — and :focus-visible only, so pointer users see nothing. */
+/* Every interactive surface shows where the keyboard is. Applied
+   globally so a new control cannot opt out by omission, and
+   :focus-visible only, so pointer users see nothing. */
 :focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
-/* §C2: no continuous animation, and no transitions, for anyone who asked
-   the OS not to see them. The volatile-jack pulse keeps a static ring so
+/* No continuous animation, and no transitions, for anyone who asked the
+   OS not to see them. The volatile-jack pulse keeps a static ring so
    the information it carries survives. */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -99,7 +104,7 @@
   }
 }
 
-/* §A4 — one button language. Feature areas still override colour and
+/* One button language. Feature areas still override colour and
    padding where they must, but they all start from the same surface,
    radius, type size and state model, and none of them has to re-invent
    "disabled" or "hover". Transitions are colour-only: never a layout
@@ -121,22 +126,12 @@ button {
     opacity var(--dur-fast) var(--ease);
 }
 
-/* The default look for a page-chrome button nobody styled — until now
-   those fell back to the webview's own light chrome (Library's Search and
-   Edit did exactly that). Two safety rails: the selector is wrapped in
-   :where() so it carries ZERO specificity (any widget that paints itself
-   still wins), and it sets no padding, so no button changes size. */
-:where(
-    .library,
-    .clip-view,
-    .beatify-view,
-    .beatify-modal,
-    .app-header,
-    .file-dialog,
-    .module-picker,
-    .docs-panel
-  )
-  button {
+/* The default look for any control nobody styled. Without it the webview
+   paints its own light chrome — a grey OS button or a white text field —
+   in the middle of a dark rack. Two safety rails: :where() carries ZERO
+   specificity, so anything that paints itself still wins, and no padding
+   is set, so no control changes size. */
+:where(button) {
   color: var(--ink);
   background: var(--surface-raised);
   border: 1px solid var(--line-strong);
@@ -144,35 +139,18 @@ button {
   font-size: var(--fs-sm);
 }
 
-:where(
-    .library,
-    .clip-view,
-    .beatify-view,
-    .beatify-modal,
-    .app-header,
-    .file-dialog,
-    .module-picker,
-    .docs-panel
-  )
-  button:hover:not(:disabled) {
+:where(button):hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--brand) 50%, var(--line-strong));
   background: color-mix(in srgb, var(--brand) 8%, var(--surface-raised));
 }
 
-/* Same story for text fields and selects: Beatify's BPM box was still a
-   white webview input in the middle of a dark rack. Zero specificity, no
-   padding, so nothing that styles itself is affected. */
+/* Native widgets whose appearance IS their meaning (a tick, a dot, a
+   fader, a colour well) are left to the platform. */
 :where(
-    .library,
-    .clip-view,
-    .beatify-view,
-    .beatify-modal,
-    .app-header,
-    .file-dialog,
-    .module-picker,
-    .docs-panel
-  )
-  :is(input, select, textarea) {
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file']),
+  select,
+  textarea
+) {
   color: var(--ink);
   background: var(--canvas);
   border: 1px solid var(--line);
@@ -213,7 +191,7 @@ button[aria-disabled='true'] {
 }
 
 /* Every value the user reads as a number uses the same tabular face, so
-   digits stop dancing as they update (§A2). */
+   digits stop dancing as they update. */
 .mono,
 .deck-time,
 .deck-bpm,
@@ -223,8 +201,8 @@ button[aria-disabled='true'] {
   font-variant-numeric: tabular-nums;
 }
 
-/* §D9 — the app had two range sliders left in the browser's default
-   blue; this is the one appearance they share. */
+/* The one appearance every range in the app shares; without it a slider
+   falls back to the browser's default blue. */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
@@ -253,7 +231,7 @@ input[type='range']::-moz-range-thumb {
   background: var(--brand);
 }
 
-/* §D11 — one empty-state treatment for every surface that can be empty:
+/* One empty-state treatment for every surface that can be empty:
    readable size, real breathing room, and a muted supporting line. */
 .empty-state,
 .rack-empty,
@@ -293,7 +271,7 @@ body {
   overflow: hidden;
 }
 
-/* The instrument's fascia (§B1): the wordmark has presence, the tabs read
+/* The instrument's fascia: the wordmark has presence, the tabs read
    as one segmented control, and engine state is a status pill so a broken
    engine can never look like a healthy one. */
 .app-header {
@@ -422,7 +400,7 @@ body {
   transition: box-shadow var(--dur-fast) var(--ease);
 }
 
-/* §B4 — an elevation scale, in shadow only, so a hovered or selected
+/* An elevation scale, in shadow only, so a hovered or selected
    panel reads as lifted without a single measured box moving. */
 .module-panel-placed:hover {
   box-shadow: var(--shadow-raised);
@@ -466,10 +444,10 @@ body {
   padding: 0 10px;
   border-bottom: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.18);
-  /* §A3: the category hue belongs to the panel edge, not to the words.
-     Eight saturated title colours turned a rack into a rainbow; the name
-     is now plain ink and the accent survives as the bar's under-rule and
-     the panel's top border. */
+  /* The category hue belongs to the panel edge, not to the words: eight
+     saturated title colours make a rack a rainbow. The name is plain ink
+     and the accent survives as the bar's under-rule and the panel's top
+     border. */
   color: var(--ink);
   box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
@@ -588,12 +566,18 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--fs-xs);
   min-width: 0;
   position: relative;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
 }
 
-/* §C4 — patching is the rack's core gesture and the socket is 16px tall.
+/* Patching is the rack's core gesture and the socket is 16px tall.
    A transparent overlay grows the target without moving a single pixel of
    the packed panel layout. */
 .jack::after {
@@ -676,7 +660,7 @@ body {
   }
 }
 
-/* §C2 — the pulse is information ("this signal is too fast to draw"), so
+/* The pulse is information ("this signal is too fast to draw"), so
    when motion is off it becomes a static ring rather than nothing. */
 @media (prefers-reduced-motion: reduce) {
   .jack-glow-volatile {
@@ -722,7 +706,7 @@ body {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, var(--line-strong), #262a31 70%);
+  background: radial-gradient(circle at 35% 30%, var(--line-strong), var(--line) 70%);
   border: 2px solid var(--line-strong);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
@@ -752,7 +736,7 @@ body {
   bottom: 1px;
   width: 4px;
   transform: translateX(-50%);
-  background: #0d1014;
+  background: var(--surface-sunken);
   border: 1px solid var(--line);
   border-radius: 2px;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
@@ -765,7 +749,7 @@ body {
   height: 7px;
   transform: translate(-50%, 50%);
   background: linear-gradient(180deg, #4a515c, #2e333b);
-  border: 1px solid #1a1d22;
+  border: 1px solid var(--canvas);
   border-radius: 2px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
@@ -786,7 +770,7 @@ body {
   width: 22px;
   height: 13px;
   border-radius: 3px;
-  background: #23272e;
+  background: var(--surface-raised);
   border: 1px solid var(--line-strong);
 }
 
@@ -827,7 +811,7 @@ body {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, var(--line-strong), #262a31 70%);
+  background: radial-gradient(circle at 35% 30%, var(--line-strong), var(--line) 70%);
   border: 2px solid var(--line-strong);
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.5),
@@ -901,7 +885,7 @@ body {
 
 .fader-track {
   position: absolute;
-  background: #0d1014;
+  background: var(--surface-sunken);
   border: 1px solid var(--line);
   border-radius: 2px;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
@@ -926,7 +910,7 @@ body {
 .fader-cap {
   position: absolute;
   background: linear-gradient(180deg, #4a515c, #2e333b);
-  border: 1px solid #1a1d22;
+  border: 1px solid var(--canvas);
   border-radius: 3px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
@@ -1001,7 +985,7 @@ body {
   z-index: 100;
   top: 40px;
   left: 0;
-  background: #23272e;
+  background: var(--surface-raised);
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   padding: 8px;
@@ -1060,7 +1044,7 @@ body {
       var(--fault) 54%,
       transparent 56%
     ),
-    #23272e;
+    var(--surface-raised);
 }
 
 .jack-color-selected {
@@ -1129,7 +1113,7 @@ body {
    live position. Both are moved by the rAF loop in AdsrUI, so they must
    not carry CSS transitions — a transition would lag the frame updates. */
 .adsr-trail {
-  stroke: #b9f0ff;
+  stroke: color-mix(in srgb, var(--brand) 55%, #fff);
   stroke-width: 3.5;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1201,7 +1185,7 @@ body {
   font-size: var(--fs-nano);
   font-weight: 700;
   line-height: 1;
-  color: #0d1013;
+  color: var(--surface-sunken);
   text-align: center;
 }
 
@@ -1295,7 +1279,7 @@ body {
   border: 1px solid var(--line);
   background: var(--canvas);
   color: var(--ink-dim);
-  font-size: 9px;
+  font-size: var(--fs-nano);
   line-height: 14px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -1313,7 +1297,7 @@ body {
 .stepseq-lamp.playing {
   background: #fff;
   border-color: #fff;
-  color: #10151b;
+  color: var(--canvas);
   font-weight: 700;
   box-shadow:
     0 0 6px #fff,
@@ -1388,7 +1372,7 @@ body {
 
 .euclid-count {
   fill: var(--ink-dim);
-  font-size: 9px;
+  font-size: var(--fs-nano);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1442,7 +1426,7 @@ body {
 
 .lfo-axis,
 .shaper-axis {
-  stroke: #262c35;
+  stroke: var(--line);
   stroke-width: 1;
 }
 
@@ -1475,7 +1459,7 @@ body {
 
 .eq-grid-label {
   fill: var(--ink-dim);
-  font-size: 9px;
+  font-size: var(--fs-nano);
 }
 
 .eq-handle {
@@ -1484,7 +1468,7 @@ body {
 
 .eq-handle-label {
   fill: var(--canvas);
-  font-size: 7px;
+  font-size: var(--fs-mark);
   font-weight: 700;
   pointer-events: none;
   user-select: none;
@@ -1499,7 +1483,7 @@ body {
   white-space: nowrap;
 }
 
-/* §D3 — one readable ink for every band, with the band's own colour kept
+/* One readable ink for every band, with the band's own colour kept
    as a dot in front of it. */
 .eq-readout-band {
   display: inline-flex;
@@ -1552,7 +1536,7 @@ body {
 }
 
 .scope-axis {
-  stroke: #262c35;
+  stroke: var(--line);
   stroke-width: 1;
 }
 
@@ -1596,7 +1580,7 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--canvas);
-  border: 1px solid #262c35;
+  border: 1px solid var(--line);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -1645,7 +1629,7 @@ body {
 }
 
 .camera-error {
-  color: #d47a6a;
+  color: var(--fault);
 }
 
 .camera-toggle {
@@ -1735,11 +1719,11 @@ body {
 
 .quantizer-key.black {
   height: 36px;
-  background: #101318;
+  background: var(--surface-sunken);
 }
 
 .quantizer-key .quantizer-key-label {
-  font-size: 8px;
+  font-size: var(--fs-mark);
   color: var(--ink-dim);
   pointer-events: none;
 }
@@ -1751,7 +1735,7 @@ body {
 }
 
 .quantizer-key.active .quantizer-key-label {
-  color: #10151b;
+  color: var(--canvas);
   font-weight: 700;
 }
 
@@ -1860,7 +1844,7 @@ body {
   padding: 4px 6px;
 }
 
-/* §D1/§D2 — one content measure for the whole page, so a title and its
+/* One content measure for the whole page, so a title and its
    metadata are never 1400px apart on a wide window. */
 .library > * {
   max-width: 1180px;
@@ -1895,7 +1879,7 @@ body {
 }
 
 .library-status {
-  color: var(--ok);
+  color: var(--ink-muted);
   font-size: var(--fs-md);
 }
 
@@ -2013,7 +1997,7 @@ body {
   height: 40px;
   object-fit: cover;
   border-radius: 3px;
-  background: #0f1116;
+  background: var(--surface-sunken);
   flex: none;
 }
 
@@ -2026,7 +2010,7 @@ body {
   border: 1px solid var(--line);
 }
 
-/* §D1 — where a track came from and what licence it carries are facts,
+/* Where a track came from and what licence it carries are facts,
    not states: they read in neutral ink so the analysis column is the only
    coloured thing in the row. */
 .tag-source,
@@ -2034,17 +2018,9 @@ body {
   color: var(--ink-dim);
 }
 
-/* A licence that grants more than the default is worth one word of
-   colour. */
-.tag-license-cc0,
-.tag-license-public-domain {
-  color: var(--ok);
-}
-
-/* §D1 — the track list is the thing a DJ scans, so it gets a scannable
-   measure instead of the full 1600px window, a real header row, row
-   hover, and tabular figures for the three columns that are numbers
-   (length, BPM, key). Structure and markup are untouched. */
+/* The track list is the thing a DJ scans: a scannable measure instead of
+   the full window width, a header row, row hover, and tabular figures for
+   the three columns that are numbers (length, BPM, key). */
 .library-tracks table {
   width: 100%;
   max-width: 1180px;
@@ -2137,13 +2113,12 @@ body {
   pointer-events: none;
 }
 
-/* §C3 — overlays arrive instead of appearing. Opacity only: nothing
+/* Overlays arrive instead of appearing. Opacity only: nothing
    moves, so nothing that measures a box can be surprised. The reduced
    motion block at the top of the file turns this off. */
 .module-picker-backdrop,
 .file-dialog-backdrop,
-.docs-backdrop,
-.beatify-modal-backdrop {
+.docs-backdrop {
   animation: overlay-in var(--dur-slow) var(--ease);
 }
 
@@ -2153,14 +2128,15 @@ body {
   }
 }
 
-/* §D12 — every overlay in the app now shares one recipe: --scrim behind
+/* Every overlay in the app shares one recipe: --scrim behind
    it, --surface in front, --radius-lg corners, --shadow-overlay under. */
 .module-picker {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   width: min(1040px, calc(100vw - 64px));
-  height: min(720px, calc(100vh - 64px));
+  /* Hug the list: a two-clip library should not open a 720px box. */
+  max-height: min(720px, calc(100vh - 64px));
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-overlay);
@@ -2305,7 +2281,7 @@ body {
 /* Fixed-height window on to the scaled-down panel: the panel keeps its
    natural size and is scaled from the top-left, so the window crops tall
    panels rather than squashing them. */
-/* §D10 — the preview is a real panel clipped to a 150px window, so most
+/* The preview is a real panel clipped to a 150px window, so most
    cards show a panel cut in half. Fading the bottom edge makes the cut
    read as a decision rather than an accident. */
 .picker-preview {
@@ -2396,22 +2372,13 @@ body {
   color: var(--cue);
 }
 
-.jack {
-  background: none;
-  border: none;
-  color: inherit;
-  font: inherit;
-  padding: 0;
-  cursor: pointer;
-}
-
 /* Outputs live in a dashed box on a lighter shade of the panel gray
    (convention: anything inside the dashed box is a source). Output
    groups get a small caption and flow left-to-right. */
 .module-outputs {
   border: 1px dashed var(--line-strong);
   border-radius: 6px;
-  background: #262a31;
+  background: var(--line);
   margin-top: 8px;
   padding: 4px 8px 5px;
   display: flex;
@@ -2492,33 +2459,24 @@ body {
   pointer-events: none;
 }
 
+/* Title-bar glyphs: quiet until pointed at, and padded to a target you
+   can actually hit rather than the size of the character. */
+.module-docs-btn,
 .module-remove {
   margin-left: auto;
   background: none;
   border: none;
-  color: #565e6b;
-  font-size: var(--fs-xl);
+  color: var(--ink-dim);
+  font-size: var(--fs-lg);
   line-height: 1;
-  padding: 6px 8px;
+  padding: 8px 10px;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .module-remove:hover {
   color: var(--fault);
   background: var(--line);
-}
-
-.module-docs-btn {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: #565e6b;
-  font-size: var(--fs-xl);
-  line-height: 1;
-  padding: 6px 8px;
-  cursor: pointer;
-  border-radius: 3px;
 }
 
 .module-docs-btn:hover {
@@ -2639,8 +2597,8 @@ body {
 }
 
 .launchcontrol-led-on {
-  background: #49d17a;
-  border-color: #49d17a;
+  background: var(--ok);
+  border-color: var(--ok);
   box-shadow: 0 0 6px rgba(73, 209, 122, 0.7);
 }
 
@@ -2654,9 +2612,9 @@ body {
 }
 
 .launchcontrol-active-on {
-  border-color: #49d17a;
-  color: #0e1319;
-  background: #49d17a;
+  border-color: var(--ok);
+  color: var(--canvas);
+  background: var(--ok);
 }
 
 .launchcontrol-owner {
@@ -2873,8 +2831,8 @@ body {
   border-radius: 6px;
   cursor: pointer;
   display: grid;
-  /* §D2 — the clip's name and the project it came from belong together;
-     only the two numeric columns are pushed to the right. */
+  /* The clip's name and the project it came from belong together; only
+     the two numeric columns are pushed to the right. */
   grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto;
   gap: 4px 14px;
   padding: 7px 10px;
@@ -2944,15 +2902,18 @@ body {
   padding: 2px 4px;
 }
 
-/* §B2 — during a mix these are the only numbers that matter, so they are
+/* During a mix these are the only numbers that matter, so they are
    the loudest thing in the panel instead of the quietest. */
 .deck-time,
 .deck-bpm {
-  font-size: var(--fs-xl);
   font-weight: 600;
   letter-spacing: -0.01em;
-  color: var(--ink);
   font-variant-numeric: tabular-nums;
+}
+
+.deck-time {
+  font-size: var(--fs-xl);
+  color: var(--ink);
 }
 
 .deck-bpm {
@@ -2980,7 +2941,7 @@ body {
 }
 
 .waveform-peaks {
-  fill: #3f7fbf;
+  fill: var(--wave);
   opacity: 0.85;
 }
 
@@ -2990,7 +2951,7 @@ body {
 }
 
 .waveform-cue {
-  stroke: #4fd47a;
+  stroke: var(--ok);
   stroke-width: 2;
 }
 
@@ -3000,7 +2961,7 @@ body {
 }
 
 .waveform-loop {
-  fill: #7a5fd4;
+  fill: var(--loop);
   opacity: 0.18;
 }
 
@@ -3010,10 +2971,10 @@ body {
 
 .deck-btn,
 .deck-cue {
-  background: #1a212b;
+  background: var(--surface-raised);
   color: inherit;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 3px 8px;
   font: inherit;
   font-size: var(--fs-sm);
@@ -3021,20 +2982,23 @@ body {
 }
 
 .deck-btn.active {
-  background: #2c5f8a;
-  border-color: #3f7fbf;
+  background: color-mix(in srgb, var(--brand) 28%, var(--canvas));
+  border-color: color-mix(in srgb, var(--brand) 70%, var(--line-strong));
 }
 
+/* An empty cue is quiet in ink, not in opacity: dimming the whole button
+   took its border with it, and these are pressed mid-mix. */
 .deck-cue {
-  width: 26px;
+  min-width: 32px;
+  padding: 5px 8px;
   text-align: center;
-  opacity: 0.55;
+  color: var(--ink-dim);
 }
 
 .deck-cue.set {
-  opacity: 1;
-  background: #1f4d31;
-  border-color: #4fd47a;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ok) 22%, var(--canvas));
+  border-color: var(--ok);
 }
 
 .deck-sync {
@@ -3053,7 +3017,7 @@ body {
 }
 
 .deck-saved-loop {
-  border-color: #7a5fd4;
+  border-color: var(--loop);
 }
 
 /* ------------------------------------------------------------------ */
@@ -3068,7 +3032,7 @@ body {
 
 .deck-stem input[type='range'] {
   width: 56px;
-  accent-color: #3f7fbf;
+  accent-color: var(--wave);
 }
 
 .deck-btn.muted {
@@ -3210,7 +3174,7 @@ body {
 
 .collapse-macro-btn {
   background: var(--cue);
-  color: #14181e;
+  color: var(--canvas);
   border: none;
   border-radius: 4px;
   padding: 4px 10px;
@@ -3225,7 +3189,7 @@ body {
 }
 
 .collapse-macro-form input {
-  background: #14181e;
+  background: var(--canvas);
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -3256,15 +3220,17 @@ body {
   margin-bottom: 2px;
 }
 
-/* --- Error surfaces -------------------------------------------------- */
+/* --- Error surfaces ---------------------------------------------------
+   Every error surface is --fault mixed into the canvas: the same red at
+   three strengths (tint, edge, text) rather than five hand-picked reds. */
 
 .error-banner {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
   padding: 0.4rem 1rem;
-  background: #2c1c1c;
-  border-bottom: 1px solid #5a2b2b;
+  background: color-mix(in srgb, var(--fault) 16%, var(--canvas));
+  border-bottom: 1px solid color-mix(in srgb, var(--fault) 40%, var(--canvas));
   font-size: var(--fs-md);
 }
 
@@ -3285,14 +3251,14 @@ body {
 }
 
 .error-context {
-  color: #ff9d9d;
-  font-family: ui-monospace, monospace;
+  color: color-mix(in srgb, var(--fault) 60%, #fff);
+  font-family: var(--font-mono);
   flex: none;
 }
 
 .error-message {
   flex: 1;
-  color: #e6d2d2;
+  color: color-mix(in srgb, var(--fault) 18%, var(--ink));
   word-break: break-word;
 }
 
@@ -3300,7 +3266,7 @@ body {
 .error-clear {
   background: none;
   border: none;
-  color: #c96a6a;
+  color: color-mix(in srgb, var(--fault) 80%, var(--ink-dim));
   cursor: pointer;
   flex: none;
 }
@@ -3311,17 +3277,17 @@ body {
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.6rem;
-  border: 1px solid #5a2b2b;
-  border-radius: 6px;
-  background: #241a1a;
-  color: #e6d2d2;
+  border: 1px solid color-mix(in srgb, var(--fault) 40%, var(--canvas));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fault) 12%, var(--canvas));
+  color: color-mix(in srgb, var(--fault) 18%, var(--ink));
   font-size: var(--fs-md);
   max-width: 320px;
 }
 
 .error-card-message {
-  font-family: ui-monospace, monospace;
-  color: #ff9d9d;
+  font-family: var(--font-mono);
+  color: color-mix(in srgb, var(--fault) 60%, #fff);
   word-break: break-word;
 }
 
@@ -3335,7 +3301,7 @@ body {
 .context-menu {
   position: fixed;
   z-index: 300;
-  background: #23272e;
+  background: var(--surface-raised);
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   padding: 4px;
@@ -3467,7 +3433,7 @@ body {
 .docs-jacks td {
   padding: 4px 8px 4px 0;
   vertical-align: top;
-  border-top: 1px solid #22262c;
+  border-top: 1px solid var(--line);
   line-height: 1.4;
 }
 
@@ -3522,7 +3488,7 @@ body {
 .choreo-scroll {
   overflow-x: auto;
   overflow-y: hidden;
-  border: 1px solid #22262c;
+  border: 1px solid var(--line);
   border-radius: 4px;
   background: #0d0f12;
 }
@@ -3534,11 +3500,11 @@ body {
 .choreo-row {
   display: flex;
   align-items: stretch;
-  border-bottom: 1px solid #1a1e24;
+  border-bottom: 1px solid var(--line);
 }
 
 .choreo-row-dragover {
-  outline: 1px dashed #5a8dee;
+  outline: 1px dashed var(--brand);
   outline-offset: -1px;
 }
 
@@ -3553,7 +3519,7 @@ body {
   gap: 2px;
   overflow: hidden;
   background: var(--canvas);
-  border-right: 1px solid #22262c;
+  border-right: 1px solid var(--line);
 }
 
 .choreo-label-main {
@@ -3588,7 +3554,7 @@ body {
 
 .choreo-kind {
   color: var(--ink-dim);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   white-space: nowrap;
 }
 
@@ -3598,7 +3564,7 @@ body {
 }
 
 .choreo-label-actions button {
-  font-size: 9px;
+  font-size: var(--fs-micro);
   padding: 0 4px;
   line-height: 14px;
 }
@@ -3615,7 +3581,7 @@ body {
   align-items: center;
   gap: 3px;
   color: var(--ink-dim);
-  font-size: 9px;
+  font-size: var(--fs-micro);
 }
 
 .choreo-row-labels {
@@ -3623,7 +3589,7 @@ body {
   flex-direction: column;
   flex: 0 0 auto;
   color: var(--ink-dim);
-  font-size: 8px;
+  font-size: var(--fs-nano);
   text-align: right;
 }
 
@@ -3651,7 +3617,7 @@ body {
 .choreo-ruler-lane {
   position: relative;
   color: var(--ink-dim);
-  font-size: 9px;
+  font-size: var(--fs-nano);
 }
 
 .choreo-ruler-num {
@@ -3662,12 +3628,12 @@ body {
 }
 
 .choreo-grid-beat {
-  stroke: #1a1e24;
+  stroke: var(--line);
   stroke-width: 1;
 }
 
 .choreo-grid-bar {
-  stroke: #2b313c;
+  stroke: var(--line-strong);
   stroke-width: 1;
 }
 
@@ -3677,16 +3643,16 @@ body {
 }
 
 .choreo-grid-octave {
-  stroke: #2b313c;
+  stroke: var(--line-strong);
   stroke-width: 1;
 }
 
 .choreo-bool-on {
-  fill: #5a8dee;
+  fill: var(--brand);
 }
 
 .choreo-zero {
-  stroke: #2b313c;
+  stroke: var(--line-strong);
   stroke-dasharray: 3 3;
 }
 
@@ -3783,10 +3749,9 @@ body {
   user-select: none;
 }
 
-/* §D4 — with no breakpoints this lane was a black strip with a green line
-   pinned to its top edge, indistinguishable from a rendering fault. The
-   dB grid is painted into the background: the lane is a fixed 90px tall
-   and spans +6 dB (y=0) to -60 dB (y=90), so unity lands at 8px and the
+/* The dB grid is painted into the background so an empty lane reads as a
+   scale rather than a rendering fault: the lane is a fixed 90px tall and
+   spans +6 dB (y=0) to -60 dB (y=90), so unity lands at 8px and the
    fainter rules mark -12 / -24 / -36 / -48 dB. */
 .clip-level-lane {
   width: 100%;
@@ -3829,8 +3794,8 @@ body {
 }
 
 .clip-selection {
-  fill: rgba(90, 141, 238, 0.25);
-  stroke: #5a8dee;
+  fill: color-mix(in srgb, var(--brand) 22%, transparent);
+  stroke: var(--brand);
   stroke-width: 2;
   /* Grabbing inside slides the selection along the audio (alt-drag takes
      the audio with it), so the interior reads as draggable. */
@@ -3939,8 +3904,8 @@ body {
   cursor: pointer;
 }
 
-/* Disabled is the shared treatment (opacity + no border, §A4); the local
-   rule only needs the dimmer ink. */
+/* Disabled is the shared treatment (opacity + no border); the local rule
+   only needs the dimmer ink. */
 .clip-tools button:disabled,
 .clip-load button:disabled,
 .clip-save button:disabled {
@@ -3948,19 +3913,18 @@ body {
   cursor: default;
 }
 
-/* §D5 — the one action on this page that produces a new track. It used to
-   wear a dark green almost indistinguishable from the eight neutral tools
-   beside it. */
+/* The one action on this page that produces a new track, among eight
+   neutral tools that must not compete with it. */
 .clip-save button.clip-save-button {
-  color: #0b1116;
-  background: var(--ok);
-  border-color: var(--ok);
+  color: var(--canvas);
+  background: var(--brand);
+  border-color: var(--brand);
   font-weight: 600;
 }
 
 .clip-save button.clip-save-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ok) 82%, #fff);
-  border-color: color-mix(in srgb, var(--ok) 82%, #fff);
+  background: color-mix(in srgb, var(--brand) 82%, #fff);
+  border-color: color-mix(in srgb, var(--brand) 82%, #fff);
 }
 
 .clip-transport {
@@ -3984,9 +3948,11 @@ body {
   cursor: default;
 }
 
+/* An engaged toggle looks the same everywhere: brand tint, brand edge —
+   the same recipe as .deck-btn.active. Green is left to "finished". */
 .clip-transport .clip-toggle-on {
-  background: #24503a;
-  border-color: #37765a;
+  background: color-mix(in srgb, var(--brand) 28%, var(--canvas));
+  border-color: color-mix(in srgb, var(--brand) 70%, var(--line-strong));
 }
 
 .clip-playhead-readout {
@@ -4056,10 +4022,9 @@ body {
   max-width: 46em;
 }
 
-/* The clip EQ reuses the EQ module's plot styling (.eq-ui etc.).
-   §D3 — it used to float as a bare island at the left edge of a 1600px
-   page with nothing to stand on. Now it is a card with a caption, so it
-   reads as one instrument instead of loose parts. */
+/* The clip EQ reuses the EQ module's plot styling (.eq-ui etc.), wrapped
+   in a captioned card so plot, knobs and readout read as one instrument
+   instead of loose parts floating on the page. */
 .clip-eq-ui {
   align-self: flex-start;
   background: var(--surface);
@@ -4100,9 +4065,8 @@ body {
   color: var(--ink-dim);
 }
 
-/* §D2 — as a stretched flex item this table spread six columns across
-   the whole window; sized to its content, the numbers sit next to the
-   names they belong to. */
+/* Sized to its content rather than stretched: six columns across the
+   whole window put every number miles from the name it belongs to. */
 .clip-regions {
   align-self: flex-start;
   min-width: 620px;
@@ -4130,8 +4094,10 @@ body {
   letter-spacing: 0.07em;
 }
 
+/* Most of what lands here is narration ("editing X", "loaded Y"), not
+   success: green is kept for states that actually completed. */
 .clip-status {
-  color: var(--ok);
+  color: var(--ink-muted);
   font-size: var(--fs-md);
 }
 
@@ -4184,7 +4150,7 @@ body {
   font-size: var(--fs-md);
 }
 
-/* §D8 — a permanent notice about an optional dependency is not an alert.
+/* A permanent notice about an optional dependency is not an alert.
    Same words (a test pins them), quiet chip instead of warning amber. */
 .beatify-tracker.fallback {
   color: var(--ink-dim);
@@ -4209,7 +4175,7 @@ body {
   max-width: 60em;
 }
 
-/* §D6 — one grid template for every row: the card takes the free space
+/* One grid template for every row: the card takes the free space
    and the two action glyphs sit in fixed columns, so they align down the
    shelf whether or not a row also carries a warning. */
 .beatify-project {
@@ -4270,12 +4236,8 @@ body {
   font-size: var(--fs-xs);
 }
 
-.beatify-open-name {
-  color: var(--ink);
-}
-
 .beatify-status {
-  color: var(--ok);
+  color: var(--ink-muted);
   font-size: var(--fs-md);
 }
 
@@ -4298,6 +4260,7 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 40;
+  animation: overlay-in var(--dur-slow) var(--ease);
 }
 
 .beatify-modal,
@@ -4429,7 +4392,7 @@ body {
 .track-picker-sub,
 .track-picker-empty,
 .track-picker-more {
-  color: #8b93a1;
+  color: var(--ink-dim);
   font-size: var(--fs-sm);
 }
 
@@ -4449,8 +4412,8 @@ body {
 .beatify-strip,
 .beatify-track-waveform {
   width: 100%;
-  background: #0e1013;
-  border: 1px solid #23262d;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
   border-radius: 6px;
 }
 
@@ -4466,7 +4429,7 @@ body {
   height: 220px;
 }
 
-/* §B5 — the same waveform the deck and the clip page draw, in the same
+/* The same waveform the deck and the clip page draw, in the same
    colour: a peak is a peak on every page. */
 .beatify-peaks,
 .beatify-track-peaks {
@@ -4812,7 +4775,7 @@ body {
   color: var(--fault);
 }
 
-/* §D9 — the modal scrolls, so its actions stay reachable: a sticky bar
+/* The modal scrolls, so its actions stay reachable: a sticky bar
    at the bottom of the scroll box with a rule above it and the modal's
    own background behind it. */
 .beatify-modal-foot {
@@ -4858,12 +4821,9 @@ body {
   gap: 10px;
   align-items: flex-start;
   min-height: 0;
-}
-
-/* Dragging beats about is a drag, not a text selection: without this
-   the browser highlights every label the pointer crosses. Inputs opt
-   back in — a clip's name is text and behaves like text. */
-.beatify-builder {
+  /* Dragging beats about is a drag, not a text selection: without this
+     the browser highlights every label the pointer crosses. Inputs opt
+     back in — a clip's name is text and behaves like text. */
   user-select: none;
 }
 
@@ -4885,9 +4845,8 @@ body {
   min-width: 0;
 }
 
-/* §D7 — 180px forced every seed title into three lines while the page
-   had 1400px of empty space; the rail is wider and its titles now elide
-   on one line (the full name stays in the button's title attribute). */
+/* Wide enough that a seed title elides on one line instead of wrapping
+   to three (the full name stays in the button's title attribute). */
 .beatify-clip-list {
   width: 248px;
   flex: none;
@@ -4923,8 +4882,8 @@ body {
   flex-wrap: wrap;
 }
 
-/* §D7 — name on one line with the facts under it, both elided: a long
-   title used to wrap to three lines and shove the stem chips down. */
+/* Name on one line with the facts under it, both elided, so a long title
+   cannot shove the stem chips down the rail. */
 .beatify-clip-list li > button:first-child {
   flex: 1;
   min-width: 0;
@@ -4967,11 +4926,27 @@ body {
   font-size: var(--fs-xs);
 }
 
+/* "no stems yet" is a fact about the source, not a warning about it: the
+   muddy amber read as a fault on a row that is working fine. */
 .beatify-clip-source-hint {
   flex-basis: 100%;
-  color: #8a7048;
+  color: var(--ink-dim);
   font-size: var(--fs-micro);
   line-height: 1.25;
+}
+
+/* A field label, not a heading: without this it inherited the track
+   title's size and shouted louder than the seed names. */
+.beatify-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+}
+
+.beatify-group input {
+  width: 3.5rem;
 }
 
 .beatify-clip-source-edit {
@@ -5025,7 +5000,7 @@ body {
 }
 
 /* On = filled and lit; off = outlined; unavailable = the disabled
-   treatment. Three states, three appearances (§D7). */
+   treatment. Three states, three appearances. */
 .beatify-seed-stems button.beatify-stem-on {
   border-color: color-mix(in srgb, var(--brand) 60%, var(--line-strong));
   background: color-mix(in srgb, var(--brand) 18%, transparent);
@@ -5070,7 +5045,7 @@ body {
 }
 
 .beatify-open-name:hover {
-  border-color: #2b3446;
+  border-color: var(--line-strong);
 }
 
 .beatify-open-name-input {
@@ -5103,8 +5078,8 @@ body {
 }
 
 .beatify-clip-danger:not(:disabled) {
-  border-color: #5a2b2b;
-  color: #e2a0a0;
+  border-color: color-mix(in srgb, var(--fault) 40%, var(--canvas));
+  color: color-mix(in srgb, var(--fault) 55%, #fff);
 }
 
 .beatify-clip-editor {
