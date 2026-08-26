@@ -1164,11 +1164,40 @@ beatify::build`.
   show (async load, dropped early seeks, seek-past-end ⇒ `ended`) are
   pinned by `StrictElement` in `tests/ClipTransport.test.ts` — reach for
   it when a playback bug is about what the element actually does.
+- THE WINDOW IS A CACHE, NOT A POSITION. A rendered (and, for a loop,
+  decoded) window can be re-entered anywhere inside itself at once, so
+  seeking into it and resuming a pause inside it must not touch the
+  backend: `withinLoaded(at)` says whether it holds the target and
+  `enter(within)` moves the position — `el.currentTime` for the element,
+  a fresh node off the KEPT `PreparedLoop` for the gapless path (hence
+  `install(source, win, prepared)`, and `drop()` where the window is
+  really gone). `seek` while playing tries that first and only renders
+  for a target outside the window; `play` tries it before every fetch, so
+  pause/resume is instant; `pause` therefore KEEPS its window. This is
+  what "I can't click to seek during playback" was: every click cost a
+  whole window of DSP, and until it landed the old source played on and
+  its playhead overwrote the click. `enter` is synchronous start to
+  finish, which is why it may install without an epoch check — but it
+  bumps the epoch, so a render in flight for somewhere else is dropped.
+- ONLY PLAYBACK MAY WRAP. `advanceTo` (the element's `timeupdate` and the
+  loop ticker — playback getting somewhere by itself) is the only
+  playhead write that can cross `range.end` and trigger `wrapAt`;
+  `setPlayhead` is the plain one every COMMAND uses. Pausing near the end
+  of a loop used to park the playhead through the wrap check, which
+  started the loop again a moment after the button said "paused" —
+  `invalidate` had the same shape, and a seek past the loop end jumped
+  the user back to its head instead of where they clicked.
+- NO STOP BUTTON ON BEATIFY. Pause keeps the playhead and Play carries on
+  from it, which leaves Stop as "pause, and also lose your place" —
+  `AudioTimeline`'s `onStop` is optional and Beatify's three surfaces
+  (track view, modal, clip editor) pass none. `ClipTransport.stop(parkAt)`
+  stays: it is how the page clears the desk or hands the speakers over.
+  The Clip page still shows its ■.
 - A LOOP ONLY DECIDES WHERE THE WRAP IS. `setLoop` never re-renders and
   never repositions: arming Loop over a selection ahead of the playhead
   plays INTO it, and dragging a selection edge while it plays does not
   interrupt a note. Playback returns to `range.start` when it CROSSES
-  `range.end` (`wrapAt`, driven from `setPlayhead`), so a range left
+  `range.end` (`wrapAt`, driven from `advanceTo`), so a range left
   behind the playhead is simply met on the next pass instead of yanking
   it backwards. What `setLoop` does do is switch OFF native wrapping
   (`el.loop` / `LoopHandle.setLooping`) whenever the loaded window is no

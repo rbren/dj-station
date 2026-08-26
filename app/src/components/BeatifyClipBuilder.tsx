@@ -253,11 +253,6 @@ export function BeatifyClipBuilder({
     transport.play(transport.playhead, { start: 0, end: live.current.clipSecs });
   }, []);
 
-  const stopClip = useCallback(() => {
-    transportRef.current?.stop(0);
-    setLive((cur) => (cur === 'clip' ? null : cur));
-  }, []);
-
   // An edit while the clip is playing has to be heard. Same split as the
   // Clip page: a change to the clip's LENGTH means every output time now
   // means something else (invalidate), anything else is a re-render of
@@ -684,7 +679,6 @@ export function BeatifyClipBuilder({
           onGrabPlacement={grabBlock}
           onRemovePlacement={(id) => setDraft((cur) => removePlacement(cur, id))}
           onTogglePlay={playClip}
-          onStop={stopClip}
           onAddRow={() => setDraft(addRow)}
           onRemoveRow={() => setDraft(removeLastRow)}
           onRename={(name) => setDraft((cur) => ({ ...cur, name }))}

@@ -6,7 +6,7 @@
 // source into a cell, the grid growing, and the rule that the source and
 // the clip never sound at once.
 
-import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BeatifyProject, BeatifySeed } from '../src/beatify';
 import type { BeatifyClipClientApi, SavedClip } from '../src/beatifyClip';
@@ -194,6 +194,11 @@ async function fourBeatsAt(col: number) {
     expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('4 beats'),
   );
   dragInto(0, col);
+}
+
+/** Let the transport's renders and continuations run to a standstill. */
+async function flushAsync() {
+  for (let i = 0; i < 4; i++) await act(async () => {});
 }
 
 /** What the editor's name box says the clip in front of you is called. */
@@ -988,6 +993,85 @@ describe('saving', () => {
     fireEvent.click(screen.getByTestId('beatify-clip-save'));
     expect(clips.save).not.toHaveBeenCalled();
     expect(screen.getByTestId('beatify-clip-note').textContent).toContain('Nothing to save');
+  });
+});
+
+// Working the transport while the pane is sounding. The window in hand
+// is the WHOLE of this seed (32.5 s, one render), so every one of these
+// gestures can be answered out of it — and a gesture that costs a fetch
+// of the same audio again is a gesture the user experiences as ignored.
+describe('the transport, mid-playback', () => {
+  const fetches = (clips: BeatifyClipClientApi) =>
+    (clips.audio as ReturnType<typeof vi.fn>).mock.calls.length;
+  const head = () => screen.getByTestId('beatify-track-playhead-readout').textContent;
+  const sounding = () => screen.getByTestId('beatify-track-play').textContent === '❚❚';
+
+  /** A press that goes nowhere: a click on the waveform, which seeks. */
+  function clickAt(beat: number) {
+    const wave = screen.getByTestId('beatify-track-waveform');
+    wave.getBoundingClientRect = () => ({ left: 0, width: 325, top: 0, height: 100 }) as DOMRect;
+    fireEvent.mouseDown(wave, { clientX: x(beat) });
+    fireEvent.mouseUp(wave, { clientX: x(beat) });
+  }
+
+  it('seeks to a click without stopping, and without fetching again', async () => {
+    const clips = await mount();
+    fireEvent.click(screen.getByTestId('beatify-track-play'));
+    await waitFor(() => expect(sounding()).toBe(true));
+    const before = fetches(clips);
+
+    clickAt(20);
+
+    expect(head()).toBe('0:10.50');
+    expect(sounding()).toBe(true);
+    await flushAsync();
+    expect(fetches(clips)).toBe(before);
+    expect(head()).toBe('0:10.50');
+  });
+
+  it('pauses where it got to, and plays on from there', async () => {
+    const clips = await mount();
+    fireEvent.click(screen.getByTestId('beatify-track-play'));
+    await waitFor(() => expect(sounding()).toBe(true));
+    clickAt(20);
+    const before = fetches(clips);
+
+    fireEvent.click(screen.getByTestId('beatify-track-play'));
+    expect(sounding()).toBe(false);
+    expect(head()).toBe('0:10.50');
+
+    fireEvent.click(screen.getByTestId('beatify-track-play'));
+    await waitFor(() => expect(sounding()).toBe(true));
+    await flushAsync();
+    expect(head()).toBe('0:10.50');
+    expect(fetches(clips)).toBe(before);
+  });
+
+  // Pausing a LOOPED pass used to be read as playback reaching the loop's
+  // right-hand edge, so a moment later the loop started itself again with
+  // the button still saying "paused".
+  it('stays paused when the loop is armed', async () => {
+    await mount();
+    selectBeats(0, 8);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('8 beats'),
+    );
+    fireEvent.click(screen.getByTestId('beatify-track-loop'));
+    fireEvent.click(screen.getByTestId('beatify-track-play'));
+    await waitFor(() => expect(sounding()).toBe(true));
+
+    fireEvent.click(screen.getByTestId('beatify-track-play'));
+    expect(sounding()).toBe(false);
+    await flushAsync();
+    expect(sounding()).toBe(false);
+  });
+
+  // Pause keeps the playhead and play carries on from it, which left Stop
+  // as a second button for "pause, and lose your place".
+  it('offers no stop button, in either pane', async () => {
+    await mount();
+    expect(screen.queryByTestId('beatify-track-stop')).toBeNull();
+    expect(screen.queryByTestId('beatify-clip-stop')).toBeNull();
   });
 });
 

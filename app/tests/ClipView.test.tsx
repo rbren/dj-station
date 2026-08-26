@@ -907,14 +907,19 @@ describe('ClipView', () => {
       fireEvent.click(screen.getByTestId('clip-play'));
       await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
 
+      const fetched = (clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls.length;
       const wave = sizeTimeline('clip-waveform');
       fireEvent.mouseDown(wave, { clientX: 400 });
       fireEvent.mouseUp(window);
 
-      // Playback re-fetches from the click instead of carrying on from the
-      // window it happened to be holding.
-      await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 4, 6));
-      expect(screen.getByTestId('clip-playhead-readout').textContent).toBe('0:04.00');
+      // Answered out of the window already in hand — the whole six
+      // seconds of this edit — rather than by fetching it all over again
+      // and only jumping once that lands, which is what made a click
+      // during playback feel ignored.
+      await waitFor(() =>
+        expect(screen.getByTestId('clip-playhead-readout').textContent).toBe('0:04.00'),
+      );
+      expect((clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(fetched);
     });
   });
 

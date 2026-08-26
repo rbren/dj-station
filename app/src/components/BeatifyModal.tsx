@@ -589,7 +589,6 @@ export function BeatifyModal({
           playhead={playhead}
           loop={loop}
           onTogglePlay={togglePlay}
-          onStop={() => transportRef.current?.stop(region ? region[0] : 0)}
           onToggleLoop={() => setLoop((v) => !v)}
           onSeek={(t) => transportRef.current?.seek(t)}
           snap={snap}

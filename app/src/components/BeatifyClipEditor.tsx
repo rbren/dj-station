@@ -55,7 +55,6 @@ export interface BeatifyClipEditorProps {
   onGrabPlacement(id: string, e: React.MouseEvent): void;
   onRemovePlacement(id: string): void;
   onTogglePlay(): void;
-  onStop(): void;
   onAddRow(): void;
   onRemoveRow(): void;
   onRename(name: string): void;
@@ -84,7 +83,6 @@ export function BeatifyClipEditor({
   onGrabPlacement,
   onRemovePlacement,
   onTogglePlay,
-  onStop,
   onAddRow,
   onRemoveRow,
   onRename,
@@ -139,9 +137,6 @@ export function BeatifyClipEditor({
           onClick={onTogglePlay}
         >
           {playing ? '❚❚' : '▶'}
-        </button>
-        <button data-testid="beatify-clip-stop" onClick={onStop}>
-          ■
         </button>
         {/* Which pane the sound is coming from, said plainly. */}
         <span

@@ -138,7 +138,12 @@ export interface AudioTimelineProps {
   playhead: number;
   loop: boolean;
   onTogglePlay(): void;
-  onStop(): void;
+  /** A ■ beside ▶, only where a page still wants one. Pause keeps the
+   *  playhead where playback got to and playing again carries on from
+   *  there, which leaves Stop as "pause, and also throw away where I
+   *  was" — a second button for a thing nobody asked it for. Beatify
+   *  passes none; the Clip page still does. */
+  onStop?(): void;
   onToggleLoop(): void;
   onSeek(secs: number): void;
   snap?: TimelineSnap;
@@ -446,9 +451,11 @@ export function AudioTimeline({
         >
           {playing ? '❚❚' : '▶'}
         </button>
-        <button data-testid={`${p}-stop`} title="Stop" onClick={onStop}>
-          ■
-        </button>
+        {onStop && (
+          <button data-testid={`${p}-stop`} title="Stop" onClick={onStop}>
+            ■
+          </button>
+        )}
         <button
           data-testid={`${p}-loop`}
           className={loop ? 'clip-toggle-on' : undefined}

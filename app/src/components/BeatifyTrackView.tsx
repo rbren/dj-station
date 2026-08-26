@@ -205,10 +205,6 @@ export function BeatifyTrackView({
     else transport.play(transport.playhead, loopRange);
   }, [loopRange]);
 
-  const stop = useCallback(() => {
-    transportRef.current?.stop(sel ? sel.start : 0);
-  }, [sel]);
-
   const seek = useCallback((secs: number) => {
     transportRef.current?.seek(Math.max(0, secs));
     setPlayhead(Math.max(0, secs));
@@ -338,7 +334,6 @@ export function BeatifyTrackView({
         playhead={playhead}
         loop={loop}
         onTogglePlay={togglePlay}
-        onStop={stop}
         onToggleLoop={() => setLoop((v) => !v)}
         onSeek={seek}
         snap={snap}

@@ -57,6 +57,10 @@ class World {
     [];
   decodes: { deferred: Deferred<PreparedLoop | null>; done?: true }[] = [];
   durationSecs = 10;
+  /** The audio clock a started loop node measures its position against.
+   *  Still by default — a test that never advances it sees a node parked
+   *  at the offset it started from. */
+  clock = 0;
   status: TransportStatus = { playing: false, playhead: 0 };
   statusCount = 0;
   webAudio = true;
@@ -152,9 +156,15 @@ class World {
         const live: LiveLoop = { offset: offsetSecs, stopped: false, looping: true };
         this.loops.push(live);
         this.check();
+        const startedAt = this.clock;
         const handle: LoopHandle = {
           duration: 4,
-          position: () => offsetSecs,
+          // What the real one does: elapsed audio time from where it
+          // entered the buffer, wrapped while it is still looping.
+          position: () => {
+            const at = offsetSecs + (this.clock - startedAt);
+            return live.looping ? at % 4 : Math.min(at, 4);
+          },
           setLooping: (on: boolean) => {
             live.looping = on;
           },
@@ -168,6 +178,11 @@ class World {
         return handle;
       },
     });
+  }
+
+  /** Let `secs` of audio time pass under whatever is playing. */
+  advance(secs: number) {
+    this.clock += secs;
   }
 
   /** Resolve everything outstanding, letting continuations run in between
@@ -497,6 +512,87 @@ describe('ClipTransport', () => {
     expect(transport.playing).toBe(false);
   });
 
+  // Working the controls WHILE IT PLAYS — the audit behind "playback is
+  // pretty rough". Every one of these is a gesture that used to cost a
+  // fetch of the whole window (seconds of nothing happening) or, worse,
+  // started the loop again behind the user's back.
+  describe('the controls, mid-playback', () => {
+    it('pauses where playback got to, and stays paused', async () => {
+      transport.play(0, { start: 0, end: 4 });
+      await world.settle();
+      expect(world.loops).toHaveLength(1);
+      const before = world.renders.length;
+
+      // A hair short of the loop's end — where every pass spends its last
+      // milliseconds. Pausing there used to read as CROSSING the loop's
+      // right-hand edge, and the wrap that crossing triggers started the
+      // whole thing again from the top a moment after the button said
+      // "paused".
+      world.advance(3.9995);
+      transport.pause();
+      await world.settle();
+
+      expect(transport.playing).toBe(false);
+      expect(world.status.playing).toBe(false);
+      expect(world.live).toBe(0);
+      expect(world.renders).toHaveLength(before);
+      expect(transport.playhead).toBeCloseTo(3.9995, 3);
+    });
+
+    it('resumes from where it paused, without fetching the loop again', async () => {
+      transport.play(0, { start: 0, end: 4 });
+      await world.settle();
+      world.advance(1.5);
+      transport.pause();
+      const renders = world.renders.length;
+      const decodes = world.decodes.length;
+
+      transport.play(transport.playhead, { start: 0, end: 4 });
+      await world.settle();
+
+      // The buffer is still decoded and still holds the answer: pressing
+      // play is a node start, not a round trip through the backend.
+      expect(world.renders).toHaveLength(renders);
+      expect(world.decodes).toHaveLength(decodes);
+      const live = world.loops.filter((l) => !l.stopped);
+      expect(live).toHaveLength(1);
+      expect(live[0].offset).toBeCloseTo(1.5, 3);
+      expect(transport.playing).toBe(true);
+    });
+
+    it('seeks inside the buffer it is holding, without fetching or decoding again', async () => {
+      transport.play(0, { start: 0, end: 4 });
+      await world.settle();
+      const renders = world.renders.length;
+      const decodes = world.decodes.length;
+
+      transport.seek(2.5);
+      await world.settle();
+
+      expect(world.renders).toHaveLength(renders);
+      expect(world.decodes).toHaveLength(decodes);
+      const live = world.loops.filter((l) => !l.stopped);
+      expect(live).toHaveLength(1);
+      expect(live[0].offset).toBeCloseTo(2.5, 3);
+      expect(live[0].looping).toBe(true);
+      // The click is answered NOW: the playhead is where it was clicked
+      // rather than wherever the old source has run on to.
+      expect(transport.playhead).toBeCloseTo(2.5, 3);
+      expect(world.peak).toBe(1);
+    });
+
+    it('fetches when the target is outside the window it holds', async () => {
+      transport.play(0, { start: 0, end: 4 });
+      await world.settle();
+      const renders = world.renders.length;
+
+      transport.seek(8);
+      await world.settle();
+      expect(world.renders.length).toBe(renders + 1);
+      expect(transport.loaded).toMatchObject({ start: 8 });
+    });
+  });
+
   describe('a loop longer than one render window', () => {
     beforeEach(() => {
       world.durationSecs = 200;
@@ -667,17 +763,18 @@ describe('ClipTransport against a strict media element', () => {
 
   it('never leaves a seek behind for the next window to apply', async () => {
     // A short loop enters at its phase, which is a real seek…
-    transport.play(0, { start: 100, end: 130 });
-    await flush();
-    transport.seek(120);
+    transport.play(120, { start: 100, end: 130 });
     // …and the window is REPLACED WHILE THAT LOAD IS STILL IN FLIGHT
     // (microtasks only: the render resolves, the blob has not loaded).
     for (let i = 0; i < 4; i++) await Promise.resolve();
     expect(el.loaded).toBe(false);
-    transport.setLoop({ start: 100, end: 104 });
+    transport.play(11, { start: 10, end: 14 });
     await flush(6);
     // The stale 20 s offset must not land on a window it was not meant
-    // for: the seek belongs to the window loaded with it.
+    // for — four seconds long, so applying it would seek past the end and
+    // end the media on the spot. The seek belongs to the window loaded
+    // with it.
+    expect(renders[renders.length - 1]).toEqual({ start: 10, len: 4 });
     expect(el.currentTime).toBeLessThanOrEqual(renders[renders.length - 1].len);
     expect(el.sounding).toBe(true);
     expect(transport.playing).toBe(true);
@@ -708,6 +805,52 @@ describe('ClipTransport against a strict media element', () => {
     expect(transport.playhead).toBe(100);
     expect(renders[renders.length - 1]).toEqual({ start: 100, len: 8 });
     expect(el.sounding).toBe(true);
+  });
+
+  it('seeks inside the window it is holding without loading anything', async () => {
+    transport.play(0, null);
+    await flush();
+    expect(renders).toHaveLength(1);
+    el.currentTime = 10;
+    el.emit('timeupdate');
+
+    // 25 s is inside the 60 s this element is holding, so the click is
+    // answered by moving the element — not by fetching sixty seconds of
+    // audio and waiting for it, which is what "I can't click to seek
+    // during playback" felt like.
+    transport.seek(25);
+    await flush(4);
+
+    expect(renders).toHaveLength(1);
+    expect(el.loads).toBe(1);
+    expect(el.currentTime).toBeCloseTo(25);
+    expect(transport.playhead).toBe(25);
+    expect(el.sounding).toBe(true);
+  });
+
+  it('resumes a pause in place, at the offset it stopped on', async () => {
+    transport.play(100, { start: 100, end: 130 });
+    await flush(4);
+    expect(renders).toHaveLength(1);
+    el.currentTime = 12;
+    el.emit('timeupdate');
+    expect(transport.playhead).toBe(112);
+
+    transport.pause();
+    expect(transport.playing).toBe(false);
+    expect(el.sounding).toBe(false);
+
+    transport.play(transport.playhead, { start: 100, end: 130 });
+    await flush(4);
+
+    // Nothing was fetched and nothing was re-loaded, so there is no
+    // silence to sit through — and no chance of the element starting at
+    // the head of the window while the seek waits for its metadata.
+    expect(renders).toHaveLength(1);
+    expect(el.loads).toBe(1);
+    expect(el.currentTime).toBeCloseTo(12);
+    expect(el.sounding).toBe(true);
+    expect(transport.playhead).toBeCloseTo(112);
   });
 
   it('plays INTO a loop armed ahead of the playhead rather than jumping to it', async () => {

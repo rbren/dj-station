@@ -28,6 +28,14 @@
 //   4. DISPOSAL IS FINAL. A disposed transport stops everything and
 //      refuses every command, so React StrictMode's mount/unmount/mount
 //      leaves nothing of the first instance behind.
+//   5. THE WINDOW IS A CACHE. What has been rendered (and decoded) can be
+//      re-entered anywhere inside itself, synchronously — so a seek into
+//      it, or a resume out of a pause, moves the position instead of
+//      fetching the same audio again and making the user wait for it.
+//   6. ONLY PLAYBACK WRAPS. Reaching the loop's end is something playback
+//      DOES (`advanceTo`); a command that puts the playhead somewhere
+//      (`setPlayhead`) never triggers a wrap, or pausing near the end of
+//      a loop starts the loop again.
 //
 // Timing values are injected so tests can drive the same code with short
 // debounces.
@@ -97,6 +105,10 @@ export class ClipTransport {
 
   private source: Source | null = null;
   private win: PlayWindow | null = null;
+  /** The decoded audio behind `win`, kept for as long as the window is —
+   *  a seek inside it, or a resume out of a pause, is then a node start
+   *  rather than another render and another decode. */
+  private prepared: PreparedLoop | null = null;
   /** The range the transport has been asked to loop, if any. */
   private loopRange: Range | null = null;
   private playingNow = false;
@@ -147,7 +159,14 @@ export class ClipTransport {
    *  starts that far into the rendered window (used to keep a loop's
    *  phase across a re-render). */
   play(fromSecs: number, loopRange: Range | null, seekWithin = 0): void {
+    if (this.disposed) return;
     this.loopRange = loopRange;
+    // Resuming a pause is not a fetch. The window in hand usually still
+    // holds where we are being asked to start — the user only pressed
+    // pause — and re-rendering it costs a second of silence and, on the
+    // media element, a load whose seek lands late enough to be heard as
+    // the loop starting from its head.
+    if (!this.playingNow && seekWithin <= 0 && this.reenter(fromSecs, loopRange)) return;
     void this.begin(fromSecs, loopRange, seekWithin);
   }
 
@@ -161,10 +180,20 @@ export class ClipTransport {
       this.epoch++;
       this.cancelTone();
       this.release();
-      this.win = null;
+      // The window is AUDIO, not a position: keep it when it still holds
+      // where the playhead has been parked, so the next Play is instant.
+      if (this.withinLoaded(at) === null) this.drop();
       this.setPlayhead(at);
       return;
     }
+    // A CLICK IS ANSWERED NOW. The audio in hand almost always covers
+    // where the user clicked, and moving the position inside it is
+    // immediate; going back to the backend for a window we are already
+    // holding is what made seeking during playback feel ignored — the
+    // old source plays on, and its playhead overwrites the click, until
+    // a whole window has been rendered.
+    const within = this.withinLoaded(at);
+    if (within !== null && this.enter(within)) return;
     this.setPlayhead(at);
     const range = this.loopRange;
     // Inside the loop, keep looping; outside it, play on from there (the
@@ -184,8 +213,11 @@ export class ClipTransport {
     this.cancelTone();
     const at = this.position();
     this.release();
-    if (at !== null) this.setPlayhead(at);
+    // Not playing FIRST, then the playhead: the window it holds is kept
+    // (a resume re-enters it), and where playback got to is a fact about
+    // a transport that has already stopped.
     this.setPlaying(false);
+    if (at !== null) this.setPlayhead(at);
   }
 
   /** Stop and park the playhead at `parkAt`, dropping the loaded window. */
@@ -194,7 +226,7 @@ export class ClipTransport {
     this.epoch++;
     this.cancelTone();
     this.release();
-    this.win = null;
+    this.drop();
     this.setPlaying(false);
     this.setPlayhead(parkAt);
   }
@@ -207,9 +239,9 @@ export class ClipTransport {
     this.cancelTone();
     const at = this.position();
     this.release();
-    this.win = null;
-    if (at !== null) this.setPlayhead(at);
+    this.drop();
     this.setPlaying(false);
+    if (at !== null) this.setPlayhead(at);
   }
 
   /** The loop range changed (selection moved, Loop toggled). Playback
@@ -274,10 +306,108 @@ export class ClipTransport {
     this.disposed = true;
     this.cancelTone();
     this.release();
-    this.win = null;
+    this.drop();
     this.detach();
     this.revokeUrl();
     this.playingNow = false;
+  }
+
+  // --- the window in hand ----------------------------------------------
+  //
+  // THE WINDOW IS A CACHE, NOT A POSITION. Once a stretch of the edit has
+  // been rendered (and, for a loop, decoded), every position inside it is
+  // reachable at once — so seeking into it, or resuming a pause inside
+  // it, must not go anywhere near the backend.
+
+  /** Seconds into the loaded window for an absolute time, or null when
+   *  the window does not hold it. The last instant is excluded: a media
+   *  element seeked to the end of what it holds ends on the spot. */
+  private withinLoaded(at: number): number | null {
+    const w = this.win;
+    if (!w) return null;
+    const within = at - w.start;
+    if (within < -EPS || within > w.end - w.start - EPS) return null;
+    return Math.max(0, within);
+  }
+
+  /** Forget the window and the audio behind it. */
+  private drop(): void {
+    this.win = null;
+    this.prepared = null;
+  }
+
+  /** Play the window in hand from `within`, starting a source if none is
+   *  live. Synchronous start to finish — no await, so nothing can
+   *  supersede it midway and it may install without an epoch check.
+   *  False when the window cannot be re-entered (nothing decoded, no
+   *  element, no blob), and the caller renders instead. */
+  private enter(within: number): boolean {
+    const w = this.win;
+    if (!w) return false;
+    this.epoch++;
+    this.cancelTone();
+    const source = this.source;
+
+    // A decoded buffer can be re-entered anywhere: start a node at the
+    // new offset, after the old one is gone (invariant 1, one slot).
+    // Whether the window belongs to the buffer is what decides the
+    // backend here — never `this.el`, whose `src` is some OTHER window's
+    // audio whenever the gapless path is the one holding this one.
+    const prepared = this.prepared;
+    if (prepared || source?.kind === 'loop') {
+      if (!prepared) return false;
+      this.release();
+      const handle = prepared.start(within);
+      handle.onEnd = this.onLoopEnd;
+      if (!w.loop) handle.setLooping(false);
+      this.install({ kind: 'loop', handle }, w, prepared);
+      this.setPlayhead(Math.min(this.host.duration(), w.start + handle.position()));
+      this.setPlaying(true);
+      return true;
+    }
+
+    // The element still holds the blob it loaded for this window, so a
+    // seek is a `currentTime` write and a resume is a `play()`.
+    const el = source?.kind === 'element' ? source.el : this.el;
+    if (!el || !el.src) return false;
+    if (!source) this.install({ kind: 'element', el }, w);
+    this.pendingSeek = within;
+    this.applyPendingSeek(el);
+    this.setPlayhead(Math.min(this.host.duration(), w.start + within));
+    this.setPlaying(true);
+    this.startElement(el);
+    return true;
+  }
+
+  /** Start playing again inside the window already in hand, if it is one
+   *  this range would have asked for. */
+  private reenter(at: number, range: Range | null): boolean {
+    const w = this.win;
+    if (!w) return false;
+    if (range) {
+      // Outside the range, or a window the range would not have loaded
+      // (it belongs to some other loop): render instead.
+      if (at < range.start - EPS || at > range.end + EPS) return false;
+      if (w.start < range.start - EPS || w.end > range.end + EPS) return false;
+    }
+    const within = this.withinLoaded(at);
+    if (within === null || !this.enter(within)) return false;
+    // Only a source holding EXACTLY the armed range may wrap itself; a
+    // window inside a longer one runs out and chains (`ranOut`).
+    const exact =
+      range !== null && Math.abs(w.start - range.start) < EPS && Math.abs(w.end - range.end) < EPS;
+    this.setNativeLoop(exact);
+    return true;
+  }
+
+  /** Start the element, swallowing what a runtime with no output device
+   *  (jsdom) or a superseded `src` throws. */
+  private startElement(el: HTMLAudioElement): void {
+    try {
+      void el.play()?.catch?.(() => {});
+    } catch {
+      // The element still holds the rendered audio; it just cannot sound.
+    }
   }
 
   // --- the one place a source is installed ----------------------------
@@ -351,7 +481,7 @@ export class ClipTransport {
         this.release();
         const handle = prepared.start(within);
         handle.onEnd = this.onLoopEnd;
-        this.install({ kind: 'loop', handle }, { start, end, loop: true });
+        this.install({ kind: 'loop', handle }, { start, end, loop: true }, prepared);
         this.setPlayhead(Math.min(duration, start + handle.position()));
         this.setPlaying(true);
         return;
@@ -378,13 +508,7 @@ export class ClipTransport {
     this.applyPendingSeek(el);
     this.setPlayhead(Math.min(duration, start + within));
     this.setPlaying(true);
-    try {
-      await el.play();
-    } catch {
-      // jsdom (and a webview with no output device) cannot play; the
-      // element still holds the rendered audio. A newer command may also
-      // have replaced the src, which aborts this play.
-    }
+    this.startElement(el);
   }
 
   /** Empty the slot: stop whatever was in it. The window is left alone —
@@ -400,9 +524,10 @@ export class ClipTransport {
   }
 
   /** Fill the empty slot. Only ever called straight after `release`. */
-  private install(source: Source, win: PlayWindow): void {
+  private install(source: Source, win: PlayWindow, prepared: PreparedLoop | null = null): void {
     this.source = source;
     this.win = win;
+    this.prepared = prepared;
     if (source.kind === 'loop') this.startTicker();
   }
 
@@ -416,7 +541,7 @@ export class ClipTransport {
     const source = this.source;
     const w = this.win;
     if (this.disposed || source?.kind !== 'element' || !w) return;
-    this.setPlayhead(Math.min(this.host.duration(), w.start + source.el.currentTime));
+    this.advanceTo(Math.min(this.host.duration(), w.start + source.el.currentTime));
   };
 
   private readonly onMeta = () => {
@@ -520,7 +645,7 @@ export class ClipTransport {
         return;
       }
       const at = this.position();
-      if (at !== null) this.setPlayhead(at);
+      if (at !== null) this.advanceTo(at);
     }, this.tickMs);
   }
 
@@ -540,11 +665,22 @@ export class ClipTransport {
     this.notify();
   }
 
+  /** Move the playhead. A COMMAND'S move, which never wraps: see below. */
   private setPlayhead(at: number): void {
     if (this.playheadNow === at) return;
-    const from = this.playheadNow;
     this.playheadNow = at;
     this.notify();
+  }
+
+  /** Playback got somewhere BY ITSELF — the only kind of move that can
+   *  cross the loop's right-hand edge and wrap. A command that puts the
+   *  playhead somewhere (a seek, a pause parking it where playback got
+   *  to, a new window starting) is not playback arriving at the edge, and
+   *  treating it as one is how pausing near the end of a loop started the
+   *  loop again a moment after the button said "paused". */
+  private advanceTo(at: number): void {
+    const from = this.playheadNow;
+    this.setPlayhead(at);
     this.wrapAt(from, at);
   }
 
