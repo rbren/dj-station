@@ -394,6 +394,17 @@ pub fn position_for_value(config: &KnobConfig, value: f32) -> f32 {
         }
         return ((value - config.min) / (config.max - config.min)).clamp(0.0, 1.0);
     }
+    // Two-position styles have exactly two reachable positions, and the
+    // search below would converge onto the snap threshold itself (0.5 —
+    // "on", but one float away from "off"). Pick the end that maps closest.
+    if matches!(config.style, KnobStyle::Switch | KnobStyle::Button) {
+        let (low, high) = (config.map(0.0), config.map(1.0));
+        return if (value - high).abs() <= (value - low).abs() {
+            1.0
+        } else {
+            0.0
+        };
+    }
     // Binary search over the monotone map; good enough for initialization.
     let (mut lo, mut hi) = (0.0f32, 1.0f32);
     let increasing = config.map(1.0) >= config.map(0.0);

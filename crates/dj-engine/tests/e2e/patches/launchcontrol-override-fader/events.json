@@ -1,0 +1,33 @@
+{
+  "seconds": 0.5,
+  "midi": [],
+  "launch_control": [
+    {
+      "instance": "lcxl1",
+      "frame": 4000,
+      "data": [
+        184,
+        77,
+        32
+      ]
+    },
+    {
+      "instance": "lcxl1",
+      "frame": 10000,
+      "data": [
+        184,
+        77,
+        96
+      ]
+    },
+    {
+      "instance": "lcxl1",
+      "frame": 16000,
+      "data": [
+        184,
+        77,
+        0
+      ]
+    }
+  ]
+}

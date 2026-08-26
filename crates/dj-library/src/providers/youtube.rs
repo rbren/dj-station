@@ -14,7 +14,7 @@
 //! `yt-dlp` is an optional runtime dependency: when it is missing every
 //! call fails with an install hint instead of panicking (the tab stays
 //! visible, see `AcquisitionHub::from_env`). Point `DJ_YTDLP_BIN` at a
-//! specific binary to override the one on `PATH`.
+//! specific binary to override the default (`/usr/local/bin/yt-dlp_macos`).
 //!
 //! Nothing here is on the RT thread, and the shell runs both search and
 //! download off the UI thread (see the app's `DownloadManager`).
@@ -37,7 +37,7 @@ pub const ENV_YTDLP_BIN: &str = "DJ_YTDLP_BIN";
 /// The escape hatch for machine-specific needs — most usefully
 /// `--cookies-from-browser firefox` when YouTube demands a sign-in.
 pub const ENV_YTDLP_ARGS: &str = "DJ_YTDLP_ARGS";
-pub const DEFAULT_BIN: &str = "yt-dlp";
+pub const DEFAULT_BIN: &str = "/usr/local/bin/yt-dlp_macos";
 
 /// Audio-only format preference: m4a/mp3 first so the file imports
 /// straight away (symphonia) and no ffmpeg post-processing is needed.

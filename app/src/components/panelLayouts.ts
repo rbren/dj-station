@@ -38,11 +38,21 @@ export interface GroupSpec {
   break?: boolean;
 }
 
+/** How an output jack draws its live value, for modules whose outputs ARE
+ *  physical controls (a MIDI control surface): the jack is topped with a
+ *  read-only dial, fader or lit pad following the signal it is putting
+ *  out. Purely a readout — the value is the module's, never the user's. */
+export type OutputControl = 'knob' | 'fader' | 'button';
+
 export interface OutputGroupSpec {
   title?: string;
   outputs: string[];
   /** Grid column count; outputs wrap freely when unset. */
   columns?: number;
+  /** Draw every jack in the group with a live value readout of this kind. */
+  control?: OutputControl;
+  /** Per-jack display labels (jack id → label); defaults to the jack id. */
+  labels?: Record<string, string>;
   /** Start this group on a new line of the output strip. */
   break?: boolean;
   /** Left inset in px (e.g. the QWERTY module's staggered key rows). */
@@ -85,12 +95,29 @@ const seqIds = (prefix: string, from: number, to: number): string[] => {
   return out;
 };
 
+/** One row of the Launch Control XL surface, drawn the way the hardware
+ *  is laid out: eight columns of it, each jack topped with a live readout
+ *  of the control it comes off and labelled by its column number, so the
+ *  panel reads as the device does (three knob rows, the faders, then the
+ *  two button rows). Jack ids are column-major (`c1_a` … `c8_ctrl`). */
+const lcRow = (title: string, suffix: string, control: OutputControl): OutputGroupSpec => {
+  const columns = [1, 2, 3, 4, 5, 6, 7, 8];
+  return {
+    title,
+    outputs: columns.map((n) => `c${n}_${suffix}`),
+    labels: Object.fromEntries(columns.map((n) => [`c${n}_${suffix}`, String(n)])),
+    columns: 8,
+    control,
+    break: true,
+  };
+};
+
 type LayoutFactory = (manifest: Manifest) => PanelLayout;
 
 /** Per-module layouts, keyed by manifest id. */
 const LAYOUTS: Record<string, LayoutFactory> = {
   'com.dj.oscillator': () => ({
-    groups: [{ inputs: ['pitch', 'fm', 'sync', 'waveform'] }],
+    groups: [{ inputs: ['pitch', 'fm', 'fm_index', 'sync', 'waveform'] }],
   }),
 
   'com.dj.vco': () => ({
@@ -172,7 +199,8 @@ const LAYOUTS: Record<string, LayoutFactory> = {
   }),
 
   // A real-mixer look: one strip per channel — stereo input jacks on top,
-  // pan knob, then the level fader — plus a master strip.
+  // pan knob, then the level fader with mute/solo under it, as on a
+  // console — plus a master strip.
   'com.dj.mixer': () => ({
     groups: [
       ...[1, 2, 3, 4, 5, 6].map((ch) => ({
@@ -183,6 +211,8 @@ const LAYOUTS: Record<string, LayoutFactory> = {
           { jack: `in${ch}_r`, label: 'R' },
           { jack: `pan${ch}`, label: 'pan' },
           { jack: `lvl${ch}`, control: 'fader' as const, hideLabel: true },
+          { jack: `mute${ch}`, label: 'mute' },
+          { jack: `solo${ch}`, label: 'solo' },
         ],
       })),
       {
@@ -249,6 +279,20 @@ const LAYOUTS: Record<string, LayoutFactory> = {
       { title: 'clock', outputs: ['clock', 'bar'] },
       { title: 'div', outputs: ['div2', 'div4', 'div8', 'div16'] },
       { title: 'mul', outputs: ['mul2', 'mul3', 'mul4'] },
+    ],
+  }),
+
+  // Clock multiplier: two controls (clock in, ratio) on one row, so the
+  // panel is as small as the module's job.
+  'com.dj.clock_mult': () => ({
+    groups: [
+      {
+        kind: 'row',
+        inputs: [
+          { jack: 'clock', label: 'clock' },
+          { jack: 'mult', label: 'mult' },
+        ],
+      },
     ],
   }),
 
@@ -726,6 +770,41 @@ const LAYOUTS: Record<string, LayoutFactory> = {
 
   'builtin.playback': () => ({
     groups: [{ inputs: [{ jack: 'play_gate', label: 'play' }, 'speed', 'loop'] }],
+  }),
+
+  'builtin.audio': () => ({
+    groups: [
+      { title: 'transport', inputs: ['play'] },
+      { title: 'tempo', inputs: ['bpm', 'speed'] },
+    ],
+    outputGroups: [
+      { title: 'audio', outputs: ['audio_l', 'audio_r'] },
+      { title: 'clock', outputs: ['clock'] },
+    ],
+  }),
+
+  // The physical surface, top to bottom: three knob rows, the faders,
+  // then the two button rows — eight columns each.
+  'builtin.launchcontrol': () => ({
+    groups: [],
+    outputGroups: [
+      lcRow('send a', 'a', 'knob'),
+      lcRow('send b', 'b', 'knob'),
+      lcRow('pan / device', 'pan', 'knob'),
+      lcRow('faders', 'fader', 'fader'),
+      lcRow('track focus', 'focus', 'button'),
+      lcRow('track control', 'ctrl', 'button'),
+    ],
+  }),
+
+  // Beat Clip: the clock owns tempo AND phase, so its two triggers sit
+  // together; the clip's own tempo is the reference they are read against.
+  'builtin.beat_clip': () => ({
+    groups: [
+      { title: 'clock', inputs: ['clock', 'reset'] },
+      { title: 'clip', inputs: ['bpm'] },
+    ],
+    outputGroups: [{ title: 'audio', outputs: ['audio_l', 'audio_r'] }],
   }),
 
   'builtin.deck': () => ({

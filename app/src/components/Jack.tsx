@@ -19,9 +19,79 @@ import { formatDisplay } from '../display';
 import { safeNumber } from '../format';
 import { useLiveJackTelemetry } from '../rackStore';
 import type { DisplaySpec, JackTelemetry, KnobConfig } from '../types';
+import { angleFor } from './Knob';
 
 /** Volatility below this renders as an ordinary value, not an alert. */
 const VOLATILE_MIN = 0.05;
+
+/** Shape of the live readout drawn above an output jack — the hardware
+ *  control the value came off (see `OutputControl` in panelLayouts). */
+export type JackReadout = 'knob' | 'fader' | 'button';
+
+/** Readouts stand for PHYSICAL controls, which put out a unipolar 0..10 V
+ *  (`SIGNAL_MAX`) sweep, so that is the scale they are drawn against; a
+ *  negative reading simply sits at the bottom of the travel. */
+export const READOUT_FULL_SCALE = 10;
+
+/** Gate threshold — the engine's ≥ 1 V "on", the same law switches use. */
+const GATE_VOLTS = 1;
+
+export const readoutFraction = (volts: number): number =>
+  Math.min(1, Math.max(0, volts / READOUT_FULL_SCALE));
+
+/** The live value of an output jack drawn as the control it comes off: a
+ *  dial for a knob, a cap on a track for a fader, a lit pad for a button.
+ *  It reads the jack's OWN telemetry (the one `Jack` already has), so a
+ *  panel of them costs one subscription per jack and no panel re-render.
+ *  Every kind reads `display` — the smoothed field the rack store
+ *  propagates; `instantaneous` is deliberately excluded from its equality
+ *  check, so a visual driven by it would only update by coincidence. */
+function JackReadoutVisual({
+  id,
+  kind,
+  telemetry,
+}: {
+  id: string;
+  kind: JackReadout;
+  telemetry: JackTelemetry | undefined;
+}) {
+  const volts = safeNumber(telemetry?.display);
+  if (kind === 'button') {
+    const on = volts >= GATE_VOLTS;
+    return (
+      <span
+        className={`jack-readout jack-readout-pad${on ? ' jack-readout-pad-on' : ''}`}
+        data-testid={`jack-readout-${id}`}
+        data-on={on ? 'yes' : 'no'}
+      />
+    );
+  }
+  const level = readoutFraction(volts);
+  if (kind === 'fader') {
+    return (
+      <span
+        className="jack-readout jack-readout-fader"
+        data-testid={`jack-readout-${id}`}
+        data-level={level.toFixed(3)}
+      >
+        <span className="jack-readout-track" />
+        <span className="jack-readout-cap" style={{ bottom: `${level * 100}%` }} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className="jack-readout jack-readout-dial"
+      data-testid={`jack-readout-${id}`}
+      data-level={level.toFixed(3)}
+    >
+      <span
+        className="jack-readout-pointer"
+        style={{ transform: `rotate(${angleFor(level)}deg)` }}
+      />
+    </span>
+  );
+}
 
 /** Indicator color + halo for a telemetry reading (exported for tests). */
 export function indicatorStyle(telemetry: JackTelemetry | undefined): {
@@ -69,6 +139,9 @@ export interface JackProps {
   selectedColor?: string;
   onClick?(shift: boolean): void;
   showLabel?: boolean;
+  /** Draw the jack's live value as the hardware control it comes off
+   *  (a control surface's knobs, faders and buttons). */
+  readout?: JackReadout;
 }
 
 /** A Jack subscribed to its own live telemetry: a tick re-renders only the
@@ -96,6 +169,7 @@ export function Jack({
   selectedColor,
   onClick,
   showLabel = true,
+  readout,
 }: JackProps) {
   // `display` is typed number but crosses IPC as JSON, where a non-finite
   // f32 becomes `null` — read it defensively.
@@ -109,12 +183,15 @@ export function Jack({
   return (
     <button
       type="button"
-      className={`jack jack-${kind}${wired ? ' jack-wired' : ''}${selected ? ' jack-selected' : ''}`}
+      className={`jack jack-${kind}${wired ? ' jack-wired' : ''}${selected ? ' jack-selected' : ''}${
+        readout ? ' jack-with-readout' : ''
+      }`}
       data-testid={`jack-${kind}-${id}`}
       data-tip={tooltip}
       style={selected && selectedColor ? { outlineColor: selectedColor } : undefined}
       onClick={(e) => onClick?.(e.shiftKey)}
     >
+      {readout && <JackReadoutVisual id={id} kind={readout} telemetry={telemetry} />}
       {/* The socket is the wire anchor point (data-jack), styled like a
           hardware panel jack: metal ring around a dark bore. */}
       <span className="jack-socket" data-jack={`${instance}:${kind}:${id}`}>

@@ -76,9 +76,12 @@ impl ExtensionRegistry {
             crate::qwerty::qwerty_manifest(),
             crate::choreo::choreo_manifest(),
             crate::playback::playback_manifest(),
+            crate::audio::audio_manifest(),
+            crate::beat_clip::beat_clip_manifest(),
             crate::deck::deck_manifest(),
             crate::mixer::crossfader_manifest(),
             crate::hands::hands_manifest(),
+            crate::launch_control::launch_control_manifest(),
         ];
         out.extend(self.extensions.values().map(|e| e.manifest.clone()));
         out.sort_by(|a, b| {

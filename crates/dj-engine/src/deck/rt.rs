@@ -45,18 +45,8 @@ pub struct DeckModule {
     beat_pulse_left: u32,
     bar_pulse_left: u32,
 
-    // Keylock granular state (two voices, Hann OLA at 50 % hop).
-    window: Vec<f32>,
-    grain_len: usize,
-    hop: usize,
-    voice_start: [f64; 2], // track frame at grain start
-    voice_off: [usize; 2], // output samples into the grain (== grain_len: idle)
-    hop_phase: usize,
-    next_voice: usize,
-    /// WSOLA scratch: the previous grain's natural continuation (channel 0),
-    /// preallocated at construction.
-    corr_ref: Vec<f32>,
-    search_radius: usize,
+    /// Keylock's grain scheduler (idle while keylock is off).
+    grains: GrainStretch,
 
     engine_frame: u64,
 }
@@ -68,13 +58,6 @@ impl DeckModule {
         shared: Arc<DeckShared>,
         engine_rate: f32,
     ) -> Self {
-        let grain_len = ((engine_rate as f64 * KEYLOCK_GRAIN_SECS) as usize).max(64) & !1;
-        let window: Vec<f32> = (0..grain_len)
-            .map(|n| {
-                let x = n as f64 / grain_len as f64;
-                (0.5 - 0.5 * (2.0 * std::f64::consts::PI * x).cos()) as f32
-            })
-            .collect();
         DeckModule {
             cmd_rx,
             garbage_tx,
@@ -103,46 +86,9 @@ impl DeckModule {
             prev_cue: [false; N_CUES],
             beat_pulse_left: 0,
             bar_pulse_left: 0,
-            window,
-            grain_len,
-            hop: grain_len / 2,
-            voice_start: [0.0; 2],
-            voice_off: [grain_len; 2],
-            hop_phase: 0,
-            next_voice: 0,
-            corr_ref: vec![0.0; (engine_rate as f64 * KEYLOCK_CORR_SECS) as usize],
-            search_radius: (engine_rate as f64 * KEYLOCK_SEARCH_SECS) as usize,
+            grains: GrainStretch::new(engine_rate),
             engine_frame: 0,
         }
-    }
-
-    /// WSOLA grain alignment: pick the start position within
-    /// ±`search_radius` of `target` whose channel-0 content best matches
-    /// the natural continuation of the currently playing grain. Bounded
-    /// work, no allocation (scratch preallocated).
-    fn align_grain_start(&mut self, target: f64, natural: f64, step: f64) -> f64 {
-        let Some(track) = self.track.as_ref() else {
-            return target;
-        };
-        let ch0 = &track.channels[0];
-        for (k, r) in self.corr_ref.iter_mut().enumerate() {
-            *r = Self::sample_at(ch0, natural + k as f64 * step);
-        }
-        let mut best_d = 0i64;
-        let mut best_score = f32::NEG_INFINITY;
-        let radius = self.search_radius as i64;
-        for d in -radius..=radius {
-            let cand = target + d as f64;
-            let mut score = 0.0f32;
-            for (k, &r) in self.corr_ref.iter().enumerate() {
-                score += r * Self::sample_at(ch0, cand + k as f64 * step);
-            }
-            if score > best_score {
-                best_score = score;
-                best_d = d;
-            }
-        }
-        target + best_d as f64
     }
 
     fn apply_cmd(&mut self, cmd: DeckCmd) {
@@ -223,9 +169,7 @@ impl DeckModule {
     }
 
     fn reset_grains(&mut self) {
-        self.voice_off = [self.grain_len; 2];
-        self.hop_phase = 0;
-        self.next_voice = 0;
+        self.grains.reset();
     }
 
     /// Master's position extrapolated to this deck's current engine frame.
@@ -278,29 +222,12 @@ impl DeckModule {
         Some(base * (1.0 + (err * SYNC_PHASE_GAIN).clamp(-SYNC_CORR_CLAMP, SYNC_CORR_CLAMP)))
     }
 
-    #[inline]
-    fn sample_at(chan: &[f32], pos: f64) -> f32 {
-        if pos < 0.0 {
-            return 0.0;
-        }
-        let i0 = pos as usize;
-        if i0 >= chan.len() {
-            return 0.0;
-        }
-        let frac = (pos - i0 as f64) as f32;
-        if frac == 0.0 || i0 + 1 >= chan.len() {
-            chan[i0]
-        } else {
-            chan[i0] * (1.0 - frac) + chan[i0 + 1] * frac
-        }
-    }
-
     /// Read the track at `pos` (frames) into (l, r).
     #[inline]
     fn read_track(track: &TrackData, pos: f64) -> (f32, f32) {
-        let l = Self::sample_at(&track.channels[0], pos);
+        let l = sample_at(&track.channels[0], pos);
         let r = if track.channels.len() > 1 {
-            Self::sample_at(&track.channels[1], pos)
+            sample_at(&track.channels[1], pos)
         } else {
             l
         };
@@ -417,45 +344,21 @@ impl HostModule for DeckModule {
 
             if playing {
                 if self.keylock {
-                    // Spawn a grain every hop output samples near the
-                    // current virtual position, WSOLA-aligned to the
-                    // running grain so joins stay phase-coherent.
-                    if self.hop_phase == 0 {
-                        let v = self.next_voice;
-                        let other = 1 - v;
-                        let dir = if rate < 0.0 { -1.0 } else { 1.0 };
-                        let step = sr_ratio * dir;
-                        let start = if self.voice_off[other] < self.grain_len {
-                            let natural =
-                                self.voice_start[other] + self.voice_off[other] as f64 * step;
-                            self.align_grain_start(self.pos, natural, step)
-                        } else {
-                            self.pos
-                        };
-                        self.voice_start[v] = start;
-                        self.voice_off[v] = 0;
-                        self.next_voice = other;
-                    }
-                    self.hop_phase += 1;
-                    if self.hop_phase >= self.hop {
-                        self.hop_phase = 0;
-                    }
+                    // Grains read at the track's own rate around the
+                    // virtual playhead: the tempo is in how far `pos`
+                    // travels, so the pitch never moves. Alignment always
+                    // correlates on the mix, which the stems share.
                     let dir = if rate < 0.0 { -1.0 } else { 1.0 };
+                    let track = self.track.as_ref().unwrap();
+                    let taps = self
+                        .grains
+                        .tick(self.pos, sr_ratio * dir, &track.channels[0]);
                     if let Some(stems) = self.stems.as_ref() {
-                        // Same grains, read from the stems; the mix is the
-                        // gain-weighted stem sum (WSOLA alignment stays on
-                        // the original track, which the grains share).
-                        for v in 0..2 {
-                            let off = self.voice_off[v];
-                            if off < self.grain_len {
-                                let read = self.voice_start[v] + off as f64 * sr_ratio * dir;
-                                let w = self.window[off];
-                                for (k, st) in stems.stems.iter().enumerate() {
-                                    let (gl, gr) = Self::read_track(st, read);
-                                    stem_lr[k].0 += gl * w;
-                                    stem_lr[k].1 += gr * w;
-                                }
-                                self.voice_off[v] = off + 1;
+                        for tap in taps.iter().flatten() {
+                            for (k, st) in stems.stems.iter().enumerate() {
+                                let (gl, gr) = Self::read_track(st, tap.pos);
+                                stem_lr[k].0 += gl * tap.gain;
+                                stem_lr[k].1 += gr * tap.gain;
                             }
                         }
                         for (k, &(sl, sr)) in stem_lr.iter().enumerate() {
@@ -463,17 +366,10 @@ impl HostModule for DeckModule {
                             r += sr * self.stem_gains[k];
                         }
                     } else {
-                        let track = self.track.as_ref().unwrap();
-                        for v in 0..2 {
-                            let off = self.voice_off[v];
-                            if off < self.grain_len {
-                                let read = self.voice_start[v] + off as f64 * sr_ratio * dir;
-                                let w = self.window[off];
-                                let (gl, gr) = Self::read_track(track, read);
-                                l += gl * w;
-                                r += gr * w;
-                                self.voice_off[v] = off + 1;
-                            }
+                        for tap in taps.iter().flatten() {
+                            let (gl, gr) = Self::read_track(track, tap.pos);
+                            l += gl * tap.gain;
+                            r += gr * tap.gain;
                         }
                     }
                 } else if let Some(stems) = self.stems.as_ref() {

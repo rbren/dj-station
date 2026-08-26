@@ -1,9 +1,0 @@
-{
-  "wires": [
-    {
-      "from_jack": "out",
-      "to": "synth-2",
-      "to_jack": "rate"
-    }
-  ]
-}

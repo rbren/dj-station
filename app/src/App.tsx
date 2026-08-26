@@ -15,13 +15,18 @@ import { RackKeysContext } from './keyScope';
 import { library, type Track } from './library';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MacroBoxes } from './components/MacroBoxes';
+import { AudioUIContext } from './components/AudioPanel';
 import { DeckUIContext } from './components/DeckPanel';
 import { DocsPanel } from './components/DocsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
-import { ClipView } from './components/ClipView';
+import { ClipView, type ClipViewHandle } from './components/ClipView';
+import { beatClip, type BeatClipEntry, BEAT_CLIP_TYPE } from './beatClip';
+import { beatifyClipClient } from './beatifyClip';
+import { BeatifyView } from './components/BeatifyView';
 import { clipClient } from './clip';
+import { beatifyClient } from './beatify';
 import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
 import { GRID, snap } from './components/ModulePanel';
 import { RackModule } from './components/RackModule';
@@ -83,7 +88,10 @@ export default function App() {
   const [moduleLib, setModuleLib] = useState<Manifest[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
-  const [view, setView] = useState<'rack' | 'library' | 'clip'>('rack');
+  const [view, setView] = useState<'rack' | 'library' | 'clip' | 'beatify'>('rack');
+  // The library's Edit button opens a track in the (always mounted) clip
+  // editor, which owns what that costs the edit already in there.
+  const clipView = useRef<ClipViewHandle>(null);
   const [wireColors, setWireColors] = useState<Record<string, number>>(() =>
     loadJson(WIRE_COLORS_KEY, {}),
   );
@@ -157,6 +165,9 @@ export default function App() {
   const [docs, setDocs] = useState<null | { typeId: string; manifest: Manifest }>(null);
   // Cmd+M module picker modal.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Beatify clips offered in the picker's Clips tab, fetched while it is
+  // open (a clip saved in another tab shows up the next time it opens).
+  const [beatClips, setBeatClips] = useState<BeatClipEntry[]>([]);
   const [zoom, setZoom] = useState<number>(() => loadZoom());
   // Infinite canvas: the rack is translated by `pan` (screen px) before the
   // zoom scale, so scrolling/dragging the background opens up new area in
@@ -193,6 +204,50 @@ export default function App() {
       if (next !== prev) store.set({ positions: next });
     },
     [store],
+  );
+
+  // Layout-entry lifetime around edits that RENAME or REMOVE modules
+  // (macro collapse/break, rename, delete). The rack keeps rendering the
+  // PRE-edit snapshot until the edit's `refresh` lands — several IPC
+  // round-trips later — and anything without a layout entry falls back to
+  // `defaultPosition`: retiring entries up front teleports the old panels
+  // (and the macro box drawn around them, title bar included) to the rack
+  // origin for the whole round-trip, over whatever is parked there. So new
+  // ids are seeded FIRST (`carryPositions`, additive) and the retired
+  // entries are dropped only AFTER the refresh (`dropPositions`).
+  const carryPositions = useCallback(
+    (renames: Record<string, string>) => {
+      setPositions((prev) => {
+        let next = prev;
+        for (const [oldId, newId] of Object.entries(renames)) {
+          const at = prev[oldId];
+          if (!at) continue;
+          if (next === prev) next = { ...prev };
+          next[newId] = at;
+        }
+        if (next === prev) return prev;
+        saveJson(POSITIONS_KEY, next);
+        return next;
+      });
+    },
+    [setPositions],
+  );
+
+  const dropPositions = useCallback(
+    (ids: Iterable<string>) => {
+      setPositions((prev) => {
+        let next = prev;
+        for (const id of ids) {
+          if (!(id in prev)) continue;
+          if (next === prev) next = { ...prev };
+          delete next[id];
+        }
+        if (next === prev) return prev;
+        saveJson(POSITIONS_KEY, next);
+        return next;
+      });
+    },
+    [setPositions],
   );
 
   const setPending = useCallback((pending: PendingWire | null) => store.set({ pending }), [store]);
@@ -968,6 +1023,7 @@ export default function App() {
         moveModule(instance, spot.x, spot.y);
       }
       await refresh();
+      return instance;
     },
     [store, refresh, moveModule, moduleLib, placeMacroGroup],
   );
@@ -1129,18 +1185,13 @@ export default function App() {
       }
       await engine.syncPositions(seed);
       await engine.removeModules(topIds);
-      setPositions((prev) => {
-        const next = { ...prev };
-        for (const id of gone) delete next[id];
-        saveJson(POSITIONS_KEY, next);
-        return next;
-      });
       const { pending, selected } = store.getState();
       setSelected(selected.filter((i) => !gone.includes(i)));
       if (pending && gone.includes(pending.instance)) setPending(null);
       await refresh();
+      dropPositions(gone);
     },
-    [store, setPositions, setPending, refresh, setSelected, toTopLevel, expandGroups],
+    [store, dropPositions, setPending, refresh, setSelected, toTopLevel, expandGroups],
   );
 
   const collapseToMacro = useCallback(
@@ -1183,27 +1234,46 @@ export default function App() {
       // The engine rebuilt the selection as <instance>/<old id> nodes
       // (nested macro members gain the same prefix): carry every panel's
       // position over so nothing moves on screen.
+      const retired: string[] = [];
       if (instance) {
-        setPositions((p) => {
-          const next = { ...p };
-          for (const id of topIds) {
-            for (const key of Object.keys(next)) {
-              if (key === id || key.startsWith(`${id}/`)) {
-                next[`${instance}/${key}`] = next[key];
-                delete next[key];
-              }
-            }
-            if (!next[`${instance}/${id}`] && !macroGroups.some((g) => g.instance === id)) {
-              next[`${instance}/${id}`] = posOf(id);
-            }
+        const prevPositions = store.getState().positions;
+        const prefixed: Record<string, string> = {};
+        for (const id of topIds) {
+          for (const key of Object.keys(prevPositions)) {
+            if (key === id || key.startsWith(`${id}/`)) prefixed[key] = `${instance}/${key}`;
           }
+        }
+        carryPositions(prefixed);
+        retired.push(...Object.keys(prefixed));
+        // Units that were never placed have no entry to carry: record the
+        // default slot they render at, so they don't move either.
+        setPositions((prev) => {
+          const next = { ...prev };
+          let changed = false;
+          for (const id of topIds) {
+            const key = `${instance}/${id}`;
+            if (next[key] || macroGroups.some((g) => g.instance === id)) continue;
+            next[key] = posOf(id);
+            changed = true;
+          }
+          if (!changed) return prev;
           saveJson(POSITIONS_KEY, next);
           return next;
         });
       }
       await refresh();
+      dropPositions(retired);
     },
-    [store, refresh, setSelected, toTopLevel, macroGroups, setPositions],
+    [
+      store,
+      refresh,
+      setSelected,
+      toTopLevel,
+      macroGroups,
+      setPositions,
+      carryPositions,
+      dropPositions,
+    ],
   );
 
   // Right-click actions on macro entries in the module picker. Rename
@@ -1261,24 +1331,12 @@ export default function App() {
   const breakMacro = useCallback(
     async (group: MacroGroup) => {
       const renames = await engine.breakMacro(group.instance);
-      if (renames) {
-        setPositions((prev) => {
-          const next = { ...prev };
-          for (const [oldId, newId] of Object.entries(renames)) {
-            if (next[oldId]) {
-              next[newId] = next[oldId];
-              delete next[oldId];
-            }
-          }
-          delete next[group.instance];
-          saveJson(POSITIONS_KEY, next);
-          return next;
-        });
-      }
+      if (renames) carryPositions(renames);
       setSelected([]);
       await refresh();
+      if (renames) dropPositions([...Object.keys(renames), group.instance]);
     },
-    [refresh, setPositions, setSelected],
+    [refresh, carryPositions, dropPositions, setSelected],
   );
 
   // Rack shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z),
@@ -1364,6 +1422,46 @@ export default function App() {
       void addModule(typeId, at);
     },
     [rackEl, pan, zoom, addModule],
+  );
+
+  // The picker's Clips tab lists what Beatify has saved; only refetched
+  // while the modal is up, so a rack session costs nothing.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let live = true;
+    void beatClip.list().then((cs) => {
+      if (live && cs) setBeatClips(cs);
+    });
+    return () => {
+      live = false;
+    };
+  }, [pickerOpen]);
+
+  // Import a clip: a Beat Clip module at the center of the view, loaded
+  // with that clip (which is also what its patch entry will name). The
+  // load names the module after the clip, so the panel that lands says
+  // "chorus stack" and its position moves to that id.
+  const addClipFromPicker = useCallback(
+    (clip: BeatClipEntry) => {
+      let at: { x: number; y: number } | undefined;
+      if (rackEl) {
+        const rect = rackEl.getBoundingClientRect();
+        at = {
+          x: snap((rect.width / 2 - pan.x) / zoom),
+          y: snap((rect.height / 2 - pan.y) / zoom),
+        };
+      }
+      setPickerOpen(false);
+      void (async () => {
+        const instance = await addModule(BEAT_CLIP_TYPE, at);
+        const named = await beatClip.load(instance, clip.projectId, clip.clipId);
+        const renamedTo = named && named !== instance ? named : null;
+        if (renamedTo) carryPositions({ [instance]: renamedTo });
+        await refresh();
+        if (renamedTo) dropPositions([instance]);
+      })();
+    },
+    [rackEl, pan, zoom, addModule, refresh, carryPositions, dropPositions],
   );
 
   // Drop a module dragged out of the library at the pointer position,
@@ -1597,18 +1695,12 @@ export default function App() {
         return;
       }
       await engine.removeModule(instance);
-      setPositions((prev) => {
-        if (!(instance in prev)) return prev;
-        const next = { ...prev };
-        delete next[instance];
-        saveJson(POSITIONS_KEY, next);
-        return next;
-      });
       const pending = store.getState().pending;
       if (pending?.instance === instance) setPending(null);
       await refresh();
+      dropPositions([instance]);
     },
-    [store, setPositions, setPending, refresh, macroOwner, removeModules],
+    [store, dropPositions, setPending, refresh, macroOwner, removeModules],
   );
 
   const renameModule = useCallback(
@@ -1617,21 +1709,17 @@ export default function App() {
       // rejects duplicates/empty names — a rejection reports to the error
       // banner, resolves null, and the refresh below reverts the display.
       const newId = await engine.renameModule(instance, name);
-      if (newId && newId !== instance) {
-        setPositions((prev) => {
-          if (!(instance in prev)) return prev;
-          const next = { ...prev, [newId]: prev[instance] };
-          delete next[instance];
-          saveJson(POSITIONS_KEY, next);
-          return next;
-        });
-        setSelected(store.getState().selected.map((id) => (id === instance ? newId : id)));
+      const renamedTo = newId && newId !== instance ? newId : null;
+      if (renamedTo) {
+        carryPositions({ [instance]: renamedTo });
+        setSelected(store.getState().selected.map((id) => (id === instance ? renamedTo : id)));
         const pending = store.getState().pending;
         if (pending?.instance === instance) setPending(null);
       }
       await refresh();
+      if (renamedTo) dropPositions([instance]);
     },
-    [store, setPositions, setSelected, setPending, refresh],
+    [store, carryPositions, dropPositions, setSelected, setPending, refresh],
   );
 
   // Shared state for DeckPanel custom UIs (track list, sync candidates,
@@ -1646,6 +1734,20 @@ export default function App() {
       },
     }),
     [libraryTracks, nodes, refresh],
+  );
+
+  // Audio module panels need the track list, a refresh after a load
+  // (adopting the track's tempo moves the module's BPM/speed knobs) and
+  // the loop switch, which is a knob-backed input like play_gate.
+  const audioUI = useMemo(
+    () => ({
+      tracks: libraryTracks,
+      onLoaded: () => void refresh(),
+      setLoop: (instance: string, on: boolean) => {
+        void engine.setKnobPosition(instance, 'loop', on ? 1 : 0).then(refresh);
+      },
+    }),
+    [libraryTracks, refresh],
   );
 
   const ctxMenuItems = useMemo<ContextMenuItem[]>(() => {
@@ -1770,6 +1872,13 @@ export default function App() {
             data-testid="tab-clip"
           >
             Clip
+          </button>
+          <button
+            className={view === 'beatify' ? 'tab active' : 'tab'}
+            onClick={() => setView('beatify')}
+            data-testid="tab-beatify"
+          >
+            Beatify
           </button>
         </nav>
         <button
@@ -2021,14 +2130,33 @@ export default function App() {
           </div>
         </div>
       )}
-      {view === 'library' && <LibraryView client={library} />}
-      {view === 'clip' && (
-        <ClipView clip={clipClient} library={library} onSaved={() => void refresh()} />
+      {view === 'library' && (
+        <LibraryView
+          client={library}
+          onEdit={(t) => {
+            clipView.current?.open(t.id);
+            setView('clip');
+          }}
+        />
+      )}
+      {/* The clip editor stays mounted so the edit survives tab switches;
+          it hides itself and pauses playback while inactive. */}
+      <ClipView
+        clip={clipClient}
+        library={library}
+        active={view === 'clip'}
+        onSaved={() => void refresh()}
+        ref={clipView}
+      />
+      {view === 'beatify' && (
+        <BeatifyView client={beatifyClient} library={library} clips={beatifyClipClient} />
       )}
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}
+          clips={beatClips}
           onAdd={addFromPicker}
+          onAddClip={addClipFromPicker}
           onClose={() => setPickerOpen(false)}
           onRenameMacro={renameMacroDef}
           onDeleteMacro={deleteMacroDef}
@@ -2041,102 +2169,111 @@ export default function App() {
         <RackKeysContext.Provider value={view === 'rack'}>
           <RackStoreContext.Provider value={store}>
             <DeckUIContext.Provider value={deckUI}>
-              <div
-                className="rack-area"
-                ref={setRackEl}
-                data-testid="rack-area"
-                style={{
-                  backgroundPosition: `${pan.x}px ${pan.y}px`,
-                  backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
-                }}
-                onDragOver={onRackDragOver}
-                onDrop={onRackDrop}
-                onContextMenu={onRackContextMenu}
-                onMouseDown={(e) => {
-                  // Pressing the rack background abandons a pending wire,
-                  // clears the selection (unless shift/cmd/ctrl — additive
-                  // marquee), and arms a marquee sweep. Mousedown, not click:
-                  // selection happens on mousedown too, and the synthetic
-                  // click a module drag fires on the rack (mouseup landing
-                  // over the background) must not wipe the drag's own
-                  // selection.
-                  if (e.button !== 0) return;
-                  if ((e.target as HTMLElement).closest?.('.module-panel')) return;
-                  // The sweep must never double as a native text-selection
-                  // drag (a text selection hijacks cmd+C).
-                  e.preventDefault();
-                  const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-                  const { pending, selected } = store.getState();
-                  if (pending) setPending(null);
-                  if (!additive && selected.length > 0) setSelected([]);
-                  const p = toRackCoords(e.clientX, e.clientY);
-                  setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
-                }}
-              >
+              <AudioUIContext.Provider value={audioUI}>
                 <div
-                  className="rack"
-                  data-testid="rack"
-                  ref={setRackInnerEl}
+                  className="rack-area"
+                  ref={setRackEl}
+                  data-testid="rack-area"
                   style={{
-                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                    transformOrigin: '0 0',
+                    backgroundPosition: `${pan.x}px ${pan.y}px`,
+                    backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
+                  }}
+                  onDragOver={onRackDragOver}
+                  onDrop={onRackDrop}
+                  onContextMenu={onRackContextMenu}
+                  onMouseDown={(e) => {
+                    // Pressing the rack background abandons a pending wire,
+                    // clears the selection (unless shift/cmd/ctrl — additive
+                    // marquee), and arms a marquee sweep. Mousedown, not click:
+                    // selection happens on mousedown too, and the synthetic
+                    // click a module drag fires on the rack (mouseup landing
+                    // over the background) must not wipe the drag's own
+                    // selection.
+                    if (e.button !== 0) return;
+                    // A module's input config menu is portaled to <body>,
+                    // but its events still bubble the REACT tree to here.
+                    // Presses that landed outside the rack's own DOM subtree
+                    // are not background presses — and the preventDefault
+                    // below would cancel the mousedown's default action,
+                    // which in WebKit is what opens a <select>'s options.
+                    if (!e.currentTarget.contains(e.target as Node)) return;
+                    if ((e.target as HTMLElement).closest?.('.module-panel')) return;
+                    // The sweep must never double as a native text-selection
+                    // drag (a text selection hijacks cmd+C).
+                    e.preventDefault();
+                    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+                    const { pending, selected } = store.getState();
+                    if (pending) setPending(null);
+                    if (!additive && selected.length > 0) setSelected([]);
+                    const p = toRackCoords(e.clientX, e.clientY);
+                    setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
                   }}
                 >
-                  <MacroBoxes
-                    groups={macroGroups}
-                    zoom={zoom}
-                    onMoveGroup={(anchor, x, y, members) => moveGroup(anchor, x, y, members)}
-                    onMoveEnd={() => endModuleDrag()}
-                    onContextMenu={onMacroBoxContextMenu}
-                  />
-                  {nodes.map((node, i) => (
-                    <RackModule
-                      key={node.instance_id}
-                      instanceId={node.instance_id}
-                      index={i}
-                      refresh={refresh}
-                      moveModule={moveModule}
-                      endModuleDrag={endModuleDrag}
+                  <div
+                    className="rack"
+                    data-testid="rack"
+                    ref={setRackInnerEl}
+                    style={{
+                      transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                      transformOrigin: '0 0',
+                    }}
+                  >
+                    <MacroBoxes
+                      groups={macroGroups}
                       zoom={zoom}
-                      removeModule={removeModule}
-                      renameModule={renameModule}
-                      openDocs={openDocs}
-                      selectModule={selectModule}
-                      onJackClick={onJackClick}
-                      onContextMenu={onModuleContextMenu}
+                      onMoveGroup={(anchor, x, y, members) => moveGroup(anchor, x, y, members)}
+                      onMoveEnd={() => endModuleDrag()}
+                      onContextMenu={onMacroBoxContextMenu}
                     />
-                  ))}
-                  {nodes.length === 0 && (
-                    <p className="rack-empty">
-                      No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
-                      rack.
-                    </p>
-                  )}
-                  {marquee && (
-                    <div
-                      className="marquee"
-                      data-testid="marquee"
-                      style={{
-                        left: Math.min(marquee.x0, marquee.x1),
-                        top: Math.min(marquee.y0, marquee.y1),
-                        width: Math.abs(marquee.x1 - marquee.x0),
-                        height: Math.abs(marquee.y1 - marquee.y0),
-                      }}
-                    />
-                  )}
-                  {/* Inside the transformed rack, in rack coordinates: pan
+                    {nodes.map((node, i) => (
+                      <RackModule
+                        key={node.instance_id}
+                        instanceId={node.instance_id}
+                        index={i}
+                        refresh={refresh}
+                        moveModule={moveModule}
+                        endModuleDrag={endModuleDrag}
+                        zoom={zoom}
+                        removeModule={removeModule}
+                        renameModule={renameModule}
+                        openDocs={openDocs}
+                        selectModule={selectModule}
+                        onJackClick={onJackClick}
+                        onContextMenu={onModuleContextMenu}
+                      />
+                    ))}
+                    {nodes.length === 0 && (
+                      <p className="rack-empty">
+                        No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
+                        rack.
+                      </p>
+                    )}
+                    {marquee && (
+                      <div
+                        className="marquee"
+                        data-testid="marquee"
+                        style={{
+                          left: Math.min(marquee.x0, marquee.x1),
+                          top: Math.min(marquee.y0, marquee.y1),
+                          width: Math.abs(marquee.x1 - marquee.x0),
+                          height: Math.abs(marquee.y1 - marquee.y0),
+                        }}
+                      />
+                    )}
+                    {/* Inside the transformed rack, in rack coordinates: pan
                     and zoom move the cables through the CSS transform, so
                     they are deliberately NOT part of layoutKey. */}
-                  <WireOverlay
-                    wires={wires}
-                    container={rackInnerEl}
-                    colors={wireColors}
-                    pending={pending}
-                    zoom={zoom}
-                    layoutKey={JSON.stringify(positions)}
-                  />
+                    <WireOverlay
+                      wires={wires}
+                      container={rackInnerEl}
+                      colors={wireColors}
+                      pending={pending}
+                      zoom={zoom}
+                      layoutKey={JSON.stringify(positions)}
+                    />
+                  </div>
                 </div>
-              </div>
+              </AudioUIContext.Provider>
             </DeckUIContext.Provider>
           </RackStoreContext.Provider>
         </RackKeysContext.Provider>

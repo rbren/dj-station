@@ -79,7 +79,7 @@ impl OnnxSeparator {
 }
 
 impl StemSeparator for OnnxSeparator {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "onnx"
     }
 

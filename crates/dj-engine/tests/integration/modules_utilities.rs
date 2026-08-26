@@ -85,6 +85,50 @@ fn mixer_sums_stereo_channels_with_levels() {
     assert_near(tail[0], 0.0, "mixer silent with faders down");
 }
 
+/// A fader at 0 kills its channel EXACTLY — with every input jack wired,
+/// pans off centre and the other channels playing.
+#[test]
+fn mixer_level_at_zero_is_exact_silence_on_a_full_desk() {
+    let peaks = |e: &mut Engine| {
+        let out = e.render_offline((0.05 * SR) as usize).unwrap();
+        let p = |c: &Vec<f32>| c.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+        (p(&out[0]), p(&out[1]))
+    };
+
+    let mut e = probe_engine(2);
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("mx", "com.dj.mixer").unwrap();
+    probe(&mut e, "mx", "out_l", 0);
+    probe(&mut e, "mx", "out_r", 1);
+    for ch in 1..=6 {
+        e.connect("osc1", "audio", "mx", &format!("in{ch}_l"))
+            .unwrap();
+        // Odd channels take a wired R, even ones keep the L normal.
+        if ch % 2 == 1 {
+            e.connect("osc1", "audio", "mx", &format!("in{ch}_r"))
+                .unwrap();
+        }
+        e.connect("lfo1", "bi", "mx", &format!("pan{ch}")).unwrap();
+        e.set_knob_value("mx", &format!("lvl{ch}"), 10.0).unwrap();
+    }
+    let (loud_l, loud_r) = peaks(&mut e);
+    assert!(loud_l > 4.9 && loud_r > 4.9, "desk should be loud first");
+
+    // Every fader down: digital silence, not a residue of six channels.
+    for ch in 1..=6 {
+        e.set_knob_value("mx", &format!("lvl{ch}"), 0.0).unwrap();
+    }
+    assert_eq!(peaks(&mut e), (0.0, 0.0), "faders down must be silent");
+
+    // ... and a single fader brings its own channel back, so the silence
+    // above was the faders' doing and not a dead patch. (Its pan sits
+    // wherever the LFO left it, so only the favoured side is at unity.)
+    e.set_knob_value("mx", "lvl4", 10.0).unwrap();
+    let (l, r) = peaks(&mut e);
+    assert!(l.max(r) > 4.9, "channel 4 alone should play: {l}, {r}");
+}
+
 #[test]
 fn mixer_pan_places_a_mono_source_in_the_field() {
     let mut e = probe_engine(2);
@@ -135,6 +179,109 @@ fn mixer_right_input_breaks_the_left_normal_when_wired() {
     assert!(
         peak_r < 1e-6,
         "wired-but-silent R must not mirror L: {peak_r}"
+    );
+}
+
+/// Three DC channels at unity, so a sum reads the audible set directly.
+fn mute_solo_engine() -> Engine {
+    let mut e = probe_engine(2);
+    e.add_module("mx", "com.dj.mixer").unwrap();
+    probe(&mut e, "mx", "out_l", 0);
+    probe(&mut e, "mx", "out_r", 1);
+    for (ch, volts) in [1.0f32, 2.0, 4.0].iter().enumerate() {
+        e.set_knob_value("mx", &format!("in{}_l", ch + 1), *volts)
+            .unwrap();
+        e.set_knob_value("mx", &format!("lvl{}", ch + 1), 10.0)
+            .unwrap();
+    }
+    e
+}
+
+/// Gate a mute/solo switch on (10 V) or off.
+fn switch(e: &mut Engine, jack: &str, on: bool) {
+    e.set_knob_value("mx", jack, if on { 10.0 } else { 0.0 })
+        .unwrap();
+}
+
+#[test]
+fn mixer_mute_silences_only_its_own_channel() {
+    let mut e = mute_solo_engine();
+    assert_near(render_tail(&mut e, 0.02)[0], 7.0, "all three channels sum");
+
+    switch(&mut e, "mute2", true);
+    assert_near(render_tail(&mut e, 0.02)[0], 5.0, "channel 2 muted");
+
+    switch(&mut e, "mute1", true);
+    assert_near(render_tail(&mut e, 0.02)[0], 4.0, "channels 1 + 2 muted");
+
+    switch(&mut e, "mute1", false);
+    switch(&mut e, "mute2", false);
+    assert_near(render_tail(&mut e, 0.02)[0], 7.0, "un-muted again");
+}
+
+#[test]
+fn mixer_solo_silences_every_channel_that_is_not_soloed() {
+    let mut e = mute_solo_engine();
+    switch(&mut e, "solo2", true);
+    assert_near(render_tail(&mut e, 0.02)[0], 2.0, "only the soloed channel");
+
+    // Solo is additive: soloing a second channel adds it to the bus.
+    switch(&mut e, "solo3", true);
+    assert_near(render_tail(&mut e, 0.02)[0], 6.0, "two soloed channels");
+
+    // Mute is independent of solo: a muted soloed channel stays silent.
+    switch(&mut e, "mute3", true);
+    assert_near(render_tail(&mut e, 0.02)[0], 2.0, "muted solo stays silent");
+
+    // Dropping every solo hands the bus back to the un-muted channels.
+    switch(&mut e, "solo2", false);
+    switch(&mut e, "solo3", false);
+    assert_near(render_tail(&mut e, 0.02)[0], 3.0, "solo cleared, 3 muted");
+}
+
+/// A mute switch is a jack like any other: CV can gate it.
+#[test]
+fn mixer_mute_accepts_a_wired_gate() {
+    let mut e = mute_solo_engine();
+    e.add_module("att", "com.dj.attenuverter").unwrap();
+    e.connect("att", "out1", "mx", "mute1").unwrap();
+    assert_near(render_tail(&mut e, 0.02)[0], 7.0, "gate low: nothing muted");
+
+    e.set_knob_value("att", "offset1", 5.0).unwrap();
+    assert_near(render_tail(&mut e, 0.02)[0], 6.0, "gate high mutes ch 1");
+}
+
+/// Toggling mute fades over a few ms — a hard cut would click.
+#[test]
+fn mixer_mute_fades_instead_of_stepping() {
+    let mut e = mute_solo_engine();
+    render_tail(&mut e, 0.02);
+    switch(&mut e, "mute3", true);
+    let out = e.render_offline((0.02 * SR) as usize).unwrap();
+    let biggest_step = out[0]
+        .windows(2)
+        .fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+    // 4 V over a 5 ms fade at 48 kHz ~= 0.017 V per sample.
+    assert!(
+        biggest_step < 0.05,
+        "mute should ramp, biggest sample step was {biggest_step} V"
+    );
+    assert_near(*out[0].last().unwrap(), 3.0, "fade settles at the new mix");
+}
+
+#[test]
+fn mixer_mute_and_solo_persist_through_save_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = mute_solo_engine();
+    switch(&mut e, "mute1", true);
+    switch(&mut e, "solo2", true);
+    e.save_patch(dir.path(), "mixer-mute-solo").unwrap();
+
+    let mut reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+    assert_near(
+        render_tail(&mut reloaded, 0.02)[0],
+        2.0,
+        "reloaded patch keeps ch 1 muted and ch 2 soloed",
     );
 }
 

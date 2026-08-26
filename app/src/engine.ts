@@ -80,6 +80,15 @@ export interface WireSnapshot {
   to_jack: string;
 }
 
+/** Launch Control XL panel poll: is the surface here, and who owns it. */
+export interface LaunchControlStatus {
+  connected: boolean;
+  /** Whether THIS module owns the surface. */
+  active: boolean;
+  /** The module that owns it; null = nobody is listening. */
+  active_instance: string | null;
+}
+
 /** One note-track cell: at most one note per beat (no polyphony). */
 export interface NoteStep {
   /** Grid row: 0 = base note, counting up through the scale. */
@@ -366,6 +375,15 @@ export class EngineClient extends IpcClient {
   /** One key transition into a QWERTY module (lowercased `event.key`). */
   qwertyKey(instance: string, key: string, down: boolean) {
     return this.call<void>('qwerty_key', { instance, key, down });
+  }
+  /** Polled by the Launch Control panel; quiet because a poll racing the
+   *  module's removal is expected. */
+  launchcontrolStatus(instance: string) {
+    return this.call<LaunchControlStatus>('launchcontrol_status', { instance }, { quiet: true });
+  }
+  /** Hand the controller to this module (exclusive) or take it away. */
+  launchcontrolSetActive(instance: string, active: boolean) {
+    return this.call<void>('launchcontrol_set_active', { instance, active });
   }
   addMidiMapping(instance: string, kind: string, num: number, name: string) {
     return this.call<void>('add_midi_mapping', { instance, kind, num, name });

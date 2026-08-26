@@ -26,8 +26,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
-    reportError(this.props.context, error);
-    console.error(`[${this.props.context}]`, error, info.componentStack);
+    reportError(this.props.context, error, info.componentStack);
   }
 
   private retry = () => this.setState({ message: null });

@@ -4,7 +4,11 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod beat_clip;
+mod beatify;
+mod beatify_clip;
 mod clip;
+mod launch_control;
 
 use dj_engine::{
     Backend, Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle,
@@ -42,6 +46,14 @@ struct AppState {
     analysis: dj_analysis::AnalysisWorker,
     /// Decoded sources for the Clip page's offline editor.
     clips: clip::ClipCache,
+    /// Stem separation (PRD §8.2): htdemucs_ft via the external demucs
+    /// CLI, one background thread per job.
+    stems: Arc<dj_analysis::StemJobs>,
+    /// Keeps the stem cache filled by itself — every downloaded track,
+    /// history included — so the Clip page never has to ask for one.
+    auto_stems: dj_analysis::AutoStemService,
+    /// The Beatify tab's in-flight analysis (ephemeral until Save).
+    beatify: beatify::BeatifySession,
 }
 
 
@@ -233,6 +245,8 @@ fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> 
             apply_deck_metadata(state, engine, &instance)?;
         }
     }
+    // Beat Clip modules apply_doc recreated hold a binding but no audio.
+    beat_clip::hydrate(state, engine);
     Ok(())
 }
 
@@ -402,6 +416,16 @@ enum ErrorKind {
     Internal,
 }
 
+impl ErrorKind {
+    fn tag(self) -> &'static str {
+        match self {
+            ErrorKind::NotFound => "not_found",
+            ErrorKind::InvalidInput => "invalid_input",
+            ErrorKind::Internal => "internal",
+        }
+    }
+}
+
 impl std::fmt::Display for CmdError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
@@ -409,26 +433,40 @@ impl std::fmt::Display for CmdError {
 }
 
 impl CmdError {
+    /// The one place a command failure is born, so it is also the one place
+    /// it gets logged: everything the frontend banner shows must leave a
+    /// trail in the terminal too (a bug report rarely carries both).
+    fn new(kind: ErrorKind, message: String) -> Self {
+        log_cmd_error(kind, &message);
+        CmdError { kind, message }
+    }
+
     fn not_found(message: impl Into<String>) -> Self {
-        CmdError {
-            kind: ErrorKind::NotFound,
-            message: message.into(),
-        }
+        CmdError::new(ErrorKind::NotFound, message.into())
     }
+
     pub(crate) fn invalid(message: impl Into<String>) -> Self {
-        CmdError {
-            kind: ErrorKind::InvalidInput,
-            message: message.into(),
-        }
+        CmdError::new(ErrorKind::InvalidInput, message.into())
     }
+}
+
+/// Consecutive identical failures collapse, exactly like the frontend banner
+/// does: polled commands (`tap`, `*_status`) fail every tick while they race
+/// a live edit, and 10 lines a second would bury everything else.
+fn log_cmd_error(kind: ErrorKind, message: &str) {
+    static LAST: Mutex<String> = Mutex::new(String::new());
+    let line = format!("[dj-ipc] {}: {message}", kind.tag());
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last == line {
+        return;
+    }
+    eprintln!("{line}");
+    *last = line;
 }
 
 /// Default conversion for `map_err(err)`: kind `internal`.
 pub(crate) fn err<E: std::fmt::Display>(e: E) -> CmdError {
-    CmdError {
-        kind: ErrorKind::Internal,
-        message: e.to_string(),
-    }
+    CmdError::new(ErrorKind::Internal, e.to_string())
 }
 
 #[derive(Serialize)]
@@ -1110,10 +1148,8 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
     let autosave = autosave_dir();
     if autosave.join("patch.json").is_file() {
         match load_patch_dir(&state, &autosave) {
-            Ok(warnings) => {
-                for w in warnings {
-                    eprintln!("[dj-audio] autosave restore: {w}");
-                }
+            // Load warnings are logged by load_patch_dir itself.
+            Ok(_) => {
                 if let Some(name) = std::fs::read_to_string(autosave.join("patch.json"))
                     .ok()
                     .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
@@ -1258,6 +1294,21 @@ fn paste_modules(state: State<AppState>, clipboard: String) -> CmdResult<BTreeMa
     let mut doc = engine.snapshot("paste");
     let renames = doc.paste(&clip);
     engine.apply_doc(&doc).map_err(err)?;
+    // A pasted Beat Clip carries only its binding; hand each copy the
+    // audio its source already holds — nothing to re-assemble, and it
+    // works even for a clip whose project has since gone. Pairs the
+    // source cannot serve (a clipboard from another patch) fall through
+    // to the usual assembly.
+    let is_clip = |id: &String| engine.nodes.iter().any(|n| &n.instance_id == id && n.is_beat_clip());
+    let clip_pairs: Vec<(String, String)> = renames
+        .iter()
+        .filter(|(from, to)| is_clip(from) && is_clip(to))
+        .map(|(from, to)| (from.clone(), to.clone()))
+        .collect();
+    for (from, to) in clip_pairs {
+        engine.beat_clip_copy(&from, &to).map_err(err)?;
+    }
+    beat_clip::hydrate(&state, &mut engine);
     Ok(renames)
 }
 
@@ -1454,9 +1505,15 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     for instance in deck_instances {
         apply_deck_metadata(state, &mut engine, &instance)?;
     }
+    // Beat Clip modules: the patch names the clip, the app assembles it.
+    beat_clip::hydrate(state, &mut engine);
     restart_backend(&mut engine, backend, "patch load")?;
     mark_saved(state, &engine);
-    Ok(engine.load_warnings.clone())
+    let warnings = engine.load_warnings.clone();
+    for w in &warnings {
+        eprintln!("[dj-audio] patch load ({}): {w}", dir.display());
+    }
+    Ok(warnings)
 }
 
 /// The global macro store: `<data_dir>/macros/`, a sibling of `patches/`.
@@ -1775,6 +1832,9 @@ fn pull_macro_instance(state: State<AppState>, instance: String) -> CmdResult<Ve
         warnings = e.pull_macro_instance(&instance).map_err(err)?;
         Ok(())
     })?;
+    for w in &warnings {
+        eprintln!("[dj-macros] pull {instance}: {w}");
+    }
     Ok(warnings)
 }
 
@@ -2016,6 +2076,37 @@ fn playback_load(state: State<AppState>, instance: String, track_id: i64) -> Cmd
     let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
     engine
         .playback_load(&instance, &PathBuf::from(track.file_path))
+        .map_err(err)
+}
+
+/// Load a library track into an Audio module instance. The track's tempo
+/// comes from the library (canonical, like deck beatgrids): the module
+/// adopts it on the BPM input and resets speed to 1x.
+#[tauri::command]
+fn audio_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResult<()> {
+    let track = state.library.track(track_id).map_err(err)?;
+    let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
+    engine
+        .audio_load(&instance, &PathBuf::from(track.file_path), track.bpm)
+        .map_err(err)
+}
+
+/// Track + transport + tempo snapshot for the Audio module panel.
+#[tauri::command]
+fn audio_status(
+    state: State<AppState>,
+    instance: String,
+) -> CmdResult<dj_engine::audio::AudioStatus> {
+    let engine = engine_lock(&state)?;
+    engine.audio_status(&instance).map_err(err)
+}
+
+/// Waveform overview peaks (0..=1) of an Audio module's track.
+#[tauri::command]
+fn audio_waveform(state: State<AppState>, instance: String, buckets: usize) -> CmdResult<Vec<f32>> {
+    let engine = engine_lock(&state)?;
+    engine
+        .audio_waveform(&instance, buckets.min(20_000))
         .map_err(err)
 }
 
@@ -2353,6 +2444,20 @@ fn main() {
     // dj-analysis (CoreML EP on macOS, CPU EP elsewhere).
     let analysis =
         dj_analysis::start_worker(library.clone(), dj_analysis::AnalysisSettings::default());
+    // Stems: htdemucs_ft through the external demucs CLI. The tooling is
+    // optional — nothing here fails at startup if it is absent, the Clip
+    // page just reports it (see `clip_stem_backend`). The service behind
+    // them separates downloads on its own, one at a time, backfilling
+    // everything a previous run never got to.
+    let stems = Arc::new(dj_analysis::StemJobs::new(
+        library.clone(),
+        Arc::new(dj_analysis::DemucsSeparator::from_env()),
+    ));
+    let auto_stems = dj_analysis::AutoStemService::start(
+        library.clone(),
+        stems.clone(),
+        dj_analysis::AutoStemSettings::from_env(),
+    );
 
     tauri::Builder::default()
         .manage(AppState {
@@ -2367,6 +2472,9 @@ fn main() {
             _watcher: watcher,
             analysis,
             clips: clip::ClipCache::default(),
+            stems,
+            auto_stems,
+            beatify: beatify::BeatifySession::default(),
         })
         .setup(|app| {
             // Camera module (getUserMedia) permission plumbing. macOS: wry's
@@ -2433,6 +2541,10 @@ fn main() {
                     }
                 }
             }
+            // Launch Control XL (PRD §7.1): hot-plug watcher for the
+            // control surface. No device, no thread work — it simply
+            // never finds a port (CI and headless runs included).
+            launch_control::spawn_watcher(app.handle().clone());
             // System menu: platform defaults (App/Edit/Window on macOS)
             // plus File (save/load) and Debug (web inspector) submenus.
             let new_patch = MenuItemBuilder::with_id("file_new", "New Patch")
@@ -2552,6 +2664,8 @@ fn main() {
             break_macro,
             inject_midi,
             qwerty_key,
+            launch_control::launchcontrol_status,
+            launch_control::launchcontrol_set_active,
             add_midi_mapping,
             remove_midi_mapping,
             add_midi_led_mapping,
@@ -2587,6 +2701,9 @@ fn main() {
             add_watch_folder,
             watch_folders,
             playback_load,
+            audio_load,
+            audio_status,
+            audio_waveform,
             deck_load,
             deck_status,
             deck_waveform,
@@ -2611,6 +2728,36 @@ fn main() {
             clip::clip_render_preview,
             clip::clip_preview_audio,
             clip::clip_save,
+            clip::clip_stem_backend,
+            clip::clip_stem_status,
+            beatify::beatify_tracker_status,
+            beatify::beatify_analyze,
+            beatify::beatify_set_reading,
+            beatify::beatify_meters,
+            beatify::beatify_preview,
+            beatify::beatify_sync_check,
+            beatify::beatify_scope,
+            beatify::beatify_save,
+            beatify::beatify_projects,
+            beatify::beatify_project_new,
+            beatify::beatify_project_open,
+            beatify::beatify_project_set_bpm,
+            beatify::beatify_seed_delete,
+            beatify::beatify_seed_rename,
+            beatify::beatify_project_rename,
+            beatify::beatify_project_delete,
+            beatify::beatify_project_audio,
+            beatify::beatify_cancel,
+            beatify::beatify_warp_map,
+            beatify_clip::beatify_clip_sources,
+            beatify_clip::beatify_clip_open,
+            beatify_clip::beatify_clip_audio,
+            beatify_clip::beatify_clip_preview,
+            beatify_clip::beatify_clip_save,
+            beatify_clip::beatify_clip_delete,
+            beat_clip::beat_clip_list,
+            beat_clip::beat_clip_load,
+            beat_clip::beat_clip_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

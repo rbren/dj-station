@@ -1,6 +1,14 @@
-//! Oscillator module: sine/saw/square/tri. Inputs: pitch, fm, sync,
-//! waveform. Output: audio (±5, modular audio level within the nominal
-//! [-10,+10]).
+//! Oscillator module: sine/saw/square/tri. Inputs: pitch, fm, fm_index,
+//! sync, waveform. Output: audio (±5, modular audio level within the
+//! nominal [-10,+10]).
+//!
+//! `fm` is LINEAR, thru-zero FM — the same convention as the VCO and the
+//! Wavetable: `f = f0 * (1 + fm/5 * index)`, with `fm_index` (0..4) as the
+//! depth (index 1 = ±100 % deviation at ±5 V, index 0 = no FM). Past
+//! `-5/index` volts the frequency goes negative and the phase simply runs
+//! backwards; nothing rectifies or clamps at DC, so harmonic ratios stay
+//! put under modulation instead of sliding sharp the way exponential
+//! (1 V/oct) FM does.
 
 use dj_module_sdk::{export_module, pitch_to_hz, InitCtx, Module, ProcessIo};
 
@@ -8,8 +16,9 @@ const AMPLITUDE: f32 = 5.0;
 
 const IN_PITCH: usize = 0;
 const IN_FM: usize = 1;
-const IN_SYNC: usize = 2;
-const IN_WAVEFORM: usize = 3;
+const IN_FM_INDEX: usize = 2;
+const IN_SYNC: usize = 3;
+const IN_WAVEFORM: usize = 4;
 
 pub struct Oscillator {
     sample_rate: f32,
@@ -18,7 +27,7 @@ pub struct Oscillator {
 }
 
 impl Module for Oscillator {
-    const N_INPUTS: usize = 4;
+    const N_INPUTS: usize = 5;
     const N_OUTPUTS: usize = 1;
 
     fn new(ctx: &InitCtx) -> Self {
@@ -44,8 +53,10 @@ impl Module for Oscillator {
             }
             self.last_sync = sync;
 
-            // Exponential FM: fm adds to pitch in 1V/oct units.
-            let freq = pitch_to_hz(pitch + fm);
+            // Linear thru-zero FM: fm shifts the frequency itself, so a
+            // negative factor runs the phase backwards.
+            let index = io.inputs[IN_FM_INDEX][s].max(0.0);
+            let freq = pitch_to_hz(pitch) * (1.0 + fm * 0.2 * index);
             let dp = freq / self.sample_rate;
             let p = self.phase;
             let v = match waveform {
@@ -68,7 +79,7 @@ impl Module for Oscillator {
             };
             io.outputs[0][s] = AMPLITUDE * v;
             self.phase += dp;
-            if self.phase >= 1.0 {
+            if !(0.0..1.0).contains(&self.phase) {
                 self.phase -= self.phase.floor();
             }
         }

@@ -32,6 +32,11 @@ pub struct TrackLoadSpec {
     pub instance: String,
     /// Audio file, relative to the case directory (keeps patches portable).
     pub file: String,
+    /// The track's tempo as the library knows it (Audio nodes adopt it on
+    /// load). Library metadata lives outside the patch, like deck grids,
+    /// so cases carry it in the sidecar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
 }
 
 /// Deck DJ metadata applied after load. In the app this comes from the
@@ -73,6 +78,17 @@ pub struct QwertyEventSpec {
     pub down: bool,
 }
 
+/// A raw Launch Control XL surface message into one module at an engine
+/// frame. Hardware never runs in CI, so golden cases drive the module
+/// through the same synthetic `launchcontrol_inject` seam the engine
+/// tests use.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LaunchControlEventSpec {
+    pub instance: String,
+    pub frame: u64,
+    pub data: [u8; 3],
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EventsFile {
     pub seconds: f32,
@@ -80,6 +96,8 @@ pub struct EventsFile {
     pub midi: Vec<MidiEventSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub qwerty: Vec<QwertyEventSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub launch_control: Vec<LaunchControlEventSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracks: Vec<TrackLoadSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -156,6 +174,17 @@ fn render_case(case: &str) -> PathBuf {
             engine
                 .deck_load(&t.instance, &case_dir.join(&t.file))
                 .unwrap();
+        } else if ext == "builtin.audio" {
+            engine
+                .audio_load(&t.instance, &case_dir.join(&t.file), t.bpm)
+                .unwrap();
+        } else if ext == "builtin.beat_clip" {
+            // A clip is assembled by the app layer from a Beatify project,
+            // so cases carry the rendered audio (and the tempo it was
+            // rendered at) in the sidecar, like deck metadata.
+            engine
+                .beat_clip_load_file(&t.instance, &case_dir.join(&t.file), t.bpm.unwrap_or(120.0))
+                .unwrap();
         } else {
             engine
                 .playback_load(&t.instance, &case_dir.join(&t.file))
@@ -184,6 +213,11 @@ fn render_case(case: &str) -> PathBuf {
     for ev in &events.qwerty {
         engine
             .qwerty_key(&ev.instance, ev.frame, &ev.key, ev.down)
+            .unwrap();
+    }
+    for ev in &events.launch_control {
+        engine
+            .launchcontrol_inject(&ev.instance, ev.frame, ev.data)
             .unwrap();
     }
     for h in &events.hands {

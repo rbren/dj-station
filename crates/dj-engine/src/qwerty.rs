@@ -215,12 +215,13 @@ impl HostModule for QwertyRtModule {
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
-        for (i, chunk) in bytes.chunks_exact(4).enumerate().take(N_QWERTY_JACKS) {
-            self.values[i] = f32::from_le_bytes(chunk.try_into().unwrap());
+        let (words, _) = bytes.as_chunks::<4>();
+        for (i, chunk) in words.iter().enumerate().take(N_QWERTY_JACKS) {
+            self.values[i] = f32::from_le_bytes(*chunk);
         }
         // `note` was appended to the state blob; older snapshots omit it.
-        if let Some(chunk) = bytes.chunks_exact(4).nth(N_QWERTY_JACKS) {
-            self.note = f32::from_le_bytes(chunk.try_into().unwrap());
+        if let Some(chunk) = words.get(N_QWERTY_JACKS) {
+            self.note = f32::from_le_bytes(*chunk);
         }
         // `gate` is derived state — recompute rather than persist.
         self.gate = self.any_key_gate();

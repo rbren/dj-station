@@ -354,30 +354,11 @@ impl Engine {
     /// loaded track (0..=1 per bucket). Computed on the control thread.
     pub fn deck_waveform(&self, instance_id: &str, buckets: usize) -> Result<Vec<f32>> {
         let node = self.deck_node(instance_id)?;
-        let Some(track) = self.decks[&node].track.as_ref() else {
-            return Ok(Vec::new());
-        };
-        let frames = track.frames();
-        if frames == 0 || buckets == 0 {
-            return Ok(Vec::new());
-        }
-        let buckets = buckets.min(frames);
-        let mut out = vec![0.0f32; buckets];
-        let per = frames as f64 / buckets as f64;
-        for (b, peak) in out.iter_mut().enumerate() {
-            let start = (b as f64 * per) as usize;
-            let end = (((b + 1) as f64 * per) as usize).min(frames);
-            let mut p = 0.0f32;
-            for i in start..end {
-                let mut s = track.channels[0][i].abs();
-                if track.channels.len() > 1 {
-                    s = s.max(track.channels[1][i].abs());
-                }
-                p = p.max(s);
-            }
-            *peak = p;
-        }
-        Ok(out)
+        Ok(self.decks[&node]
+            .track
+            .as_ref()
+            .map(|t| t.peaks(buckets))
+            .unwrap_or_default())
     }
 
     pub fn xrun_count(&self) -> u64 {

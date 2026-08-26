@@ -227,6 +227,129 @@ fn clock_run_gate_stops_and_reset_rephases() {
 }
 
 // ---------------------------------------------------------------------------
+// Clock multiplier
+// ---------------------------------------------------------------------------
+
+/// `mult` detent indices, in manifest order: /8 /4 /3 /2 1x 2x 3x 4x 6x 8x.
+const MULT_DIV3: f32 = 2.0;
+const MULT_DIV2: f32 = 3.0;
+const MULT_X4: f32 = 7.0;
+
+/// A 240 BPM master clock (4 Hz, one edge every 0.25 s) feeding a
+/// multiplier whose output is probed on master L.
+fn clock_mult_patch() -> Engine {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("cm", "com.dj.clock_mult").unwrap();
+    e.set_knob_value("clk", "bpm", 240.0).unwrap();
+    e.connect("clk", "clock", "cm", "clock").unwrap();
+    probe(&mut e, 0, "cm", "out");
+    e
+}
+
+#[test]
+fn clock_mult_free_runs_at_two_hz_without_an_input_clock() {
+    let mut e = probe_engine();
+    e.add_module("cm", "com.dj.clock_mult").unwrap();
+    probe(&mut e, 0, "cm", "out");
+    let out = e.render_offline((2.05 * SR) as usize).unwrap();
+
+    // Nothing patched into `clock` and the knob at its 1x default: the
+    // module is a 2 Hz clock source on its own.
+    assert_edges_near(
+        &rising_edges(&out[0]),
+        &[0.0, 0.5, 1.0, 1.5, 2.0],
+        1,
+        "free-running clock",
+    );
+    let nominal = (0.005 * SR) as usize;
+    for &run in high_runs(&out[0]).iter().take(4) {
+        assert_eq!(run, nominal, "free-running pulse width");
+    }
+}
+
+#[test]
+fn clock_mult_free_run_rate_follows_the_multiplier() {
+    let mut e = probe_engine();
+    e.add_module("cm", "com.dj.clock_mult").unwrap();
+    set_stepped(&mut e, "cm", "mult", MULT_DIV2);
+    probe(&mut e, 0, "cm", "out");
+    let out = e.render_offline((2.05 * SR) as usize).unwrap();
+
+    // The 2 Hz fallback is an assumed INPUT rate, so the knob still
+    // multiplies it: /2 of 2 Hz is one pulse per second.
+    assert_edges_near(
+        &rising_edges(&out[0]),
+        &[0.0, 1.0, 2.0],
+        1,
+        "free-running /2",
+    );
+}
+
+#[test]
+fn clock_mult_passes_the_clock_through_at_the_default_1x() {
+    let mut e = clock_mult_patch();
+    let out = e.render_offline((1.55 * SR) as usize).unwrap();
+
+    let beats: Vec<f32> = (0..7).map(|i| i as f32 * 0.25).collect();
+    assert_edges_near(&rising_edges(&out[0]), &beats, 1, "1x");
+}
+
+#[test]
+fn clock_mult_fills_in_pulses_between_clock_edges() {
+    let mut e = clock_mult_patch();
+    set_stepped(&mut e, "cm", "mult", MULT_X4);
+    let out = e.render_offline((1.01 * SR) as usize).unwrap();
+
+    // The interval is unknown until the second edge, so the first beat
+    // only carries the pulses the free-running 2 Hz estimate predicts
+    // (0.125 s apart); from the second edge on, x4 of 4 Hz is 16 Hz.
+    let mut expected = vec![0.0, 0.125];
+    expected.extend((0..=12).map(|i| 0.25 + i as f32 * 0.0625));
+    // The in-between pulses are interpolated from the measured interval,
+    // so they land within a couple of samples of the ideal grid rather
+    // than exactly on it (the pulses on clock edges are exact).
+    assert_edges_near(&rising_edges(&out[0]), &expected, 4, "x4");
+}
+
+#[test]
+fn clock_mult_divides_in_step_with_the_clock() {
+    let mut e = clock_mult_patch();
+    set_stepped(&mut e, "cm", "mult", MULT_DIV2);
+    let out = e.render_offline((1.55 * SR) as usize).unwrap();
+    assert_edges_near(&rising_edges(&out[0]), &[0.0, 0.5, 1.0, 1.5], 1, "/2");
+
+    // Odd divisions stay exact (no float drift off the third edge).
+    let mut e = clock_mult_patch();
+    set_stepped(&mut e, "cm", "mult", MULT_DIV3);
+    let out = e.render_offline((1.55 * SR) as usize).unwrap();
+    assert_edges_near(&rising_edges(&out[0]), &[0.0, 0.75, 1.5], 1, "/3");
+}
+
+#[test]
+fn clock_mult_falls_back_to_free_running_when_the_clock_stops() {
+    let mut e = clock_mult_patch();
+    let running = e.render_offline((1.0 * SR) as usize).unwrap();
+    assert_edges_near(
+        &rising_edges(&running[0]),
+        &[0.0, 0.25, 0.5, 0.75],
+        1,
+        "clocked",
+    );
+
+    // Stop the master clock: after four missed intervals (1 s here) the
+    // multiplier decides the clock is gone and free-runs at 2 Hz again.
+    e.set_knob_position("clk", "run", 0.0).unwrap();
+    let out = e.render_offline((2.0 * SR) as usize).unwrap();
+    assert_edges_near(
+        &rising_edges(&out[0]),
+        &[0.75, 1.25, 1.75],
+        100,
+        "free-running after the clock stopped",
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Step sequencer
 // ---------------------------------------------------------------------------
 

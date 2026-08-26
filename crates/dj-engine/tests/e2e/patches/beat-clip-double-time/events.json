@@ -1,0 +1,11 @@
+{
+  "seconds": 1.0,
+  "midi": [],
+  "tracks": [
+    {
+      "instance": "bc1",
+      "file": "clip.wav",
+      "bpm": 120.0
+    }
+  ]
+}

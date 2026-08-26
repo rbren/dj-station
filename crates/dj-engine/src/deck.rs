@@ -17,11 +17,9 @@
 //! path performs no allocation, locking, or IO. Replaced tracks travel back
 //! on a garbage ring for off-RT drop.
 //!
-//! **Keylock** is a two-voice granular (windowed overlap-add) time-stretch:
-//! grains read the track at its native rate (pitch-neutral) while grain
-//! spawn positions advance at the tempo-scaled rate. The Hann window table
-//! is precomputed at construction (off-RT); 50 % hop gives exact
-//! constant-overlap-add.
+//! **Keylock** is [`crate::stretch`], the shared granular time-stretch:
+//! grains read the track at its native rate (pitch-neutral) while the
+//! virtual playhead they spawn around advances at the tempo-scaled rate.
 //!
 //! **Sync** (PRD §7 "beat-sync and phase-sync to another deck"): every deck
 //! publishes its transport (position, rate, grid, engine-frame stamp) into
@@ -40,6 +38,7 @@ use crate::knob::{Curve, KnobConfig, KnobStyle};
 use crate::manifest::{categories, JackDecl, Manifest, OutputDecl, ParamDecl};
 use crate::module_host::HostModule;
 use crate::playback::TrackData;
+use crate::stretch::{sample_at, GrainStretch};
 
 pub const DECK_ID: &str = "builtin.deck";
 
@@ -52,15 +51,9 @@ pub const CLOCK_PULSE_SECS: f64 = 0.010;
 pub const BPM_REF: f64 = 120.0;
 /// Full-scale `phase_nudge` (±10) bends the rate by this fraction (±50 %).
 pub const NUDGE_DEPTH: f64 = 0.5;
-/// Keylock grain length in seconds (two-voice Hann OLA, 50 % hop).
-pub const KEYLOCK_GRAIN_SECS: f64 = 0.040;
-/// WSOLA alignment: candidate grain starts are searched within ± this
-/// window around the ideal (virtual-timeline) position...
-pub const KEYLOCK_SEARCH_SECS: f64 = 0.004;
-/// ...maximizing cross-correlation with the natural continuation of the
-/// previous grain over this many seconds. Keeps grain joins phase-coherent
-/// so pitch holds under time-stretch (no OLA comb drift).
-pub const KEYLOCK_CORR_SECS: f64 = 0.005;
+// Keylock is [`crate::stretch`]: grain length, the WSOLA search window and
+// the overlap law are decided there, once, for every module that stretches.
+
 /// Sync phase-correction gain (per block) and correction clamp.
 const SYNC_PHASE_GAIN: f64 = 4.0;
 const SYNC_CORR_CLAMP: f64 = 0.05;

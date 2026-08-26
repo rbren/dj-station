@@ -16,10 +16,13 @@ pub const MIDI_ID: &str = "builtin.midi";
 pub enum BuiltinKind {
     AudioOut,
     Midi,
+    LaunchControl,
     Qwerty,
     Choreo,
     Hands,
     Playback,
+    Audio,
+    BeatClip,
     Deck,
     Crossfader,
 }
@@ -29,24 +32,39 @@ impl BuiltinKind {
         match ext_id {
             AUDIO_OUT_ID => Some(BuiltinKind::AudioOut),
             MIDI_ID => Some(BuiltinKind::Midi),
+            crate::launch_control::LAUNCH_CONTROL_ID => Some(BuiltinKind::LaunchControl),
             crate::qwerty::QWERTY_ID => Some(BuiltinKind::Qwerty),
             crate::choreo::CHOREO_ID => Some(BuiltinKind::Choreo),
             crate::hands::HANDS_ID => Some(BuiltinKind::Hands),
             crate::playback::PLAYBACK_ID => Some(BuiltinKind::Playback),
+            crate::audio::AUDIO_ID => Some(BuiltinKind::Audio),
+            crate::beat_clip::BEAT_CLIP_ID => Some(BuiltinKind::BeatClip),
             crate::deck::DECK_ID => Some(BuiltinKind::Deck),
             crate::mixer::CROSSFADER_ID => Some(BuiltinKind::Crossfader),
             _ => None,
         }
     }
 
+    /// Modules that ARE a piece of hardware: every output is the position
+    /// of a real knob, fader or button the user is holding. A wire out of
+    /// one therefore SETS what it lands on rather than modulating it —
+    /// the auto-Override rule in [`crate::Engine::auto_wire_style_on_connect`],
+    /// the same reasoning as a pitch wire into a pitch input.
+    pub fn is_control_surface(ext_id: &str) -> bool {
+        matches!(Self::from_ext_id(ext_id), Some(BuiltinKind::LaunchControl))
+    }
+
     pub fn ext_id(self) -> &'static str {
         match self {
             BuiltinKind::AudioOut => AUDIO_OUT_ID,
             BuiltinKind::Midi => MIDI_ID,
+            BuiltinKind::LaunchControl => crate::launch_control::LAUNCH_CONTROL_ID,
             BuiltinKind::Qwerty => crate::qwerty::QWERTY_ID,
             BuiltinKind::Choreo => crate::choreo::CHOREO_ID,
             BuiltinKind::Hands => crate::hands::HANDS_ID,
             BuiltinKind::Playback => crate::playback::PLAYBACK_ID,
+            BuiltinKind::Audio => crate::audio::AUDIO_ID,
+            BuiltinKind::BeatClip => crate::beat_clip::BEAT_CLIP_ID,
             BuiltinKind::Deck => crate::deck::DECK_ID,
             BuiltinKind::Crossfader => crate::mixer::CROSSFADER_ID,
         }
@@ -56,10 +74,13 @@ impl BuiltinKind {
         match self {
             BuiltinKind::AudioOut => audio_out_manifest(),
             BuiltinKind::Midi => midi_manifest(),
+            BuiltinKind::LaunchControl => crate::launch_control::launch_control_manifest(),
             BuiltinKind::Qwerty => crate::qwerty::qwerty_manifest(),
             BuiltinKind::Choreo => crate::choreo::choreo_manifest(),
             BuiltinKind::Hands => crate::hands::hands_manifest(),
             BuiltinKind::Playback => crate::playback::playback_manifest(),
+            BuiltinKind::Audio => crate::audio::audio_manifest(),
+            BuiltinKind::BeatClip => crate::beat_clip::beat_clip_manifest(),
             BuiltinKind::Deck => crate::deck::deck_manifest(),
             BuiltinKind::Crossfader => crate::mixer::crossfader_manifest(),
         }
@@ -723,8 +744,10 @@ impl HostModule for MidiModule {
 
     fn load_state(&mut self, bytes: &[u8]) {
         let mut words = bytes
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().unwrap()));
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c));
         for (i, w) in words.by_ref().take(MAX_MIDI_JACKS).enumerate() {
             self.values[i] = w;
         }

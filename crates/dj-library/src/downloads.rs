@@ -117,6 +117,9 @@ impl DownloadManager {
                     job.state = DownloadState::Failed;
                     job.stage = "failed".into();
                     job.error = Some(format!("{e:#}"));
+                    // The job snapshot only reaches the UI banner; the
+                    // failure belongs in the log too (with the cause chain).
+                    eprintln!("[dj-library] download failed ({}): {e:#}", job.title);
                 }
             });
         });

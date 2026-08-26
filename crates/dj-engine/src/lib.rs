@@ -9,6 +9,8 @@
 //! - Patch persistence as a directory tree of deterministic JSON files.
 //! - Hot reload: watch extension folders, save/load state, atomic block-boundary swap.
 
+pub mod audio;
+pub mod beat_clip;
 pub mod builtin;
 pub mod choreo;
 pub mod deck;
@@ -17,6 +19,7 @@ pub mod graph;
 pub mod hands;
 pub mod history;
 pub mod knob;
+pub mod launch_control;
 pub mod macro_store;
 pub mod macros;
 pub mod manifest;
@@ -27,6 +30,7 @@ pub mod patch;
 pub mod playback;
 pub mod qwerty;
 pub mod registry;
+pub mod stretch;
 pub mod telemetry;
 pub mod wasm_host;
 
@@ -37,9 +41,14 @@ pub use engine::{
 };
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle, WireStyle};
+pub use launch_control::LAUNCH_CONTROL_ID;
 pub use macro_store::{MacroImport, MacroStore, MACROS_DIR_NAME};
 pub use macros::{MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroParam, MacroPreviewNode};
 pub use manifest::Manifest;
+/// Re-exported so the shell can hold a hardware MIDI connection alive
+/// (`Engine::connect_launchcontrol_hardware`) without depending on midir.
+#[cfg(feature = "midi-hw")]
+pub use midir;
 pub use patch::{MacroInstanceFile, PatchDoc};
 pub use registry::ExtensionRegistry;
 pub use telemetry::JackTelemetry;

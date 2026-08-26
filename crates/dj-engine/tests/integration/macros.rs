@@ -332,6 +332,7 @@ fn macros_may_not_nest() {
             midi_led_mappings: Vec::new(),
             choreo: None,
             track: None,
+            clip: None,
             sync_to: None,
         },
     );

@@ -16,6 +16,8 @@
 mod common;
 
 mod analysis_sync;
+mod audio;
+mod beat_clip;
 mod choreo;
 mod clipboard;
 mod conformance;
@@ -26,6 +28,7 @@ mod display_units;
 mod envelope;
 mod graph_edit;
 mod hands;
+mod launch_control;
 mod live_edit;
 mod macro_store;
 mod macros;

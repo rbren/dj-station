@@ -375,6 +375,9 @@ impl Engine {
         for rx in self.playback_garbage.values_mut() {
             while rx.pop().is_ok() {}
         }
+        for ctl in self.audios.values_mut() {
+            while ctl.garbage_rx.pop().is_ok() {}
+        }
         for ctl in self.decks.values_mut() {
             while ctl.garbage_rx.pop().is_ok() {}
         }

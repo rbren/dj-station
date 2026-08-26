@@ -50,7 +50,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   'com.dj.oscillator': {
     summary:
       'Basic audio oscillator with sine, saw, square and triangle shapes, ' +
-      'exponential FM and hard sync. Output is +-5 V audio. The ' +
+      'linear through-zero FM and hard sync. Output is +-5 V audio. The ' +
       'bread-and-butter starting point for basslines, leads and drones: ' +
       'pair it with a filter and envelope for a classic subtractive voice, ' +
       'or point it at another oscillator\u2019s fm input as a modulator.',
@@ -58,7 +58,14 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       pitch:
         'Which note to play: 1 V/oct pitch CV (0 V = C4). Patch a sequencer, ' +
         'quantizer or MIDI pitch output here for melodies.',
-      fm: 'Exponential FM, added to pitch in 1 V/oct units.',
+      fm:
+        'FM signal input (audio or CV): linear through-zero FM, so the pitch ' +
+        'you play stays put while the timbre changes. +-5 V swings the ' +
+        'frequency by +-100 % per unit of fm_index; past that the frequency ' +
+        'goes negative and the phase runs backwards.',
+      fm_index:
+        'FM depth: how strongly fm modulates the frequency. 0 (the default) ' +
+        'is no FM at all \u2014 turn it up to hear the fm input.',
       sync: 'Hard sync: a rising edge (>= 1 V) resets the phase.',
       waveform: 'Wave select: 0 sine, 1 saw, 2 square, 3 triangle.',
     },
@@ -69,7 +76,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     },
     examples: [
       'pitch <- Quantizer out, audio -> Filter in for a classic subtractive voice.',
-      'audio -> another Oscillator fm for two-operator FM.',
+      'audio -> another Oscillator fm with fm_index up for two-operator FM.',
     ],
   },
   'com.dj.vco': {
@@ -458,6 +465,26 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'mul2 -> Trigger Sequencer clock for 8th-note drum patterns.',
     ],
   },
+  'com.dj.clock_mult': {
+    summary:
+      'Clock multiplier/divider: follows an incoming clock and re-times it ' +
+      'by a detented ratio \u2014 /8 /4 /3 /2 1x 2x 3x 4x 6x 8x, 1x by ' +
+      'default. Multiplications are predicted from the last two clock ' +
+      'edges, divisions land on the clock\u2019s own edges. With nothing ' +
+      'patched in (or before the first edge arrives) it free-runs as if ' +
+      'fed a 2 Hz clock, so it doubles as a standalone clock source.',
+    inputs: {
+      clock: 'Clock to follow; its rate is measured between the last two rising edges.',
+      mult:
+        'Ratio selector: /8 /4 /3 /2 1x 2x 3x 4x 6x 8x output pulses per ' +
+        'input pulse (1x by default).',
+    },
+    outputs: { out: 'Trigger stream at the input rate times the selected ratio.' },
+    examples: [
+      'Clock -> Clock Multiplier at x3 -> Trigger Sequencer for triplet hats.',
+      'Drop one unpatched at 4x for an 8 Hz trigger source with no master clock.',
+    ],
+  },
   'com.dj.step_seq': {
     summary:
       '16-step CV/gate sequencer: per-step CV, gate on/off and ratchet ' +
@@ -739,16 +766,22 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   // --------------------------------------------------------------- Utilities
   'com.dj.mixer': {
     summary:
-      'Six-channel stereo mixer with per-channel level and pan plus a ' +
-      'master level. Each channel is an L/R pair; leave R unpatched and ' +
-      'it mirrors L, so a mono source pans across the stereo field. Good ' +
-      'for summing a multi-oscillator stack into one fat voice, balancing ' +
-      'a few parts into a stereo submix, or placing voices in the field.',
+      'Six-channel stereo mixer with per-channel level, pan, mute and ' +
+      'solo plus a master level. Each channel is an L/R pair; leave R ' +
+      'unpatched and it mirrors L, so a mono source pans across the ' +
+      'stereo field. Solo follows the console law — the moment any ' +
+      'channel is soloed the rest go quiet — while mute stands on its ' +
+      'own, so a muted channel stays silent even when soloed. Good for ' +
+      'summing a multi-oscillator stack into one fat voice, balancing a ' +
+      'few parts into a stereo submix, or auditioning one part alone.',
     inputs: {
       'in#_l': 'Channel # left input (audio).',
       'in#_r': 'Channel # right input (audio; mirrors L when unpatched).',
       'lvl#': 'Channel # level fader, 0..10 (10 = unity).',
       'pan#': 'Channel # pan/balance, -10 (left) .. +10 (right).',
+      'mute#': 'Channel # mute: on (or a gate >= 1 V) silences it.',
+      'solo#':
+        'Channel # solo: while any solo is on, only soloed (and ' + 'un-muted) channels are heard.',
       master: 'Master output level.',
     },
     outputs: {
@@ -758,6 +791,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     examples: [
       'Sum a three-oscillator stack before one Filter.',
       'Pan two voices apart for instant stereo width.',
+      'Solo one channel to audition a part, or gate a mute from an LFO ' +
+        'square for rhythmic drop-outs.',
     ],
   },
   'com.dj.alias': {
@@ -991,6 +1026,41 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Map a knob to map0 and wire it to Filter cutoff.',
     ],
   },
+  'builtin.launchcontrol': {
+    summary:
+      'The Novation Launch Control XL as CV: eight columns matching the ' +
+      'surface, each with three knobs (send A, send B, pan), a mixer-style ' +
+      'fader and two buttons. Knobs and faders read 0..+10 V (fader down = ' +
+      '0 V); the buttons are gates, 10 V while held. The panel light shows ' +
+      'whether the controller is plugged in, and Active decides which ' +
+      'module it drives \u2014 only one at a time, so several of these can ' +
+      'sit on the rack as saved control layouts and you hand the surface ' +
+      'to whichever one you are playing. Values hold when the controller ' +
+      'goes away, so unplugging never jumps the patch. The panel is a ' +
+      'picture of the surface: every jack wears a live dial, fader cap or ' +
+      'lit pad, so you can see where the hardware is standing without ' +
+      'looking down. Wiring one of these outputs sets the input it lands ' +
+      'on to Override, not CV \u2014 the physical control IS the value, so ' +
+      'the knob it is wired to goes inert and follows the surface ' +
+      '(right-click that input and set Wire mode back to CV to have the ' +
+      'surface add to the knob instead).',
+    outputs: {
+      'c#_a': 'Column #, top knob (Send A), 0..+10 V.',
+      'c#_b': 'Column #, middle knob (Send B), 0..+10 V.',
+      'c#_pan': 'Column #, bottom knob (Pan/Device), 0..+10 V.',
+      'c#_fader': 'Column #, fader: 0 V down, +10 V up.',
+      'c#_focus': 'Column #, upper button: 10 V while held.',
+      'c#_ctrl': 'Column #, lower button: 10 V while held.',
+    },
+    params: {
+      active: 'Which module the controller drives (exclusive; the panel button).',
+    },
+    examples: [
+      'c1_fader -> Mixer lvl1: real faders on a six-channel mix.',
+      'c1_a -> Filter cutoff, c1_b -> resonance: a knob per column, a voice per column.',
+      'c1_focus -> ADSR gate for finger-drumming; c1_ctrl -> sequencer reset.',
+    ],
+  },
   'builtin.qwerty': {
     summary:
       'The computer keyboard as a gate source: one output jack per ' +
@@ -1132,6 +1202,54 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     },
     outputs: { out_l: 'Left audio.', out_r: 'Right audio.' },
     examples: ['Loop a texture under a live set with speed at 0.5 for half-time.'],
+  },
+  'builtin.audio': {
+    summary:
+      'Plays any track from the library and runs a beat clock at its ' +
+      'tempo. BPM and speed are one tempo in two units: moving either ' +
+      'moves the other, so pushing the BPM up plays the track faster and ' +
+      'the clock stays locked to what you hear. Loading a track takes the ' +
+      'BPM the library analysed and sets speed back to 1x. The panel ' +
+      'shows the track as a waveform with a playhead, and the track ' +
+      'loops until you switch looping off.',
+    inputs: {
+      play: 'Play/pause switch (rising edge restarts a finished track).',
+      bpm: 'Clock tempo in BPM; drags the speed control with it.',
+      speed: 'Playback rate, 1x = the file\u2019s own tempo; drags BPM with it.',
+      loop: 'Repeat the track at its end (on by default); the clock restarts each pass.',
+    },
+    outputs: {
+      audio_l: 'Left audio.',
+      audio_r: 'Right audio.',
+      clock: 'Trigger per beat at the BPM tempo (free-running while paused).',
+    },
+    examples: [
+      'clock -> Step Sequencer clock: the pattern locks to the loaded track.',
+      'audio_l/audio_r -> Audio Output; ride the BPM control to tempo-match a jam.',
+    ],
+  },
+  'builtin.beat_clip': {
+    summary:
+      'Plays a clip built in the Beatify tab, locked to a clock. Import ' +
+      'one from the Clips tab of the module picker and the module arrives ' +
+      'loaded with that clip and the tempo its project is laid out at. ' +
+      'The clock does the rest: the gap between its last two ticks is the ' +
+      'beat, so the clip runs at whatever tempo the patch is running at ' +
+      '\u2014 stretched, not sped up, so its pitch stays put \u2014 and ' +
+      'every tick re-anchors the phase: the clip starts ON a tick and ' +
+      'comes back around on one, never in between. It waits for two ticks ' +
+      'before the first sound, since one tick cannot say how fast to go. ' +
+      'Reset parks it at beat 0 to wait for the next tick.',
+    inputs: {
+      clock: 'A rising edge is a beat: it sets the tempo and the phase.',
+      reset: 'Back to beat 0, silent until the next clock edge.',
+      bpm: 'Tempo the clip was rendered at \u2014 what one of its beats means.',
+    },
+    outputs: { audio_l: 'Left audio.', audio_r: 'Right audio.' },
+    examples: [
+      'Clock -> clock: every clip in the rack rides one tempo.',
+      'Step Sequencer trigger -> reset: drop the clip back to its head on cue.',
+    ],
   },
   'builtin.crossfader': {
     summary:

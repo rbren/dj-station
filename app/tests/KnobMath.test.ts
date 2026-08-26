@@ -117,6 +117,9 @@ describe('positionForValue matches knob.rs position_for_value', () => {
     ['log 0..10 value 5', LOG_0_10, 5, 0.25],
     ['log 1..100 value 10', LOG_GEO, 10, 0.5],
     ['custom value 0.1', CUSTOM, 0.1, 0.25],
+    // Two-position styles resolve to an END, never the snap threshold.
+    ['switch 0..1 value 1 (a default-on switch)', SWITCH, 1, 1],
+    ['switch 0..1 value 0', SWITCH, 0, 0],
   ];
   for (const [name, config, value, expected] of cases) {
     it(name, () => {

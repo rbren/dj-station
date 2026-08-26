@@ -22,6 +22,9 @@
 use anyhow::{Context, Result};
 use rustfft::num_complex::Complex;
 use std::path::{Path, PathBuf};
+use std::process::{Child, ExitStatus};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use crate::decode::AudioData;
 use crate::stft::Stft;
@@ -37,9 +40,95 @@ pub struct Stems(pub [AudioData; N_STEMS]);
 /// A stem separation backend. Implementations must be deterministic for a
 /// given input and preserve length/sample rate.
 pub trait StemSeparator: Send + Sync {
-    /// Short id recorded alongside cached stems ("band", "onnx").
-    fn id(&self) -> &'static str;
+    /// Short id that keys the stem cache ("band", "onnx", "htdemucs_ft").
+    /// Model-backed separators return the model name so two models never
+    /// share a cache directory (see [`stems_dir_for`]).
+    fn id(&self) -> &str;
     fn separate(&self, audio: &AudioData) -> Result<Stems>;
+
+    /// Can this backend actually run here? In-process separators always
+    /// can; one that shells out to a tool reports a missing install as an
+    /// `Err` carrying a user-facing hint, so callers can say so instead
+    /// of starting work that cannot finish.
+    fn probe(&self) -> Result<()> {
+        Ok(())
+    }
+
+    /// Separate, giving up early if `cancel` fires.
+    ///
+    /// The default ignores the token, which is right for the in-process
+    /// separators: they are seconds of CPU, so the caller simply throws
+    /// the result away. A separator that shells out to a tool for minutes
+    /// must override this and hand its child process to the token — a
+    /// flag alone cannot stop another process.
+    fn separate_cancellable(&self, audio: &AudioData, _cancel: &CancelToken) -> Result<Stems> {
+        self.separate(audio)
+    }
+}
+
+/// A stop signal for one separation, plus the child process (if any) that
+/// is doing the work. Cancelling kills that child: a demucs run is
+/// minutes of another program's time and nothing inside it is watching a
+/// flag of ours.
+#[derive(Debug, Default)]
+pub struct CancelToken {
+    stopped: AtomicBool,
+    child: Mutex<Option<Child>>,
+}
+
+impl CancelToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ask the separation to stop, killing the running child if there is
+    /// one. Safe to call from any thread, and safe to call twice.
+    pub fn cancel(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        if let Some(child) = self.child.lock().expect("cancel token poisoned").as_mut() {
+            let _ = child.kill();
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
+    }
+
+    /// Put `child` under this token's control. A token cancelled before
+    /// the spawn kills it immediately, so a cancel can never be lost in
+    /// the gap between the two.
+    pub fn adopt(&self, child: Child) {
+        let mut slot = self.child.lock().expect("cancel token poisoned");
+        *slot = Some(child);
+        if self.is_cancelled() {
+            if let Some(child) = slot.as_mut() {
+                let _ = child.kill();
+            }
+        }
+    }
+
+    /// Wait for the adopted child, returning how it exited.
+    ///
+    /// Polls rather than blocking in `wait`: the child has to stay
+    /// reachable for [`cancel`](Self::cancel) the whole time it runs, and
+    /// a blocking wait would either hold the lock (deadlocking the cancel)
+    /// or take the child out of reach of it. A separation is minutes
+    /// long, so a 25 ms tick costs nothing.
+    pub fn wait_child(&self) -> std::io::Result<Option<ExitStatus>> {
+        loop {
+            {
+                let mut slot = self.child.lock().expect("cancel token poisoned");
+                let Some(child) = slot.as_mut() else {
+                    return Ok(None);
+                };
+                if let Some(status) = child.try_wait()? {
+                    *slot = None;
+                    return Ok(Some(status));
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +158,7 @@ const CHUNK_SECS: f64 = 20.0;
 pub struct BandSeparator;
 
 impl StemSeparator for BandSeparator {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "band"
     }
 
@@ -275,8 +364,62 @@ fn median(v: &mut [f32]) -> f32 {
 // ---------------------------------------------------------------------------
 
 /// Where a track's stems live: `<data_dir>/stems/<content_hash>/`.
+///
+/// This is the DSP fallback's (and the deck's) cache. Model-backed
+/// backends qualify it further — see [`stems_dir_for`].
 pub fn stems_dir(data_dir: &Path, content_hash: &str) -> PathBuf {
     data_dir.join("stems").join(content_hash)
+}
+
+/// The default (DSP) separator id, whose stems live unqualified in
+/// [`stems_dir`] so the deck's auto-load path never moves.
+pub const DEFAULT_SEPARATOR_ID: &str = "band";
+
+/// Where one *backend's* stems live. The DSP fallback keeps the flat
+/// `<data_dir>/stems/<hash>/` layout; every other backend gets its own
+/// subdirectory `<data_dir>/stems/<hash>/<separator id>/`, so asking for
+/// `htdemucs_ft` can never be served the DSP stems that the import-time
+/// analysis pass already wrote (and vice versa).
+pub fn stems_dir_for(data_dir: &Path, content_hash: &str, separator_id: &str) -> PathBuf {
+    let base = stems_dir(data_dir, content_hash);
+    if separator_id == DEFAULT_SEPARATOR_ID {
+        base
+    } else {
+        base.join(separator_id)
+    }
+}
+
+/// Sum stems back together — the editor's "vocals + drums, no bass" is
+/// this over the cached stem files.
+///
+/// Separation is a partition of the signal, so summing is all a subset
+/// needs: no gain staging, no normalisation. Parts must share a sample
+/// rate and channel count (they come from one separation of one track);
+/// a ragged last block just leaves the shorter parts silent at the end.
+pub fn mix_stems(parts: &[&AudioData]) -> Result<AudioData> {
+    let (first, rest) = parts
+        .split_first()
+        .context("mixing stems: nothing to mix")?;
+    let n_ch = first.channels.len();
+    for part in rest {
+        anyhow::ensure!(
+            part.sample_rate == first.sample_rate && part.channels.len() == n_ch,
+            "mixing stems: parts disagree on format"
+        );
+    }
+    let frames = parts.iter().map(|p| p.frames()).max().unwrap_or(0);
+    let mut channels = vec![vec![0.0f32; frames]; n_ch];
+    for part in parts {
+        for (out, src) in channels.iter_mut().zip(&part.channels) {
+            for (o, s) in out.iter_mut().zip(src) {
+                *o += *s;
+            }
+        }
+    }
+    Ok(AudioData {
+        sample_rate: first.sample_rate,
+        channels,
+    })
 }
 
 /// The four stem FLAC paths inside a stems directory, [`STEM_NAMES`] order.
@@ -284,19 +427,43 @@ pub fn stem_paths(dir: &Path) -> [PathBuf; N_STEMS] {
     std::array::from_fn(|i| dir.join(format!("{}.flac", STEM_NAMES[i])))
 }
 
-/// True when all four stems are cached.
+/// True when all four stems are cached AND none of them is empty.
+///
+/// Both halves matter, because both are what an interrupted separation
+/// leaves behind. Missing files are the obvious case (a quit between
+/// stems). Empty ones are the nastier case: `write_stems` renames each
+/// stem into place, and a rename that outlived its data through a power
+/// cut leaves a 0-byte file that a presence check would trust forever.
+/// Either way the answer is no, and the track is separated again.
 pub fn stems_cached(dir: &Path) -> bool {
-    stem_paths(dir).iter().all(|p| p.is_file())
+    stem_paths(dir)
+        .iter()
+        .all(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.len() > 0))
 }
 
 /// Compute-if-missing stem cache: returns `true` if stems were computed,
 /// `false` on a cache hit (nothing recomputed, per-track caching keyed by
 /// the content hash embedded in `dir`).
 pub fn ensure_stems(dir: &Path, audio: &AudioData, separator: &dyn StemSeparator) -> Result<bool> {
+    ensure_stems_cancellable(dir, audio, separator, &CancelToken::new())
+}
+
+/// [`ensure_stems`], abandonable through `cancel`. A cancelled run writes
+/// nothing: a half-filled cache directory would be indistinguishable from
+/// a real one on the next look.
+pub fn ensure_stems_cancellable(
+    dir: &Path,
+    audio: &AudioData,
+    separator: &dyn StemSeparator,
+    cancel: &CancelToken,
+) -> Result<bool> {
     if stems_cached(dir) {
         return Ok(false);
     }
-    let stems = separator.separate(audio)?;
+    let stems = separator.separate_cancellable(audio, cancel)?;
+    if cancel.is_cancelled() {
+        return Ok(false);
+    }
     write_stems(dir, &stems)?;
     Ok(true)
 }

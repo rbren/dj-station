@@ -2,7 +2,7 @@
 // "Collapse to Macro" naming form calling the engine bridge, and the
 // macro library section instantiating macros by id.
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Manifest } from '../src/types';
 import type { CollapseOutcome, MacroGroup } from '../src/engine';
@@ -47,13 +47,20 @@ const state = {
   nodes: [] as unknown[],
   wires: [] as unknown[],
   modules: [OSC, VCA] as Manifest[],
+  /** Set to hold the next node snapshots in flight (an edit's refresh takes
+   *  several IPC round-trips in the real shell — the rack renders the
+   *  pre-edit snapshot the whole time). */
+  hold: null as Promise<void> | null,
 };
 
 const fakeEngine = {
   loadDemoPatch: vi.fn(async () => {}),
   start: vi.fn(async () => {}),
   listModules: vi.fn(async () => state.modules),
-  nodes: vi.fn(async () => state.nodes),
+  nodes: vi.fn(async () => {
+    if (state.hold) await state.hold;
+    return state.nodes;
+  }),
   wires: vi.fn(async () => state.wires),
   tap: vi.fn(async () => null),
   tapAll: vi.fn(async () => ({})),
@@ -97,7 +104,7 @@ vi.mock('../src/engine', () => ({
 
 import App from '../src/App';
 
-function node(instance: string, manifest: Manifest) {
+function node(instance: string, manifest: Manifest, position?: [number, number]) {
   return {
     instance_id: instance,
     type_id: manifest.id,
@@ -106,6 +113,7 @@ function node(instance: string, manifest: Manifest) {
     params: {},
     wired_inputs: [],
     midi_mappings: [],
+    position,
   };
 }
 
@@ -115,6 +123,7 @@ beforeEach(() => {
   state.nodes = [node('osc1', OSC), node('vca1', VCA)];
   state.wires = [];
   state.modules = [OSC, VCA];
+  state.hold = null;
   // clearAllMocks keeps mockResolvedValue overrides; restore defaults.
   fakeEngine.macroGroups.mockResolvedValue([]);
   fakeEngine.macroLayout.mockResolvedValue({});
@@ -336,6 +345,75 @@ describe('expanded macro view', () => {
     expect(item.textContent).toContain('Tone');
     fireEvent.click(item);
     await waitFor(() => expect(fakeEngine.breakMacro).toHaveBeenCalledWith('tone1'));
+  });
+
+  // Breaking renames the members (tone1/osc1 -> osc1), but the rack keeps
+  // rendering the PRE-break snapshot until the refresh lands — several IPC
+  // round-trips in the real shell. Retiring the members' layout entries up
+  // front left them (and the macro box drawn around them, title bar and
+  // all) parked at the default slot on top of whatever else was there,
+  // which is what the leftover title bar over other modules was.
+  it('break leaves the group put mid-refresh and no stale layout entries', async () => {
+    state.nodes = [
+      node('tone1/osc1', OSC, [96, 96]),
+      node('tone1/vca1', VCA, [96, 384]),
+      node('osc2', OSC, [480, 96]),
+    ];
+    fakeEngine.macroGroups.mockResolvedValue([
+      {
+        instance: 'tone1',
+        macro_id: 'macro.tone',
+        name: 'Tone',
+        members: ['tone1/osc1', 'tone1/vca1'],
+      },
+    ]);
+    fakeEngine.breakMacro.mockImplementation(async () => {
+      state.nodes = [
+        node('osc1', OSC, [96, 96]),
+        node('vca1', VCA, [96, 384]),
+        node('osc2', OSC, [480, 96]),
+      ];
+      fakeEngine.macroGroups.mockResolvedValue([]);
+      return { 'tone1/osc1': 'osc1', 'tone1/vca1': 'vca1' };
+    });
+    render(<App />);
+    await screen.findByTestId('module-tone1/osc1');
+    const box = await screen.findByTestId('macro-box-tone1');
+    const boxAt = { left: box.style.left, top: box.style.top };
+    expect(boxAt.top).not.toBe('');
+
+    let release = () => {};
+    state.hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fireEvent.contextMenu(screen.getByTestId('module-tone1/osc1'));
+    fireEvent.click(await screen.findByTestId('ctx-break-macro'));
+    await waitFor(() => expect(fakeEngine.breakMacro).toHaveBeenCalledWith('tone1'));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // Mid-refresh: the pre-break panels and their box have not moved.
+    const midPanel = screen.getByTestId('module-tone1/osc1');
+    expect([midPanel.style.left, midPanel.style.top]).toEqual(['96px', '96px']);
+    const midBox = screen.getByTestId('macro-box-tone1');
+    expect({ left: midBox.style.left, top: midBox.style.top }).toEqual(boxAt);
+
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await screen.findByTestId('module-osc1');
+    await waitFor(() => expect(screen.queryByTestId('macro-box-tone1')).toBeNull());
+    const panel = screen.getByTestId('module-osc1');
+    expect([panel.style.left, panel.style.top]).toEqual(['96px', '96px']);
+    // The retired ids (members and the instance itself) leave no layout
+    // entries behind.
+    expect(JSON.parse(localStorage.getItem('dj-rack-positions') ?? '{}')).toEqual({
+      osc1: { x: 96, y: 96 },
+      vca1: { x: 96, y: 384 },
+      osc2: { x: 480, y: 96 },
+    });
   });
 
   // The three instance verbs (PRD §6): each instance owns its copy of the

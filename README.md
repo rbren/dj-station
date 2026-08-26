@@ -32,6 +32,19 @@ library's YouTube tab (`brew install yt-dlp`, `pipx install yt-dlp`, or your
 package manager). Nothing else needs it — without it the tab is still there
 and reports the missing binary when you search.
 
+Also optional: **[demucs](https://github.com/adefossez/demucs)**
+(`pipx install demucs`) for studio-quality stem separation. With it
+installed, tracks are separated on their own in the background — anything
+downloaded from YouTube first, then the rest of the library — so the Clip
+page can drop the vocals out of a track without anyone waiting on a model
+or pressing anything; it just reports whether the stems have landed.
+Without demucs the Clip page says so and the stem switches stay off; the
+decks' stem controls are unaffected (they use the built-in DSP band
+split). `DJ_AUTOSTEM=off|downloads|all` (default `all`) chooses what gets
+separated automatically, `DJ_DEMUCS_BIN` points at a specific binary,
+`DJ_DEMUCS_MODEL` picks another model (default `htdemucs_ft`) and
+`DJ_DEMUCS_ARGS` adds flags to every call (e.g. `--device cuda`).
+
 ## State & saves — `custom/`
 
 All persistent state lives in **`custom/` inside this checkout** (the repo
@@ -111,8 +124,9 @@ a failed job reports its error in the library view.
 title/channel/duration/thumbnail; Download fetches the best *audio-only*
 stream (m4a/mp3 preferred, so **no ffmpeg needed** — nothing is
 transcoded) into `custom/downloads/` and imports it as a normal track that
-analyzes and loads onto a deck like any other. `yt-dlp` must be on `PATH`
-(or point `DJ_YTDLP_BIN` at it); when it is missing, search and download
+analyzes and loads onto a deck like any other. The binary defaults to
+`/usr/local/bin/yt-dlp_macos` (point `DJ_YTDLP_BIN` at a different one to
+override); when it is missing, search and download
 fail with an install hint instead of the tab disappearing. YouTube results
 are tagged license `unknown` on purpose — the search API exposes no
 license, so check the video's terms before using its audio.
@@ -125,6 +139,18 @@ patch graph: inputs `play_gate` (≥ 1.0 plays, low pauses) and `speed`
 (pitch-style, +1.0 = double rate), outputs `audio_l`/`audio_r`. Decoding
 (symphonia) and sample-rate conversion happen off the RT thread; the loaded
 track path persists with the patch.
+
+The **Audio module** (`builtin.audio`) plays any library track and clocks the
+rack from it: inputs `play`, `bpm`, `speed` and `loop`, outputs
+`audio_l`/`audio_r` plus `clock` (a trigger per beat, free-running while
+paused). BPM and speed are one tempo in two units — move either and the
+other follows, so pushing the BPM up plays the track faster and the clock
+stays locked to what you hear. Loading a track adopts the BPM the library
+analyzed and sets speed back to 1x. Tracks loop by default (the ⟳ button on
+the panel, or the `loop` jack), with the beat clock restarting on every
+pass. The panel picks the track and draws it as a waveform with a live
+playhead; the rest is ordinary knob-backed inputs you can wire, MIDI-map or
+automate.
 
 The **DJ Deck module** (`builtin.deck`, M2) is the full DJ deck (PRD §7):
 transport with pitch fader (`speed` × `pitch_range` param, default ±8 %) and

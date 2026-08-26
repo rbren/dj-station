@@ -3,7 +3,7 @@
 
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { WaveformView } from '../src/components/WaveformView';
+import { peaksPath, WaveformView } from '../src/components/WaveformView';
 
 const PEAKS = Array.from({ length: 100 }, (_, i) => (i % 10) / 10);
 
@@ -62,5 +62,37 @@ describe('WaveformView', () => {
     render(<WaveformView {...baseProps} />);
     const playhead = screen.getByTestId('waveform-zoom-playhead');
     expect(Number(playhead.getAttribute('x1'))).toBeCloseTo(500, 5);
+  });
+});
+
+describe('peaksPath', () => {
+  /** Columns in the polygon (top edge only; the bottom mirrors it). */
+  const columns = (d: string) => ((d.match(/L/g)?.length ?? 0) - 1) / 2;
+
+  const dense = Array.from({ length: 4000 }, (_, i) => (i % 50) / 50);
+
+  it('draws more columns as you zoom in, from the same peaks', () => {
+    const whole = columns(peaksPath(dense, 0, 1, 100));
+    const tenth = columns(peaksPath(dense, 0.4, 0.5, 100));
+    const hundredth = columns(peaksPath(dense, 0.4, 0.41, 100));
+    // Zoomed out the path is capped; zoomed in it thins out to one column
+    // per bucket rather than stretching a fixed number of them.
+    expect(whole).toBeGreaterThan(500);
+    expect(tenth).toBe(400);
+    expect(hundredth).toBe(40);
+  });
+
+  it('keeps a lone loud bucket visible when zoomed out', () => {
+    const quiet = new Array(4000).fill(0.01);
+    quiet[1234] = 1;
+    const d = peaksPath(quiet, 0, 1, 100);
+    // A sampling path would step straight over one bucket in 4000; the
+    // pooled one puts it on screen at full height (y = 0 above the mid).
+    expect(d).toContain(',0 ');
+  });
+
+  it('has nothing to draw without peaks or width', () => {
+    expect(peaksPath([], 0, 1, 100)).toBe('');
+    expect(peaksPath(dense, 0.5, 0.5, 100)).toBe('');
   });
 });

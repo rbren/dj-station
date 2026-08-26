@@ -26,7 +26,7 @@ import type {
 } from '../types';
 import { InputCell } from './InputCell';
 import { LiveJack } from './Jack';
-import { resolveLayout } from './panelLayouts';
+import { resolveLayout, type OutputGroupSpec } from './panelLayouts';
 import { WIRE_COLORS } from './WireOverlay';
 
 /** Panel accent hue per library category (border + title tint). */
@@ -218,23 +218,28 @@ export function ModulePanel(props: ModulePanelProps) {
   const stripGroups = CustomUI
     ? layout.outputGroups.filter((g) => !g.besideUI)
     : layout.outputGroups;
-  const renderOutputJack = (id: string) => (
-    <LiveJack
-      key={id}
-      instance={instanceId}
-      id={id}
-      kind="output"
-      telemetry={telemetry?.[`out:${id}`]}
-      display={manifest.outputs.find((o) => o.id === id)?.display}
-      selected={
-        pendingSource?.kind === 'output' &&
-        pendingSource.instance === instanceId &&
-        pendingSource.jack === id
-      }
-      selectedColor={pendingColor}
-      onClick={(shift) => props.onJackClick?.('output', id, shift)}
-    />
-  );
+  // Output jacks of a group, optionally drawn as the hardware controls
+  // they come off (a control surface's knobs, faders and pads).
+  const renderOutputJack =
+    (group?: Pick<OutputGroupSpec, 'control' | 'labels'>) => (id: string) => (
+      <LiveJack
+        key={id}
+        instance={instanceId}
+        id={id}
+        kind="output"
+        label={group?.labels?.[id]}
+        readout={group?.control}
+        telemetry={telemetry?.[`out:${id}`]}
+        display={manifest.outputs.find((o) => o.id === id)?.display}
+        selected={
+          pendingSource?.kind === 'output' &&
+          pendingSource.instance === instanceId &&
+          pendingSource.jack === id
+        }
+        selectedColor={pendingColor}
+        onClick={(shift) => props.onJackClick?.('output', id, shift)}
+      />
+    );
   const accent = CATEGORY_ACCENTS[manifest.category ?? ''] ?? '#8a93a2';
   const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(
     null,
@@ -380,7 +385,7 @@ export function ModulePanel(props: ModulePanelProps) {
               <CustomUIHost instanceId={instanceId} handle={props.handle} CustomUI={CustomUI} />
               {besideGroups.map((group, gi) => (
                 <div className="beside-ui-outputs" key={group.title ?? gi}>
-                  {group.outputs.map(renderOutputJack)}
+                  {group.outputs.map(renderOutputJack(group))}
                 </div>
               ))}
             </div>
@@ -493,7 +498,7 @@ export function ModulePanel(props: ModulePanelProps) {
             {stripGroups.map((group, gi) => (
               <div
                 key={group.title ?? gi}
-                className="output-group"
+                className={`output-group${group.control ? ' output-group-surface' : ''}`}
                 style={group.indent ? { paddingLeft: group.indent } : undefined}
               >
                 {group.title && <span className="output-group-title">{group.title}</span>}
@@ -505,7 +510,7 @@ export function ModulePanel(props: ModulePanelProps) {
                       : undefined
                   }
                 >
-                  {group.outputs.map(renderOutputJack)}
+                  {group.outputs.map(renderOutputJack(group))}
                 </div>
               </div>
             ))}

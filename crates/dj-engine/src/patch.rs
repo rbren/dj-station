@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::beat_clip::BeatClipRef;
 use crate::choreo::ChoreoState;
 use crate::engine::{Engine, EngineConfig, MidiMappingInfo};
 use crate::knob::KnobState;
@@ -66,6 +67,11 @@ pub struct ModuleFile {
     /// re-applied by the app layer after load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<String>,
+    /// Which Beatify clip a Beat Clip node plays. The clip's AUDIO is not
+    /// persisted (a clip is placements, re-assembled on demand) — the app
+    /// layer loads it after a patch load, like deck metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<BeatClipRef>,
     /// Deck instance this deck is beat-synced to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_to: Option<String>,
@@ -324,6 +330,7 @@ impl Engine {
                     midi_led_mappings: Vec::new(),
                     choreo: None,
                     track: None,
+                    clip: None,
                     sync_to: None,
                 },
             );
@@ -385,6 +392,7 @@ impl Engine {
             midi_led_mappings: info.midi_led_mappings.clone(),
             choreo: info.choreo.clone(),
             track: info.track_path.clone(),
+            clip: info.clip.clone(),
             sync_to: self.deck_sync_to_by_node(node_idx),
         }
     }
@@ -640,6 +648,27 @@ impl Engine {
         }
     }
 
+    /// Load a saved track path into whichever track-playing module the
+    /// node is. Patches persist only the path — an Audio node's tempo
+    /// rides along in its saved knobs, deck grids/cues/loops come from the
+    /// library, both re-applied by the caller/app layer after load.
+    pub(crate) fn load_module_track(
+        &mut self,
+        instance_id: &str,
+        kind: Option<crate::builtin::BuiltinKind>,
+        track: &str,
+    ) -> Result<()> {
+        match kind {
+            Some(crate::builtin::BuiltinKind::Deck) => {
+                self.deck_load(instance_id, Path::new(track))
+            }
+            Some(crate::builtin::BuiltinKind::Audio) => {
+                self.audio_load(instance_id, Path::new(track), None)
+            }
+            _ => self.playback_load(instance_id, Path::new(track)),
+        }
+    }
+
     /// Add one module instance from its patch entry, restoring mappings,
     /// track, params and knobs. Deck sync targets are pushed
     /// onto `deferred_syncs` (applied once every module exists).
@@ -669,13 +698,11 @@ impl Engine {
             self.choreo_set_state(instance_id, c.clone())?;
         }
         if let Some(track) = &mf.track {
-            if crate::builtin::BuiltinKind::from_ext_id(&mf.ext)
-                == Some(crate::builtin::BuiltinKind::Deck)
-            {
-                self.deck_load(instance_id, Path::new(track))?;
-            } else {
-                self.playback_load(instance_id, Path::new(track))?;
-            }
+            let kind = crate::builtin::BuiltinKind::from_ext_id(&mf.ext);
+            self.load_module_track(instance_id, kind, track)?;
+        }
+        if mf.clip.is_some() {
+            self.beat_clip_bind(instance_id, mf.clip.clone())?;
         }
         if let Some(sync_to) = &mf.sync_to {
             deferred_syncs.push((instance_id.to_string(), sync_to.clone()));
@@ -899,12 +926,17 @@ impl Engine {
             let node = self.node_idx(instance_id)?;
             if let Some(track) = &mf.track {
                 if self.nodes[node].track_path.as_deref() != Some(track.as_str()) {
-                    if self.nodes[node].is_deck() {
-                        self.deck_load(instance_id, Path::new(track))?;
-                    } else {
-                        self.playback_load(instance_id, Path::new(track))?;
-                    }
+                    let kind = self.nodes[node].builtin_kind();
+                    self.load_module_track(instance_id, kind, track)?;
                 }
+            }
+
+            // Beat Clip binding (the audio behind it is the app layer's
+            // to re-assemble — `beat_clip_pending` reports it afterwards).
+            if self.nodes[node].builtin_kind() == Some(crate::builtin::BuiltinKind::BeatClip)
+                && self.nodes[node].clip != mf.clip
+            {
+                self.beat_clip_bind(instance_id, mf.clip.clone())?;
             }
 
             // Deck sync partner.

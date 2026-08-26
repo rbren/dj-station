@@ -1,0 +1,73 @@
+{
+  "regions": [
+    {
+      "source": 0,
+      "start_secs": 0.1,
+      "end_secs": 0.45,
+      "reverse": false,
+      "gain_db": 0.0
+    },
+    {
+      "source": 1,
+      "start_secs": 0.2,
+      "end_secs": 0.5,
+      "reverse": true,
+      "gain_db": -3.0
+    },
+    {
+      "source": 0,
+      "start_secs": 0.6,
+      "end_secs": 0.85,
+      "reverse": false,
+      "gain_db": 0.0
+    }
+  ],
+  "overlays": [
+    {
+      "at_secs": 0.3,
+      "source": 1,
+      "start_secs": 0.55,
+      "end_secs": 0.95,
+      "reverse": false,
+      "gain_db": -6.0
+    }
+  ],
+  "eq": {
+    "bands": [
+      {
+        "freq_hz": 99.0,
+        "gain_db": 4.0,
+        "q": 1.0
+      },
+      {
+        "freq_hz": 990.0,
+        "gain_db": -5.0,
+        "q": 2.5
+      },
+      {
+        "freq_hz": 6300.0,
+        "gain_db": 2.5,
+        "q": 0.7
+      }
+    ]
+  },
+  "level": [
+    {
+      "time_secs": 0.0,
+      "gain_db": -60.0
+    },
+    {
+      "time_secs": 0.15,
+      "gain_db": 0.0
+    },
+    {
+      "time_secs": 0.6,
+      "gain_db": -4.0
+    },
+    {
+      "time_secs": 0.9,
+      "gain_db": -60.0
+    }
+  ],
+  "crossfade_ms": 8.0
+}

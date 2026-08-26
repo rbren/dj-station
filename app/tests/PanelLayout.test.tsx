@@ -3,14 +3,14 @@
 // controls, and the normalization guarantee that every manifest jack
 // renders exactly once even if a layout forgets or misnames it.
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import GridSeqUI from '../../extensions/grid_seq/ui-src/GridSeqUI';
 import StepSeqUI from '../../extensions/step_seq/ui-src/StepSeqUI';
 import { ModulePanel } from '../src/components/ModulePanel';
 import { resolveLayout } from '../src/components/panelLayouts';
-import type { Manifest, ModuleHandle } from '../src/types';
+import type { JackTelemetry, Manifest, ModuleHandle } from '../src/types';
 
 const HANDLE: ModuleHandle = {
   paramValue: () => 0,
@@ -20,6 +20,14 @@ const HANDLE: ModuleHandle = {
 };
 
 const noop = () => {};
+
+const tele = (display: number): JackTelemetry => ({
+  instantaneous: display,
+  rms_100ms: 0,
+  display,
+  volatility: 0,
+  is_fast: false,
+});
 
 const baseProps = {
   knobs: {},
@@ -139,6 +147,40 @@ describe('ModulePanel with layouts', () => {
       expect(screen.getByTestId(`input-cell-pan${ch}`).querySelector('.knob')).toBeTruthy();
     }
     expect(screen.getByTestId('input-cell-master').querySelector('.fader-v')).toBeTruthy();
+  });
+
+  // A level wired in override mode is set by the signal, not the fader:
+  // the cap has to ride the incoming level instead of the inert baseline.
+  it('a mixer level in override mode rides the wire, not its baseline', () => {
+    const m = manifest('com.dj.mixer', ['lvl1', 'master'], ['out_l', 'out_r']);
+    const capPct = () =>
+      parseFloat(
+        (screen.getByTestId('input-cell-lvl1').querySelector('.fader-cap') as HTMLElement).style
+          .bottom,
+      );
+    const { rerender } = render(
+      <ModulePanel
+        {...baseProps}
+        instanceId="mix1"
+        manifest={m}
+        knobs={{ lvl1: { position: 0.1, atten: 1, offset: 0, wire_style: 'override' } }}
+        wired={{ lvl1: true }}
+        telemetry={{ lvl1: tele(6) }}
+      />,
+    );
+    expect(capPct()).toBeCloseTo(60, 3);
+    // Back in CV mode the fader is the baseline again, wire or no wire.
+    rerender(
+      <ModulePanel
+        {...baseProps}
+        instanceId="mix1"
+        manifest={m}
+        knobs={{ lvl1: { position: 0.1, atten: 1, offset: 0, wire_style: 'cv' } }}
+        wired={{ lvl1: true }}
+        telemetry={{ lvl1: tele(6) }}
+      />,
+    );
+    expect(capPct()).toBeCloseTo(10, 3);
   });
 
   it('audio-flagged inputs render as plain jacks with no control (mixer ins)', () => {
@@ -368,5 +410,164 @@ describe('grid sequencer row-output alignment', () => {
     expect(rule('.gridseq-ui')).toContain('gap: var(--ui-row-gap');
     expect(rule('.beside-ui-outputs .jack')).toContain('height: var(--ui-row-h');
     expect(rule('.beside-ui-outputs')).toContain('gap: var(--ui-row-gap');
+  });
+});
+
+// A module that IS a piece of hardware draws its outputs as the controls
+// they come off (`OutputGroupSpec.control`): the Launch Control XL's panel
+// is six rows of eight — three of knobs, the faders, then the two button
+// rows — each jack wearing a live readout of its own signal and labelled
+// by its column number, so the panel reads like the surface.
+describe('control-surface output readouts', () => {
+  const ROWS = ['a', 'b', 'pan', 'fader', 'focus', 'ctrl'];
+  const lcManifest = () => {
+    const outputs: string[] = [];
+    for (let c = 1; c <= 8; c++) for (const r of ROWS) outputs.push(`c${c}_${r}`);
+    return manifest('builtin.launchcontrol', [], outputs);
+  };
+
+  it('lays the surface out as six eight-wide rows of knobs, faders and buttons', () => {
+    const layout = resolveLayout(lcManifest());
+    expect(layout.outputGroups.map((g) => g.control)).toEqual([
+      'knob',
+      'knob',
+      'knob',
+      'fader',
+      'button',
+      'button',
+    ]);
+    for (const g of layout.outputGroups) {
+      expect(g.columns).toBe(8);
+      // A row is one control ACROSS the surface, though the jack ids are
+      // column-major (c1_a…c8_ctrl).
+      expect(g.outputs).toHaveLength(8);
+      // Columns are numbered on the panel; the ids stay in the tooltip.
+      expect(g.outputs.map((id) => g.labels?.[id])).toEqual([
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+      ]);
+    }
+    expect(layout.outputGroups[0].outputs[0]).toBe('c1_a');
+    expect(layout.outputGroups[3].outputs[7]).toBe('c8_fader');
+    // Every jack of the surface is rendered exactly once.
+    expect(layout.outputGroups.flatMap((g) => g.outputs)).toHaveLength(48);
+  });
+
+  it('draws each control at its live value', () => {
+    render(
+      <ModulePanel
+        {...baseProps}
+        instanceId="lcxl1"
+        manifest={lcManifest()}
+        telemetry={{
+          'out:c1_a': tele(10), // knob fully clockwise
+          'out:c2_a': tele(5), // knob at noon
+          'out:c1_fader': tele(2.5), // fader a quarter up
+          'out:c1_focus': tele(10), // button held
+          'out:c2_focus': tele(0), // button up
+        }}
+      />,
+    );
+    // Knobs: 0..10 V over the dial's own −135°…+135° sweep.
+    expect(screen.getByTestId('jack-readout-c1_a').getAttribute('data-level')).toBe('1.000');
+    expect(
+      screen.getByTestId('jack-readout-c1_a').querySelector<HTMLElement>('.jack-readout-pointer')!
+        .style.transform,
+    ).toBe('rotate(135deg)');
+    expect(
+      screen.getByTestId('jack-readout-c2_a').querySelector<HTMLElement>('.jack-readout-pointer')!
+        .style.transform,
+    ).toBe('rotate(0deg)');
+    // An untouched control sits at the bottom of its travel, not blank.
+    expect(screen.getByTestId('jack-readout-c3_a').getAttribute('data-level')).toBe('0.000');
+
+    // Faders: the cap rides the track.
+    const fader = screen.getByTestId('jack-readout-c1_fader');
+    expect(fader.getAttribute('class')).toContain('jack-readout-fader');
+    expect(fader.querySelector<HTMLElement>('.jack-readout-cap')!.style.bottom).toBe('25%');
+
+    // Buttons: a pad lit while the gate is high (>= 1 V), dark otherwise.
+    expect(screen.getByTestId('jack-readout-c1_focus').getAttribute('data-on')).toBe('yes');
+    expect(screen.getByTestId('jack-readout-c1_focus').getAttribute('class')).toContain(
+      'jack-readout-pad-on',
+    );
+    expect(screen.getByTestId('jack-readout-c2_focus').getAttribute('data-on')).toBe('no');
+    expect(screen.getByTestId('jack-readout-c2_focus').getAttribute('class')).not.toContain(
+      'jack-readout-pad-on',
+    );
+  });
+
+  it('follows the display reading, the one the rack store propagates', () => {
+    // `instantaneous` is excluded from the store's per-jack equality check
+    // (rackStore.jackTelemetryEqual), so a readout reading it would only
+    // ever update by coincidence.
+    render(
+      <ModulePanel
+        {...baseProps}
+        instanceId="lcxl1"
+        manifest={lcManifest()}
+        telemetry={{
+          'out:c1_focus': { ...tele(0), instantaneous: 10 },
+          'out:c1_a': { ...tele(0), instantaneous: 10 },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('jack-readout-c1_focus').getAttribute('data-on')).toBe('no');
+    expect(screen.getByTestId('jack-readout-c1_a').getAttribute('data-level')).toBe('0.000');
+  });
+
+  it('leaves the jack itself a jack: labels, tooltips and wiring clicks', () => {
+    const clicks: string[] = [];
+    render(
+      <ModulePanel
+        {...baseProps}
+        instanceId="lcxl1"
+        manifest={lcManifest()}
+        telemetry={{ 'out:c3_pan': tele(7.5) }}
+        onJackClick={(_kind, jack) => clicks.push(jack)}
+      />,
+    );
+    const jack = screen.getByTestId('jack-output-c3_pan');
+    expect(jack.querySelector('.jack-name')!.textContent).toBe('3');
+    // The id (and its value) stay one hover away.
+    expect(jack.getAttribute('data-tip')).toContain('c3_pan');
+    // The readout is decoration inside the jack button: a press on it is
+    // still a press on the jack, which is how a wire gets made.
+    fireEvent.click(screen.getByTestId('jack-readout-c3_pan'));
+    expect(clicks).toEqual(['c3_pan']);
+  });
+
+  it('ordinary modules keep plain output jacks', () => {
+    render(
+      <ModulePanel
+        {...baseProps}
+        instanceId="lfo1"
+        manifest={manifest('com.dj.lfo', [], ['bi'])}
+      />,
+    );
+    expect(screen.queryByTestId('jack-readout-bi')).toBeNull();
+    expect(screen.getByTestId('jack-output-bi').getAttribute('class')).not.toContain(
+      'jack-with-readout',
+    );
+    expect(document.querySelector('.output-group-surface')).toBeNull();
+  });
+
+  it('styles.css gives readout cells one fixed width so the rows line up', () => {
+    const css = readFileSync('src/styles.css', 'utf8');
+    const rule = (selector: string) => {
+      const m = css.match(new RegExp(`${selector.replace(/[.\s]/g, '\\$&')}\\s*{[^}]*}`));
+      if (!m) throw new Error(`missing rule ${selector}`);
+      return m[0];
+    };
+    expect(rule('.jack-with-readout')).toContain('width: 40px');
+    // ...including inside the output strip, which otherwise frees jack
+    // widths (`.module-outputs .jack { width: auto }`).
+    expect(rule('.module-outputs .jack-with-readout')).toContain('width: 40px');
   });
 });

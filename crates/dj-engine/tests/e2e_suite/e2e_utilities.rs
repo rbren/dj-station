@@ -12,6 +12,10 @@
 //! - `utilities-attenuverter1-vibrato`: a sine LFO tamed by the
 //!   single-channel attenuverter (small atten, offset carrying the base
 //!   pitch) into an oscillator's pitch — a vibrato around E4.
+//! - `utilities-mixer-mute-solo`: three voices on the mixer, one muted
+//!   for good and one soloed on and off by a square LFO — the solo law
+//!   (soloing silences the rest) and the mute law (a muted channel stays
+//!   silent even when soloed) audible in one render.
 //!
 //! The shared harness lives in `tests/common/e2e.rs`.
 
@@ -138,6 +142,49 @@ fn regen_mixer_stereo_pan() {
     write_events(&dir, &EventsFile::seconds(0.5));
 }
 
+fn regen_mixer_mute_solo() {
+    let dir = crate::common::e2e::case_dir("utilities-mixer-mute-solo");
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("osc2", "com.dj.oscillator").unwrap();
+    e.add_module("osc3", "com.dj.oscillator").unwrap();
+    e.add_module("lfo", "com.dj.oscillator").unwrap();
+    e.add_module("mix", "com.dj.mixer").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    // Three voices at unity: C4, G4, E5.
+    for (ch, (osc, pitch)) in [
+        ("osc1", 0.0f32),
+        ("osc2", 7.0 / 12.0),
+        ("osc3", 16.0 / 12.0),
+    ]
+    .iter()
+    .enumerate()
+    {
+        e.set_knob_value(osc, "pitch", *pitch).unwrap();
+        e.connect(osc, "audio", "mix", &format!("in{}_l", ch + 1))
+            .unwrap();
+        e.set_knob_value("mix", &format!("lvl{}", ch + 1), 10.0)
+            .unwrap();
+    }
+
+    // Channel 2's solo switch is gated by a ~2 Hz square LFO: the render
+    // alternates between "everything un-muted" and "G4 alone".
+    e.set_knob_position("lfo", "waveform", 2.0 / 3.0).unwrap();
+    e.set_knob_value("lfo", "pitch", -7.0).unwrap();
+    e.connect("lfo", "audio", "mix", "solo2").unwrap();
+
+    // Channel 3 is muted for the whole render — never audible, soloed or not.
+    e.set_knob_position("mix", "mute3", 1.0).unwrap();
+
+    e.set_knob_value("mix", "master", 5.0).unwrap();
+    e.connect("mix", "out_l", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-utilities-mixer-mute-solo")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(1.0));
+}
+
 fn regen_attenuverter1_vibrato() {
     let dir = crate::common::e2e::case_dir("utilities-attenuverter1-vibrato");
     let mut e = mono_engine();
@@ -187,6 +234,14 @@ fn e2e_utilities_mixer_stereo_pan() {
         regen_mixer_stereo_pan();
     }
     check_case("utilities-mixer-stereo-pan");
+}
+
+#[test]
+fn e2e_utilities_mixer_mute_solo() {
+    if regen() {
+        regen_mixer_mute_solo();
+    }
+    check_case("utilities-mixer-mute-solo");
 }
 
 #[test]

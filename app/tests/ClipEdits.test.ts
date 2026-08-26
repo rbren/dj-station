@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  addOverlay,
   appendSource,
   cutRange,
   duplicateRange,
@@ -13,9 +14,14 @@ import {
   fadeOut,
   gainRange,
   levelDbAt,
+  moveRange,
   programDuration,
   regionSpans,
+  removeOverlay,
+  rulerTicks,
+  resizeSelection,
   reverseRange,
+  selectionEdgeAt,
   setLevelPoint,
   SILENCE_DB,
   trimTo,
@@ -103,6 +109,47 @@ describe('clip region math', () => {
     expect(programDuration(doubled)).toBeCloseTo(15, 9);
   });
 
+  it('moves a selection later on the timeline (drag right)', () => {
+    // [2,4) of a 10 s clip dragged to start at 5: the material between
+    // 4 and 7 shifts left to fill the hole, the selection lands at 5.
+    const p = moveRange(base(), 2, 4, 5);
+    expect(p.regions.map((r) => [r.start_secs, r.end_secs])).toEqual([
+      [0, 2],
+      [4, 7],
+      [2, 4],
+      [7, 10],
+    ]);
+    expect(programDuration(p)).toBeCloseTo(10, 9);
+  });
+
+  it('moves a selection earlier on the timeline (drag left)', () => {
+    const p = moveRange(base(), 6, 8, 1);
+    expect(p.regions.map((r) => [r.start_secs, r.end_secs])).toEqual([
+      [0, 1],
+      [6, 8],
+      [1, 6],
+      [8, 10],
+    ]);
+  });
+
+  it('clamps a move to the ends of the timeline', () => {
+    const start = moveRange(base(), 4, 6, -3);
+    expect(start.regions[0]).toMatchObject({ start_secs: 4, end_secs: 6 });
+    const end = moveRange(base(), 4, 6, 99);
+    expect(end.regions[end.regions.length - 1]).toMatchObject({ start_secs: 4, end_secs: 6 });
+    // Moving the whole clip is a no-op shape-wise.
+    expect(moveRange(base(), 0, 10, 3).regions).toEqual(base().regions);
+  });
+
+  it('overlays mix over the timeline and extend the duration', () => {
+    const p = addOverlay(base(), 1, 4, 8);
+    expect(p.overlays).toHaveLength(1);
+    expect(p.overlays[0]).toMatchObject({ source: 1, at_secs: 8, start_secs: 0, end_secs: 4 });
+    // 8 s in + 4 s of overlay outruns the 10 s base.
+    expect(programDuration(p)).toBeCloseTo(12, 9);
+    expect(programDuration(removeOverlay(p, 0))).toBeCloseTo(10, 9);
+  });
+
   it('appends another source for splicing', () => {
     const p = appendSource(base(), 1, 6);
     expect(p.regions.map((r) => r.source)).toEqual([0, 1]);
@@ -142,5 +189,99 @@ describe('clip level automation', () => {
     expect(p.level[2]).toEqual({ time_secs: 7, gain_db: 0 });
     expect(p.level[3]).toEqual({ time_secs: 10, gain_db: SILENCE_DB });
     expect(levelDbAt(p.level, 1)).toBeCloseTo(SILENCE_DB / 2, 9);
+  });
+});
+
+describe('selection edges', () => {
+  const sel = { start: 3, end: 6 };
+
+  it('grabs whichever end is within the handle radius', () => {
+    expect(selectionEdgeAt(sel, 3.05, 0.1)).toBe('start');
+    expect(selectionEdgeAt(sel, 5.95, 0.1)).toBe('end');
+    // Between the ends, and outside them, is not a grab.
+    expect(selectionEdgeAt(sel, 4.5, 0.1)).toBeNull();
+    expect(selectionEdgeAt(sel, 2.5, 0.1)).toBeNull();
+    expect(selectionEdgeAt(null, 3, 0.1)).toBeNull();
+  });
+
+  it('breaks a tie toward the start and ignores a zero radius', () => {
+    expect(selectionEdgeAt({ start: 4, end: 6 }, 5, 1)).toBe('start');
+    expect(selectionEdgeAt(sel, 3, 0)).toBeNull();
+  });
+
+  it('expands and shrinks against the anchored end', () => {
+    expect(resizeSelection(sel, 'end', 9, 10)).toEqual({ start: 3, end: 9 });
+    expect(resizeSelection(sel, 'end', 4, 10)).toEqual({ start: 3, end: 4 });
+    expect(resizeSelection(sel, 'start', 1, 10)).toEqual({ start: 1, end: 6 });
+    expect(resizeSelection(sel, 'start', 5, 10)).toEqual({ start: 5, end: 6 });
+  });
+
+  it('flips when an end is dragged past its opposite, and clamps to the clip', () => {
+    expect(resizeSelection(sel, 'end', 1, 10)).toEqual({ start: 1, end: 3 });
+    expect(resizeSelection(sel, 'start', 8, 10)).toEqual({ start: 6, end: 8 });
+    expect(resizeSelection(sel, 'end', 99, 10)).toEqual({ start: 3, end: 10 });
+    expect(resizeSelection(sel, 'start', -5, 10)).toEqual({ start: 0, end: 6 });
+  });
+});
+
+describe('ruler ticks', () => {
+  const majors = (from: number, to: number, target?: number) =>
+    rulerTicks(from, to, target)
+      .filter((t) => t.major)
+      .map((t) => t.label);
+
+  it('labels round times at a spacing the zoom warrants', () => {
+    expect(majors(0, 60)).toEqual(['0:00', '0:10', '0:20', '0:30', '0:40', '0:50', '1:00']);
+    // Zoomed to four seconds: half-second labels, not four one-second ones.
+    expect(majors(0, 4)).toEqual([
+      '0:00.0',
+      '0:00.5',
+      '0:01.0',
+      '0:01.5',
+      '0:02.0',
+      '0:02.5',
+      '0:03.0',
+      '0:03.5',
+      '0:04.0',
+    ]);
+  });
+
+  it('only labels ticks that fall inside the window', () => {
+    const ticks = rulerTicks(12.3, 27.8);
+    expect(ticks.every((t) => t.secs >= 12.3 && t.secs <= 27.8)).toBe(true);
+    expect(majors(12.3, 27.8)).toEqual(['0:14', '0:16', '0:18', '0:20', '0:22', '0:24', '0:26']);
+  });
+
+  it('subdivides between labels without labelling the minors', () => {
+    const ticks = rulerTicks(0, 60);
+    expect(ticks.filter((t) => !t.major).every((t) => t.label === '')).toBe(true);
+    // 10 s steps are subdivided in halves.
+    expect(ticks.map((t) => t.secs)).toContain(5);
+    expect(ticks.map((t) => t.secs)).toContain(55);
+  });
+
+  it('keeps labels on exact times when zoomed to hundredths', () => {
+    expect(majors(0.995, 1.06)).toEqual([
+      '0:01.00',
+      '0:01.01',
+      '0:01.02',
+      '0:01.03',
+      '0:01.04',
+      '0:01.05',
+      '0:01.06',
+    ]);
+  });
+
+  it('has nothing to draw for an empty or backwards window', () => {
+    expect(rulerTicks(5, 5)).toEqual([]);
+    expect(rulerTicks(9, 3)).toEqual([]);
+    expect(rulerTicks(0, Number.NaN)).toEqual([]);
+  });
+
+  it('stops coarsening at ten minutes for a very long clip', () => {
+    const labels = majors(0, 7200);
+    expect(labels[0]).toBe('0:00');
+    expect(labels[1]).toBe('10:00');
+    expect(labels[labels.length - 1]).toBe('120:00');
   });
 });

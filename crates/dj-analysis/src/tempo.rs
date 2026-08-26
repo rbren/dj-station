@@ -35,15 +35,47 @@ pub struct TempoResult {
     pub anchor_secs: f64,
 }
 
+/// The onset-strength envelope step 1 produces, with the geometry needed
+/// to map frames back to seconds. Shared with the Beatify beat tracker so
+/// both read the same onset function.
+#[derive(Debug, Clone)]
+pub struct OnsetEnvelope {
+    /// Half-wave-rectified energy flux, one value per frame.
+    pub flux: Vec<f32>,
+    /// Frames per second.
+    pub rate: f64,
+    /// Seconds of `flux[i]`: the flux window's trailing edge.
+    pub frame_offset_secs: f64,
+}
+
+impl OnsetEnvelope {
+    pub fn frame_secs(&self, frame: f64) -> f64 {
+        frame / self.rate + self.frame_offset_secs
+    }
+
+    pub fn secs_frame(&self, secs: f64) -> f64 {
+        (secs - self.frame_offset_secs) * self.rate
+    }
+}
+
+/// Compute the onset-strength envelope (step 1 of [`detect_tempo`]).
+pub fn onset_envelope(mono: &[f32], sample_rate: u32) -> OnsetEnvelope {
+    let sr = sample_rate as f64;
+    let win = ((ENV_WIN_SECS * sr) as usize).max(32);
+    let hop = ((ENV_HOP_SECS * sr) as usize).max(8);
+    OnsetEnvelope {
+        flux: onset_flux(mono, win, hop),
+        rate: sr / hop as f64,
+        frame_offset_secs: win as f64 / sr,
+    }
+}
+
 /// Detect tempo + beatgrid on a mono signal. Returns `None` for signals
 /// too short or too flat to track (needs ~8 beats of material).
 pub fn detect_tempo(mono: &[f32], sample_rate: u32) -> Option<TempoResult> {
     let sr = sample_rate as f64;
-    let win = ((ENV_WIN_SECS * sr) as usize).max(32);
-    let hop = ((ENV_HOP_SECS * sr) as usize).max(8);
-    let env_rate = sr / hop as f64;
-
-    let flux = onset_flux(mono, win, hop);
+    let env = onset_envelope(mono, sample_rate);
+    let (flux, env_rate) = (&env.flux, env.rate);
     let lag_min = (env_rate * 60.0 / BPM_MAX).floor() as usize;
     let lag_max = (env_rate * 60.0 / BPM_MIN).ceil() as usize;
     if flux.len() < lag_max * 3 {
@@ -117,19 +149,19 @@ pub fn detect_tempo(mono: &[f32], sample_rate: u32) -> Option<TempoResult> {
     // fitted beats carry nearly as much onset energy as the beats
     // themselves, the detected period is a x2 of the true pulse (a
     // half-tempo grid would miss every other beat) -- halve and refit.
-    let (mut anchor_env, mut period_fit) = fit_grid(&flux, peak, period)?;
+    let (mut anchor_env, mut period_fit) = fit_grid(flux, peak, period)?;
     for _ in 0..2 {
         let half = period_fit / 2.0;
         let bpm_if_halved = 60.0 * env_rate / half;
         if bpm_if_halved > BPM_MAX * 1.5 {
             break;
         }
-        let on = comb_mean(&flux, anchor_env, period_fit);
-        let off = comb_mean(&flux, anchor_env + half, period_fit);
+        let on = comb_mean(flux, anchor_env, period_fit);
+        let off = comb_mean(flux, anchor_env + half, period_fit);
         if off < 0.6 * on {
             break;
         }
-        let (a, p) = fit_grid(&flux, peak, half)?;
+        let (a, p) = fit_grid(flux, peak, half)?;
         anchor_env = a;
         period_fit = p;
     }
@@ -140,7 +172,7 @@ pub fn detect_tempo(mono: &[f32], sample_rate: u32) -> Option<TempoResult> {
     // (i-1)*hop and i*hop; an onset registers as it enters the window tail,
     // so the raw estimate carries a ~window-length bias. De-bias against
     // the raw signal's attack points.
-    let rough_anchor = (anchor_env * hop as f64 + win as f64) / sr;
+    let rough_anchor = env.frame_secs(anchor_env);
     let anchor = refine_anchor(mono, sr, rough_anchor, period_secs);
     let anchor_secs = anchor.rem_euclid(period_secs);
 

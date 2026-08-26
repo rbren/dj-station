@@ -5,8 +5,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { Knob, mapPosition } from '../src/components/Knob';
-import type { KnobConfig } from '../src/types';
+import { Knob, LiveOverrideKnob, mapPosition } from '../src/components/Knob';
+import type { JackTelemetry, KnobConfig } from '../src/types';
 
 const LINEAR: KnobConfig = { style: 'continuous', min: 0, max: 10, curve: 'linear' };
 
@@ -650,5 +650,99 @@ describe('Knob', () => {
     expect(menu.style.position).toBe('fixed');
     expect(menu.style.left).toBe('120px');
     expect(menu.style.top).toBe('240px');
+  });
+});
+
+// An input in wire-override mode takes its value from the signal, not the
+// knob — so the control has to MOVE with the signal instead of sitting on
+// an inert baseline (dials and mixer-style level faders alike).
+describe('LiveOverrideKnob', () => {
+  const tele = (display: number): JackTelemetry => ({
+    instantaneous: display,
+    rms_100ms: 0,
+    display,
+    volatility: 0,
+    is_fast: false,
+  });
+
+  const overrideProps = {
+    instance: 'vco1',
+    jack: 'pitch',
+    label: 'pitch',
+    config: LINEAR,
+    wired: true,
+    wireStyle: 'override' as const,
+  };
+
+  it('renders the dial at the live value, not at the knob baseline', () => {
+    render(
+      <LiveOverrideKnob
+        {...overrideProps}
+        position={0.2}
+        onPosition={() => {}}
+        telemetry={tele(7.5)}
+      />,
+    );
+    const dial = screen.getByRole('slider', { name: 'pitch' });
+    expect(Number(dial.getAttribute('aria-valuenow'))).toBeCloseTo(7.5, 5);
+    // 7.5 V of a 0..10 knob = position 0.75 = -135 + 270 * 0.75 degrees.
+    const pointer = dial.querySelector('.knob-pointer') as HTMLElement;
+    expect(parseFloat(/rotate\((-?[\d.]+)deg\)/.exec(pointer.style.transform)![1])).toBeCloseTo(
+      67.5,
+      3,
+    );
+  });
+
+  it('moves the mixer level fader cap with the wire', () => {
+    const { rerender } = render(
+      <LiveOverrideKnob
+        {...overrideProps}
+        jack="lvl1"
+        label="lvl1"
+        appearance="fader"
+        position={0}
+        onPosition={() => {}}
+        telemetry={tele(2)}
+      />,
+    );
+    const capPct = () =>
+      parseFloat((document.querySelector('.fader-cap') as HTMLElement).style.bottom);
+    expect(capPct()).toBeCloseTo(20, 3);
+    rerender(
+      <LiveOverrideKnob
+        {...overrideProps}
+        jack="lvl1"
+        label="lvl1"
+        appearance="fader"
+        position={0}
+        onPosition={() => {}}
+        telemetry={tele(8)}
+      />,
+    );
+    expect(capPct()).toBeCloseTo(80, 3);
+  });
+
+  it('falls back to the baseline while the jack has no reading yet', () => {
+    render(<LiveOverrideKnob {...overrideProps} position={0.4} onPosition={() => {}} />);
+    expect(
+      Number(screen.getByRole('slider', { name: 'pitch' }).getAttribute('aria-valuenow')),
+    ).toBeCloseTo(4, 5);
+  });
+
+  it('drags still move the (inert) baseline, not the displayed value', () => {
+    const onPosition = vi.fn();
+    render(
+      <LiveOverrideKnob
+        {...overrideProps}
+        position={0.2}
+        onPosition={onPosition}
+        telemetry={tele(7.5)}
+      />,
+    );
+    const dial = screen.getByRole('slider', { name: 'pitch' });
+    fireEvent.mouseDown(dial, { clientY: 100 });
+    fireEvent.mouseMove(window, { clientY: 70 }); // -30px => +0.2
+    fireEvent.mouseUp(window);
+    expect(onPosition.mock.lastCall![0]).toBeCloseTo(0.4, 5);
   });
 });

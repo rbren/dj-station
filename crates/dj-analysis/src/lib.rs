@@ -14,20 +14,31 @@
 //!   model from a configurable path (CoreML execution provider on macOS,
 //!   CPU elsewhere). Stems are cached as FLAC in app storage, keyed by the
 //!   track's content hash.
+//! - **Beatify** ([`beatify`]): the Beatify tab's headless pipeline —
+//!   beat detection (`beat_this` when installed, a deterministic DSP
+//!   tracker otherwise), least-squares grid fit, anchored time warp and
+//!   the hash-keyed record store. Beats only: no meter, no downbeats.
 //! - **Clip editing** ([`clip`]): the Clip page's offline editor —
 //!   cut/splice/reverse spans of library tracks, 3-band EQ and level
 //!   automation, rendered deterministically into a new audio file.
 //! - **Background worker** ([`worker`]): drains the library's analysis
 //!   queue off the audio/UI threads; results land in the library DB with
 //!   no user action.
+//! - **Automatic stems** ([`auto_stems`]): keeps the stem cache filled for
+//!   downloaded tracks — one separation at a time, backfilling history and
+//!   anything a quit interrupted, so the Clip page never has to ask.
 //!
 //! Everything here runs on background threads — never on the RT audio
 //! thread. The engine consumes results (beatgrids via the library DB, stem
 //! FLACs via `deck_load_stems`).
 
+pub mod auto_stems;
+pub mod beatify;
 pub mod clip;
 pub mod decode;
+pub mod demucs;
 pub mod key;
+pub mod stem_jobs;
 pub mod stems;
 pub mod stft;
 pub mod tempo;
@@ -37,10 +48,17 @@ pub mod worker;
 #[cfg(feature = "onnx")]
 pub mod onnx;
 
+pub use auto_stems::{
+    AutoStemScope, AutoStemService, AutoStemSettings, AutoStemStatus, TrackStems,
+};
+pub use beatify::{analyze as beatify_analyze, BeatifyRecord};
 pub use clip::{render_clip, ClipEq, ClipProgram, ClipRegion, LevelPoint};
 pub use decode::{decode_audio, AudioData};
+pub use demucs::DemucsSeparator;
+pub use stem_jobs::{StemJob, StemJobState, StemJobs};
 pub use stems::{
-    ensure_stems, stem_paths, stems_cached, stems_dir, BandSeparator, StemSeparator, Stems,
+    ensure_stems, ensure_stems_cancellable, mix_stems, stem_paths, stems_cached, stems_dir,
+    stems_dir_for, BandSeparator, CancelToken, StemSeparator, Stems, DEFAULT_SEPARATOR_ID, N_STEMS,
     STEM_NAMES,
 };
 pub use worker::{start_worker, AnalysisSettings, AnalysisWorker};

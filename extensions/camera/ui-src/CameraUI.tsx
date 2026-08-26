@@ -128,6 +128,7 @@ export default function CameraUI() {
     wantRef.current = true;
     if (!navigator.mediaDevices?.getUserMedia) {
       wantRef.current = false;
+      console.error("[camera] getUserMedia is unavailable in this webview");
       setState({ kind: "error", message: "Camera is not supported here." });
       return;
     }
@@ -161,6 +162,7 @@ export default function CameraUI() {
       setState({ kind: "live" });
     } catch (err) {
       wantRef.current = false;
+      console.error("[camera] starting the camera failed:", err);
       setState({ kind: "error", message: errorMessage(err) });
     }
   }, []);
@@ -169,6 +171,9 @@ export default function CameraUI() {
     if (trackWantRef.current) return;
     const video = videoRef.current;
     if (!video?.requestVideoFrameCallback) {
+      console.error(
+        "[camera] requestVideoFrameCallback is unavailable; no hand tracking",
+      );
       setTrackError("Hand tracking is not supported here.");
       return;
     }
@@ -181,6 +186,7 @@ export default function CameraUI() {
     } catch (err) {
       trackWantRef.current = false;
       setTrackState("off");
+      console.error("[camera] hand tracking failed to start:", err);
       setTrackError(
         err instanceof Error && err.message
           ? `Hand tracking failed to start: ${err.message}`

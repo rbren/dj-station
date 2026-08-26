@@ -8,7 +8,7 @@ import { useState } from 'react';
 import type { DisplaySpec, JackTelemetry, KnobConfig, KnobState, WireStyle } from '../types';
 import type { CellSpec } from './panelLayouts';
 import { LiveJack } from './Jack';
-import { Knob } from './Knob';
+import { Knob, LiveOverrideKnob, type KnobProps } from './Knob';
 import { KnobConfigMenu } from './KnobConfigMenu';
 import { WIRE_COLORS } from './WireOverlay';
 
@@ -67,6 +67,30 @@ export function InputCell(props: InputCellProps) {
   // (full config menu, which includes the same Color row) and stops
   // propagation, so this never fires on the dial itself.
   const [colorMenuAt, setColorMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const overridden = wired && state?.wire_style === 'override';
+  const knobProps: KnobProps = {
+    label: cell.jack,
+    config,
+    display: props.display,
+    appearance,
+    position: state?.position ?? 0,
+    wired,
+    plain,
+    atten: state?.atten,
+    offset: state?.offset,
+    wireStyle: state?.wire_style,
+    onPosition: props.onKnobPosition,
+    onConfigChange: props.onKnobConfig,
+    onAttenOffset: props.onAttenOffset,
+    onWireStyle: props.onWireStyle,
+    onReset: props.onKnobReset,
+    onRelease: props.onEditEnd,
+    jackColor: props.color,
+    onJackColor: props.onColor,
+    jackLabel: props.customLabel,
+    jackLabelDefault: defaultLabel,
+    onJackLabel: props.onLabel,
+  };
   return (
     <div
       className={`input-cell${appearance ? ` input-cell-${appearance}` : ''}${
@@ -97,31 +121,19 @@ export function InputCell(props: InputCellProps) {
         onClick={props.onJackClick}
         showLabel={false}
       />
-      {control !== 'jack' && (
-        <Knob
-          label={cell.jack}
-          config={config}
-          display={props.display}
-          appearance={appearance}
-          position={state?.position ?? 0}
-          wired={wired}
-          plain={plain}
-          atten={state?.atten}
-          offset={state?.offset}
-          wireStyle={state?.wire_style}
-          onPosition={props.onKnobPosition}
-          onConfigChange={props.onKnobConfig}
-          onAttenOffset={props.onAttenOffset}
-          onWireStyle={props.onWireStyle}
-          onReset={props.onKnobReset}
-          onRelease={props.onEditEnd}
-          jackColor={props.color}
-          onJackColor={props.onColor}
-          jackLabel={props.customLabel}
-          jackLabelDefault={defaultLabel}
-          onJackLabel={props.onLabel}
-        />
-      )}
+      {control !== 'jack' &&
+        // Under override the wire, not the knob, sets the value: the
+        // control becomes a live readout of it (LiveOverrideKnob).
+        (overridden ? (
+          <LiveOverrideKnob
+            instance={props.instance}
+            jack={cell.jack}
+            telemetry={props.telemetry}
+            {...knobProps}
+          />
+        ) : (
+          <Knob {...knobProps} />
+        ))}
       {colorMenuAt && props.onColor && (
         <KnobConfigMenu
           config={config}

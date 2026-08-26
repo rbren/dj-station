@@ -178,6 +178,36 @@ fn two_decks_through_crossfader_follow_equal_power_gain_curves() {
     assert!((center.2 / full_b - std::f64::consts::FRAC_1_SQRT_2).abs() < 0.02);
 }
 
+/// A fader hard over must silence the far side EXACTLY: `cos`/`sin` of the
+/// f32 `FRAC_PI_2` overshoot zero by ~4e-8, which used to leak a
+/// phase-inverted copy of the closed channel into the mix.
+#[test]
+fn crossfader_end_stops_silence_the_closed_channel_exactly() {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("xf1", "builtin.crossfader").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "xf1", "a_l").unwrap();
+    e.connect("osc1", "audio", "xf1", "a_r").unwrap();
+    e.connect("xf1", "out_l", "out1", "l").unwrap();
+
+    // Fader hard to B: nothing is patched into B, so the mix must be
+    // digital silence, not a residue of A.
+    e.set_knob_position("xf1", "xfade", 1.0).unwrap();
+    let out = e.render_offline(4800).unwrap();
+    let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    assert_eq!(peak, 0.0, "A leaks at the B end stop");
+
+    // The other end stop passes A at exactly unity.
+    e.set_knob_position("xf1", "xfade", 0.0).unwrap();
+    let out = e.render_offline(4800).unwrap();
+    let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    assert!(
+        peak > 4.9,
+        "A should reach ±5 V at its end stop, got {peak}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Criterion 4: beat_clock on the grid + ADSR envelopes at beat positions
 // ---------------------------------------------------------------------------

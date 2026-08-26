@@ -18,10 +18,29 @@ export interface ClipRegion {
   gain_db: number;
 }
 
+/** A span mixed OVER the timeline at `at_secs` instead of spliced in. */
+export type ClipOverlay = ClipRegion & { at_secs: number };
+
+/** One parametric EQ band — an RBJ peaking bell, pass-through at 0 dB.
+ *  Same filter as the rack's EQ module. */
+export interface ClipEqBand {
+  freq_hz: number;
+  gain_db: number;
+  q: number;
+}
+
 export interface ClipEq {
-  low_db: number;
-  mid_db: number;
-  high_db: number;
+  bands: ClipEqBand[];
+}
+
+export const EQ_MIN_HZ = 20;
+export const EQ_MIN_Q = 0.2;
+export const EQ_MAX_Q = 12;
+
+/** Four bells at the EQ module's default frequencies (its freq knobs'
+ *  defaults, converted from 1 V/oct pitch to Hz). */
+export function defaultEqBands(): ClipEqBand[] {
+  return [99, 397, 1586, 6343].map((freq_hz) => ({ freq_hz, gain_db: 0, q: 1 }));
 }
 
 export interface LevelPoint {
@@ -31,26 +50,125 @@ export interface LevelPoint {
 
 export interface ClipProgram {
   regions: ClipRegion[];
+  overlays: ClipOverlay[];
   eq: ClipEq;
   level: LevelPoint[];
   crossfade_ms: number;
 }
 
+/** One thing the editor cuts from: a library track, or a chosen set of
+ *  its stems mixed together. The set is part of the identity — "the
+ *  vocals of track 7" is a different source from "track 7".
+ *
+ *  Empty means the full mix, which is also how "every stem on" is sent:
+ *  the track's own file is exact, where re-summing stems is not. */
+export interface ClipSourceRef {
+  track_id: number;
+  /** Empty = the full mix; otherwise STEM_NAMES entries. */
+  stems: string[];
+}
+
 export interface ClipRequest {
-  /** Library track ids; `region.source` indexes into this list. */
-  sources: number[];
+  /** `region.source` indexes into this list. */
+  sources: ClipSourceRef[];
   program: ClipProgram;
 }
 
 /** A decoded source track, as the editor needs it. */
 export interface ClipSource {
   track_id: number;
+  /** Which stems this lane is (canonical order), empty for the full mix. */
+  stems: string[];
   title: string;
   artist: string;
   duration_secs: number;
   sample_rate: number;
   channels: number;
   peaks: number[];
+}
+
+/** Stem order, mirroring `dj_analysis::stems::STEM_NAMES`. */
+export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'] as const;
+export type StemName = (typeof STEM_NAMES)[number];
+
+/** Which separation backend the shell is configured with, and whether its
+ *  tooling is actually installed on this machine. */
+export interface ClipStemBackend {
+  /** Separator id — the model name for demucs, e.g. "htdemucs_ft". */
+  backend: string;
+  available: boolean;
+  /** Install hint / failure reason when `available` is false. */
+  detail: string | null;
+  stems: string[];
+}
+
+/** Where a track's stems stand. Nothing here asks for a separation: the
+ *  shell separates every downloaded track on its own (history included),
+ *  so the page reports progress rather than offering a button. */
+export type StemState = 'ready' | 'loading' | 'failed' | 'unavailable';
+
+export interface ClipStemStatus {
+  track_id: number;
+  backend: string;
+  state: StemState;
+  /** What the separation is doing, while it is this track's turn. */
+  stage: string | null;
+  /** Why there will be no stems (missing tooling, repeated failure). */
+  detail: string | null;
+  /** Tracks still waiting for stems, this one included. */
+  pending: number;
+}
+
+/** What to tell someone whose stems are not ready yet.
+ *
+ *  Every one of these is a wait or a reason, never an instruction: there
+ *  is no button to press, because separation happens on its own. */
+export function stemWait(status: ClipStemStatus | null, backend: ClipStemBackend | null): string {
+  if (status?.state === 'ready') return 'Stems are ready';
+  if (status && (status.state === 'failed' || status.state === 'unavailable')) {
+    return status.detail ?? 'These stems are unavailable';
+  }
+  if (backend?.available === false) {
+    return backend.detail ?? 'Stem separation is unavailable';
+  }
+  const stage = status?.stage ? ` (${status.stage})` : '';
+  const queued = status && status.pending > 1 ? ` · ${status.pending} tracks queued` : '';
+  return `Stems are loading${stage}${queued} — separation runs in the background`;
+}
+
+/** Label for a source lane: "Title", "Title — vocals" or, once more than
+ *  one stem is off, the shorter way round: "Title — no bass". */
+export function stemLabel(stems: string[]): string {
+  if (stems.length === 0) return '';
+  if (stems.length > STEM_NAMES.length - stems.length) {
+    const off = STEM_NAMES.filter((s) => !stems.includes(s));
+    return `no ${off.join(', ')}`;
+  }
+  return stems.join(' + ');
+}
+
+export function sourceLabel(source: ClipSource): string {
+  const stems = stemLabel(source.stems);
+  return stems ? `${source.title} — ${stems}` : source.title;
+}
+
+export function sourceRef(source: ClipSource): ClipSourceRef {
+  return { track_id: source.track_id, stems: source.stems };
+}
+
+/** The set the backend would use: every stem on is the full mix, so it
+ *  travels as the empty set (and never needs a separation). */
+export function stemSet(on: readonly string[]): string[] {
+  const kept = STEM_NAMES.filter((s) => on.includes(s));
+  return kept.length === STEM_NAMES.length ? [] : kept;
+}
+
+export function sameSource(a: ClipSourceRef, b: ClipSourceRef): boolean {
+  return (
+    a.track_id === b.track_id &&
+    a.stems.length === b.stems.length &&
+    a.stems.every((s, i) => s === b.stems[i])
+  );
 }
 
 /** The rendered edit (no file written). */
@@ -68,7 +186,8 @@ export const DEFAULT_CROSSFADE_MS = 5;
 export function emptyProgram(): ClipProgram {
   return {
     regions: [],
-    eq: { low_db: 0, mid_db: 0, high_db: 0 },
+    overlays: [],
+    eq: { bands: defaultEqBands() },
     level: [],
     crossfade_ms: DEFAULT_CROSSFADE_MS,
   };
@@ -103,7 +222,11 @@ export function regionSpans(program: ClipProgram): RegionSpan[] {
 
 export function programDuration(program: ClipProgram): number {
   const spans = regionSpans(program);
-  return spans.length ? spans[spans.length - 1].end : 0;
+  let total = spans.length ? spans[spans.length - 1].end : 0;
+  for (const o of program.overlays) {
+    total = Math.max(total, Math.max(0, o.at_secs) + regionDuration(o));
+  }
+  return total;
 }
 
 /** The region under an output time, plus how far into it the time falls. */
@@ -219,6 +342,31 @@ export function gainRange(
   return mapRange(program, from, to, (r) => ({ ...r, gain_db: r.gain_db + deltaDb }));
 }
 
+/** Move the selected range so it starts at `destStart` (drag a selection
+ *  left or right along the timeline: cut it out, splice it back in). */
+export function moveRange(
+  program: ClipProgram,
+  from: number,
+  to: number,
+  destStart: number,
+): ClipProgram {
+  const iso = isolate(program, from, to);
+  if (!iso) return program;
+  const moved = iso.regions.slice(iso.from, iso.to);
+  if (moved.length === 0) return program;
+  const rest = [...iso.regions.slice(0, iso.from), ...iso.regions.slice(iso.to)];
+  if (rest.length === 0) return withRegions(program, moved);
+  // Land the selection's start at destStart of the final timeline: that is
+  // the same time on the remainder's timeline (everything after the
+  // insertion just shifts right by the selection's length).
+  const restProgram = withRegions(program, rest);
+  const t = Math.min(Math.max(0, destStart), programDuration(restProgram));
+  const loc = locate(restProgram, t);
+  const at = splitAt(rest, loc.index, loc.offset);
+  rest.splice(at.index, 0, ...moved);
+  return withRegions(program, rest);
+}
+
 /** Splice a copy of the selected range in right after it. */
 export function duplicateRange(program: ClipProgram, from: number, to: number): ClipProgram {
   const iso = isolate(program, from, to);
@@ -246,6 +394,28 @@ export function removeRegion(program: ClipProgram, index: number): ClipProgram {
     program,
     program.regions.filter((_, i) => i !== index),
   );
+}
+
+/** Mix a whole source over the timeline starting at `atSecs`. */
+export function addOverlay(
+  program: ClipProgram,
+  source: number,
+  durationSecs: number,
+  atSecs: number,
+): ClipProgram {
+  const overlay: ClipOverlay = {
+    source,
+    start_secs: 0,
+    end_secs: durationSecs,
+    reverse: false,
+    gain_db: 0,
+    at_secs: Math.max(0, atSecs),
+  };
+  return { ...program, overlays: [...program.overlays, overlay] };
+}
+
+export function removeOverlay(program: ClipProgram, index: number): ClipProgram {
+  return { ...program, overlays: program.overlays.filter((_, i) => i !== index) };
 }
 
 // ---------------------------------------------------------------------------
@@ -310,22 +480,123 @@ export function levelDbAt(points: LevelPoint[], t: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Selection geometry (pure, so the drag behaviour is testable headless)
+// ---------------------------------------------------------------------------
+
+/** A span of the output timeline, in seconds. */
+export interface TimeRange {
+  start: number;
+  end: number;
+}
+
+/** Which end of a selection a pointer is grabbing. */
+export type SelectionEdge = 'start' | 'end';
+
+/** The edge within `tolerance` seconds of `t`, or null for "not an edge".
+ *  The nearer edge wins, so a very short selection still resizes sanely
+ *  from whichever side the pointer is closest to. */
+export function selectionEdgeAt(
+  sel: TimeRange | null,
+  t: number,
+  tolerance: number,
+): SelectionEdge | null {
+  if (!sel || tolerance <= 0) return null;
+  const dStart = Math.abs(t - sel.start);
+  const dEnd = Math.abs(t - sel.end);
+  if (Math.min(dStart, dEnd) > tolerance) return null;
+  return dStart <= dEnd ? 'start' : 'end';
+}
+
+/** Drag one edge of a selection to `t`, keeping the other end anchored.
+ *  Dragging an edge past its opposite simply flips the range (the pointer
+ *  keeps controlling the same physical end), matching every DAW. */
+export function resizeSelection(
+  sel: TimeRange,
+  edge: SelectionEdge,
+  t: number,
+  duration: number,
+): TimeRange {
+  const anchor = edge === 'start' ? sel.end : sel.start;
+  const moved = Math.min(Math.max(0, t), Math.max(0, duration));
+  return { start: Math.min(anchor, moved), end: Math.max(anchor, moved) };
+}
+
+// ---------------------------------------------------------------------------
+// Time ruler
+// ---------------------------------------------------------------------------
+
+/** Tick spacings that read as round times, from a hundredth of a second
+ *  (fully zoomed in) to ten minutes. Thirds of a minute are in there
+ *  because 15 s and 30 s labels beat 20 s ones on a music timeline. */
+const TICK_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+
+/** A labelled mark on the time ruler. `major` ticks carry the label. */
+export interface TimeTick {
+  secs: number;
+  label: string;
+  major: boolean;
+}
+
+/** Seconds as a ruler label, no more precise than `step` warrants:
+ *  `1:30` at whole-second spacing, `1:30.5` at tenths, `1:30.25` below. */
+export function tickLabel(secs: number, step: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs - m * 60;
+  const decimals = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
+  const pad = decimals === 0 ? 2 : decimals + 3;
+  return `${m}:${s.toFixed(decimals).padStart(pad, '0')}`;
+}
+
+/** Ticks for the visible window [from, to], aiming for about `target`
+ *  labels: the step is the coarsest one that still gets there, so the
+ *  labels stay put as you zoom instead of crawling. Minor ticks subdivide
+ *  each step in halves (fifths where the step is a 5, which subdivides
+ *  1-2-5 evenly) and carry no label. */
+export function rulerTicks(from: number, to: number, target = 8): TimeTick[] {
+  const span = to - from;
+  if (!Number.isFinite(span) || span <= 0 || target < 1) return [];
+  const ideal = span / target;
+  const step = TICK_STEPS.find((s) => s >= ideal) ?? TICK_STEPS[TICK_STEPS.length - 1];
+  const mantissa = step / 10 ** Math.floor(Math.log10(step));
+  const minors = Math.abs(mantissa - 5) < 1e-9 ? 5 : 2;
+  const sub = step / minors;
+  const ticks: TimeTick[] = [];
+  const first = Math.ceil(from / sub - 1e-9);
+  const last = Math.floor(to / sub + 1e-9);
+  for (let i = first; i <= last; i++) {
+    // Snap away the dust i*sub leaves (3 * 0.005 is not 0.015), or a label
+    // lands on 0:00.99 instead of 0:01.00.
+    const at = Number((i * sub).toFixed(6));
+    const major = Math.abs(at / step - Math.round(at / step)) < 1e-6;
+    ticks.push({ secs: at, label: major ? tickLabel(at, step) : '', major });
+  }
+  return ticks;
+}
+
+// ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
 
 /** What ClipView needs; tests substitute a mock. */
 export interface ClipClientApi {
-  loadSource(trackId: number, buckets: number): Promise<ClipSource | null>;
+  /** Decode a track — or a mix of its separated stems — for editing. */
+  loadSource(trackId: number, stems: string[], buckets: number): Promise<ClipSource | null>;
   renderPreview(request: ClipRequest, buckets: number): Promise<ClipRender | null>;
-  /** 16-bit WAV bytes for an audition window. */
+  /** 16-bit WAV bytes for a playback window of the rendered edit. */
   previewAudio(request: ClipRequest, startSecs: number, secs: number): Promise<ArrayBuffer | null>;
-  /** Render and import as a NEW library track (sources untouched). */
-  save(request: ClipRequest, title: string, artist: string): Promise<Track | null>;
+  /** Render and import as a NEW library track (sources untouched). The
+   *  artist is inherited from the first source. */
+  save(request: ClipRequest, title: string): Promise<Track | null>;
+  /** Which separation backend is configured, and is it installed? */
+  stemBackend(): Promise<ClipStemBackend | null>;
+  /** Where this track's stems stand — asking also puts it at the front
+   *  of the separation queue. */
+  stemStatus(trackId: number): Promise<ClipStemStatus | null>;
 }
 
 export class ClipClient extends IpcClient implements ClipClientApi {
-  loadSource(trackId: number, buckets: number) {
-    return this.call<ClipSource>('clip_load_source', { trackId, buckets });
+  loadSource(trackId: number, stems: string[], buckets: number) {
+    return this.call<ClipSource>('clip_load_source', { trackId, stems, buckets });
   }
   renderPreview(request: ClipRequest, buckets: number) {
     return this.call<ClipRender>('clip_render_preview', { request, buckets });
@@ -333,8 +604,14 @@ export class ClipClient extends IpcClient implements ClipClientApi {
   previewAudio(request: ClipRequest, startSecs: number, secs: number) {
     return this.call<ArrayBuffer>('clip_preview_audio', { request, startSecs, secs });
   }
-  save(request: ClipRequest, title: string, artist: string) {
-    return this.call<Track>('clip_save', { request, title, artist });
+  save(request: ClipRequest, title: string) {
+    return this.call<Track>('clip_save', { request, title });
+  }
+  stemBackend() {
+    return this.call<ClipStemBackend>('clip_stem_backend', {});
+  }
+  stemStatus(trackId: number) {
+    return this.call<ClipStemStatus>('clip_stem_status', { trackId });
   }
 }
 

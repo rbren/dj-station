@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::audio::{AudioControl, AudioModule, AudioShared};
+use crate::beat_clip::{BeatClipControl, BeatClipModule, BeatClipRef, BeatClipShared};
 use crate::builtin::{
     AudioOutModule, BuiltinKind, MidiEvent, MidiMapKind, MidiModule, MidiOutEvent, MidiOutSink,
     MidiShared,
@@ -26,10 +28,13 @@ use crate::wasm_host::WasmRuntime;
 
 // Facade modules: additional `impl Engine` blocks grouped by feature area.
 // This file keeps construction, graph editing, knobs and telemetry.
+mod audio_api;
+mod beat_clip_api;
 mod choreo_api;
 mod deck_api;
 mod hands_api;
 mod hot_reload;
+mod launch_control_api;
 mod lifecycle;
 mod macros_api;
 mod midi;
@@ -135,6 +140,10 @@ pub struct NodeInfo {
     /// Path of the track loaded into a Playback/Deck node (persisted in the
     /// patch).
     pub track_path: Option<String>,
+    /// Which Beatify clip a Beat Clip node plays (persisted in the patch;
+    /// the audio itself is re-assembled by the app layer after a load, the
+    /// way deck metadata is re-applied).
+    pub clip: Option<BeatClipRef>,
     /// Rack position (unzoomed rack coordinates) — pure UI passthrough,
     /// control-side only, never touches the RT thread. Persisted in the
     /// patch's `layout` map so undo/redo restores module moves and puts
@@ -156,6 +165,10 @@ impl NodeInfo {
 
     pub fn is_deck(&self) -> bool {
         self.builtin_kind() == Some(crate::builtin::BuiltinKind::Deck)
+    }
+
+    pub fn is_beat_clip(&self) -> bool {
+        self.builtin_kind() == Some(crate::builtin::BuiltinKind::BeatClip)
     }
 }
 
@@ -340,6 +353,19 @@ pub struct Engine {
     >,
     /// Key gate events toward the RT thread, per QWERTY node.
     qwerty_producers: HashMap<usize, rtrb::Producer<crate::qwerty::QwertyEvent>>,
+    /// Launch Control XL jack values toward the RT thread plus the decode/
+    /// dedup control state, per Launch Control node.
+    launch_control_producers: HashMap<
+        usize,
+        (
+            rtrb::Producer<crate::launch_control::LaunchControlEvent>,
+            crate::launch_control::LaunchControlControl,
+        ),
+    >,
+    /// Whether a Launch Control XL surface is currently attached. Set by the
+    /// app's device watcher (or tests); purely control-side status — module
+    /// ownership of the surface is the `active` param.
+    launch_control_connected: bool,
     /// Compiled-program handoff + playhead per Choreography node.
     choreos: HashMap<usize, crate::choreo::ChoreoControl>,
     /// LED feedback messages coming back from the RT thread, per MIDI node.
@@ -352,6 +378,11 @@ pub struct Engine {
     playback_producers: HashMap<usize, rtrb::Producer<Arc<TrackData>>>,
     /// Replaced tracks come back from the RT thread for off-RT drop.
     playback_garbage: HashMap<usize, rtrb::Consumer<Arc<TrackData>>>,
+    /// Control-side state per Audio node (track handoff + decoded track).
+    audios: HashMap<usize, AudioControl>,
+    /// Control-side state per Beat Clip node (clip handoff + the binding
+    /// the loaded audio came from).
+    beat_clips: HashMap<usize, BeatClipControl>,
     /// Control-side state per DJ Deck node (M2).
     decks: HashMap<usize, DeckControl>,
     xruns: Arc<AtomicU64>,
@@ -382,6 +413,9 @@ const CMD_QUEUE_CAP: usize = 1024;
 const HANDS_QUEUE_CAP: usize = 4096;
 /// Pending key events per QWERTY node (same sizing rationale).
 const QWERTY_QUEUE_CAP: usize = 4096;
+/// Pending control-surface values per Launch Control node (same sizing
+/// rationale; one full sweep of the surface is 48 values).
+const LAUNCH_CONTROL_QUEUE_CAP: usize = 4096;
 /// Pending compiled choreography programs per Choreo node (drained at the
 /// next block; edits are UI-rate).
 const CHOREO_QUEUE_CAP: usize = 64;
@@ -448,12 +482,16 @@ impl Engine {
             midi_producers: HashMap::new(),
             hands_producers: HashMap::new(),
             qwerty_producers: HashMap::new(),
+            launch_control_producers: HashMap::new(),
+            launch_control_connected: false,
             choreos: HashMap::new(),
             midi_out_consumers: HashMap::new(),
             macros: MacroLibrary::default(),
             macro_instances: BTreeMap::new(),
             playback_producers: HashMap::new(),
             playback_garbage: HashMap::new(),
+            audios: HashMap::new(),
+            beat_clips: HashMap::new(),
             decks: HashMap::new(),
             xruns: Arc::new(AtomicU64::new(0)),
             proc_misses: Arc::new(AtomicU64::new(0)),
@@ -645,8 +683,11 @@ impl Engine {
                 BuiltinKind::Midi
                 | BuiltinKind::Choreo
                 | BuiltinKind::Qwerty
+                | BuiltinKind::LaunchControl
                 | BuiltinKind::Hands
                 | BuiltinKind::Playback
+                | BuiltinKind::Audio
+                | BuiltinKind::BeatClip
                 | BuiltinKind::Deck,
             ) => Err(anyhow!("{ext_id} modules are created via add_module")),
             None => {
@@ -716,8 +757,11 @@ impl Engine {
         let mut midi_plumbing = None;
         let mut hands_plumbing = None;
         let mut qwerty_plumbing = None;
+        let mut launch_control_plumbing = None;
         let mut choreo_ctl = None;
         let mut playback_plumbing = None;
+        let mut audio_ctl = None;
+        let mut beat_clip_ctl = None;
         let mut deck_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
             Some(BuiltinKind::Midi) => {
@@ -737,6 +781,14 @@ impl Engine {
                 let (tx, rx) = rtrb::RingBuffer::new(QWERTY_QUEUE_CAP);
                 qwerty_plumbing = Some(tx);
                 Box::new(crate::qwerty::QwertyRtModule::new(rx, self.current_frame()))
+            }
+            Some(BuiltinKind::LaunchControl) => {
+                let (tx, rx) = rtrb::RingBuffer::new(LAUNCH_CONTROL_QUEUE_CAP);
+                launch_control_plumbing = Some(tx);
+                Box::new(crate::launch_control::LaunchControlRtModule::new(
+                    rx,
+                    self.current_frame(),
+                ))
             }
             Some(BuiltinKind::Choreo) => {
                 let (tx, rx) = rtrb::RingBuffer::new(CHOREO_QUEUE_CAP);
@@ -759,6 +811,41 @@ impl Engine {
                 let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
                 playback_plumbing = Some((tx, garbage_rx));
                 Box::new(PlaybackModule::new(rx, garbage_tx, self.config.sample_rate))
+            }
+            Some(BuiltinKind::Audio) => {
+                let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let shared = Arc::new(AudioShared::default());
+                audio_ctl = Some(AudioControl {
+                    tx,
+                    garbage_rx,
+                    track: None,
+                    shared: shared.clone(),
+                });
+                Box::new(AudioModule::new(
+                    rx,
+                    garbage_tx,
+                    self.config.sample_rate,
+                    shared,
+                ))
+            }
+            Some(BuiltinKind::BeatClip) => {
+                let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let shared = Arc::new(BeatClipShared::default());
+                beat_clip_ctl = Some(BeatClipControl {
+                    tx,
+                    garbage_rx,
+                    track: None,
+                    loaded: None,
+                    shared: shared.clone(),
+                });
+                Box::new(BeatClipModule::new(
+                    rx,
+                    garbage_tx,
+                    self.config.sample_rate,
+                    shared,
+                ))
             }
             Some(BuiltinKind::Deck) => {
                 let (tx, rx) = rtrb::RingBuffer::new(DECK_QUEUE_CAP);
@@ -833,6 +920,7 @@ impl Engine {
                 None
             },
             track_path: None,
+            clip: None,
             position: None,
         };
 
@@ -892,6 +980,12 @@ impl Engine {
         if let Some(tx) = qwerty_plumbing {
             self.qwerty_producers.insert(idx, tx);
         }
+        if let Some(tx) = launch_control_plumbing {
+            self.launch_control_producers.insert(
+                idx,
+                (tx, crate::launch_control::LaunchControlControl::default()),
+            );
+        }
         if let Some(ctl) = choreo_ctl {
             self.choreos.insert(idx, ctl);
         }
@@ -899,11 +993,20 @@ impl Engine {
             self.playback_producers.insert(idx, tx);
             self.playback_garbage.insert(idx, garbage_rx);
         }
+        if let Some(ctl) = audio_ctl {
+            self.audios.insert(idx, ctl);
+        }
+        if let Some(ctl) = beat_clip_ctl {
+            self.beat_clips.insert(idx, ctl);
+        }
         if let Some(ctl) = deck_ctl {
             self.decks.insert(idx, ctl);
         }
         self.node_by_id.insert(instance_id.to_string(), idx);
         self.nodes.insert(idx, info);
+        if BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::LaunchControl) {
+            self.launchcontrol_claim_if_unowned(idx);
+        }
         Ok(())
     }
 
@@ -970,9 +1073,12 @@ impl Engine {
         self.midi_out_consumers.remove(&slot);
         self.hands_producers.remove(&slot);
         self.qwerty_producers.remove(&slot);
+        self.launch_control_producers.remove(&slot);
         self.choreos.remove(&slot);
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);
+        self.audios.remove(&slot);
+        self.beat_clips.remove(&slot);
         self.decks.remove(&slot);
         // Other decks sync-locked to this one lose their master.
         for ctl in self.decks.values_mut() {
@@ -1159,8 +1265,10 @@ impl Engine {
         position: f32,
     ) -> Result<()> {
         let (node, jack) = self.in_jack_indices(instance_id, jack_id)?;
+        let link = self.tempo_link(node, jack);
         self.nodes[node].knobs[jack].position = position.clamp(0.0, 1.0);
-        self.push_knob_rt(node, jack)
+        self.push_knob_rt(node, jack)?;
+        self.apply_tempo_link(link)
     }
 
     /// Set an unwired input's knob by mapped signal value (inverse of the
@@ -1169,11 +1277,32 @@ impl Engine {
     pub fn set_knob_value(&mut self, instance_id: &str, jack_id: &str, value: f32) -> Result<()> {
         let node = self.node_idx(instance_id)?;
         let jack = self.jack_index(node, jack_id)?;
-        let cfg = self.nodes[node].knobs[jack]
+        let link = self.tempo_link(node, jack);
+        self.write_knob_value(node, jack, value)?;
+        self.apply_tempo_link(link)
+    }
+
+    /// The knob config in force for an input: the per-patch override, else
+    /// the manifest's declaration.
+    pub(crate) fn knob_config(&self, node: usize, jack: usize) -> KnobConfig {
+        self.nodes[node].knobs[jack]
             .config
             .clone()
             .or_else(|| self.nodes[node].manifest.inputs[jack].knob.clone())
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    /// Value an input's knob currently maps to (what an unwired jack reads).
+    pub(crate) fn knob_value(&self, node: usize, jack: usize) -> f32 {
+        self.knob_config(node, jack)
+            .map(self.nodes[node].knobs[jack].position)
+    }
+
+    /// Move a knob to the position that maps to `value`, with no linked-
+    /// knob side effects (the mirror in [`Engine::apply_tempo_link`] uses
+    /// this to write the partner without recursing).
+    pub(crate) fn write_knob_value(&mut self, node: usize, jack: usize, value: f32) -> Result<()> {
+        let cfg = self.knob_config(node, jack);
         self.nodes[node].knobs[jack].position = position_for_value(&cfg, value);
         self.push_knob_rt(node, jack)
     }
@@ -1243,13 +1372,24 @@ impl Engine {
             .count())
     }
 
+    /// True when a prospective wire STARTS at a control surface — a module
+    /// that is a piece of hardware, whose outputs are the positions of real
+    /// knobs, faders and buttons (see [`BuiltinKind::is_control_surface`]).
+    pub fn wire_is_from_control_surface(&self, from_id: &str, from_jack: &str) -> Result<bool> {
+        let (from_id, _) = self.resolve_out_jack(from_id, from_jack)?;
+        let node = self.node_idx(&from_id)?;
+        Ok(BuiltinKind::is_control_surface(&self.nodes[node].ext_id))
+    }
+
     /// User wire-time auto blend mode (called by the app right after
-    /// `connect`): the FIRST wire into a jack decides — pitch into pitch
-    /// (v/oct on both ends) flips to Override so a keyboard note wire SETS
-    /// the oscillator's pitch, anything else resets to CV so a stale
-    /// Override never captures an LFO. Extra wires sum without touching
-    /// the mode (vibrato on top of a note CV). Patch load and undo restore
-    /// the saved field instead of re-deriving it.
+    /// `connect`): the FIRST wire into a jack decides — Override when the
+    /// wire carries a POSITION rather than a modulation, so it SETS what it
+    /// lands on: pitch into pitch (v/oct on both ends), or anything out of
+    /// a control surface, where the physical fader in the user's hand is
+    /// the value. Anything else resets to CV so a stale Override never
+    /// captures an LFO. Extra wires sum without touching the mode (vibrato
+    /// on top of a note CV). Patch load and undo restore the saved field
+    /// instead of re-deriving it.
     pub fn auto_wire_style_on_connect(
         &mut self,
         from_id: &str,
@@ -1260,7 +1400,9 @@ impl Engine {
         if self.input_wire_count(to_id, to_jack)? != 1 {
             return Ok(());
         }
-        let style = if self.wire_is_pitch_pair(from_id, from_jack, to_id, to_jack)? {
+        let sets_the_value = self.wire_is_pitch_pair(from_id, from_jack, to_id, to_jack)?
+            || self.wire_is_from_control_surface(from_id, from_jack)?;
+        let style = if sets_the_value {
             crate::knob::WireStyle::Override
         } else {
             crate::knob::WireStyle::Cv
