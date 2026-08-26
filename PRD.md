@@ -199,21 +199,13 @@ Multi-channel routing is also just modules.
 
 ---
 
-## 7.3 Gesture Control Module (built-in, native)
+## 7.3 Gesture Control Module — removed
 
-Real-time webcam processing as a control surface — hands become another controller, no hardware required.
-
-- Live webcam feed rendered in the module's panel, with detection results visualized on top of the video.
-- On-device hand tracking (MediaPipe-Hands-class model via ONNX Runtime, CoreML EP on macOS, per the §8.2 pipeline conventions); no frames ever leave the machine.
-- A **mode system**, explicitly extensible so new interaction modes can be added later. Two modes ship first:
-  - **Wheel mode:** two on-screen wheels overlaid on the feed, each divided into **8 radial sections plus a ninth center section** (18 zones total). Each zone is mappable to a **switch**: hand presence inside the zone drives a gate-style output (0/1, §4 conventions). Active zones highlight on the overlay.
-  - **Landmark mode:** per-hand skeletal landmarks (fingertips, knuckles, palm, wrist) are detected, **named** (e.g. `L.index.tip`, `R.thumb.tip`), and drawn with labels on the feed. Two mapping types:
-    - **Presence** of a named point in frame → switch/gate output.
-    - **Distance** between any two named points → continuous value output (normalized 0..1, smoothed).
-- Like the MIDI module (§7.1), every mapping materializes as an **output jack** wireable into anything — VCA gain, deck crossfader, ADSR gate, playback speed, etc.
-- Mappings are created with a learn-style flow from the module UI and **persist in the patch** (directory format, §12.3).
-- Video capture and inference run off the RT thread; control values cross into the graph via the same lock-free path as MIDI. Target ≥ 30 fps detection; dropped/failed frames degrade gracefully (hold last value, decay gates after a timeout).
-- macOS camera permission (AVFoundation) is requested on first use with a sane denial fallback (module shows a prompt, outputs stay at 0).
+The webcam gesture-control module (detection pipeline crate, wheel/landmark
+mode registry, learn-flow mappings) shipped in M5 and was later removed: the
+camera module's in-webview MediaPipe hand tracking plus the `Hands` module's
+fixed CV jack set cover the same ground with far less machinery. Hand-driven
+control lives there now.
 
 ---
 
@@ -359,19 +351,10 @@ Collapse-to-macro with library storage and edit propagation, native dylib module
 - [ ] **[A]** Perf: 4 decks with stems + 50 WASM modules, 10-minute offline-and-live stress run, zero xruns on M4 hardware. *(Partially verified: `crates/dj-engine/tests/perf_m4.rs` builds exactly this patch and runs a scalable offline stress (STRESS_SECONDS; CI = 600 s ≙ the 10-minute equivalent, faster than realtime, zero xruns) plus a short live null-backend segment and the RT allocation tripwire. The literal 10-minute wall-clock, zero-xrun run on M4 hardware with a real audio device remains open — this environment is headless with no audio device.)*
 - [ ] **[H]** Overall feel pass: latency, UI responsiveness, and stability during a real 30-minute mixed set.
 
-### M5 – Gesture Control (Webcam)
-The Gesture Control module (§7.3): live webcam feed with detection overlay, extensible mode system, Wheel mode (2 wheels × 8 radial sections + center = 18 mappable switch zones), Landmark mode (named hand landmarks; presence → switch, point-pair distance → continuous), learn-style mapping flow, output jacks wireable into any module, mappings persisted in the patch.
+### M5 – Gesture Control (Webcam) — removed
 
-**Acceptance:**
-- [x] **[A]** Detection pipeline runs on recorded test videos (fixtures checked into the repo, camera mocked as a frame source): known hand poses produce the expected named landmarks within pixel tolerance, deterministically across runs. *(Verified: `crates/dj-gesture/tests/pipeline.rs` — recorded fixtures are small JSON landmark traces (not video binaries) rendered to synthetic frames by the mock `TraceFrameSource` and re-detected by the deterministic `MarkerDetector`; known poses recover named landmarks within 1.5 px, byte-deterministic across runs; fixture provenance test pins the committed files to their generators. The ONNX MediaPipe-Hands-class detector is a feature-gated path behind the same `HandDetector` trait (`--features onnx`, smoke test skips without `DJ_GESTURE_ONNX_MODEL`); no model weights ship. See reports/M5_REPORT.md.)*
-- [x] **[A]** Wheel mode: synthetic/recorded input placing a hand in each of the 18 zones toggles exactly the mapped switch output for that zone and no others; zone activation events land in the graph as gate values per §4. *(Verified: `crates/dj-gesture/tests/modes.rs::wheel_tour_toggles_exactly_one_zone` walks a recorded tour through all 2×9 zones with all 18 mapped; `crates/dj-engine/tests/gesture.rs::wheel_zones_gate_exactly_one_output_in_graph` renders the module in a graph and asserts exactly the visited zone's jack reads gate 1 (§4: 0/1) and all others 0.)*
-- [x] **[A]** Landmark mode: presence mapping emits gate 1 when the named point is detected and decays to 0 after the configured timeout when it disappears; distance mapping between two named points produces a normalized, smoothed continuous output that tracks a scripted pinch-open/close fixture monotonically. *(Verified: `crates/dj-gesture/tests/modes.rs::presence_gate_decays_after_timeout` and `::pinch_distance_is_monotonic_normalized_and_holds` (normalized 0..1, smoothed, monotone on the scripted pinch fixture, holds last value across dropped frames); in-graph versions in `crates/dj-engine/tests/gesture.rs`.)*
-- [x] **[A]** Mappings (zone → switch, presence → switch, distance → continuous) round-trip through patch save/load (directory format), including mode selection and wheel layout. *(Verified: `crates/dj-engine/tests/gesture.rs::gesture_state_round_trips_through_patch` — all three mapping kinds, active mode, and a customized wheel layout persist in the module's JSON file in the patch directory and reload with identical jack assignments and wiring.)*
-- [x] **[A]** E2E: a serialized patch wiring `Gesture(distance) → VCA(cv)` with `Osc → VCA → Audio Out`, driven by a recorded gesture fixture, renders audio whose amplitude tracks the gesture (golden case per §10.1). *(Verified: golden case `gesture-pinch-vca` in `crates/dj-engine/tests/e2e_golden.rs` — the events sidecar carries the recorded pinch fixture, the rendered WAV is byte-identical to the committed golden, and its RMS envelope rises and falls with the pinch.)*
-- [ ] **[A]** Inference throughput ≥ 30 fps on M4 hardware (timed in CI on target machine); frame drops hold last value, gates decay after timeout; RT thread remains allocation/lock-free (tripwire passes with the module active). *(Partially verified: `crates/dj-gesture/tests/pipeline.rs::pipeline_throughput_floor` benchmarks the full synthetic pipeline (frame render → detection → mode evaluation) and asserts a generous 120 fps floor (~9000 fps measured in release here); frame-drop hold and timeout decay covered in `modes.rs`/`tests/gesture.rs`; `crates/dj-engine/tests/rt_safety.rs` passes with an active gesture module in the stress patch, allocation tripwire included. The literal ≥ 30 fps timing on M4 hardware remains open — this environment is headless with no camera and not the target machine.)*
-- [x] **[A]** Mode system is registered via an extensible registry: adding a stub third mode in a test requires no changes to the module core, only registration. *(Verified: `crates/dj-gesture/tests/modes.rs::stub_third_mode_registers_without_core_changes` and `crates/dj-engine/tests/gesture.rs::stub_third_mode_registers_against_engine_without_core_changes` — the stub mode lives entirely in the test, is added via `register_mode`, and immediately supports mappings, the learn flow, and graph output.)*
-- [ ] **[H]** Camera permission flow works on macOS; denial shows the fallback prompt and the app stays stable.
-- [ ] **[H]** Overlay visualization (wheels, labeled landmarks) is legible and tracks hands with no perceptible lag; controlling a VCA by pinch distance feels playable in a live set.
+Delivered and later removed; see §7.3. Hand-driven control is now the camera
+module's in-webview MediaPipe tracking feeding the `Hands` module.
 
 ## 12. Resolved Decisions
 

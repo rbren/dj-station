@@ -225,14 +225,15 @@ with 0.0 = C4 (261.626 Hz); gate high ≥ 1.0, low ≤ 0.0. Default block size
 
 ## Milestone status
 
-M0, M1, M2, M3, M4, and M5 are implemented; see
+M0, M1, M2, M3, and M4 are implemented; see
 [reports/M0_REPORT.md](reports/M0_REPORT.md),
 [reports/M1_REPORT.md](reports/M1_REPORT.md),
 [reports/M2_REPORT.md](reports/M2_REPORT.md),
-[reports/M3_REPORT.md](reports/M3_REPORT.md),
-[reports/M4_REPORT.md](reports/M4_REPORT.md), and
-[reports/M5_REPORT.md](reports/M5_REPORT.md) for the
-acceptance-criteria → test mapping and known gaps.
+[reports/M3_REPORT.md](reports/M3_REPORT.md), and
+[reports/M4_REPORT.md](reports/M4_REPORT.md) for the
+acceptance-criteria → test mapping and known gaps. M5 (webcam gesture
+control) was delivered and later removed — the camera module's in-webview
+MediaPipe hand tracking feeding the `Hands` module replaces it.
 
 M4 adds: collapse-to-macro (multi-select in the rack, macros stored in
 the library DB with versioning and an update-vs-fork prompt on
@@ -244,12 +245,3 @@ messages), rekordbox XML import (tracks, beatgrids, hot cues, loops
 into the library DB), and the PRD §10 perf stress test
 (`crates/dj-engine/tests/perf_m4.rs`).
 
-M5 adds: the Gesture Control module (PRD §7.3) — a detection pipeline
-in `crates/dj-gesture` (frame-source abstraction with a mock fixture
-source; deterministic marker detector by default, MediaPipe-Hands-class
-ONNX detector behind `--features onnx`), an extensible mode registry
-with Wheel (2×(8+1) zones → gates) and Landmark (presence → gate,
-point-pair distance → continuous) modes, a `builtin.gesture` engine
-module mirroring MIDI (mappings = output jacks, lock-free RT handoff,
-learn flow, patch persistence), and a panel with an SVG detection
-overlay that runs headless over the mock feed.

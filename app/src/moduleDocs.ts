@@ -937,8 +937,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       '(getUserMedia); the module has no jacks — it exists to host the ' +
       'panel. The camera and hand tracking start automatically ' +
       'when the module loads (per-session, never saved in the patch \u2014 ' +
-      'switching either off sticks for the session). Independent of the ' +
-      'Gesture module. Hand ' +
+      'switching either off sticks for the session). Hand ' +
       'tracking (MediaPipe, fully local — no network) draws both hands\u2019 ' +
       'landmark skeletons over the mirrored feed with fingertips and L/R ' +
       'labels highlighted; the overlay and a diagnostics readout (fps, ' +
@@ -1017,19 +1016,6 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'q -> sequencer reset: tap to restart the pattern on the downbeat.',
     ],
   },
-  'builtin.gesture': {
-    summary:
-      'Camera gesture control (PRD \u00a77.3): hand tracking is evaluated by ' +
-      'the active mode and each named mapping becomes an output jack, like ' +
-      'MIDI mappings. Detection runs off the audio thread; values are ' +
-      'applied sample-accurately and hold their last value on dropped ' +
-      'frames. Good for performing without touching anything: wave a hand ' +
-      'to sweep a filter, ride a virtual wheel to nudge a deck, keep ' +
-      'playing while your hands are on other gear.',
-    outputs: { 'map#': 'A gesture mapping value, as configured in the panel.' },
-    examples: ['Add a "wheel" mapping and wire it to a Deck speed for touchless nudging.'],
-  },
-
   'builtin.choreo': {
     summary:
       'A beat-indexed multi-track timeline for choreographing a whole ' +

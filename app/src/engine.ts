@@ -80,48 +80,6 @@ export interface WireSnapshot {
   to_jack: string;
 }
 
-// --- Gesture Control (M5, PRD §7.3) ---
-
-export interface GestureWheel {
-  cx: number;
-  cy: number;
-  radius: number;
-  center_radius: number;
-}
-
-export interface GestureWheelLayout {
-  wheels: GestureWheel[];
-}
-
-export interface GestureHand {
-  handedness: 'Left' | 'Right';
-  points: { x: number; y: number }[];
-}
-
-export interface GestureDetection {
-  hands: GestureHand[];
-}
-
-export interface GestureMapping {
-  name: string;
-  mode: string;
-  config: Record<string, unknown>;
-  value: number;
-}
-
-export interface GestureStatus {
-  mode: string;
-  modes: string[];
-  wheels: GestureWheelLayout;
-  mappings: GestureMapping[];
-  detection: GestureDetection | null;
-  active_zones: [number, number][];
-  /** Fixture name when a mock feed is running. */
-  feed: string | null;
-  /** 'mock' here; 'granted' | 'denied' | 'prompt' on macOS later. */
-  camera: string;
-}
-
 /** One note-track cell: at most one note per beat (no polyphony). */
 export interface NoteStep {
   /** Grid row: 0 = base note, counting up through the scale. */
@@ -419,32 +377,6 @@ export class EngineClient extends IpcClient {
    *  out messages back to the controller. */
   addMidiLedMapping(instance: string, kind: string, num: number, name: string) {
     return this.call<void>('add_midi_led_mapping', { instance, kind, num, name });
-  }
-  /** Polled by the gesture panel; quiet because a poll racing the module's
-   *  removal (or an undo/redo rebuild) is expected, not an error. */
-  gestureStatus(instance: string) {
-    return this.call<GestureStatus>('gesture_status', { instance }, { quiet: true });
-  }
-  gestureSetMode(instance: string, mode: string) {
-    return this.call<void>('gesture_set_mode', { instance, mode });
-  }
-  gestureAddMapping(instance: string, name: string, mode: string, config: Record<string, unknown>) {
-    return this.call<void>('gesture_add_mapping', { instance, name, mode, config });
-  }
-  gestureRemoveMapping(instance: string, name: string) {
-    return this.call<void>('gesture_remove_mapping', { instance, name });
-  }
-  gestureLearnBegin(instance: string) {
-    return this.call<void>('gesture_learn_begin', { instance });
-  }
-  gestureLearnPoll(instance: string, name: string) {
-    return this.call<boolean>('gesture_learn_poll', { instance, name });
-  }
-  gestureFeedStart(instance: string, source: string) {
-    return this.call<void>('gesture_feed_start', { instance, source });
-  }
-  gestureFeedStop(instance: string) {
-    return this.call<void>('gesture_feed_stop', { instance });
   }
   removeMidiLedMapping(instance: string, name: string) {
     return this.call<void>('remove_midi_led_mapping', { instance, name });

@@ -6,7 +6,7 @@
 //!   the next clock plays beat 0, phase-locking to the reset like the step
 //!   sequencer).
 //! - Outputs: dynamic, one per track (note tracks own two: note + velocity),
-//!   drawn from `MAX_CHOREO_JACKS` preallocated slots like the MIDI/Gesture
+//!   drawn from `MAX_CHOREO_JACKS` preallocated slots like the MIDI
 //!   modules. Jack ids are `t<slot>` (a note track also owns `t<slot+1>` for
 //!   velocity) — stable across track renames and reorders, so persisted
 //!   wires never break.

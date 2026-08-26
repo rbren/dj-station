@@ -769,11 +769,6 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
-  'builtin.gesture': () => ({
-    groups: [],
-    outputGroups: [{ title: 'mappings', outputs: seqIds('map', 0, 63), columns: 8 }],
-  }),
-
   // Choreography timeline: clock/reset inputs; the track jacks are dynamic
   // (one or two per track), so they flow into the auto-appended group.
   'builtin.choreo': () => ({

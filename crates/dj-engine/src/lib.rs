@@ -13,7 +13,6 @@ pub mod builtin;
 pub mod choreo;
 pub mod deck;
 pub mod engine;
-pub mod gesture;
 pub mod graph;
 pub mod hands;
 pub mod history;
@@ -33,13 +32,9 @@ pub mod wasm_host;
 
 pub use builtin::{MidiMapKind, MidiOutEvent, MidiOutSink, MockMidiSink};
 pub use choreo::{ChoreoState, ChoreoTrack, ChoreoTrackData, NoteStep, CHOREO_ID};
-/// Re-exported so embedders (Tauri shell, tests) use one consistent
-/// gesture API without a separate dependency.
-pub use dj_gesture;
 pub use engine::{
     normalize_module_name, Backend, Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE,
 };
-pub use gesture::{GestureMappingInfo, GestureState, GESTURE_ID};
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle, WireStyle};
 pub use macro_store::{MacroImport, MacroStore, MACROS_DIR_NAME};

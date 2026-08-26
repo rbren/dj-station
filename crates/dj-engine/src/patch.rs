@@ -20,7 +20,6 @@ use std::path::Path;
 
 use crate::choreo::ChoreoState;
 use crate::engine::{Engine, EngineConfig, MidiMappingInfo};
-use crate::gesture::GestureState;
 use crate::knob::KnobState;
 use crate::macros::{MacroDef, MacroInstance, MacroLibrary};
 use crate::registry::ExtensionRegistry;
@@ -57,10 +56,6 @@ pub struct ModuleFile {
     /// LED feedback mappings on a MIDI node (input jacks -> note/CC out).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub midi_led_mappings: Vec<MidiMappingInfo>,
-    /// Gesture module state (PRD §7.3): mode selection, wheel layout, and
-    /// mappings, all of which round-trip through save/load.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gesture: Option<GestureState>,
     /// Choreography timeline (beats + tracks; round-trips through
     /// save/load, jack slots included so wires stay valid).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -327,7 +322,6 @@ impl Engine {
                     params,
                     midi_mappings: Vec::new(),
                     midi_led_mappings: Vec::new(),
-                    gesture: None,
                     choreo: None,
                     track: None,
                     sync_to: None,
@@ -389,11 +383,6 @@ impl Engine {
             params: info.params.clone(),
             midi_mappings: info.midi_mappings.clone(),
             midi_led_mappings: info.midi_led_mappings.clone(),
-            gesture: info.gesture.as_ref().map(|g| GestureState {
-                mode: g.active_mode().to_string(),
-                wheels: *g.wheels(),
-                mappings: self.gesture_mappings(&info.instance_id).unwrap_or_default(),
-            }),
             choreo: info.choreo.clone(),
             track: info.track_path.clone(),
             sync_to: self.deck_sync_to_by_node(node_idx),
@@ -652,7 +641,7 @@ impl Engine {
     }
 
     /// Add one module instance from its patch entry, restoring mappings,
-    /// gesture state, track, params and knobs. Deck sync targets are pushed
+    /// track, params and knobs. Deck sync targets are pushed
     /// onto `deferred_syncs` (applied once every module exists).
     fn add_module_from_file(
         &mut self,
@@ -675,13 +664,6 @@ impl Engine {
         }
         for m in &mf.midi_led_mappings {
             self.add_midi_led_mapping(instance_id, m.kind, m.num, &m.name)?;
-        }
-        if let Some(g) = &mf.gesture {
-            self.gesture_set_mode(instance_id, &g.mode)?;
-            self.gesture_set_wheels(instance_id, g.wheels)?;
-            for m in &g.mappings {
-                self.restore_gesture_mapping(instance_id, m)?;
-            }
         }
         if let Some(c) = &mf.choreo {
             self.choreo_set_state(instance_id, c.clone())?;
@@ -901,29 +883,6 @@ impl Engine {
                 }
                 for m in &mf.midi_led_mappings {
                     self.add_midi_led_mapping(instance_id, m.kind, m.num, &m.name)?;
-                }
-            }
-
-            // Gesture state (mode, wheels, mappings).
-            if let Some(g) = &mf.gesture {
-                if self.nodes[node].gesture.is_some() {
-                    let p = self.nodes[node].gesture.as_ref().unwrap();
-                    if p.active_mode() != g.mode {
-                        self.gesture_set_mode(instance_id, &g.mode)?;
-                    }
-                    let node = self.node_idx(instance_id)?;
-                    if *self.nodes[node].gesture.as_ref().unwrap().wheels() != g.wheels {
-                        self.gesture_set_wheels(instance_id, g.wheels)?;
-                    }
-                    let cur = self.gesture_mappings(instance_id)?;
-                    if cur != g.mappings {
-                        for m in &cur {
-                            self.remove_gesture_mapping(instance_id, &m.name)?;
-                        }
-                        for m in &g.mappings {
-                            self.restore_gesture_mapping(instance_id, m)?;
-                        }
-                    }
                 }
             }
 

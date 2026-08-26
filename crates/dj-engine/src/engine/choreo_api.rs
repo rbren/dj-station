@@ -132,7 +132,7 @@ impl Engine {
     }
 
     /// Remove a track. The caller disconnects wires from its jacks first
-    /// (the Tauri shell does, like gesture mapping removal).
+    /// (the Tauri shell does, like MIDI mapping removal).
     pub fn choreo_remove_track(&mut self, instance_id: &str, index: usize) -> Result<()> {
         self.choreo_edit(instance_id, |st| {
             anyhow::ensure!(index < st.tracks.len(), "no track {index}");

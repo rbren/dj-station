@@ -239,13 +239,6 @@ impl Engine {
             for m in &mf.midi_led_mappings {
                 self.add_midi_led_mapping(&full, m.kind, m.num, &m.name)?;
             }
-            if let Some(g) = &mf.gesture {
-                self.gesture_set_mode(&full, &g.mode)?;
-                self.gesture_set_wheels(&full, g.wheels)?;
-                for m in &g.mappings {
-                    self.restore_gesture_mapping(&full, m)?;
-                }
-            }
             if let Some(c) = &mf.choreo {
                 self.choreo_set_state(&full, c.clone())?;
             }
@@ -547,7 +540,6 @@ impl Engine {
                 params,
                 midi_mappings: Vec::new(),
                 midi_led_mappings: Vec::new(),
-                gesture: None,
                 choreo: None,
                 track: None,
                 sync_to: None,

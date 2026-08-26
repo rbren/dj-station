@@ -2,7 +2,7 @@
 //!
 //! Each case under `tests/e2e/patches/<case>/` is a serialized patch
 //! (directory-tree format, §12.3) plus an `events.json` sidecar describing
-//! render length and virtual MIDI/track/deck/gesture setup. [`check_case`]
+//! render length and virtual MIDI/track/deck setup. [`check_case`]
 //! loads the patch, renders it offline to a WAV, and compares against the
 //! committed golden in `tests/e2e/goldens/<case>.wav`.
 //!
@@ -53,19 +53,10 @@ pub struct DeckSetupSpec {
     pub stems: Option<[String; 4]>,
 }
 
-/// A recorded gesture fixture (JSON pose trace, case-relative) fed through
-/// the deterministic mock pipeline (synthetic frames -> marker detector)
-/// into a Gesture node before rendering (M5).
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GestureTraceSpec {
-    pub instance: String,
-    pub trace: String,
-}
-
 /// A recorded hand-landmark fixture (JSON `HandsTrace`, case-relative)
 /// fed into a Hands node before rendering. Landmark frames come from the
 /// camera panel's tracker at runtime, so E2E cases carry them in the
-/// sidecar like deck metadata and gesture traces.
+/// sidecar like deck metadata.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HandsTraceSpec {
     pub instance: String,
@@ -93,8 +84,6 @@ pub struct EventsFile {
     pub tracks: Vec<TrackLoadSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub decks: Vec<DeckSetupSpec>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub gestures: Vec<GestureTraceSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hands: Vec<HandsTraceSpec>,
 }
@@ -196,10 +185,6 @@ fn render_case(case: &str) -> PathBuf {
         engine
             .qwerty_key(&ev.instance, ev.frame, &ev.key, ev.down)
             .unwrap();
-    }
-    for g in &events.gestures {
-        let trace = dj_engine::dj_gesture::PoseTrace::load(&case_dir.join(&g.trace)).unwrap();
-        engine.gesture_feed_trace(&g.instance, &trace, 0).unwrap();
     }
     for h in &events.hands {
         let trace = dj_engine::hands::HandsTrace::load(&case_dir.join(&h.trace)).unwrap();

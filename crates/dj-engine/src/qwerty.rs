@@ -17,7 +17,7 @@
 //! the RT graph as timestamped events over a lock-free SPSC ring
 //! ([`QwertyRtModule`] — zero allocations or locks on the RT side).
 //! Sample-accurate within a block; late/past events apply immediately
-//! (same policy as MIDI/gesture/hands).
+//! (same policy as MIDI/hands).
 
 use crate::manifest::{categories, DisplayMap, DisplaySpec, Manifest, OutputDecl};
 use crate::module_host::HostModule;

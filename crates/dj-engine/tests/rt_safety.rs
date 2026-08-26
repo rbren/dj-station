@@ -101,29 +101,42 @@ fn build_stress_patch(engine: &mut Engine, voices: usize) {
     engine.connect("deckB", "audio_l", "xf1", "b_l").unwrap();
     engine.connect("xf1", "out_l", "out1", "l").unwrap();
 
-    // Gesture module (M5) active on the RT path: a distance mapping wired
-    // into voice 0's VCA, with a recorded pinch fixture fed through the
-    // detection pipeline (events cross the same lock-free ring live use
-    // takes).
-    engine.add_module("gest1", "builtin.gesture").unwrap();
+    // Hands module active on the RT path: the pinch jack wired into voice
+    // 0's VCA, driven by a recorded landmark trace (events cross the same
+    // lock-free ring live camera use takes).
+    engine.add_module("hands1", "builtin.hands").unwrap();
+    engine.connect("hands1", "r_pinch", "vca0", "cv").unwrap();
     engine
-        .add_gesture_mapping(
-            "gest1",
-            "pinch",
-            "landmark",
-            serde_json::json!({
-                "type": "distance",
-                "a": "L.thumb.tip", "b": "L.index.tip",
-                "min": 0.04, "max": 0.3,
-            }),
-        )
+        .hands_feed_trace("hands1", &pinch_trace(30.0, 45), 0)
         .unwrap();
-    engine.connect("gest1", "pinch", "vca0", "cv").unwrap();
-    let trace = dj_engine::dj_gesture::fixtures::pinch_trace(30.0, 45, 0.04, 0.3);
-    engine.gesture_feed_trace("gest1", &trace, 0).unwrap();
 
     // Hold a note so every voice is audible for the whole run.
     engine.inject_midi("midi1", 0, [0x90, 60, 100]).unwrap();
+}
+
+/// A deterministic hand-landmark trace: a right hand at frame center
+/// whose pinch opens then closes over `n` frames.
+fn pinch_trace(fps: f32, n: usize) -> dj_engine::hands::HandsTrace {
+    use dj_engine::hands::{HandsDetection, HandsTrace, N_LANDMARKS};
+    let frames = (0..n)
+        .map(|i| {
+            let t = i as f32 / (n - 1) as f32;
+            let pinch = 0.1 + 1.3 * (1.0 - (2.0 * t - 1.0).abs());
+            let mut pts = [[0.0f32; 3]; N_LANDMARKS];
+            for (j, p) in pts.iter_mut().enumerate() {
+                *p = [0.005 * j as f32, 0.005 * j as f32, 0.0];
+            }
+            pts[0] = [0.0, -0.2, 0.0]; // wrist
+            pts[9] = [0.0, 0.1, 0.0]; // middle MCP
+            pts[4] = [0.1, 0.0, 0.0]; // thumb tip
+            pts[8] = [0.1 + pinch * 0.3, 0.0, 0.0]; // index tip
+            HandsDetection {
+                left: None,
+                right: Some(pts),
+            }
+        })
+        .collect();
+    HandsTrace { fps, frames }
 }
 
 /// A deterministic 2 s test tone the stress decks loop, created once per

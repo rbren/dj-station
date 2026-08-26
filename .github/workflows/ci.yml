@@ -129,11 +129,6 @@ jobs:
       # test skips itself unless DJ_STEMS_ONNX_MODEL points at a model.
       - name: ONNX separator smoke (feature-gated; skips without a model)
         run: cargo test -p dj-analysis --release --features onnx --test onnx_smoke
-      # M5: same pattern for the optional ONNX hand-landmark detector. The
-      # smoke test skips itself unless DJ_GESTURE_ONNX_MODEL points at a
-      # model (empty-string env counts as unset).
-      - name: ONNX hand detector smoke (feature-gated; skips without a model)
-        run: cargo test -p dj-gesture --release --features onnx --test onnx_smoke
       - name: Headless smoke via run.sh path
         run: |
           ./scripts/build-extensions.sh

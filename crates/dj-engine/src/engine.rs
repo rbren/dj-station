@@ -13,7 +13,6 @@ use crate::builtin::{
     MidiShared,
 };
 use crate::deck::{DeckCmd, DeckControl, DeckModule, DeckStatus, N_CUES};
-use crate::gesture::{GestureEvent, GestureMappingInfo, GestureRtModule};
 use crate::graph::{compute_plan, Graph, GraphEdit, GraphNode, GrowStorage, NodeStorage, WireSpec};
 use crate::knob::{position_for_value, JackRt, KnobConfig, KnobState};
 use crate::macros::{MacroDef, MacroInstance, MacroInterface, MacroLibrary, MacroPreviewNode};
@@ -29,7 +28,6 @@ use crate::wasm_host::WasmRuntime;
 // This file keeps construction, graph editing, knobs and telemetry.
 mod choreo_api;
 mod deck_api;
-mod gesture_api;
 mod hands_api;
 mod hot_reload;
 mod lifecycle;
@@ -131,8 +129,6 @@ pub struct NodeInfo {
     pub midi_mappings: Vec<MidiMappingInfo>,
     /// LED feedback mappings (input jacks -> note/CC out; PRD §7.1).
     pub midi_led_mappings: Vec<MidiMappingInfo>,
-    /// Control-side gesture pipeline core for a Gesture node (PRD §7.3).
-    pub gesture: Option<dj_gesture::GestureProcessor>,
     /// Canonical timeline state for a Choreography node (persisted in the
     /// patch; the RT side plays a compiled copy).
     pub choreo: Option<crate::choreo::ChoreoState>,
@@ -333,8 +329,6 @@ pub struct Engine {
     cmd_tx: Arc<Mutex<rtrb::Producer<Command>>>,
     garbage_rx: rtrb::Consumer<RtGarbage>,
     midi_producers: HashMap<usize, rtrb::Producer<MidiEvent>>,
-    /// Gesture value events toward the RT thread, per gesture node.
-    gesture_producers: HashMap<usize, rtrb::Producer<GestureEvent>>,
     /// Hands CV events toward the RT thread plus the dedup control state,
     /// per Hands node.
     hands_producers: HashMap<
@@ -382,11 +376,9 @@ pub struct Engine {
 }
 
 const CMD_QUEUE_CAP: usize = 1024;
-/// Pending gesture value events per Gesture node. Sized for offline
-/// renders that pre-inject whole recorded fixtures (like MIDI's ring);
-/// live feeds drain it every block.
-const GESTURE_QUEUE_CAP: usize = 4096;
-/// Pending hands CV events per Hands node (same sizing rationale).
+/// Pending hands CV events per Hands node. Sized for offline renders
+/// that pre-inject whole recorded traces (like MIDI's ring); live feeds
+/// drain it every block.
 const HANDS_QUEUE_CAP: usize = 4096;
 /// Pending key events per QWERTY node (same sizing rationale).
 const QWERTY_QUEUE_CAP: usize = 4096;
@@ -454,7 +446,6 @@ impl Engine {
             cmd_tx: Arc::new(Mutex::new(cmd_tx)),
             garbage_rx,
             midi_producers: HashMap::new(),
-            gesture_producers: HashMap::new(),
             hands_producers: HashMap::new(),
             qwerty_producers: HashMap::new(),
             choreos: HashMap::new(),
@@ -635,12 +626,6 @@ impl Engine {
                 return Ok(m.jack);
             }
         }
-        // Gesture nodes likewise (PRD §7.3: every mapping is a jack).
-        if let Some(g) = &info.gesture {
-            if let Some((jack, _)) = g.mappings().iter().find(|(_, d)| d.name == jack_id) {
-                return Ok(*jack);
-            }
-        }
         info.manifest
             .outputs
             .iter()
@@ -660,7 +645,6 @@ impl Engine {
                 BuiltinKind::Midi
                 | BuiltinKind::Choreo
                 | BuiltinKind::Qwerty
-                | BuiltinKind::Gesture
                 | BuiltinKind::Hands
                 | BuiltinKind::Playback
                 | BuiltinKind::Deck,
@@ -729,9 +713,7 @@ impl Engine {
         // Side-table entries are keyed by the graph SLOT, which is only
         // known after add_node (slots are recycled); build now, file later.
         let mut midi_shared = None;
-        let mut gesture = None;
         let mut midi_plumbing = None;
-        let mut gesture_tx = None;
         let mut hands_plumbing = None;
         let mut qwerty_plumbing = None;
         let mut choreo_ctl = None;
@@ -745,12 +727,6 @@ impl Engine {
                 midi_shared = Some(shared.clone());
                 midi_plumbing = Some((tx, out_rx));
                 Box::new(MidiModule::new(rx, shared, out_tx))
-            }
-            Some(BuiltinKind::Gesture) => {
-                let (tx, rx) = rtrb::RingBuffer::new(GESTURE_QUEUE_CAP);
-                gesture_tx = Some(tx);
-                gesture = Some(dj_gesture::GestureProcessor::default());
-                Box::new(GestureRtModule::new(rx, self.current_frame()))
             }
             Some(BuiltinKind::Hands) => {
                 let (tx, rx) = rtrb::RingBuffer::new(HANDS_QUEUE_CAP);
@@ -851,7 +827,6 @@ impl Engine {
             midi_shared,
             midi_mappings: Vec::new(),
             midi_led_mappings: Vec::new(),
-            gesture,
             choreo: if BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::Choreo) {
                 Some(crate::choreo::ChoreoState::default())
             } else {
@@ -909,9 +884,6 @@ impl Engine {
         if let Some((tx, out_rx)) = midi_plumbing {
             self.midi_producers.insert(idx, tx);
             self.midi_out_consumers.insert(idx, out_rx);
-        }
-        if let Some(tx) = gesture_tx {
-            self.gesture_producers.insert(idx, tx);
         }
         if let Some(tx) = hands_plumbing {
             self.hands_producers
@@ -996,7 +968,6 @@ impl Engine {
         self.wires = wires;
         self.midi_producers.remove(&slot);
         self.midi_out_consumers.remove(&slot);
-        self.gesture_producers.remove(&slot);
         self.hands_producers.remove(&slot);
         self.qwerty_producers.remove(&slot);
         self.choreos.remove(&slot);
@@ -1094,11 +1065,6 @@ impl Engine {
         if info.is_midi() {
             if let Some(m) = info.midi_mappings.iter().find(|m| m.jack == jack) {
                 return m.name.clone();
-            }
-        }
-        if let Some(g) = &info.gesture {
-            if let Some((_, d)) = g.mappings().iter().find(|(j, _)| *j == jack) {
-                return d.name.clone();
             }
         }
         info.manifest.outputs[jack].id.clone()
@@ -1339,8 +1305,8 @@ impl Engine {
     /// the state a freshly added module of this type would have. For a
     /// macro instance that is the saved internal state of ITS OWN copy of
     /// the definition (see [`Engine::reset_macro_instance`], which also
-    /// restores internal wiring). Non-structural: wires, MIDI/gesture
-    /// mappings and loaded tracks are untouched.
+    /// restores internal wiring). Non-structural: wires, MIDI mappings
+    /// and loaded tracks are untouched.
     pub fn reset_module(&mut self, instance_id: &str) -> Result<()> {
         if let Some(def) = self
             .macro_instances
@@ -1403,7 +1369,7 @@ impl Engine {
     }
 
     /// Read an output jack's live telemetry — same shape as [`Engine::tap`],
-    /// resolving macro externals and named MIDI/gesture mapping jacks.
+    /// resolving macro externals and named MIDI mapping jacks.
     pub fn tap_out(&self, instance_id: &str, jack_id: &str) -> Result<JackTelemetry> {
         let (rid, rjack) = self.resolve_out_jack(instance_id, jack_id)?;
         let node = self.node_idx(&rid)?;

@@ -614,7 +614,6 @@ dependencies = [
  "anyhow",
  "cpal",
  "dj-analysis",
- "dj-gesture",
  "dj-library",
  "dj-module-sdk",
  "hound",
@@ -628,17 +627,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "wasmtime",
-]
-
-[[package]]
-name = "dj-gesture"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ort",
- "serde",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]

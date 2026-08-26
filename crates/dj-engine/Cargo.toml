@@ -24,7 +24,6 @@ wasmtime = { version = "37", default-features = false, features = ["cranelift", 
 rtrb = "0.3"
 libloading = "0.8"
 dj-module-sdk = { path = "../dj-module-sdk" }
-dj-gesture = { path = "../dj-gesture" }
 hound = "3.5"
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "isomp4", "flac", "wav", "pcm", "aiff"] }
 cpal = { version = "0.16", optional = true }

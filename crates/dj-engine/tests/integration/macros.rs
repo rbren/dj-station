@@ -330,7 +330,6 @@ fn macros_may_not_nest() {
             params: Default::default(),
             midi_mappings: Vec::new(),
             midi_led_mappings: Vec::new(),
-            gesture: None,
             choreo: None,
             track: None,
             sync_to: None,

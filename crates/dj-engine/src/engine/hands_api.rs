@@ -1,4 +1,4 @@
-//! Hands module control-plane API (the gesture feed's fixed-jack sibling):
+//! Hands module control-plane API:
 //! per-frame detections from the camera panel land here, derivations run
 //! on the calling (control) thread, and changed values ship to the RT
 //! graph over the node's SPSC ring.
@@ -53,7 +53,7 @@ impl Engine {
 
     /// Feed a whole recorded landmark trace starting at engine frame
     /// `start`. Used by offline renders, tests, and the E2E golden
-    /// harness (the hands analogue of `gesture_feed_trace`).
+    /// harness.
     pub fn hands_feed_trace(
         &mut self,
         instance_id: &str,

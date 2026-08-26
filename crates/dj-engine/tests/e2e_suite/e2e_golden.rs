@@ -5,8 +5,8 @@
 //! Module-specific cases live in their own `tests/e2e_*.rs` files.
 
 use crate::common::e2e::{
-    check_case, regen, write_case_tone, write_events, DeckSetupSpec, EventsFile, GestureTraceSpec,
-    MidiEventSpec, TrackLoadSpec,
+    check_case, regen, write_case_tone, write_events, DeckSetupSpec, EventsFile, MidiEventSpec,
+    TrackLoadSpec,
 };
 use dj_engine::{Engine, EngineConfig, MidiMapKind};
 
@@ -176,7 +176,6 @@ fn regen_patches() {
                     file: "tone.wav".into(),
                 }],
                 decks: vec![],
-                gestures: vec![],
                 hands: vec![],
             },
         );
@@ -220,7 +219,6 @@ fn regen_deck_patches() {
                     r#loop: Some((0.5, 1.5, true)),
                     stems: None,
                 }],
-                gestures: vec![],
                 hands: vec![],
             },
         );
@@ -284,7 +282,6 @@ fn regen_deck_patches() {
                         stems: None,
                     },
                 ],
-                gestures: vec![],
                 hands: vec![],
             },
         );
@@ -355,7 +352,6 @@ fn regen_stem_patches() {
                         "stem-other.wav".into(),
                     ]),
                 }],
-                gestures: vec![],
                 hands: vec![],
             },
         );
@@ -493,63 +489,4 @@ fn e2e_deck_crossfader_sync() {
         regen_deck_patches();
     }
     check_case("deck-crossfader-sync");
-}
-
-fn regen_gesture_patches() {
-    let patches = crate::common::e2e::e2e_dir().join("patches");
-
-    // Case 9 (M5): Gesture(distance: L thumb<->index) -> VCA(cv) with
-    // Osc -> VCA -> Audio Out (stereo l/r), driven by the recorded pinch
-    // fixture: rendered amplitude tracks the pinch open/close.
-    {
-        let dir = patches.join("gesture-pinch-vca");
-        std::fs::create_dir_all(&dir).unwrap();
-        let trace = dj_engine::dj_gesture::fixtures::pinch_trace(30.0, 45, 0.04, 0.3);
-        trace.save(&dir.join("pinch.json")).unwrap();
-
-        let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
-        e.add_module("gest1", "builtin.gesture").unwrap();
-        e.add_module("osc1", "com.dj.oscillator").unwrap();
-        e.add_module("vca1", "com.dj.vca").unwrap();
-        e.add_module("out1", "builtin.audio_out").unwrap();
-        e.add_gesture_mapping(
-            "gest1",
-            "pinch",
-            "landmark",
-            serde_json::json!({
-                "type": "distance",
-                "a": "L.thumb.tip", "b": "L.index.tip",
-                "min": 0.04, "max": 0.3,
-            }),
-        )
-        .unwrap();
-        e.connect("osc1", "audio", "vca1", "in").unwrap();
-        e.connect("gest1", "pinch", "vca1", "cv").unwrap();
-        e.connect("vca1", "out", "out1", "l").unwrap();
-        e.connect("vca1", "out", "out1", "r").unwrap();
-        // Wired inputs add to the knob baseline; zero the cv knob so the
-        // pinch alone drives the amplitude.
-        e.set_knob_value("vca1", "cv", 0.0).unwrap();
-        e.save_patch(&dir.join("patch"), "e2e-gesture-pinch-vca")
-            .unwrap();
-        write_events(
-            &dir,
-            &EventsFile {
-                seconds: 1.5,
-                gestures: vec![GestureTraceSpec {
-                    instance: "gest1".into(),
-                    trace: "pinch.json".into(),
-                }],
-                ..EventsFile::default()
-            },
-        );
-    }
-}
-
-#[test]
-fn e2e_gesture_pinch_vca() {
-    if regen() {
-        regen_gesture_patches();
-    }
-    check_case("gesture-pinch-vca");
 }

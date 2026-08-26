@@ -24,7 +24,6 @@ mod deck_library;
 mod deck_stems;
 mod display_units;
 mod envelope;
-mod gesture;
 mod graph_edit;
 mod hands;
 mod live_edit;

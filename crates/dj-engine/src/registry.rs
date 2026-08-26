@@ -78,7 +78,6 @@ impl ExtensionRegistry {
             crate::playback::playback_manifest(),
             crate::deck::deck_manifest(),
             crate::mixer::crossfader_manifest(),
-            crate::gesture::gesture_manifest(),
             crate::hands::hands_manifest(),
         ];
         out.extend(self.extensions.values().map(|e| e.manifest.clone()));

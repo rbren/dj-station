@@ -13,7 +13,6 @@ import type { JackTelemetry, KnobConfig, ModuleHandle } from '../types';
 import { ChoreoPanel } from './ChoreoPanel';
 import { CUSTOM_UIS } from './customUIs';
 import { ErrorBoundary } from './ErrorBoundary';
-import { GesturePanel } from './GesturePanel';
 import { MidiPanel } from './MidiPanel';
 import { ModulePanel } from './ModulePanel';
 import { QwertyPanel } from './QwertyPanel';
@@ -157,21 +156,6 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
                 setNote: (i, t, b, n) => engine.choreoSetNote(i, t, b, n),
                 setNoteSettings: (i, t, o, s, b) => engine.choreoSetNoteSettings(i, t, o, s, b),
                 endEdit: () => engine.endEdit(),
-              }}
-              onChanged={() => void refresh()}
-            />
-          ) : node.type_id === 'builtin.gesture' ? (
-            <GesturePanel
-              instance={instanceId}
-              api={{
-                status: (i) => engine.gestureStatus(i),
-                setMode: (i, m) => engine.gestureSetMode(i, m),
-                addMapping: (i, n, m, c) => engine.gestureAddMapping(i, n, m, c),
-                removeMapping: (i, n) => engine.gestureRemoveMapping(i, n),
-                learnBegin: (i) => engine.gestureLearnBegin(i),
-                learnPoll: (i, n) => engine.gestureLearnPoll(i, n),
-                feedStart: (i, src) => engine.gestureFeedStart(i, src),
-                feedStop: (i) => engine.gestureFeedStop(i),
               }}
               onChanged={() => void refresh()}
             />

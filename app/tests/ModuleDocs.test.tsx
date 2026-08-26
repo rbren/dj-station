@@ -27,7 +27,6 @@ const BUILTIN_IDS = [
   'builtin.audio_out',
   'builtin.midi',
   'builtin.qwerty',
-  'builtin.gesture',
   'builtin.hands',
   'builtin.deck',
   'builtin.playback',

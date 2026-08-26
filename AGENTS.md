@@ -120,26 +120,11 @@ fails if it's missing.
   `rt_safety.rs` (default 30 s; CI 600). The strict zero-deadline-miss
   criterion is the open on-M4-hardware PRD checkbox; on shared hosts the
   test tolerates ≤ 1 % CPU-time spikes, documented inline.
-- Gesture (M5, PRD §7.3): `crates/dj-gesture` is the detection pipeline
-  (frame source -> `HandDetector` -> `GestureProcessor` mode/mapping
-  evaluation), all off the RT thread; `builtin.gesture` in dj-engine
-  mirrors MIDI (mappings = output jacks, values cross via rtrb SPSC
-  events, sample-accurate RT application, frame drops hold last value).
-  Mapping/mode/wheel-layout state persists per-module in the patch
-  (`GestureState`). Test fixtures are small deterministic JSON landmark
-  traces under `crates/dj-gesture/tests/fixtures/` pinned to their
-  generators (regenerate with `REGEN_FIXTURES=1`) — never video
-  binaries. The tested default detector is the deterministic
-  `MarkerDetector` on synthetic trace frames; the ONNX hand model is
-  behind `dj-gesture --features onnx` and its smoke test gates on
-  `DJ_GESTURE_ONNX_MODEL` (unset/empty ⇒ skip) — don't make CI depend
-  on model files. New gesture modes register via `ModeRegistry` /
-  `Engine::gesture_register_mode`; the processor core must stay
-  mode-agnostic (a stub third mode registering with zero core changes
-  is an M5 acceptance test — keep it true). E2E deck-style sidecars now
-  also carry `gestures` fixture specs in `events.json`. The app's mock
-  feed thread (fixture -> full pipeline at 30 fps) stands in for the
-  macOS camera behind the same start/stop IPC commands.
+- Gesture (M5, PRD §7.3) is REMOVED: the `dj-gesture` crate,
+  `builtin.gesture`, its panel and its `gesture-pinch-vca` golden are
+  gone. Hand-driven control is the camera panel's in-webview MediaPipe
+  tracking feeding `builtin.hands` (see the camera/hands entries below)
+  — don't reintroduce a second detection pipeline in Rust.
 - Choreography module (`builtin.choreo`, `crates/dj-engine/src/choreo.rs` +
   `engine/choreo_api.rs`): a beat-indexed multi-track timeline. Track
   state (`ChoreoState`) is canonical control-side, persisted per instance
@@ -287,6 +272,16 @@ fails if it's missing.
   assert); it passes standalone — rerun
   `cargo test -p dj-engine --release --test rt_safety` before assuming a
   regression.
+- Stale test binaries from OTHER git worktrees can poison
+  `cargo test --workspace`: sibling checkouts under
+  `/tmp/conversation-worktrees/` share this `target/` dir, and a test
+  binary bakes in its build-time `CARGO_MANIFEST_DIR`, so cargo may run
+  one whose fixture paths point at a worktree whose files differ. The
+  tell is a fixture `NotFound`/drift failure in a crate the change never
+  touched, passing standalone but failing under `--workspace` (seen on
+  `dj-analysis`'s `golden_clip_edit`). `touch` the test source to force a
+  relink, and check the baked path with
+  `strings <binary> | grep conversation-worktrees`.
 - Frontend rack state lives in `app/src/rackStore.ts` (hand-rolled
   external store read via `useSyncExternalStore`, no zustand), provided
   through `RackStoreContext`; each `RackModule` subscribes to its own
@@ -399,7 +394,7 @@ fails if it's missing.
   the full right-click event stream).
 - Module layout (post-refactor): `engine.rs` keeps core types,
   construction, graph editing, knobs and telemetry; feature-area
-  `impl Engine` blocks live under `src/engine/` (`midi`, `gesture_api`,
+  `impl Engine` blocks live under `src/engine/` (`midi`, `hands_api`,
   `macros_api`, `lifecycle`, `deck_api`, `hot_reload` — each is
   `use super::*;` + one impl block). Likewise `deck.rs` is the deck's
   control plane; the RT-thread `DeckModule` lives in `deck/rt.rs`

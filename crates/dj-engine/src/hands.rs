@@ -1,7 +1,7 @@
 //! Built-in Hands module (`builtin.hands`): CV outputs derived from the
 //! camera panel's MediaPipe hand tracking.
 //!
-//! Architecturally the Gesture module's sibling with a FIXED jack set:
+//! Architecturally the MIDI module's sibling with a FIXED jack set:
 //! detection happens in the webview (MediaPipe WASM needs it), landmark
 //! frames cross into Rust over one Tauri IPC command, the derivations
 //! below run on the control thread, and changed values ship to the RT
@@ -121,8 +121,7 @@ pub struct HandsDetection {
     pub right: Option<[[f32; 3]; N_LANDMARKS]>,
 }
 
-/// A recorded landmark trace for offline renders / E2E goldens (the
-/// hands analogue of `dj_gesture::PoseTrace`).
+/// A recorded landmark trace for offline renders / E2E goldens.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HandsTrace {
     pub fps: f32,
@@ -426,7 +425,7 @@ impl HostModule for HandsRtModule {
         for s in 0..frames {
             let now = block_start + s as u64;
             // Sample-accurate within the block; late/past events apply
-            // immediately (same policy as MIDI/gesture).
+            // immediately (same policy as MIDI).
             loop {
                 match self.consumer.peek() {
                     Ok(ev) if ev.frame <= now => {

@@ -1,10 +1,9 @@
 //! E2E golden audio case for the Hands module (camera hand-tracking CV).
 //!
 //! Landmark frames come from the webview tracker at runtime, so this case
-//! carries a deterministic synthetic `HandsTrace` in its sidecar (the
-//! hands analogue of gesture pose traces): a right hand whose pinch opens
-//! then closes, wired `r_pinch -> VCA cv`, so the render's amplitude
-//! envelope IS the pinch curve.
+//! carries a deterministic synthetic `HandsTrace` in its sidecar: a right
+//! hand whose pinch opens then closes, wired `r_pinch -> VCA cv`, so the
+//! render's amplitude envelope IS the pinch curve.
 
 use crate::common::e2e::{check_case, regen, write_events, EventsFile, HandsTraceSpec};
 use dj_engine::hands::{HandsDetection, HandsTrace, N_LANDMARKS};
