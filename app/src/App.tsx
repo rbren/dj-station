@@ -1896,7 +1896,11 @@ export default function App() {
         >
           {patchName}
         </span>
-        <span className="engine-status" data-testid="engine-status">
+        <span
+          className="engine-status"
+          data-testid="engine-status"
+          data-state={connected === null ? 'pending' : connected ? 'on' : 'off'}
+        >
           {connected === null
             ? 'connecting…'
             : connected

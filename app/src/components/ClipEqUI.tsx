@@ -14,7 +14,7 @@
 // or a fresh wheel burst) so the owner can snapshot history, then
 // `onChange` streams the live band values.
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, type CSSProperties } from 'react';
 import { EQ_MAX_Q, EQ_MIN_Q, type ClipEqBand } from '../clip';
 
 const W = 340;
@@ -358,7 +358,9 @@ export function ClipEqUI({ bands, onBegin, onChange }: ClipEqUIProps) {
           <span
             key={i}
             className="eq-readout-band"
-            style={{ color: BAND_COLORS[i % BAND_COLORS.length] }}
+            /* §D3 — the band's colour is a swatch, not the text colour:
+               four coloured strings of numbers were unreadable. */
+            style={{ '--band': BAND_COLORS[i % BAND_COLORS.length] } as CSSProperties}
           >
             {hzLabel(Math.round(b.freq_hz))}Hz {b.gain_db >= 0 ? '+' : ''}
             {b.gain_db.toFixed(1)}dB Q{b.q.toFixed(1)}

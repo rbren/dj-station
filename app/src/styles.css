@@ -1,8 +1,273 @@
+/* Design tokens (DESIGN_OVERHAUL.md §A). Everything visual should reach
+   for one of these instead of a fresh literal: sizes come from ONE scale,
+   ink from three contrast levels, and colour meaning is fixed —
+   --brand for signal/selection, --cue for "armed, look here", --fault for
+   faults only. Per-module category colour stays on the panel's own
+   --accent (set inline by ModulePanel) and is deliberately NOT defined
+   here, so a panel's hue can never leak into page chrome. */
 :root {
   color-scheme: dark;
-  font-family: 'Inter', system-ui, sans-serif;
-  background: #14161a;
-  color: #e6e6e6;
+  /* No webfont is bundled, so ask for faces that actually exist rather
+     than a phantom 'Inter'. */
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Roboto Mono', Menlo, monospace;
+
+  /* Type scale. --fs-nano/-micro are panel legends and axis marks only;
+     anything a user reads as a sentence starts at --fs-sm. */
+  --fs-nano: 10px;
+  --fs-micro: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-title: 18px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+
+  /* Surfaces, darkest to lightest. */
+  --canvas: #14161a;
+  --surface: #191c21;
+  --surface-raised: #22262e;
+  --surface-sunken: #0e1013;
+  --line: #2a2e35;
+  --line-strong: #414854;
+
+  /* Ink: 14.4 / 8.4 / 5.9 : 1 on --canvas. */
+  /* §C5 — three inks, and the dimmest of them still clears 4.5:1 on
+     --surface; nothing a user has to read goes below --ink-dim. */
+  --ink: #e8eaee;
+  --ink-muted: #aab3c0;
+  --ink-dim: #8b95a3;
+
+  /* Meaning. --brand is the one UI accent (selection, focus, active
+     state); --cue is the mixer-lamp amber for armed/attention; --fault is
+     reserved for faults. */
+  --brand: #62d0ff;
+  --brand-dim: #5fb6d4;
+  --cue: #e6b450;
+  --ok: #7dde8a;
+  --warn: #e0b78f;
+  --fault: #e05c5c;
+
+  /* One waveform colour for the whole app (deck, clip, beatify). */
+  --wave: #3f7fbf;
+  --wave-strong: #6fa8dc;
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  --shadow-panel: 0 2px 8px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-raised: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --shadow-overlay: 0 18px 48px rgba(0, 0, 0, 0.55);
+  --scrim: rgba(8, 9, 12, 0.62);
+
+  /* Motion: state changes are --dur-fast, overlays --dur-slow, and both
+     are answered by the prefers-reduced-motion block below. */
+  --dur-fast: 120ms;
+  --dur-slow: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+
+  /* No font-size here on purpose: `rem` lengths elsewhere in this file
+     (paddings, gaps) are sized against the root, so re-basing it would
+     silently move layout. Text sizes come from the scale above. */
+  font-family: var(--font-ui);
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+/* Quality floor (DESIGN_OVERHAUL.md §C1): every interactive surface shows
+   where the keyboard is. Applied globally so a new control cannot opt out
+   by omission — and :focus-visible only, so pointer users see nothing. */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* §C2: no continuous animation, and no transitions, for anyone who asked
+   the OS not to see them. The volatile-jack pulse keeps a static ring so
+   the information it carries survives. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* §A4 — one button language. Feature areas still override colour and
+   padding where they must, but they all start from the same surface,
+   radius, type size and state model, and none of them has to re-invent
+   "disabled" or "hover". Transitions are colour-only: never a layout
+   property, so no measured box can move under the animation. */
+button,
+select,
+input,
+textarea {
+  font-family: inherit;
+}
+
+button {
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+
+/* The default look for a page-chrome button nobody styled — until now
+   those fell back to the webview's own light chrome (Library's Search and
+   Edit did exactly that). Two safety rails: the selector is wrapped in
+   :where() so it carries ZERO specificity (any widget that paints itself
+   still wins), and it sets no padding, so no button changes size. */
+:where(
+    .library,
+    .clip-view,
+    .beatify-view,
+    .beatify-modal,
+    .app-header,
+    .file-dialog,
+    .module-picker,
+    .docs-panel
+  )
+  button {
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+
+:where(
+    .library,
+    .clip-view,
+    .beatify-view,
+    .beatify-modal,
+    .app-header,
+    .file-dialog,
+    .module-picker,
+    .docs-panel
+  )
+  button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--brand) 50%, var(--line-strong));
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface-raised));
+}
+
+/* Same story for text fields and selects: Beatify's BPM box was still a
+   white webview input in the middle of a dark rack. Zero specificity, no
+   padding, so nothing that styles itself is affected. */
+:where(
+    .library,
+    .clip-view,
+    .beatify-view,
+    .beatify-modal,
+    .app-header,
+    .file-dialog,
+    .module-picker,
+    .docs-panel
+  )
+  :is(input, select, textarea) {
+  color: var(--ink);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+
+/* One disabled treatment: dimmed AND de-bordered, so "can't press this"
+   never reads as "ordinary button". */
+button:disabled,
+button[aria-disabled='true'] {
+  opacity: 0.42;
+  border-color: transparent;
+  cursor: default;
+}
+
+/* The one primary action on a screen, and the destructive one. */
+.is-primary {
+  color: #0b1116;
+  background: var(--brand);
+  border-color: var(--brand);
+  font-weight: 600;
+}
+
+.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brand) 82%, #fff);
+  border-color: color-mix(in srgb, var(--brand) 82%, #fff);
+}
+
+.is-danger {
+  color: var(--fault);
+  border-color: color-mix(in srgb, var(--fault) 55%, var(--line-strong));
+}
+
+.is-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fault) 18%, var(--surface-raised));
+  border-color: var(--fault);
+}
+
+/* Every value the user reads as a number uses the same tabular face, so
+   digits stop dancing as they update (§A2). */
+.mono,
+.deck-time,
+.deck-bpm,
+.beatify-clock,
+.clip-clock {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* §D9 — the app had two range sliders left in the browser's default
+   blue; this is the one appearance they share. */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 60%, #04080b);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 1px solid color-mix(in srgb, var(--brand) 60%, #04080b);
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+/* §D11 — one empty-state treatment for every surface that can be empty:
+   readable size, real breathing room, and a muted supporting line. */
+.empty-state,
+.rack-empty,
+.library-empty,
+.clip-empty,
+.beatify-empty,
+.picker-empty {
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  max-width: 46ch;
+  padding: 2.5rem 1.5rem;
+  margin: 0 auto;
+  text-align: center;
 }
 
 /* The page itself must never scroll: the shell is pinned to the viewport
@@ -28,24 +293,69 @@ body {
   overflow: hidden;
 }
 
+/* The instrument's fascia (§B1): the wordmark has presence, the tabs read
+   as one segmented control, and engine state is a status pill so a broken
+   engine can never look like a healthy one. */
 .app-header {
   display: flex;
   flex: none;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 1rem;
+  align-items: center;
+  gap: 0.85rem;
   padding: 0.5rem 1rem;
-  border-bottom: 1px solid #2a2e35;
+  background: linear-gradient(180deg, #1c2027 0%, var(--surface) 100%);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
 }
 
 .app-header h1 {
-  font-size: 1.1rem;
-  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0 0.25rem 0 0;
+  color: var(--ink);
 }
 
+/* Engine state, in the one place the eye returns to. The text is
+   unchanged (tests read it); only its weight and colour say "fine" or
+   "not fine". */
 .engine-status {
-  font-size: 0.8rem;
-  color: #8a93a2;
+  font-size: var(--fs-xs);
+  color: var(--ink-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-raised);
+}
+
+.engine-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-dim);
+  box-shadow: 0 0 6px currentcolor;
+}
+
+.engine-status[data-state='on'] {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--line-strong));
+}
+
+.engine-status[data-state='off'] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line-strong));
+}
+
+.engine-status[data-state='on']::before {
+  background: var(--ok);
+}
+
+.engine-status[data-state='off']::before {
+  background: var(--warn);
 }
 
 /* Free placement canvas: placed panels are absolutely positioned on a
@@ -74,7 +384,7 @@ body {
 }
 
 .rack-empty {
-  color: #8a93a2;
+  color: var(--ink-dim);
   padding: 2rem;
 }
 
@@ -83,7 +393,7 @@ body {
    size so measurement never feeds back. Each panel carries an --accent
    custom property from its library category. */
 .module-panel {
-  --accent: #8a93a2;
+  --accent: var(--ink-dim);
   /* Containing block for the absolutely-positioned .module-title, which
      is out of flow so a long name can NEVER widen the panel (it elides)
      and the bar always spans the full snapped panel width. */
@@ -97,15 +407,25 @@ body {
      multi-select): labels and readouts must never turn into a text
      selection mid-gesture. Form fields below re-enable selection. */
   user-select: none;
-  background: linear-gradient(180deg, #22262e 0%, #1b1e24 14%, #191c21 100%);
-  border: 1px solid #414854;
-  border-top: 2px solid color-mix(in srgb, var(--accent) 60%, #414854);
+  background: linear-gradient(
+    180deg,
+    var(--surface-raised) 0%,
+    var(--surface) 14%,
+    var(--surface) 100%
+  );
+  border: 1px solid var(--line-strong);
+  border-top: 2px solid color-mix(in srgb, var(--accent) 60%, var(--line-strong));
   border-radius: 8px;
   box-sizing: border-box;
   overflow: hidden;
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: var(--shadow-panel);
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+
+/* §B4 — an elevation scale, in shadow only, so a hovered or selected
+   panel reads as lifted without a single measured box moving. */
+.module-panel-placed:hover {
+  box-shadow: var(--shadow-raised);
 }
 
 .module-panel-content {
@@ -136,7 +456,7 @@ body {
   height: 56px;
   box-sizing: border-box;
   font-weight: 600;
-  font-size: 1.9rem;
+  font-size: var(--fs-title);
   line-height: 1;
   letter-spacing: 0.02em;
   display: flex;
@@ -144,9 +464,14 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 0 10px;
-  border-bottom: 1px solid #262b33;
+  border-bottom: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.18);
-  color: color-mix(in srgb, var(--accent) 60%, #e6e6e6);
+  /* §A3: the category hue belongs to the panel edge, not to the words.
+     Eight saturated title colours turned a rack into a rainbow; the name
+     is now plain ink and the accent survives as the bar's under-rule and
+     the panel's top border. */
+  color: var(--ink);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* The module's (renameable) name — the header's prominent element. */
@@ -163,11 +488,15 @@ body {
   font: inherit;
   color: inherit;
   background: rgba(0, 0, 0, 0.35);
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, #3a4150);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line-strong));
   border-radius: 3px;
   padding: 0 4px;
   margin: -1px 0;
-  outline: none;
+}
+
+.module-name-input:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
 }
 
 /* --- Input cells: wire jack stacked directly on the control ---------- */
@@ -194,11 +523,11 @@ body {
 }
 
 .input-group-title {
-  font-size: 0.58rem;
+  font-size: var(--fs-nano);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #6f7987;
+  color: var(--ink-dim);
   white-space: nowrap;
 }
 
@@ -242,9 +571,9 @@ body {
 }
 
 .input-cell-label {
-  font-size: 0.6rem;
+  font-size: var(--fs-nano);
   line-height: 1.1;
-  color: #96a0af;
+  color: var(--ink-muted);
   max-width: var(--cell-w);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -259,8 +588,18 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   min-width: 0;
+  position: relative;
+}
+
+/* §C4 — patching is the rack's core gesture and the socket is 16px tall.
+   A transparent overlay grows the target without moving a single pixel of
+   the packed panel layout. */
+.jack::after {
+  content: '';
+  position: absolute;
+  inset: -3px -2px;
 }
 
 .jack-name {
@@ -269,7 +608,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
-  color: #96a0af;
+  color: var(--ink-muted);
 }
 
 /* Hardware-style panel socket: metal ring around a dark bore. The bore
@@ -284,10 +623,10 @@ body {
     #07090c 42%,
     #6a7382 50%,
     #aeb7c6 62%,
-    #454c58 88%,
-    #262b33 100%
+    var(--line-strong) 88%,
+    var(--line) 100%
   );
-  border: 1px solid #12151a;
+  border: 1px solid var(--surface-sunken);
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.9),
     0 1px 0 rgba(255, 255, 255, 0.08);
@@ -337,8 +676,18 @@ body {
   }
 }
 
+/* §C2 — the pulse is information ("this signal is too fast to draw"), so
+   when motion is off it becomes a static ring rather than nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .jack-glow-volatile {
+    outline: 1px solid currentcolor;
+    outline-offset: 1px;
+    filter: brightness(1.15);
+  }
+}
+
 .jack.jack-selected {
-  outline: 2px solid #e6b450;
+  outline: 2px solid var(--cue);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -373,8 +722,8 @@ body {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #3a4049, #262a31 70%);
-  border: 2px solid #3c424c;
+  background: radial-gradient(circle at 35% 30%, var(--line-strong), #262a31 70%);
+  border: 2px solid var(--line-strong);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
@@ -386,7 +735,7 @@ body {
   top: 2px;
   width: 2px;
   height: 7px;
-  background: var(--accent, #62d0ff);
+  background: var(--accent, var(--brand));
   border-radius: 1px;
   transform-origin: 50% 7px;
 }
@@ -404,7 +753,7 @@ body {
   width: 4px;
   transform: translateX(-50%);
   background: #0d1014;
-  border: 1px solid #2a2e35;
+  border: 1px solid var(--line);
   border-radius: 2px;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
 }
@@ -428,7 +777,7 @@ body {
   margin: auto;
   width: 100%;
   height: 2px;
-  background: var(--accent, #62d0ff);
+  background: var(--accent, var(--brand));
 }
 
 /* Buttons are amber pads, lit while the gate is high — the colour the
@@ -438,7 +787,7 @@ body {
   height: 13px;
   border-radius: 3px;
   background: #23272e;
-  border: 1px solid #3a4049;
+  border: 1px solid var(--line-strong);
 }
 
 .jack-readout-pad-on {
@@ -478,8 +827,8 @@ body {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #3a4049, #262a31 70%);
-  border: 2px solid #3c424c;
+  background: radial-gradient(circle at 35% 30%, var(--line-strong), #262a31 70%);
+  border: 2px solid var(--line-strong);
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.5),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -498,7 +847,7 @@ body {
   top: 2px;
   width: 2px;
   height: 9px;
-  background: var(--accent, #62d0ff);
+  background: var(--accent, var(--brand));
   border-radius: 1px;
   transform-origin: 50% 9px;
 }
@@ -510,9 +859,9 @@ body {
   left: 50%;
   bottom: -3px;
   transform: translateX(-50%);
-  font-size: 0.55rem;
+  font-size: var(--fs-nano);
   line-height: 1;
-  color: var(--accent, #62d0ff);
+  color: var(--accent, var(--brand));
   background: rgba(20, 23, 28, 0.85);
   border-radius: 3px;
   padding: 0 2px;
@@ -553,7 +902,7 @@ body {
 .fader-track {
   position: absolute;
   background: #0d1014;
-  border: 1px solid #2a2e35;
+  border: 1px solid var(--line);
   border-radius: 2px;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
 }
@@ -601,7 +950,7 @@ body {
   position: absolute;
   inset: 0;
   margin: auto;
-  background: var(--accent, #62d0ff);
+  background: var(--accent, var(--brand));
 }
 
 .fader-v .fader-cap::after {
@@ -628,7 +977,7 @@ body {
 .knob-spread path {
   fill: none;
   /* Teal: deliberately distinct from the gold wired-jack/wire-default
-     (#e6b450), the cyan accent (#62d0ff), the green outputs (#7dde8a) and
+     (var(--cue)), the cyan accent (var(--brand)), the green outputs (var(--ok)) and
      every WIRE_COLORS cable entry. */
   stroke: #3fd2c0;
   stroke-width: 3;
@@ -639,12 +988,12 @@ body {
 /* Negative atten (cmd-drag overscrolled past zero): the wire's swing is
    reversed, flagged in the legacy warning orange. */
 .knob-spread path.knob-spread-reversed {
-  stroke: #e6b450;
+  stroke: var(--cue);
 }
 
 .param-name {
-  font-size: 0.7rem;
-  color: #8a93a2;
+  font-size: var(--fs-xs);
+  color: var(--ink-dim);
 }
 
 .knob-config-menu {
@@ -653,13 +1002,13 @@ body {
   top: 40px;
   left: 0;
   background: #23272e;
-  border: 1px solid #3c424c;
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   min-width: 140px;
 }
 
@@ -675,12 +1024,12 @@ body {
   transform: translateX(-50%);
   z-index: 200;
   pointer-events: none;
-  background: #16181d;
-  color: #c8ccd4;
-  border: 1px solid #3c424c;
+  background: var(--surface);
+  color: var(--ink-muted);
+  border: 1px solid var(--line-strong);
   border-radius: 4px;
   padding: 3px 8px;
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   white-space: nowrap;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
@@ -697,28 +1046,34 @@ body {
   width: 16px;
   height: 16px;
   padding: 0;
-  border: 1px solid #3c424c;
+  border: 1px solid var(--line-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .jack-color-none {
   background:
-    linear-gradient(to top right, transparent 44%, #e05c5c 46%, #e05c5c 54%, transparent 56%),
+    linear-gradient(
+      to top right,
+      transparent 44%,
+      var(--fault) 46%,
+      var(--fault) 54%,
+      transparent 56%
+    ),
     #23272e;
 }
 
 .jack-color-selected {
-  outline: 2px solid #c8ccd4;
+  outline: 2px solid var(--ink-muted);
   outline-offset: 1px;
 }
 
 .knob-config-section {
   margin-top: 2px;
   padding-top: 6px;
-  border-top: 1px solid #3c424c;
-  color: #8a93a2;
-  font-size: 0.7rem;
+  border-top: 1px solid var(--line-strong);
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -727,13 +1082,13 @@ body {
   width: 28px;
   height: 16px;
   border-radius: 8px;
-  background: #2a2e35;
-  border: 2px solid #3c424c;
+  background: var(--line);
+  border: 2px solid var(--line-strong);
   cursor: pointer;
 }
 
 .knob-toggle-on {
-  background: var(--accent, #62d0ff);
+  background: var(--accent, var(--brand));
 }
 
 /* Wire-style / wired inputs keep the cell footprint but only a small
@@ -756,17 +1111,17 @@ body {
 }
 
 .adsr-bg {
-  fill: #14161a;
+  fill: var(--canvas);
 }
 
 .adsr-path {
-  stroke: #62d0ff;
+  stroke: var(--brand);
   stroke-width: 2;
 }
 
 .adsr-handle {
-  fill: #e6b450;
-  stroke: #14161a;
+  fill: var(--cue);
+  stroke: var(--canvas);
   stroke-width: 1.5;
 }
 
@@ -784,7 +1139,7 @@ body {
 
 .adsr-playhead {
   fill: #fff;
-  stroke: #62d0ff;
+  stroke: var(--brand);
   stroke-width: 2;
   filter: drop-shadow(0 0 6px rgb(98 208 255 / 95%));
   pointer-events: none;
@@ -801,14 +1156,14 @@ body {
 }
 
 .adsr-readout {
-  font-size: 0.75rem;
-  color: #8a93a2;
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
   padding: 4px 0;
 }
 
 .adsr-stage {
   float: right;
-  color: #62d0ff;
+  color: var(--brand);
   font-variant-numeric: tabular-nums;
 }
 
@@ -829,8 +1184,8 @@ body {
 
 .trigseq-track-label {
   width: 12px;
-  font-size: 0.6rem;
-  color: #6f7987;
+  font-size: var(--fs-nano);
+  color: var(--ink-dim);
   text-align: right;
 }
 
@@ -838,12 +1193,12 @@ body {
   width: 16px;
   height: 16px;
   border-radius: 3px;
-  border: 1px solid #343b45;
-  background: #14171c;
+  border: 1px solid var(--line);
+  background: var(--canvas);
   cursor: pointer;
   padding: 0;
   /* Ratchet count (grid seq shift+click), rendered as the button text. */
-  font-size: 0.55rem;
+  font-size: var(--fs-nano);
   font-weight: 700;
   line-height: 1;
   color: #0d1013;
@@ -851,13 +1206,13 @@ body {
 }
 
 .trigseq-cell.beat {
-  border-color: #454c58;
+  border-color: var(--line-strong);
 }
 
 .trigseq-cell.on {
-  background: var(--accent, #62d0ff);
-  border-color: color-mix(in srgb, var(--accent, #62d0ff) 70%, #fff);
-  box-shadow: 0 0 5px color-mix(in srgb, var(--accent, #62d0ff) 60%, transparent);
+  background: var(--accent, var(--brand));
+  border-color: color-mix(in srgb, var(--accent, var(--brand)) 70%, #fff);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--accent, var(--brand)) 60%, transparent);
 }
 
 .trigseq-cell.beyond {
@@ -871,11 +1226,11 @@ body {
   border-color: #fff;
   box-shadow:
     0 0 6px #fff,
-    0 0 14px var(--accent, #5fb6d4);
+    0 0 14px var(--accent, var(--brand-dim));
 }
 
 .trigseq-cell.on.playing {
-  background: color-mix(in srgb, var(--accent, #5fb6d4) 35%, #fff);
+  background: color-mix(in srgb, var(--accent, var(--brand-dim)) 35%, #fff);
 }
 
 /* --- Grid Sequencer -------------------------------------------------- */
@@ -917,7 +1272,7 @@ body {
   width: var(--ui-row-h, 24px);
   height: var(--ui-row-h, 24px);
   border-radius: 4px;
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
 }
 
 /* --- Step sequencer playhead strip ---------------------------------- */
@@ -937,9 +1292,9 @@ body {
 .stepseq-lamp {
   height: 16px;
   border-radius: 3px;
-  border: 1px solid #343b45;
-  background: #14171c;
-  color: #6f7987;
+  border: 1px solid var(--line);
+  background: var(--canvas);
+  color: var(--ink-dim);
   font-size: 9px;
   line-height: 14px;
   text-align: center;
@@ -948,7 +1303,7 @@ body {
 }
 
 .stepseq-lamp.beat {
-  border-color: #454c58;
+  border-color: var(--line-strong);
 }
 
 .stepseq-lamp.beyond {
@@ -962,7 +1317,7 @@ body {
   font-weight: 700;
   box-shadow:
     0 0 6px #fff,
-    0 0 14px var(--accent, #5fb6d4);
+    0 0 14px var(--accent, var(--brand-dim));
 }
 
 /* --- Turing register lamps ------------------------------------------ */
@@ -977,13 +1332,13 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  border: 1px solid #343b45;
-  background: #14171c;
+  border: 1px solid var(--line);
+  background: var(--canvas);
 }
 
 .turing-bit.on {
-  background: var(--accent, #5fb6d4);
-  border-color: color-mix(in srgb, var(--accent, #5fb6d4) 70%, #fff);
+  background: var(--accent, var(--brand-dim));
+  border-color: color-mix(in srgb, var(--accent, var(--brand-dim)) 70%, #fff);
 }
 
 .turing-bit.beyond {
@@ -994,7 +1349,7 @@ body {
   border-color: #fff;
   box-shadow:
     0 0 6px #fff,
-    0 0 12px var(--accent, #5fb6d4);
+    0 0 12px var(--accent, var(--brand-dim));
 }
 
 .turing-bit.on.playing {
@@ -1020,19 +1375,19 @@ body {
 }
 
 .euclid-dot.on {
-  fill: var(--accent, #5fb6d4);
+  fill: var(--accent, var(--brand-dim));
 }
 
 /* The currently-playing step flares white with an accent halo. */
 .euclid-dot.playing {
   fill: #fff;
-  stroke: var(--accent, #5fb6d4);
+  stroke: var(--accent, var(--brand-dim));
   stroke-width: 2;
   filter: drop-shadow(0 0 4px #fff);
 }
 
 .euclid-count {
-  fill: #6f7987;
+  fill: var(--ink-dim);
   font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
@@ -1054,7 +1409,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #14161a;
+  background: var(--canvas);
   border-radius: 4px;
   padding: 0 6px;
 }
@@ -1067,17 +1422,21 @@ body {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 1px solid #12151a;
-  background: color-mix(in srgb, var(--accent, #62d0ff) calc(var(--lfo-level) * 100%), #1b2027);
+  border: 1px solid var(--surface-sunken);
+  background: color-mix(
+    in srgb,
+    var(--accent, var(--brand)) calc(var(--lfo-level) * 100%),
+    #1b2027
+  );
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.7),
     0 0 calc(var(--lfo-level) * 12px) calc(var(--lfo-level) * 4px)
-      color-mix(in srgb, var(--accent, #62d0ff) calc(var(--lfo-level) * 75%), transparent);
+      color-mix(in srgb, var(--accent, var(--brand)) calc(var(--lfo-level) * 75%), transparent);
 }
 
 .lfo-bg,
 .shaper-bg {
-  fill: #14161a;
+  fill: var(--canvas);
   rx: 4;
 }
 
@@ -1089,14 +1448,14 @@ body {
 
 .lfo-wave,
 .shaper-curve {
-  stroke: var(--accent, #62d0ff);
+  stroke: var(--accent, var(--brand));
   stroke-width: 1.6;
 }
 
 .lfo-readout,
 .shaper-mode {
-  font-size: 0.65rem;
-  color: #8a93a2;
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
   padding: 2px 0 0;
 }
 
@@ -1110,13 +1469,13 @@ body {
 }
 
 .eq-plot {
-  background: #14161a;
+  background: var(--canvas);
   border-radius: 4px;
 }
 
 .eq-grid-label {
-  fill: #5d6675;
-  font-size: 8px;
+  fill: var(--ink-dim);
+  font-size: 9px;
 }
 
 .eq-handle {
@@ -1124,7 +1483,7 @@ body {
 }
 
 .eq-handle-label {
-  fill: #14161a;
+  fill: var(--canvas);
   font-size: 7px;
   font-weight: 700;
   pointer-events: none;
@@ -1135,9 +1494,27 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 6px;
-  font-size: 0.6rem;
-  color: #8a93a2;
+  font-size: var(--fs-nano);
+  color: var(--ink-dim);
   white-space: nowrap;
+}
+
+/* §D3 — one readable ink for every band, with the band's own colour kept
+   as a dot in front of it. */
+.eq-readout-band {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.eq-readout-band::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--band, currentColor);
 }
 
 /* --- Scope trace + spectrum ----------------------------------------- */
@@ -1155,22 +1532,22 @@ body {
 }
 
 .scope-view-btn {
-  background: #1b1e24;
-  color: #8a93a2;
-  border: 1px solid #2a2f38;
+  background: var(--surface);
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 1px 8px;
-  font-size: 0.62rem;
+  font-size: var(--fs-micro);
   cursor: pointer;
 }
 
 .scope-view-btn[aria-pressed='true'] {
-  color: #e6e9ef;
-  border-color: var(--accent, #9aa7b5);
+  color: var(--ink);
+  border-color: var(--accent, var(--ink-muted));
 }
 
 .scope-bg {
-  fill: #14161a;
+  fill: var(--canvas);
   rx: 4;
 }
 
@@ -1180,17 +1557,17 @@ body {
 }
 
 .scope-wave {
-  stroke: var(--accent, #62d0ff);
+  stroke: var(--accent, var(--brand));
   stroke-width: 1.4;
 }
 
 .scope-bar {
-  fill: color-mix(in srgb, var(--accent, #62d0ff) 80%, transparent);
+  fill: color-mix(in srgb, var(--accent, var(--brand)) 80%, transparent);
 }
 
 .scope-readout {
-  font-size: 0.65rem;
-  color: #8a93a2;
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1218,7 +1595,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #14161a;
+  background: var(--canvas);
   border: 1px solid #262c35;
   border-radius: 4px;
   overflow: hidden;
@@ -1247,7 +1624,7 @@ body {
   padding: 3px 6px;
   background: rgba(10, 12, 16, 0.75);
   border-radius: 4px;
-  font-size: 0.6rem;
+  font-size: var(--fs-nano);
   line-height: 1.35;
   color: #9fe8a8;
   font-variant-numeric: tabular-nums;
@@ -1261,8 +1638,8 @@ body {
 }
 
 .camera-status {
-  font-size: 0.65rem;
-  color: #6f7987;
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
   text-align: center;
   padding: 6px;
 }
@@ -1272,19 +1649,19 @@ body {
 }
 
 .camera-toggle {
-  background: #1b1e24;
-  color: #8a93a2;
-  border: 1px solid #2a2f38;
+  background: var(--surface);
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 3px 10px;
-  font-size: 0.7rem;
+  font-size: var(--fs-xs);
   cursor: pointer;
   align-self: flex-start;
 }
 
 .camera-toggle[aria-pressed='true'] {
-  color: #e6e9ef;
-  border-color: var(--accent, #9aa7b5);
+  color: var(--ink);
+  border-color: var(--accent, var(--ink-muted));
 }
 
 .level-meter {
@@ -1295,8 +1672,8 @@ body {
 
 .level-meter-label {
   width: 34px;
-  font-size: 0.62rem;
-  color: #8a93a2;
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
   text-align: right;
 }
 
@@ -1304,8 +1681,8 @@ body {
   flex: 1;
   height: 8px;
   border-radius: 4px;
-  background: #14171c;
-  border: 1px solid #2a2f38;
+  background: var(--canvas);
+  border: 1px solid var(--line);
   overflow: hidden;
 }
 
@@ -1314,16 +1691,16 @@ body {
   height: 100%;
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--accent, #62d0ff) 60%, #14171c),
-    var(--accent, #62d0ff)
+    color-mix(in srgb, var(--accent, var(--brand)) 60%, var(--canvas)),
+    var(--accent, var(--brand))
   );
-  box-shadow: 0 0 6px color-mix(in srgb, var(--accent, #62d0ff) 55%, transparent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent, var(--brand)) 55%, transparent);
   transition: width 0.1s linear;
 }
 
 .level-meter-value {
   width: 52px;
-  font-size: 0.68rem;
+  font-size: var(--fs-micro);
   font-variant-numeric: tabular-nums;
   color: #dfe4ec;
 }
@@ -1343,7 +1720,7 @@ body {
 .quantizer-key {
   width: 20px;
   border-radius: 0 0 3px 3px;
-  border: 1px solid #343b45;
+  border: 1px solid var(--line);
   cursor: pointer;
   padding: 0 0 3px;
   display: flex;
@@ -1353,7 +1730,7 @@ body {
 
 .quantizer-key.white {
   height: 52px;
-  background: #262b33;
+  background: var(--line);
 }
 
 .quantizer-key.black {
@@ -1363,7 +1740,7 @@ body {
 
 .quantizer-key .quantizer-key-label {
   font-size: 8px;
-  color: #6f7987;
+  color: var(--ink-dim);
   pointer-events: none;
 }
 
@@ -1384,8 +1761,8 @@ body {
 }
 
 .quantizer-scale-name {
-  font-size: 0.65rem;
-  color: #8a93a2;
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
   padding: 3px 0 0;
 }
 
@@ -1393,23 +1770,40 @@ body {
 /* Library view (M1)                                                  */
 /* ------------------------------------------------------------------ */
 
+/* One segmented control, not four loose pills: the group is the object,
+   and the active segment is filled rather than merely outlined. */
 .app-tabs {
   display: flex;
-  gap: 6px;
+  gap: 2px;
+  padding: 2px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 
 .app-tabs .tab {
-  background: #1b1e24;
-  color: #8a93a2;
-  border: 1px solid #2a2f38;
-  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-dim);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   padding: 4px 14px;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.01em;
   cursor: pointer;
 }
 
+.app-tabs .tab:hover:not(.active) {
+  color: var(--ink);
+  background: var(--surface-raised);
+  border-color: transparent;
+}
+
 .app-tabs .tab.active {
-  color: #e6e9ef;
-  border-color: #62d0ff;
+  color: var(--ink);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--brand) 18%, var(--surface-raised));
+  border-color: color-mix(in srgb, var(--brand) 55%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 .library {
@@ -1426,22 +1820,22 @@ body {
 .store-tabs {
   display: flex;
   gap: 6px;
-  border-bottom: 1px solid #2a2d33;
+  border-bottom: 1px solid var(--line);
   padding-bottom: 8px;
 }
 
 .store-tab {
-  background: #1b1d22;
-  color: #9aa0aa;
-  border: 1px solid #2a2d33;
+  background: var(--surface);
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
   border-radius: 6px 6px 0 0;
   padding: 6px 14px;
   cursor: pointer;
 }
 
 .store-tab.active {
-  background: #2a2d33;
-  color: #f2f3f5;
+  background: var(--line);
+  color: var(--ink);
 }
 
 .store-filters {
@@ -1454,16 +1848,35 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: #9aa0aa;
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
 }
 
 .store-filter select {
-  background: #1b1d22;
-  color: #f2f3f5;
-  border: 1px solid #2a2d33;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 4px 6px;
+}
+
+/* §D1/§D2 — one content measure for the whole page, so a title and its
+   metadata are never 1400px apart on a wide window. */
+.library > * {
+  max-width: 1180px;
+}
+
+.library h2 {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 0.5rem 0 0;
+}
+
+.library h3 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin: 0.25rem 0 0;
 }
 
 .library-search {
@@ -1474,21 +1887,21 @@ body {
 .library-search input {
   flex: 1;
   max-width: 480px;
-  background: #14161a;
-  color: #e6e9ef;
-  border: 1px solid #2a2f38;
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 10px;
 }
 
 .library-status {
-  color: #7dd88f;
-  font-size: 0.85rem;
+  color: var(--ok);
+  font-size: var(--fs-md);
 }
 
 .library-errors {
-  color: #e08f8f;
-  font-size: 0.8rem;
+  color: var(--fault);
+  font-size: var(--fs-md);
 }
 
 /* In-flight search indicator (provider searches shell out to yt-dlp and
@@ -1497,15 +1910,15 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #8a93a2;
-  font-size: 0.85rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-md);
 }
 
 .search-spinner {
   width: 12px;
   height: 12px;
-  border: 2px solid #2a2f38;
-  border-top-color: #62d0ff;
+  border: 2px solid var(--line);
+  border-top-color: var(--brand);
   border-radius: 50%;
   animation: search-spin 0.8s linear infinite;
 }
@@ -1529,11 +1942,11 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #1b1e24;
-  border: 1px solid #2a2f38;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 10px;
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
 }
 
 .download-job-title {
@@ -1544,15 +1957,15 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #62d0ff;
-  font-size: 0.8rem;
+  color: var(--brand);
+  font-size: var(--fs-md);
 }
 
 .download-bar {
   width: 120px;
   height: 6px;
-  background: #14161a;
-  border: 1px solid #2a2f38;
+  background: var(--canvas);
+  border: 1px solid var(--line);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -1560,16 +1973,16 @@ body {
 .download-bar-fill {
   display: block;
   height: 100%;
-  background: #62d0ff;
+  background: var(--brand);
   transition: width 0.3s ease;
 }
 
 .tag-download-done {
-  color: #7dd88f;
+  color: var(--ok);
 }
 
 .tag-download-failed {
-  color: #e08f8f;
+  color: var(--fault);
 }
 
 .provider-results ul {
@@ -1584,8 +1997,8 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #1b1e24;
-  border: 1px solid #2a2f38;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 10px;
 }
@@ -1605,42 +2018,96 @@ body {
 }
 
 .tag {
-  font-size: 0.7rem;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-radius: 4px;
   padding: 2px 6px;
-  border: 1px solid #2a2f38;
+  border: 1px solid var(--line);
 }
 
-.tag-source {
-  color: #62d0ff;
-}
-
+/* §D1 — where a track came from and what licence it carries are facts,
+   not states: they read in neutral ink so the analysis column is the only
+   coloured thing in the row. */
+.tag-source,
 .tag-license {
-  color: #e6b450;
+  color: var(--ink-dim);
 }
 
+/* A licence that grants more than the default is worth one word of
+   colour. */
 .tag-license-cc0,
 .tag-license-public-domain {
-  color: #7dd88f;
+  color: var(--ok);
 }
 
+/* §D1 — the track list is the thing a DJ scans, so it gets a scannable
+   measure instead of the full 1600px window, a real header row, row
+   hover, and tabular figures for the three columns that are numbers
+   (length, BPM, key). Structure and markup are untouched. */
 .library-tracks table {
   width: 100%;
+  max-width: 1180px;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
 .library-tracks th,
 .library-tracks td {
   text-align: left;
-  padding: 6px 10px;
-  border-bottom: 1px solid #2a2f38;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
 }
 
-.library-empty {
-  color: #8a93a2;
+.library-tracks thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.library-tracks tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.library-tracks tbody tr {
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.library-tracks tbody tr:hover {
+  background: color-mix(in srgb, var(--brand) 7%, transparent);
+}
+
+/* Title first, everything else supporting. */
+.library-tracks tbody td:first-child {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.library-tracks tbody td:nth-child(2) {
+  color: var(--ink-muted);
+}
+
+.library-tracks tbody td:nth-child(3),
+.library-tracks tbody td:nth-child(4),
+.library-tracks tbody td:nth-child(5) {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+/* The row's own action stays quiet until the row is under the pointer. */
+.library-tracks tbody td:last-child {
+  text-align: right;
 }
 
 /* Fills the shell below the header; the .rack-area child stretches to it
@@ -1658,7 +2125,7 @@ body {
 .module-picker-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1670,15 +2137,33 @@ body {
   pointer-events: none;
 }
 
+/* §C3 — overlays arrive instead of appearing. Opacity only: nothing
+   moves, so nothing that measures a box can be surprised. The reduced
+   motion block at the top of the file turns this off. */
+.module-picker-backdrop,
+.file-dialog-backdrop,
+.docs-backdrop,
+.beatify-modal-backdrop {
+  animation: overlay-in var(--dur-slow) var(--ease);
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* §D12 — every overlay in the app now shares one recipe: --scrim behind
+   it, --surface in front, --radius-lg corners, --shadow-overlay under. */
 .module-picker {
-  background: #1a1d22;
-  border: 1px solid #2a2e35;
-  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   width: min(1040px, calc(100vw - 64px));
   height: min(720px, calc(100vh - 64px));
   display: flex;
   flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-overlay);
 }
 
 .module-picker-header {
@@ -1686,13 +2171,13 @@ body {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid #2a2e35;
+  border-bottom: 1px solid var(--line);
 }
 
 .module-picker-header h2 {
-  font-size: 0.9rem;
+  font-size: var(--fs-lg);
   margin: 0;
-  color: #8a93a2;
+  color: var(--ink-dim);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   white-space: nowrap;
@@ -1700,30 +2185,29 @@ body {
 
 .module-picker-header .library-search {
   flex: 1;
-  background: #14171c;
-  border: 1px solid #2a2e35;
+  background: var(--canvas);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  color: #e6e6e6;
+  color: var(--ink);
   padding: 6px 10px;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
 }
 
 .module-picker-header .library-search:focus {
-  outline: none;
-  border-color: #62d0ff;
+  border-color: var(--brand);
 }
 
 .module-picker-close {
   background: none;
   border: none;
-  color: #8a93a2;
+  color: var(--ink-dim);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--fs-lg);
   padding: 4px 6px;
 }
 
 .module-picker-close:hover {
-  color: #e6e6e6;
+  color: var(--ink);
 }
 
 /* Modules | Clips — the picker's two halves, above the category pills. */
@@ -1731,28 +2215,28 @@ body {
   display: flex;
   gap: 18px;
   padding: 0 16px;
-  border-bottom: 1px solid #2a2e35;
+  border-bottom: 1px solid var(--line);
 }
 
 .picker-tab {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: #8a93a2;
+  color: var(--ink-dim);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   letter-spacing: 0.04em;
   padding: 8px 2px;
   text-transform: uppercase;
 }
 
 .picker-tab:hover {
-  color: #e6e6e6;
+  color: var(--ink);
 }
 
 .picker-tab.active {
-  border-bottom-color: #62d0ff;
-  color: #62d0ff;
+  border-bottom-color: var(--brand);
+  color: var(--brand);
 }
 
 .picker-categories {
@@ -1760,27 +2244,27 @@ body {
   flex-wrap: wrap;
   gap: 6px;
   padding: 10px 16px;
-  border-bottom: 1px solid #2a2e35;
+  border-bottom: 1px solid var(--line);
 }
 
 .picker-category {
-  background: #1d2026;
-  border: 1px solid #2a2e35;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 999px;
-  color: #8a93a2;
+  color: var(--ink-dim);
   padding: 4px 12px;
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 
 .picker-category:hover {
-  border-color: #62d0ff;
-  color: #e6e6e6;
+  border-color: var(--brand);
+  color: var(--ink);
 }
 
 .picker-category.active {
-  border-color: #62d0ff;
-  color: #62d0ff;
+  border-color: var(--brand);
+  color: var(--brand);
 }
 
 .picker-body {
@@ -1790,9 +2274,9 @@ body {
 }
 
 .picker-group-title {
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   font-weight: 600;
-  color: #8a93a2;
+  color: var(--ink-dim);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin: 14px 0 8px;
@@ -1805,8 +2289,8 @@ body {
 }
 
 .picker-entry {
-  background: #1d2026;
-  border: 1px solid #2a2e35;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 8px;
   cursor: grab;
   display: flex;
@@ -1815,20 +2299,24 @@ body {
 }
 
 .picker-entry:hover {
-  border-color: #62d0ff;
+  border-color: var(--brand);
 }
 
 /* Fixed-height window on to the scaled-down panel: the panel keeps its
    natural size and is scaled from the top-left, so the window crops tall
    panels rather than squashing them. */
+/* §D10 — the preview is a real panel clipped to a 150px window, so most
+   cards show a panel cut in half. Fading the bottom edge makes the cut
+   read as a decision rather than an accident. */
 .picker-preview {
   height: 150px;
   overflow: hidden;
   padding: 8px;
   pointer-events: none;
   background:
-    radial-gradient(circle, #22262d 1px, transparent 1px) 0 0 / 26px 26px,
-    #14161a;
+    radial-gradient(circle, var(--line) 1px, transparent 1px) 0 0 / 26px 26px,
+    var(--canvas);
+  mask-image: linear-gradient(to bottom, #000 72%, rgba(0, 0, 0, 0.15));
 }
 
 .picker-preview-panel {
@@ -1848,18 +2336,18 @@ body {
   justify-content: space-between;
   gap: 6px;
   padding: 8px 10px;
-  border-top: 1px solid #2a2e35;
+  border-top: 1px solid var(--line);
 }
 
 .picker-entry-name {
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
 }
 
 .picker-entry-io,
 .library-empty {
-  font-size: 0.7rem;
-  color: #8a93a2;
+  font-size: var(--fs-xs);
+  color: var(--ink-dim);
 }
 
 /* Infinite canvas viewport: the .rack inside is translated by the pan and
@@ -1897,15 +2385,15 @@ body {
 }
 
 .wire-cable {
-  stroke: #e6b450;
+  stroke: var(--cue);
   stroke-width: 2.5;
   fill: none;
   opacity: 0.85;
 }
 
 .wiring-hint {
-  font-size: 0.8rem;
-  color: #e6b450;
+  font-size: var(--fs-md);
+  color: var(--cue);
 }
 
 .jack {
@@ -1921,7 +2409,7 @@ body {
    (convention: anything inside the dashed box is a source). Output
    groups get a small caption and flow left-to-right. */
 .module-outputs {
-  border: 1px dashed #454c58;
+  border: 1px dashed var(--line-strong);
   border-radius: 6px;
   background: #262a31;
   margin-top: 8px;
@@ -1939,11 +2427,11 @@ body {
 }
 
 .output-group-title {
-  font-size: 0.58rem;
+  font-size: var(--fs-nano);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #6f7987;
+  color: var(--ink-dim);
   white-space: nowrap;
 }
 
@@ -1984,7 +2472,7 @@ body {
    `output: true`, e.g. the attenuverter's per-channel out at the foot of
    its column). A subtle top rule separates it from the inputs above. */
 .output-cell {
-  border-top: 1px dashed #454c58;
+  border-top: 1px dashed var(--line-strong);
   padding-top: 4px;
   margin-top: 2px;
 }
@@ -2009,7 +2497,7 @@ body {
   background: none;
   border: none;
   color: #565e6b;
-  font-size: 20px;
+  font-size: var(--fs-xl);
   line-height: 1;
   padding: 6px 8px;
   cursor: pointer;
@@ -2017,8 +2505,8 @@ body {
 }
 
 .module-remove:hover {
-  color: #e05c5c;
-  background: #2a2e35;
+  color: var(--fault);
+  background: var(--line);
 }
 
 .module-docs-btn {
@@ -2026,7 +2514,7 @@ body {
   background: none;
   border: none;
   color: #565e6b;
-  font-size: 20px;
+  font-size: var(--fs-xl);
   line-height: 1;
   padding: 6px 8px;
   cursor: pointer;
@@ -2034,8 +2522,8 @@ body {
 }
 
 .module-docs-btn:hover {
-  color: #62d0ff;
-  background: #2a2e35;
+  color: var(--brand);
+  background: var(--line);
 }
 
 /* When the ? button is present it carries the auto margin; ✕ sits next to it. */
@@ -2044,15 +2532,15 @@ body {
 }
 
 .patch-title {
-  color: #8a93a2;
-  font-size: 12px;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
 }
 
 /* Save As / Open dialogs (driven by the native File menu). */
 .file-dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2060,9 +2548,10 @@ body {
 }
 
 .file-dialog {
-  background: #1a1d22;
-  border: 1px solid #2a2e35;
-  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
   padding: 16px;
   min-width: 260px;
   display: flex;
@@ -2072,32 +2561,32 @@ body {
 
 .file-dialog h3 {
   margin: 0;
-  font-size: 13px;
-  color: #cdd3de;
+  font-size: var(--fs-sm);
+  color: var(--ink);
 }
 
 .file-dialog input {
-  background: #14171c;
-  border: 1px solid #2a2e35;
+  background: var(--canvas);
+  border: 1px solid var(--line);
   border-radius: 4px;
-  color: #cdd3de;
+  color: var(--ink);
   padding: 4px 8px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .file-dialog button {
-  background: #23262c;
-  border: 1px solid #2a2e35;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
   border-radius: 4px;
-  color: #cdd3de;
+  color: var(--ink);
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 
 .file-dialog button:hover {
-  border-color: #454c58;
+  border-color: var(--line-strong);
 }
 
 .file-dialog-list {
@@ -2118,16 +2607,16 @@ body {
 
 .file-dialog-empty {
   margin: 0;
-  color: #8a93a2;
-  font-size: 12px;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
 }
 
 .midi-panel {
-  border: 1px solid #2a2e35;
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px;
   margin-bottom: 8px;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
 }
 
 /* --- Launch Control XL: device light + ownership button -------------- */
@@ -2137,16 +2626,16 @@ body {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  font-size: 0.78rem;
-  color: #8a93a2;
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
 }
 
 .launchcontrol-led {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #2a2e35;
-  border: 1px solid #3a4049;
+  background: var(--line);
+  border: 1px solid var(--line-strong);
 }
 
 .launchcontrol-led-on {
@@ -2158,7 +2647,7 @@ body {
 .launchcontrol-active {
   padding: 2px 10px;
   border-radius: 4px;
-  border: 1px solid #3a4049;
+  border: 1px solid var(--line-strong);
   background: #1b1f26;
   color: #b8c0cc;
   cursor: pointer;
@@ -2178,14 +2667,14 @@ body {
 /* --- QWERTY module: hint line above the keyboard-row jacks ----------- */
 
 .qwerty-panel {
-  color: #8a93a2;
-  font-size: 0.72rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
   white-space: nowrap;
   margin-bottom: 6px;
 }
 
 .midi-empty {
-  color: #8a93a2;
+  color: var(--ink-dim);
   margin: 2px 0;
 }
 
@@ -2202,32 +2691,32 @@ body {
 }
 
 .midi-mapping-src {
-  color: #8a93a2;
+  color: var(--ink-dim);
 }
 
 .midi-key {
   margin-left: auto;
-  background: #2a2e35;
-  border: 1px solid #3c424c;
+  background: var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: 4px;
   color: inherit;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   padding: 1px 6px;
   cursor: pointer;
 }
 
 .midi-key-capture {
-  border-color: #e6b450;
-  color: #e6b450;
+  border-color: var(--cue);
+  color: var(--cue);
 }
 
 .midi-remove {
   background: none;
   border: none;
-  color: #8a93a2;
+  color: var(--ink-dim);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--fs-lg);
 }
 
 .midi-remove:hover {
@@ -2244,12 +2733,12 @@ body {
 .midi-add select,
 .midi-add input,
 .midi-add button {
-  background: #2a2e35;
-  border: 1px solid #3c424c;
+  background: var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: 4px;
   color: inherit;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   padding: 2px 4px;
 }
 
@@ -2262,7 +2751,7 @@ body {
 }
 
 .midi-add-preview {
-  color: #8a93a2;
+  color: var(--ink-dim);
   min-width: 28px;
 }
 
@@ -2286,24 +2775,24 @@ body {
 .audio-row select {
   flex: 1;
   min-width: 120px;
-  background: #12161c;
+  background: var(--surface-sunken);
   color: inherit;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 2px 4px;
 }
 
 .audio-readout {
   justify-content: space-between;
-  font-size: 0.72rem;
-  color: #9aa7b5;
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .audio-loop {
-  background: #12161c;
-  color: #9aa7b5;
-  border: 1px solid #2a3340;
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 2px 6px;
   cursor: pointer;
@@ -2320,7 +2809,7 @@ body {
   width: 100%;
   height: 48px;
   background: #0d1116;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--line);
   border-radius: 4px;
 }
 
@@ -2345,8 +2834,8 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 6px;
-  font-size: 0.72rem;
-  color: #9aa7b5;
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2384,42 +2873,44 @@ body {
   border-radius: 6px;
   cursor: pointer;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
-  gap: 12px;
+  /* §D2 — the clip's name and the project it came from belong together;
+     only the two numeric columns are pushed to the right. */
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto;
+  gap: 4px 14px;
   padding: 7px 10px;
 }
 
 .picker-clip-row.active {
-  background: #1d2026;
-  border-color: #62d0ff;
+  background: var(--surface);
+  border-color: var(--brand);
 }
 
 .picker-clip-name {
-  color: #e6e6e6;
-  font-size: 0.85rem;
+  color: var(--ink);
+  font-size: var(--fs-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .picker-clip-project {
-  color: #8a93a2;
-  font-size: 0.75rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .picker-clip-beats {
-  color: #4fd6c8;
-  font-size: 0.75rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 .picker-clip-bpm {
-  color: #9aa7b5;
-  font-size: 0.75rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   min-width: 5.5em;
   text-align: right;
@@ -2446,18 +2937,27 @@ body {
 .deck-load-row select {
   flex: 1;
   min-width: 120px;
-  background: #12161c;
+  background: var(--surface-sunken);
   color: inherit;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 2px 4px;
 }
 
+/* §B2 — during a mix these are the only numbers that matter, so they are
+   the loudest thing in the panel instead of the quietest. */
 .deck-time,
 .deck-bpm {
-  font-size: 0.72rem;
-  color: #9aa7b5;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
+}
+
+.deck-bpm {
+  font-size: var(--fs-lg);
+  color: var(--ink-muted);
 }
 
 .waveform {
@@ -2485,7 +2985,7 @@ body {
 }
 
 .waveform-playhead {
-  stroke: #e6b450;
+  stroke: var(--cue);
   stroke-width: 3;
 }
 
@@ -2496,7 +2996,7 @@ body {
 
 .waveform-cue-label {
   fill: #4fd47a;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .waveform-loop {
@@ -2512,11 +3012,11 @@ body {
 .deck-cue {
   background: #1a212b;
   color: inherit;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 3px 8px;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -2541,14 +3041,14 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 0.72rem;
-  color: #9aa7b5;
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
 }
 
 .deck-sync select {
-  background: #12161c;
+  background: var(--surface-sunken);
   color: inherit;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--line);
   border-radius: 4px;
 }
 
@@ -2578,28 +3078,28 @@ body {
 }
 
 .analysis-progress {
-  font-size: 0.78rem;
-  color: #e6b450;
+  font-size: var(--fs-sm);
+  color: var(--cue);
 }
 
 .tag-analysis-done {
-  color: #4fd47a;
+  color: var(--ok);
 }
 
 .tag-analysis-failed {
-  color: #d46a4f;
+  color: var(--fault);
 }
 
 .tag-analysis-queued,
 .tag-analysis-analyzing {
-  color: #e6b450;
+  color: var(--cue);
 }
 
 .analyze-button {
   margin-left: 6px;
   background: transparent;
-  color: #9aa7b5;
-  border: 1px solid #2a3340;
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
 }
@@ -2613,7 +3113,7 @@ body {
      bounds, so flush neighbours can never paint over it (an outward
      outline was hidden by adjacent modules). The z-index lifts the glow
      above later siblings without touching layout. */
-  outline: 3px solid #4dd8ff;
+  outline: 3px solid var(--brand);
   outline-offset: -3px;
   box-shadow: 0 0 12px 2px rgba(77, 216, 255, 0.55);
   z-index: 1;
@@ -2653,7 +3153,7 @@ body {
   border-radius: 6px 6px 0 0;
   color: #cdc4ff;
   /* Same proportion of its 44px bar as .module-title's of its 56px. */
-  font-size: 1.5rem;
+  font-size: var(--fs-title);
   line-height: 1;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -2688,28 +3188,28 @@ body {
    the pointer so the drag keeps flowing to the window listeners. */
 .marquee {
   position: absolute;
-  border: 1px solid #4dd8ff;
+  border: 1px solid var(--brand);
   background: rgba(77, 216, 255, 0.12);
   pointer-events: none;
   z-index: 5;
 }
 
 .add-module-btn {
-  background: #1d2026;
-  border: 1px solid #2a2e35;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  color: #e6e6e6;
+  color: var(--ink);
   padding: 4px 12px;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
   cursor: pointer;
 }
 
 .add-module-btn:hover {
-  border-color: #62d0ff;
+  border-color: var(--brand);
 }
 
 .collapse-macro-btn {
-  background: #e6b450;
+  background: var(--cue);
   color: #14181e;
   border: none;
   border-radius: 4px;
@@ -2726,16 +3226,16 @@ body {
 
 .collapse-macro-form input {
   background: #14181e;
-  color: #dfe7ef;
-  border: 1px solid #2a3340;
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 4px 8px;
 }
 
 .collapse-macro-form button {
   background: transparent;
-  color: #9aa7b5;
-  border: 1px solid #2a3340;
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 4px 8px;
   cursor: pointer;
@@ -2746,13 +3246,13 @@ body {
 .midi-leds {
   margin-top: 6px;
   padding-top: 4px;
-  border-top: 1px solid #2a3340;
+  border-top: 1px solid var(--line);
 }
 
 .midi-leds-title {
   display: block;
-  font-size: 11px;
-  color: #9aa7b5;
+  font-size: var(--fs-micro);
+  color: var(--ink-muted);
   margin-bottom: 2px;
 }
 
@@ -2765,7 +3265,7 @@ body {
   padding: 0.4rem 1rem;
   background: #2c1c1c;
   border-bottom: 1px solid #5a2b2b;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
 }
 
 .error-banner-list {
@@ -2815,7 +3315,7 @@ body {
   border-radius: 6px;
   background: #241a1a;
   color: #e6d2d2;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
   max-width: 320px;
 }
 
@@ -2836,7 +3336,7 @@ body {
   position: fixed;
   z-index: 300;
   background: #23272e;
-  border: 1px solid #3c424c;
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
   padding: 4px;
   min-width: 180px;
@@ -2853,10 +3353,10 @@ body {
   background: none;
   border: none;
   border-radius: 4px;
-  color: #cdd3de;
+  color: var(--ink);
   padding: 5px 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   text-align: left;
   cursor: pointer;
 }
@@ -2871,7 +3371,7 @@ body {
 }
 
 .context-menu-hint {
-  font-size: 10px;
+  font-size: var(--fs-nano);
   color: #5b626e;
   font-style: italic;
 }
@@ -2880,7 +3380,7 @@ body {
 .docs-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2888,9 +3388,10 @@ body {
 }
 
 .docs-panel {
-  background: #1a1d22;
-  border: 1px solid #2a2e35;
-  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
   width: min(680px, 90vw);
   max-height: 84vh;
   display: flex;
@@ -2902,25 +3403,25 @@ body {
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  border-bottom: 1px solid #2a2e35;
+  border-bottom: 1px solid var(--line);
 }
 
 .docs-header h3 {
   margin: 0;
-  font-size: 14px;
-  color: #cdd3de;
+  font-size: var(--fs-md);
+  color: var(--ink);
 }
 
 .docs-type-id {
-  font-size: 11px;
-  color: #8a93a2;
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
   font-weight: normal;
 }
 
 .docs-category {
-  font-size: 11px;
-  color: #8a93a2;
-  border: 1px solid #2a2e35;
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1px 8px;
 }
@@ -2929,19 +3430,19 @@ body {
   margin-left: auto;
   background: none;
   border: none;
-  color: #8a93a2;
-  font-size: 13px;
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
 .docs-close:hover {
-  color: #cdd3de;
+  color: var(--ink);
 }
 
 .docs-body {
   padding: 12px 16px 16px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: #b8bfca;
 }
 
@@ -2952,10 +3453,10 @@ body {
 
 .docs-section h4 {
   margin: 12px 0 4px;
-  font-size: 11px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #8a93a2;
+  color: var(--ink-dim);
 }
 
 .docs-jacks {
@@ -2972,18 +3473,18 @@ body {
 
 .docs-jack-name {
   white-space: nowrap;
-  color: #cdd3de;
+  color: var(--ink);
 }
 
 .docs-jack-name code {
-  color: #8a93a2;
-  font-size: 11px;
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
 }
 
 .docs-jack-control {
   white-space: nowrap;
-  color: #8a93a2;
-  font-size: 11px;
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
 }
 
 .docs-examples {
@@ -2998,7 +3499,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--fs-micro);
 }
 
 .choreo-toolbar {
@@ -3011,7 +3512,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #8a93a2;
+  color: var(--ink-dim);
 }
 
 .choreo-toolbar input[type='number'] {
@@ -3051,7 +3552,7 @@ body {
   width: 116px;
   gap: 2px;
   overflow: hidden;
-  background: #14171c;
+  background: var(--canvas);
   border-right: 1px solid #22262c;
 }
 
@@ -3075,10 +3576,10 @@ body {
 
 .choreo-name {
   width: 72px;
-  font-size: 11px;
+  font-size: var(--fs-micro);
   background: transparent;
   border: 1px solid transparent;
-  color: #cdd3de;
+  color: var(--ink);
 }
 
 .choreo-name:focus {
@@ -3086,7 +3587,7 @@ body {
 }
 
 .choreo-kind {
-  color: #626b7c;
+  color: var(--ink-dim);
   font-size: 9px;
   white-space: nowrap;
 }
@@ -3113,7 +3614,7 @@ body {
   display: flex;
   align-items: center;
   gap: 3px;
-  color: #8a93a2;
+  color: var(--ink-dim);
   font-size: 9px;
 }
 
@@ -3121,7 +3622,7 @@ body {
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
-  color: #626b7c;
+  color: var(--ink-dim);
   font-size: 8px;
   text-align: right;
 }
@@ -3149,7 +3650,7 @@ body {
 
 .choreo-ruler-lane {
   position: relative;
-  color: #626b7c;
+  color: var(--ink-dim);
   font-size: 9px;
 }
 
@@ -3209,7 +3710,7 @@ body {
 }
 
 .choreo-empty {
-  color: #626b7c;
+  color: var(--ink-dim);
   padding: 4px 2px;
 }
 
@@ -3241,15 +3742,15 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #9aa0aa;
-  font-size: 0.85rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
 }
 
 .clip-load select,
 .clip-save input {
-  background: #14161a;
-  color: #e6e9ef;
-  border: 1px solid #2a2f38;
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 10px;
   max-width: 380px;
@@ -3262,7 +3763,7 @@ body {
 }
 
 .clip-empty {
-  color: #626b7c;
+  color: var(--ink-dim);
   max-width: 46em;
 }
 
@@ -3276,23 +3777,53 @@ body {
   width: 100%;
   height: 160px;
   background: #101216;
-  border: 1px solid #2a2f38;
+  border: 1px solid var(--line);
   border-radius: 6px;
   cursor: text;
   user-select: none;
 }
 
+/* §D4 — with no breakpoints this lane was a black strip with a green line
+   pinned to its top edge, indistinguishable from a rendering fault. The
+   dB grid is painted into the background: the lane is a fixed 90px tall
+   and spans +6 dB (y=0) to -60 dB (y=90), so unity lands at 8px and the
+   fainter rules mark -12 / -24 / -36 / -48 dB. */
 .clip-level-lane {
   width: 100%;
   height: 90px;
-  background: #101216;
-  border: 1px solid #2a2f38;
-  border-radius: 6px;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 8px,
+      color-mix(in srgb, var(--ink-dim) 55%, transparent) 8px 9px,
+      transparent 9px
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 25px,
+      var(--line) 25px 26px,
+      transparent 26px 41px,
+      var(--line) 41px 42px,
+      transparent 42px 57px,
+      var(--line) 57px 58px,
+      transparent 58px 74px,
+      var(--line) 74px 75px,
+      transparent 75px
+    ),
+    var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   cursor: crosshair;
 }
 
+/* A flat line at unity with no breakpoints is the default, not a value
+   the user set: it says so by staying quiet. */
+.clip-level-lane:not(:has(.clip-level-point)) .clip-level-line {
+  stroke: var(--ink-dim);
+}
+
 .clip-join {
-  stroke: #62d0ff;
+  stroke: var(--brand);
   stroke-width: 2;
   opacity: 0.5;
 }
@@ -3326,7 +3857,7 @@ body {
 }
 
 .clip-waveform:hover .clip-selection-edge {
-  stroke: #dce8ff;
+  stroke: var(--ink);
 }
 
 .clip-grid {
@@ -3343,7 +3874,7 @@ body {
   position: relative;
   height: 18px;
   overflow: hidden;
-  border-bottom: 1px solid #2a2f38;
+  border-bottom: 1px solid var(--line);
   user-select: none;
 }
 
@@ -3364,7 +3895,7 @@ body {
   position: absolute;
   bottom: 8px;
   left: 3px;
-  font-size: 10px;
+  font-size: var(--fs-nano);
   font-style: normal;
   line-height: 1;
   color: #8b94a6;
@@ -3373,19 +3904,19 @@ body {
 
 .clip-level-line {
   fill: none;
-  stroke: #7dd88f;
+  stroke: var(--ok);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
 
 .clip-level-point {
-  fill: #7dd88f;
+  fill: var(--ok);
   cursor: grab;
 }
 
 .clip-readout {
-  color: #9aa0aa;
-  font-size: 0.8rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3400,24 +3931,36 @@ body {
 .clip-tools button,
 .clip-load button,
 .clip-save button {
-  background: #1b1d22;
-  color: #e6e9ef;
-  border: 1px solid #2a2f38;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 12px;
   cursor: pointer;
 }
 
+/* Disabled is the shared treatment (opacity + no border, §A4); the local
+   rule only needs the dimmer ink. */
 .clip-tools button:disabled,
 .clip-load button:disabled,
 .clip-save button:disabled {
-  color: #5c626c;
+  color: var(--ink-dim);
   cursor: default;
 }
 
-.clip-save-button {
-  background: #24503a;
-  border-color: #37765a;
+/* §D5 — the one action on this page that produces a new track. It used to
+   wear a dark green almost indistinguishable from the eight neutral tools
+   beside it. */
+.clip-save button.clip-save-button {
+  color: #0b1116;
+  background: var(--ok);
+  border-color: var(--ok);
+  font-weight: 600;
+}
+
+.clip-save button.clip-save-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ok) 82%, #fff);
+  border-color: color-mix(in srgb, var(--ok) 82%, #fff);
 }
 
 .clip-transport {
@@ -3428,9 +3971,9 @@ body {
 }
 
 .clip-transport button {
-  background: #1b1d22;
-  color: #e6e9ef;
-  border: 1px solid #2a2f38;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 12px;
   cursor: pointer;
@@ -3447,8 +3990,8 @@ body {
 }
 
 .clip-playhead-readout {
-  color: #9aa0aa;
-  font-size: 0.85rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
   font-variant-numeric: tabular-nums;
   min-width: 72px;
 }
@@ -3479,8 +4022,8 @@ body {
 }
 
 .clip-stem-ready {
-  color: #7dd88f;
-  font-size: 0.85rem;
+  color: var(--ok);
+  font-size: var(--fs-md);
 }
 
 .clip-stem-toggles {
@@ -3497,25 +4040,43 @@ body {
 }
 
 .clip-stem-toggles .clip-stem-off {
-  color: #626b7c;
+  color: var(--ink-dim);
   text-decoration: line-through;
 }
 
 /* Stems on their way: a wait, not a warning. */
 .clip-stem-loading {
   color: #c8b07d;
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
 }
 
 .clip-stem-hint {
-  color: #626b7c;
-  font-size: 0.8rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-md);
   max-width: 46em;
 }
 
-/* The clip EQ reuses the EQ module's plot styling (.eq-ui etc.). */
+/* The clip EQ reuses the EQ module's plot styling (.eq-ui etc.).
+   §D3 — it used to float as a bare island at the left edge of a 1600px
+   page with nothing to stand on. Now it is a card with a caption, so it
+   reads as one instrument instead of loose parts. */
 .clip-eq-ui {
   align-self: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px 8px;
+}
+
+.clip-eq-ui::before {
+  content: 'EQ';
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
 }
 
 .clip-eq-qrow {
@@ -3535,36 +4096,48 @@ body {
 }
 
 .clip-eq-q-label {
-  font-size: 0.7rem;
-  color: #8b93a3;
+  font-size: var(--fs-xs);
+  color: var(--ink-dim);
 }
 
+/* §D2 — as a stretched flex item this table spread six columns across
+   the whole window; sized to its content, the numbers sit next to the
+   names they belong to. */
 .clip-regions {
+  align-self: flex-start;
+  min-width: 620px;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
 }
 
 .clip-regions th,
 .clip-regions td {
   text-align: left;
-  padding: 3px 10px 3px 0;
-  color: #c8cdd6;
+  padding: 3px 16px 3px 0;
+  color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
 }
 
+.clip-regions td:nth-child(2) {
+  color: var(--ink);
+}
+
 .clip-regions th {
-  color: #7e838d;
-  font-weight: 500;
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
 }
 
 .clip-status {
-  color: #7dd88f;
-  font-size: 0.85rem;
+  color: var(--ok);
+  font-size: var(--fs-md);
 }
 
 .clip-error {
-  color: #e08f8f;
-  font-size: 0.85rem;
+  color: var(--fault);
+  font-size: var(--fs-md);
 }
 
 /* --- Beatify tab -------------------------------------------------------
@@ -3593,30 +4166,37 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #9aa0aa;
-  font-size: 0.85rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
 }
 
 .beatify-bar select {
-  background: #14161a;
-  color: #e6e9ef;
-  border: 1px solid #2a2f38;
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 10px;
   max-width: 380px;
 }
 
 .beatify-tracker {
-  color: #5fd0c5;
-  font-size: 0.8rem;
+  color: var(--brand);
+  font-size: var(--fs-md);
 }
 
+/* §D8 — a permanent notice about an optional dependency is not an alert.
+   Same words (a test pins them), quiet chip instead of warning amber. */
 .beatify-tracker.fallback {
-  color: #d8a15f;
+  color: var(--ink-dim);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: var(--fs-xs);
 }
 
 .beatify-empty {
-  color: #626b7c;
+  color: var(--ink-dim);
   max-width: 46em;
 }
 
@@ -3629,79 +4209,91 @@ body {
   max-width: 60em;
 }
 
+/* §D6 — one grid template for every row: the card takes the free space
+   and the two action glyphs sit in fixed columns, so they align down the
+   shelf whether or not a row also carries a warning. */
 .beatify-project {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
   align-items: center;
   gap: 8px;
 }
 
 .beatify-project-open {
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
   text-align: left;
-  background: #14161a;
-  border: 1px solid #2a2f38;
+  background: var(--canvas);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 8px 10px;
   cursor: pointer;
 }
 
 .beatify-project-open:hover {
-  border-color: #3a4150;
+  border-color: var(--line-strong);
 }
 
 .beatify-project-name {
-  color: #e6e9ef;
+  color: var(--ink);
 }
 
 .beatify-project-facts {
-  color: #7c869a;
-  font-size: 0.8rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-md);
 }
 
 .beatify-project-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
   background: transparent;
-  border: none;
-  color: #7c869a;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--ink-dim);
+  font-size: var(--fs-md);
   cursor: pointer;
 }
 
 .beatify-project-edit:hover {
-  color: #dce8ff;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border-color: var(--line-strong);
 }
 
 .beatify-project-warn {
-  color: #e0b78f;
-  font-size: 0.8rem;
+  grid-column: 1 / -1;
+  color: var(--warn);
+  font-size: var(--fs-xs);
 }
 
 .beatify-open-name {
-  color: #e6e9ef;
+  color: var(--ink);
 }
 
 .beatify-status {
-  color: #7dd88f;
-  font-size: 0.85rem;
+  color: var(--ok);
+  font-size: var(--fs-md);
 }
 
 .beatify-error {
-  color: #e08f8f;
-  font-size: 0.85rem;
+  color: var(--fault);
+  font-size: var(--fs-md);
 }
 
 .beatify-line {
-  color: #9aa0aa;
-  font-size: 0.8rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
   font-variant-numeric: tabular-nums;
 }
 
 .beatify-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 9, 12, 0.72);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3710,9 +4302,10 @@ body {
 
 .beatify-modal,
 .beatify-warn {
-  background: #16181d;
-  border: 1px solid #2a2f38;
-  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -3740,13 +4333,13 @@ body {
 
 .beatify-modal-head h2,
 .beatify-track-head h2 {
-  font-size: 1.1rem;
+  font-size: var(--fs-xl);
   margin: 0;
 }
 
 .beatify-file {
   color: #c8cdd6;
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
   min-width: 260px;
 }
 
@@ -3769,7 +4362,7 @@ body {
 .beatify-choose-hint {
   margin: 0;
   color: #9aa3b2;
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
 }
 
 /* A page that a modal has taken over: still readable, plainly not
@@ -3804,7 +4397,7 @@ body {
   list-style: none;
   max-height: 320px;
   overflow-y: auto;
-  background: #14171c;
+  background: var(--canvas);
   border: 1px solid #2b2f38;
   border-radius: 6px;
   box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
@@ -3830,14 +4423,14 @@ body {
 }
 
 .track-picker-title {
-  font-size: 0.9rem;
+  font-size: var(--fs-lg);
 }
 
 .track-picker-sub,
 .track-picker-empty,
 .track-picker-more {
   color: #8b93a1;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
 }
 
 .track-picker-empty,
@@ -3847,8 +4440,8 @@ body {
 
 .beatify-agreement {
   margin-left: auto;
-  color: #5fd0c5;
-  font-size: 0.8rem;
+  color: var(--brand);
+  font-size: var(--fs-md);
   letter-spacing: 0.04em;
 }
 
@@ -3873,10 +4466,12 @@ body {
   height: 220px;
 }
 
+/* §B5 — the same waveform the deck and the clip page draw, in the same
+   colour: a peak is a peak on every page. */
 .beatify-peaks,
 .beatify-track-peaks {
-  fill: #d8a15f;
-  opacity: 0.85;
+  fill: var(--wave);
+  opacity: 0.9;
 }
 
 .beatify-dim {
@@ -3885,25 +4480,25 @@ body {
 }
 
 .beatify-drift {
-  fill: #d8a15f;
+  fill: var(--cue);
   opacity: 0.5;
 }
 
 .beatify-disagree {
-  fill: #e08f8f;
+  fill: var(--fault);
   opacity: 0.18;
 }
 
 .beatify-selection,
 .beatify-track-selection {
-  fill: #5fd0c5;
-  stroke: #5fd0c5;
+  fill: var(--brand);
+  stroke: var(--brand);
   opacity: 0.2;
 }
 
 .beatify-grid,
 .beatify-track-grid {
-  stroke: #5fd0c5;
+  stroke: var(--brand);
   stroke-width: 1;
   opacity: 0.35;
 }
@@ -3915,35 +4510,35 @@ body {
 }
 
 .beatify-density {
-  fill: #d8a15f;
+  fill: var(--cue);
   opacity: 0.6;
 }
 
 .beatify-playhead,
 .beatify-track-playhead {
-  stroke: #e6e9ef;
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 
 .beatify-inband {
-  fill: #5fd0c5;
+  fill: var(--brand);
   opacity: 0.1;
 }
 
 .beatify-zero {
-  stroke: #2a2f38;
+  stroke: var(--line);
 }
 
 .beatify-res.good {
-  fill: #5fd0c5;
+  fill: var(--brand);
 }
 
 .beatify-res.warn {
-  fill: #d8a15f;
+  fill: var(--cue);
 }
 
 .beatify-res.bad {
-  fill: #e08f8f;
+  fill: var(--fault);
 }
 
 /* The error strip and everything that says what it is. It rides inside
@@ -3961,15 +4556,15 @@ body {
   flex-wrap: wrap;
   gap: 12px;
   margin: 0;
-  color: #7c869a;
-  font-size: 0.75rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
 }
 
 .beatify-strip-key {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #626b7c;
+  color: var(--ink-dim);
 }
 
 .beatify-key-dot {
@@ -3981,15 +4576,15 @@ body {
 }
 
 .beatify-key-dot.good {
-  background: #5fd0c5;
+  background: var(--brand);
 }
 
 .beatify-key-dot.warn {
-  background: #d8a15f;
+  background: var(--cue);
 }
 
 .beatify-key-dot.bad {
-  background: #e08f8f;
+  background: var(--fault);
 }
 
 .beatify-strip-plot {
@@ -4002,8 +4597,8 @@ body {
 .beatify-strip-mark {
   position: absolute;
   right: 8px;
-  color: #626b7c;
-  font-size: 0.65rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
   pointer-events: none;
 }
 
@@ -4023,8 +4618,8 @@ body {
 .beatify-strip-caption {
   margin: 0;
   max-width: 72em;
-  color: #626b7c;
-  font-size: 0.75rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
 }
 
 .beatify-panes {
@@ -4051,7 +4646,7 @@ body {
 
 .beatify-phase h3 {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
   letter-spacing: 0.08em;
   color: #7e838d;
   text-transform: uppercase;
@@ -4073,8 +4668,8 @@ body {
   flex-wrap: wrap;
   gap: 4px 14px;
   margin: 0;
-  color: #7c869a;
-  font-size: 0.75rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
 }
 
 .beatify-scope-svg {
@@ -4089,7 +4684,7 @@ body {
    Amber, because a trace is what was played (MOD-1). */
 .beatify-scope-trace {
   fill: none;
-  stroke: #d8a15f;
+  stroke: var(--cue);
   stroke-opacity: 0.45;
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
@@ -4103,18 +4698,18 @@ body {
 
 /* Where attacks begin across all the traces (MOD-10). */
 .beatify-scope-attacks {
-  fill: #d8a15f;
+  fill: var(--cue);
   fill-opacity: 0.12;
 }
 
 .beatify-scope-line {
-  stroke: #5fd0c5;
+  stroke: var(--brand);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
 .beatify-scope-cut {
-  stroke: #e6e9ef;
+  stroke: var(--ink);
   stroke-width: 1;
   stroke-dasharray: 5 4;
   vector-effect: non-scaling-stroke;
@@ -4129,20 +4724,20 @@ body {
 .beatify-scope-tag {
   position: absolute;
   top: 2px;
-  font-size: 0.7rem;
+  font-size: var(--fs-xs);
   letter-spacing: 0.04em;
   pointer-events: none;
 }
 
 .beatify-scope-tag.beat {
   margin-left: 5px;
-  color: #5fd0c5;
+  color: var(--brand);
 }
 
 .beatify-scope-tag.cut {
   transform: translateX(-100%);
   margin-left: -5px;
-  color: #e6e9ef;
+  color: var(--ink);
 }
 
 .beatify-scope-tag.cut.after {
@@ -4153,24 +4748,24 @@ body {
 .beatify-scope-axis {
   display: flex;
   justify-content: space-between;
-  color: #626b7c;
-  font-size: 0.72rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
 }
 
 .beatify-scope-clear.good {
-  color: #5fd0c5;
+  color: var(--brand);
 }
 
 .beatify-scope-clear.bad {
-  color: #e08f8f;
+  color: var(--fault);
 }
 
 .beatify-slider {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #9aa0aa;
-  font-size: 0.8rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
 }
 
 .beatify-slider input[type='range'] {
@@ -4182,45 +4777,66 @@ body {
 .beatify-transport input[type='number'],
 .beatify-track-transport input[type='number'] {
   width: 60px;
-  background: #14161a;
-  color: #e6e9ef;
-  border: 1px solid #2a2f38;
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 4px 6px;
 }
 
 .beatify-flag {
-  color: #d8a15f;
-  font-size: 0.78rem;
+  color: var(--cue);
+  font-size: var(--fs-sm);
 }
 
 .beatify-modal button.active,
 .beatify-transport button.active {
-  border-color: #5fd0c5;
-  color: #5fd0c5;
+  border-color: var(--brand);
+  color: var(--brand);
 }
 
 .beatify-verdict {
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   font-variant-numeric: tabular-nums;
 }
 
 .beatify-verdict.good {
-  color: #7dd88f;
+  color: var(--ok);
 }
 
 .beatify-verdict.warn {
-  color: #d8a15f;
+  color: var(--cue);
 }
 
 .beatify-verdict.bad {
-  color: #e08f8f;
+  color: var(--fault);
 }
 
+/* §D9 — the modal scrolls, so its actions stay reachable: a sticky bar
+   at the bottom of the scroll box with a rule above it and the modal's
+   own background behind it. */
+.beatify-modal-foot {
+  position: sticky;
+  bottom: -16px;
+  z-index: 1;
+  margin: 4px -16px -16px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+/* The commit action is the point of the modal. */
 .beatify-modal-foot .beatify-commit {
   margin-left: 4px;
-  border-color: #5fd0c5;
-  color: #5fd0c5;
+  color: #0b1116;
+  background: var(--brand);
+  border-color: var(--brand);
+  font-weight: 600;
+}
+
+.beatify-modal-foot .beatify-commit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brand) 82%, #fff);
+  border-color: color-mix(in srgb, var(--brand) 82%, #fff);
 }
 
 .beatify-modal-foot > .beatify-verdict {
@@ -4269,11 +4885,14 @@ body {
   min-width: 0;
 }
 
+/* §D7 — 180px forced every seed title into three lines while the page
+   had 1400px of empty space; the rail is wider and its titles now elide
+   on one line (the full name stays in the button's title attribute). */
 .beatify-clip-list {
-  width: 180px;
+  width: 248px;
   flex: none;
-  background: #191c22;
-  border: 1px solid #262b34;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 8px;
   max-height: 620px;
@@ -4282,10 +4901,10 @@ body {
 
 .beatify-clip-list h3 {
   margin: 0 0 6px;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #7c869a;
+  color: var(--ink-dim);
 }
 
 .beatify-clip-list ul {
@@ -4304,54 +4923,66 @@ body {
   flex-wrap: wrap;
 }
 
+/* §D7 — name on one line with the facts under it, both elided: a long
+   title used to wrap to three lines and shove the stem chips down. */
 .beatify-clip-list li > button:first-child {
   flex: 1;
+  min-width: 0;
   display: flex;
-  justify-content: space-between;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
-  color: #d5dae4;
+  color: var(--ink);
   padding: 4px 6px;
-  border-radius: 4px;
-  font-size: 0.82rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+
+.beatify-clip-list li > button:first-child > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .beatify-clip-list li > button:first-child:hover:not(:disabled) {
-  background: #21262f;
+  background: var(--surface-raised);
 }
 
 .beatify-clip-list li > button.selected {
-  border-color: #5fd0c5;
-  color: #9ff0e6;
+  border-color: color-mix(in srgb, var(--brand) 65%, transparent);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  color: var(--ink);
 }
 
 .beatify-clip-list li > button:disabled {
-  color: #5a6273;
+  color: var(--ink-dim);
 }
 
 .beatify-clip-source-kind {
-  color: #7c869a;
-  font-size: 0.7rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
 }
 
 .beatify-clip-source-hint {
   flex-basis: 100%;
   color: #8a7048;
-  font-size: 0.68rem;
+  font-size: var(--fs-micro);
   line-height: 1.25;
 }
 
 .beatify-clip-source-edit {
   background: transparent;
   border: none;
-  color: #7c869a;
+  color: var(--ink-dim);
   cursor: pointer;
 }
 
 .beatify-clip-source-edit:hover {
-  color: #dce8ff;
+  color: var(--ink);
 }
 
 .beatify-clip-new {
@@ -4370,8 +5001,8 @@ body {
 }
 
 .beatify-seed-empty {
-  color: #7c869a;
-  font-size: 0.72rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
   line-height: 1.35;
   padding: 4px 6px;
 }
@@ -4385,17 +5016,20 @@ body {
 
 .beatify-seed-stems button {
   background: transparent;
-  border: 1px solid #333a46;
+  border: 1px solid var(--line);
   border-radius: 3px;
-  color: #5a6273;
-  font-size: 0.65rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
   padding: 1px 5px;
   cursor: pointer;
 }
 
+/* On = filled and lit; off = outlined; unavailable = the disabled
+   treatment. Three states, three appearances (§D7). */
 .beatify-seed-stems button.beatify-stem-on {
-  border-color: #47707a;
-  color: #9ff0e6;
+  border-color: color-mix(in srgb, var(--brand) 60%, var(--line-strong));
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+  color: var(--ink);
 }
 
 .beatify-seed-stems button:disabled {
@@ -4425,7 +5059,7 @@ body {
 }
 
 .beatify-open-name {
-  color: #dce8ff;
+  color: var(--ink);
   font-weight: 600;
   /* A name that can be typed over, not a button: it looks like the label
      it is until it is clicked. */
@@ -4440,7 +5074,7 @@ body {
 }
 
 .beatify-open-name-input {
-  color: #dce8ff;
+  color: var(--ink);
   font-weight: 600;
   background: #10141c;
   border: 1px solid #3a465c;
@@ -4452,7 +5086,7 @@ body {
 /* What joining this project will do to the material being imported. */
 .beatify-conform {
   color: #8a7048;
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   margin-right: auto;
 }
 
@@ -4489,58 +5123,58 @@ body {
 
 .beatify-clip-head h3 {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--fs-lg);
 }
 
 .beatify-clip-name {
   width: 12em;
-  background: #12151a;
-  border: 1px solid #262b34;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
   border-radius: 4px;
-  color: #e6e6e6;
+  color: var(--ink);
   padding: 3px 6px;
 }
 
 .beatify-clip-live {
-  font-size: 0.75rem;
-  color: #626b7c;
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
 }
 
 .beatify-clip-live.on.clip {
-  color: #5fd0c5;
+  color: var(--brand);
 }
 
 .beatify-clip-live.on.source {
-  color: #d8a15f;
+  color: var(--cue);
 }
 
 .beatify-clip-count,
 .beatify-clip-note {
-  font-size: 0.75rem;
-  color: #7c869a;
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
 }
 
 .beatify-clip-length {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 0.75rem;
-  color: #7c869a;
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
 }
 
 .beatify-clip-length input {
   width: 4.5em;
-  background: #12151a;
-  border: 1px solid #262b34;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
   border-radius: 4px;
-  color: #e6e6e6;
+  color: var(--ink);
   padding: 3px 6px;
 }
 
 .beatify-clip-grid {
   position: relative;
-  background: #12151a;
-  border: 1px solid #262b34;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px;
 }
@@ -4553,8 +5187,8 @@ body {
 
 .beatify-clip-tick {
   flex: none;
-  font-size: 0.62rem;
-  color: #5fd0c5;
+  font-size: var(--fs-micro);
+  color: var(--brand);
   border-left: 1px solid #24333a;
   padding-left: 2px;
   box-sizing: border-box;
@@ -4588,7 +5222,7 @@ body {
   top: 0;
   bottom: 0;
   background: rgba(95, 208, 197, 0.18);
-  border: 1px dashed #5fd0c5;
+  border: 1px dashed var(--brand);
   pointer-events: none;
 }
 
@@ -4602,8 +5236,8 @@ body {
   justify-content: space-between;
   gap: 4px;
   padding: 0 4px;
-  font-size: 0.7rem;
-  color: #14161a;
+  font-size: var(--fs-xs);
+  color: var(--canvas);
   cursor: grab;
   overflow: hidden;
   box-sizing: border-box;
@@ -4611,7 +5245,7 @@ body {
 
 /* Two runs that abut are still two runs: the join is drawn. */
 .beatify-clip-block.seam {
-  border-left: 2px solid #14161a;
+  border-left: 2px solid var(--canvas);
 }
 
 .beatify-clip-block-label {
@@ -4629,7 +5263,7 @@ body {
 }
 
 .beatify-clip-block.tint-0 {
-  background: #d8a15f;
+  background: var(--cue);
 }
 .beatify-clip-block.tint-1 {
   background: #c78bb0;
