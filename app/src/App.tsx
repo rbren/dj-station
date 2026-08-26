@@ -1438,7 +1438,9 @@ export default function App() {
   }, [pickerOpen]);
 
   // Import a clip: a Beat Clip module at the center of the view, loaded
-  // with that clip (which is also what its patch entry will name).
+  // with that clip (which is also what its patch entry will name). The
+  // load names the module after the clip, so the panel that lands says
+  // "chorus stack" and its position moves to that id.
   const addClipFromPicker = useCallback(
     (clip: BeatClipEntry) => {
       let at: { x: number; y: number } | undefined;
@@ -1452,11 +1454,14 @@ export default function App() {
       setPickerOpen(false);
       void (async () => {
         const instance = await addModule(BEAT_CLIP_TYPE, at);
-        await beatClip.load(instance, clip.projectId, clip.clipId);
+        const named = await beatClip.load(instance, clip.projectId, clip.clipId);
+        const renamedTo = named && named !== instance ? named : null;
+        if (renamedTo) carryPositions({ [instance]: renamedTo });
         await refresh();
+        if (renamedTo) dropPositions([instance]);
       })();
     },
-    [rackEl, pan, zoom, addModule, refresh],
+    [rackEl, pan, zoom, addModule, refresh, carryPositions, dropPositions],
   );
 
   // Drop a module dragged out of the library at the pointer position,

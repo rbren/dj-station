@@ -1221,10 +1221,12 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'one from the Clips tab of the module picker and the module arrives ' +
       'loaded with that clip and the tempo its project is laid out at. ' +
       'The clock does the rest: the gap between its last two ticks is the ' +
-      'beat, so the clip runs at whatever tempo the patch is running at, ' +
-      'and every tick re-anchors the phase \u2014 the clip starts ON a ' +
-      'tick and comes back around on one, never in between. Reset parks ' +
-      'it at beat 0 to wait for the next tick.',
+      'beat, so the clip runs at whatever tempo the patch is running at ' +
+      '\u2014 stretched, not sped up, so its pitch stays put \u2014 and ' +
+      'every tick re-anchors the phase: the clip starts ON a tick and ' +
+      'comes back around on one, never in between. It waits for two ticks ' +
+      'before the first sound, since one tick cannot say how fast to go. ' +
+      'Reset parks it at beat 0 to wait for the next tick.',
     inputs: {
       clock: 'A rising edge is a beat: it sets the tempo and the phase.',
       reset: 'Back to beat 0, silent until the next clock edge.',

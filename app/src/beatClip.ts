@@ -49,7 +49,9 @@ export interface BeatClipStatus {
  *  client below implements it and tests substitute a mock. */
 export interface BeatClipApi {
   list(): Promise<BeatClipEntry[] | null>;
-  load(instance: string, projectId: string, clipId: string): Promise<void | null>;
+  /** Resolves to the module's instance id, which the load renames after
+   *  the clip ("chorus stack"), so the caller can re-key its layout. */
+  load(instance: string, projectId: string, clipId: string): Promise<string | null>;
   status(instance: string): Promise<BeatClipStatus | null>;
 }
 
@@ -58,7 +60,7 @@ export class BeatClipClient extends IpcClient implements BeatClipApi {
     return this.call<BeatClipEntry[]>('beat_clip_list');
   }
   load(instance: string, projectId: string, clipId: string) {
-    return this.call<void>('beat_clip_load', { instance, projectId, clipId });
+    return this.call<string>('beat_clip_load', { instance, projectId, clipId });
   }
   status(instance: string) {
     return this.call<BeatClipStatus>('beat_clip_status', { instance });

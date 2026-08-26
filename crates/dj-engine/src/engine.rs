@@ -170,6 +170,10 @@ impl NodeInfo {
     pub fn is_deck(&self) -> bool {
         self.builtin_kind() == Some(crate::builtin::BuiltinKind::Deck)
     }
+
+    pub fn is_beat_clip(&self) -> bool {
+        self.builtin_kind() == Some(crate::builtin::BuiltinKind::BeatClip)
+    }
 }
 
 /// Control-side node metadata in STABLE slots, mirroring the graph's slot

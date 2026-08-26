@@ -31,6 +31,7 @@ pub mod patch;
 pub mod playback;
 pub mod qwerty;
 pub mod registry;
+pub mod stretch;
 pub mod telemetry;
 pub mod wasm_host;
 

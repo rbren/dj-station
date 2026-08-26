@@ -1550,6 +1550,21 @@ fn paste_modules(state: State<AppState>, clipboard: String) -> CmdResult<BTreeMa
     let mut doc = engine.snapshot("paste");
     let renames = doc.paste(&clip);
     engine.apply_doc(&doc).map_err(err)?;
+    // A pasted Beat Clip carries only its binding; hand each copy the
+    // audio its source already holds — nothing to re-assemble, and it
+    // works even for a clip whose project has since gone. Pairs the
+    // source cannot serve (a clipboard from another patch) fall through
+    // to the usual assembly.
+    let is_clip = |id: &String| engine.nodes.iter().any(|n| &n.instance_id == id && n.is_beat_clip());
+    let clip_pairs: Vec<(String, String)> = renames
+        .iter()
+        .filter(|(from, to)| is_clip(from) && is_clip(to))
+        .map(|(from, to)| (from.clone(), to.clone()))
+        .collect();
+    for (from, to) in clip_pairs {
+        engine.beat_clip_copy(&from, &to).map_err(err)?;
+    }
+    beat_clip::hydrate(&state, &mut engine);
     Ok(renames)
 }
 

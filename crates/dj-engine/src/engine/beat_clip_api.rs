@@ -34,17 +34,29 @@ impl Engine {
         bpm: f64,
     ) -> Result<()> {
         let node = self.beat_clip_node(instance_id)?;
-        let data = Arc::new(audio);
+        self.hand_clip(node, clip, Arc::new(audio), bpm as f32)
+    }
+
+    /// Put a clip in a node's hands: the RT module picks the audio up
+    /// lock-free at the next block boundary, and the BPM input — what one
+    /// beat of that clip means — moves with it.
+    fn hand_clip(
+        &mut self,
+        node: usize,
+        clip: Option<BeatClipRef>,
+        audio: Arc<TrackData>,
+        bpm: f32,
+    ) -> Result<()> {
         let ctl = self.beat_clips.get_mut(&node).unwrap();
         // Reclaim clips the RT thread replaced earlier.
         while ctl.garbage_rx.pop().is_ok() {}
-        ctl.track = Some(data.clone());
+        ctl.track = Some(audio.clone());
         ctl.loaded = clip.clone();
         ctl.tx
-            .push(data)
+            .push(audio)
             .map_err(|_| anyhow!("too many pending clip loads"))?;
         self.nodes[node].clip = clip;
-        self.write_knob_value(node, IN_BPM, bpm as f32)
+        self.write_knob_value(node, IN_BPM, bpm)
     }
 
     /// Load a rendered clip from a file (tests and E2E cases, where the
@@ -57,6 +69,23 @@ impl Engine {
     ) -> Result<()> {
         let audio = decode_file(path)?;
         self.beat_clip_load(instance_id, None, audio, bpm)
+    }
+
+    /// Hand `to` the clip `from` is playing — copy/paste and duplicate.
+    /// The assembled audio is shared (an `Arc`, so no re-render and no
+    /// second copy of the samples) along with the binding and the tempo.
+    /// Returns false when the source has no audio to give: the paste is
+    /// then an ordinary pending binding for the app layer to assemble.
+    pub fn beat_clip_copy(&mut self, from: &str, to: &str) -> Result<bool> {
+        let src = self.beat_clip_node(from)?;
+        let Some(audio) = self.beat_clips[&src].track.clone() else {
+            return Ok(false);
+        };
+        let clip = self.nodes[src].clip.clone();
+        let bpm = self.knob_value(src, IN_BPM);
+        let node = self.beat_clip_node(to)?;
+        self.hand_clip(node, clip, audio, bpm)?;
+        Ok(true)
     }
 
     /// Point a Beat Clip node at a clip WITHOUT audio (patch load): the

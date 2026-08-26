@@ -1,15 +1,21 @@
 //! Beat Clip module (`builtin.beat_clip`) tests:
-//! - silent until the first clock edge, and after a reset,
+//! - silent until TWO clock edges have measured a tempo (one edge is a
+//!   phase, not a speed), and after a reset,
 //! - the interval between the last two edges is the tempo (one clip beat
 //!   per interval), so a clock at twice the clip's tempo plays it twice as
 //!   fast and a changing clock is followed,
+//! - that speed change is a STRETCH: the pitch does not move with it,
 //! - every edge re-anchors the phase, so the clip's beat 0 lands ON a tick
 //!   and never between two,
 //! - the clip binding (not its audio) survives a patch save/load, and a
-//!   reloaded node reports itself as waiting to be assembled.
+//!   reloaded node reports itself as waiting to be assembled,
+//! - copying a module copies the clip it is playing.
 //!
 //! The clip under test is a RAMP: sample *i* is `i / frames * 0.5`, so the
-//! rendered value says exactly where the playhead is ([`played_frame`]).
+//! rendered value says where the playhead is ([`played_frame`]) — read as
+//! the grain-weighted average of the voices in flight, which is why
+//! position assertions carry a grain of tolerance ([`SMEAR`]). The pitch
+//! test uses a tone instead.
 
 use dj_engine::beat_clip::{BeatClipRef, BEAT_CLIP_ID};
 use dj_engine::playback::TrackData;
@@ -23,6 +29,12 @@ const CLIP_BPM: f64 = 125.0;
 const BEAT_FRAMES: usize = 23_040;
 const CLIP_BEATS: usize = 4;
 const CLIP_FRAMES: usize = BEAT_FRAMES * CLIP_BEATS;
+/// How far a position read out of stretched audio may sit from the virtual
+/// playhead: grains are up to 40 ms long and WSOLA-aligned within ±4 ms of
+/// it (`dj_engine::stretch`), and a ramp biases that search towards its
+/// loud end. A twentieth of a beat — nowhere near enough to confuse one
+/// beat of the clip with another, which is what these tests are about.
+const SMEAR: f64 = 0.05 * BEAT_FRAMES as f64;
 
 fn mono_engine() -> Engine {
     Engine::new(
@@ -45,21 +57,43 @@ fn ramp_clip() -> TrackData {
     }
 }
 
+/// A clip that is one steady tone, for asking what the stretch did to the
+/// pitch.
+fn tone_clip(hz: f64) -> TrackData {
+    TrackData {
+        channels: vec![(0..CLIP_FRAMES)
+            .map(|i| (2.0 * std::f64::consts::PI * hz * i as f64 / SR as f64).sin() as f32 * 0.5)
+            .collect()],
+        sample_rate: SR,
+    }
+}
+
 /// Which clip frame a rendered sample came from (engine units are ±10 V,
 /// the ramp spans 0..0.5 of the file).
 fn played_frame(sample: f32) -> f64 {
     sample as f64 / 10.0 / 0.5 * CLIP_FRAMES as f64
 }
 
-/// Beat Clip -> Audio Out, loaded with the ramp at its own tempo.
-fn beat_clip_engine() -> Engine {
+fn zero_crossing_hz(signal: &[f32]) -> f64 {
+    let crossings = signal
+        .windows(2)
+        .filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0))
+        .count();
+    crossings as f64 / 2.0 / (signal.len() as f64 / SR as f64)
+}
+
+/// Beat Clip -> Audio Out, loaded with `clip` at the clip's own tempo.
+fn engine_with(clip: TrackData) -> Engine {
     let mut e = mono_engine();
     e.add_module("bc1", BEAT_CLIP_ID).unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("bc1", "audio_l", "out1", "l").unwrap();
-    e.beat_clip_load("bc1", None, ramp_clip(), CLIP_BPM)
-        .unwrap();
+    e.beat_clip_load("bc1", None, clip, CLIP_BPM).unwrap();
     e
+}
+
+fn beat_clip_engine() -> Engine {
+    engine_with(ramp_clip())
 }
 
 /// A clock edge on `jack` (a block high, then `low_blocks` blocks low),
@@ -77,6 +111,13 @@ fn tick(e: &mut Engine, blocks: usize) -> Vec<f32> {
     pulse(e, "clock", blocks - 1)
 }
 
+/// The pair of beats that tells the module how fast to play: everything
+/// from the second edge on is audible.
+fn start(e: &mut Engine, blocks: usize) {
+    tick(e, blocks);
+    tick(e, blocks);
+}
+
 #[test]
 fn beat_clip_is_listed_in_all_manifests() {
     let ids: Vec<String> = crate::common::registry()
@@ -91,7 +132,7 @@ fn beat_clip_is_listed_in_all_manifests() {
 }
 
 #[test]
-fn silent_until_the_first_clock_edge() {
+fn silent_until_two_clock_edges_measure_the_tempo() {
     let mut e = beat_clip_engine();
     let quiet = e.render_offline(BLOCK * 10).unwrap().remove(0);
     assert!(
@@ -99,14 +140,27 @@ fn silent_until_the_first_clock_edge() {
         "a clip with no clock must not play"
     );
 
-    let played = tick(&mut e, 4);
+    // One edge is a phase, not yet a speed: still nothing to play.
+    let first = tick(&mut e, 180);
     assert!(
-        played.iter().any(|s| *s != 0.0),
-        "the first clock edge starts the clip"
+        first.iter().all(|s| *s == 0.0),
+        "one clock edge does not say how fast the clip should run"
+    );
+    let status = e.beat_clip_status("bc1").unwrap();
+    assert_eq!(status.beat, -1, "still waiting for a tempo");
+    assert_eq!(status.clock_bpm, 0.0);
+    assert!(!status.playing);
+
+    // The second edge measures the beat — and is beat 0 of the clip.
+    let second = tick(&mut e, 180);
+    assert!(
+        second.iter().any(|s| *s != 0.0),
+        "the second clock edge starts the clip"
     );
     let status = e.beat_clip_status("bc1").unwrap();
     assert_eq!(status.beats, CLIP_BEATS);
-    assert_eq!(status.beat, 0, "the first edge plays beat 0");
+    assert_eq!(status.beat, 0, "the clip starts at beat 0");
+    assert!((status.clock_bpm - CLIP_BPM).abs() < 1.0);
     assert!(status.playing);
 }
 
@@ -115,14 +169,15 @@ fn the_clock_sets_the_tempo() {
     // Ticks twice as fast as the clip was rendered: one clip beat has to
     // fit in half the time, so the audio runs at 2x.
     let mut e = beat_clip_engine();
-    tick(&mut e, 90);
-    tick(&mut e, 90);
+    start(&mut e, 90);
     let third = tick(&mut e, 90);
 
-    let span = 1000;
-    let rate = (played_frame(third[span]) - played_frame(third[0])) / span as f64;
+    // Measured across several grains: within one the clip is read at its
+    // own rate, and the stretch lands on the grain boundaries.
+    let (from, to) = (1_000, 9_000);
+    let rate = (played_frame(third[to]) - played_frame(third[from])) / (to - from) as f64;
     assert!(
-        (rate - 2.0).abs() < 0.02,
+        (rate - 2.0).abs() < 0.05,
         "a double-speed clock should play the clip at 2x, got {rate}"
     );
     let bpm = e.beat_clip_status("bc1").unwrap().clock_bpm;
@@ -135,32 +190,56 @@ fn the_clock_sets_the_tempo() {
     // last two edges, not the first two.
     tick(&mut e, 180);
     let slow = tick(&mut e, 180);
-    let rate = (played_frame(slow[span]) - played_frame(slow[0])) / span as f64;
+    let rate = (played_frame(slow[to]) - played_frame(slow[from])) / (to - from) as f64;
     assert!(
-        (rate - 1.0).abs() < 0.02,
+        (rate - 1.0).abs() < 0.05,
         "back at the clip's own tempo the rate is 1x, got {rate}"
     );
 }
 
 #[test]
+fn stretching_the_clip_holds_its_pitch() {
+    // The tempo change is a stretch, not a speed-up: a 440 Hz clip still
+    // sounds 440 Hz whether the clock runs it at double or half speed.
+    // ±10 cents around 440 Hz ~ ±2.55 Hz — the deck's keylock tolerance.
+    let cents_10 = 440.0 * (2f64.powf(10.0 / 1200.0) - 1.0);
+    for (blocks, factor) in [(90usize, 2.0f64), (360, 0.5)] {
+        let mut e = engine_with(tone_clip(440.0));
+        start(&mut e, blocks);
+        let played = tick(&mut e, blocks);
+        // Past the grain the beat edge lands in, over whole hops.
+        let hz = zero_crossing_hz(&played[2_000..10_000]);
+        assert!(
+            (hz - 440.0).abs() <= cents_10,
+            "at {factor}x the clip should still sound 440 Hz, measured {hz:.2}"
+        );
+    }
+}
+
+#[test]
 fn every_edge_re_anchors_the_phase() {
     let mut e = beat_clip_engine();
-    // Deliberately uneven: the fourth beat is short, so a free-running
+    start(&mut e, 180);
+    // Deliberately uneven: the third beat is short, so a free-running
     // playhead would drift off the grid. Phase belongs to the clock.
-    for (beat, blocks) in [(0usize, 180usize), (1, 180), (2, 150), (3, 180)] {
+    for (beat, blocks) in [(1usize, 180usize), (2, 150), (3, 180)] {
         let out = tick(&mut e, blocks);
-        let at = played_frame(out[0]);
+        // Read a little way in, past the crossfade that carries the
+        // previous grain over the edge, and subtract that much again.
+        let at = played_frame(out[4_000]) - 4_000.0;
         let want = (beat * BEAT_FRAMES) as f64;
         assert!(
-            (at - want).abs() < 8.0,
+            (at - want).abs() < SMEAR,
             "beat {beat} should start at clip frame {want}, started at {at}"
         );
+        assert_eq!(e.beat_clip_status("bc1").unwrap().beat, beat as i64);
     }
     // Past the last beat the clip comes back around — on the tick.
     let wrapped = tick(&mut e, 180);
+    let at = played_frame(wrapped[4_000]) - 4_000.0;
     assert!(
-        played_frame(wrapped[0]) < 8.0,
-        "the clip restarts at frame 0 on the tick after its last beat"
+        at.abs() < SMEAR,
+        "the clip restarts at frame 0 on the tick after its last beat, at {at}"
     );
     assert_eq!(e.beat_clip_status("bc1").unwrap().beat, 0);
 }
@@ -168,7 +247,7 @@ fn every_edge_re_anchors_the_phase() {
 #[test]
 fn reset_parks_at_beat_zero_until_the_next_clock() {
     let mut e = beat_clip_engine();
-    tick(&mut e, 180);
+    start(&mut e, 180);
     tick(&mut e, 180);
 
     let after_reset = pulse(&mut e, "reset", 20);
@@ -180,10 +259,13 @@ fn reset_parks_at_beat_zero_until_the_next_clock() {
     assert_eq!(status.beat, -1, "a reset module is waiting for a clock");
     assert_eq!(status.position_secs, 0.0, "phase is back at 0");
 
+    // The tempo is still known, so ONE edge restarts it: a reset moves the
+    // phase, it does not make the module re-learn the clock.
     let restarted = tick(&mut e, 180);
+    let at = played_frame(restarted[4_000]) - 4_000.0;
     assert!(
-        played_frame(restarted[0]) < 8.0,
-        "the next clock plays beat 0, from the top of the clip"
+        at.abs() < SMEAR,
+        "the next clock plays beat 0, from the top of the clip, at {at}"
     );
 }
 
@@ -218,5 +300,58 @@ fn the_clip_binding_survives_a_patch_round_trip() {
     assert_eq!(
         status.duration_secs, 0.0,
         "the patch carries the binding, never the audio"
+    );
+}
+
+#[test]
+fn a_copy_plays_the_same_clip_as_its_source() {
+    // What copy/paste rides on: the new module is handed the assembled
+    // audio, the binding and the tempo, with nothing to re-render.
+    let clip = BeatClipRef {
+        project: "p2".into(),
+        clip: "7".into(),
+        name: "chorus stack".into(),
+    };
+    let mut e = beat_clip_engine();
+    e.beat_clip_load("bc1", Some(clip.clone()), ramp_clip(), CLIP_BPM)
+        .unwrap();
+    e.add_module("bc2", BEAT_CLIP_ID).unwrap();
+    e.connect("bc2", "audio_l", "out1", "l").unwrap();
+
+    assert!(e.beat_clip_copy("bc1", "bc2").unwrap());
+    let status = e.beat_clip_status("bc2").unwrap();
+    assert_eq!(status.clip.as_ref(), Some(&clip));
+    assert_eq!(status.bpm, CLIP_BPM);
+    assert_eq!(status.beats, CLIP_BEATS);
+    assert!(
+        e.beat_clip_pending().is_empty(),
+        "a copy has its audio already; there is nothing to assemble"
+    );
+
+    // And it plays: the copy is a working module, not just metadata.
+    for _ in 0..2 {
+        e.set_knob_position("bc2", "clock", 1.0).unwrap();
+        e.render_offline(BLOCK).unwrap();
+        e.set_knob_position("bc2", "clock", 0.0).unwrap();
+        e.render_offline(BLOCK * 179).unwrap();
+    }
+    let played = e.render_offline(BLOCK * 40).unwrap().remove(0);
+    assert!(
+        played.iter().any(|s| *s != 0.0),
+        "the copied module should play the clip it was handed"
+    );
+
+    // A source with no audio (a patch just loaded) has nothing to hand
+    // on, and says so: the copy is left to the app layer's assembly.
+    let mut fresh = mono_engine();
+    fresh.add_module("a", BEAT_CLIP_ID).unwrap();
+    fresh.add_module("b", BEAT_CLIP_ID).unwrap();
+    fresh.beat_clip_bind("a", Some(clip.clone())).unwrap();
+    fresh.beat_clip_bind("b", Some(clip)).unwrap();
+    assert!(!fresh.beat_clip_copy("a", "b").unwrap());
+    assert_eq!(
+        fresh.beat_clip_pending().len(),
+        2,
+        "both ends then wait for the app layer to assemble the clip"
     );
 }

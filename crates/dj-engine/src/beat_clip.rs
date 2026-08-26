@@ -11,10 +11,20 @@
 //! (so a clock at twice the clip's own tempo plays it twice as fast), and
 //! every edge re-anchors the playhead onto that beat's boundary. A clip is
 //! therefore never heard starting between ticks — a four-beat clip laid
-//! against a four-beat bar comes back around exactly on the downbeat. Until
-//! two edges have been seen the tempo is unknown, so the clip runs at its
-//! own; before the FIRST edge (and after a reset) it is silent, parked at
-//! beat 0, which is the step-sequencer convention [`crate::choreo`] uses.
+//! against a four-beat bar comes back around exactly on the downbeat.
+//!
+//! NOTHING IS HEARD UNTIL TWO EDGES HAVE BEEN MEASURED: one edge gives
+//! phase but no tempo, and a clip that started before the speed was known
+//! would have to lurch onto it. So the first edge only arms; the second —
+//! the one that says how long a beat is — plays beat 0. A reset (or a new
+//! clip) parks the module at beat 0 and silences it until the next edge,
+//! the same convention [`crate::choreo`] uses; it does NOT forget the
+//! tempo, so a running clock restarts the clip immediately.
+//!
+//! The tempo change is a STRETCH, not a speed-up: [`crate::stretch`] reads
+//! grains at the clip's own rate around a playhead that moves at the
+//! clock's, so a clip played faster keeps its pitch. Same machinery as the
+//! deck's keylock.
 //!
 //! What the patch keeps is the BINDING ([`BeatClipRef`]: which project,
 //! which clip), never the audio — a clip is placements, not a file (see
@@ -31,6 +41,7 @@ use crate::knob::{Curve, KnobConfig, KnobStyle};
 use crate::manifest::{categories, DisplaySpec, JackDecl, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 use crate::playback::TrackData;
+use crate::stretch::{sample_at, GrainStretch};
 
 pub const BEAT_CLIP_ID: &str = "builtin.beat_clip";
 
@@ -205,21 +216,23 @@ pub struct BeatClipModule {
     garbage_tx: rtrb::Producer<Arc<TrackData>>,
     track: Option<Arc<TrackData>>,
     engine_rate: f32,
-    /// Playhead in clip frames (fractional).
+    /// VIRTUAL playhead in clip frames: it moves at the clock's tempo,
+    /// while the grains reading it move at the clip's own (that split is
+    /// what keeps the pitch).
     pos: f64,
     /// Beat of the clip the last clock edge landed on.
     beat: u32,
-    /// True until the first clock after a load or a reset: that clock
-    /// plays beat 0 instead of advancing.
-    armed: bool,
-    /// A clock edge has been seen, so there is something to play.
+    /// Audible: a tempo is known and an edge has started the clip.
     started: bool,
     last_clock: f32,
     last_reset: f32,
-    /// Samples between the last two clock edges.
+    /// Engine samples between the last two clock edges; 0 = no tempo yet,
+    /// which is why nothing plays.
     interval: f32,
+    /// An edge has been seen, so `since_clock` is a real gap.
+    seen_edge: bool,
     since_clock: f32,
-    seen_interval: bool,
+    grains: GrainStretch,
     shared: Arc<BeatClipShared>,
 }
 
@@ -237,36 +250,26 @@ impl BeatClipModule {
             engine_rate: engine_rate.max(1.0),
             pos: 0.0,
             beat: 0,
-            armed: true,
             started: false,
             last_clock: 0.0,
             last_reset: 0.0,
             interval: 0.0,
+            seen_edge: false,
             since_clock: 0.0,
-            seen_interval: false,
+            grains: GrainStretch::new(engine_rate),
             shared,
         }
     }
 
     /// Park at beat 0 and wait for a clock. Phase is 0 from this instant;
     /// the audio only moves again on the next edge, because a clip that
-    /// restarted between ticks would be off the grid it was cut on.
+    /// restarted between ticks would be off the grid it was cut on. The
+    /// measured tempo survives — this is a phase reset, not a re-learn.
     fn rearm(&mut self) {
         self.pos = 0.0;
         self.beat = 0;
-        self.armed = true;
         self.started = false;
-    }
-
-    #[inline]
-    fn sample_at(chan: &[f32], pos: f64) -> f32 {
-        let i0 = pos as usize;
-        let frac = (pos - i0 as f64) as f32;
-        if frac == 0.0 || i0 + 1 >= chan.len() {
-            chan[i0.min(chan.len() - 1)]
-        } else {
-            chan[i0] * (1.0 - frac) + chan[i0 + 1] * frac
-        }
+        self.grains.reset();
     }
 }
 
@@ -314,41 +317,59 @@ impl HostModule for BeatClipModule {
 
             self.since_clock += 1.0;
             if clock[s] >= 1.0 && self.last_clock < 1.0 {
-                if self.started && self.since_clock < MAX_INTERVAL_SECS * self.engine_rate {
-                    self.interval = self.since_clock.max(2.0);
-                    self.seen_interval = true;
-                }
-                self.since_clock = 0.0;
-                if self.armed || beats == 0 {
-                    self.armed = false;
-                    self.beat = 0;
+                // Two edges make a tempo. One that is not a tempo (the
+                // first ever, or a gap too long to be a beat) leaves the
+                // module armed and silent, waiting for the pair.
+                let measured = self.seen_edge
+                    && self.since_clock <= MAX_INTERVAL_SECS * self.engine_rate
+                    && beats > 0;
+                self.interval = if measured {
+                    self.since_clock.max(2.0)
                 } else {
-                    self.beat = (self.beat + 1) % beats as u32;
+                    0.0
+                };
+                self.since_clock = 0.0;
+                self.seen_edge = true;
+                if !measured {
+                    self.rearm();
+                } else {
+                    if self.started {
+                        self.beat = (self.beat + 1) % beats as u32;
+                    } else {
+                        // The edge that first knew the tempo is beat 0.
+                        self.beat = 0;
+                        self.started = true;
+                    }
+                    // The edge IS the beat boundary: phase is the clock's,
+                    // not the playhead's, so drift can never accumulate.
+                    // The grains keep running across the jump — the
+                    // overlap-add is the crossfade a re-anchor needs.
+                    self.pos = self.beat as f64 * beat_frames;
                 }
-                self.started = true;
-                // The edge IS the beat boundary: phase is the clock's, not
-                // the playhead's, so drift can never accumulate.
-                self.pos = self.beat as f64 * beat_frames;
             }
             self.last_clock = clock[s];
 
             let (l, r) = match &self.track {
                 Some(track) if self.started && self.pos < track.frames() as f64 => {
-                    let l = Self::sample_at(&track.channels[0], self.pos);
-                    let r = if track.channels.len() > 1 {
-                        Self::sample_at(&track.channels[1], self.pos)
-                    } else {
-                        l
-                    };
-                    // One clip beat per clock interval; sample-rate
-                    // conversion folds into the increment. With only one
-                    // edge seen the tempo is still unknown, so the clip
-                    // runs at its own rate until the second.
-                    self.pos += if self.seen_interval && self.interval > 0.0 {
-                        beat_frames / self.interval as f64
-                    } else {
-                        track.sample_rate as f64 / self.engine_rate as f64
-                    };
+                    // Grains read at the clip's OWN rate (sample-rate
+                    // conversion only), so the pitch is the clip's however
+                    // fast the clock runs it.
+                    let step = track.sample_rate as f64 / self.engine_rate as f64;
+                    let taps = self.grains.tick(self.pos, step, &track.channels[0]);
+                    let (mut l, mut r) = (0.0f32, 0.0f32);
+                    for tap in taps.iter().flatten() {
+                        let gl = sample_at(&track.channels[0], tap.pos);
+                        let gr = if track.channels.len() > 1 {
+                            sample_at(&track.channels[1], tap.pos)
+                        } else {
+                            gl
+                        };
+                        l += gl * tap.gain;
+                        r += gr * tap.gain;
+                    }
+                    // One clip beat per clock interval: the whole tempo
+                    // change lives in this advance.
+                    self.pos += beat_frames / self.interval as f64;
                     (l, r)
                 }
                 _ => (0.0, 0.0),
@@ -364,7 +385,7 @@ impl HostModule for BeatClipModule {
             ),
             None => (0.0, false),
         };
-        let clock_bpm = if self.seen_interval && self.interval > 0.0 {
+        let clock_bpm = if self.interval > 0.0 {
             60.0 * self.engine_rate as f64 / self.interval as f64
         } else {
             0.0
@@ -377,20 +398,24 @@ impl HostModule for BeatClipModule {
         );
     }
 
+    /// Transport across a hot reload: the playhead, its beat, and the
+    /// tempo the clock had measured (without which nothing may play).
     fn save_state(&mut self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(13);
+        let mut bytes = Vec::with_capacity(17);
         bytes.extend_from_slice(&self.pos.to_le_bytes());
         bytes.extend_from_slice(&self.beat.to_le_bytes());
+        bytes.extend_from_slice(&self.interval.to_le_bytes());
         bytes.push(self.started as u8);
         bytes
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
-        if bytes.len() >= 13 {
+        if bytes.len() >= 17 {
             self.pos = f64::from_le_bytes(bytes[..8].try_into().unwrap());
             self.beat = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
-            self.started = bytes[12] != 0;
-            self.armed = !self.started;
+            self.interval = f32::from_le_bytes(bytes[12..16].try_into().unwrap());
+            self.started = bytes[16] != 0 && self.interval > 0.0;
+            self.seen_edge = self.started;
         }
     }
 

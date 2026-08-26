@@ -61,15 +61,17 @@ pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
 }
 
 /// Assemble a clip and hand it to a Beat Clip module, binding the module
-/// to it. Undoable under the same key as loading a track into a deck or
-/// the Audio module: it is the same act.
+/// to it and naming the module after it. Undoable under the same key as
+/// loading a track into a deck or the Audio module: it is the same act.
+/// Returns the instance id the module ended up with — the rename gives it
+/// a new one, and the frontend's rack layout is keyed by id.
 #[tauri::command(async)]
 pub fn beat_clip_load(
     state: State<AppState>,
     instance: String,
     project_id: String,
     clip_id: String,
-) -> CmdResult<()> {
+) -> CmdResult<String> {
     // Assemble BEFORE taking the engine lock: this decodes and mixes.
     let rendered = render_clip(&state, &project_id, &clip_id)?;
     let clip = BeatClipRef {
@@ -80,7 +82,29 @@ pub fn beat_clip_load(
     let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
     engine
         .beat_clip_load(&instance, Some(clip), track_data(&rendered), rendered.bpm)
-        .map_err(err)
+        .map_err(err)?;
+    Ok(name_after_clip(&mut engine, &instance, &rendered.name))
+}
+
+/// A clip module wears the clip's name ("chorus stack", not "beatclip1"):
+/// the clip IS the module. The same clip can be imported twice, so a name
+/// already in the rack gets numbered; a name with nothing usable in it
+/// (the engine normalizes to instance ids) leaves the module as it is.
+fn name_after_clip(engine: &mut Engine, instance: &str, clip_name: &str) -> String {
+    if dj_engine::normalize_module_name(clip_name).is_empty() {
+        return instance.to_string();
+    }
+    for n in 1..100 {
+        let candidate = if n == 1 {
+            clip_name.to_string()
+        } else {
+            format!("{clip_name} {n}")
+        };
+        if let Ok(id) = engine.rename_module(instance, &candidate) {
+            return id;
+        }
+    }
+    instance.to_string()
 }
 
 /// Clip + transport snapshot for the Beat Clip module panel.

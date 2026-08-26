@@ -990,12 +990,27 @@ beatify::build`.
   `beat_frames / interval` per output frame, and a clock at 2x the clip's
   tempo plays it at 2x), and every edge re-anchors `pos` to
   `beat * beat_frames`, so a multi-beat clip is never heard starting
-  between ticks. `reset` (and a fresh load) re-arms: parked at beat 0,
-  SILENT until the next edge, the `armed` convention `choreo` uses. `bpm`
-  is the tempo the audio was rendered at — what one clip beat means —
+  between ticks. NOTHING PLAYS UNTIL TWO EDGES HAVE MEASURED A TEMPO: one
+  edge is a phase, not a speed, so the first edge only arms and the second
+  is beat 0 (a gap longer than `MAX_INTERVAL_SECS` is not a tempo either —
+  it re-arms). `reset` (and a fresh load) parks at beat 0, SILENT until the
+  next edge, the `armed` convention `choreo` uses, but KEEPS the measured
+  interval, so a running clock restarts the clip on its very next edge.
+  `bpm` is the tempo the audio was rendered at — what one clip beat means —
   written by the loader from the project's grid. Panel readout comes from
   `BeatClipShared` (position/clock BPM/beat/playing atomics published once
   per block), like `AudioShared`.
+- `crates/dj-engine/src/stretch.rs` is THE granular time-stretch: two
+  voices, Hann overlap-add at 50 % hop (exact COLA, so unity rate is
+  transparent), each grain WSOLA-aligned within ±`SEARCH_SECS` of the
+  virtual playhead. It owns no audio — `GrainStretch::tick(pos, step, ch0)`
+  returns the taps (`pos` + window gain) and the caller reads its own
+  channels, which is how the deck drives four stems off one grain
+  schedule. Both the deck's KEYLOCK and Beat Clip's tempo follow use it:
+  the playhead moves at the stretched rate, grains read at the source's
+  own, so pitch never moves with tempo. A tempo change needs no
+  `reset()` — the alignment search absorbs it, and a per-beat re-anchor
+  crossfades through the overlap; reset only for a load/seek/cue jump.
 - What a patch persists for a Beat Clip is the BINDING, never the audio:
   `ModuleFile.clip` (`BeatClipRef` = project id + clip id + display name),
   because a clip is placements re-assembled on demand. `Engine::
@@ -1013,7 +1028,16 @@ beatify::build`.
   gallery, since an unbound one plays nothing. Picking one adds the module
   and calls `beat_clip_load` (undoable under `EditKey::Track`, `async`
   because assembling decodes audio — assemble BEFORE taking the engine
-  lock).
+  lock). That command also NAMES the module after the clip ("chorus stack",
+  not "beatclip1") via `rename_module`, numbering a name already in the
+  rack, and RETURNS the resulting instance id — the frontend re-keys its
+  rack positions onto it exactly like a user rename.
+- Copy/paste of a Beat Clip carries the audio, not just the binding:
+  `paste_modules` calls `Engine::beat_clip_copy(from, to)` for each
+  renamed pair that is a clip module on both ends (the `Arc<TrackData>` is
+  shared, so nothing re-renders and a clip whose project is gone still
+  copies), then `hydrate` covers the rest — a clipboard pasted into
+  another patch, where the source no longer exists.
 - Beatify detection degrades like the yt-dlp provider: `beat_this` (a
   PyTorch model) is an OPTIONAL runtime dep. `detect::probe_beat_this`
   FINDS it rather than assuming `python3`: it reads the shebang of a
