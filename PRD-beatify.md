@@ -416,8 +416,21 @@ UI asks for it (MOD-A31). Deleting a seed leaves the project, its tempo
 and its clips alone: what a clip loses is audio, not arithmetic.
 **PRJ-6.** A clip source names the seed AND the parts of it that were
 playing — `seed:s2/drums+bass`. A stem is not a source of its own: it is a
-seed with some of its parts switched off, and all parts on is the render
-itself rather than four stems summed.
+seed with some of its parts switched off.
+**PRJ-6a.** WHAT A SEED PLAYS FOLLOWS ITS SWITCHES, AND ONLY ITS SWITCHES.
+The source open in the pane is derived from them — which entry is open,
+plus which of that seed's parts are on — never stored alongside them, so a
+switch reaches the pane even for the seed nobody clicked (a project is
+minted empty, so that is every seed of a freshly imported one).
+**PRJ-6b.** UNTOUCHED IS THE RENDER; TOUCHED IS THE PARTS. A seed nobody
+has taken apart plays the render itself, and nothing is separated for it.
+Once a switch is touched that seed plays its parts summed — including with
+every part switched back on (`seed:s2/drums+bass+other+vocals`), because
+dropping the vocals has to leave the drums exactly as they were, and a sum
+of stems is not sample-for-sample the render they came out of. Every part
+on is still the WHOLE of that seed: it is called by the seed's name, and
+if its parts cannot be had (no separation on this machine) it falls back
+to the render, so a clip cut from the whole of a seed always plays.
 **PRJ-7.** On disk: `<data_dir>/beatify/<project-id>/project.json` holds
 the envelope (name, bpm, seeds); each seed owns
 `seeds/<seed-id>/{meta.json,warped.wav,stems/}`. A project written before

@@ -1341,10 +1341,27 @@ The detail is in the `Conventions` bullets above; this is the map.
   changes the source pane only, its pencil opens a clip in the editor
   only. A STEM IS NOT A SOURCE: it is a seed with parts switched off, so
   stem toggles hang off the seed row and a source id names both —
-  `seed:s2/drums+bass`, and bare `seed:s2` (all parts on) resolves to the
-  render itself rather than a sum of stem files. Ids are built and read
-  ONLY through `seedSourceId`/`parseSourceId`/`seedOfSourceId`/
-  `stemsOfSourceId` in `app/src/beatifyClip.ts`.
+  `seed:s2/drums+bass`. Ids are built and read ONLY through
+  `seedSourceId`/`seedMix`/`parseSourceId`/`seedOfSourceId`/
+  `stemsOfSourceId`/`isWholeSeed` in `app/src/beatifyClip.ts`.
+- WHAT A SEED PLAYS IS DERIVED FROM ITS SWITCHES (PRJ-6a/6b), and this is
+  the shape to keep: the builder stores WHICH ENTRY is open (`wanted`) and
+  WHICH PARTS ARE OFF per seed (`stemsOff`), and `picked` — the id the
+  pane opens, the transport fetches and a dragged run carries — is a
+  `useMemo` over both. It used to be stored, with the toggle writing the
+  new id into it only when it matched the entry the user had last CLICKED;
+  since projects are minted empty, the open seed is usually one nobody
+  clicked, so the switches lit up and the audio never moved. Anything that
+  can change what is sounding belongs in that derivation, not beside it.
+  `stemsOff[seedId]` ABSENT means untouched (play the render, separate
+  nothing); PRESENT — including `[]` — means play the parts, all four
+  named (`seed:s1/drums+bass+other+vocals`), so a switch leaves everything
+  it did not touch sample-for-sample as it was. Backend twin:
+  `is_whole_seed` in `beatify_clip.rs` (empty OR every STEM_NAME) names
+  such a source after the seed and lets the whole kit fall back to the
+  render when stems cannot be had. The first switch on a seed warps its
+  parts onto the grid (seconds), so while the asked-for mix has not landed
+  the seed's switch group is `aria-busy` (`settling` in the builder).
 - The clip model is pure and lives in `app/src/beatifyClip.ts`: a
   `ClipDraft` is `{id, name, rows, columns, placements}`, and a
   `Placement` is a CONTIGUOUS RUN of beats from one source, never a

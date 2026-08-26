@@ -56,6 +56,10 @@ export interface BeatifyClipListProps {
   onSelect(id: SourceId): void;
   /** Flip one of a seed's parts on or off. */
   onToggleStem(seedId: string, name: string): void;
+  /** The seed whose mix has been asked for but has not landed yet — the
+   *  first switch on a seed separates its parts onto the grid, and that
+   *  takes seconds. '' when what is playing is what was asked for. */
+  settling?: string;
   /** Load this saved clip into the editor, source untouched. */
   onEdit(id: SourceId): void;
   /** Drop a seed from the project, render and all. */
@@ -72,6 +76,7 @@ export function BeatifyClipList({
   selected,
   onSelect,
   onToggleStem,
+  settling = '',
   onEdit,
   onRemoveSeed,
   onNew,
@@ -121,6 +126,12 @@ export function BeatifyClipList({
               data-testid={`beatify-seed-stems-${seed.seedId}`}
               role="group"
               aria-label={`${seed.label} stems`}
+              aria-busy={seed.seedId === settling}
+              title={
+                seed.seedId === settling
+                  ? 'Separating this track onto the grid — the switches take effect as soon as it lands'
+                  : undefined
+              }
             >
               {seed.stems.map((stem) => (
                 <button

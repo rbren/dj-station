@@ -30,14 +30,17 @@ import {
   fromWire,
   isEmpty,
   isSaved,
+  isWholeSeed,
   movePlacement,
   pasteFragment,
   parseSourceId,
   placeRun,
   removeLastRow,
   removePlacement,
+  seedMix,
   seedOfSourceId,
   seedSourceId,
+  sourceIdOf,
   stemsOfSourceId,
   setColumns,
   toWire,
@@ -118,21 +121,19 @@ export function BeatifyClipBuilder({
 
   const [sources, setSources] = useState<ClipSources | null>(null);
   const [saved, setSaved] = useState<SavedClip[]>([]);
-  // What the user last clicked. It is a WISH, not the truth: a seed can
-  // be deleted out from under it, so `picked` below is what it resolves
-  // to now.
+  // WHICH ENTRY the user last clicked — a seed or a clip. What a seed is
+  // PLAYING is not in here: that is `stemsOff`, and `picked` puts the two
+  // together. It is a WISH, not the truth: a seed can be deleted out from
+  // under it, and a project is minted empty, so what is open is very
+  // often something nobody ever clicked.
   const [wanted, setPicked] = useState<SourceId>(() =>
     firstSeed ? seedSourceId(firstSeed.id) : '',
   );
-  const picked = useMemo<SourceId>(() => {
-    const seedId = seedOfSourceId(wanted);
-    if (seedId && project.seeds.some((s) => s.id === seedId)) return wanted;
-    if (wanted.startsWith('clip:')) return wanted;
-    return firstSeed ? seedSourceId(firstSeed.id) : '';
-  }, [firstSeed, project.seeds, wanted]);
   /** Which stems are switched OFF, per seed. Off rather than on, so a
    *  seed nobody has touched is its whole mix without having to know
-   *  what its stems are called. */
+   *  what its stems are called; absent rather than empty, so "nobody has
+   *  touched this" is a different answer from "all of it is on"
+   *  (`seedMix`). */
   const [stemsOff, setStemsOff] = useState<Record<string, string[]>>({});
   const [open, setOpen] = useState<ClipSourceAudio | null>(null);
   const [draft, setDraft] = useState<ClipDraft>(() => emptyDraft());
@@ -147,6 +148,25 @@ export function BeatifyClipBuilder({
   const [clipHead, setClipHead] = useState(0);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+
+  /** What a seed can be taken apart into, in the order the list shows. */
+  const partsOf = useCallback(
+    (seedId: string): string[] =>
+      sources?.sources.find((s) => s.seedId === seedId)?.stems.map((s) => s.name) ?? [],
+    [sources],
+  );
+  /** THE SOURCE THE PANE IS ON, derived rather than stored: which entry
+   *  is open, plus — for a seed — which of its parts are switched on.
+   *  Deriving it is the whole point. A stem switch changes `stemsOff` and
+   *  nothing else, so it reaches the pane even for the seed nobody
+   *  clicked (every seed of a freshly imported project), and a run
+   *  dragged out of the pane cannot name a mix the pane was not playing. */
+  const picked = useMemo<SourceId>(() => {
+    if (wanted.startsWith('clip:')) return wanted;
+    const asked = seedOfSourceId(wanted);
+    const seedId = project.seeds.some((s) => s.id === asked) ? asked : (firstSeed?.id ?? '');
+    return seedId ? seedMix(seedId, partsOf(seedId), stemsOff[seedId]) : '';
+  }, [firstSeed, partsOf, project.seeds, stemsOff, wanted]);
 
   const sourceRef = useRef<BeatifyTrackViewHandle | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -467,14 +487,16 @@ export function BeatifyClipBuilder({
   const seedEntries = useMemo<ClipListSeed[]>(
     () =>
       (sources?.sources ?? []).map((info) => {
-        const off = stemsOff[info.seedId] ?? [];
-        const on = info.stems.map((s) => s.name).filter((name) => !off.includes(name));
-        const all = on.length === info.stems.length;
+        const off = stemsOff[info.seedId];
         return {
           seedId: info.seedId,
-          // All four on IS the whole mix — the render itself, which
-          // needs no separated stems and no summing.
-          id: seedSourceId(info.seedId, all ? [] : on),
+          // The same law the pane reads: untouched switches are the
+          // render, touched ones are the parts (`seedMix`).
+          id: seedMix(
+            info.seedId,
+            info.stems.map((s) => s.name),
+            off,
+          ),
           label: info.label,
           beats: info.beats,
           sourceBpm: info.sourceBpm,
@@ -482,7 +504,7 @@ export function BeatifyClipBuilder({
           available: info.available,
           stems: info.stems.map((stem) => ({
             name: stem.name,
-            on: !off.includes(stem.name),
+            on: !(off ?? []).includes(stem.name),
             available: stem.available,
             hint: stem.hint,
           })),
@@ -497,27 +519,26 @@ export function BeatifyClipBuilder({
   );
 
   /** Flip one of a seed's parts. Muting the last one is silence, so the
-   *  last one on stays on — the Clip page's rule, for the same reason. */
+   *  last one on stays on — the Clip page's rule, for the same reason.
+   *
+   *  This writes the switches and NOTHING else: what the pane is playing
+   *  is read back off them (`picked`), and which seed is open is the
+   *  user's, so flipping a switch on one seed cannot steal the pane from
+   *  another. */
   const toggleStem = useCallback(
     (seedId: string, name: string) => {
-      const info = sources?.sources.find((s) => s.seedId === seedId);
-      if (!info) return;
+      const parts = partsOf(seedId);
+      if (parts.length === 0) return;
       const off = stemsOff[seedId] ?? [];
       const next = off.includes(name) ? off.filter((s) => s !== name) : [...off, name];
-      if (next.length >= info.stems.length) {
+      if (next.length >= parts.length) {
         setNote('Leave at least one stem on — muting them all is silence');
         return;
       }
-      const on = info.stems.map((s) => s.name).filter((s) => !next.includes(s));
       setStemsOff({ ...stemsOff, [seedId]: next });
       setNote(null);
-      // Only follow the switches in the pane that is showing this seed:
-      // toggling one seed's stems must not steal the source from another.
-      setPicked((cur) =>
-        seedOfSourceId(cur) === seedId ? seedSourceId(seedId, next.length === 0 ? [] : on) : cur,
-      );
     },
-    [sources, stemsOff],
+    [partsOf, stemsOff],
   );
 
   const order = useMemo(
@@ -529,9 +550,13 @@ export function BeatifyClipBuilder({
       const seedId = seedOfSourceId(id);
       if (seedId) {
         const seed = seedEntries.find((e) => e.seedId === seedId);
-        const stems = stemsOfSourceId(id);
         if (!seed) return id;
-        return stems.length ? `${seed.label} · ${stems.join(' + ')}` : seed.label;
+        // Every part on is the whole of it, whether it is being played as
+        // the render or as its parts summed back up: that is the seed,
+        // and it is called by its name.
+        const parts = seed.stems.map((stem) => stem.name);
+        if (isWholeSeed(id, parts)) return seed.label;
+        return `${seed.label} · ${stemsOfSourceId(id).join(' + ')}`;
       }
       return clipEntries.find((e) => e.id === id)?.label ?? id;
     },
@@ -565,6 +590,13 @@ export function BeatifyClipBuilder({
     ? { id: picked, label: open.label, durationSecs: open.durationSecs, peaks: open.peaks }
     : null;
 
+  // The mix that is ASKED for is not always the one that has landed: the
+  // first time a seed is taken apart, its parts are separated onto the
+  // grid, which is seconds of work. The switches say so — a switch that
+  // sits there looking done while nothing has changed yet is the same
+  // thing as a switch that does nothing.
+  const settling = !open || sourceIdOf(open.source) !== picked;
+
   // What the pane is MOUNTED against: the material, not the mix. A stem
   // switched off is the same seed on the same grid, so the view sits
   // through it (zoom, selection, playhead and all, see `sourceView.id`);
@@ -584,6 +616,7 @@ export function BeatifyClipBuilder({
         selected={picked}
         onSelect={setPicked}
         onToggleStem={toggleStem}
+        settling={settling ? seedOfSourceId(picked) : ''}
         onEdit={editSaved}
         onRemoveSeed={onRemoveSeed}
         onNew={newClip}

@@ -4526,6 +4526,22 @@ body {
   opacity: 0.45;
 }
 
+/* Asked for, not landed yet: the first switch on a seed separates its
+   parts onto the grid, which takes seconds. */
+.beatify-seed-stems[aria-busy='true'] {
+  animation: beatify-stems-settling 1.1s ease-in-out infinite;
+}
+
+@keyframes beatify-stems-settling {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 /* The tempo a whole project runs at: small, and next to its name. */
 .beatify-bpm {
   width: 5.5rem;

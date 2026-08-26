@@ -14,12 +14,14 @@ import {
   isSaved,
   movePlacement,
   pasteFragment,
+  isWholeSeed,
   parseSourceId,
   placeRun,
   removeLastRow,
   removePlacement,
   rowPlacements,
   setColumns,
+  seedMix,
   seedSourceId,
   seedOfSourceId,
   stemsOfSourceId,
@@ -294,5 +296,38 @@ describe('source ids', () => {
 
   it('keep two seeds apart even when the same stem is soloed', () => {
     expect(seedSourceId('s1', ['drums'])).not.toBe(seedSourceId('s2', ['drums']));
+  });
+});
+
+// What a seed PLAYS follows its switches, and only its switches: that is
+// what lets a switch reach a pane showing a seed nobody ever clicked.
+describe('the mix a seed plays', () => {
+  const PARTS = ['drums', 'bass', 'other', 'vocals'];
+
+  it('is the render until somebody touches a switch', () => {
+    expect(seedMix('s1', PARTS, undefined)).toBe('seed:s1');
+    expect(isWholeSeed(seedMix('s1', PARTS, undefined), PARTS)).toBe(true);
+  });
+
+  it('is the parts that are left on, once one is off', () => {
+    expect(seedMix('s1', PARTS, ['vocals'])).toBe('seed:s1/drums+bass+other');
+    expect(stemsOfSourceId(seedMix('s1', PARTS, ['vocals', 'bass']))).toEqual(['drums', 'other']);
+  });
+
+  // The point of the whole exercise: switching a part back on must leave
+  // everything else exactly as it was, so a seed being taken apart goes
+  // on being played from its parts rather than jumping back to the
+  // render — which is the same audio in name only.
+  it('stays on the parts when every one of them is back on', () => {
+    const whole = seedMix('s1', PARTS, []);
+    expect(whole).toBe('seed:s1/drums+bass+other+vocals');
+    expect(stemsOfSourceId(whole)).toEqual(PARTS);
+    // Still the whole of that seed, so it is named after the seed.
+    expect(isWholeSeed(whole, PARTS)).toBe(true);
+    expect(isWholeSeed(seedMix('s1', PARTS, ['vocals']), PARTS)).toBe(false);
+  });
+
+  it('keeps the parts in the order the list shows them', () => {
+    expect(seedMix('s1', PARTS, ['bass'])).toBe('seed:s1/drums+other+vocals');
   });
 });

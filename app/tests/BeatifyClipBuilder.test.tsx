@@ -93,7 +93,7 @@ function clipsMock(overrides: Partial<BeatifyClipClientApi> = {}): BeatifyClipCl
       source,
       label:
         source.kind === 'seed'
-          ? source.stems.length
+          ? source.stems.length && source.stems.length < 4
             ? `Live Set A · ${source.stems.join(' + ')}`
             : 'Live Set A'
           : 'clip',
@@ -266,12 +266,17 @@ describe('the source list', () => {
         expect.any(Number),
       ),
     );
-    // Turning it back on is the whole render again, not three stems summed.
+    // Turning it back on plays the seed from ALL FOUR of its parts, not
+    // back from the render: what was still on has to be left exactly as
+    // it was, or every switch would also nudge everything it did not
+    // touch. Nothing is separated for a seed nobody takes apart, though —
+    // the pane opens on the bare seed above, and only stops asking for
+    // the render once a switch is touched.
     fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
     await waitFor(() =>
       expect(clips.open).toHaveBeenLastCalledWith(
         'p1',
-        { kind: 'seed', id: 's1', stems: [] },
+        { kind: 'seed', id: 's1', stems: ['drums', 'bass', 'other', 'vocals'] },
         expect.any(Number),
       ),
     );
@@ -372,6 +377,10 @@ describe('switching a stem off leaves the source where it was', () => {
   const readout = () => screen.getByTestId('beatify-track-readout').textContent;
   const mixOf = (clips: BeatifyClipClientApi) =>
     (clips.audio as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
+  /** What the pane last went to fetch — asked for whether or not it is
+   *  sounding, so this is the mix even while stopped. */
+  const openedMix = (clips: BeatifyClipClientApi) =>
+    (clips.open as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
 
   /** The pane's title is the mix it is showing, so this waits for the new
    *  audio to have LANDED rather than merely been asked for. */
@@ -398,9 +407,12 @@ describe('switching a stem off leaves the source where it was', () => {
    *  seed's grid and so exactly as long as the whole render. */
   const openMix: BeatifyClipClientApi['open'] = async (_projectId, source) => {
     const stems = source.kind === 'seed' ? source.stems : [];
+    // The backend's own rule: every part on is the whole of the seed, and
+    // is called by the seed's name (`is_whole_seed`).
+    const whole = stems.length === 0 || stems.length === 4;
     return {
       source,
-      label: stems.length ? `Live Set A · ${stems.join(' + ')}` : 'Live Set A',
+      label: whole ? 'Live Set A' : `Live Set A · ${stems.join(' + ')}`,
       durationSecs: DURATION,
       sampleRate: 44100,
       channels: 2,
@@ -481,6 +493,75 @@ describe('switching a stem off leaves the source where it was', () => {
     expect(readout()).toBe(before);
     expect(screen.getByTestId('beatify-track-loop').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByTestId('beatify-track-playhead-readout').textContent).toBe(head);
+  });
+
+  // THE BUG THIS ALL CAME FROM. A project is minted EMPTY and the first
+  // track is imported into it, so the builder is already on screen,
+  // showing nothing, when its first seed arrives. Nobody ever clicked
+  // that seed — the pane falls back to it — and a stem switch that only
+  // spoke to what was clicked spoke to nothing at all: the switch lit
+  // up, the audio never moved.
+  it('switches the stems of a seed nobody clicked', async () => {
+    const clips = clipsMock();
+    const { rerender } = render(builder(project([]), clips));
+    await screen.findByTestId('beatify-builder-empty');
+    rerender(builder(project(), clips));
+    await screen.findByTestId('beatify-track-waveform');
+
+    fireEvent.click(await screen.findByTestId('beatify-stem-s1-vocals'));
+
+    await waitFor(() =>
+      expect(openedMix(clips)).toEqual({
+        kind: 'seed',
+        id: 's1',
+        stems: ['drums', 'bass', 'other'],
+      }),
+    );
+  });
+
+  // A run remembers the mix it was cut from, and it can only do that if
+  // the pane and the switches never disagree about what that was.
+  it('cuts runs from the mix that is playing', async () => {
+    await mount(clipsMock({ open: openMix }));
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
+    await showing('Live Set A · drums + bass + other');
+    await fourBeatsAt(0);
+    expect(blocks()[0].textContent).toContain('Live Set A · drums + bass + other');
+
+    // Everything back on is the whole of the seed again — played from its
+    // parts, but called by the seed's name, not by a list of all of them.
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
+    await showing('Live Set A');
+    selectBeats(8, 4);
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-drag-beats').textContent).toContain('4 beats'),
+    );
+    dragInto(0, 8);
+    expect(blocks()[1].textContent).toContain('Live Set A · 4');
+  });
+
+  // Separating a track onto the grid is seconds of work the first time a
+  // seed is taken apart. Saying nothing for those seconds is how a switch
+  // that works reads as a switch that does nothing.
+  it('says the switches have not landed yet while the parts are being made', async () => {
+    const waiting: Array<() => void> = [];
+    const clips = clipsMock({
+      open: async (projectId, source, buckets) => {
+        if (source.kind === 'seed' && source.stems.length) {
+          await new Promise<void>((resolve) => waiting.push(resolve));
+        }
+        return openMix(projectId, source, buckets);
+      },
+    });
+    await mount(clips);
+    const switches = () => screen.getByTestId('beatify-seed-stems-s1');
+    await waitFor(() => expect(switches().getAttribute('aria-busy')).toBe('false'));
+
+    fireEvent.click(screen.getByTestId('beatify-stem-s1-vocals'));
+    await waitFor(() => expect(switches().getAttribute('aria-busy')).toBe('true'));
+    waiting.forEach((land) => land());
+    await showing('Live Set A · drums + bass + other');
+    expect(switches().getAttribute('aria-busy')).toBe('false');
   });
 
   // The boundary: a DIFFERENT seed is different material, so that pane

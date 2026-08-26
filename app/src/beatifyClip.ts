@@ -27,6 +27,37 @@ export const seedSourceId = (seedId: string, stems: readonly string[] = []): Sou
 
 export const clipSourceId = (id: string): SourceId => `clip:${id}`;
 
+/** What a seed PLAYS, given which of its parts are switched off. `off`
+ *  undefined means nobody has touched its switches.
+ *
+ *  UNTOUCHED IS THE RENDER; TOUCHED IS THE PARTS — including when every
+ *  part is switched back on, which is why this returns the whole kit by
+ *  name rather than a bare seed id. Dropping the vocals has to leave the
+ *  drums exactly as they were, and a sum of stems is not sample-for-sample
+ *  the render they were separated out of: mixing the two means every
+ *  switch also nudges everything it did not touch. So a seed being taken
+ *  apart is played from its parts from then on, and a seed nobody is
+ *  taking apart costs no separated audio at all. */
+export function seedMix(
+  seedId: string,
+  parts: readonly string[],
+  off: readonly string[] | undefined,
+): SourceId {
+  if (off === undefined) return seedSourceId(seedId);
+  return seedSourceId(
+    seedId,
+    parts.filter((name) => !off.includes(name)),
+  );
+}
+
+/** Whether a source is a seed with all of `parts` playing — the whole of
+ *  it, however it is being resolved, so it is named after itself and not
+ *  after a list of everything it contains. */
+export function isWholeSeed(id: SourceId, parts: readonly string[]): boolean {
+  const on = stemsOfSourceId(id);
+  return on.length === 0 || (parts.length > 0 && on.length === parts.length);
+}
+
 /** IPC shape of a source: what the backend needs to find the audio. */
 export type SourceSpec =
   { kind: 'seed'; id: string; stems: string[] } | { kind: 'clip'; id: string };

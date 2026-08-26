@@ -315,7 +315,9 @@ impl<'a> Resolver<'a> {
                     .seed(&id)
                     .map(|s| s.name.clone())
                     .unwrap_or_else(|| format!("seed {id}"));
-                if stems.is_empty() {
+                // Every part on is the whole of it — the seed, called by
+                // its name, however it is being resolved.
+                if is_whole_seed(&stems) {
                     name
                 } else {
                     format!("{name} · {}", stems.join(" + "))
@@ -350,6 +352,16 @@ impl<'a> Resolver<'a> {
         }
         let audio = match &source {
             ClipSourceRef::Seed { id, stems } if stems.is_empty() => self.seed(id)?,
+            // THE WHOLE KIT IS THE WHOLE SEED, and can be had either way:
+            // its parts summed (what the pane asks for, so that dropping
+            // one leaves the others sample for sample as they were) or the
+            // render they were separated out of. Preferring the parts is
+            // what makes a switch exact; falling back to the render is
+            // what keeps a clip cut from the whole of a seed playable
+            // after the stem cache is cleared, or on another machine.
+            ClipSourceRef::Seed { id, stems } if is_whole_seed(stems) => {
+                self.submix(id, stems).or_else(|_| self.seed(id))?
+            }
             ClipSourceRef::Seed { id, stems } => self.submix(id, stems)?,
             // `resolved` has turned every legacy stem into a seed.
             ClipSourceRef::Stem { name } => {
@@ -385,9 +397,9 @@ impl<'a> Resolver<'a> {
         Ok(Arc::new(decode(&path, "the beatified render")?))
     }
 
-    /// The seed with only some of its parts switched on: the chosen stems
-    /// summed. Four-of-four is never asked for — the list turns all-on
-    /// back into the whole mix, which is the render itself.
+    /// The chosen parts of a seed, summed. All of them is a fair request:
+    /// the pane plays a seed it is taking apart from its parts even with
+    /// every one switched back on (see `audio` above).
     fn submix(&self, seed_id: &str, stems: &[String]) -> CmdResult<Arc<AudioData>> {
         let mut parts = Vec::new();
         for name in stems {
@@ -504,6 +516,17 @@ fn build_warp(audio: &AudioData, map: &WarpMap, out_secs: f64) -> AudioData {
 
 fn decode(path: &std::path::Path, what: &str) -> CmdResult<AudioData> {
     dj_analysis::decode_audio(path).map_err(|e| err(format!("reading {what}: {e}")))
+}
+
+/// Whether a stem selection is the whole of the seed: nothing named at
+/// all (the render), or every part there is (the render's parts, summed).
+/// Mirrors `isWholeSeed` in `app/src/beatifyClip.ts`.
+fn is_whole_seed(stems: &[String]) -> bool {
+    stems.is_empty()
+        || (stems.len() == dj_analysis::STEM_NAMES.len()
+            && dj_analysis::STEM_NAMES
+                .iter()
+                .all(|name| stems.iter().any(|s| s == name)))
 }
 
 fn stem_hint(state: &AppState) -> String {
