@@ -3749,9 +3749,19 @@ body {
 }
 
 /* The import modal before a track has been chosen: the picker IS the
-   dialog, so it gets the room it needs and nothing else is drawn. */
+   dialog, so it gets the room it needs and nothing else is drawn. The
+   matches sit INLINE under the search box here — floating them over a
+   dialog with nothing else in it only leaves a hole where the list would
+   be, and the dialog's own scroll would clip them. */
 .beatify-modal-choose {
   width: min(560px, 92vw);
+}
+
+.beatify-modal-choose .track-picker-list {
+  position: static;
+  margin-top: 4px;
+  max-height: 46vh;
+  box-shadow: none;
 }
 
 .beatify-choose-hint {
@@ -3767,9 +3777,13 @@ body {
   filter: saturate(0.6);
 }
 
+/* Sizes to its input and nothing more. A flex-basis here would be the
+   MAIN axis, and this sits in column flex (the choose dialog) as often as
+   in a row: growing there makes a 240px-tall empty box with the matches
+   stranded at the bottom of it. Rows that want it wide size the wrapper
+   around it (.beatify-file). */
 .track-picker {
   position: relative;
-  flex: 1 1 240px;
 }
 
 .track-picker-input {

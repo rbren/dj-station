@@ -879,7 +879,12 @@ offset))`, offset in position units — so the knob's curve shapes the
   `suspended` prop) and both window keydown handlers — the builder's and
   `BeatifyTrackView`'s — return early, after pausing what was sounding.
   Pinned by `app/tests/TrackPicker.test.tsx` and the MOD-A0 cases in
-  `BeatifyView.test.tsx`.
+  `BeatifyView.test.tsx`. Layout invariant (CSS-pinned in the same test):
+  `.track-picker` carries NO flex sizing — a flex-basis is the main axis,
+  and the choose dialog is a column, so it would grow into an empty box
+  with the matches stranded at its bottom; and in that dialog the match
+  list is `position: static` (inline under the box) rather than floating
+  over a dialog that holds nothing else.
 - Beatify's frontend: `BeatifyView.tsx` (tab shell: track list,
   run/verdict state, owns which track is open), `BeatifyModal.tsx` (the
   detection report + audition) and, once a track is beatified,

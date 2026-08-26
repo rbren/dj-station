@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MAX_SHOWN, TrackPicker, matchTracks } from '../src/components/TrackPicker';
@@ -96,6 +97,23 @@ describe('the searchable track picker', () => {
     fireEvent.keyDown(search(), { key: 'Escape' });
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(search().value).toContain('Boys of Summer');
+  });
+
+  // jsdom doesn't lay anything out, so pin the stylesheet directly: the
+  // picker used to carry `flex: 1 1 240px`, which in the Beatify import
+  // dialog (a COLUMN flex) grew it into an empty 240px box with its
+  // matches stranded at the bottom — a hole between search and results.
+  it('.track-picker never grows past its input, and lists inline in the import dialog', () => {
+    // vitest runs with app/ (the vite root) as cwd.
+    const css = readFileSync('src/styles.css', 'utf-8');
+    const rule = /\.track-picker\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(rule).toMatch(/position:\s*relative/);
+    expect(rule).not.toMatch(/flex/);
+    // The choose dialog is nothing but the picker: its matches belong
+    // under the box, in the flow, not floating over the empty dialog.
+    const choose =
+      /\.beatify-modal-choose\s+\.track-picker-list\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(choose).toMatch(/position:\s*static/);
   });
 
   // Space is play/pause on every page this can appear on: typing a query
