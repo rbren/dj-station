@@ -75,3 +75,61 @@ fn e2e_launchcontrol_fader_button() {
     }
     check_case("launchcontrol-fader-button");
 }
+
+/// `launchcontrol-override-fader`: the same fader, wired the way the APP
+/// wires it — `auto_wire_style_on_connect` puts a surface wire into
+/// Override, so the fader IS the VCA's gain. The gain knob is saved wide
+/// open on purpose: were the mode ever to fall back to CV, the patch
+/// would render at full level throughout instead of following the fader.
+fn regen_launchcontrol_override_fader() {
+    let dir = crate::common::e2e::case_dir("launchcontrol-override-fader");
+
+    let mut e = Engine::new(
+        EngineConfig {
+            master_channels: 1,
+            ..EngineConfig::default()
+        },
+        crate::common::registry(),
+    )
+    .unwrap();
+    e.add_module("lcxl1", dj_engine::LAUNCH_CONTROL_ID).unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("lcxl1", "c1_fader", "vca1", "cv").unwrap();
+    e.auto_wire_style_on_connect("lcxl1", "c1_fader", "vca1", "cv")
+        .unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
+    e.set_knob_value("vca1", "cv", 10.0).unwrap();
+    e.save_patch(&dir.join("patch"), "e2e-launchcontrol-override-fader")
+        .unwrap();
+
+    let msg = |frame: u64, data: [u8; 3]| LaunchControlEventSpec {
+        instance: "lcxl1".into(),
+        frame,
+        data,
+    };
+    write_events(
+        &dir,
+        &EventsFile {
+            seconds: 0.5,
+            launch_control: vec![
+                // Silent until the fader moves: an override jack reads the
+                // wire, not the knob it is drawn over.
+                msg(4_000, [0xB8, 77, 32]),
+                msg(10_000, [0xB8, 77, 96]),
+                msg(16_000, [0xB8, 77, 0]),
+            ],
+            ..EventsFile::default()
+        },
+    );
+}
+
+#[test]
+fn e2e_launchcontrol_override_fader() {
+    if regen() {
+        regen_launchcontrol_override_fader();
+    }
+    check_case("launchcontrol-override-fader");
+}

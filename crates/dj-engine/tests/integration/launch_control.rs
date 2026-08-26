@@ -233,6 +233,75 @@ fn launch_control_node_round_trips_through_patch() {
     assert_eq!(loaded.tap("scope1", "in").unwrap().instantaneous, 10.0);
 }
 
+/// A surface control IS a value, so the app's wire-time rule
+/// (`auto_wire_style_on_connect`, run by the `connect_wire` command)
+/// puts the jack it lands on into Override instead of CV: the fader in
+/// the user's hand sets the gain rather than adding to whatever the knob
+/// was left at.
+#[test]
+fn a_wire_from_the_surface_takes_the_input_over() {
+    use dj_engine::WireStyle;
+    let mut engine = crate::common::default_engine();
+    engine.add_module("lcxl1", LAUNCH_CONTROL_ID).unwrap();
+    engine.add_module("lfo1", "com.dj.lfo").unwrap();
+    engine.add_module("vca1", "com.dj.vca").unwrap();
+    engine.add_module("vca2", "com.dj.vca").unwrap();
+
+    engine.connect("lcxl1", "c1_fader", "vca1", "cv").unwrap();
+    engine
+        .auto_wire_style_on_connect("lcxl1", "c1_fader", "vca1", "cv")
+        .unwrap();
+    assert_eq!(
+        engine.knob_state("vca1", "cv").unwrap().wire_style,
+        WireStyle::Override
+    );
+
+    // An ordinary modulation source still lands as CV.
+    engine.connect("lfo1", "bi", "vca2", "cv").unwrap();
+    engine
+        .auto_wire_style_on_connect("lfo1", "bi", "vca2", "cv")
+        .unwrap();
+    assert_eq!(
+        engine.knob_state("vca2", "cv").unwrap().wire_style,
+        WireStyle::Cv
+    );
+
+    // Only the FIRST wire decides: a fader added on top of an LFO leaves
+    // the mode the patch is already running in alone.
+    engine.connect("lcxl1", "c2_fader", "vca2", "cv").unwrap();
+    engine
+        .auto_wire_style_on_connect("lcxl1", "c2_fader", "vca2", "cv")
+        .unwrap();
+    assert_eq!(
+        engine.knob_state("vca2", "cv").unwrap().wire_style,
+        WireStyle::Cv
+    );
+}
+
+/// The audible half of the rule: under Override the knob is inert and the
+/// fader's own volts arrive at the input, clamped to the knob's range.
+#[test]
+fn an_overridden_input_reads_the_surface_and_ignores_its_knob() {
+    let mut engine = crate::common::default_engine();
+    engine.add_module("lcxl1", LAUNCH_CONTROL_ID).unwrap();
+    engine.add_module("vca1", "com.dj.vca").unwrap();
+    engine.connect("lcxl1", "c1_fader", "vca1", "cv").unwrap();
+    engine
+        .auto_wire_style_on_connect("lcxl1", "c1_fader", "vca1", "cv")
+        .unwrap();
+    // A gain knob left wide open must not add to the fader.
+    engine.set_knob_value("vca1", "cv", 10.0).unwrap();
+
+    inject(&mut engine, "lcxl1", [0xB8, C1_FADER_CC, 0]);
+    assert_eq!(
+        engine.tap("vca1", "cv").unwrap().instantaneous,
+        0.0,
+        "fader down closes the VCA even with the knob open"
+    );
+    inject(&mut engine, "lcxl1", [0xB8, C1_FADER_CC, 127]);
+    assert_eq!(engine.tap("vca1", "cv").unwrap().instantaneous, 10.0);
+}
+
 /// Regression (the Hands/QWERTY lesson): a module added mid-session must
 /// apply feeds immediately. Events carry the GLOBAL engine frame clock,
 /// so an RT module whose local clock started at 0 would see every event

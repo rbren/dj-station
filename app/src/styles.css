@@ -343,6 +343,125 @@ body {
   border-radius: 4px;
 }
 
+/* --- Live readouts on output jacks --------------------------------------
+   Modules that ARE a piece of hardware (the Launch Control XL) draw every
+   output as the control it comes off, so the panel reads like the surface
+   in front of you: the jack keeps its socket and its label and wears a
+   dial, a fader or a lit pad above them, following the live signal. All of
+   it is read-only decoration — the jack underneath still takes the click
+   that makes a wire, so nothing here may swallow a pointer event. The
+   fixed cell width is what lines the rows up into a grid. */
+
+.jack-with-readout {
+  flex-direction: column;
+  gap: 3px;
+  width: 40px;
+}
+
+.jack-with-readout .jack-name {
+  width: 100%;
+  text-align: center;
+}
+
+.jack-readout {
+  position: relative;
+  flex: none;
+  pointer-events: none;
+}
+
+.jack-readout-dial {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #3a4049, #262a31 70%);
+  border: 2px solid #3c424c;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+/* Same −135°…+135° sweep as a knob's pointer (angleFor in Knob.tsx),
+   pivoting on the dial's centre. */
+.jack-readout-pointer {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 2px;
+  height: 7px;
+  background: var(--accent, #62d0ff);
+  border-radius: 1px;
+  transform-origin: 50% 7px;
+}
+
+.jack-readout-fader {
+  width: 16px;
+  height: 34px;
+}
+
+.jack-readout-track {
+  position: absolute;
+  left: 50%;
+  top: 1px;
+  bottom: 1px;
+  width: 4px;
+  transform: translateX(-50%);
+  background: #0d1014;
+  border: 1px solid #2a2e35;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.jack-readout-cap {
+  position: absolute;
+  left: 50%;
+  width: 16px;
+  height: 7px;
+  transform: translate(-50%, 50%);
+  background: linear-gradient(180deg, #4a515c, #2e333b);
+  border: 1px solid #1a1d22;
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.jack-readout-cap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 100%;
+  height: 2px;
+  background: var(--accent, #62d0ff);
+}
+
+/* Buttons are amber pads, lit while the gate is high — the colour the
+   hardware's own track buttons use. */
+.jack-readout-pad {
+  width: 22px;
+  height: 13px;
+  border-radius: 3px;
+  background: #23272e;
+  border: 1px solid #3a4049;
+}
+
+.jack-readout-pad-on {
+  background: #e0a44a;
+  border-color: #f0bc6a;
+  box-shadow: 0 0 7px rgba(224, 164, 74, 0.75);
+}
+
+/* Surface rows sit flush under one another: one instrument face, not six
+   lists of jacks. */
+.output-group-surface {
+  gap: 1px;
+}
+
+.output-group-surface + .output-group-surface {
+  margin-top: 3px;
+}
+
+.output-group-surface .output-group-jacks {
+  row-gap: 0;
+  column-gap: 4px;
+}
+
 /* Every dial/toggle control renders inside the same 32x32 box so
    switching styles never shifts the panel layout. */
 .knob {
@@ -1853,6 +1972,12 @@ body {
 
 .module-outputs .jack {
   width: auto;
+}
+
+/* ...except a surface readout, whose fixed cell width is what makes the
+   rows line up column-for-column (see .jack-with-readout). */
+.module-outputs .jack-with-readout {
+  width: 40px;
 }
 
 /* Inline output jack living inside an input group (layout cells with

@@ -176,7 +176,10 @@ export function attenOffsetForSpread(
   };
 }
 
-const angleFor = (position: number) => -135 + clamp01(position) * 270;
+/** Dial sweep: position 0..1 over the usual −135°…+135° arc. Exported so
+ *  read-only readouts (a control surface's output jacks) point the same
+ *  way as the knob they mirror. */
+export const angleFor = (position: number) => -135 + clamp01(position) * 270;
 
 /** SVG arc along the dial's sweep between two knob positions. */
 function arcPath(fromPos: number, toPos: number, cx: number, cy: number, r: number): string {

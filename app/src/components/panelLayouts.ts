@@ -38,11 +38,21 @@ export interface GroupSpec {
   break?: boolean;
 }
 
+/** How an output jack draws its live value, for modules whose outputs ARE
+ *  physical controls (a MIDI control surface): the jack is topped with a
+ *  read-only dial, fader or lit pad following the signal it is putting
+ *  out. Purely a readout — the value is the module's, never the user's. */
+export type OutputControl = 'knob' | 'fader' | 'button';
+
 export interface OutputGroupSpec {
   title?: string;
   outputs: string[];
   /** Grid column count; outputs wrap freely when unset. */
   columns?: number;
+  /** Draw every jack in the group with a live value readout of this kind. */
+  control?: OutputControl;
+  /** Per-jack display labels (jack id → label); defaults to the jack id. */
+  labels?: Record<string, string>;
   /** Start this group on a new line of the output strip. */
   break?: boolean;
   /** Left inset in px (e.g. the QWERTY module's staggered key rows). */
@@ -85,9 +95,22 @@ const seqIds = (prefix: string, from: number, to: number): string[] => {
   return out;
 };
 
-/** One row of the Launch Control XL surface, left to right: the jack ids
- *  are column-major (`c1_a` … `c8_ctrl`), the panel shows them by row. */
-const lcRow = (suffix: string): string[] => [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `c${n}_${suffix}`);
+/** One row of the Launch Control XL surface, drawn the way the hardware
+ *  is laid out: eight columns of it, each jack topped with a live readout
+ *  of the control it comes off and labelled by its column number, so the
+ *  panel reads as the device does (three knob rows, the faders, then the
+ *  two button rows). Jack ids are column-major (`c1_a` … `c8_ctrl`). */
+const lcRow = (title: string, suffix: string, control: OutputControl): OutputGroupSpec => {
+  const columns = [1, 2, 3, 4, 5, 6, 7, 8];
+  return {
+    title,
+    outputs: columns.map((n) => `c${n}_${suffix}`),
+    labels: Object.fromEntries(columns.map((n) => [`c${n}_${suffix}`, String(n)])),
+    columns: 8,
+    control,
+    break: true,
+  };
+};
 
 type LayoutFactory = (manifest: Manifest) => PanelLayout;
 
@@ -765,12 +788,12 @@ const LAYOUTS: Record<string, LayoutFactory> = {
   'builtin.launchcontrol': () => ({
     groups: [],
     outputGroups: [
-      { title: 'send a', outputs: lcRow('a'), columns: 8, break: true },
-      { title: 'send b', outputs: lcRow('b'), columns: 8, break: true },
-      { title: 'pan', outputs: lcRow('pan'), columns: 8, break: true },
-      { title: 'fader', outputs: lcRow('fader'), columns: 8, break: true },
-      { title: 'focus', outputs: lcRow('focus'), columns: 8, break: true },
-      { title: 'control', outputs: lcRow('ctrl'), columns: 8, break: true },
+      lcRow('send a', 'a', 'knob'),
+      lcRow('send b', 'b', 'knob'),
+      lcRow('pan / device', 'pan', 'knob'),
+      lcRow('faders', 'fader', 'fader'),
+      lcRow('track focus', 'focus', 'button'),
+      lcRow('track control', 'ctrl', 'button'),
     ],
   }),
 

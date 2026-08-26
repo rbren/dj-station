@@ -1037,7 +1037,14 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'module it drives \u2014 only one at a time, so several of these can ' +
       'sit on the rack as saved control layouts and you hand the surface ' +
       'to whichever one you are playing. Values hold when the controller ' +
-      'goes away, so unplugging never jumps the patch.',
+      'goes away, so unplugging never jumps the patch. The panel is a ' +
+      'picture of the surface: every jack wears a live dial, fader cap or ' +
+      'lit pad, so you can see where the hardware is standing without ' +
+      'looking down. Wiring one of these outputs sets the input it lands ' +
+      'on to Override, not CV \u2014 the physical control IS the value, so ' +
+      'the knob it is wired to goes inert and follows the surface ' +
+      '(right-click that input and set Wire mode back to CV to have the ' +
+      'surface add to the knob instead).',
     outputs: {
       'c#_a': 'Column #, top knob (Send A), 0..+10 V.',
       'c#_b': 'Column #, middle knob (Send B), 0..+10 V.',

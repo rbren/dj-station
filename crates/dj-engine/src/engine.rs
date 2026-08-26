@@ -1406,13 +1406,24 @@ impl Engine {
             .count())
     }
 
+    /// True when a prospective wire STARTS at a control surface — a module
+    /// that is a piece of hardware, whose outputs are the positions of real
+    /// knobs, faders and buttons (see [`BuiltinKind::is_control_surface`]).
+    pub fn wire_is_from_control_surface(&self, from_id: &str, from_jack: &str) -> Result<bool> {
+        let (from_id, _) = self.resolve_out_jack(from_id, from_jack)?;
+        let node = self.node_idx(&from_id)?;
+        Ok(BuiltinKind::is_control_surface(&self.nodes[node].ext_id))
+    }
+
     /// User wire-time auto blend mode (called by the app right after
-    /// `connect`): the FIRST wire into a jack decides — pitch into pitch
-    /// (v/oct on both ends) flips to Override so a keyboard note wire SETS
-    /// the oscillator's pitch, anything else resets to CV so a stale
-    /// Override never captures an LFO. Extra wires sum without touching
-    /// the mode (vibrato on top of a note CV). Patch load and undo restore
-    /// the saved field instead of re-deriving it.
+    /// `connect`): the FIRST wire into a jack decides — Override when the
+    /// wire carries a POSITION rather than a modulation, so it SETS what it
+    /// lands on: pitch into pitch (v/oct on both ends), or anything out of
+    /// a control surface, where the physical fader in the user's hand is
+    /// the value. Anything else resets to CV so a stale Override never
+    /// captures an LFO. Extra wires sum without touching the mode (vibrato
+    /// on top of a note CV). Patch load and undo restore the saved field
+    /// instead of re-deriving it.
     pub fn auto_wire_style_on_connect(
         &mut self,
         from_id: &str,
@@ -1423,7 +1434,9 @@ impl Engine {
         if self.input_wire_count(to_id, to_jack)? != 1 {
             return Ok(());
         }
-        let style = if self.wire_is_pitch_pair(from_id, from_jack, to_id, to_jack)? {
+        let sets_the_value = self.wire_is_pitch_pair(from_id, from_jack, to_id, to_jack)?
+            || self.wire_is_from_control_surface(from_id, from_jack)?;
+        let style = if sets_the_value {
             crate::knob::WireStyle::Override
         } else {
             crate::knob::WireStyle::Cv

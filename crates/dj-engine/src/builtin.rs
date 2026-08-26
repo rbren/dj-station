@@ -47,6 +47,15 @@ impl BuiltinKind {
         }
     }
 
+    /// Modules that ARE a piece of hardware: every output is the position
+    /// of a real knob, fader or button the user is holding. A wire out of
+    /// one therefore SETS what it lands on rather than modulating it —
+    /// the auto-Override rule in [`crate::Engine::auto_wire_style_on_connect`],
+    /// the same reasoning as a pitch wire into a pitch input.
+    pub fn is_control_surface(ext_id: &str) -> bool {
+        matches!(Self::from_ext_id(ext_id), Some(BuiltinKind::LaunchControl))
+    }
+
     pub fn ext_id(self) -> &'static str {
         match self {
             BuiltinKind::AudioOut => AUDIO_OUT_ID,

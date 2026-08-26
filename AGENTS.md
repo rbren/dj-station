@@ -286,6 +286,24 @@ fails if it's missing.
   by the shell's hot-plug watcher (`app/src-tauri/src/launch_control.rs`:
   1 s port scan behind `midi-hw`; device messages cross a channel to a
   forwarder thread so midir's callback never waits on the engine lock).
+  A SURFACE WIRE SETS WHAT IT LANDS ON: a module whose outputs are
+  physical controls (`BuiltinKind::is_control_surface`) is the second
+  auto-Override case in `auto_wire_style_on_connect`, beside the v/oct
+  pitch pair — the fader in your hand IS the value, so the knob it is
+  wired to goes inert rather than being added to. Same first-wire-decides
+  rule, same per-patch `wire_style` a user can set back to CV. Pinned by
+  `launch_control.rs`'s wire tests and the `launchcontrol-override-fader`
+  golden (whose gain knob is saved wide open, so a regression to CV would
+  render at full level instead of following the fader).
+  The panel is a PICTURE of the device: output groups may carry a
+  `control` (`OutputGroupSpec.control`, panelLayouts.ts) and per-jack
+  `labels`, which draws each jack with a read-only dial / fader cap /
+  lit pad above its socket (`JackReadoutVisual` in Jack.tsx, fed by the
+  telemetry the jack ALREADY subscribes to — no second subscription, no
+  panel re-render per tick). Readouts are drawn against the unipolar
+  0..10 V a physical control puts out, gates light at the engine's ≥ 1 V,
+  and the fixed `.jack-with-readout` cell width is what lines the six
+  rows up into one grid.
 - Params vs. inputs (post-M5 refactor): ALL WASM-module controls
   (oscillator `waveform`, ADSR `attack/decay/sustain/release`, playback
   `loop`) are ordinary knob-backed input jacks — wireable, per-patch

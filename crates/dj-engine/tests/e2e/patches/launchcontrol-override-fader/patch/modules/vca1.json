@@ -1,0 +1,17 @@
+{
+  "ext": "com.dj.vca",
+  "knobs": {
+    "cv": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0,
+      "wire_style": "override"
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

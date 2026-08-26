@@ -37,6 +37,22 @@ const VCA: Manifest = {
   params: [],
 };
 
+// A control surface: its output jacks are drawn as the hardware controls
+// they come off (dial / fader cap / lit pad), which must follow ticks like
+// any other live jack readout — again without the panel re-rendering.
+const LCXL: Manifest = {
+  id: 'builtin.launchcontrol',
+  name: 'Launch Control XL',
+  version: '0.1.0',
+  abi: 'native-1',
+  inputs: [],
+  outputs: [
+    { id: 'c1_fader', name: 'C1 Fader' },
+    { id: 'c1_focus', name: 'C1 Focus' },
+  ],
+  params: [],
+};
+
 function node(instance: string, manifest: Manifest, extra?: Record<string, unknown>) {
   return {
     instance_id: instance,
@@ -66,6 +82,7 @@ const state = {
       knobs: { pitch: { position: 0.1, atten: 1, offset: 0, wire_style: 'override' } },
       wired_inputs: ['pitch'],
     }),
+    node('lcxl-1', LCXL),
   ],
   // Output jacks are keyed `out:<id>` in tap_all responses.
   telemetry: {
@@ -73,6 +90,7 @@ const state = {
     'osc-2': { pitch: tele(0), 'out:audio': tele(2) },
     'vca-1': { in: tele(0), cv: tele(0), 'out:out': tele(3) },
     'osc-3': { pitch: tele(2), 'out:audio': tele(4) },
+    'lcxl-1': { 'out:c1_fader': tele(0), 'out:c1_focus': tele(0) },
   } as Record<string, Record<string, JackTelemetry>>,
 };
 
@@ -193,6 +211,22 @@ describe('telemetry tick render counts', () => {
     };
     await tick(100);
     expect(angle()).toBeCloseTo(81, 3);
+    expect(renderCounts).toEqual({});
+  });
+
+  it("keeps a control surface's readouts on the hardware, panel unmoved", async () => {
+    await mount();
+    const fader = () => screen.getByTestId('jack-readout-c1_fader').getAttribute('data-level');
+    const pad = () => screen.getByTestId('jack-readout-c1_focus').getAttribute('data-on');
+    expect(fader()).toBe('0.000');
+    expect(pad()).toBe('no');
+    state.telemetry = {
+      ...state.telemetry,
+      'lcxl-1': { 'out:c1_fader': tele(7.5), 'out:c1_focus': tele(10) },
+    };
+    await tick(100);
+    expect(fader()).toBe('0.750');
+    expect(pad()).toBe('yes');
     expect(renderCounts).toEqual({});
   });
 
