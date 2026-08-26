@@ -13,6 +13,7 @@ mod e2e_audio;
 mod e2e_beat_clip;
 mod e2e_camera;
 mod e2e_choreo;
+mod e2e_decks;
 mod e2e_effects;
 mod e2e_golden;
 mod e2e_hands;

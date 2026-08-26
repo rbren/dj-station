@@ -84,6 +84,11 @@ pub fn spawn_watcher(app: AppHandle) {
             // No active module (or none on the rack at all) is the normal
             // idle state, not an error.
             let _ = engine.launchcontrol_feed(frame, data);
+            // The same surface drives the Decks tab's bank directly (one
+            // column per slot) — a Decks bank is not a wired module, so
+            // it reads the device rather than a Launch Control module's
+            // jacks. Banks with `surface` off ignore this.
+            let _ = engine.decks_feed(data);
         }
     });
 

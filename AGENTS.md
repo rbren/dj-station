@@ -1065,6 +1065,36 @@ beatify::build`.
   written by the loader from the project's grid. Panel readout comes from
   `BeatClipShared` (position/clock BPM/beat/playing atomics published once
   per block), like `AudioShared`.
+- Decks bank (`builtin.decks`, `crates/dj-engine/src/decks.rs` +
+  `engine/decks_api.rs`, Tauri `app/src-tauri/src/decks.rs`, page
+  `app/src/components/DecksView.tsx`): EIGHT Beatify clips on ONE clock —
+  the module behind the Decks tab. The bank owns the tempo (`bpm` knob)
+  and a single beat position; a slot's playback rate is
+  `bank_bpm / source_bpm` through the shared `stretch.rs` granular
+  stretch, so a clip is stretched, never pitched. PHASE IS NOT PER SLOT:
+  every slot reads the SAME beat position modulo its own loop length
+  (clip beats + silent `tail`, minus its whole-beat `phase`), which is
+  what makes a 2-beat clip and an 8-beat clip start together with no
+  re-triggering; `align_beats` in the status is the gcd of a slot's loop
+  with every other loaded one (1 = shares nothing, e.g. 7 against 8) and
+  `cycle_beats` their lcm. A freshly loaded clip is MUTED, un-shifted and
+  tail-free — `decks_load` resets those, `decks_supply` deliberately does
+  NOT (it is the app layer handing over audio for a binding that already
+  exists, after a patch load or undo). The three tone controls are
+  first-order crossovers where the mid band is the REMAINDER of low and
+  high, so flat (1.0 = the surface knob at 12 o'clock) is bit-exact
+  bypass; level/mute/solo ramp per block rather than stepping. The
+  Launch Control XL drives a bank COLUMN-PER-SLOT (knobs high/mid/low,
+  fader level, the two buttons TOGGLE mute and solo) without being wired
+  to it: the shell forwards device messages to `decks_feed`, which only
+  reaches banks whose `surface` param is on, and `decks_inject` addresses
+  one bank directly for tests — the `launchcontrol_feed`/`_inject` split,
+  for the same reason. Slot state round-trips in the patch `ModuleFile`
+  (`decks` field); the clips' AUDIO does not, so `decks_pending` reports
+  what the app layer still owes and `decks::hydrate` re-assembles it
+  beside `beat_clip::hydrate`. Golden: `decks-bank-two-clips`, whose
+  sidecar carries the slot mix in a `deck_slots` section (a load resets a
+  slot, so the case sets the mix after the audio).
 - `crates/dj-engine/src/stretch.rs` is THE granular time-stretch: two
   voices, Hann overlap-add at 50 % hop (exact COLA, so unity rate is
   transparent), each grain WSOLA-aligned within ±`SEARCH_SECS` of the

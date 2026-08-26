@@ -44,5 +44,8 @@ describe('app shell layout (CSS-level pin)', () => {
     expect(rule('.clip-view')).toMatch(/overflow-y:\s*auto/);
     expect(rule('.docs-body')).toMatch(/overflow-y:\s*auto/);
     expect(rule('.picker-body')).toMatch(/overflow-y:\s*auto/);
+    // The Decks bank scrolls its own row of strips; the page must not.
+    expect(rule('.decks-view')).toMatch(/min-height:\s*0/);
+    expect(rule('.decks-strips')).toMatch(/overflow:\s*auto/);
   });
 });

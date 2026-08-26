@@ -37,6 +37,35 @@ pub struct TrackLoadSpec {
     /// so cases carry it in the sidecar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bpm: Option<f64>,
+    /// Which slot of a Decks bank the audio goes into.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<usize>,
+}
+
+/// One Decks slot's mix and place on the bank's grid, applied AFTER its
+/// audio. Loading a clip deliberately resets a slot (muted, un-shifted),
+/// so a case that wants to hear one says so here — the same shape as a
+/// deck's grid/cues arriving after `deck_load`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DecksSlotSpec {
+    pub instance: String,
+    pub slot: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mid: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub high: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mute: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solo: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<i32>,
 }
 
 /// Deck DJ metadata applied after load. In the app this comes from the
@@ -102,6 +131,8 @@ pub struct EventsFile {
     pub tracks: Vec<TrackLoadSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub decks: Vec<DeckSetupSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deck_slots: Vec<DecksSlotSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hands: Vec<HandsTraceSpec>,
 }
@@ -178,6 +209,18 @@ fn render_case(case: &str) -> PathBuf {
             engine
                 .audio_load(&t.instance, &case_dir.join(&t.file), t.bpm)
                 .unwrap();
+        } else if ext == "builtin.decks" {
+            // A bank's clips come from Beatify projects the same way a
+            // Beat Clip's do, so the case carries the rendered audio and
+            // the tempo it was rendered at.
+            engine
+                .decks_load_file(
+                    &t.instance,
+                    t.slot.unwrap_or(0),
+                    &case_dir.join(&t.file),
+                    t.bpm.unwrap_or(120.0),
+                )
+                .unwrap();
         } else if ext == "builtin.beat_clip" {
             // A clip is assembled by the app layer from a Beatify project,
             // so cases carry the rendered audio (and the tempo it was
@@ -205,6 +248,36 @@ fn render_case(case: &str) -> PathBuf {
         if let Some(stems) = &d.stems {
             let paths: [PathBuf; 4] = std::array::from_fn(|i| case_dir.join(&stems[i]));
             engine.deck_load_stems(&d.instance, &paths).unwrap();
+        }
+    }
+    for d in &events.deck_slots {
+        use dj_engine::decks::SlotControl;
+        let mut set = |c: SlotControl, v: f32| {
+            engine.decks_set_control(&d.instance, d.slot, c, v).unwrap();
+        };
+        if let Some(v) = d.level {
+            set(SlotControl::Level, v);
+        }
+        if let Some(v) = d.low {
+            set(SlotControl::Low, v);
+        }
+        if let Some(v) = d.mid {
+            set(SlotControl::Mid, v);
+        }
+        if let Some(v) = d.high {
+            set(SlotControl::High, v);
+        }
+        if let Some(v) = d.mute {
+            set(SlotControl::Mute, if v { 10.0 } else { 0.0 });
+        }
+        if let Some(v) = d.solo {
+            set(SlotControl::Solo, if v { 10.0 } else { 0.0 });
+        }
+        if let Some(v) = d.tail {
+            engine.decks_set_tail(&d.instance, d.slot, v).unwrap();
+        }
+        if let Some(v) = d.phase {
+            engine.decks_set_phase(&d.instance, d.slot, v).unwrap();
         }
     }
     for ev in &events.midi {

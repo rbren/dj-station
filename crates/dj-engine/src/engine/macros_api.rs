@@ -537,6 +537,7 @@ impl Engine {
                 midi_mappings: Vec::new(),
                 midi_led_mappings: Vec::new(),
                 choreo: None,
+                decks: None,
                 track: None,
                 clip: None,
                 sync_to: None,

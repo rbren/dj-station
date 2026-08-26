@@ -178,10 +178,12 @@ fn regen_patches() {
                     instance: "play1".into(),
                     file: "tone.wav".into(),
                     bpm: None,
+                    slot: None,
                 }],
                 decks: vec![],
                 hands: vec![],
                 launch_control: vec![],
+                ..EventsFile::default()
             },
         );
     }
@@ -217,6 +219,7 @@ fn regen_deck_patches() {
                     instance: "deck1".into(),
                     file: "tone.wav".into(),
                     bpm: None,
+                    slot: None,
                 }],
                 decks: vec![DeckSetupSpec {
                     instance: "deck1".into(),
@@ -227,6 +230,7 @@ fn regen_deck_patches() {
                 }],
                 hands: vec![],
                 launch_control: vec![],
+                ..EventsFile::default()
             },
         );
     }
@@ -268,11 +272,13 @@ fn regen_deck_patches() {
                         instance: "deckA".into(),
                         file: "tone-a.wav".into(),
                         bpm: None,
+                        slot: None,
                     },
                     TrackLoadSpec {
                         instance: "deckB".into(),
                         file: "tone-b.wav".into(),
                         bpm: None,
+                        slot: None,
                     },
                 ],
                 decks: vec![
@@ -293,6 +299,7 @@ fn regen_deck_patches() {
                 ],
                 hands: vec![],
                 launch_control: vec![],
+                ..EventsFile::default()
             },
         );
     }
@@ -350,6 +357,7 @@ fn regen_stem_patches() {
                     instance: "deck1".into(),
                     file: "mix.wav".into(),
                     bpm: None,
+                    slot: None,
                 }],
                 decks: vec![DeckSetupSpec {
                     instance: "deck1".into(),
@@ -365,6 +373,7 @@ fn regen_stem_patches() {
                 }],
                 hands: vec![],
                 launch_control: vec![],
+                ..EventsFile::default()
             },
         );
     }

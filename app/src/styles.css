@@ -5306,3 +5306,325 @@ body {
 .beatify-drag-beats:disabled {
   cursor: default;
 }
+
+/* ------------------------------------------------------------------ */
+/* Decks tab: eight clips on one clock                                 */
+/* ------------------------------------------------------------------ */
+
+/* Eight channel strips, sized so the whole bank is on screen at once —
+   a mixer you have to scroll is a mixer you cannot read mid-mix. Below
+   that width the strips keep their minimum and the row scrolls. */
+.decks-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.decks-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+/* The tempo is the one number that drives everything else on the page,
+   so it is the biggest thing on it. */
+.decks-tempo {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.decks-tempo-label {
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.decks-bpm {
+  width: 5.5ch;
+  font-size: var(--fs-2xl);
+  padding: 2px 4px;
+  text-align: right;
+}
+
+.decks-tempo-unit {
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.decks-tempo-slider {
+  align-self: center;
+  width: 160px;
+}
+
+.decks-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
+}
+
+.decks-beat {
+  color: var(--ink);
+  font-size: var(--fs-md);
+}
+
+.decks-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+/* Whether the hardware is driving the bank, in the same pill language as
+   the engine's own status. */
+.decks-surface {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+}
+
+.decks-surface::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentcolor;
+  box-shadow: 0 0 6px currentcolor;
+}
+
+.decks-surface[data-state='on'] {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--line-strong));
+}
+
+.decks-surface[data-state='waiting'] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line-strong));
+}
+
+.decks-btn.is-on {
+  background: color-mix(in srgb, var(--brand) 28%, var(--canvas));
+  border-color: color-mix(in srgb, var(--brand) 70%, var(--line-strong));
+}
+
+/* Solo is the one control that changes what everyone ELSE does, so it
+   gets the "armed, look here" amber instead of the brand tint. */
+.decks-btn-solo.is-on {
+  background: color-mix(in srgb, var(--cue) 26%, var(--canvas));
+  border-color: color-mix(in srgb, var(--cue) 70%, var(--line-strong));
+}
+
+.decks-add {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 7px 14px;
+}
+
+.decks-strips {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(156px, 1fr);
+  gap: 8px;
+  padding: 10px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.decks-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-panel);
+}
+
+/* An empty deck stays a deck — same box, quieter ink — so the bank does
+   not change shape as clips come and go. */
+.decks-slot-empty {
+  background: var(--surface-sunken);
+}
+
+.decks-slot-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.decks-slot-number {
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  min-width: 1.5ch;
+}
+
+.decks-slot-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  padding: 3px 6px;
+  font-size: var(--fs-sm);
+}
+
+.decks-slot-empty .decks-slot-name {
+  color: var(--ink-dim);
+}
+
+.decks-slot-eject {
+  padding: 3px 6px;
+  color: var(--ink-dim);
+}
+
+/* Beats, source tempo, stretch — the three numbers a DJ checks before
+   letting a clip in. */
+.decks-slot-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.decks-slot-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.decks-slot-facts dt {
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.decks-slot-facts dd {
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  margin: 0;
+}
+
+.decks-slot-note {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  line-height: 1.35;
+}
+
+/* A clip that shares no beat with the rest is not broken — it just will
+   not lock, and the page says so in ink, not in red. */
+.decks-slot-adrift {
+  color: var(--warn);
+}
+
+.decks-slot-missing {
+  color: var(--fault);
+}
+
+.decks-beats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-height: 8px;
+}
+
+.decks-beat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+/* Silence hung on the end is still part of the loop, so it is drawn —
+   as an outline, because nothing sounds there. */
+.decks-beat-tail {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.decks-beat-dot.on {
+  background: var(--brand);
+}
+
+.decks-beat-tail.on {
+  background: var(--brand-dim);
+}
+
+.decks-tone {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.decks-mix {
+  display: flex;
+  gap: 8px;
+}
+
+.decks-mix-side {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.decks-btn {
+  padding: 3px 6px;
+  font-size: var(--fs-xs);
+}
+
+/* Add/remove a beat: a label, two nudge buttons and the count between
+   them, so the number the buttons change is the number you are reading. */
+.decks-step {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.decks-step-label {
+  flex: 1;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.decks-step button {
+  padding: 0 5px;
+  line-height: 1.6;
+  font-size: var(--fs-xs);
+}
+
+.decks-step-value {
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  min-width: 2ch;
+  text-align: center;
+}
+
+.decks-clip-dialog {
+  width: min(680px, 90vw);
+}

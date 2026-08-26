@@ -20,6 +20,7 @@ use std::path::Path;
 
 use crate::beat_clip::BeatClipRef;
 use crate::choreo::ChoreoState;
+use crate::decks::DecksState;
 use crate::engine::{Engine, EngineConfig, MidiMappingInfo};
 use crate::knob::KnobState;
 use crate::macros::{MacroDef, MacroInstance, MacroLibrary};
@@ -61,6 +62,12 @@ pub struct ModuleFile {
     /// save/load, jack slots included so wires stay valid).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choreo: Option<ChoreoState>,
+    /// A Decks bank's eight slots: which clip each plays, its level, tone
+    /// controls, mute/solo and its place on the bank's grid. Like a Beat
+    /// Clip's binding, the clips' AUDIO is not here — the app layer
+    /// re-assembles it after a load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decks: Option<DecksState>,
     /// Track path loaded into a Playback/Deck node (absolute;
     /// library-managed). Deck cues/loops/beatgrids are *not* stored here —
     /// they are track metadata in the library DB (PRD §7) and get
@@ -329,6 +336,7 @@ impl Engine {
                     midi_mappings: Vec::new(),
                     midi_led_mappings: Vec::new(),
                     choreo: None,
+                    decks: None,
                     track: None,
                     clip: None,
                     sync_to: None,
@@ -391,6 +399,7 @@ impl Engine {
             midi_mappings: info.midi_mappings.clone(),
             midi_led_mappings: info.midi_led_mappings.clone(),
             choreo: info.choreo.clone(),
+            decks: self.decks_state(&info.instance_id).ok(),
             track: info.track_path.clone(),
             clip: info.clip.clone(),
             sync_to: self.deck_sync_to_by_node(node_idx),
@@ -697,6 +706,9 @@ impl Engine {
         if let Some(c) = &mf.choreo {
             self.choreo_set_state(instance_id, c.clone())?;
         }
+        if let Some(d) = &mf.decks {
+            self.decks_set_state(instance_id, d.clone())?;
+        }
         if let Some(track) = &mf.track {
             let kind = crate::builtin::BuiltinKind::from_ext_id(&mf.ext);
             self.load_module_track(instance_id, kind, track)?;
@@ -928,6 +940,15 @@ impl Engine {
                 if self.nodes[node].track_path.as_deref() != Some(track.as_str()) {
                     let kind = self.nodes[node].builtin_kind();
                     self.load_module_track(instance_id, kind, track)?;
+                }
+            }
+
+            // Decks bank (slots, mix, grid). Replaced wholesale when it
+            // differs; the clips' audio is the app layer's to re-assemble,
+            // and `decks_pending` reports what it owes.
+            if let Some(d) = &mf.decks {
+                if self.decks_state(instance_id).ok().as_ref() != Some(d) {
+                    self.decks_set_state(instance_id, d.clone())?;
                 }
             }
 

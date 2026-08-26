@@ -41,6 +41,7 @@ fn regen_beat_clip_double_time() {
                 instance: "bc1".into(),
                 file: "clip.wav".into(),
                 bpm: Some(120.0),
+                slot: None,
             }],
             ..EventsFile::default()
         },

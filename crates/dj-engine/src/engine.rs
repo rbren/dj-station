@@ -15,6 +15,7 @@ use crate::builtin::{
     MidiShared,
 };
 use crate::deck::{DeckCmd, DeckControl, DeckModule, DeckStatus, N_CUES};
+use crate::decks::{DecksControl, DecksRtModule, DecksShared};
 use crate::graph::{compute_plan, Graph, GraphEdit, GraphNode, GrowStorage, NodeStorage, WireSpec};
 use crate::knob::{position_for_value, JackRt, KnobConfig, KnobState};
 use crate::macros::{MacroDef, MacroInstance, MacroInterface, MacroLibrary, MacroPreviewNode};
@@ -32,6 +33,7 @@ mod audio_api;
 mod beat_clip_api;
 mod choreo_api;
 mod deck_api;
+mod decks_api;
 mod hands_api;
 mod hot_reload;
 mod launch_control_api;
@@ -385,6 +387,9 @@ pub struct Engine {
     beat_clips: HashMap<usize, BeatClipControl>,
     /// Control-side state per DJ Deck node (M2).
     decks: HashMap<usize, DeckControl>,
+    /// Control-side state per Decks BANK node (the Decks tab's eight clip
+    /// slots) — a different module from the DJ deck above.
+    clip_decks: HashMap<usize, DecksControl>,
     xruns: Arc<AtomicU64>,
     /// Blocks whose *processing* alone exceeded the block period — the
     /// engine itself was the bottleneck (as opposed to `xruns`, which on the
@@ -423,6 +428,9 @@ const CHOREO_QUEUE_CAP: usize = 64;
 const PLAYBACK_QUEUE_CAP: usize = 64;
 /// Pending control commands per Deck node (drained at the next block).
 const DECK_QUEUE_CAP: usize = 256;
+/// Pending commands per Decks bank node: a surface sweep is 48 values and
+/// each one ships a mix plus a timing command.
+const DECKS_QUEUE_CAP: usize = 256;
 
 /// CPU time consumed by the calling thread, in nanoseconds. Unlike wall
 /// time this excludes preemption, so per-block cost measured with it is
@@ -493,6 +501,7 @@ impl Engine {
             audios: HashMap::new(),
             beat_clips: HashMap::new(),
             decks: HashMap::new(),
+            clip_decks: HashMap::new(),
             xruns: Arc::new(AtomicU64::new(0)),
             proc_misses: Arc::new(AtomicU64::new(0)),
             max_proc_nanos: Arc::new(AtomicU64::new(0)),
@@ -688,6 +697,7 @@ impl Engine {
                 | BuiltinKind::Playback
                 | BuiltinKind::Audio
                 | BuiltinKind::BeatClip
+                | BuiltinKind::Decks
                 | BuiltinKind::Deck,
             ) => Err(anyhow!("{ext_id} modules are created via add_module")),
             None => {
@@ -763,6 +773,7 @@ impl Engine {
         let mut audio_ctl = None;
         let mut beat_clip_ctl = None;
         let mut deck_ctl = None;
+        let mut decks_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
             Some(BuiltinKind::Midi) => {
                 let (tx, rx) = rtrb::RingBuffer::new(4096);
@@ -841,6 +852,18 @@ impl Engine {
                     shared: shared.clone(),
                 });
                 Box::new(BeatClipModule::new(
+                    rx,
+                    garbage_tx,
+                    self.config.sample_rate,
+                    shared,
+                ))
+            }
+            Some(BuiltinKind::Decks) => {
+                let (tx, rx) = rtrb::RingBuffer::new(DECKS_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(DECKS_QUEUE_CAP);
+                let shared = Arc::new(DecksShared::default());
+                decks_ctl = Some(DecksControl::new(tx, garbage_rx, shared.clone()));
+                Box::new(DecksRtModule::new(
                     rx,
                     garbage_tx,
                     self.config.sample_rate,
@@ -1002,6 +1025,9 @@ impl Engine {
         if let Some(ctl) = deck_ctl {
             self.decks.insert(idx, ctl);
         }
+        if let Some(ctl) = decks_ctl {
+            self.clip_decks.insert(idx, ctl);
+        }
         self.node_by_id.insert(instance_id.to_string(), idx);
         self.nodes.insert(idx, info);
         if BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::LaunchControl) {
@@ -1080,6 +1106,7 @@ impl Engine {
         self.audios.remove(&slot);
         self.beat_clips.remove(&slot);
         self.decks.remove(&slot);
+        self.clip_decks.remove(&slot);
         // Other decks sync-locked to this one lose their master.
         for ctl in self.decks.values_mut() {
             if ctl.sync_to.as_deref() == Some(instance_id) {

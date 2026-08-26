@@ -25,6 +25,7 @@ import { ClipView, type ClipViewHandle } from './components/ClipView';
 import { beatClip, type BeatClipEntry, BEAT_CLIP_TYPE } from './beatClip';
 import { beatifyClipClient } from './beatifyClip';
 import { BeatifyView } from './components/BeatifyView';
+import { DecksView } from './components/DecksView';
 import { clipClient } from './clip';
 import { beatifyClient } from './beatify';
 import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
@@ -88,7 +89,7 @@ export default function App() {
   const [moduleLib, setModuleLib] = useState<Manifest[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
-  const [view, setView] = useState<'rack' | 'library' | 'clip' | 'beatify'>('rack');
+  const [view, setView] = useState<'rack' | 'library' | 'clip' | 'beatify' | 'decks'>('rack');
   // The library's Edit button opens a track in the (always mounted) clip
   // editor, which owns what that costs the edit already in there.
   const clipView = useRef<ClipViewHandle>(null);
@@ -1880,6 +1881,13 @@ export default function App() {
           >
             Beatify
           </button>
+          <button
+            className={view === 'decks' ? 'tab active' : 'tab'}
+            onClick={() => setView('decks')}
+            data-testid="tab-decks"
+          >
+            Decks
+          </button>
         </nav>
         <button
           className="add-module-btn"
@@ -2155,6 +2163,9 @@ export default function App() {
       {view === 'beatify' && (
         <BeatifyView client={beatifyClient} library={library} clips={beatifyClipClient} />
       )}
+      {/* The bank is a rack module, so the page is only a view of it: it
+          keeps playing on other tabs, and unmounting costs nothing. */}
+      {view === 'decks' && <DecksView />}
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}

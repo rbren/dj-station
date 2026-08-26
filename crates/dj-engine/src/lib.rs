@@ -14,6 +14,7 @@ pub mod beat_clip;
 pub mod builtin;
 pub mod choreo;
 pub mod deck;
+pub mod decks;
 pub mod engine;
 pub mod graph;
 pub mod hands;

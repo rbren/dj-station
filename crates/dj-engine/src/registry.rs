@@ -79,6 +79,7 @@ impl ExtensionRegistry {
             crate::audio::audio_manifest(),
             crate::beat_clip::beat_clip_manifest(),
             crate::deck::deck_manifest(),
+            crate::decks::decks_manifest(),
             crate::mixer::crossfader_manifest(),
             crate::hands::hands_manifest(),
             crate::launch_control::launch_control_manifest(),

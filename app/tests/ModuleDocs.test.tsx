@@ -33,6 +33,7 @@ const BUILTIN_IDS = [
   'builtin.playback',
   'builtin.audio',
   'builtin.beat_clip',
+  'builtin.decks',
   'builtin.crossfader',
 ];
 

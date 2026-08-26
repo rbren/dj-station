@@ -8,6 +8,7 @@ mod beat_clip;
 mod beatify;
 mod beatify_clip;
 mod clip;
+mod decks;
 mod launch_control;
 
 use dj_engine::{
@@ -131,6 +132,11 @@ enum EditKey<'a> {
     PullMacro(&'a str),
     ResetMacro(&'a str),
     Track(&'a str),
+    /// A Decks slot's clip, silence tail or phase shift.
+    DeckSlot(&'a str, usize),
+    /// One control of a Decks slot; coalesced per control so a fader drag
+    /// is one undo step.
+    DeckSlotControl(&'a str, usize, &'static str),
 }
 
 impl std::fmt::Display for EditKey<'_> {
@@ -170,6 +176,8 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::PullMacro(i) => write!(f, "pull_macro:{i}"),
             EditKey::ResetMacro(i) => write!(f, "reset_macro:{i}"),
             EditKey::Track(i) => write!(f, "track:{i}"),
+            EditKey::DeckSlot(i, s) => write!(f, "deckslot:{i}:{s}"),
+            EditKey::DeckSlotControl(i, s, c) => write!(f, "deckctl:{i}:{s}:{c}"),
         }
     }
 }
@@ -245,8 +253,10 @@ fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> 
             apply_deck_metadata(state, engine, &instance)?;
         }
     }
-    // Beat Clip modules apply_doc recreated hold a binding but no audio.
+    // Beat Clip modules and Decks slots apply_doc recreated hold a
+    // binding but no audio.
     beat_clip::hydrate(state, engine);
+    decks::hydrate(state, engine);
     Ok(())
 }
 
@@ -1309,6 +1319,7 @@ fn paste_modules(state: State<AppState>, clipboard: String) -> CmdResult<BTreeMa
         engine.beat_clip_copy(&from, &to).map_err(err)?;
     }
     beat_clip::hydrate(&state, &mut engine);
+    decks::hydrate(&state, &mut engine);
     Ok(renames)
 }
 
@@ -1505,8 +1516,10 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     for instance in deck_instances {
         apply_deck_metadata(state, &mut engine, &instance)?;
     }
-    // Beat Clip modules: the patch names the clip, the app assembles it.
+    // Beat Clip modules and Decks slots: the patch names the clip, the
+    // app assembles it.
     beat_clip::hydrate(state, &mut engine);
+    decks::hydrate(state, &mut engine);
     restart_backend(&mut engine, backend, "patch load")?;
     mark_saved(state, &engine);
     let warnings = engine.load_warnings.clone();
@@ -2758,6 +2771,17 @@ fn main() {
             beat_clip::beat_clip_list,
             beat_clip::beat_clip_load,
             beat_clip::beat_clip_status,
+            decks::decks_banks,
+            decks::decks_ensure,
+            decks::decks_status,
+            decks::decks_load,
+            decks::decks_clear,
+            decks::decks_set_control,
+            decks::decks_set_tail,
+            decks::decks_set_phase,
+            decks::decks_set_bpm,
+            decks::decks_set_surface,
+            decks::decks_reset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

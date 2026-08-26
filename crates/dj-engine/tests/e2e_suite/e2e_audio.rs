@@ -48,6 +48,7 @@ fn regen_audio_clock_gate() {
                 instance: "audio1".into(),
                 file: "tone.wav".into(),
                 bpm: Some(150.0),
+                slot: None,
             }],
             ..EventsFile::default()
         },
@@ -85,6 +86,7 @@ fn regen_audio_loop() {
                 instance: "audio1".into(),
                 file: "tone.wav".into(),
                 bpm: Some(120.0),
+                slot: None,
             }],
             ..EventsFile::default()
         },

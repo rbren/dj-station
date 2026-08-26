@@ -1228,6 +1228,34 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'audio_l/audio_r -> Audio Output; ride the BPM control to tempo-match a jam.',
     ],
   },
+  'builtin.decks': {
+    summary:
+      'Eight Beatify clips on one clock \u2014 the bank behind the Decks ' +
+      'tab. Every slot is stretched to the bank\u2019s tempo (not sped ' +
+      'up, so nothing changes pitch) and started on the shared grid, so a ' +
+      'two-beat clip and an eight-beat clip come round on the same beat. ' +
+      'A slot arrives muted, with a level, three tone controls, mute and ' +
+      'solo \u2014 the same six controls a Launch Control XL column ' +
+      'carries, which is what the surface drives when Follow is on. Beats ' +
+      'of silence can be hung on the end of a clip and the whole clip ' +
+      'shifted a beat at a time, both on that same grid. Load clips on the ' +
+      'Decks tab; the bank is an ordinary module, so it keeps playing ' +
+      'wherever you are.',
+    inputs: {
+      bpm: 'Tempo of the whole bank \u2014 every slot is stretched to it.',
+      reset: 'Park the bank on beat 0.',
+    },
+    outputs: { audio_l: 'Left of the bank mix.', audio_r: 'Right of the bank mix.' },
+    params: {
+      surface:
+        'Whether this bank follows the Launch Control XL: one column per ' +
+        'slot, knobs high/mid/low, fader level, buttons mute and solo.',
+    },
+    examples: [
+      'audio_l/audio_r -> Audio Output: the eight decks as one mix.',
+      'Step Sequencer trigger -> reset: drop the whole bank back on cue.',
+    ],
+  },
   'builtin.beat_clip': {
     summary:
       'Plays a clip built in the Beatify tab, locked to a clock. Import ' +

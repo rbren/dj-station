@@ -24,6 +24,7 @@ mod conformance;
 mod deck;
 mod deck_library;
 mod deck_stems;
+mod decks;
 mod display_units;
 mod envelope;
 mod graph_edit;
