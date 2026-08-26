@@ -1,0 +1,19 @@
+{
+  "id": "com.dj.clock_mult",
+  "name": "Clock Multiplier",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Clock & Sequencing",
+  "inputs": [
+    { "id": "clock", "name": "Clock", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mult", "name": "Multiplier", "default": 4.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 9.0, "curve": "linear", "steps": 10 },
+      "display": { "steps": ["/8", "/4", "/3", "/2", "1x", "2x", "3x", "4x", "6x", "8x"] } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Clock Out" }
+  ],
+  "params": [],
+  "latency_samples": 0
+}

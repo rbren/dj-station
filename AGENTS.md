@@ -307,6 +307,19 @@ fails if it's missing.
   `waveforms-fm-sync` golden (that case now sets `fm_index`; every other
   golden is byte-identical because index 0 leaves the frequency exactly
   `pitch_to_hz(pitch)`).
+- Clock Multiplier (`extensions/clock_mult`, `com.dj.clock_mult`): the
+  ratio is a knob-backed `mult` INPUT (10 detents
+  `/8 /4 /3 /2 1x 2x 3x 4x 6x 8x`, 1x default, exact rationals in
+  `RATIOS` so `/3` can't drift), never a param. The input rate comes from
+  the last two rising edges like every other clock consumer; multiplied
+  pulses are predicted from that interval (the phase is capped just short
+  of the next input period so a late edge can't manufacture one), while
+  divisions land on the clock's own edges. With nothing wired, before the
+  first edge, or after the clock has been silent for 4 measured periods,
+  it FREE-RUNS as if fed a 2 Hz clock — the fallback is an assumed input
+  rate, so the knob still applies (1x ⇒ 2 Hz out) and the next edge
+  re-phases the grid. Its output jack is `out`, not `clock`: no other
+  manifest reuses one id across both directions, so don't start.
 - Units & display mapping: jack values are Volts to the engine; a
   manifest input/output may carry a `display` spec (unit string —
   default "V" — plus optional `volt_per_octave` map and per-step

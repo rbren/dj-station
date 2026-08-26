@@ -228,6 +228,60 @@ fn regen_grid_seq() {
     write_events(&dir, &EventsFile::seconds(1.5));
 }
 
+/// Two clock multipliers: one at x3 tracking the master clock, one with
+/// nothing patched into its clock input (free-running at 2 Hz), each
+/// gating its own voice.
+fn regen_clock_mult() {
+    let dir = crate::common::e2e::case_dir("seq-clock-mult");
+    let mut e = mono_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("cm1", "com.dj.clock_mult").unwrap();
+    e.add_module("cm2", "com.dj.clock_mult").unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("adsr1", "com.dj.adsr").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("osc2", "com.dj.oscillator").unwrap();
+    e.add_module("adsr2", "com.dj.adsr").unwrap();
+    e.add_module("vca2", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    // Lead: 120 BPM (a beat every 0.5 s) times 3 = a triplet grid, with
+    // the two extra pulses per beat predicted between the clock's edges.
+    e.set_knob_value("clk", "bpm", 120.0).unwrap();
+    e.connect("clk", "clock", "cm1", "clock").unwrap();
+    set_stepped(&mut e, "cm1", "mult", 6.0); // detent 6 = x3
+    e.connect("cm1", "out", "adsr1", "gate").unwrap();
+    set_stepped(&mut e, "osc1", "waveform", 3.0); // triangle
+    e.set_knob_value("adsr1", "attack", 0.004).unwrap();
+    e.set_knob_value("adsr1", "decay", 0.05).unwrap();
+    e.set_knob_value("adsr1", "sustain", 0.25).unwrap();
+    e.set_knob_value("adsr1", "release", 0.03).unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("adsr1", "env", "vca1", "cv").unwrap();
+    // Wired inputs add to the knob baseline; close the gain knob so the
+    // envelope alone opens the VCA.
+    e.set_knob_value("vca1", "cv", 0.0).unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
+
+    // Bass: cm2's clock jack stays unpatched, so it free-runs at 2 Hz on
+    // its own and needs no master clock wire.
+    e.connect("cm2", "out", "adsr2", "gate").unwrap();
+    set_stepped(&mut e, "osc2", "waveform", 2.0); // square
+    e.set_knob_value("osc2", "pitch", -2.0).unwrap();
+    e.set_knob_value("adsr2", "attack", 0.002).unwrap();
+    e.set_knob_value("adsr2", "decay", 0.15).unwrap();
+    e.set_knob_value("adsr2", "sustain", 0.0).unwrap();
+    e.set_knob_value("adsr2", "release", 0.02).unwrap();
+    e.connect("osc2", "audio", "vca2", "in").unwrap();
+    e.connect("adsr2", "env", "vca2", "cv").unwrap();
+    e.set_knob_value("vca2", "cv", 0.0).unwrap();
+    e.connect("vca2", "out", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-seq-clock-mult")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(1.5));
+}
+
 #[test]
 fn e2e_seq_clock_step() {
     if regen() {
@@ -250,4 +304,12 @@ fn e2e_seq_euclid_turing() {
         regen_euclid_turing();
     }
     check_case("seq-euclid-turing");
+}
+
+#[test]
+fn e2e_seq_clock_mult() {
+    if regen() {
+        regen_clock_mult();
+    }
+    check_case("seq-clock-mult");
 }

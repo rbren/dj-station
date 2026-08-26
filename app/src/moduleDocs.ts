@@ -465,6 +465,26 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'mul2 -> Trigger Sequencer clock for 8th-note drum patterns.',
     ],
   },
+  'com.dj.clock_mult': {
+    summary:
+      'Clock multiplier/divider: follows an incoming clock and re-times it ' +
+      'by a detented ratio \u2014 /8 /4 /3 /2 1x 2x 3x 4x 6x 8x, 1x by ' +
+      'default. Multiplications are predicted from the last two clock ' +
+      'edges, divisions land on the clock\u2019s own edges. With nothing ' +
+      'patched in (or before the first edge arrives) it free-runs as if ' +
+      'fed a 2 Hz clock, so it doubles as a standalone clock source.',
+    inputs: {
+      clock: 'Clock to follow; its rate is measured between the last two rising edges.',
+      mult:
+        'Ratio selector: /8 /4 /3 /2 1x 2x 3x 4x 6x 8x output pulses per ' +
+        'input pulse (1x by default).',
+    },
+    outputs: { out: 'Trigger stream at the input rate times the selected ratio.' },
+    examples: [
+      'Clock -> Clock Multiplier at x3 -> Trigger Sequencer for triplet hats.',
+      'Drop one unpatched at 4x for an 8 Hz trigger source with no master clock.',
+    ],
+  },
   'com.dj.step_seq': {
     summary:
       '16-step CV/gate sequencer: per-step CV, gate on/off and ratchet ' +

@@ -259,6 +259,20 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
+  // Clock multiplier: two controls (clock in, ratio) on one row, so the
+  // panel is as small as the module's job.
+  'com.dj.clock_mult': () => ({
+    groups: [
+      {
+        kind: 'row',
+        inputs: [
+          { jack: 'clock', label: 'clock' },
+          { jack: 'mult', label: 'mult' },
+        ],
+      },
+    ],
+  }),
+
   // One column per step (cv over gate over ratchet), like a hardware
   // sequencer's per-step channel. The step grid comes FIRST so it sits
   // directly under the custom playhead strip (StepSeqUI), which renders
