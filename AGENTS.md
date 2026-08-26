@@ -46,6 +46,16 @@ fails if it's missing.
 
 ## Conventions
 
+- Frontend styling goes through the design tokens at the top of
+  `app/src/styles.css` (`--fs-*` scale, `--canvas/--surface*/--line*`,
+  three inks, `--brand/--cue/--ok/--fault`, `--shadow-*`, `--dur-*`,
+  `--scrim`). Do not add a fresh hex literal or font-size when a token
+  fits; per-module category hue lives only on a panel's inline `--accent`.
+  `DESIGN_OVERHAUL.md` is the review those tokens came from, and each rule
+  written for a finding carries its id (`§A4`, `§D9`, …) in a comment —
+  grep for the id before changing that area. Motion is colour/opacity only
+  and must survive the `prefers-reduced-motion` block at the top of the
+  file.
 - ALL persistent state roots in ONE directory resolved by
   `dj_library::paths` (`crates/dj-library/src/paths.rs`): `custom/` in the
   repo checkout (`run.sh` + `.git` found by walking up from the cwd, then
