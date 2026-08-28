@@ -472,8 +472,19 @@ offset))`, offset in position units — so the knob's curve shapes the
   `App.moveModule` (push-out with drag-past-to-commit, plus the
   provisional co-operative bump — a neighbour displaced to open a slot,
   reverted if the drag moves on, finalized on release via
-  `endModuleDrag`). Behavior is pinned by
-  `app/tests/RackCollision.test.tsx`. Title-bar sizing (78b9e15): module
+  `endModuleDrag`). An INSERT (picker click, clip import, drag-drop) aims
+  at the CURSOR, not the middle of the view, and never leaves the visible
+  area: `App.insertPoint` (last window-level cursor position → grid-snapped
+  rack coordinates; the picker modal covers the rack, so the pointer is
+  over the modal) feeds `spotInView` in `rackLayout.ts`, which clamps the
+  footprint into `App.viewRect` (the `.rack-area` box mapped back through
+  pan/zoom) and takes the closest free visible grid spot — the clamped
+  point itself when the view is full. The insert is placed with the
+  nominal fallback footprint (its panel is not in the DOM yet), so
+  `App.pendingInsert` carries the aimed-at viewport into the post-render
+  pass and that one module's real-size correction stays on screen too.
+  Behavior is pinned by `app/tests/RackCollision.test.tsx`.
+  Title-bar sizing (78b9e15): module
   title bars are 56px min-height; macro labels are full-width 44px title
   bars styled like module ones — `MACRO_LABEL_H` in `rackLayout.ts` must
   match the macro-label CSS height or collision/placement geometry drifts

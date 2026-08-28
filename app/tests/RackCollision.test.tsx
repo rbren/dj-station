@@ -9,7 +9,7 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { nearestFreeSpot, rectsOverlap } from '../src/rackLayout';
+import { nearestFreeSpot, rectsOverlap, spotInView } from '../src/rackLayout';
 import type { Manifest } from '../src/types';
 
 const OSC: Manifest = {
@@ -125,6 +125,117 @@ describe('nearestFreeSpot', () => {
     const spot = nearestFreeSpot({ x: 48, y: 0 }, SIZE, others)!;
     expect(Math.abs(spot.x - 48) + Math.abs(spot.y - 0)).toBeLessThanOrEqual(96 + 48);
     expect(others.some((r) => rectsOverlap({ ...spot, ...SIZE }, r))).toBe(false);
+  });
+});
+
+describe('spotInView (module picker placement)', () => {
+  const SIZE = { w: 192, h: 96 };
+  // A viewport scrolled away from the rack origin, as after a pan.
+  const VIEW = { x: 1000, y: 500, w: 960, h: 480 };
+  const inside = (p: { x: number; y: number }) =>
+    p.x >= VIEW.x &&
+    p.y >= VIEW.y &&
+    p.x + SIZE.w <= VIEW.x + VIEW.w &&
+    p.y + SIZE.h <= VIEW.y + VIEW.h;
+
+  it('lands on the cursor, grid-snapped, when the spot is free', () => {
+    expect(spotInView({ x: 1300, y: 700 }, SIZE, [], VIEW)).toEqual({ x: 1296, y: 720 });
+  });
+
+  it('pulls a cursor outside the view back inside it', () => {
+    // Picked with the pointer parked over the header, way above the rack.
+    const spot = spotInView({ x: 1200, y: -4000 }, SIZE, [], VIEW);
+    expect(inside(spot)).toBe(true);
+    expect(spot.y).toBe(528); // first grid row fully inside the view
+  });
+
+  it('keeps the whole footprint inside the view at the far edge', () => {
+    const spot = spotInView({ x: VIEW.x + VIEW.w, y: VIEW.y + VIEW.h }, SIZE, [], VIEW);
+    expect(inside(spot)).toBe(true);
+  });
+
+  it('steps aside from an occupied spot without leaving the view', () => {
+    const others = [{ x: 1248, y: 672, w: 288, h: 192 }];
+    const spot = spotInView({ x: 1300, y: 700 }, SIZE, others, VIEW);
+    expect(rectsOverlap({ ...spot, ...SIZE }, others[0])).toBe(false);
+    expect(inside(spot)).toBe(true);
+    // Nearby, not across the canvas: one grid step off the blocker's edge.
+    expect(Math.abs(spot.x - 1296) + Math.abs(spot.y - 720)).toBeLessThanOrEqual(288);
+  });
+
+  it('crosses a wall of modules to the free area on the other side', () => {
+    // Everything left of x=1600 in the view is taken: the module lands in
+    // the free strip on the right rather than off screen.
+    const others = [{ x: 900, y: 400, w: 700, h: 700 }];
+    const spot = spotInView({ x: 1100, y: 700 }, SIZE, others, VIEW);
+    expect(rectsOverlap({ ...spot, ...SIZE }, others[0])).toBe(false);
+    expect(inside(spot)).toBe(true);
+  });
+
+  it('stays visible even when the view is full', () => {
+    const others = [{ x: 0, y: 0, w: 10000, h: 10000 }];
+    const spot = spotInView({ x: 1300, y: 700 }, SIZE, others, VIEW);
+    expect(inside(spot)).toBe(true);
+  });
+
+  it('shows the top-left corner of a footprint bigger than the view', () => {
+    const huge = { w: 4000, h: 2000 };
+    const spot = spotInView({ x: 9999, y: 9999 }, huge, [], VIEW);
+    expect(spot).toEqual({ x: 1008, y: 528 });
+  });
+});
+
+describe('module picker insert placement', () => {
+  // jsdom measures nothing, so the rack viewport is given a box by hand —
+  // without one the placement has no view to keep the module inside.
+  function viewport(width: number, height: number) {
+    const el = screen.getByTestId('rack-area');
+    el.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, right: width, bottom: height, x: 0, y: 0, width, height }) as DOMRect;
+  }
+
+  async function pickOscillator() {
+    fireEvent.keyDown(window, { key: 'm', metaKey: true });
+    fireEvent.click(await screen.findByTestId('library-add-com.dj.oscillator'));
+    await waitFor(() => expect(savedPositions().oscillat1).toBeTruthy());
+    return savedPositions().oscillat1;
+  }
+
+  it('lands the module at the cursor, not at the rack origin', async () => {
+    // Panned far from the origin: what is on screen is the rack around
+    // (1000, 500), so a placement that ignores the pan is off screen.
+    localStorage.setItem('dj-rack-pan', JSON.stringify({ x: -1000, y: -500 }));
+    await renderApp([]);
+    viewport(800, 600);
+    // Deliberately NOT the middle of the view, which is where an insert
+    // used to land however far the cursor was from it.
+    fireEvent.mouseMove(window, { clientX: 200, clientY: 120 });
+    expect(await pickOscillator()).toEqual({ x: 1200, y: 624 });
+  });
+
+  it('pulls a cursor that is off the rack back into the viewport', async () => {
+    localStorage.setItem('dj-rack-pan', JSON.stringify({ x: -1000, y: -500 }));
+    await renderApp([]);
+    viewport(800, 600);
+    // Picked with the pointer up in the header, above the rack entirely.
+    fireEvent.mouseMove(window, { clientX: 400, clientY: -200 });
+    const pos = await pickOscillator();
+    expect(pos.y).toBeGreaterThanOrEqual(500);
+    expect(pos.y + 96).toBeLessThanOrEqual(1100);
+  });
+
+  it('steps aside from the module already under the cursor', async () => {
+    localStorage.setItem('dj-rack-pan', JSON.stringify({ x: -1000, y: -500 }));
+    setPositions({ a: { x: 1200, y: 624 } });
+    await renderApp(['a']);
+    viewport(800, 600);
+    fireEvent.mouseMove(window, { clientX: 200, clientY: 120 });
+    const pos = await pickOscillator();
+    expect(rectsOverlap({ ...pos, w: 192, h: 96 }, { x: 1200, y: 624, w: 192, h: 96 })).toBe(false);
+    // Still on screen, and still next to where the cursor was.
+    expect(pos.x).toBeGreaterThanOrEqual(1000);
+    expect(pos.y).toBeGreaterThanOrEqual(500);
+    expect(Math.abs(pos.x - 1200) + Math.abs(pos.y - 624)).toBeLessThanOrEqual(192);
   });
 });
 

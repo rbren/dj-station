@@ -149,6 +149,46 @@ export function nearestFreeSpot(
   return null;
 }
 
+/** Where a module inserted from the picker (or a drop) should land: a grid
+ *  spot as close as possible to `want` — the cursor — that keeps the whole
+ *  `size` footprint inside `view`, the visible rack rect in rack
+ *  coordinates. Candidates are the visible grid spots, tried nearest-first,
+ *  so the module lands clear of `others` whenever the view has room; when
+ *  it has none the clamped point wins anyway, because a module the user
+ *  cannot see is worse than one that overlaps (the drag push-out and the
+ *  post-render pass sort out overlaps from there). A footprint larger than
+ *  the view gets its top-left corner in view. */
+export function spotInView(
+  want: { x: number; y: number },
+  size: { w: number; h: number },
+  others: Rect[],
+  view: Rect,
+): { x: number; y: number } {
+  const axis = (lo: number, span: number, extent: number, at: number) => {
+    const min = Math.ceil(lo / GRID) * GRID;
+    // A footprint too big for the view can only show its leading edge.
+    const max = Math.max(min, Math.floor((lo + span - extent) / GRID) * GRID);
+    return { min, max, start: Math.min(Math.max(Math.round(at / GRID) * GRID, min), max) };
+  };
+  const ax = axis(view.x, view.w, size.w, want.x);
+  const ay = axis(view.y, view.h, size.h, want.y);
+  const start = { x: ax.start, y: ay.start };
+  const free = (pos: { x: number; y: number }) =>
+    !others.some((r) => rectsOverlap({ ...pos, ...size }, r));
+  if (free(start)) return start;
+  const candidates: { x: number; y: number; d: number }[] = [];
+  for (let x = ax.min; x <= ax.max; x += GRID) {
+    for (let y = ay.min; y <= ay.max; y += GRID) {
+      candidates.push({ x, y, d: (x - start.x) ** 2 + (y - start.y) ** 2 });
+    }
+  }
+  candidates.sort((a, b) => a.d - b.d);
+  for (const { x, y } of candidates) {
+    if (free({ x, y })) return { x, y };
+  }
+  return start;
+}
+
 /** Absolute rack placement, matching how ModulePanel positions itself — used
  *  by the fallback card that stands in for a panel that failed to render. */
 export function panelStyle(pos: { x: number; y: number }): React.CSSProperties {

@@ -41,6 +41,7 @@ import {
   nearestFreeSpot,
   rectsOverlap,
   resolvePush,
+  spotInView,
   type Rect,
 } from './rackLayout';
 import {
@@ -288,6 +289,44 @@ export default function App() {
       saveJson(PAN_KEY, { x: 0, y: 0 });
     }
   }, []);
+
+  // Last cursor position in SCREEN coordinates, tracked window-wide (not
+  // just over the rack) because the picker modal covers the rack: where the
+  // user is pointing when they pick a module is a point over the modal.
+  // A ref, so tracking the pointer never re-renders.
+  const cursor = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      cursor.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener('mousemove', onMove);
+    return () => window.removeEventListener('mousemove', onMove);
+  }, []);
+
+  // The visible slice of the canvas in rack coordinates: undo the pan
+  // translate and the zoom scale on the .rack-area box. Everything a module
+  // picker inserts must land inside it. A rack with no measured box (hidden
+  // behind another page, jsdom) constrains nothing — placement falls back
+  // to the plain nearest free spot.
+  const viewRect = useCallback((): Rect | null => {
+    if (!rackEl) return null;
+    const box = rackEl.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) return null;
+    return { x: -pan.x / zoom, y: -pan.y / zoom, w: box.width / zoom, h: box.height / zoom };
+  }, [rackEl, pan, zoom]);
+
+  // Where an insert from the picker wants to land: the cursor, in
+  // grid-snapped rack coordinates (the middle of the view until the mouse
+  // has moved). Placement clamps it into the viewport from there.
+  const insertPoint = useCallback((): { x: number; y: number } | undefined => {
+    if (!rackEl) return undefined;
+    const box = rackEl.getBoundingClientRect();
+    const at = cursor.current;
+    const local = at
+      ? { x: at.x - box.left, y: at.y - box.top }
+      : { x: box.width / 2, y: box.height / 2 };
+    return { x: snap((local.x - pan.x) / zoom), y: snap((local.y - pan.y) / zoom) };
+  }, [rackEl, pan, zoom]);
 
   // A drag-induced neighbour bump in flight: `bumped` was displaced from
   // `from` to open a slot for `dragged`. Provisional until the drag ends —
@@ -645,6 +684,12 @@ export default function App() {
     [store, setPositions, moveGroup, macroOwner, noteMove],
   );
 
+  // The module a picker insert / drop just placed, with the viewport it was
+  // aimed into: the post-render pass below re-checks it with its real panel
+  // size and must correct it WITHIN that viewport (an unconstrained search
+  // can walk a fresh module clean off the screen in a busy rack).
+  const pendingInsert = useRef<null | { instance: string; view: Rect }>(null);
+
   // Post-render placement pass: with real panel sizes in the DOM, move any
   // module that overlaps an earlier one to the nearest free grid spot (same
   // search as drop placement, so corrections stay near the intended point).
@@ -695,7 +740,11 @@ export default function App() {
           }
           let pos = posOf(id, i);
           const size = moduleRect(id, pos);
-          pos = nearestFreeSpot(pos, { w: size.w, h: size.h }, placed) ?? pos;
+          const insert = pendingInsert.current;
+          pos =
+            insert?.instance === id
+              ? spotInView(pos, { w: size.w, h: size.h }, placed, insert.view)
+              : (nearestFreeSpot(pos, { w: size.w, h: size.h }, placed) ?? pos);
           if (next[id]?.x !== pos.x || next[id]?.y !== pos.y) {
             next[id] = pos;
             changed = true;
@@ -713,6 +762,12 @@ export default function App() {
         void engine.syncPositions(synced);
         return next;
       });
+      // One pass with real sizes settles a fresh insert; from then on it is
+      // an ordinary module (and may be dragged anywhere the user likes).
+      const insert = pendingInsert.current;
+      if (insert && nodes.some((n) => n.instance_id === insert.instance)) {
+        pendingInsert.current = null;
+      }
     }, 0);
     return () => clearTimeout(timer);
   }, [nodes, setPositions, macroOwner]);
@@ -783,7 +838,12 @@ export default function App() {
       // new macro lands clear of other macro boxes, not just their panels.
       const bbox = macroBoxRect(boundingBox(rels.map((r) => r.rect)));
       const want = at ?? prev[instance] ?? { x: GRID, y: GRID };
-      const spot = nearestFreeSpot(want, { w: bbox.w, h: bbox.h }, placed) ?? want;
+      // An insert aimed at a point (picker, drop) stays in the viewport,
+      // box and all; a placement inherited from a saved layout does not.
+      const view = at ? viewRect() : null;
+      const spot = view
+        ? spotInView(want, { w: bbox.w, h: bbox.h }, placed, view)
+        : (nearestFreeSpot(want, { w: bbox.w, h: bbox.h }, placed) ?? want);
       setPositions((p) => {
         const next = { ...p };
         // A paste/legacy layout may have parked a position under the
@@ -803,7 +863,7 @@ export default function App() {
       }
       void engine.syncPositions(synced);
     },
-    [store, setPositions, collisionRects],
+    [store, setPositions, collisionRects, viewRect],
   );
 
   /** Lay out any macro group whose members have no stored positions yet
@@ -1014,19 +1074,26 @@ export default function App() {
         await placeMacroGroup(instance, typeId, at);
       } else if (at) {
         // Deterministic, near-the-cursor placement: the drop point itself
-        // when free, otherwise the nearest free grid spot (ring search) —
-        // never a far-away jump.
+        // when free, otherwise the closest free grid spot that is still on
+        // screen — a new module the user has to hunt for is a lost module.
         const rect = moduleRect(instance, at);
         const others = nodes.map((node, i) =>
           moduleRect(node.instance_id, positions[node.instance_id] ?? defaultPosition(i)),
         );
-        const spot = nearestFreeSpot(at, { w: rect.w, h: rect.h }, others) ?? at;
+        const view = viewRect();
+        const spot = view
+          ? spotInView(at, { w: rect.w, h: rect.h }, others, view)
+          : (nearestFreeSpot(at, { w: rect.w, h: rect.h }, others) ?? at);
+        // The panel is not in the DOM yet, so `rect` is the nominal
+        // fallback footprint: the post-render pass re-checks this one with
+        // its real size, and must keep it on screen when it does.
+        pendingInsert.current = view ? { instance, view } : null;
         moveModule(instance, spot.x, spot.y);
       }
       await refresh();
       return instance;
     },
-    [store, refresh, moveModule, moduleLib, placeMacroGroup],
+    [store, refresh, moveModule, moduleLib, placeMacroGroup, viewRect],
   );
 
   // Selection model (standard desktop semantics): a plain click on a module
@@ -1407,22 +1474,16 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [view, store, refresh, changeZoom, copyModules, pasteModules, removeModules, setSelected]);
 
-  // Click-to-add from the picker: land the module at the center of the
-  // current view (pan/zoom-aware), then close the modal.
+  // Click-to-add from the picker: land the module under the cursor
+  // (pan/zoom-aware, kept inside the viewport by addModule), then close the
+  // modal — the panel appears where the user was already looking.
   const addFromPicker = useCallback(
     (typeId: string) => {
-      let at: { x: number; y: number } | undefined;
-      if (rackEl) {
-        const rect = rackEl.getBoundingClientRect();
-        at = {
-          x: snap((rect.width / 2 - pan.x) / zoom),
-          y: snap((rect.height / 2 - pan.y) / zoom),
-        };
-      }
+      const at = insertPoint();
       setPickerOpen(false);
       void addModule(typeId, at);
     },
-    [rackEl, pan, zoom, addModule],
+    [insertPoint, addModule],
   );
 
   // The picker's Clips tab lists what Beatify has saved; only refetched
@@ -1438,20 +1499,13 @@ export default function App() {
     };
   }, [pickerOpen]);
 
-  // Import a clip: a Beat Clip module at the center of the view, loaded
-  // with that clip (which is also what its patch entry will name). The
-  // load names the module after the clip, so the panel that lands says
-  // "chorus stack" and its position moves to that id.
+  // Import a clip: a Beat Clip module under the cursor, loaded with that
+  // clip (which is also what its patch entry will name). The load names the
+  // module after the clip, so the panel that lands says "chorus stack" and
+  // its position moves to that id.
   const addClipFromPicker = useCallback(
     (clip: BeatClipEntry) => {
-      let at: { x: number; y: number } | undefined;
-      if (rackEl) {
-        const rect = rackEl.getBoundingClientRect();
-        at = {
-          x: snap((rect.width / 2 - pan.x) / zoom),
-          y: snap((rect.height / 2 - pan.y) / zoom),
-        };
-      }
+      const at = insertPoint();
       setPickerOpen(false);
       void (async () => {
         const instance = await addModule(BEAT_CLIP_TYPE, at);
@@ -1462,7 +1516,7 @@ export default function App() {
         if (renamedTo) dropPositions([instance]);
       })();
     },
-    [rackEl, pan, zoom, addModule, refresh, carryPositions, dropPositions],
+    [insertPoint, addModule, refresh, carryPositions, dropPositions],
   );
 
   // Drop a module dragged out of the library at the pointer position,
