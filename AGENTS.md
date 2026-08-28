@@ -464,6 +464,11 @@ offset))`, offset in position units — so the knob's curve shapes the
   order) responses so playheads never step backwards. Pinned by
   `app/tests/StepFollower.test.ts` + `AntiAliasing.test.tsx` +
   `AdsrUI.test.tsx`.
+- Rack zoom bounds live in `ZOOM_MIN`/`ZOOM_MAX` in `app/src/App.tsx`
+  (0.04–2.5); `loadZoom` validates persisted zoom against them and
+  `dotGridSize()` doubles the background lattice until dots are ≥12px
+  apart so deep zoom-out does not moiré. Pinned by
+  `app/tests/AppShortcuts.test.tsx`.
 - Rack geometry (frontend): module positions are UNZOOMED rack
   coordinates — any pointer math must divide screen deltas by the rack
   zoom (panel drags in `ModulePanel`, drops in `App.onRackDrop`). All
