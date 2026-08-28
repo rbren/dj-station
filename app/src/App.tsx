@@ -60,8 +60,18 @@ export type { PendingWire };
 
 const ZOOM_KEY = 'dj-rack-zoom';
 const ZOOM_STEP = 1.2;
-const ZOOM_MIN = 0.4;
+const ZOOM_MIN = 0.04;
 const ZOOM_MAX = 2.5;
+
+/** Background dot-grid spacing: below ~0.25 zoom the 48px lattice collapses
+ *  into moiré, so double the spacing until dots sit ≥ 12px apart. Doubling
+ *  keeps every remaining dot on a rack grid intersection, so the grid still
+ *  tracks the pan exactly. */
+function dotGridSize(zoom: number): number {
+  let size = GRID * zoom;
+  while (size < 12) size *= 2;
+  return size;
+}
 
 function loadZoom(): number {
   const z = Number(localStorage.getItem(ZOOM_KEY));
@@ -2245,7 +2255,7 @@ export default function App() {
                   data-testid="rack-area"
                   style={{
                     backgroundPosition: `${pan.x}px ${pan.y}px`,
-                    backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
+                    backgroundSize: `${dotGridSize(zoom)}px ${dotGridSize(zoom)}px`,
                   }}
                   onDragOver={onRackDragOver}
                   onDrop={onRackDrop}

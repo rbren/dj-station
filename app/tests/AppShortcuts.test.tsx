@@ -129,7 +129,20 @@ describe('zoom shortcuts', () => {
     for (let i = 0; i < 20; i++) fireEvent.keyDown(window, { key: '+', metaKey: true });
     expect(scaleOf()).toBe(scaled(2.5));
     for (let i = 0; i < 40; i++) fireEvent.keyDown(window, { key: '_', metaKey: true });
-    expect(scaleOf()).toBe(scaled(0.4));
+    expect(scaleOf()).toBe(scaled(0.04));
+  });
+
+  it('the deepest zoom-out restores from storage and coarsens the dot grid', async () => {
+    localStorage.setItem('dj-rack-zoom', '0.04');
+    await renderApp();
+    expect(scaleOf()).toBe(scaled(0.04));
+    // The dot grid coarsens (doubles) at deep zoom-out instead of collapsing
+    // into sub-2px moiré: spacing stays >= 12px and a power-of-two multiple
+    // of the zoomed 48px lattice, so dots keep landing on grid points.
+    const size = parseFloat(screen.getByTestId('rack-area').style.backgroundSize);
+    expect(size).toBeGreaterThanOrEqual(12);
+    expect(size).toBeLessThan(24);
+    expect(Math.log2(size / (48 * 0.04))).toBeCloseTo(Math.round(Math.log2(size / (48 * 0.04))));
   });
 });
 
