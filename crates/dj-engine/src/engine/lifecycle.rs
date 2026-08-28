@@ -1,6 +1,51 @@
 //! Rendering / running: offline render and the null/cpal realtime backends — split out of the old monolithic engine.rs; methods on [`Engine`] only.
+//!
+//! TWO DEVICES, ONE ENGINE. The graph fills two buses — the live mix and
+//! the monitor (cue) one — and the cpal backend opens a stream for each,
+//! on whichever hardware output the user picked ([`AudioOutputs`]). Only
+//! the live callback ever touches the engine core; the monitor stream is
+//! fed from it over a ring, because the two devices run on their own
+//! clocks and neither may wait for the other.
 
 use super::*;
+
+/// Which hardware output each bus plays out of, by device name. `None` is
+/// "the system default" for the live mix and "no monitoring at all" for
+/// the monitor — a name the machine no longer has is reported, never
+/// silently swapped.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AudioOutputs {
+    pub live: Option<String>,
+    pub monitor: Option<String>,
+}
+
+/// Every hardware audio output this machine can play through, by name —
+/// what the app's output pickers list.
+#[cfg(feature = "cpal-backend")]
+pub fn audio_output_devices() -> Vec<String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    let Ok(devices) = host.output_devices() else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = devices.filter_map(|d| d.name().ok()).collect();
+    names.dedup();
+    names
+}
+
+#[cfg(not(feature = "cpal-backend"))]
+pub fn audio_output_devices() -> Vec<String> {
+    Vec::new()
+}
+
+/// The output device with this name, if the machine still has it.
+#[cfg(feature = "cpal-backend")]
+fn named_output(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    host.output_devices()
+        .ok()?
+        .find(|d| d.name().map(|n| n == name).unwrap_or(false))
+}
 
 impl Engine {
     // ------------------------------------------------------------------
@@ -11,6 +56,16 @@ impl Engine {
     /// return the master bus as one Vec per channel, in engine units
     /// (nominal [-10, +10], unclipped).
     pub fn render_offline(&mut self, total_frames: usize) -> Result<Vec<Vec<f32>>> {
+        self.render_bus(total_frames, false)
+    }
+
+    /// Offline render of the MONITOR (cue) bus instead of the master —
+    /// what the headphones would have heard over the same blocks.
+    pub fn render_offline_monitor(&mut self, total_frames: usize) -> Result<Vec<Vec<f32>>> {
+        self.render_bus(total_frames, true)
+    }
+
+    fn render_bus(&mut self, total_frames: usize, monitor: bool) -> Result<Vec<Vec<f32>>> {
         let block = self.config.block_size;
         let channels = self.config.master_channels;
         let mut out: Vec<Vec<f32>> = vec![Vec::with_capacity(total_frames); channels];
@@ -19,8 +74,9 @@ impl Engine {
         while done < total_frames {
             let frames = block.min(total_frames - done);
             core.process_block(frames);
+            let bus = if monitor { &core.monitor } else { &core.master };
             for (ch, buf) in out.iter_mut().enumerate() {
-                buf.extend_from_slice(&core.master[ch][..frames]);
+                buf.extend_from_slice(&bus[ch][..frames]);
             }
             done += frames;
         }
@@ -125,6 +181,19 @@ impl Engine {
         Ok(())
     }
 
+    /// Which hardware outputs the two buses go to. Set by the app from its
+    /// own settings — a device name belongs to the MACHINE, not to the
+    /// patch, so it is never saved with one.
+    pub fn audio_outputs(&self) -> &AudioOutputs {
+        &self.audio_outputs
+    }
+
+    /// Choose the live and monitor devices. Takes effect at the next
+    /// backend start; the caller restarts the backend to hear it.
+    pub fn set_audio_outputs(&mut self, outputs: AudioOutputs) {
+        self.audio_outputs = outputs;
+    }
+
     /// Start the cpal device backend (requires a working audio device).
     #[cfg(feature = "cpal-backend")]
     pub fn start_cpal(&mut self) -> Result<()> {
@@ -176,6 +245,18 @@ impl Engine {
         let stop_thread = stop.clone();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::result::Result<(), String>>();
 
+        // The monitor device is a SECOND stream, fed by the live callback
+        // over a ring: only one thread may hold the core, and the two
+        // devices run on their own clocks. A quarter second of slack
+        // absorbs the drift between them; whoever is late finds silence
+        // rather than blocking the other.
+        let outputs = self.audio_outputs.clone();
+        let mon_capacity = channels * self.config.sample_rate as usize / 4;
+        let (mon_tx, mon_rx) = rtrb::RingBuffer::<f32>::new(mon_capacity);
+        let mut mon_tx = mon_tx;
+        let mut mon_rx = mon_rx;
+        let want_monitor = outputs.monitor.is_some();
+
         // The stream is created, driven, and dropped entirely on this
         // thread: cpal::Stream is !Send on CoreAudio, so it must never
         // cross threads (and Engine must stay Send for the Tauri shell).
@@ -210,6 +291,15 @@ impl Engine {
                                         (core.master[ch][s] / crate::graph::SIGNAL_MAX)
                                             .clamp(-1.0, 1.0),
                                     );
+                                    if want_monitor {
+                                        // Full ring = the monitor device is
+                                        // behind; drop rather than block the
+                                        // live callback.
+                                        let _ = mon_tx.push(
+                                            (core.monitor[ch][s] / crate::graph::SIGNAL_MAX)
+                                                .clamp(-1.0, 1.0),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -232,41 +322,88 @@ impl Engine {
                         xruns.fetch_add(1, Ordering::Relaxed);
                     }
                 };
-                let result = (|| -> std::result::Result<cpal::Stream, String> {
-                    let host = cpal::default_host();
-                    eprintln!("[dj-audio] cpal host: {:?}", host.id());
-                    let device = host
-                        .default_output_device()
-                        .ok_or("no audio output device")?;
-                    eprintln!(
-                        "[dj-audio] default output device: {:?}",
-                        device.name().unwrap_or_else(|e| format!("<unknown: {e}>"))
-                    );
-                    match device.default_output_config() {
-                        Ok(def) => eprintln!(
+                let mon_cb = move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    for s in out.iter_mut() {
+                        // Nothing queued yet (or the live stream is late):
+                        // silence is the only honest thing to play.
+                        *s = mon_rx.pop().unwrap_or(0.0);
+                    }
+                };
+                let result =
+                    (|| -> std::result::Result<(cpal::Stream, Option<cpal::Stream>), String> {
+                        let host = cpal::default_host();
+                        eprintln!("[dj-audio] cpal host: {:?}", host.id());
+                        let device = match &outputs.live {
+                            Some(name) => named_output(&host, name)
+                                .ok_or_else(|| format!("no audio output device named {name:?}"))?,
+                            None => host
+                                .default_output_device()
+                                .ok_or("no audio output device")?,
+                        };
+                        eprintln!(
+                            "[dj-audio] live output device: {:?}",
+                            device.name().unwrap_or_else(|e| format!("<unknown: {e}>"))
+                        );
+                        match device.default_output_config() {
+                            Ok(def) => eprintln!(
                             "[dj-audio] device default config: {} ch @ {} Hz, {:?}, buffer {:?}",
                             def.channels(),
                             def.sample_rate().0,
                             def.sample_format(),
                             def.buffer_size()
                         ),
-                        Err(e) => eprintln!("[dj-audio] default_output_config failed: {e}"),
-                    }
-                    let stream = device
-                        .build_output_stream(
-                            &config,
-                            data_cb,
-                            |err| eprintln!("[dj-audio] cpal stream error: {err}"),
-                            None,
-                        )
-                        .map_err(|e| format!("build_output_stream: {e}"))?;
-                    eprintln!("[dj-audio] output stream built, calling play()");
-                    stream.play().map_err(|e| format!("play: {e}"))?;
-                    eprintln!("[dj-audio] stream playing");
-                    Ok(stream)
-                })();
+                            Err(e) => eprintln!("[dj-audio] default_output_config failed: {e}"),
+                        }
+                        let stream = device
+                            .build_output_stream(
+                                &config,
+                                data_cb,
+                                |err| eprintln!("[dj-audio] cpal stream error: {err}"),
+                                None,
+                            )
+                            .map_err(|e| format!("build_output_stream: {e}"))?;
+                        eprintln!("[dj-audio] output stream built, calling play()");
+                        stream.play().map_err(|e| format!("play: {e}"))?;
+                        eprintln!("[dj-audio] stream playing");
+                        // The monitor device is optional in the strongest
+                        // sense: if it cannot be opened the live output still
+                        // plays, and the cue is what is lost.
+                        let monitor = match &outputs.monitor {
+                            Some(name) => match named_output(&host, name) {
+                                Some(dev) => match dev.build_output_stream(
+                                    &config,
+                                    mon_cb,
+                                    |err| eprintln!("[dj-audio] monitor stream error: {err}"),
+                                    None,
+                                ) {
+                                    Ok(s) => match s.play() {
+                                        Ok(()) => {
+                                            eprintln!(
+                                                "[dj-audio] monitor stream playing on {name:?}"
+                                            );
+                                            Some(s)
+                                        }
+                                        Err(e) => {
+                                            eprintln!("[dj-audio] monitor play failed: {e}");
+                                            None
+                                        }
+                                    },
+                                    Err(e) => {
+                                        eprintln!("[dj-audio] monitor stream build failed: {e}");
+                                        None
+                                    }
+                                },
+                                None => {
+                                    eprintln!("[dj-audio] no monitor device named {name:?}");
+                                    None
+                                }
+                            },
+                            None => None,
+                        };
+                        Ok((stream, monitor))
+                    })();
                 match result {
-                    Ok(stream) => {
+                    Ok((stream, monitor)) => {
                         let _ = ready_tx.send(Ok(()));
                         // Periodic debug report: proves whether the device is
                         // pulling audio (callbacks > 0) and whether the graph
@@ -305,6 +442,7 @@ impl Engine {
                             }
                         }
                         eprintln!("[dj-audio] stop requested, dropping cpal stream");
+                        drop(monitor);
                         drop(stream);
                     }
                     Err(e) => {
@@ -379,6 +517,12 @@ impl Engine {
             while ctl.garbage_rx.pop().is_ok() {}
         }
         for ctl in self.decks.values_mut() {
+            while ctl.garbage_rx.pop().is_ok() {}
+        }
+        for ctl in self.clip_decks.values_mut() {
+            while ctl.garbage_rx.pop().is_ok() {}
+        }
+        for ctl in self.beat_clips.values_mut() {
             while ctl.garbage_rx.pop().is_ok() {}
         }
     }

@@ -72,6 +72,11 @@ pub struct BeatClipRef {
     /// The clip's name when it was bound — display only.
     #[serde(default)]
     pub name: String,
+    /// The Beatify project the clip was cut in, by name — display only,
+    /// like `name`: a deck says where its clip came from, and two decks
+    /// holding an "intro" each are told apart by it.
+    #[serde(default)]
+    pub project_name: String,
     /// Which parts of a track the clip is made of ("drums", "bass", …),
     /// as it was when bound — display only, like the name. Empty for a
     /// patch saved before clips said, and re-filled on the next load.

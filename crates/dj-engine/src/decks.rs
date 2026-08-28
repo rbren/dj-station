@@ -1,10 +1,28 @@
 //! Built-in Decks module (`builtin.decks`): eight Beatify clips on ONE
 //! clock, mixed down to a stereo pair — the engine behind the Decks tab.
 //!
-//! - Inputs: `bpm` (the bank's tempo; every slot is stretched to it) and
-//!   `reset` (a rising edge parks the whole bank on beat 0).
-//! - Outputs: `audio_l`, `audio_r`.
+//! - Inputs: `bpm` (the bank's tempo; every slot is stretched to it),
+//!   `reset` (a rising edge parks the whole bank on beat 0) and a RETURN
+//!   pair per deck (`d1_in_l`…`d8_in_r`).
+//! - Outputs: `audio_l`/`audio_r` (the live mix), `mon_l`/`mon_r` (the
+//!   decks switched to Monitor), `clock` (one pulse per bank beat), and
+//!   per deck a SEND pair (`d1_l`/`d1_r`) plus its three tone controls as
+//!   CV (`d1_high`/`d1_mid`/`d1_low`).
 //! - Params: `surface` (does this bank listen to the Launch Control XL).
+//!
+//! THE RACK IS THE BANK'S EFFECTS LOOP. A deck's send always carries its
+//! audio; wiring anything back into that deck's return makes the modules
+//! in between its INSERT — the deck's own path stops reaching the mix, so
+//! nothing is heard twice — and the fader, mute and monitor switch still
+//! belong to the deck. The three tone controls work the same way round:
+//! their CV outputs always carry the knob positions, and patching one
+//! takes that band OFF the deck's audio (it sits flat) because a knob
+//! doing two jobs is a knob you cannot read.
+//!
+//! MONITOR IS A CUE, NOT A SOLO: a deck switched to it leaves the live
+//! pair and comes out of the monitor pair instead, and every other deck
+//! carries on exactly as it was. The app sends the two pairs to two
+//! chosen output devices.
 //!
 //! ONE CLOCK, NO PER-SLOT TRANSPORT. The module owns a single fractional
 //! beat counter that advances at the `bpm` input's tempo, and a slot's
@@ -12,10 +30,9 @@
 //! own length. That is what makes the bank phase-aligned by construction:
 //! every clip's beat 0 lands on a beat of the same grid, so an 8-beat clip
 //! and a 2-beat clip come round together and a 6-beat clip lands on the
-//! even beats they share ([`align_beats`] is the gcd that names that
-//! grid). Seven beats against eight share nothing but beat 0 of a 56-beat
-//! cycle, and the status says so rather than pretending
-//! ([`slots_align`] / [`DeckSlotStatus::aligned`]).
+//! even beats they share. [`cycle_beats`] is how long the whole bank takes
+//! to come round — the one thing about that arithmetic the tab still says
+//! out loud.
 //!
 //! A clip is played at the bank's tempo, not at its own: the playhead
 //! moves at `bpm`, while [`crate::stretch`]'s grains read the audio at the
@@ -26,7 +43,7 @@
 //!
 //! Slots load MUTED and un-shifted: dropping a clip into a running bank
 //! can never make a noise the user did not ask for, and the level, EQ and
-//! solo they already set stay where they are.
+//! monitor switch they already set stay where they are.
 //!
 //! CONTROL STATE IS CANONICAL CONTROL-SIDE ([`DecksState`], persisted per
 //! instance in the patch like [`crate::choreo::ChoreoState`]) and mirrors
@@ -35,8 +52,10 @@
 //! (`decks_pending`). Both the panel and the Launch Control XL write that
 //! same state — the surface is decoded with [`crate::launch_control`]'s
 //! own device map, one column per slot (three knobs = high/mid/low, fader
-//! = level, the two buttons = mute and solo), so what the tab draws and
-//! what the hardware does can never be two different mappings.
+//! = level, the two buttons = mute and monitor), so what the tab draws and
+//! what the hardware does can never be two different mappings — and the
+//! bank lights the surface's buttons back ([`led_for`]), so the controller
+//! shows the same state the strip does.
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
@@ -61,9 +80,53 @@ pub const SURFACE_PARAM: &str = "surface";
 
 pub(crate) const IN_BPM: usize = 0;
 pub(crate) const IN_RESET: usize = 1;
+/// First per-slot RETURN jack. Two (L/R) per slot: wire a deck's send
+/// through the rack and back in here and the modules become that deck's
+/// insert — what comes back is what the bank mixes.
+pub(crate) const IN_RETURN_BASE: usize = 2;
+pub const N_INPUTS: usize = IN_RETURN_BASE + SLOTS * 2;
 
 const OUT_AUDIO_L: usize = 0;
 const OUT_AUDIO_R: usize = 1;
+/// The monitor pair: a slot switched to Monitor leaves the live mix and
+/// comes out here instead (the app sends this pair to the monitor device).
+const OUT_MON_L: usize = 2;
+const OUT_MON_R: usize = 3;
+/// One pulse per beat of the bank's own clock, for the rack.
+const OUT_CLOCK: usize = 4;
+/// First per-slot output. Five each: the send pair, then the three tone
+/// controls as CV.
+pub(crate) const OUT_SLOT_BASE: usize = 5;
+pub(crate) const OUT_PER_SLOT: usize = 5;
+pub const N_OUTPUTS: usize = OUT_SLOT_BASE + SLOTS * OUT_PER_SLOT;
+
+/// Tone controls, in the order their CV outputs (and the surface's three
+/// knob rows) sit: high, mid, low.
+pub const TONES: [SlotControl; 3] = [SlotControl::High, SlotControl::Mid, SlotControl::Low];
+
+/// A slot's return jack (`ch` 0 = L, 1 = R).
+pub fn return_jack(slot: usize, ch: usize) -> usize {
+    IN_RETURN_BASE + slot * 2 + ch
+}
+
+/// A slot's send jack (`ch` 0 = L, 1 = R).
+pub fn send_jack(slot: usize, ch: usize) -> usize {
+    OUT_SLOT_BASE + slot * OUT_PER_SLOT + ch
+}
+
+/// A slot's tone-control CV output (`tone` indexes [`TONES`]).
+pub fn tone_jack(slot: usize, tone: usize) -> usize {
+    OUT_SLOT_BASE + slot * OUT_PER_SLOT + 2 + tone
+}
+
+/// How long the clock output's pulse is held, in seconds (~1 ms, the
+/// width the built-in MIDI clock uses).
+const CLOCK_PULSE_SECS: f32 = 0.001;
+
+/// An off from a surface button this soon after its own on is a FINGER
+/// COMING OFF a momentary button, not a second press (see
+/// [`crate::Engine::decks_feed`]).
+pub const MOMENTARY_RELEASE_SECS: f64 = 0.25;
 
 /// Tempo a fresh bank runs at.
 pub const DEFAULT_BPM: f32 = 120.0;
@@ -110,22 +173,6 @@ pub fn lcm(a: u32, b: u32) -> u32 {
         return a.max(b);
     }
     (a as u64 / gcd(a, b) as u64 * b as u64).min(MAX_CYCLE_BEATS as u64) as u32
-}
-
-/// The beat grid one slot's starts land on, given every other loaded
-/// slot: the gcd of their lengths. Eight beats beside two is 2 — the
-/// short clip starts on every even beat, one of which is the long one's
-/// downbeat; eight beside seven is 1, which is another way of saying
-/// nothing is shared.
-pub fn align_beats(len: u32, others: &[u32]) -> u32 {
-    others.iter().fold(len, |acc, o| gcd(acc, *o))
-}
-
-/// Whether two loop lengths hold any phase relationship worth the name.
-/// A one-beat loop starts on every beat, so it is aligned with anything;
-/// otherwise the two must share a factor.
-pub fn slots_align(a: u32, b: u32) -> bool {
-    a.min(b) <= 1 || gcd(a, b) > 1
 }
 
 /// How often the whole bank comes round: the lcm of every loaded slot.
@@ -182,7 +229,22 @@ pub fn decks_manifest() -> Manifest {
                 }),
                 display: None,
             },
-        ],
+        ]
+        .into_iter()
+        // A deck's RETURN: the far end of its insert. Plain wire jacks
+        // (no knob) — this is audio coming back, not a control.
+        .chain((0..SLOTS).flat_map(|slot| {
+            [("l", "L"), ("r", "R")].map(|(side, name)| JackDecl {
+                id: format!("d{}_in_{side}", slot + 1),
+                name: format!("Deck {} Return {name}", slot + 1),
+                default: 0.0,
+                audio: true,
+                capture: false,
+                knob: None,
+                display: None,
+            })
+        }))
+        .collect(),
         outputs: vec![
             OutputDecl {
                 id: "audio_l".into(),
@@ -194,7 +256,54 @@ pub fn decks_manifest() -> Manifest {
                 name: "Audio R".into(),
                 display: None,
             },
-        ],
+            OutputDecl {
+                id: "mon_l".into(),
+                name: "Monitor L".into(),
+                display: None,
+            },
+            OutputDecl {
+                id: "mon_r".into(),
+                name: "Monitor R".into(),
+                display: None,
+            },
+            OutputDecl {
+                id: "clock".into(),
+                name: "Clock".into(),
+                display: None,
+            },
+        ]
+        .into_iter()
+        .chain((0..SLOTS).flat_map(|slot| {
+            let n = slot + 1;
+            [
+                OutputDecl {
+                    id: format!("d{n}_l"),
+                    name: format!("Deck {n} Send L"),
+                    display: None,
+                },
+                OutputDecl {
+                    id: format!("d{n}_r"),
+                    name: format!("Deck {n} Send R"),
+                    display: None,
+                },
+                OutputDecl {
+                    id: format!("d{n}_high"),
+                    name: format!("Deck {n} High CV"),
+                    display: None,
+                },
+                OutputDecl {
+                    id: format!("d{n}_mid"),
+                    name: format!("Deck {n} Mid CV"),
+                    display: None,
+                },
+                OutputDecl {
+                    id: format!("d{n}_low"),
+                    name: format!("Deck {n} Low CV"),
+                    display: None,
+                },
+            ]
+        }))
+        .collect(),
         params: vec![ParamDecl {
             id: SURFACE_PARAM.into(),
             name: "Follow Launch Control XL".into(),
@@ -238,8 +347,11 @@ pub struct DeckSlotState {
     /// Clips arrive muted: a load can never make an unasked-for noise.
     #[serde(default = "yes")]
     pub mute: bool,
-    #[serde(default)]
-    pub solo: bool,
+    /// Monitor (cue): this deck leaves the live mix and comes out of the
+    /// bank's monitor pair instead. `solo` is the name it was saved under
+    /// before it meant this.
+    #[serde(default, alias = "solo")]
+    pub monitor: bool,
 }
 
 fn default_bpm() -> f32 {
@@ -265,7 +377,7 @@ impl Default for DeckSlotState {
             mid: 1.0,
             high: 1.0,
             mute: true,
-            solo: false,
+            monitor: false,
         }
     }
 }
@@ -325,13 +437,13 @@ pub enum SlotControl {
     Mid,
     Low,
     Mute,
-    Solo,
+    Monitor,
 }
 
 impl SlotControl {
     /// The Launch Control XL row that drives this control: knobs top to
     /// bottom are high/mid/low (a mixer's EQ order), the fader is level,
-    /// and the two buttons are mute and solo.
+    /// and the two buttons are mute and monitor.
     pub fn from_surface_row(r: usize) -> Option<Self> {
         Some(match r {
             row::SEND_A => SlotControl::High,
@@ -339,7 +451,7 @@ impl SlotControl {
             row::PAN => SlotControl::Low,
             row::FADER => SlotControl::Level,
             row::FOCUS => SlotControl::Mute,
-            row::CONTROL => SlotControl::Solo,
+            row::CONTROL => SlotControl::Monitor,
             _ => return None,
         })
     }
@@ -347,7 +459,7 @@ impl SlotControl {
     /// Is this a momentary button (toggles the state) rather than a
     /// continuous control (sets it)?
     pub fn is_button(self) -> bool {
-        matches!(self, SlotControl::Mute | SlotControl::Solo)
+        matches!(self, SlotControl::Mute | SlotControl::Monitor)
     }
 
     /// What `volts` off the surface means for this control: 0..10 V spans
@@ -357,7 +469,7 @@ impl SlotControl {
         match self {
             SlotControl::Level => unit,
             SlotControl::High | SlotControl::Mid | SlotControl::Low => unit * EQ_MAX,
-            SlotControl::Mute | SlotControl::Solo => unit,
+            SlotControl::Mute | SlotControl::Monitor => unit,
         }
     }
 }
@@ -367,6 +479,7 @@ impl SlotControl {
 pub struct SlotShared {
     pos_secs: AtomicU64,
     beat: AtomicI64,
+    sounding: AtomicBool,
     playing: AtomicBool,
 }
 
@@ -390,9 +503,14 @@ impl DecksShared {
     pub fn slot_position_secs(&self, slot: usize) -> f64 {
         f64::from_bits(self.slots[slot].pos_secs.load(Ordering::Relaxed))
     }
-    /// Beat of its own clip the slot is on, or -1 when it is silent.
+    /// Beat of its own loop the slot is on (the silent tail counts), or -1
+    /// when nothing is loaded.
     pub fn slot_beat(&self, slot: usize) -> i64 {
         self.slots[slot].beat.load(Ordering::Relaxed)
+    }
+    /// Whether that beat is one of the clip's own rather than its tail.
+    pub fn slot_sounding(&self, slot: usize) -> bool {
+        self.slots[slot].sounding.load(Ordering::Relaxed)
     }
     pub fn slot_playing(&self, slot: usize) -> bool {
         self.slots[slot].playing.load(Ordering::Relaxed)
@@ -417,12 +535,19 @@ pub enum DecksCmd {
         mid: f32,
         high: f32,
         mute: bool,
-        solo: bool,
+        monitor: bool,
     },
     Timing {
         slot: u8,
         tail: u32,
         phase: i32,
+    },
+    /// Which of a slot's three tone controls have their CV output patched
+    /// into the rack — those stop touching the audio (see
+    /// [`DecksRtModule::process`]).
+    Tone {
+        slot: u8,
+        patched: [bool; 3],
     },
     /// Park the bank on beat 0.
     Reset,
@@ -440,6 +565,18 @@ pub struct DecksControl {
     /// slot the app layer still has to assemble (`decks_pending`).
     pub tracks: Vec<Option<Arc<TrackData>>>,
     pub surface: crate::launch_control::LaunchControlControl,
+    /// When each surface button was last seen pressed, so a release can
+    /// be told from a second press ([`MOMENTARY_RELEASE_SECS`]). WALL
+    /// clock, not audio frames: the surface is played whether or not the
+    /// engine is running, and this is control-thread code. `None` is a
+    /// button that has not been down — an off arriving then is a TOGGLE
+    /// template's second press, never a finger coming off.
+    pub(crate) button_down: [Option<std::time::Instant>; SLOTS * 2],
+    /// Slots whose lamps on the surface no longer match their state.
+    pub(crate) leds_dirty: [bool; SLOTS],
+    /// Channel nibble the device last spoke on — LED messages go back the
+    /// way they came, because the surface changes channel per template.
+    pub(crate) surface_channel: u8,
 }
 
 impl DecksControl {
@@ -455,8 +592,32 @@ impl DecksControl {
             state: DecksState::default(),
             tracks: vec![None; SLOTS],
             surface: crate::launch_control::LaunchControlControl::default(),
+            button_down: [None; SLOTS * 2],
+            leds_dirty: [true; SLOTS],
+            surface_channel: DEFAULT_SURFACE_CHANNEL,
         }
     }
+}
+
+/// Channel LED messages go out on until the device has spoken (factory
+/// template 1).
+pub const DEFAULT_SURFACE_CHANNEL: u8 = 8;
+
+/// Launch Control XL LED velocities: `12 + red + 16*green`, red and green
+/// 0..3. A lit control says what it is doing — mute is red, monitor is
+/// green — so the surface reads like the strip does.
+pub mod led {
+    pub const OFF: u8 = 12;
+    pub const RED: u8 = 15;
+    pub const GREEN: u8 = 60;
+}
+
+/// The lamp velocity for one deck's two buttons (mute, monitor).
+pub fn led_for(mute: bool, monitor: bool) -> (u8, u8) {
+    (
+        if mute { led::RED } else { led::OFF },
+        if monitor { led::GREEN } else { led::OFF },
+    )
 }
 
 /// One slot, as a UI sees it.
@@ -478,17 +639,22 @@ pub struct DeckSlotStatus {
     pub mid: f32,
     pub high: f32,
     pub mute: bool,
-    pub solo: bool,
-    /// The beat grid this slot's starts land on, against the rest of the
-    /// bank (the gcd of the loop lengths).
-    pub align_beats: u32,
-    /// False when this clip shares no phase with something else loaded —
-    /// seven beats against eight.
-    pub aligned: bool,
+    /// Cueing: this deck is on the monitor pair instead of the live mix.
+    pub monitor: bool,
+    /// Whether this deck's return is wired — its send goes through the
+    /// rack and what comes back is what the bank mixes.
+    pub insert: bool,
+    /// Which of the three tone controls have their CV output patched into
+    /// the rack, in [`TONES`] order (high, mid, low). A patched one drives
+    /// that jack and leaves the deck's own tone alone.
+    pub tone_patched: [bool; 3],
     pub duration_secs: f64,
     pub position_secs: f64,
-    /// Beat of its own clip the slot is playing, -1 when silent.
+    /// Beat of its own loop the slot is on — the silent tail counts too,
+    /// because the lamp is showing where the loop IS. -1 = nothing loaded.
     pub beat: i64,
+    /// Whether that beat is the clip's own audio rather than its tail.
+    pub sounding: bool,
     pub playing: bool,
 }
 
@@ -539,8 +705,11 @@ struct RtSlot {
     mid: f32,
     high: f32,
     mute: bool,
-    solo: bool,
-    /// Smoothed level actually applied, so mute/solo/fader moves ramp.
+    monitor: bool,
+    /// Tone controls whose CV output is patched into the rack (high, mid,
+    /// low): those bands stay flat here.
+    tone_patched: [bool; 3],
+    /// Smoothed level actually applied, so mute/monitor/fader moves ramp.
     gain: f32,
     grains: GrainStretch,
     eq: [BandSplit; 2],
@@ -559,11 +728,23 @@ impl RtSlot {
             mid: 1.0,
             high: 1.0,
             mute: true,
-            solo: false,
+            monitor: false,
+            tone_patched: [false; 3],
             gain: 0.0,
             grains: GrainStretch::new(engine_rate),
             eq: [BandSplit::default(); 2],
         }
+    }
+
+    /// The three band gains this slot's audio actually gets: a tone
+    /// control whose CV output is patched has left the deck, so its band
+    /// sits flat.
+    fn bands(&self) -> (f32, f32, f32) {
+        (
+            if self.tone_patched[2] { 1.0 } else { self.low },
+            if self.tone_patched[1] { 1.0 } else { self.mid },
+            if self.tone_patched[0] { 1.0 } else { self.high },
+        )
     }
 
     fn length_beats(&self) -> u32 {
@@ -590,6 +771,11 @@ pub struct DecksRtModule {
     a_low: f32,
     a_high: f32,
     a_gain: f32,
+    /// Samples of the clock output's pulse still to go, and the beat the
+    /// last one was fired on.
+    clock_left: u32,
+    clock_len: u32,
+    last_beat: i64,
     shared: Arc<DecksShared>,
 }
 
@@ -616,6 +802,10 @@ impl DecksRtModule {
             a_low: one_pole(EQ_LOW_HZ, rate),
             a_high: one_pole(EQ_HIGH_HZ, rate),
             a_gain: 1.0 - (-1.0 / (GAIN_SMOOTH_SECS * rate)).exp(),
+            clock_left: 0,
+            clock_len: ((rate * CLOCK_PULSE_SECS) as u32).max(1),
+            // Beat 0 has not happened yet: the first sample fires it.
+            last_beat: -1,
             shared,
         }
     }
@@ -648,7 +838,7 @@ impl DecksRtModule {
                 mid,
                 high,
                 mute,
-                solo,
+                monitor,
             } => {
                 let Some(s) = self.slots.get_mut(slot as usize) else {
                     return;
@@ -658,7 +848,7 @@ impl DecksRtModule {
                 s.mid = mid;
                 s.high = high;
                 s.mute = mute;
-                s.solo = solo;
+                s.monitor = monitor;
             }
             DecksCmd::Timing { slot, tail, phase } => {
                 let Some(s) = self.slots.get_mut(slot as usize) else {
@@ -666,6 +856,12 @@ impl DecksRtModule {
                 };
                 s.tail = tail;
                 s.phase = phase;
+            }
+            DecksCmd::Tone { slot, patched } => {
+                let Some(s) = self.slots.get_mut(slot as usize) else {
+                    return;
+                };
+                s.tone_patched = patched;
             }
             DecksCmd::Reset => {
                 self.beat_pos = 0.0;
@@ -678,81 +874,128 @@ impl DecksRtModule {
 }
 
 impl HostModule for DecksRtModule {
-    fn process(
-        &mut self,
-        inputs: &[Vec<f32>],
-        outputs: &mut [Vec<f32>],
-        _mask: u64,
-        frames: usize,
-    ) {
+    fn process(&mut self, inputs: &[Vec<f32>], outputs: &mut [Vec<f32>], mask: u64, frames: usize) {
         while let Ok(cmd) = self.rx.pop() {
             self.apply(cmd);
         }
 
-        // Solo is a property of the bank, so it is decided once per block
-        // rather than per slot per sample.
-        let any_solo = self
-            .slots
-            .iter()
-            .any(|s| s.solo && s.track.is_some() && s.beats > 0);
+        // The three tone controls go out as CV whether or not the deck is
+        // playing: they are knob positions, and a knob has a position even
+        // in silence. Constant across the block, like every control read.
+        for (i, slot) in self.slots.iter().enumerate() {
+            for (t, control) in TONES.iter().enumerate() {
+                let value = match control {
+                    SlotControl::High => slot.high,
+                    SlotControl::Mid => slot.mid,
+                    _ => slot.low,
+                };
+                let volts = (value / EQ_MAX).clamp(0.0, 1.0) * SIGNAL_MAX;
+                outputs[tone_jack(i, t)][..frames].fill(volts);
+            }
+        }
 
         let bpm = &inputs[IN_BPM];
         let reset = &inputs[IN_RESET];
         let (a_low, a_high, a_gain) = (self.a_low, self.a_high, self.a_gain);
+        let engine_rate = self.engine_rate;
         for s in 0..frames {
             if reset[s] >= 1.0 && self.last_reset < 1.0 {
                 self.beat_pos = 0.0;
+                self.last_beat = -1;
                 for slot in &mut self.slots {
                     slot.grains.reset();
                 }
             }
             self.last_reset = reset[s];
 
+            // One pulse per beat of the bank's own clock — the thing the
+            // rack can lock to.
+            let beat = self.beat_pos.floor() as i64;
+            if beat != self.last_beat {
+                self.last_beat = beat;
+                self.clock_left = self.clock_len;
+            }
+            outputs[OUT_CLOCK][s] = if self.clock_left > 0 {
+                self.clock_left -= 1;
+                SIGNAL_MAX
+            } else {
+                0.0
+            };
+
             let tempo = bpm[s].clamp(MIN_BPM, MAX_BPM) as f64;
             let (mut mix_l, mut mix_r) = (0.0f32, 0.0f32);
-            for slot in &mut self.slots {
-                let target = if slot.mute || (any_solo && !slot.solo) {
-                    0.0
-                } else {
-                    slot.level.max(0.0)
-                };
+            let (mut mon_l, mut mon_r) = (0.0f32, 0.0f32);
+            for (i, slot) in self.slots.iter_mut().enumerate() {
+                let target = if slot.mute { 0.0 } else { slot.level.max(0.0) };
                 slot.gain += a_gain * (target - slot.gain);
+                // A wired return makes the rack this deck's insert: what
+                // comes back is what the bank mixes, in place of the
+                // deck's own path.
+                let insert =
+                    mask & (1 << return_jack(i, 0)) != 0 || mask & (1 << return_jack(i, 1)) != 0;
 
-                let Some(track) = &slot.track else { continue };
-                let len = slot.length_beats();
-                if len == 0 {
-                    continue;
-                }
-                let beat_frames = 60.0 / slot.source_bpm as f64 * track.sample_rate as f64;
-                let local = (self.beat_pos - slot.phase as f64).rem_euclid(len as f64);
-                let pos = local * beat_frames;
-                // The tail is silence: past the clip's own beats there is
-                // nothing to read, but the slot keeps counting.
-                if local >= slot.beats as f64 || pos >= track.frames() as f64 {
-                    continue;
-                }
-                // Grains read at the clip's own rate while the playhead
-                // moves at the bank's — that split is the whole stretch.
-                let step = track.sample_rate as f64 / self.engine_rate as f64;
-                let taps = slot.grains.tick(pos, step, &track.channels[0]);
+                // The deck's own audio, which is also what its send
+                // carries — silent whenever there is nothing to read (no
+                // clip, or the loop's silent tail).
                 let (mut l, mut r) = (0.0f32, 0.0f32);
-                for tap in taps.iter().flatten() {
-                    let gl = sample_at(&track.channels[0], tap.pos);
-                    let gr = if track.channels.len() > 1 {
-                        sample_at(&track.channels[1], tap.pos)
+                let mut sounding = false;
+                if let Some(track) = &slot.track {
+                    let len = slot.length_beats();
+                    let beat_frames = 60.0 / slot.source_bpm as f64 * track.sample_rate as f64;
+                    let local = if len > 0 {
+                        (self.beat_pos - slot.phase as f64).rem_euclid(len as f64)
                     } else {
-                        gl
+                        0.0
                     };
-                    l += gl * tap.gain;
-                    r += gr * tap.gain;
+                    let pos = local * beat_frames;
+                    if len > 0 && local < slot.beats as f64 && pos < track.frames() as f64 {
+                        // Grains read at the clip's own rate while the
+                        // playhead moves at the bank's — that split is the
+                        // whole stretch.
+                        let step = track.sample_rate as f64 / engine_rate as f64;
+                        let taps = slot.grains.tick(pos, step, &track.channels[0]);
+                        for tap in taps.iter().flatten() {
+                            let gl = sample_at(&track.channels[0], tap.pos);
+                            let gr = if track.channels.len() > 1 {
+                                sample_at(&track.channels[1], tap.pos)
+                            } else {
+                                gl
+                            };
+                            l += gl * tap.gain;
+                            r += gr * tap.gain;
+                        }
+                        let (low, mid, high) = slot.bands();
+                        l = slot.eq[0].process(l, a_low, a_high, low, mid, high);
+                        r = slot.eq[1].process(r, a_low, a_high, low, mid, high);
+                        sounding = true;
+                    }
                 }
-                let l = slot.eq[0].process(l, a_low, a_high, slot.low, slot.mid, slot.high);
-                let r = slot.eq[1].process(r, a_low, a_high, slot.low, slot.mid, slot.high);
-                mix_l += l * slot.gain;
-                mix_r += r * slot.gain;
+                outputs[send_jack(i, 0)][s] = l * SIGNAL_MAX;
+                outputs[send_jack(i, 1)][s] = r * SIGNAL_MAX;
+
+                if insert {
+                    // Back off the rack in engine units; the fader and the
+                    // mute still belong to the deck.
+                    l = inputs[return_jack(i, 0)][s] / SIGNAL_MAX;
+                    r = inputs[return_jack(i, 1)][s] / SIGNAL_MAX;
+                } else if !sounding {
+                    continue;
+                }
+                // Monitor takes the deck OFF the live pair and puts it on
+                // the monitor one — it is a cue, not a solo: nothing else
+                // changes.
+                let (bus_l, bus_r) = if slot.monitor {
+                    (&mut mon_l, &mut mon_r)
+                } else {
+                    (&mut mix_l, &mut mix_r)
+                };
+                *bus_l += l * slot.gain;
+                *bus_r += r * slot.gain;
             }
             outputs[OUT_AUDIO_L][s] = mix_l * SIGNAL_MAX;
             outputs[OUT_AUDIO_R][s] = mix_r * SIGNAL_MAX;
+            outputs[OUT_MON_L][s] = mon_l * SIGNAL_MAX;
+            outputs[OUT_MON_R][s] = mon_r * SIGNAL_MAX;
             self.beat_pos += tempo / 60.0 / self.engine_rate as f64;
         }
 
@@ -764,22 +1007,26 @@ impl HostModule for DecksRtModule {
         for (i, slot) in self.slots.iter().enumerate() {
             let pub_slot = &self.shared.slots[i];
             let len = slot.length_beats();
-            let (pos_secs, beat, playing) = match (&slot.track, len) {
+            let (pos_secs, beat, sounding, playing) = match (&slot.track, len) {
                 (Some(track), len) if len > 0 => {
                     let local = (self.beat_pos - slot.phase as f64).rem_euclid(len as f64);
+                    // The beat is where the LOOP is, tail included: a
+                    // silent beat is still a beat the lamp must show.
                     let sounding = local < slot.beats as f64;
                     (
                         local * 60.0 / slot.source_bpm as f64,
-                        if sounding { local as i64 } else { -1 },
+                        local as i64,
+                        sounding,
                         sounding && slot.gain > 1e-4 && track.frames() > 0,
                     )
                 }
-                _ => (0.0, -1, false),
+                _ => (0.0, -1, false, false),
             };
             pub_slot
                 .pos_secs
                 .store(pos_secs.to_bits(), Ordering::Relaxed);
             pub_slot.beat.store(beat, Ordering::Relaxed);
+            pub_slot.sounding.store(sounding, Ordering::Relaxed);
             pub_slot.playing.store(playing, Ordering::Relaxed);
         }
     }
@@ -818,13 +1065,27 @@ mod tests {
     use crate::launch_control::{decode, jack_index};
 
     #[test]
-    fn manifest_is_one_clock_and_one_stereo_pair() {
+    fn manifest_is_one_clock_two_pairs_and_a_loop_per_deck() {
         let m = decks_manifest();
         assert_eq!(m.id, DECKS_ID);
         let ins: Vec<&str> = m.inputs.iter().map(|i| i.id.as_str()).collect();
-        assert_eq!(ins, ["bpm", "reset"]);
+        assert_eq!(ins.len(), N_INPUTS);
+        assert_eq!(&ins[..2], ["bpm", "reset"]);
+        // The tempo and the reset first, then a return pair per deck.
+        assert_eq!(ins[return_jack(0, 0)], "d1_in_l");
+        assert_eq!(ins[return_jack(7, 1)], "d8_in_r");
         let outs: Vec<&str> = m.outputs.iter().map(|o| o.id.as_str()).collect();
-        assert_eq!(outs, ["audio_l", "audio_r"]);
+        assert_eq!(outs.len(), N_OUTPUTS);
+        assert_eq!(
+            &outs[..5],
+            ["audio_l", "audio_r", "mon_l", "mon_r", "clock"]
+        );
+        assert_eq!(outs[send_jack(0, 0)], "d1_l");
+        assert_eq!(outs[tone_jack(0, 0)], "d1_high");
+        assert_eq!(outs[tone_jack(0, 2)], "d1_low");
+        assert_eq!(outs[tone_jack(7, 2)], "d8_low");
+        // The mask the RT reads is a u64, so the jacks have to fit in it.
+        const { assert!(N_INPUTS <= 64) };
         // Following the surface is a mode toggle, so it is a param and
         // rides in the patch (params-vs-inputs rule).
         assert_eq!(m.params.len(), 1);
@@ -840,24 +1101,6 @@ mod tests {
         assert_eq!((s.level, s.low, s.mid, s.high), (1.0, 1.0, 1.0, 1.0));
         assert_eq!(s.length_beats(), 0, "nothing loaded has no length");
         assert_eq!(DecksState::default().slots.len(), SLOTS);
-    }
-
-    #[test]
-    fn alignment_is_the_gcd_of_the_loop_lengths() {
-        // The ticket's cases: 2 against 8 starts with it, 6 against 8
-        // lands on the even beats they share, 7 shares nothing.
-        assert_eq!(align_beats(2, &[8]), 2);
-        assert_eq!(align_beats(6, &[8]), 2);
-        assert_eq!(align_beats(7, &[8]), 1);
-        assert_eq!(align_beats(4, &[8, 12]), 4);
-        // A slot with nothing else loaded is its own grid.
-        assert_eq!(align_beats(6, &[]), 6);
-
-        assert!(slots_align(2, 8));
-        assert!(slots_align(6, 8));
-        assert!(!slots_align(7, 8));
-        // A one-beat loop starts on every beat, so it fits anything.
-        assert!(slots_align(1, 7));
     }
 
     #[test]
@@ -895,7 +1138,7 @@ mod tests {
         );
         assert_eq!(
             surface_target(jack_index(3, row::CONTROL)),
-            Some((3, SlotControl::Solo))
+            Some((3, SlotControl::Monitor))
         );
         // And the device map is the Launch Control's own: fader 3 is CC 79.
         let (jack, volts) = decode([0xB8, 79, 127]).unwrap();
@@ -918,10 +1161,39 @@ mod tests {
         let shared = Arc::new(DecksShared::default());
         let mut m = DecksRtModule::new(rx, garbage_tx, 48_000.0, shared.clone());
         setup(&mut tx);
-        let inputs = vec![vec![bpm; frames], vec![0.0; frames]];
-        let mut outputs = vec![vec![0.0; frames]; 2];
+        let mut inputs = vec![vec![0.0; frames]; N_INPUTS];
+        inputs[IN_BPM].fill(bpm);
+        let mut outputs = vec![vec![0.0; frames]; N_OUTPUTS];
         m.process(&inputs, &mut outputs, 0, frames);
         (outputs.remove(0), shared)
+    }
+
+    /// Render with wires: `mask` says which input jacks are connected and
+    /// `returns` fills them, so an insert can be tested.
+    fn render_patched(
+        setup: impl FnOnce(&mut rtrb::Producer<DecksCmd>),
+        frames: usize,
+        mask: u64,
+        returns: impl Fn(usize, usize) -> f32,
+    ) -> Vec<Vec<f32>> {
+        let (mut tx, rx) = rtrb::RingBuffer::new(64);
+        let (garbage_tx, _garbage_rx) = rtrb::RingBuffer::new(64);
+        let shared = Arc::new(DecksShared::default());
+        let mut m = DecksRtModule::new(rx, garbage_tx, 48_000.0, shared);
+        setup(&mut tx);
+        let mut inputs = vec![vec![0.0; frames]; N_INPUTS];
+        inputs[IN_BPM].fill(120.0);
+        for (jack, buf) in inputs.iter_mut().enumerate() {
+            if mask & (1 << jack) == 0 {
+                continue;
+            }
+            for (s, v) in buf.iter_mut().enumerate() {
+                *v = returns(jack, s);
+            }
+        }
+        let mut outputs = vec![vec![0.0; frames]; N_OUTPUTS];
+        m.process(&inputs, &mut outputs, mask, frames);
+        outputs
     }
 
     /// A one-beat clip at 120 BPM: a constant, so the level it comes out
@@ -943,7 +1215,7 @@ mod tests {
         .unwrap();
     }
 
-    fn mix(tx: &mut rtrb::Producer<DecksCmd>, slot: u8, level: f32, mute: bool, solo: bool) {
+    fn mix(tx: &mut rtrb::Producer<DecksCmd>, slot: u8, level: f32, mute: bool, monitor: bool) {
         tx.push(DecksCmd::Mix {
             slot,
             level,
@@ -951,7 +1223,7 @@ mod tests {
             mid: 1.0,
             high: 1.0,
             mute,
-            solo,
+            monitor,
         })
         .unwrap();
     }
@@ -989,7 +1261,7 @@ mod tests {
     }
 
     #[test]
-    fn mute_and_solo_ramp_rather_than_click() {
+    fn mute_and_level_ramp_rather_than_click() {
         let (out, _) = render(
             |tx| {
                 load(tx, 0, 2, 0.5);
@@ -1009,8 +1281,8 @@ mod tests {
     }
 
     #[test]
-    fn solo_anywhere_silences_every_slot_that_is_not_soloed() {
-        let (out, shared) = render(
+    fn monitor_moves_a_deck_to_the_cue_pair_and_leaves_the_rest_alone() {
+        let out = render_patched(
             |tx| {
                 load(tx, 0, 2, 0.5);
                 mix(tx, 0, 1.0, false, false);
@@ -1018,15 +1290,112 @@ mod tests {
                 mix(tx, 1, 1.0, false, true);
             },
             4800,
-            120.0,
+            0,
+            |_, _| 0.0,
         );
-        let tail = &out[out.len() - 100..];
+        let live = &out[OUT_AUDIO_L][4700..];
+        let mon = &out[OUT_MON_L][4700..];
         assert!(
-            tail.iter().all(|s| (*s - 0.25 * SIGNAL_MAX).abs() < 0.05),
-            "only the soloed slot is heard"
+            live.iter().all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
+            "the live pair carries the deck that is NOT being cued, untouched"
         );
-        assert!(!shared.slot_playing(0), "slot 1 is soloed out");
-        assert!(shared.slot_playing(1));
+        assert!(
+            mon.iter().all(|s| (*s - 0.25 * SIGNAL_MAX).abs() < 0.05),
+            "and the cued deck comes out of the monitor pair"
+        );
+    }
+
+    #[test]
+    fn a_wired_return_makes_the_rack_that_decks_insert() {
+        // Slot 1's return carries a constant; its own clip must not reach
+        // the mix as well, or the deck would be heard twice.
+        let mask = 1 << return_jack(0, 0) | 1 << return_jack(0, 1);
+        let out = render_patched(
+            |tx| {
+                load(tx, 0, 2, 0.5);
+                mix(tx, 0, 1.0, false, false);
+            },
+            4800,
+            mask,
+            |_, _| 0.25 * SIGNAL_MAX,
+        );
+        let live = &out[OUT_AUDIO_L][4700..];
+        assert!(
+            live.iter().all(|s| (*s - 0.25 * SIGNAL_MAX).abs() < 0.05),
+            "what comes back is what is mixed, at the deck's own fader"
+        );
+        let send = &out[send_jack(0, 0)][4700..];
+        assert!(
+            send.iter().all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
+            "and the send still carries the deck's own audio, pre-fader"
+        );
+    }
+
+    #[test]
+    fn a_patched_tone_control_drives_its_jack_and_leaves_the_audio_flat() {
+        let mask = 0;
+        let out = render_patched(
+            |tx| {
+                load(tx, 0, 2, 0.5);
+                tx.push(DecksCmd::Mix {
+                    slot: 0,
+                    level: 1.0,
+                    low: 0.0,
+                    mid: 1.0,
+                    high: 1.0,
+                    mute: false,
+                    monitor: false,
+                })
+                .unwrap();
+                // Low is patched into the rack: it stops cutting the bass.
+                tx.push(DecksCmd::Tone {
+                    slot: 0,
+                    patched: [false, false, true],
+                })
+                .unwrap();
+            },
+            4800,
+            mask,
+            |_, _| 0.0,
+        );
+        // Low at 0 with the CV unpatched would gut a DC-ish clip; patched,
+        // the audio comes through at unity.
+        let live = &out[OUT_AUDIO_L][4700..];
+        assert!(
+            live.iter().all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
+            "a patched tone control leaves its band alone: {:?}",
+            &live[..4]
+        );
+        // ...and the jack carries the knob position, 0 V for a cut.
+        assert!(out[tone_jack(0, 2)].iter().all(|v| *v == 0.0));
+        // A control still on the deck sits at its own value: unity is
+        // half of the 0..EQ_MAX span.
+        let mid = out[tone_jack(0, 1)][0];
+        assert!((mid - SIGNAL_MAX / EQ_MAX).abs() < 1e-6, "mid CV {mid}");
+    }
+
+    #[test]
+    fn the_clock_output_pulses_once_a_beat() {
+        // Two beats at 120 BPM = one second.
+        let out = render_patched(
+            |tx| {
+                load(tx, 0, 2, 0.5);
+                mix(tx, 0, 1.0, false, false);
+            },
+            48_000,
+            0,
+            |_, _| 0.0,
+        );
+        let clock = &out[OUT_CLOCK];
+        let edges = clock
+            .windows(2)
+            .filter(|w| w[0] == 0.0 && w[1] > 0.0)
+            .count()
+            // The very first sample is beat 0's pulse, which has no edge
+            // before it.
+            + usize::from(clock[0] > 0.0);
+        assert_eq!(edges, 2, "one pulse per beat");
+        assert!(clock[0] > 0.0 && clock[47] > 0.0 && clock[100] == 0.0);
     }
 
     #[test]
@@ -1147,20 +1516,13 @@ mod tests {
         load(&mut tx, 0, 2, 0.5);
         mix(&mut tx, 0, 1.0, false, false);
         let frames = 12_000;
-        let mut outputs = vec![vec![0.0; frames]; 2];
-        m.process(
-            &[vec![120.0; frames], vec![0.0; frames]],
-            &mut outputs,
-            0,
-            frames,
-        );
+        let mut outputs = vec![vec![0.0; frames]; N_OUTPUTS];
+        let mut inputs = vec![vec![0.0; frames]; N_INPUTS];
+        inputs[IN_BPM].fill(120.0);
+        m.process(&inputs, &mut outputs, 0, frames);
         assert!(shared.beat() > 0.4);
-        m.process(
-            &[vec![120.0; frames], vec![10.0; frames]],
-            &mut outputs,
-            0,
-            frames,
-        );
+        inputs[IN_RESET].fill(10.0);
+        m.process(&inputs, &mut outputs, 0, frames);
         assert!(
             (shared.beat() - 0.5).abs() < 1e-6,
             "the reset restarts the count, got {}",

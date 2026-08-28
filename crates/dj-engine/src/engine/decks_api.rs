@@ -14,10 +14,11 @@
 
 use super::*;
 use crate::decks::{
-    align_beats, cycle_beats, slots_align, DeckSlotState, DeckSlotStatus, DecksCmd, DecksState,
-    DecksStatus, SlotControl, EQ_MAX, IN_BPM, MAX_TAIL_BEATS, SLOTS, SURFACE_PARAM,
+    cycle_beats, led_for, return_jack, tone_jack, DeckSlotState, DeckSlotStatus, DecksCmd,
+    DecksState, DecksStatus, SlotControl, EQ_MAX, IN_BPM, MAX_TAIL_BEATS, MOMENTARY_RELEASE_SECS,
+    SLOTS, SURFACE_PARAM,
 };
-use crate::launch_control::BUTTON_GATE_VOLTS;
+use crate::launch_control::{jack_index, row, BUTTON_GATE_VOLTS};
 
 impl Engine {
     fn decks_node(&self, instance_id: &str) -> Result<usize> {
@@ -48,7 +49,7 @@ impl Engine {
                 mid: s.mid,
                 high: s.high,
                 mute: s.mute,
-                solo: s.solo,
+                monitor: s.monitor,
             },
             DecksCmd::Timing {
                 slot: slot as u8,
@@ -56,6 +57,9 @@ impl Engine {
                 phase: s.phase,
             },
         );
+        // The surface's lamps show mute and monitor, so any write to a
+        // slot leaves them owing an update.
+        ctl.leds_dirty[slot] = true;
         ctl.tx
             .push(mix)
             .map_err(|_| anyhow!("too many pending deck edits"))?;
@@ -63,6 +67,47 @@ impl Engine {
             .push(timing)
             .map_err(|_| anyhow!("too many pending deck edits"))?;
         Ok(())
+    }
+
+    /// Which of a slot's three tone-control CV outputs are patched into
+    /// the rack, in [`TONES`] order.
+    fn tone_patched(&self, node: usize, slot: usize) -> [bool; 3] {
+        let mut out = [false; 3];
+        for (t, patched) in out.iter_mut().enumerate() {
+            let jack = tone_jack(slot, t);
+            *patched = self
+                .wires
+                .iter()
+                .any(|w| w.from_node == node && w.from_jack == jack);
+        }
+        out
+    }
+
+    /// Whether a slot's return is wired — the rack is its insert.
+    fn insert_wired(&self, node: usize, slot: usize) -> bool {
+        (0..2).any(|ch| {
+            let jack = return_jack(slot, ch);
+            self.wires
+                .iter()
+                .any(|w| w.to_node == node && w.to_jack == jack)
+        })
+    }
+
+    /// Tell every bank which of its tone controls have left the deck for
+    /// the rack. Called after any wire change, because that is the only
+    /// thing that can change the answer.
+    pub(crate) fn sync_decks_routing(&mut self) {
+        let nodes: Vec<usize> = self.clip_decks.keys().copied().collect();
+        for node in nodes {
+            for slot in 0..SLOTS {
+                let patched = self.tone_patched(node, slot);
+                let ctl = self.clip_decks.get_mut(&node).unwrap();
+                let _ = ctl.tx.push(DecksCmd::Tone {
+                    slot: slot as u8,
+                    patched,
+                });
+            }
+        }
     }
 
     /// Edit one slot's control state and mirror it to the RT thread.
@@ -225,7 +270,7 @@ impl Engine {
             SlotControl::Mid => s.mid = value.clamp(0.0, EQ_MAX),
             SlotControl::Low => s.low = value.clamp(0.0, EQ_MAX),
             SlotControl::Mute => s.mute = value >= 1.0,
-            SlotControl::Solo => s.solo = value >= 1.0,
+            SlotControl::Monitor => s.monitor = value >= 1.0,
         })
     }
 
@@ -315,47 +360,31 @@ impl Engine {
             .slots
             .iter()
             .enumerate()
-            .map(|(i, s)| {
-                let len = s.length_beats();
-                // Every OTHER loaded slot: a clip is not out of phase
-                // with itself.
-                let others: Vec<u32> = ctl
-                    .state
-                    .slots
-                    .iter()
-                    .enumerate()
-                    .filter(|(j, o)| *j != i && o.length_beats() > 0)
-                    .map(|(_, o)| o.length_beats())
-                    .collect();
-                DeckSlotStatus {
-                    slot: i,
-                    clip: s.clip.clone(),
-                    loaded: ctl.tracks[i].is_some(),
-                    beats: s.beats,
-                    tail: s.tail,
-                    phase: s.phase,
-                    source_bpm: s.source_bpm,
-                    stretch: bank_bpm / s.source_bpm.max(1.0) as f64,
-                    level: s.level,
-                    low: s.low,
-                    mid: s.mid,
-                    high: s.high,
-                    mute: s.mute,
-                    solo: s.solo,
-                    align_beats: if len > 0 {
-                        align_beats(len, &others)
-                    } else {
-                        0
-                    },
-                    aligned: len == 0 || others.iter().all(|o| slots_align(len, *o)),
-                    duration_secs: ctl.tracks[i]
-                        .as_ref()
-                        .map(|t| t.duration_secs())
-                        .unwrap_or(0.0),
-                    position_secs: ctl.shared.slot_position_secs(i),
-                    beat: ctl.shared.slot_beat(i),
-                    playing: ctl.shared.slot_playing(i),
-                }
+            .map(|(i, s)| DeckSlotStatus {
+                slot: i,
+                clip: s.clip.clone(),
+                loaded: ctl.tracks[i].is_some(),
+                beats: s.beats,
+                tail: s.tail,
+                phase: s.phase,
+                source_bpm: s.source_bpm,
+                stretch: bank_bpm / s.source_bpm.max(1.0) as f64,
+                level: s.level,
+                low: s.low,
+                mid: s.mid,
+                high: s.high,
+                mute: s.mute,
+                monitor: s.monitor,
+                insert: self.insert_wired(node, i),
+                tone_patched: self.tone_patched(node, i),
+                duration_secs: ctl.tracks[i]
+                    .as_ref()
+                    .map(|t| t.duration_secs())
+                    .unwrap_or(0.0),
+                position_secs: ctl.shared.slot_position_secs(i),
+                beat: ctl.shared.slot_beat(i),
+                sounding: ctl.shared.slot_sounding(i),
+                playing: ctl.shared.slot_playing(i),
             })
             .collect();
         Ok(DecksStatus {
@@ -370,9 +399,17 @@ impl Engine {
 
     /// Feed one raw Launch Control XL message to every bank that follows
     /// the surface (the DEVICE feed — the app's hot-plug watcher). Knobs
-    /// and faders SET their control; the two buttons are momentary on the
-    /// device and TOGGLE mute/solo on the press, because a mute you have
-    /// to keep your finger on is not a mute.
+    /// and faders SET their control; the two buttons TOGGLE mute/monitor,
+    /// because a mute you have to keep your finger on is not a mute.
+    ///
+    /// ONE PRESS IS ONE CHANGE, whichever kind of button the template
+    /// gives us. A momentary button sends an on when it goes down and an
+    /// off when it comes back up; a factory-template toggle sends the on
+    /// on one press and the OFF on the next — so acting on the on alone
+    /// meant every second press did nothing (you had to double-tap). Both
+    /// edges act now, except an off that lands within
+    /// [`MOMENTARY_RELEASE_SECS`] of its own on: that is a finger coming
+    /// off, not a second press.
     pub fn decks_feed(&mut self, data: [u8; 3]) -> Result<()> {
         let nodes: Vec<usize> = self
             .clip_decks
@@ -403,6 +440,8 @@ impl Engine {
         // its end stop), then apply exactly what changed.
         let mut hit = None;
         let ctl = self.clip_decks.get_mut(&node).unwrap();
+        // LEDs go back out on the channel the device is talking on.
+        ctl.surface_channel = data[0] & 0x0F;
         ctl.surface
             .feed(data, |jack, volts| hit = Some((jack, volts)));
         let Some((jack, volts)) = hit else {
@@ -412,14 +451,19 @@ impl Engine {
             return Ok(());
         };
         if control.is_button() {
-            // Only the press acts; the release is what makes the next
-            // press a fresh one.
-            if volts < BUTTON_GATE_VOLTS {
+            let button = slot * 2 + usize::from(control == SlotControl::Monitor);
+            if volts >= BUTTON_GATE_VOLTS {
+                ctl.button_down[button] = Some(std::time::Instant::now());
+            } else if ctl.button_down[button]
+                .is_some_and(|down| down.elapsed().as_secs_f64() <= MOMENTARY_RELEASE_SECS)
+            {
+                // A finger coming off a momentary button, not a press.
+                ctl.button_down[button] = None;
                 return Ok(());
             }
             return self.write_slot(node, slot, |s| match control {
                 SlotControl::Mute => s.mute = !s.mute,
-                SlotControl::Solo => s.solo = !s.solo,
+                SlotControl::Monitor => s.monitor = !s.monitor,
                 _ => {}
             });
         }
@@ -431,5 +475,52 @@ impl Engine {
             SlotControl::Low => s.low = value,
             _ => {}
         })
+    }
+
+    /// Lamp messages the surface is owed: mute lights red, monitor lights
+    /// green, on the channel the device last spoke on. Only banks that
+    /// follow the surface light it, and only slots whose state has moved
+    /// since the last drain — the app pumps this to the device's output
+    /// port, exactly like a MIDI module's LED feedback.
+    pub fn decks_drain_leds(&mut self) -> Vec<MidiOutEvent> {
+        let mut out = Vec::new();
+        for (node, ctl) in self.clip_decks.iter_mut() {
+            let follows = self
+                .nodes
+                .get(*node)
+                .and_then(|i| i.params.get(SURFACE_PARAM).copied())
+                != Some(0.0);
+            if !follows {
+                // A bank that is not driving the surface must not light it.
+                ctl.leds_dirty = [false; SLOTS];
+                continue;
+            }
+            for slot in 0..SLOTS {
+                if !std::mem::replace(&mut ctl.leds_dirty[slot], false) {
+                    continue;
+                }
+                let s = &ctl.state.slots[slot];
+                let (mute, monitor) = led_for(s.mute, s.monitor);
+                let status = 0x90 | ctl.surface_channel;
+                for (jack_row, velocity) in [(row::FOCUS, mute), (row::CONTROL, monitor)] {
+                    if let Some(note) = crate::launch_control::note_for(jack_index(slot, jack_row))
+                    {
+                        out.push(MidiOutEvent {
+                            frame: 0,
+                            data: [status, note, velocity],
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Say the lamps are owed again — after a surface (re)connect, when
+    /// the device has forgotten everything it was showing.
+    pub fn decks_relight_surface(&mut self) {
+        for ctl in self.clip_decks.values_mut() {
+            ctl.leds_dirty = [true; SLOTS];
+        }
     }
 }

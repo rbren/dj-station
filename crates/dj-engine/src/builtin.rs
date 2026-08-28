@@ -8,6 +8,11 @@ use crate::manifest::{categories, JackDecl, Manifest, OutputDecl};
 use crate::module_host::HostModule;
 
 pub const AUDIO_OUT_ID: &str = "builtin.audio_out";
+/// The second pair of ears: everything landing here goes to the MONITOR
+/// device (headphones/booth) instead of the live one, so a deck can be
+/// cued without the room hearing it. Identical jacks to Audio Output —
+/// only which bus the graph mixes it into differs.
+pub const MONITOR_OUT_ID: &str = "builtin.monitor_out";
 pub const MIDI_ID: &str = "builtin.midi";
 
 /// The built-in (non-extension) module types, resolved once from an
@@ -15,6 +20,7 @@ pub const MIDI_ID: &str = "builtin.midi";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinKind {
     AudioOut,
+    MonitorOut,
     Midi,
     LaunchControl,
     Qwerty,
@@ -32,6 +38,7 @@ impl BuiltinKind {
     pub fn from_ext_id(ext_id: &str) -> Option<Self> {
         match ext_id {
             AUDIO_OUT_ID => Some(BuiltinKind::AudioOut),
+            MONITOR_OUT_ID => Some(BuiltinKind::MonitorOut),
             MIDI_ID => Some(BuiltinKind::Midi),
             crate::launch_control::LAUNCH_CONTROL_ID => Some(BuiltinKind::LaunchControl),
             crate::qwerty::QWERTY_ID => Some(BuiltinKind::Qwerty),
@@ -59,6 +66,7 @@ impl BuiltinKind {
     pub fn ext_id(self) -> &'static str {
         match self {
             BuiltinKind::AudioOut => AUDIO_OUT_ID,
+            BuiltinKind::MonitorOut => MONITOR_OUT_ID,
             BuiltinKind::Midi => MIDI_ID,
             BuiltinKind::LaunchControl => crate::launch_control::LAUNCH_CONTROL_ID,
             BuiltinKind::Qwerty => crate::qwerty::QWERTY_ID,
@@ -76,6 +84,7 @@ impl BuiltinKind {
     pub fn manifest(self) -> Manifest {
         match self {
             BuiltinKind::AudioOut => audio_out_manifest(),
+            BuiltinKind::MonitorOut => monitor_out_manifest(),
             BuiltinKind::Midi => midi_manifest(),
             BuiltinKind::LaunchControl => crate::launch_control::launch_control_manifest(),
             BuiltinKind::Qwerty => crate::qwerty::qwerty_manifest(),
@@ -124,9 +133,18 @@ pub const GLOBAL_OUT_BASE: usize = POLY_OUT_BASE + MIDI_POLY_VOICES * 3;
 pub const TOTAL_MIDI_OUTS: usize = GLOBAL_OUT_BASE + MIDI_GLOBAL_OUTS.len();
 
 pub fn audio_out_manifest() -> Manifest {
+    out_manifest(AUDIO_OUT_ID, "Audio Output")
+}
+
+/// The monitor output: the same module, mixed into the monitor bus.
+pub fn monitor_out_manifest() -> Manifest {
+    out_manifest(MONITOR_OUT_ID, "Monitor Output")
+}
+
+fn out_manifest(id: &str, name: &str) -> Manifest {
     Manifest {
-        id: AUDIO_OUT_ID.into(),
-        name: "Audio Output".into(),
+        id: id.into(),
+        name: name.into(),
         version: "0.1.0".into(),
         abi: "native-1".into(),
         category: categories::ANALYSIS.into(),

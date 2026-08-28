@@ -652,6 +652,9 @@ pub struct RenderedClip {
     pub audio: AudioData,
     pub bpm: f64,
     pub name: String,
+    /// The project it was cut in, by name — what a deck shows beside the
+    /// clip's own name.
+    pub project_name: String,
     /// What it is made of, for the module that ends up playing it.
     pub stems: Vec<String>,
 }
@@ -682,11 +685,13 @@ pub fn render_clip(state: &AppState, project_id: &str, clip_id: &str) -> CmdResu
         placements: clip.placements,
     };
     let audio = resolver.assemble(&draft, 0)?;
+    let project_name = resolver.project.name.clone();
     Ok(RenderedClip {
         audio,
         bpm,
         stems: clip.stems,
         name: clip.name,
+        project_name,
     })
 }
 

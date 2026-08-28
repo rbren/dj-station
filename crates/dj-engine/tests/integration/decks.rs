@@ -7,12 +7,17 @@
 //! - beats of silence on the end and whole-beat shifts move a slot on
 //!   that grid,
 //! - a Launch Control XL column drives its slot (knobs = tone controls,
-//!   fader = level, buttons TOGGLE mute and solo),
+//!   fader = level, buttons TOGGLE mute and monitor on ONE press, and the
+//!   lamps follow),
+//! - a cued deck leaves the live mix for the monitor bus,
 //! - and the whole bank — bindings and mix — round-trips through a patch,
 //!   whose reload asks the app layer for the audio back.
 
 use dj_engine::beat_clip::BeatClipRef;
-use dj_engine::decks::{SlotControl, DECKS_ID, EQ_MAX, SLOTS};
+use dj_engine::builtin::MONITOR_OUT_ID;
+use dj_engine::decks::{
+    led, SlotControl, DECKS_ID, DEFAULT_SURFACE_CHANNEL, EQ_MAX, MOMENTARY_RELEASE_SECS, SLOTS,
+};
 use dj_engine::playback::TrackData;
 use dj_engine::{Engine, EngineConfig};
 
@@ -48,6 +53,7 @@ fn clip_ref(name: &str) -> BeatClipRef {
         project: "p1".into(),
         clip: name.into(),
         name: name.into(),
+        project_name: "set one".into(),
         stems: Vec::new(),
     }
 }
@@ -142,18 +148,13 @@ fn a_loaded_clip_arrives_muted_and_stretched_to_the_banks_tempo() {
 }
 
 #[test]
-fn slots_share_the_banks_grid_and_the_gcd_says_how_coarsely() {
+fn slots_share_the_banks_grid_however_long_their_loops_are() {
     let mut e = bank();
     load(&mut e, 0, 8);
     load(&mut e, 1, 2);
     load(&mut e, 2, 6);
 
     let st = e.decks_status("bank1").unwrap();
-    // A two-beat clip beside an eight-beat one starts with it; six beside
-    // eight lands on the even beats they share. Both are the gcd.
-    assert_eq!(st.slots[1].align_beats, 2);
-    assert_eq!(st.slots[2].align_beats, 2);
-    assert!(st.slots.iter().all(|s| s.aligned));
     assert_eq!(st.cycle_beats, 24, "8, 2 and 6 come round together on 24");
 
     // The alignment is real, not just arithmetic: two beats in, the
@@ -169,17 +170,10 @@ fn slots_share_the_banks_grid_and_the_gcd_says_how_coarsely() {
     assert_eq!(st.slots[1].beat, 0);
     assert_eq!(st.slots[2].beat, 2);
 
-    // Seven beats share nothing with any of them, so the bank's common
-    // grid collapses to a single beat and every slot says it is adrift
-    // rather than pretending to be locked.
+    // Seven beats share nothing with any of them: the bank still runs
+    // them all off the one clock, it just takes longer to come round.
     load(&mut e, 3, 7);
     let st = e.decks_status("bank1").unwrap();
-    assert!(st.slots.iter().filter(|s| s.beats > 0).all(|s| !s.aligned));
-    assert!(st
-        .slots
-        .iter()
-        .filter(|s| s.beats > 0)
-        .all(|s| s.align_beats == 1));
     assert_eq!(st.cycle_beats, 168, "and only comes round every 168 beats");
 }
 
@@ -239,7 +233,7 @@ fn a_surface_column_drives_its_slot() {
     press(&mut e, FOCUS_NOTES[2]);
     assert!(e.decks_status("bank1").unwrap().slots[2].mute);
     press(&mut e, CONTROL_NOTES[2]);
-    assert!(e.decks_status("bank1").unwrap().slots[2].solo);
+    assert!(e.decks_status("bank1").unwrap().slots[2].monitor);
 
     // A column with nothing in it still moves its own slot, and no other.
     e.decks_inject("bank1", [0xB8, 84, 127]).unwrap();
@@ -305,7 +299,7 @@ fn the_whole_bank_round_trips_through_a_patch_and_asks_for_its_audio_back() {
         .unwrap();
     e.decks_set_control("bank1", 3, SlotControl::Low, 0.25)
         .unwrap();
-    e.decks_set_control("bank1", 3, SlotControl::Solo, 10.0)
+    e.decks_set_control("bank1", 3, SlotControl::Monitor, 10.0)
         .unwrap();
     e.decks_set_tail("bank1", 3, 2).unwrap();
     e.decks_set_phase("bank1", 3, 1).unwrap();
@@ -323,7 +317,7 @@ fn the_whole_bank_round_trips_through_a_patch_and_asks_for_its_audio_back() {
     assert!(!st.slots[0].mute);
     assert_eq!(st.slots[0].beats, 8);
     assert!((st.slots[3].low - 0.25).abs() < 1e-6);
-    assert!(st.slots[3].solo);
+    assert!(st.slots[3].monitor);
     assert_eq!((st.slots[3].tail, st.slots[3].phase), (2, 1));
     // The audio is NOT in the patch: a clip is placements, and the app
     // layer is asked to assemble exactly the slots that need it.
@@ -361,4 +355,171 @@ fn an_untouched_bank_round_trips_unchanged() {
         e2.decks_state("bank1").unwrap(),
         e.decks_state("bank1").unwrap()
     );
+}
+
+#[test]
+fn a_bank_restored_from_a_patch_plays_once_its_audio_comes_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = bank();
+    load(&mut e, 0, 2);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    let out = e.render_offline(48_000).unwrap().remove(0);
+    assert!(
+        out[out.len() - 100..].iter().any(|s| s.abs() > 0.1),
+        "the live bank plays"
+    );
+    e.save_patch(&dir.path().join("p"), "decks").unwrap();
+
+    // What the app does at startup: load the patch, then hand back the
+    // audio the patch could not carry. Sound is the whole point of the
+    // handover, so assert on the render, not on the bookkeeping.
+    let mut e2 = Engine::load_patch(&dir.path().join("p"), crate::common::registry()).unwrap();
+    for (instance, slot, cl) in e2.decks_pending() {
+        e2.decks_supply(&instance, slot, Some(cl), clip(2, 0.5), CLIP_BPM)
+            .unwrap();
+    }
+    let out = e2.render_offline(48_000).unwrap().remove(0);
+    let peak = out.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+    assert!(peak > 0.1, "a restored bank plays (peak {peak})");
+}
+
+#[test]
+fn a_restored_bank_runs_when_the_backend_starts_after_the_handover() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = bank();
+    load(&mut e, 0, 2);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    e.save_patch(&dir.path().join("p"), "decks").unwrap();
+
+    // The app's startup order: load the patch, hand the audio back while
+    // the engine is STOPPED, then start the backend.
+    let mut e2 = Engine::load_patch(&dir.path().join("p"), crate::common::registry()).unwrap();
+    for (instance, slot, cl) in e2.decks_pending() {
+        e2.decks_supply(&instance, slot, Some(cl), clip(2, 0.5), CLIP_BPM)
+            .unwrap();
+    }
+    e2.start_null_realtime().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let st = e2.decks_status("bank1").unwrap();
+    e2.stop().unwrap();
+    assert!(st.beat > 0.1, "the bank's clock runs");
+    assert!(st.slots[0].playing, "the slot is sounding");
+}
+
+#[test]
+fn one_button_press_is_one_change_whichever_template_sends_it() {
+    let mut e = bank();
+    load(&mut e, 0, 2);
+    let note = FOCUS_NOTES[0];
+    assert!(
+        e.decks_status("bank1").unwrap().slots[0].mute,
+        "loads muted"
+    );
+
+    // A MOMENTARY button: down then straight back up is one press.
+    press(&mut e, note);
+    assert!(!e.decks_status("bank1").unwrap().slots[0].mute);
+
+    // A TOGGLE template: the on is one press and the off, arriving a
+    // finger-lift later than any finger lift, is the NEXT press — acting
+    // only on the on is what used to make the user tap twice.
+    e.decks_inject("bank1", [0x90, note, 127]).unwrap();
+    assert!(e.decks_status("bank1").unwrap().slots[0].mute);
+    std::thread::sleep(std::time::Duration::from_secs_f64(
+        MOMENTARY_RELEASE_SECS + 0.05,
+    ));
+    e.decks_inject("bank1", [0x80, note, 0]).unwrap();
+    assert!(
+        !e.decks_status("bank1").unwrap().slots[0].mute,
+        "the off is a press of its own, not a release"
+    );
+}
+
+#[test]
+fn the_surface_lamps_follow_mute_and_monitor() {
+    let mut e = bank();
+    load(&mut e, 1, 2);
+    // A fresh bank owes the device every lamp: it forgets them when it is
+    // unplugged, so nothing may be assumed about what is lit.
+    let first = e.decks_drain_leds();
+    assert_eq!(first.len(), SLOTS * 2, "both lamps of every slot");
+    assert!(
+        e.decks_drain_leds().is_empty(),
+        "nothing changed, nothing to send"
+    );
+
+    e.decks_set_control("bank1", 1, SlotControl::Monitor, 1.0)
+        .unwrap();
+    let leds = e.decks_drain_leds();
+    assert_eq!(leds.len(), 2, "only the slot that moved");
+    let status = 0x90 | DEFAULT_SURFACE_CHANNEL;
+    // It loaded muted, and is now cued as well: red under the fader, green
+    // beside it, on the channel the device last spoke on.
+    assert_eq!(leds[0].data, [status, FOCUS_NOTES[1], led::RED]);
+    assert_eq!(leds[1].data, [status, CONTROL_NOTES[1], led::GREEN]);
+
+    e.decks_set_control("bank1", 1, SlotControl::Mute, 0.0)
+        .unwrap();
+    let leds = e.decks_drain_leds();
+    assert_eq!(
+        leds[0].data[2],
+        led::OFF,
+        "unmuted, so the mute lamp is out"
+    );
+    assert_eq!(leds[1].data[2], led::GREEN);
+
+    // A bank that has stopped following the surface must not light it.
+    e.set_param("bank1", "surface", 0.0).unwrap();
+    e.decks_set_control("bank1", 1, SlotControl::Mute, 1.0)
+        .unwrap();
+    assert!(e.decks_drain_leds().is_empty());
+}
+
+#[test]
+fn a_monitored_deck_leaves_the_live_mix_for_the_monitor_one() {
+    let mut e = bank();
+    e.add_module("mon1", MONITOR_OUT_ID).unwrap();
+    e.connect("bank1", "mon_l", "mon1", "l").unwrap();
+    load(&mut e, 0, 2);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+
+    let live = e.render_offline(24_000).unwrap().remove(0);
+    assert!(peak(&live) > 0.1, "it is in the live mix");
+
+    e.decks_set_control("bank1", 0, SlotControl::Monitor, 1.0)
+        .unwrap();
+    let live = e.render_offline(24_000).unwrap().remove(0);
+    assert!(
+        peak(&live[4_800..]) < 1e-3,
+        "cueing a deck takes it out of the room"
+    );
+    let monitor = e.render_offline_monitor(24_000).unwrap().remove(0);
+    assert!(peak(&monitor[4_800..]) > 0.1, "and puts it in the cue");
+}
+
+#[test]
+fn the_bank_pulses_its_clock_once_a_beat() {
+    let mut e = bank();
+    e.add_module("out2", "builtin.audio_out").unwrap();
+    e.connect("bank1", "clock", "out2", "l").unwrap();
+    // 120 BPM: half a second a beat, so one second is two pulses — count
+    // the rising edges rather than the samples, the gate has width.
+    let out = e.render_offline(48_000).unwrap().remove(0);
+    let mut edges = 0;
+    let mut high = false;
+    for s in &out {
+        let now = *s > 0.5;
+        if now && !high {
+            edges += 1;
+        }
+        high = now;
+    }
+    assert_eq!(edges, 2, "one pulse a beat at 120 BPM");
+}
+
+fn peak(xs: &[f32]) -> f32 {
+    xs.iter().fold(0.0f32, |a, s| a.max(s.abs()))
 }

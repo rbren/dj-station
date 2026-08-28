@@ -20,7 +20,17 @@ export const MAX_BPM = 300;
 
 /** One of a slot's six controls — the six a Launch Control XL column
  *  carries. */
-export type SlotControl = 'level' | 'high' | 'mid' | 'low' | 'mute' | 'solo';
+export type SlotControl = 'level' | 'high' | 'mid' | 'low' | 'mute' | 'monitor';
+
+/** The bank's own jacks, by name (mirrors `decks_manifest`). A deck's
+ *  SEND carries its audio out to the rack and its RETURN brings the
+ *  rack's answer back; the three tone controls each have a CV out. */
+export const CLOCK_JACK = 'clock';
+export const sendJack = (slot: number, side: 'l' | 'r') => `d${slot + 1}_${side}`;
+export const returnJack = (slot: number, side: 'l' | 'r') => `d${slot + 1}_in_${side}`;
+export const TONES = ['high', 'mid', 'low'] as const;
+export type Tone = (typeof TONES)[number];
+export const toneJack = (slot: number, tone: Tone) => `d${slot + 1}_${tone}`;
 
 export interface DeckSlotStatus {
   slot: number;
@@ -39,15 +49,20 @@ export interface DeckSlotStatus {
   mid: number;
   high: number;
   mute: boolean;
-  solo: boolean;
-  /** The beat grid this slot's starts share with the rest of the bank. */
-  align_beats: number;
-  /** False when the clip shares no phase with something else loaded. */
-  aligned: boolean;
+  /** On the monitor pair instead of the live mix (the cue button). */
+  monitor: boolean;
+  /** Whether the deck's return is wired — the rack is its insert. */
+  insert: boolean;
+  /** Which tone controls have left the deck for the rack, in TONES
+   *  order: a patched one is a CV source and stops cutting its band. */
+  tone_patched: [boolean, boolean, boolean];
   duration_secs: number;
   position_secs: number;
-  /** Beat of its own clip the slot is on, -1 when silent. */
+  /** Beat of the slot's LOOP the playhead is on, silence included; -1
+   *  when the slot holds nothing. */
   beat: number;
+  /** Whether the playhead is inside the clip rather than its silence. */
+  sounding: boolean;
   playing: boolean;
 }
 
@@ -85,6 +100,9 @@ export interface DecksApi {
   setBpm(instance: string, bpm: number): Promise<void | null>;
   setSurface(instance: string, follow: boolean): Promise<void | null>;
   reset(instance: string): Promise<void | null>;
+  /** Assemble any slot still waiting for its audio; resolves to how many
+   *  were filled. */
+  rehydrate(): Promise<number | null>;
   endEdit(): Promise<void | null>;
 }
 
@@ -124,6 +142,9 @@ export class DecksClient extends IpcClient implements DecksApi {
   reset(instance: string) {
     return this.call<void>('decks_reset', { instance });
   }
+  rehydrate() {
+    return this.call<number>('decks_rehydrate');
+  }
   /** Close the undo-coalescing window (fader drags, tempo drags). */
   endEdit() {
     return this.call<void>('end_edit');
@@ -139,14 +160,6 @@ export function stretchLabel(stretch: number): string {
   const pct = (stretch - 1) * 100;
   if (!Number.isFinite(pct) || Math.abs(pct) < 0.05) return '±0.0%';
   return `${pct > 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}%`;
-}
-
-/** What a slot's phase relationship to the rest of the bank amounts to.
- *  `null` = nothing to say (an empty slot, or the only clip loaded). */
-export function alignLabel(slot: DeckSlotStatus, loadedSlots: number): string | null {
-  if (slot.beats === 0 || loadedSlots < 2) return null;
-  if (!slot.aligned) return 'free — shares no beat with the others';
-  return slot.align_beats === 1 ? 'locks every beat' : `locks every ${slot.align_beats} beats`;
 }
 
 /** Total loop length of a slot, silence included. */

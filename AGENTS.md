@@ -1101,26 +1101,72 @@ beatify::build`.
   every slot reads the SAME beat position modulo its own loop length
   (clip beats + silent `tail`, minus its whole-beat `phase`), which is
   what makes a 2-beat clip and an 8-beat clip start together with no
-  re-triggering; `align_beats` in the status is the gcd of a slot's loop
-  with every other loaded one (1 = shares nothing, e.g. 7 against 8) and
-  `cycle_beats` their lcm. A freshly loaded clip is MUTED, un-shifted and
-  tail-free — `decks_load` resets those, `decks_supply` deliberately does
-  NOT (it is the app layer handing over audio for a binding that already
-  exists, after a patch load or undo). The three tone controls are
+  re-triggering; `cycle_beats` is the lcm of the loaded loops (how often
+  the whole bank comes round). A freshly loaded clip is MUTED, un-shifted
+  and tail-free — `decks_load` resets those, `decks_supply` deliberately
+  does NOT (it is the app layer handing over audio for a binding that
+  already exists, after a patch load or undo). The three tone controls are
   first-order crossovers where the mid band is the REMAINDER of low and
   high, so flat (1.0 = the surface knob at 12 o'clock) is bit-exact
-  bypass; level/mute/solo ramp per block rather than stepping. The
-  Launch Control XL drives a bank COLUMN-PER-SLOT (knobs high/mid/low,
-  fader level, the two buttons TOGGLE mute and solo) without being wired
-  to it: the shell forwards device messages to `decks_feed`, which only
-  reaches banks whose `surface` param is on, and `decks_inject` addresses
-  one bank directly for tests — the `launchcontrol_feed`/`_inject` split,
-  for the same reason. Slot state round-trips in the patch `ModuleFile`
-  (`decks` field); the clips' AUDIO does not, so `decks_pending` reports
-  what the app layer still owes and `decks::hydrate` re-assembles it
-  beside `beat_clip::hydrate`. Golden: `decks-bank-two-clips`, whose
-  sidecar carries the slot mix in a `deck_slots` section (a load resets a
-  slot, so the case sets the mix after the audio).
+  bypass; level/mute/monitor ramp per block rather than stepping. MONITOR
+  (not solo) is per slot: it moves that deck from the bank's live pair to
+  its `mon_l`/`mon_r` pair — a cue, so it changes nothing for the other
+  decks. Slot state round-trips in the patch `ModuleFile` (`decks` field);
+  the clips' AUDIO does not, so `decks_pending` reports what the app layer
+  still owes and `decks::hydrate` re-assembles it beside
+  `beat_clip::hydrate` — the Decks page also calls `decks_rehydrate` once
+  when it opens, which is what makes a bank restored with the app sound
+  again instead of coming back bound and silent. Goldens:
+  `decks-bank-two-clips` (the mix, the stretch, the phase) and
+  `decks-rack-insert` (a deck sent out to the rack and back, opened by a
+  patched tone control); the sidecar carries the slot mix in a
+  `deck_slots` section (a load resets a slot, so the case sets the mix
+  after the audio).
+- Decks JACKS (`decks.rs` jack tables): besides `audio_l/r` the bank
+  exposes, per slot, a stereo SEND (`d<N>_l/r`), a stereo RETURN
+  (`d<N>_in_l/r`) and three tone CV outputs (`d<N>_high/mid/low`), plus
+  one bank-wide `clock` gate (one pulse per beat) and the monitor pair.
+  Two rules make them behave: a wired RETURN turns the rack into that
+  deck's insert (the deck's own path is replaced by what comes back —
+  fader and mute still belong to the deck), and a PATCHED tone control
+  leaves the deck (its band sits flat and the knob is now just CV on the
+  0..10 V scale). The RT thread must not walk the wire list, so
+  `Engine::sync_decks_routing` pushes `DecksCmd::Tone` after every wire
+  change (`connect` / `remove_wires_where`, which is also how a patch load
+  arrives) and the return's own wiring is read from the block's input
+  `mask`. Cables into a bank are ordinary graph wires, so a deck insert is
+  a graph CYCLE — the plan's back edges read the previous block, which is
+  where the insert's one-block delay comes from.
+- Launch Control XL + decks (`launch_control.rs`, `decks_api.rs`,
+  `app/src-tauri/src/launch_control.rs`): the surface drives a bank
+  COLUMN-PER-SLOT (knobs high/mid/low, fader level, the two buttons TOGGLE
+  mute and monitor) without being wired to it — the shell forwards device
+  messages to `decks_feed`, which only reaches banks whose `surface` param
+  is on, and `decks_inject` addresses one bank directly for tests (the
+  `launchcontrol_feed`/`_inject` split, for the same reason). ONE PRESS IS
+  ONE CHANGE whatever the template sends: both MIDI edges toggle, except
+  an off within `MOMENTARY_RELEASE_SECS` of its own on (a finger coming
+  off a momentary button) — a WALL clock, not the audio frame count, so
+  the surface behaves the same with the engine stopped. Acting on the
+  press alone is what used to make a factory-template toggle need a
+  double-tap. LEDs go the other way:
+  `decks_drain_leds` returns note-on messages for slots whose state moved
+  (`led_for`: mute red, monitor green, both amber) on the channel the
+  device last spoke on, and the shell's hot-plug watcher pumps them to the
+  device's output port every scan; `decks_relight_surface` marks every
+  lamp dirty after a (re)connect, because the device forgets.
+- Audio OUTPUTS (`engine/lifecycle.rs`, `audio_outputs` /
+  `set_audio_outputs` in `app/src-tauri/src/main.rs`): the graph fills two
+  buses, the live mix and the monitor (cue) one, and `AudioOutputs` names
+  the cpal device each plays out of (`None` = the system default live, no
+  cue at all for monitor). The monitor is a SECOND stream fed from the
+  live callback over an `rtrb` ring — one thread holds the core, the two
+  devices run on their own clocks, and whoever is late finds silence
+  rather than blocking the other. A monitor device that will not open
+  loses the cue, never the live output. The choice belongs to the MACHINE,
+  not the patch: it is stored with the app's settings, and takes effect on
+  the next backend start, so `set_audio_outputs` restarts a running
+  engine.
 - `crates/dj-engine/src/stretch.rs` is THE granular time-stretch: two
   voices, Hann overlap-add at 50 % hop (exact COLA, so unity rate is
   transparent), each grain WSOLA-aligned within ±`SEARCH_SECS` of the
@@ -1552,3 +1598,36 @@ The detail is in the `Conventions` bullets above; this is the map.
   `BeatifyClip.test.ts` + `BeatifyGrid.test.ts` (pure model and grid
   math), and `cargo test -p dj-analysis --release --test beatify`
   (pipeline, conform, store).
+
+## The Decks page at a glance
+
+The engine detail is in the `Conventions` bullets above; this is the map
+of the page.
+
+- Where the code is. Frontend: `app/src/decks.ts` (`DecksApi` + the jack
+  names the page patches — `sendJack`/`returnJack`/`toneJack`/
+  `CLOCK_JACK` — mirroring `decks.rs`), `app/src/audioOutputs.ts` (the
+  live/monitor device pickers) and `app/src/components/Decks{View,Slot,
+  Rack,ClipPicker}.tsx`. Backend: `app/src-tauri/src/decks.rs` over
+  `Engine`'s `decks_*` API.
+- Layout: a rack GRID above, shrunken deck strips below, ONE cable
+  overlay across both. `DecksRack` draws the patch's other modules as
+  small cards (the bank itself is drawn as the decks, so it is filtered
+  out of the grid) and every jack on the page — deck sends/returns, tone
+  CV outs, the bank clock, module ins/outs — is a `LiveJack`, so the Rack
+  tab's telemetry and this page's cables are the same machinery. Patching
+  is CLICK-CLICK: arm a jack, click its opposite; clicking an armed jack
+  disarms, clicking a wired INPUT pulls its cable out. The cards carry
+  jacks only — a module's KNOBS are still edited on the Rack tab, which is
+  why `DecksRack` is a light card and not a reused `RackModule` (that one
+  is built for a draggable panel on the zoomable canvas).
+- State ownership: `decks_status` is the single poll (the engine owns
+  phase, stretch and what is patched — never recompute them in the page),
+  and the only local state is a DRAFT of the control being dragged, which
+  clears itself when the engine's reading agrees. The patch GRAPH is not
+  telemetry: `nodes`/`wires` are re-read on mount and after an edit made
+  here, never on the status clock.
+- Tests: `app/tests/DecksView.test.tsx` (strips, lamps, drafts, the rack
+  strip, the output pickers, the rehydrate-on-open), plus the engine's
+  `cargo test -p dj-engine --release --test integration decks` and the
+  two `decks-*` E2E goldens.

@@ -30,6 +30,9 @@ export interface BeatClipRef {
   project: string;
   clip: string;
   name: string;
+  /** The Beatify project it was cut in, by name — display only, and
+   *  empty in a patch saved before clips said. */
+  project_name?: string;
   /** What the clip held when it was bound — display only, and absent in
    *  a patch saved before clips said. Refreshed on every load. */
   stems?: string[];

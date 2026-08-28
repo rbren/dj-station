@@ -72,6 +72,7 @@ impl ExtensionRegistry {
     pub fn all_manifests(&self) -> Vec<Manifest> {
         let mut out = vec![
             builtin::audio_out_manifest(),
+            builtin::monitor_out_manifest(),
             builtin::midi_manifest(),
             crate::qwerty::qwerty_manifest(),
             crate::choreo::choreo_manifest(),

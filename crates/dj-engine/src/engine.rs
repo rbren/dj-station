@@ -39,6 +39,7 @@ mod hands_api;
 mod hot_reload;
 mod launch_control_api;
 mod lifecycle;
+pub use lifecycle::{audio_output_devices, AudioOutputs};
 mod macros_api;
 mod midi;
 mod qwerty_api;
@@ -258,6 +259,9 @@ pub struct EngineCore {
     cmd_rx: rtrb::Consumer<Command>,
     garbage_tx: rtrb::Producer<RtGarbage>,
     pub master: Vec<Vec<f32>>,
+    /// The cue bus: what the Monitor Output modules mixed, for the
+    /// second device the app opens.
+    pub monitor: Vec<Vec<f32>>,
     blocks: Arc<AtomicU64>,
     master_analyzers: Vec<crate::telemetry::JackAnalyzer>,
 }
@@ -292,7 +296,8 @@ impl EngineCore {
 
     pub fn process_block(&mut self, frames: usize) {
         self.apply_commands();
-        self.graph.process_block(frames, &mut self.master);
+        self.graph
+            .process_block(frames, &mut self.master, &mut self.monitor);
         for (ch, an) in self.master_analyzers.iter_mut().enumerate() {
             an.update(&self.master[ch][..frames]);
         }
@@ -394,6 +399,10 @@ pub struct Engine {
     /// Control-side state per Decks BANK node (the Decks tab's eight clip
     /// slots) — a different module from the DJ deck above.
     clip_decks: HashMap<usize, DecksControl>,
+    /// Which hardware outputs the live and monitor buses play out of.
+    /// The machine's business, not the patch's — the app persists it
+    /// beside its own settings and hands it back at startup.
+    audio_outputs: AudioOutputs,
     xruns: Arc<AtomicU64>,
     /// Blocks whose *processing* alone exceeded the block period — the
     /// engine itself was the bottleneck (as opposed to `xruns`, which on the
@@ -475,6 +484,7 @@ impl Engine {
             cmd_rx,
             garbage_tx,
             master: vec![vec![0.0; config.block_size]; config.master_channels],
+            monitor: vec![vec![0.0; config.block_size]; config.master_channels],
             blocks: blocks.clone(),
             master_analyzers,
         };
@@ -506,6 +516,7 @@ impl Engine {
             beat_clips: HashMap::new(),
             decks: HashMap::new(),
             clip_decks: HashMap::new(),
+            audio_outputs: AudioOutputs::default(),
             xruns: Arc::new(AtomicU64::new(0)),
             proc_misses: Arc::new(AtomicU64::new(0)),
             max_proc_nanos: Arc::new(AtomicU64::new(0)),
@@ -579,6 +590,7 @@ impl Engine {
         let plan = compute_plan(&self.n_inputs_by_slot(), &wires);
         self.dispatch_edit(GraphEdit::Replan { plan })?;
         self.wires = wires;
+        self.sync_decks_routing();
         Ok(())
     }
 
@@ -687,10 +699,12 @@ impl Engine {
     /// Instantiate a module for a node (initial add or hot reload).
     fn instantiate(&self, ext_id: &str, manifest: &Manifest) -> Result<Box<dyn HostModule>> {
         match BuiltinKind::from_ext_id(ext_id) {
-            Some(BuiltinKind::AudioOut) => Ok(Box::new(AudioOutModule {
-                channel_offset: 0,
-                muted: false,
-            })),
+            Some(BuiltinKind::AudioOut) | Some(BuiltinKind::MonitorOut) => {
+                Ok(Box::new(AudioOutModule {
+                    channel_offset: 0,
+                    muted: false,
+                }))
+            }
             Some(BuiltinKind::Crossfader) => Ok(Box::new(CrossfaderModule)),
             Some(
                 BuiltinKind::Midi
@@ -981,6 +995,7 @@ impl Engine {
             n_in,
             n_out,
             audio_out: BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::AudioOut),
+            monitor_out: BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::MonitorOut),
         };
         // Allocate the graph slot control-side: recycle a tombstone (LIFO,
         // like the old in-graph free list) or grow the storage by one.
@@ -1183,6 +1198,7 @@ impl Engine {
         let plan = compute_plan(&self.n_inputs_by_slot(), &wires);
         self.dispatch_edit(GraphEdit::Replan { plan })?;
         self.wires = wires;
+        self.sync_decks_routing();
         Ok(())
     }
 

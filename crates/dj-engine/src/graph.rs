@@ -41,6 +41,8 @@ pub struct GraphNode {
     pub n_out: usize,
     /// Audio-out nodes are mixed into the master bus by the executor.
     pub audio_out: bool,
+    /// Monitor-out nodes are mixed into the monitor (cue) bus instead.
+    pub monitor_out: bool,
 }
 
 /// Derived execution state: node order, per-jack incoming wire lists and
@@ -327,11 +329,18 @@ impl Graph {
         migrate(&mut self.out_analyzers, &mut g.out_analyzers);
     }
 
-    /// Process one block. `master` is the pre-allocated master bus
-    /// (one Vec<f32> of block_size per output channel). RT-safe.
-    pub fn process_block(&mut self, frames: usize, master: &mut [Vec<f32>]) {
+    /// Process one block. `master` and `monitor` are the pre-allocated
+    /// buses (one Vec<f32> of block_size per output channel) — the live
+    /// output and the cue output, filled by the Audio Output and Monitor
+    /// Output modules respectively. RT-safe.
+    pub fn process_block(
+        &mut self,
+        frames: usize,
+        master: &mut [Vec<f32>],
+        monitor: &mut [Vec<f32>],
+    ) {
         let frames = frames.min(self.block_size);
-        for ch in master.iter_mut() {
+        for ch in master.iter_mut().chain(monitor.iter_mut()) {
             ch[..frames].fill(0.0);
         }
 
@@ -406,9 +415,9 @@ impl Graph {
                 self.out_analyzers[node][jack].update(&self.out_curr[node][jack][..frames]);
             }
 
-            // Mix audio-out nodes into the master bus (hard clip happens at
-            // the device/file boundary, not here).
-            if gn.audio_out {
+            // Mix audio-out nodes into their bus — live or monitor (hard
+            // clip happens at the device/file boundary, not here).
+            if gn.audio_out || gn.monitor_out {
                 let (offset, muted) = gn
                     .module
                     .as_any()
@@ -418,11 +427,12 @@ impl Graph {
                 if muted {
                     continue;
                 }
-                // Only the audio jacks mix to master; the trailing
+                let bus: &mut [Vec<f32>] = if gn.monitor_out { monitor } else { master };
+                // Only the audio jacks mix to the bus; the trailing
                 // channel_offset input jack is control, not audio.
                 for jack in 0..n_in.min(crate::builtin::AUDIO_OUT_CHANNELS) {
                     let ch = offset + jack;
-                    if ch >= master.len() {
+                    if ch >= bus.len() {
                         break;
                     }
                     // Skip unwired inputs so silent jacks don't add DC.
@@ -430,7 +440,7 @@ impl Graph {
                         continue;
                     }
                     let src = &self.in_bufs[node][jack];
-                    let dst = &mut master[ch];
+                    let dst = &mut bus[ch];
                     for s in 0..frames {
                         dst[s] += src[s];
                     }

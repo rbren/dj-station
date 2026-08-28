@@ -16,6 +16,7 @@
 //! on the main thread and would freeze the window.
 
 use dj_engine::beat_clip::BeatClipRef;
+use dj_engine::builtin::{AUDIO_OUT_ID, MONITOR_OUT_ID};
 use dj_engine::decks::{DecksStatus, SlotControl, DECKS_ID, SURFACE_PARAM};
 use dj_engine::playback::TrackData;
 use dj_engine::Engine;
@@ -46,26 +47,53 @@ pub fn decks_ensure(state: State<AppState>) -> CmdResult<String> {
     engine.add_module(&instance, DECKS_ID).map_err(err)?;
     // Wire it to the output the patch already has; a patch with none is
     // left alone rather than grown one behind the user's back.
-    let out = engine
-        .nodes
-        .iter()
-        .find(|n| n.ext_id == "builtin.audio_out")
-        .map(|n| n.instance_id.clone());
+    let out = find_node(&engine, AUDIO_OUT_ID);
     if let Some(out) = out {
         let _ = engine.connect(&instance, "audio_l", &out, "l");
         let _ = engine.connect(&instance, "audio_r", &out, "r");
     }
+    // The monitor pair needs somewhere to go for the Monitor buttons to
+    // mean anything, and nothing else in a patch makes one — so the bank
+    // brings its own, in the same undo step.
+    let monitor = match find_node(&engine, MONITOR_OUT_ID) {
+        Some(existing) => Some(existing),
+        None => {
+            let id = fresh_monitor_id(&engine);
+            engine.add_module(&id, MONITOR_OUT_ID).map_err(err)?;
+            Some(id)
+        }
+    };
+    if let Some(monitor) = monitor {
+        let _ = engine.connect(&instance, "mon_l", &monitor, "l");
+        let _ = engine.connect(&instance, "mon_r", &monitor, "r");
+    }
     Ok(instance)
 }
 
+fn find_node(engine: &Engine, ext_id: &str) -> Option<String> {
+    engine
+        .nodes
+        .iter()
+        .find(|n| n.ext_id == ext_id)
+        .map(|n| n.instance_id.clone())
+}
+
 fn fresh_id(engine: &Engine) -> String {
+    fresh_named(engine, "decks")
+}
+
+fn fresh_monitor_id(engine: &Engine) -> String {
+    fresh_named(engine, "monitor")
+}
+
+fn fresh_named(engine: &Engine, stem: &str) -> String {
     let taken: std::collections::BTreeSet<&str> = engine
         .nodes
         .iter()
         .map(|n| n.instance_id.as_str())
         .collect();
     (1..)
-        .map(|n| format!("decks{n}"))
+        .map(|n| format!("{stem}{n}"))
         .find(|id| !taken.contains(id.as_str()))
         .unwrap()
 }
@@ -93,11 +121,18 @@ pub fn decks_load(
         project: project_id,
         clip: clip_id,
         name: rendered.name.clone(),
+        project_name: rendered.project_name.clone(),
         stems: rendered.stems.clone(),
     };
     let mut engine = patch_edit(&state, EditKey::DeckSlot(&instance, slot))?;
     engine
-        .decks_load(&instance, slot, Some(clip), track_data(&rendered), rendered.bpm)
+        .decks_load(
+            &instance,
+            slot,
+            Some(clip),
+            track_data(&rendered),
+            rendered.bpm,
+        )
         .map_err(err)
 }
 
@@ -132,7 +167,7 @@ fn control_key(control: SlotControl) -> &'static str {
         SlotControl::Mid => "mid",
         SlotControl::Low => "low",
         SlotControl::Mute => "mute",
-        SlotControl::Solo => "solo",
+        SlotControl::Monitor => "monitor",
     }
 }
 
@@ -169,11 +204,7 @@ pub fn decks_set_bpm(state: State<AppState>, instance: String, bpm: f32) -> CmdR
 /// Whether this bank follows the Launch Control XL (a mode param, so it
 /// rides in the patch).
 #[tauri::command]
-pub fn decks_set_surface(
-    state: State<AppState>,
-    instance: String,
-    follow: bool,
-) -> CmdResult<()> {
+pub fn decks_set_surface(state: State<AppState>, instance: String, follow: bool) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::Param(&instance, SURFACE_PARAM))?;
     engine
         .set_param(&instance, SURFACE_PARAM, if follow { 1.0 } else { 0.0 })
@@ -186,6 +217,23 @@ pub fn decks_set_surface(
 pub fn decks_reset(state: State<AppState>, instance: String) -> CmdResult<()> {
     let mut engine = engine_lock(&state)?;
     engine.decks_reset(&instance).map_err(err)
+}
+
+/// Assemble any slot still waiting for its audio. The page calls this
+/// when it opens: a bank restored from the autosave at startup can find
+/// its clips unassembled (the Beatify projects they name are read off
+/// disk, and that can fail while the app is still coming up), and the
+/// symptom is a deck that looks loaded and makes no sound. Assembling
+/// again is free when nothing is pending.
+#[tauri::command(async)]
+pub fn decks_rehydrate(state: State<AppState>) -> CmdResult<usize> {
+    let mut engine = engine_lock(&state)?;
+    let pending = engine.decks_pending().len();
+    if pending == 0 {
+        return Ok(0);
+    }
+    hydrate(&state, &mut engine);
+    Ok(pending - engine.decks_pending().len())
 }
 
 fn track_data(rendered: &RenderedClip) -> TrackData {
@@ -211,6 +259,7 @@ pub fn hydrate(state: &AppState, engine: &mut Engine) {
                 // said what they hold carries no stems.
                 let clip = BeatClipRef {
                     name: rendered.name.clone(),
+                    project_name: rendered.project_name.clone(),
                     stems: rendered.stems.clone(),
                     ..clip
                 };

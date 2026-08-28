@@ -12,8 +12,8 @@ mod decks;
 mod launch_control;
 
 use dj_engine::{
-    Backend, CaptureWindow, Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig,
-    KnobStyle, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroStore, Manifest,
+    AudioOutputs, Backend, CaptureWindow, Engine, EngineConfig, ExtensionRegistry, JackTelemetry,
+    KnobConfig, KnobStyle, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroStore, Manifest,
     MidiMapKind, PatchDoc, UndoHistory, WireStyle, MACROS_DIR_NAME,
 };
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
@@ -56,7 +56,6 @@ struct AppState {
     /// The Beatify tab's in-flight analysis (ephemeral until Save).
     beatify: beatify::BeatifySession,
 }
-
 
 /// Named patches live under the single data dir (PRD §3) — `custom/` in
 /// the repo checkout unless `DJ_STATION_DATA_DIR` overrides it.
@@ -948,7 +947,6 @@ fn remove_midi_led_mapping(
         .map_err(err)
 }
 
-
 /// Everything the choreography panel needs per poll: the timeline plus
 /// the live playhead beat.
 #[derive(serde::Serialize)]
@@ -1310,7 +1308,12 @@ fn paste_modules(state: State<AppState>, clipboard: String) -> CmdResult<BTreeMa
     // works even for a clip whose project has since gone. Pairs the
     // source cannot serve (a clipboard from another patch) fall through
     // to the usual assembly.
-    let is_clip = |id: &String| engine.nodes.iter().any(|n| &n.instance_id == id && n.is_beat_clip());
+    let is_clip = |id: &String| {
+        engine
+            .nodes
+            .iter()
+            .any(|n| &n.instance_id == id && n.is_beat_clip())
+    };
     let clip_pairs: Vec<(String, String)> = renames
         .iter()
         .filter(|(from, to)| is_clip(from) && is_clip(to))
@@ -1943,12 +1946,76 @@ fn qwerty_key(state: State<AppState>, instance: String, key: String, down: bool)
     engine.qwerty_key(&instance, frame, &key, down).map_err(err)
 }
 
+/// Where the two buses play: the hardware outputs and the pair currently
+/// chosen. The names are the machine's, so the pickers can show what is
+/// actually there and say when a remembered device has gone.
+#[derive(Serialize)]
+struct AudioOutputSettings {
+    devices: Vec<String>,
+    live: Option<String>,
+    monitor: Option<String>,
+}
+
+/// Device choices live beside the app's other data, NOT in the patch: a
+/// patch travels between machines, and a sound card does not.
+fn audio_outputs_path() -> PathBuf {
+    dj_library::default_data_dir().join("audio_outputs.json")
+}
+
+fn load_audio_outputs() -> AudioOutputs {
+    std::fs::read_to_string(audio_outputs_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn audio_outputs(state: State<AppState>) -> CmdResult<AudioOutputSettings> {
+    let engine = engine_lock(&state)?;
+    let chosen = engine.audio_outputs().clone();
+    Ok(AudioOutputSettings {
+        devices: dj_engine::audio_output_devices(),
+        live: chosen.live,
+        monitor: chosen.monitor,
+    })
+}
+
+/// Point a bus at a device. The streams are opened at backend start, so a
+/// running engine is stopped and started again — the graph, and every
+/// deck's position in it, is untouched by that.
+#[tauri::command]
+fn set_audio_outputs(
+    state: State<AppState>,
+    live: Option<String>,
+    monitor: Option<String>,
+) -> CmdResult<()> {
+    let outputs = AudioOutputs { live, monitor };
+    let path = audio_outputs_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&outputs).map_err(err)?).map_err(err)?;
+    let mut engine = engine_lock(&state)?;
+    if engine.audio_outputs() == &outputs {
+        return Ok(());
+    }
+    engine.set_audio_outputs(outputs);
+    let was_running = engine.is_running();
+    if was_running {
+        engine.stop().map_err(err)?;
+        restart_backend(&mut engine, Some(Backend::Cpal), "audio output change")?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn engine_start(state: State<AppState>) -> CmdResult<String> {
     let mut engine = engine_lock(&state)?;
     if engine.is_running() {
         return Ok("already-running".into());
     }
+    // Whatever devices the user picked last time they were here.
+    engine.set_audio_outputs(load_audio_outputs());
     match engine.start_cpal() {
         Ok(()) => {
             eprintln!("[dj-audio] engine started on the cpal device backend");
@@ -2716,6 +2783,8 @@ fn main() {
             sync_positions,
             engine_start,
             engine_stop,
+            audio_outputs,
+            set_audio_outputs,
             library_tracks,
             library_search,
             providers,
@@ -2797,6 +2866,7 @@ fn main() {
             decks::decks_set_bpm,
             decks::decks_set_surface,
             decks::decks_reset,
+            decks::decks_rehydrate,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

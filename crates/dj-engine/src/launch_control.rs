@@ -167,6 +167,21 @@ pub fn decode(data: [u8; 3]) -> Option<(usize, f32)> {
     Some((jack_index(col, row::CONTROL), volts))
 }
 
+/// The note number a BUTTON jack answers to — [`decode`] the other way
+/// round, for lighting the lamp above a control (`None` for the knobs and
+/// faders, which have no lamp).
+pub fn note_for(jack: usize) -> Option<u8> {
+    let (col, r) = (jack / ROWS, jack % ROWS);
+    if col >= COLUMNS {
+        return None;
+    }
+    match r {
+        row::FOCUS => Some(FOCUS_NOTE[col]),
+        row::CONTROL => Some(CONTROL_NOTE[col]),
+        _ => None,
+    }
+}
+
 /// Control-plane state per Launch Control node: dedups per-jack values so
 /// a knob resting against its end stop (the device repeats identical CCs
 /// while touched) doesn't flood the event ring.

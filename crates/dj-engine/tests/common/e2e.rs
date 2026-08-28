@@ -60,8 +60,8 @@ pub struct DecksSlotSpec {
     pub high: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mute: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub solo: Option<bool>,
+    #[serde(default, alias = "solo", skip_serializing_if = "Option::is_none")]
+    pub monitor: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -270,8 +270,8 @@ fn render_case(case: &str) -> PathBuf {
         if let Some(v) = d.mute {
             set(SlotControl::Mute, if v { 10.0 } else { 0.0 });
         }
-        if let Some(v) = d.solo {
-            set(SlotControl::Solo, if v { 10.0 } else { 0.0 });
+        if let Some(v) = d.monitor {
+            set(SlotControl::Monitor, if v { 10.0 } else { 0.0 });
         }
         if let Some(v) = d.tail {
             engine.decks_set_tail(&d.instance, d.slot, v).unwrap();

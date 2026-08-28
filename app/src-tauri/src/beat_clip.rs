@@ -82,6 +82,7 @@ pub fn beat_clip_load(
         project: project_id,
         clip: clip_id,
         name: rendered.name.clone(),
+        project_name: rendered.project_name.clone(),
         stems: rendered.stems.clone(),
     };
     let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
@@ -145,6 +146,7 @@ pub fn hydrate(state: &AppState, engine: &mut Engine) {
                 // carries no stems, and re-cutting one can change them.
                 let clip = BeatClipRef {
                     name: rendered.name.clone(),
+                    project_name: rendered.project_name.clone(),
                     stems: rendered.stems.clone(),
                     ..clip
                 };
