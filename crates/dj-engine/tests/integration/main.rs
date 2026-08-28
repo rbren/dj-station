@@ -44,6 +44,7 @@ mod persistence;
 mod playback;
 mod qwerty;
 mod rename;
+mod scope;
 mod telemetry;
 mod undo;
 mod wire_summing;

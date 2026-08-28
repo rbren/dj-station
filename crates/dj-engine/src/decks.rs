@@ -154,6 +154,7 @@ pub fn decks_manifest() -> Manifest {
                 name: "Bank BPM".into(),
                 default: DEFAULT_BPM,
                 audio: false,
+                capture: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Continuous,
                     min: MIN_BPM,
@@ -171,6 +172,7 @@ pub fn decks_manifest() -> Manifest {
                 name: "Reset".into(),
                 default: 0.0,
                 audio: false,
+                capture: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Button,
                     min: 0.0,

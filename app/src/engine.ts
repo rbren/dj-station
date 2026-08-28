@@ -3,7 +3,14 @@
 // headless.
 
 import { IpcClient } from './ipc';
-import type { JackTelemetry, KnobConfig, KnobState, Manifest, WireStyle } from './types';
+import type {
+  CaptureWindow,
+  JackTelemetry,
+  KnobConfig,
+  KnobState,
+  Manifest,
+  WireStyle,
+} from './types';
 
 /** Subscribe to native File-menu actions
  *  ("saved" | "save-as" | "open" | "request-new").
@@ -254,6 +261,12 @@ export class EngineClient extends IpcClient {
     return this.call<Record<string, Record<string, JackTelemetry>>>('tap_all', undefined, {
       quiet: true,
     });
+  }
+  /** A window of RAW SAMPLES from a `capture` jack (the Scope's `in`) —
+   *  the signal itself, for panels that draw it. Quiet for the same
+   *  reason as `tap`: it is a display poll racing structural edits. */
+  jackCapture(instance: string, jack: string) {
+    return this.call<CaptureWindow>('jack_capture', { instance, jack }, { quiet: true });
   }
   savePatch(dir: string, name: string) {
     return this.call<void>('save_patch', { dir, name });

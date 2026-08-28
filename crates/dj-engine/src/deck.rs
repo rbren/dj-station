@@ -88,6 +88,7 @@ pub fn deck_manifest() -> Manifest {
             name: "Play Gate".into(),
             default: 0.0,
             audio: false,
+            capture: false,
             knob: Some(KnobConfig {
                 style: KnobStyle::Button,
                 min: 0.0,
@@ -102,6 +103,7 @@ pub fn deck_manifest() -> Manifest {
             name: "Pitch Fader".into(),
             default: 0.0,
             audio: false,
+            capture: false,
             knob: Some(KnobConfig {
                 style: KnobStyle::Continuous,
                 min: -10.0,
@@ -116,6 +118,7 @@ pub fn deck_manifest() -> Manifest {
             name: "Phase Nudge".into(),
             default: 0.0,
             audio: false,
+            capture: false,
             knob: Some(KnobConfig {
                 style: KnobStyle::Continuous,
                 min: -10.0,
@@ -130,6 +133,7 @@ pub fn deck_manifest() -> Manifest {
             name: "Loop Toggle".into(),
             default: 0.0,
             audio: false,
+            capture: false,
             knob: Some(KnobConfig {
                 style: KnobStyle::Button,
                 min: 0.0,
@@ -146,6 +150,7 @@ pub fn deck_manifest() -> Manifest {
             name: format!("Cue {i}"),
             default: 0.0,
             audio: false,
+            capture: false,
             knob: Some(KnobConfig {
                 style: KnobStyle::Button,
                 min: 0.0,

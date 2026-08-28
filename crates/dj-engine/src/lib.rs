@@ -12,6 +12,7 @@
 pub mod audio;
 pub mod beat_clip;
 pub mod builtin;
+pub mod capture;
 pub mod choreo;
 pub mod deck;
 pub mod decks;
@@ -36,6 +37,7 @@ pub mod telemetry;
 pub mod wasm_host;
 
 pub use builtin::{MidiMapKind, MidiOutEvent, MidiOutSink, MockMidiSink};
+pub use capture::{CaptureWindow, CAPTURE_SAMPLES};
 pub use choreo::{ChoreoState, ChoreoTrack, ChoreoTrackData, NoteStep, CHOREO_ID};
 pub use engine::{
     normalize_module_name, Backend, Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE,

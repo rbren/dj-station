@@ -90,11 +90,20 @@ export interface JackTelemetry {
 
 export type ParamValue = number;
 
+/** A window of raw samples from a `capture` jack, as the engine sends it. */
+export interface CaptureWindow {
+  sample_rate: number;
+  samples: number[];
+}
+
 /** Handle passed to custom extension UIs (PRD §5.3). */
 export interface ModuleHandle {
   paramValue(id: string): ParamValue;
   setParam(id: string, v: ParamValue): void;
   signalTap(jackId: string): JackTelemetry;
+  /** The signal ITSELF on a manifest `capture` jack — for the panels that
+   *  draw it (the Scope). Absent on the picker's inert preview handle. */
+  capture?(jackId: string): Promise<{ sampleRate: number; samples: Float32Array } | null>;
   /** End of an edit gesture (drag release) — undo step boundary. */
   endEdit?(): void;
   size: { w: number; h: number };

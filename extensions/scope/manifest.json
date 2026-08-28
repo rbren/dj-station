@@ -5,7 +5,7 @@
   "abi": "wasm-1",
   "category": "Analysis & I/O",
   "inputs": [
-    { "id": "in", "name": "In", "default": 0.0 },
+    { "id": "in", "name": "In", "default": 0.0, "capture": true },
     { "id": "hysteresis", "name": "Hysteresis", "default": 0.15,
       "knob": { "style": "continuous", "min": 0.02, "max": 0.6, "curve": "linear" } },
     { "id": "window", "name": "Window", "default": 0.05,

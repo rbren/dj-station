@@ -72,6 +72,7 @@ impl Engine {
                     name: j.id.clone(),
                     default: 0.0,
                     audio: false,
+                    capture: false,
                     knob: None,
                     display: None,
                 })

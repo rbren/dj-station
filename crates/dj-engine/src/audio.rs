@@ -62,6 +62,7 @@ pub fn audio_manifest() -> Manifest {
                 name: "Play".into(),
                 default: 0.0,
                 audio: false,
+                capture: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Switch,
                     min: 0.0,
@@ -76,6 +77,7 @@ pub fn audio_manifest() -> Manifest {
                 name: "BPM".into(),
                 default: DEFAULT_BPM,
                 audio: false,
+                capture: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Continuous,
                     min: 20.0,
@@ -93,6 +95,7 @@ pub fn audio_manifest() -> Manifest {
                 name: "Speed".into(),
                 default: 1.0,
                 audio: false,
+                capture: false,
                 // Geometric: half speed and double speed sit the same
                 // distance from 1x, which lands exactly mid-travel.
                 knob: Some(KnobConfig {
@@ -114,6 +117,7 @@ pub fn audio_manifest() -> Manifest {
                 // otherwise, so the module is useful the moment it plays.
                 default: SIGNAL_MAX,
                 audio: false,
+                capture: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Switch,
                     min: 0.0,

@@ -71,6 +71,7 @@ pub fn choreo_manifest() -> Manifest {
         name: name.into(),
         default: 0.0,
         audio: false,
+        capture: false,
         knob: Some(KnobConfig {
             style: KnobStyle::Button,
             min: 0.0,

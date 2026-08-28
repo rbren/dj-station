@@ -20,6 +20,8 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
+use crate::capture::CaptureRing;
+
 pub const RMS_WINDOW_SECONDS: f32 = 0.1;
 pub const FAST_HZ_THRESHOLD: f32 = 10.0;
 /// Volatility's rate term saturates here: a 60 Hz LFO reads as maximally
@@ -109,6 +111,9 @@ impl TelemetryStore {
 #[derive(Debug)]
 pub struct JackAnalyzer {
     slot: Arc<JackSlot>,
+    /// Raw sample capture for jacks a UI draws (`capture.rs`); `None` for
+    /// every other jack, which is nearly all of them.
+    capture: Option<Arc<CaptureRing>>,
     /// Per-block sum of squares, ring buffer covering the window.
     sq_ring: Vec<f64>,
     /// Per-block sum, for the window mean (used by the crossing detector).
@@ -133,6 +138,7 @@ impl JackAnalyzer {
         let n_blocks = window_samples.div_ceil(block_size).max(1);
         JackAnalyzer {
             slot,
+            capture: None,
             sq_ring: vec![0.0; n_blocks],
             sum_ring: vec![0.0; n_blocks],
             zc_ring: vec![0; n_blocks],
@@ -148,11 +154,21 @@ impl JackAnalyzer {
         }
     }
 
+    /// Publish this jack's raw samples into `ring` as well (the Scope's
+    /// trace; see `capture.rs`). Control thread, at graph build time.
+    pub fn with_capture(mut self, ring: Arc<CaptureRing>) -> Self {
+        self.capture = Some(ring);
+        self
+    }
+
     /// Called once per block with the jack's effective input buffer.
     pub fn update(&mut self, buf: &[f32]) {
         let n = buf.len().min(self.block_size);
         if n == 0 {
             return;
+        }
+        if let Some(c) = &self.capture {
+            c.push(&buf[..n]);
         }
         // Window mean from the *previous* window contents (cheap, stable).
         let mean = if self.total_n > 0 {

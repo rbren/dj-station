@@ -14,6 +14,7 @@ use crate::builtin::{
     AudioOutModule, BuiltinKind, MidiEvent, MidiMapKind, MidiModule, MidiOutEvent, MidiOutSink,
     MidiShared,
 };
+use crate::capture::{CaptureRing, CaptureWindow};
 use crate::deck::{DeckCmd, DeckControl, DeckModule, DeckStatus, N_CUES};
 use crate::decks::{DecksControl, DecksRtModule, DecksShared};
 use crate::graph::{compute_plan, Graph, GraphEdit, GraphNode, GrowStorage, NodeStorage, WireSpec};
@@ -132,6 +133,9 @@ pub struct NodeInfo {
     pub telemetry: Vec<Arc<JackSlot>>,
     /// Output-jack telemetry, one slot per manifest output.
     pub out_telemetry: Vec<Arc<JackSlot>>,
+    /// Raw sample rings, one per manifest input, `Some` only for jacks the
+    /// manifest marks `capture` (the Scope's `in`; see `capture.rs`).
+    pub capture: Vec<Option<Arc<CaptureRing>>>,
     pub midi_shared: Option<Arc<MidiShared>>,
     pub midi_mappings: Vec<MidiMappingInfo>,
     /// LED feedback mappings (input jacks -> note/CC out; PRD §7.1).
@@ -905,9 +909,26 @@ impl Engine {
             .iter()
             .map(|_| Arc::new(JackSlot::default()))
             .collect();
+        // Jacks a UI DRAWS (the Scope's `in`) also get a raw sample ring.
+        let capture: Vec<Option<Arc<CaptureRing>>> = manifest
+            .inputs
+            .iter()
+            .map(|decl| {
+                decl.capture
+                    .then(|| Arc::new(CaptureRing::new(self.config.sample_rate)))
+            })
+            .collect();
         let analyzers: Vec<JackAnalyzer> = telemetry
             .iter()
-            .map(|s| JackAnalyzer::new(s.clone(), self.config.sample_rate, self.config.block_size))
+            .zip(&capture)
+            .map(|(s, ring)| {
+                let a =
+                    JackAnalyzer::new(s.clone(), self.config.sample_rate, self.config.block_size);
+                match ring {
+                    Some(r) => a.with_capture(r.clone()),
+                    None => a,
+                }
+            })
             .collect();
         let out_telemetry: Vec<Arc<JackSlot>> = manifest
             .outputs
@@ -934,6 +955,7 @@ impl Engine {
             params: params.clone(),
             telemetry,
             out_telemetry,
+            capture,
             midi_shared,
             midi_mappings: Vec::new(),
             midi_led_mappings: Vec::new(),
@@ -1548,6 +1570,19 @@ impl Engine {
             .get(jack)
             .map(|s| s.read())
             .ok_or_else(|| anyhow!("no output telemetry for {instance_id:?}:{jack_id:?}"))
+    }
+
+    /// Read the raw sample window an input jack captures — the signal
+    /// itself, for panels that DRAW it (the Scope). Only jacks whose
+    /// manifest marks them `capture` have one.
+    pub fn jack_capture(&self, instance_id: &str, jack_id: &str) -> Result<CaptureWindow> {
+        let (node, jack) = self.in_jack_indices(instance_id, jack_id)?;
+        self.nodes[node]
+            .capture
+            .get(jack)
+            .and_then(|c| c.as_ref())
+            .map(|c| c.read())
+            .ok_or_else(|| anyhow!("jack {instance_id:?}:{jack_id:?} captures no samples"))
     }
 
     /// Telemetry for a master output channel.

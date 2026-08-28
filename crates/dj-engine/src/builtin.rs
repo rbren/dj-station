@@ -137,6 +137,7 @@ pub fn audio_out_manifest() -> Manifest {
                 name: (*name).into(),
                 default: 0.0,
                 audio: false,
+                capture: false,
                 knob: None,
                 display: None,
             })
@@ -146,6 +147,7 @@ pub fn audio_out_manifest() -> Manifest {
                     name: "Device Channel Offset".into(),
                     default: 0.0,
                     audio: false,
+                    capture: false,
                     knob: Some(KnobConfig {
                         style: KnobStyle::Stepped,
                         min: 0.0,
@@ -160,6 +162,7 @@ pub fn audio_out_manifest() -> Manifest {
                     name: "Mute".into(),
                     default: 0.0,
                     audio: false,
+                    capture: false,
                     knob: Some(KnobConfig {
                         style: KnobStyle::Switch,
                         min: 0.0,
@@ -194,6 +197,7 @@ pub fn midi_manifest() -> Manifest {
                 name: format!("LED {i}"),
                 default: 0.0,
                 audio: false,
+                capture: false,
                 knob: None,
                 display: None,
             })

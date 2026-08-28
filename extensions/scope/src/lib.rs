@@ -19,6 +19,17 @@
 //! a DC-blocked copy of the input: the threshold scales with the measured
 //! peak (`hysteresis`), and the last three periods are median-filtered, so
 //! harmonics and noise near the zero crossing do not double the reading.
+//!
+//! A crossing detector always measures SOMETHING — noise crosses the
+//! threshold constantly, and a median of three short random gaps is a
+//! perfectly plausible-looking "period" — so a measured period only counts
+//! as a PITCH once the signal is shown to actually repeat at it: the
+//! module keeps a delay line and tracks the normalized autocorrelation at
+//! the current lag, smoothed over several periods. A tone correlates with
+//! itself one period back (confidence ~1); noise does not (confidence ~0),
+//! so `hz` and `trig` stay silent and a noise source reads "— Hz" instead
+//! of an invented fundamental. `pitch` still holds its last reading, the
+//! way a pitch tracker's sample-and-hold does.
 
 use dj_module_sdk::{export_module, InitCtx, Module, ProcessIo};
 
@@ -40,6 +51,15 @@ const MAX_HZ: f32 = 12_000.0;
 const SILENCE: f32 = 1e-3;
 /// Sync pulse width, seconds.
 const TRIG_SECS: f32 = 0.001;
+/// Correlation is averaged over this many periods, clamped to the sample
+/// window below — long enough that a random signal cannot average its way
+/// to a high score, short enough to voice a tone within ~10 ms.
+const CONFIDENCE_PERIODS: f32 = 8.0;
+const CONFIDENCE_MIN_SAMPLES: f32 = 512.0;
+const CONFIDENCE_MAX_SAMPLES: f32 = 4096.0;
+/// Normalized autocorrelation at or above which a reading is a pitch and
+/// not an accident.
+const CONFIDENCE_VOICED: f32 = 0.6;
 const GATE_HIGH: f32 = 10.0;
 /// Reference for the pitch output: 1V/oct with 0 V = C4 (PRD §4).
 const C4_HZ: f32 = 261.626;
@@ -55,6 +75,17 @@ pub struct Scope {
     since_edge: u32,
     /// Last three measured periods, in samples.
     periods: [f32; 3],
+    /// DC-blocked history, one slowest period long, for the correlator.
+    history: Vec<f32>,
+    write: usize,
+    /// Lag the correlator is measuring at, in samples (0 = none yet).
+    lag: usize,
+    /// Smoothed <y[n] y[n-lag]> and <y²>, whose ratio is `confidence`.
+    corr: f32,
+    energy: f32,
+    /// 0..1 — normalized autocorrelation at `lag`: does the signal really
+    /// repeat at the measured period? A tone reaches 1; noise stays near 0.
+    confidence: f32,
     freq: f32,
     pitch: f32,
     trig_left: u32,
@@ -71,6 +102,9 @@ impl Module for Scope {
     const N_OUTPUTS: usize = 6;
 
     fn new(ctx: &InitCtx) -> Self {
+        // One period of the slowest detectable tone, so the correlator can
+        // always reach back a whole period.
+        let history_len = (ctx.sample_rate / MIN_HZ).ceil() as usize + 1;
         Scope {
             sample_rate: ctx.sample_rate,
             dc: 0.0,
@@ -79,6 +113,12 @@ impl Module for Scope {
             high: false,
             since_edge: 0,
             periods: [0.0; 3],
+            history: vec![0.0; history_len],
+            write: 0,
+            lag: 0,
+            corr: 0.0,
+            energy: 0.0,
+            confidence: 0.0,
             freq: 0.0,
             pitch: 0.0,
             trig_left: 0,
@@ -128,24 +168,59 @@ impl Module for Scope {
                     let m = median3(self.periods[0], self.periods[1], self.periods[2]);
                     if m > 0.0 {
                         self.freq = self.sample_rate / m;
+                        self.lag = (m.round() as usize).min(self.history.len() - 1);
+                        if self.confidence >= CONFIDENCE_VOICED {
+                            self.trig_left = trig_len;
+                        }
                     }
-                    self.trig_left = trig_len;
                 }
                 self.since_edge = 0;
             }
-            // Silence or a signal too slow to measure: drop the estimate.
-            if self.peak < SILENCE || self.since_edge as f32 > max_period {
-                self.freq = 0.0;
+
+            // Does the signal actually repeat at the measured period? The
+            // normalized autocorrelation at that lag, smoothed over a few
+            // periods, is the difference between a tone and a coincidence.
+            let now = self.write;
+            self.history[now] = y;
+            self.write = (now + 1) % self.history.len();
+            if self.lag > 0 {
+                let back = (now + self.history.len() - self.lag) % self.history.len();
+                let prev = self.history[back];
+                let coeff = 1.0
+                    / (CONFIDENCE_PERIODS * self.lag as f32)
+                        .clamp(CONFIDENCE_MIN_SAMPLES, CONFIDENCE_MAX_SAMPLES);
+                self.corr += coeff * (y * prev - self.corr);
+                self.energy += coeff * (0.5 * (y * y + prev * prev) - self.energy);
+                self.confidence = if self.energy > SILENCE * SILENCE {
+                    (self.corr / self.energy).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
             }
 
-            if self.freq > 0.0 {
+            // Silence, a signal too slow to measure, or one that never
+            // repeats (noise): no fundamental to report.
+            if self.peak < SILENCE || self.since_edge as f32 > max_period {
+                self.freq = 0.0;
+                self.lag = 0;
+                self.corr = 0.0;
+                self.energy = 0.0;
+                self.confidence = 0.0;
+            }
+            let voiced = self.freq > 0.0 && self.confidence >= CONFIDENCE_VOICED;
+
+            if voiced {
                 self.pitch = (self.freq / C4_HZ).log2().clamp(-10.0, 10.0);
             }
             // `pitch` holds its last reading while unvoiced (`hz` drops to
             // 0, which is how a patch can tell), like a pitch tracker's
             // sample-and-hold.
             io.outputs[OUT_PITCH][s] = self.pitch;
-            io.outputs[OUT_HZ][s] = (self.freq * 0.01).clamp(0.0, 10.0);
+            io.outputs[OUT_HZ][s] = if voiced {
+                (self.freq * 0.01).clamp(0.0, 10.0)
+            } else {
+                0.0
+            };
             io.outputs[OUT_PEAK][s] = self.peak.min(10.0);
             io.outputs[OUT_RMS][s] = self.mean_square.max(0.0).sqrt().min(10.0);
             io.outputs[OUT_TRIG][s] = if self.trig_left > 0 {

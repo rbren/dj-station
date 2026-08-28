@@ -1,26 +1,39 @@
 // Custom UI for the Scope: a time-domain trace and a frequency-domain
 // spectrum, with a wave / spectrum / both toggle.
 //
-// The DSP module deliberately ships no sample buffer to the app (see
-// src/lib.rs — the engine's telemetry is scalar per jack), so this panel
-// reconstructs a model of the measured signal from what the scope does
-// emit: the detected fundamental (`hz`), the decaying `peak` and the
-// windowed `rms`. The crest factor peak/rms picks a harmonic template
-// (sine ~ 1.41, square ~ 1, saw ~ 1.73) and a band-limited harmonic
-// series is synthesized in TS at 48 kHz. The spectrum is a real FFT
-// (N = 1024) of that synthesized buffer, drawn as log-frequency bars —
-// all analysis happens here in the UI; the RT thread does no extra work.
+// EVERYTHING DRAWN HERE IS THE SIGNAL ITSELF. The panel polls a window of
+// raw samples from the scope's `in` jack (a manifest `capture` jack — see
+// crates/dj-engine/src/capture.rs) and draws that: the trace is those
+// samples, the spectrum is a real FFT of those samples. It used to
+// RECONSTRUCT a harmonic model from the scalar hz/peak/rms telemetry,
+// which is why noise drew a tidy periodic wave and a comb spectrum with
+// dead bins between the invented harmonics — a picture of the model, not
+// of the signal. The scalar outputs still feed the readout, which is what
+// they measure.
+//
+// The RT thread does no extra work: it writes samples it already has into
+// a fixed ring, and the FFT happens here, per poll, on the window the app
+// asked for.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+/** One window of captured samples, oldest first. */
+export interface CaptureWindow {
+  sampleRate: number;
+  samples: Float32Array;
+}
 
 // Structural copy of the host's ModuleHandle (extensions compile standalone).
 interface ModuleHandle {
   paramValue(id: string): number;
   signalTap?(jackId: string): { display: number };
+  /** Raw samples from a `capture` jack; absent outside a live rack. */
+  capture?(jackId: string): Promise<CaptureWindow | null>;
 }
 
-export const FFT_SIZE = 1024;
-export const SAMPLE_RATE = 48000;
+/** How often the sample window is re-fetched (ms) — the telemetry rate. */
+export const POLL_MS = 100;
+export const FFT_SIZE = 2048;
 
 // Sized to fill the condensed one-row I/O strip below (3 input + 6 output
 // cells, see panelLayouts.ts) so the display is the panel's main surface.
@@ -35,76 +48,8 @@ const F_HI = 16000;
 const BANDS = 48;
 /** Spectrum floor, dB relative to a 10 V full-scale sine. */
 const DB_FLOOR = -60;
-
-const CREST_SQUARE = 1.0;
-const CREST_SINE = Math.SQRT2;
-const CREST_SAW = Math.sqrt(3);
-const HARMONICS = 16;
-
-/** Harmonic amplitudes for the crest-factor-matched template blend. */
-export function harmonicAmps(crest: number): number[] {
-  const amps: number[] = [];
-  for (let k = 1; k <= HARMONICS; k++) {
-    const sine = k === 1 ? 1 : 0;
-    const square = k % 2 === 1 ? 1 / k : 0;
-    const saw = 1 / k;
-    let a: number;
-    if (crest <= CREST_SINE) {
-      // square -> sine as the crest factor rises toward sqrt(2).
-      const t = Math.min(
-        1,
-        Math.max(0, (crest - CREST_SQUARE) / (CREST_SINE - CREST_SQUARE)),
-      );
-      a = square + (sine - square) * t;
-    } else {
-      // sine -> saw beyond sqrt(2).
-      const t = Math.min(
-        1,
-        Math.max(0, (crest - CREST_SINE) / (CREST_SAW - CREST_SINE)),
-      );
-      a = sine + (saw - sine) * t;
-    }
-    amps.push(a);
-  }
-  return amps;
-}
-
-/**
- * Synthesize `n` samples of the reconstructed signal: a band-limited
- * harmonic series at `f0`, character picked by peak/rms, scaled so the
- * buffer RMS matches the measured `rms`. Unvoiced (f0 <= 0) or silent
- * input yields silence.
- */
-export function synthesizeWave(
-  f0: number,
-  peak: number,
-  rms: number,
-  n: number = FFT_SIZE,
-  sampleRate: number = SAMPLE_RATE,
-): Float32Array {
-  const out = new Float32Array(n);
-  if (f0 <= 0 || peak <= 1e-4 || rms <= 1e-4) return out;
-  const crest = peak / rms;
-  const amps = harmonicAmps(crest);
-  const nyquist = sampleRate / 2;
-  let sumSq = 0;
-  for (let i = 0; i < n; i++) {
-    let v = 0;
-    for (let k = 1; k <= amps.length; k++) {
-      const f = k * f0;
-      if (f >= nyquist || amps[k - 1] === 0) continue;
-      v += amps[k - 1] * Math.sin((2 * Math.PI * f * i) / sampleRate);
-    }
-    out[i] = v;
-    sumSq += v * v;
-  }
-  const bufRms = Math.sqrt(sumSq / n);
-  if (bufRms > 0) {
-    const g = rms / bufRms;
-    for (let i = 0; i < n; i++) out[i] *= g;
-  }
-  return out;
-}
+/** Trace full scale: the ±10 V signal rails, so the height is honest. */
+const FULL_SCALE = 10;
 
 /**
  * Magnitude spectrum of a real buffer: iterative radix-2 FFT, Hann
@@ -113,7 +58,8 @@ export function synthesizeWave(
  */
 export function fftMag(input: Float32Array): Float32Array {
   const n = input.length;
-  if ((n & (n - 1)) !== 0) throw new Error("fftMag: length must be 2^k");
+  if (n === 0 || (n & (n - 1)) !== 0)
+    throw new Error("fftMag: length must be 2^k");
   const re = new Float32Array(n);
   const im = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -162,6 +108,17 @@ export function fftMag(input: Float32Array): Float32Array {
   return mags;
 }
 
+/** The newest 2^k samples of a capture, for the FFT. Empty if too short. */
+export function fftFrame(
+  samples: Float32Array,
+  max: number = FFT_SIZE,
+): Float32Array {
+  let n = 1;
+  while (n * 2 <= Math.min(samples.length, max)) n *= 2;
+  if (n < 2) return new Float32Array(0);
+  return samples.subarray(samples.length - n);
+}
+
 export interface Band {
   /** Band center frequency, Hz. */
   hz: number;
@@ -169,11 +126,14 @@ export interface Band {
   db: number;
 }
 
-/** Fold FFT magnitudes into log-spaced display bands (max per band). */
-export function spectrumBands(
-  mags: Float32Array,
-  sampleRate: number = SAMPLE_RATE,
-): Band[] {
+/**
+ * Fold FFT magnitudes into log-spaced display bands. A band reads the MEAN
+ * POWER of the bins it covers, so the display is a density: white noise —
+ * equal power per bin — draws flat across bands of very different widths,
+ * and no band can come out empty (the lowest bands, narrower than a bin,
+ * read the bin they sit in).
+ */
+export function spectrumBands(mags: Float32Array, sampleRate: number): Band[] {
   const n = mags.length * 2;
   const binHz = sampleRate / n;
   const bands: Band[] = [];
@@ -182,14 +142,96 @@ export function spectrumBands(
   for (let b = 0; b < BANDS; b++) {
     const fLo = Math.exp(logLo + ((logHi - logLo) * b) / BANDS);
     const fHi = Math.exp(logLo + ((logHi - logLo) * (b + 1)) / BANDS);
-    const kLo = Math.max(1, Math.floor(fLo / binHz));
-    const kHi = Math.min(mags.length - 1, Math.ceil(fHi / binHz));
-    let m = 0;
-    for (let k = kLo; k <= kHi; k++) m = Math.max(m, mags[k]);
-    const db = m > 0 ? 20 * Math.log10(m / 10) : DB_FLOOR;
-    bands.push({ hz: Math.sqrt(fLo * fHi), db: Math.max(DB_FLOOR, db) });
+    const hz = Math.sqrt(fLo * fHi);
+    if (mags.length < 2) {
+      bands.push({ hz, db: DB_FLOOR });
+      continue;
+    }
+    // Bin 0 is DC — never part of a band.
+    const kLo = Math.min(mags.length - 1, Math.max(1, Math.floor(fLo / binHz)));
+    const kHi = Math.min(
+      mags.length - 1,
+      Math.max(kLo, Math.ceil(fHi / binHz)),
+    );
+    let power = 0;
+    for (let k = kLo; k <= kHi; k++) power += mags[k] * mags[k];
+    const amp = Math.sqrt(power / (kHi - kLo + 1));
+    const db = amp > 0 ? 20 * Math.log10(amp / 10) : DB_FLOOR;
+    bands.push({ hz, db: Math.max(DB_FLOOR, db) });
   }
   return bands;
+}
+
+/**
+ * Where to start drawing so a periodic trace stands still: the latest
+ * rising zero crossing at or before the window start, falling back to the
+ * window start when the signal never crosses. Noise has no trigger to
+ * find by nature — which is what an unsyncable input looks like on a real
+ * scope, and why noise must not be drawn as if it had one.
+ */
+export function triggerStart(
+  samples: Float32Array,
+  windowStart: number,
+): number {
+  for (let i = windowStart; i > 0; i--) {
+    if (samples[i - 1] <= 0 && samples[i] > 0) return i;
+  }
+  return windowStart;
+}
+
+/**
+ * The slice of the capture the trace draws: two periods of the detected
+ * fundamental, trigger-aligned; the whole window when there is no pitch to
+ * lock to (noise, silence).
+ */
+export function traceWindow(
+  samples: Float32Array,
+  sampleRate: number,
+  f0: number,
+): Float32Array {
+  if (samples.length === 0 || f0 <= 0) return samples;
+  const len = Math.min(
+    samples.length,
+    Math.max(16, Math.round((2 * sampleRate) / f0)),
+  );
+  const start = triggerStart(samples, samples.length - len);
+  return samples.subarray(start, start + len);
+}
+
+/**
+ * Min/max envelope of `samples` over at most `columns` display columns, as
+ * SVG polyline points: a window longer than the panel is wide is drawn as
+ * the band it actually occupies instead of an aliased line through every
+ * k-th sample.
+ */
+export function tracePoints(
+  samples: Float32Array,
+  columns: number,
+  width: number,
+  height: number,
+): string {
+  if (samples.length === 0) return "";
+  const yOf = (v: number) =>
+    height / 2 -
+    (Math.max(-FULL_SCALE, Math.min(FULL_SCALE, v)) / FULL_SCALE) *
+      (height / 2 - PAD);
+  const cols = Math.max(1, Math.min(columns, samples.length));
+  const pts: string[] = [];
+  for (let c = 0; c < cols; c++) {
+    const lo = Math.floor((c * samples.length) / cols);
+    const hi = Math.max(lo + 1, Math.floor(((c + 1) * samples.length) / cols));
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = lo; i < hi && i < samples.length; i++) {
+      if (samples[i] < min) min = samples[i];
+      if (samples[i] > max) max = samples[i];
+    }
+    const x = PAD + (c / Math.max(1, cols - 1)) * (width - 2 * PAD);
+    // Top-then-bottom per column keeps the envelope one continuous line.
+    pts.push(`${x.toFixed(1)},${yOf(max).toFixed(1)}`);
+    if (min !== max) pts.push(`${x.toFixed(1)},${yOf(min).toFixed(1)}`);
+  }
+  return pts.join(" ");
 }
 
 type View = "time" | "spectrum" | "both";
@@ -197,51 +239,66 @@ type View = "time" | "spectrum" | "both";
 const readTap = (handle: ModuleHandle, jack: string): number =>
   handle.signalTap?.(jack)?.display ?? 0;
 
+const EMPTY = new Float32Array(0);
+const DEFAULT_SAMPLE_RATE = 48000;
+
+/** Poll the scope's `in` jack for a fresh window of samples. */
+function useCapture(handle: ModuleHandle): CaptureWindow {
+  const [window, setWindow] = useState<CaptureWindow>({
+    sampleRate: DEFAULT_SAMPLE_RATE,
+    samples: EMPTY,
+  });
+  // The handle is rebuilt on every node snapshot; the poll must not be.
+  const handleRef = useRef(handle);
+  handleRef.current = handle;
+  useEffect(() => {
+    let alive = true;
+    let inFlight = false;
+    const poll = async () => {
+      if (inFlight || !handleRef.current.capture) return;
+      inFlight = true;
+      try {
+        const w = await handleRef.current.capture("in");
+        if (alive && w) setWindow(w);
+      } catch {
+        // A scope on a node that just went away: the next poll is the
+        // retry, and the IPC layer has already reported the failure.
+      } finally {
+        inFlight = false;
+      }
+    };
+    void poll();
+    const id = setInterval(() => void poll(), POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+  return window;
+}
+
 export default function ScopeUI({ handle }: { handle: ModuleHandle }) {
   const [view, setView] = useState<View>("both");
-  // Scope measurements from the batched telemetry tap (see lib.rs for
-  // the output scaling: hz is 1 V per 100 Hz).
+  const { sampleRate, samples } = useCapture(handle);
+  // Scope measurements from the batched telemetry tap (see lib.rs for the
+  // output scaling: hz is 1 V per 100 Hz, and reads 0 when the input has
+  // no fundamental to report).
   const f0 = readTap(handle, "out:hz") * 100;
   const peak = Math.max(0, readTap(handle, "out:peak"));
   const rms = Math.max(0, readTap(handle, "out:rms"));
-  const voiced = f0 > 0 && peak > 1e-4 && rms > 1e-4;
 
   const showTime = view !== "spectrum";
   const showSpec = view !== "time";
 
-  // Time trace: two periods of the harmonic model, scaled to the peak.
-  let tracePts = "";
-  if (showTime) {
-    const pts: string[] = [];
-    const amps = voiced ? harmonicAmps(peak / rms) : [];
-    // Normalize the drawn shape to unit peak so the y-scale is honest.
-    let shapePeak = 0;
-    const shape: number[] = [];
-    const N = 128;
-    for (let i = 0; i <= N; i++) {
-      let v = 0;
-      const ph = (2 * 2 * Math.PI * i) / N; // two cycles
-      for (let k = 1; k <= amps.length; k++) {
-        if (k * f0 >= SAMPLE_RATE / 2) break;
-        v += amps[k - 1] * Math.sin(k * ph);
-      }
-      shape.push(v);
-      shapePeak = Math.max(shapePeak, Math.abs(v));
-    }
-    const yScale = (TRACE_H / 2 - PAD) * Math.min(1, peak / 10) || 0;
-    for (let i = 0; i <= N; i++) {
-      const x = PAD + (i / N) * (W - 2 * PAD);
-      const y =
-        TRACE_H / 2 - (shapePeak > 0 ? (shape[i] / shapePeak) * yScale : 0);
-      pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
-    }
-    tracePts = pts.join(" ");
-  }
+  const tracePts = showTime
+    ? tracePoints(traceWindow(samples, sampleRate, f0), W, W, TRACE_H)
+    : "";
 
   let bands: Band[] = [];
   let peakBandHz = 0;
   if (showSpec) {
-    bands = spectrumBands(fftMag(synthesizeWave(f0, peak, rms)));
+    const frame = fftFrame(samples);
+    bands = spectrumBands(frame.length > 0 ? fftMag(frame) : EMPTY, sampleRate);
     let best = DB_FLOOR;
     for (const b of bands) {
       if (b.db > best) {
@@ -295,7 +352,7 @@ export default function ScopeUI({ handle }: { handle: ModuleHandle }) {
           role="img"
           aria-label="spectrum"
           data-testid="scope-spectrum"
-          data-peak-hz={voiced ? peakBandHz.toFixed(0) : ""}
+          data-peak-hz={peakBandHz > 0 ? peakBandHz.toFixed(0) : ""}
         >
           <rect x={0} y={0} width={W} height={SPEC_H} className="scope-bg" />
           {bands.map((b, i) => {
@@ -316,7 +373,7 @@ export default function ScopeUI({ handle }: { handle: ModuleHandle }) {
         </svg>
       )}
       <div className="scope-readout" data-testid="scope-readout">
-        {voiced ? `${f0.toFixed(f0 < 100 ? 1 : 0)} Hz` : "— Hz"} · peak{" "}
+        {f0 > 0 ? `${f0.toFixed(f0 < 100 ? 1 : 0)} Hz` : "— Hz"} · peak{" "}
         {peak.toFixed(1)} V · rms {rms.toFixed(1)} V
       </div>
     </div>

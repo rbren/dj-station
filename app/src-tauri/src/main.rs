@@ -12,9 +12,9 @@ mod decks;
 mod launch_control;
 
 use dj_engine::{
-    Backend, Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig, KnobStyle,
-    MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroStore, Manifest, MidiMapKind, PatchDoc,
-    UndoHistory, WireStyle, MACROS_DIR_NAME,
+    Backend, CaptureWindow, Engine, EngineConfig, ExtensionRegistry, JackTelemetry, KnobConfig,
+    KnobStyle, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroStore, Manifest,
+    MidiMapKind, PatchDoc, UndoHistory, WireStyle, MACROS_DIR_NAME,
 };
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
@@ -596,6 +596,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                             name: mm.name.clone(),
                             default: 0.0,
                             audio: false,
+                            capture: false,
                             knob: None,
                             display: None,
                         })
@@ -1345,6 +1346,19 @@ fn set_param(state: State<AppState>, instance: String, param: String, value: f32
 fn tap(state: State<AppState>, instance: String, jack: String) -> CmdResult<JackTelemetry> {
     let engine = engine_lock(&state)?;
     engine.tap(&instance, &jack).map_err(err)
+}
+
+/// A window of raw samples from a `capture` jack — the Scope's trace and
+/// spectrum are drawn from this, never from the scalar telemetry (which
+/// cannot describe a waveform). Poll-rate, like `tap`.
+#[tauri::command]
+fn jack_capture(
+    state: State<AppState>,
+    instance: String,
+    jack: String,
+) -> CmdResult<CaptureWindow> {
+    let engine = engine_lock(&state)?;
+    engine.jack_capture(&instance, &jack).map_err(err)
 }
 
 /// Batched telemetry for the UI's 100 ms poll: one lock acquisition and one
@@ -2656,6 +2670,7 @@ fn main() {
             set_param,
             tap,
             tap_all,
+            jack_capture,
             save_patch,
             save_patch_as,
             new_patch,

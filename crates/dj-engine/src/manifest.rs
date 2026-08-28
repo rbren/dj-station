@@ -38,6 +38,12 @@ pub struct JackDecl {
     /// Purely presentational; the engine still treats it as a normal input.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub audio: bool,
+    /// The UI may read a window of RAW SAMPLES from this jack
+    /// (`crate::capture`), because drawing it is the module's whole point
+    /// — the Scope's `in`. Costs one fixed ring per instance, so it is
+    /// opt-in per jack and never implied by `audio`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub capture: bool,
     #[serde(default)]
     pub knob: Option<KnobConfig>,
     /// How the jack's value reads to a human (unit / mapping / step labels).

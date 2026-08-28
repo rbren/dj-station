@@ -953,8 +953,12 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     },
     outputs: {
       thru: 'Unchanged copy of in.',
-      pitch: 'Detected pitch as CV (1 V/oct).',
-      hz: 'Detected frequency, Hz-scaled CV.',
+      pitch:
+        'Detected pitch as CV (1 V/oct), held at its last reading while ' +
+        'the input has no pitch.',
+      hz:
+        'Detected frequency, Hz-scaled CV (1 V per 100 Hz) \u2014 0 V when ' +
+        'the input has no fundamental to report, e.g. noise or silence.',
       peak:
         'Instantaneous peak level of the input as a CV \u2014 spikes on ' +
         'transients; good for triggering off hits.',

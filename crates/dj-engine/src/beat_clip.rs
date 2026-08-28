@@ -85,6 +85,7 @@ pub fn beat_clip_manifest() -> Manifest {
         name: name.into(),
         default: 0.0,
         audio: false,
+        capture: false,
         knob: Some(KnobConfig {
             style: KnobStyle::Button,
             min: 0.0,
@@ -108,6 +109,7 @@ pub fn beat_clip_manifest() -> Manifest {
                 name: "Clip BPM".into(),
                 default: DEFAULT_BPM,
                 audio: false,
+                capture: false,
                 knob: Some(KnobConfig {
                     style: KnobStyle::Continuous,
                     min: 20.0,

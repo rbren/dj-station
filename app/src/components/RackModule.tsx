@@ -257,6 +257,12 @@ function makeHandle(
         volatility: 0,
         is_fast: false,
       },
+    // Raw samples, not a smoothed reading: the panels that draw a signal
+    // (the Scope) fetch their own window on their own schedule.
+    capture: async (jackId) => {
+      const w = await engine.jackCapture(node.instance_id, jackId);
+      return w && { sampleRate: w.sample_rate, samples: Float32Array.from(w.samples) };
+    },
     endEdit: () => void engine.endEdit(),
     size: { w: 360, h: 200 },
   };

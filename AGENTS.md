@@ -421,6 +421,16 @@ offset))`, offset in position units — so the knob's curve shapes the
   `app/tests/KnobMath.test.ts` pins the TS knob curve math to
   `knob.rs`; if either side's mapping changes, update both plus that
   table.
+- Jack telemetry is SCALAR (value / rms / fast flag) and cannot describe a
+  waveform. A panel that DRAWS a signal reads raw samples instead: mark
+  the input jack `"capture": true` in the manifest, which gives it a
+  fixed lock-free ring (`crates/dj-engine/src/capture.rs`, 2048 samples
+  written by the RT thread from the jack's post-blend buffer), read via
+  `Engine::jack_capture` / the `jack_capture` IPC command /
+  `ModuleHandle.capture`. The Scope's `in` is the only one; keep it that
+  way (one ring per capture jack per instance) and never reconstruct a
+  signal from telemetry — that is exactly the bug the Scope had, drawing a
+  synthesized periodic wave and a comb spectrum for white noise.
 - Telemetry rendering (perf-critical, pinned by
   `app/tests/RenderCounts.test.tsx`): a telemetry tick must NEVER
   re-render a `ModulePanel`. `setTelemetry` keeps object identity per
