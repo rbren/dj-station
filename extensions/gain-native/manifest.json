@@ -15,5 +15,6 @@
   "params": [
     { "id": "boost", "name": "Boost", "type": "float", "default": 1.0, "min": 0.0, "max": 4.0 }
   ],
+  "bypass": { "out": "in" },
   "latency_samples": 0
 }

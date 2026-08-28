@@ -122,6 +122,7 @@ enum EditKey<'a> {
     /// itself, so every drag is exactly one undo step).
     Move,
     Param(&'a str, &'a str),
+    Bypass(&'a str),
     Load(&'a str),
     NewPatch,
     Paste,
@@ -166,6 +167,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::ModuleResetMany => write!(f, "modreset_many"),
             EditKey::Move => write!(f, "move"),
             EditKey::Param(i, p) => write!(f, "param:{i}:{p}"),
+            EditKey::Bypass(i) => write!(f, "bypass:{i}"),
             EditKey::Load(d) => write!(f, "load:{d}"),
             EditKey::NewPatch => write!(f, "new_patch"),
             EditKey::Paste => write!(f, "paste"),
@@ -534,6 +536,10 @@ struct NodeSnapshot {
     midi_mappings: Vec<MidiMappingSnapshot>,
     /// LED feedback mappings (M4, PRD §7.1); each is also an input jack.
     midi_led_mappings: Vec<MidiMappingSnapshot>,
+    /// Module bypassed: its manifest's `bypass` routes carry input to
+    /// output and its DSP is skipped. Whether the toggle exists at all is
+    /// the manifest's `bypass` map, which rides in `manifest`.
+    bypassed: bool,
     /// Engine-known rack position (unzoomed rack coordinates). The
     /// frontend adopts it on refresh — this is how undo/redo moves panels
     /// back. `None` = engine has no opinion; the local layout store wins.
@@ -668,6 +674,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                     num: m.num,
                 })
                 .collect(),
+            bypassed: n.bypassed,
             position: n.position,
         })
         .collect();
@@ -1343,6 +1350,15 @@ fn remove_modules(state: State<AppState>, instances: Vec<String>) -> CmdResult<(
 fn set_param(state: State<AppState>, instance: String, param: String, value: f32) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::Param(&instance, &param))?;
     engine.set_param(&instance, &param, value).map_err(err)
+}
+
+/// Bypass a module: its declared in -> out routes carry the signal and its
+/// DSP stops running. Per-module state like a knob — undoable, and saved
+/// in the patch.
+#[tauri::command]
+fn set_module_bypass(state: State<AppState>, instance: String, bypass: bool) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::Bypass(&instance))?;
+    engine.set_bypass(&instance, bypass).map_err(err)
 }
 
 #[tauri::command]
@@ -2735,6 +2751,7 @@ fn main() {
             paste_modules,
             remove_modules,
             set_param,
+            set_module_bypass,
             tap,
             tap_all,
             jack_capture,

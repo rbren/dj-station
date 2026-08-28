@@ -74,6 +74,7 @@ pub fn crossfader_manifest() -> Manifest {
         params: vec![],
         ui: None,
         latency_samples: 0,
+        bypass: Default::default(),
     }
 }
 

@@ -67,6 +67,9 @@ export interface NodeSnapshot {
   midi_mappings: MidiMapping[];
   /** LED feedback mappings (M4); each is also an input jack. */
   midi_led_mappings: MidiMapping[];
+  /** Module bypassed: the engine copies `manifest.bypass`'s routes and
+   *  runs no DSP. Only ever true for a module that declares routes. */
+  bypassed?: boolean;
   /** Engine-known rack position (unzoomed rack coordinates). Adopted on
    *  refresh so undo/redo restores module moves; absent/null means the
    *  engine has no opinion and the local layout store wins. */
@@ -247,6 +250,11 @@ export class EngineClient extends IpcClient {
   }
   setParam(instance: string, param: string, value: number) {
     return this.call<void>('set_param', { instance, param, value });
+  }
+  /** Bypass a module: its declared in -> out routes carry the signal and
+   *  its DSP stops running. One undo step; saved in the patch. */
+  setModuleBypass(instance: string, bypass: boolean) {
+    return this.call<void>('set_module_bypass', { instance, bypass });
   }
   tap(instance: string, jack: string) {
     // Quiet: the 100ms telemetry poll races structural edits (undo/redo,

@@ -1,6 +1,7 @@
 //! Extension manifest (`manifest.json`) parsing — PRD §5.1.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::knob::KnobConfig;
@@ -25,6 +26,38 @@ pub struct Manifest {
     pub ui: Option<String>,
     #[serde(default)]
     pub latency_samples: u32,
+    /// How this module passes signal through when BYPASSED: output jack id
+    /// -> the input jack id its samples are copied from. Declaring any
+    /// route is what makes a module bypassable (an audio in -> audio out
+    /// module always should); a stereo pair is two routes, and one input
+    /// may feed several outputs. Outputs with no route fall silent while
+    /// bypassed — a bypassed module's DSP does not run at all.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bypass: BTreeMap<String, String>,
+}
+
+impl Manifest {
+    /// Whether the module offers a bypass toggle (it declared routes).
+    pub fn is_bypassable(&self) -> bool {
+        !self.bypass.is_empty()
+    }
+
+    /// [`Manifest::bypass`] resolved to jack indices: per output jack, the
+    /// input jack it copies while bypassed. Empty for a module that is not
+    /// bypassable; routes naming jacks the manifest lacks are dropped
+    /// (validated at load time — [`Extension::load`]).
+    pub fn bypass_routes(&self) -> Vec<Option<usize>> {
+        if !self.is_bypassable() {
+            return Vec::new();
+        }
+        self.outputs
+            .iter()
+            .map(|o| {
+                let from = self.bypass.get(&o.id)?;
+                self.inputs.iter().position(|i| &i.id == from)
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,6 +220,18 @@ impl Extension {
             manifest.inputs.len() <= 64 && manifest.outputs.len() <= 64,
             "at most 64 inputs/outputs supported"
         );
+        for (out, input) in &manifest.bypass {
+            anyhow::ensure!(
+                manifest.outputs.iter().any(|o| &o.id == out),
+                "bypass route names unknown output {out:?} in {}",
+                manifest_path.display()
+            );
+            anyhow::ensure!(
+                manifest.inputs.iter().any(|i| &i.id == input),
+                "bypass route names unknown input {input:?} in {}",
+                manifest_path.display()
+            );
+        }
         let dsp_path = match manifest.abi.as_str() {
             "wasm-1" => {
                 let p = dir.join("dsp.wasm");

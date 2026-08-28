@@ -13,5 +13,6 @@
     { "id": "out", "name": "Out" }
   ],
   "params": [],
+  "bypass": { "out": "in" },
   "latency_samples": 0
 }

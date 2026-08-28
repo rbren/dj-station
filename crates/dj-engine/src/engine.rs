@@ -90,6 +90,10 @@ pub enum Command {
         jack: usize,
         rt: JackRt,
     },
+    SetBypass {
+        node: usize,
+        on: bool,
+    },
     SwapModule {
         node: usize,
         module: Box<dyn HostModule>,
@@ -151,6 +155,11 @@ pub struct NodeInfo {
     /// the audio itself is re-assembled by the app layer after a load, the
     /// way deck metadata is re-applied).
     pub clip: Option<BeatClipRef>,
+    /// Whether the module is bypassed: its declared bypass routes copy
+    /// input to output and its DSP does not run. Persisted in the patch
+    /// like any other per-module state; only ever true for a module whose
+    /// manifest declares routes.
+    pub bypassed: bool,
     /// Rack position (unzoomed rack coordinates) — pure UI passthrough,
     /// control-side only, never touches the RT thread. Persisted in the
     /// patch's `layout` map so undo/redo restores module moves and puts
@@ -176,6 +185,12 @@ impl NodeInfo {
 
     pub fn is_beat_clip(&self) -> bool {
         self.builtin_kind() == Some(crate::builtin::BuiltinKind::BeatClip)
+    }
+
+    /// Whether the module offers a bypass toggle (its manifest declares
+    /// in -> out routes).
+    pub fn is_bypassable(&self) -> bool {
+        self.manifest.is_bypassable()
     }
 }
 
@@ -276,6 +291,7 @@ impl EngineCore {
                 Command::SetKnobRt { node, jack, rt } => {
                     self.graph.set_jack_rt(node, jack, rt);
                 }
+                Command::SetBypass { node, on } => self.graph.set_bypassed(node, on),
                 Command::SwapModule { node, module } => {
                     let old = self.graph.swap_module(node, module);
                     // Ship the old instance back for off-RT drop; if the ring
@@ -980,6 +996,7 @@ impl Engine {
             },
             track_path: None,
             clip: None,
+            bypassed: false,
             position: None,
         };
 
@@ -996,12 +1013,14 @@ impl Engine {
             n_out,
             audio_out: BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::AudioOut),
             monitor_out: BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::MonitorOut),
+            bypass_routes: manifest.bypass_routes(),
+            bypassed: false,
         };
         // Allocate the graph slot control-side: recycle a tombstone (LIFO,
         // like the old in-graph free list) or grow the storage by one.
         let recycled = !self.free_slots.is_empty();
         let idx = self.free_slots.pop().unwrap_or(self.graph_slots);
-        let grow = (!recycled).then(|| GrowStorage::with_len(idx + 1));
+        let grow = (!recycled).then(|| Box::new(GrowStorage::with_len(idx + 1)));
         let storage = NodeStorage::for_node(
             n_in,
             n_out,
@@ -1305,6 +1324,35 @@ impl Engine {
                 .map_err(|_| anyhow!("command queue full"))?,
         }
         Ok(())
+    }
+
+    /// Bypass a module (or take it out of bypass): while bypassed its
+    /// declared routes copy input jacks straight to output jacks and its
+    /// DSP never runs. Per-module state like a knob — it rides in the
+    /// patch and survives a save/load. Rejects modules whose manifest
+    /// declares no routes.
+    pub fn set_bypass(&mut self, instance_id: &str, on: bool) -> Result<()> {
+        let node = self.node_idx(instance_id)?;
+        anyhow::ensure!(
+            self.nodes[node].is_bypassable(),
+            "{instance_id} cannot be bypassed"
+        );
+        self.nodes[node].bypassed = on;
+        match &mut self.state {
+            EngineState::Stopped(core) => core.graph.set_bypassed(node, on),
+            _ => self
+                .cmd_tx
+                .lock()
+                .unwrap()
+                .push(Command::SetBypass { node, on })
+                .map_err(|_| anyhow!("command queue full"))?,
+        }
+        Ok(())
+    }
+
+    /// Whether a module is currently bypassed.
+    pub fn is_bypassed(&self, instance_id: &str) -> Result<bool> {
+        Ok(self.nodes[self.node_idx(instance_id)?].bypassed)
     }
 
     fn push_knob_rt(&mut self, node: usize, jack: usize) -> Result<()> {

@@ -43,6 +43,15 @@ pub struct GraphNode {
     pub audio_out: bool,
     /// Monitor-out nodes are mixed into the monitor (cue) bus instead.
     pub monitor_out: bool,
+    /// Per output jack, the input jack its samples are copied from while
+    /// `bypassed` (`None` = that output falls silent). Allocated on the
+    /// control thread from the manifest ([`crate::manifest::Manifest::bypass_routes`]);
+    /// empty means the module declares no bypass and can never be
+    /// bypassed.
+    pub bypass_routes: Vec<Option<usize>>,
+    /// While true the executor copies the routes above and does NOT run
+    /// the module: a bypassed module does no processing at all.
+    pub bypassed: bool,
 }
 
 /// Derived execution state: node order, per-jack incoming wire lists and
@@ -189,8 +198,10 @@ pub enum GraphEdit {
         /// In: the slot's buffers/analyzers. Out: emptied.
         storage: NodeStorage,
         /// Present when `slot` is beyond current storage. Out: the old
-        /// outer vectors.
-        grow: Option<GrowStorage>,
+        /// outer vectors. Boxed to keep this variant from dwarfing the
+        /// others — the box is allocated with its contents on the control
+        /// thread and only ever moved by the RT thread.
+        grow: Option<Box<GrowStorage>>,
         /// In: the new plan. Out: the old plan.
         plan: Plan,
     },
@@ -404,11 +415,27 @@ impl Graph {
                 self.analyzers[node][jack].update(&self.in_bufs[node][jack][..frames]);
             }
 
-            // Run the module.
+            // Run the module — unless it is bypassed, in which case each
+            // output takes its declared input's samples verbatim and the
+            // DSP is skipped entirely (a copy, so still RT-safe).
             let mask = self.plan.connected_mask[node];
             let gn = self.nodes[node].as_mut().unwrap();
-            gn.module
-                .process(&self.in_bufs[node], &mut self.out_curr[node], mask, frames);
+            if gn.bypassed {
+                debug_assert_eq!(gn.bypass_routes.len(), gn.n_out, "bypassed without routes");
+                for jack in 0..gn.n_out {
+                    match gn.bypass_routes[jack] {
+                        Some(src) => {
+                            let src_buf = &self.in_bufs[node][src];
+                            let dst = &mut self.out_curr[node][jack];
+                            dst[..frames].copy_from_slice(&src_buf[..frames]);
+                        }
+                        None => self.out_curr[node][jack][..frames].fill(0.0),
+                    }
+                }
+            } else {
+                gn.module
+                    .process(&self.in_bufs[node], &mut self.out_curr[node], mask, frames);
+            }
 
             // Tap outputs for telemetry (same machinery as inputs).
             for jack in 0..gn.n_out {
@@ -471,5 +498,13 @@ impl Graph {
 
     pub fn set_jack_rt(&mut self, node: usize, jack: usize, rt: JackRt) {
         self.jack_rt[node][jack] = rt;
+    }
+
+    /// Bypass a node: its outputs copy their declared inputs and its DSP
+    /// stops running. A node that declared no routes is never bypassed
+    /// (the engine rejects the request before it gets here).
+    pub fn set_bypassed(&mut self, node: usize, on: bool) {
+        let gn = self.nodes[node].as_mut().expect("dead graph slot");
+        gn.bypassed = on && !gn.bypass_routes.is_empty();
     }
 }

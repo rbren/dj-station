@@ -74,6 +74,12 @@ measured layout) passes unchanged, no transition or animation added here
 touches a layout property, and every screen below was re-shot and re-read
 after the change.
 
+Later additions to the palette are listed here so the set stays a
+decision: `--bypass` (module bypass — a dark red title bar), deliberately
+its own token rather than `--fault`, which is reserved for things that
+are broken; a bypassed module is one the user chose to step around, and
+the panel says the word "BYPASS" so the state never rests on colour.
+
 Where the numbers stand against the audit: 607 hex literals (176 distinct)
 → 145 (104 distinct, 27 of which are `#fff` inside a `color-mix`); 145
 `font-size` declarations across ~26 hand-picked values → every declaration

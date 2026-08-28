@@ -82,6 +82,12 @@ pub struct ModuleFile {
     /// Deck instance this deck is beat-synced to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_to: Option<String>,
+    /// Module bypassed: the manifest's bypass routes copy input to output
+    /// and the DSP does not run. Omitted when off, so a patch saved before
+    /// bypass existed — and every module that is not bypassed — is
+    /// byte-identical to what it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bypassed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -340,6 +346,7 @@ impl Engine {
                     track: None,
                     clip: None,
                     sync_to: None,
+                    bypassed: false,
                 },
             );
         }
@@ -403,6 +410,7 @@ impl Engine {
             track: info.track_path.clone(),
             clip: info.clip.clone(),
             sync_to: self.deck_sync_to_by_node(node_idx),
+            bypassed: info.bypassed,
         }
     }
 
@@ -719,6 +727,14 @@ impl Engine {
         if let Some(sync_to) = &mf.sync_to {
             deferred_syncs.push((instance_id.to_string(), sync_to.clone()));
         }
+        if mf.bypassed {
+            // A module whose newer manifest dropped its bypass routes just
+            // comes back live — worth a warning, never a failed load.
+            if let Err(e) = self.set_bypass(instance_id, true) {
+                self.load_warnings
+                    .push(format!("{instance_id}: dropped saved bypass ({e})"));
+            }
+        }
         for (param, value) in &mf.params {
             // A param the module no longer declares: skip it, but warn —
             // params are user-visible mode state (keylock, stem gains).
@@ -958,6 +974,13 @@ impl Engine {
                 && self.nodes[node].clip != mf.clip
             {
                 self.beat_clip_bind(instance_id, mf.clip.clone())?;
+            }
+
+            // Bypass (undo/redo of the title-bar toggle). Guarded like the
+            // load path: a manifest that dropped its routes leaves the
+            // module live rather than failing the whole apply.
+            if self.nodes[node].bypassed != mf.bypassed && self.nodes[node].is_bypassable() {
+                self.set_bypass(instance_id, mf.bypassed)?;
             }
 
             // Deck sync partner.

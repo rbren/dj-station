@@ -469,3 +469,64 @@ describe('custom input labels', () => {
     expect(screen.queryByLabelText('jack label')).toBeNull();
   });
 });
+
+// The bypass toggle: manifest-declared routes are what make a module
+// bypassable, and the state has to be visible without relying on colour.
+describe('ModulePanel bypass', () => {
+  const FX_MANIFEST: Manifest = {
+    ...OSC_MANIFEST,
+    id: 'com.dj.filter',
+    name: 'Filter',
+    inputs: [{ id: 'in', name: 'In' }],
+    outputs: [{ id: 'lp', name: 'LP' }],
+    bypass: { lp: 'in' },
+  };
+  const fxProps = { ...baseProps, manifest: FX_MANIFEST };
+
+  it('offers no toggle for a module whose manifest declares no routes', () => {
+    render(<ModulePanel {...baseProps} onBypass={() => {}} />);
+    expect(screen.queryByTestId('module-bypass-osc1')).toBeNull();
+  });
+
+  it('toggles bypass on and back off again', () => {
+    const onBypass = vi.fn();
+    const { rerender } = render(<ModulePanel {...fxProps} onBypass={onBypass} />);
+    const toggle = screen.getByTestId('module-bypass-osc1');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(toggle);
+    expect(onBypass).toHaveBeenCalledWith(true);
+
+    rerender(<ModulePanel {...fxProps} onBypass={onBypass} bypassed />);
+    expect(screen.getByTestId('module-bypass-osc1').getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByTestId('module-bypass-osc1'));
+    expect(onBypass).toHaveBeenLastCalledWith(false);
+  });
+
+  it('marks the panel and says the word while bypassed', () => {
+    const { rerender } = render(<ModulePanel {...fxProps} onBypass={() => {}} />);
+    expect(screen.getByTestId('module-osc1').dataset.bypassed).toBeUndefined();
+    expect(screen.queryByText('BYPASS')).toBeNull();
+
+    rerender(<ModulePanel {...fxProps} onBypass={() => {}} bypassed />);
+    const panel = screen.getByTestId('module-osc1');
+    expect(panel.dataset.bypassed).toBe('true');
+    expect(panel.className).toContain('module-panel-bypassed');
+    expect(screen.getByText('BYPASS')).toBeTruthy();
+  });
+
+  it('a title-bar click on the toggle does not start a panel drag', () => {
+    const onMove = vi.fn();
+    render(
+      <ModulePanel
+        {...fxProps}
+        onBypass={() => {}}
+        position={{ x: 0, y: 0 }}
+        onMove={onMove}
+        onSelect={() => {}}
+      />,
+    );
+    fireEvent.mouseDown(screen.getByTestId('module-bypass-osc1'));
+    fireEvent.mouseMove(window, { clientX: 40, clientY: 40 });
+    expect(onMove).not.toHaveBeenCalled();
+  });
+});

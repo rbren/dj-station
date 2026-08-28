@@ -102,6 +102,7 @@ impl Engine {
                 .collect(),
             ui: None,
             latency_samples: 0,
+            bypass: Default::default(),
         }
     }
 
@@ -542,6 +543,7 @@ impl Engine {
                 track: None,
                 clip: None,
                 sync_to: None,
+                bypassed: false,
             },
         );
         // Rack layout survives the rebuild: collapsed members keep their

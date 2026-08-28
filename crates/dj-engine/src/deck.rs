@@ -259,6 +259,7 @@ pub fn deck_manifest() -> Manifest {
         params,
         ui: None,
         latency_samples: 0,
+        bypass: Default::default(),
     }
 }
 

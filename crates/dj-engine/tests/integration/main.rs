@@ -18,6 +18,7 @@ mod common;
 mod analysis_sync;
 mod audio;
 mod beat_clip;
+mod bypass;
 mod choreo;
 mod clipboard;
 mod conformance;

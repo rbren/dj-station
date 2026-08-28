@@ -51,6 +51,10 @@
   --ok: #7dde8a;
   --warn: #e0b78f;
   --fault: #e05c5c;
+  /* Bypassed module: a dark, desaturated red, deliberately NOT --fault —
+     nothing is broken, the user asked this module to step aside. Dark
+     enough that --ink still clears 7:1 on it. */
+  --bypass: #6d2226;
 
   /* One waveform colour for the whole app (deck, clip, beatify), and one
      violet that means "loop" wherever a loop is drawn. */
@@ -2461,6 +2465,7 @@ body {
 
 /* Title-bar glyphs: quiet until pointed at, and padded to a target you
    can actually hit rather than the size of the character. */
+.module-bypass-btn,
 .module-docs-btn,
 .module-remove {
   margin-left: auto;
@@ -2484,9 +2489,46 @@ body {
   background: var(--line);
 }
 
-/* When the ? button is present it carries the auto margin; ✕ sits next to it. */
-.module-docs-btn ~ .module-remove {
+/* The leftmost glyph present carries the auto margin; the rest of the
+   cluster sits next to it. */
+.module-docs-btn ~ .module-remove,
+.module-bypass-btn ~ .module-docs-btn,
+.module-bypass-btn ~ .module-remove {
   margin-left: 0;
+}
+
+.module-bypass-btn:hover {
+  color: var(--ink);
+  background: var(--line);
+}
+
+/* Engaged: the glyph itself is filled, so the toggle reads as "on" even
+   against the already-red bar. */
+.module-bypass-btn[aria-checked='true'] {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--bypass) 65%, transparent);
+}
+
+/* A bypassed module wears a dark red title bar: the signal is walking
+   straight through it. The word is there too — never colour alone. */
+.module-panel-bypassed {
+  border-top-color: color-mix(in srgb, var(--bypass) 85%, var(--line-strong));
+}
+
+.module-panel-bypassed .module-title {
+  background: var(--bypass);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--bypass) 60%, var(--ink));
+}
+
+.module-bypass-tag {
+  flex: none;
+  font-size: var(--fs-nano);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--ink) 45%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
 }
 
 .patch-title {

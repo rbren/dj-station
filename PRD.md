@@ -83,11 +83,13 @@ my-module/
     { "id": "dc_block", "name": "DC Block", "type": "toggle", "default": true }
   ],
   "ui": "ui.js",                    // optional
+  "bypass": { "out": "in" },        // optional: output -> input passthrough
   "latency_samples": 0
 }
 ```
 
 Notes:
+- **`bypass` declares the module bypassable**: a map from output jack id to the input jack id that output carries, untouched, while bypass is engaged. Any module with audio in → audio out should declare it, including one that fans a single input out to a stereo pair (`{"out_l": "in", "out_r": "in"}`); an output with no route (a `gr` readout, say) goes silent. The host then draws a bypass toggle in the panel's title bar, and while it is on the engine skips the module's `process` entirely and copies the declared routes. The flag is per-module state: it is saved in the patch and undoable like a knob.
 - Every **input** is simultaneously a jack and a knob target. If a wire is plugged in, the knob becomes an attenuverter/offset on the incoming signal (host behavior, uniform everywhere).
 - **Knob config is data, not code.** Right-click any input to reconfigure: style (`continuous` | `switch` | `button` | `stepped`), endpoint values (any two values for switch/interp range), curve (`linear` | `exp` | `log` | custom breakpoints). User overrides are saved in the patch, not the manifest.
 - `params` are non-signal settings (UI-thread only, delivered to DSP as change events).

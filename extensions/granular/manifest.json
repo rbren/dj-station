@@ -32,5 +32,6 @@
     { "id": "out_l", "name": "Out L" },
     { "id": "out_r", "name": "Out R" }
   ],
+  "bypass": { "out_l": "in_l", "out_r": "in_r" },
   "latency_samples": 0
 }

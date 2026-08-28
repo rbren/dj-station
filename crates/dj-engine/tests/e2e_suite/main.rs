@@ -11,6 +11,7 @@ mod common;
 mod e2e_alias;
 mod e2e_audio;
 mod e2e_beat_clip;
+mod e2e_bypass;
 mod e2e_camera;
 mod e2e_choreo;
 mod e2e_decks;

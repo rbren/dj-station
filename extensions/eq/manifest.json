@@ -51,5 +51,6 @@
   "outputs": [
     { "id": "out", "name": "Out" }
   ],
+  "bypass": { "out": "in" },
   "latency_samples": 0
 }

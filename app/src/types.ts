@@ -76,6 +76,10 @@ export interface Manifest {
   outputs: OutputDecl[];
   params: ParamDecl[];
   ui?: string | null;
+  /** Bypass routing: output jack id -> the input jack id it passes
+   *  through untouched while the module is bypassed. A non-empty map is
+   *  what makes a module bypassable (the title bar's ⏻ toggle). */
+  bypass?: Record<string, string>;
 }
 
 export interface JackTelemetry {

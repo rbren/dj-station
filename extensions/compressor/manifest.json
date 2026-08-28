@@ -32,5 +32,6 @@
     { "id": "out_r", "name": "Out R" },
     { "id": "gr", "name": "Gain Reduction" }
   ],
+  "bypass": { "out_l": "in_l", "out_r": "in_r" },
   "latency_samples": 0
 }

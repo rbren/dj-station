@@ -86,6 +86,11 @@ export interface ModulePanelProps {
   onRename?(name: string): void;
   /** Open this module's documentation (renders a ? button in the title bar). */
   onDocs?(): void;
+  /** Bypassed: the engine passes the module's declared inputs straight to
+   *  its outputs and runs no DSP. The toggle only renders for a module
+   *  whose manifest declares bypass routes. */
+  bypassed?: boolean;
+  onBypass?(bypass: boolean): void;
   /** Called on pointer-up after knob/param drags (undo gesture boundary). */
   onEditEnd?(): void;
   /** Right-click on the panel (module context menu). */
@@ -211,6 +216,10 @@ export function ModulePanel(props: ModulePanelProps) {
       ? WIRE_COLORS[pendingSource.color % WIRE_COLORS.length]
       : undefined;
   const CustomUI = props.customUI;
+  // The manifest's bypass routes are what say a module CAN be bypassed;
+  // the toggle is hidden entirely for one that declares none.
+  const bypassable = !!props.onBypass && Object.keys(manifest.bypass ?? {}).length > 0;
+  const bypassed = bypassable && !!props.bypassed;
   const layout = useMemo(() => resolveLayout(manifest), [manifest]);
   // besideUI groups render next to the custom UI; without one they fall
   // back to the strip so jacks are never lost.
@@ -320,9 +329,10 @@ export function ModulePanel(props: ModulePanelProps) {
     <div
       className={`module-panel${position ? ' module-panel-placed' : ''}${
         props.selected ? ' module-panel-selected' : ''
-      }`}
+      }${bypassed ? ' module-panel-bypassed' : ''}`}
       data-testid={`module-${instanceId}`}
       data-selected={props.selected ? 'true' : undefined}
+      data-bypassed={bypassed ? 'true' : undefined}
       onContextMenu={props.onContextMenu}
       onMouseDown={onPanelMouseDown}
       style={{
@@ -354,6 +364,23 @@ export function ModulePanel(props: ModulePanelProps) {
             name={props.displayName || instanceId.slice(instanceId.lastIndexOf('/') + 1)}
             onRename={props.onRename}
           />
+          {/* Colour alone can't carry the state (and the panel may be
+              zoomed out to where the bar is a sliver): say it in words. */}
+          {bypassed && <span className="module-bypass-tag">BYPASS</span>}
+          {bypassable && (
+            <button
+              className="module-bypass-btn"
+              data-testid={`module-bypass-${instanceId}`}
+              data-tip={bypassed ? 'Bypassed — click to process again' : 'Bypass this module'}
+              role="switch"
+              aria-checked={bypassed}
+              aria-label="Bypass"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => props.onBypass?.(!bypassed)}
+            >
+              ⏻
+            </button>
+          )}
           {props.onDocs && (
             <button
               className="module-docs-btn"

@@ -25,5 +25,6 @@
     { "id": "hp", "name": "HP" },
     { "id": "notch", "name": "Notch" }
   ],
+  "bypass": { "lp": "in", "bp": "in", "hp": "in", "notch": "in" },
   "latency_samples": 0
 }

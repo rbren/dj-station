@@ -72,6 +72,19 @@ fails if it's missing.
 - Every new module/engine feature ships with a serialized-patch E2E golden
   audio case (see `crates/dj-engine/tests/e2e_suite/`). Existing goldens
   stay byte-identical unless intentionally regenerated and documented.
+- Bypass is manifest data, not per-module code: a `"bypass"` map (output
+  jack id -> the input jack id it passes through) makes a module
+  bypassable, and every audio in -> audio out module should declare one,
+  including a single input fanned to a stereo pair. The graph then skips
+  `process` and copies the routes (`GraphNode::bypass_routes`,
+  resolved to indices at add time so the RT thread only ever copies
+  slices); an output with no route is silent. The flag is per-module
+  state — `Command::SetBypass` to the RT thread, `NodeInfo.bypassed` on
+  the control thread, `bypassed` in the module's patch JSON (skipped when
+  false, so old patches and unbypassed modules keep their bytes), one
+  undo step (`EditKey::Bypass`). Pinned by
+  `crates/dj-engine/tests/integration/bypass.rs` and the
+  `bypass-resonator-thru` golden.
 - RT thread: zero allocations/locks. Heavy work happens off the RT thread
   with lock-free handoff (see `crates/dj-engine/src/playback.rs`).
 - Patches are directory trees of small JSON files; new state must round-trip

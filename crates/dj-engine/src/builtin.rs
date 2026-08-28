@@ -196,6 +196,7 @@ fn out_manifest(id: &str, name: &str) -> Manifest {
         params: vec![],
         ui: None,
         latency_samples: 0,
+        bypass: Default::default(),
     }
 }
 
@@ -248,6 +249,7 @@ pub fn midi_manifest() -> Manifest {
         params: vec![],
         ui: None,
         latency_samples: 0,
+        bypass: Default::default(),
     }
 }
 

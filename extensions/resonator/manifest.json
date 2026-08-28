@@ -29,5 +29,6 @@
     { "id": "out_l", "name": "Out L (odd)" },
     { "id": "out_r", "name": "Out R (even)" }
   ],
+  "bypass": { "out_l": "in", "out_r": "in" },
   "latency_samples": 0
 }

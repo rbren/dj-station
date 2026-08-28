@@ -143,6 +143,7 @@ pub fn beat_clip_manifest() -> Manifest {
         params: vec![],
         ui: None,
         latency_samples: 0,
+        bypass: Default::default(),
     }
 }
 

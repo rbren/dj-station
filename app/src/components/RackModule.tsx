@@ -177,6 +177,10 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
         onRemove={() => void removeModule(instanceId)}
         onRename={(name) => void props.renameModule(instanceId, name)}
         onDocs={props.openDocs && (() => props.openDocs?.(instanceId))}
+        bypassed={node.bypassed}
+        onBypass={(bypass) => {
+          void engine.setModuleBypass(instanceId, bypass).then(refresh);
+        }}
         onContextMenu={(e) => props.onContextMenu?.(instanceId, e)}
         onEditEnd={() => void engine.endEdit()}
         selected={selected}
