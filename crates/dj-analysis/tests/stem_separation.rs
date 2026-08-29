@@ -392,6 +392,29 @@ fn stem_cache_is_keyed_by_backend_so_models_never_collide() {
 }
 
 #[test]
+fn removing_a_tracks_stems_takes_every_backends_cache() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path();
+    for backend in ["band", DEFAULT_MODEL] {
+        let dir = stems_dir_for(data, "hash1", backend);
+        std::fs::create_dir_all(&dir).unwrap();
+        for p in stem_paths(&dir) {
+            std::fs::write(p, b"flac").unwrap();
+        }
+    }
+    // A second track's cache is a sibling and must survive.
+    let other = stems_dir_for(data, "hash2", "band");
+    std::fs::create_dir_all(&other).unwrap();
+
+    dj_analysis::remove_stems(data, "hash1").unwrap();
+    assert!(!stems_dir_for(data, "hash1", "band").exists());
+    assert!(!stems_dir_for(data, "hash1", DEFAULT_MODEL).exists());
+    assert!(other.exists());
+    // A track that was never separated deletes just as cleanly.
+    dj_analysis::remove_stems(data, "never-separated").unwrap();
+}
+
+#[test]
 fn demucs_separator_defaults_to_the_fine_tuned_model() {
     let sep = DemucsSeparator::with_bin("demucs", DEFAULT_MODEL);
     assert_eq!(sep.model(), "htdemucs_ft");

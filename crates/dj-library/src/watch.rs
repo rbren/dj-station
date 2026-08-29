@@ -88,13 +88,20 @@ pub fn start_watcher(library: Arc<Library>, poll_interval: Duration) -> WatchHan
 
             while !stop2.load(Ordering::Relaxed) {
                 let folders = library.watch_folders().unwrap_or_default();
+                // Re-read every pass, like the folder list: a track deleted
+                // from the library must not walk back in on the next scan.
+                let deleted: HashSet<PathBuf> = library
+                    .deleted_files()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
                 let mut files = Vec::new();
                 for folder in &folders {
                     scan_dir(folder, 0, &mut files);
                 }
                 for path in files {
                     let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-                    if known.contains(&canonical) {
+                    if known.contains(&canonical) || deleted.contains(&canonical) {
                         continue;
                     }
                     let Some(now) = stamp(&path) else { continue };

@@ -103,6 +103,9 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
   const [watching, setWatching] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [queue, setQueue] = useState<AnalysisQueue | null>(null);
+  // The track a Delete button is asking about. Deleting is destructive
+  // and unattended (there is no library undo), so it is always confirmed.
+  const [pendingDelete, setPendingDelete] = useState<Track | null>(null);
 
   const refreshTracks = useCallback(
     async (text: string) => {
@@ -147,6 +150,24 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
       await refreshTracks('');
     },
     [client, refreshTracks],
+  );
+
+  // Delete the confirmed track and re-read the list the user is looking
+  // at (a search stays a search). What became of the audio file is the
+  // backend's call, so the status line reports what it did.
+  const remove = useCallback(
+    async (t: Track) => {
+      setPendingDelete(null);
+      const deleted = await client.deleteTrack(t.id);
+      if (!deleted) return;
+      setStatus(
+        deleted.file_removed
+          ? `Deleted “${t.title}” and its audio file`
+          : `Deleted “${t.title}” — its file stays where it is`,
+      );
+      await refreshTracks(query);
+    },
+    [client, query, refreshTracks],
   );
 
   const pending = queue ? queue.queued.length + (queue.current !== null ? 1 : 0) : 0;
@@ -451,6 +472,7 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
                   <th>License</th>
                   <th>Analysis</th>
                   {onEdit && <th />}
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -496,11 +518,52 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
                         </button>
                       </td>
                     )}
+                    <td>
+                      <button
+                        className="is-danger"
+                        data-testid="library-delete"
+                        data-tip="remove this track from the library"
+                        onClick={() => setPendingDelete(t)}
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {pendingDelete && (
+        <div
+          className="file-dialog-backdrop"
+          data-testid="library-delete-dialog"
+          onClick={() => setPendingDelete(null)}
+        >
+          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete “{pendingDelete.title}”?</h3>
+            <p className="file-dialog-empty">
+              Its analysis, cue points, saved loops and separated stems go with it, and nothing here
+              can be undone. A file this app downloaded or rendered is deleted too; a file of your
+              own stays where it is — but the library will not pick it up again by itself.
+            </p>
+            <button
+              className="is-danger"
+              data-testid="library-delete-confirm"
+              onClick={() => void remove(pendingDelete)}
+            >
+              Delete Track
+            </button>
+            <button
+              className="file-dialog-cancel"
+              data-testid="library-delete-cancel"
+              onClick={() => setPendingDelete(null)}
+            >
+              Keep It
+            </button>
+          </div>
         </div>
       )}
     </section>

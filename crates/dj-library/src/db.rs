@@ -81,6 +81,11 @@ CREATE TABLE IF NOT EXISTS track_beatgrids (
     bpm         REAL NOT NULL,
     anchor_secs REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS deleted_files (
+    file_path  TEXT PRIMARY KEY,
+    deleted_at TEXT NOT NULL
+);
 ";
 
 /// A library track row. `bpm`/`musical_key`/`analysis_status` are the
@@ -283,6 +288,74 @@ impl Library {
             Ok(c.last_insert_rowid())
         })?;
         self.track(id)
+    }
+
+    /// Delete a track: the row, everything hanging off it (tags, crate
+    /// membership, cues, loops, beatgrid — all `ON DELETE CASCADE`), and
+    /// the audio file itself when the file is one the app owns.
+    ///
+    /// OWNERSHIP IS THE RULE: a file under the data dir got there because
+    /// the app put it there (a provider download, a rendered clip), so it
+    /// goes with the track; a file anywhere else is the user's own and is
+    /// left exactly where it is. Either way the path is remembered in
+    /// `deleted_files`, so the watch folder does not re-import what the
+    /// user just threw away (see [`Library::deleted_files`]); an explicit
+    /// import of that same path clears the tombstone and brings it back.
+    pub fn delete_track(&self, id: i64) -> Result<DeletedTrack> {
+        let track = self.track(id)?;
+        self.with_conn(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO deleted_files (file_path, deleted_at) \
+                 VALUES (?1, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                params![track.file_path],
+            )?;
+            c.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+            Ok(())
+        })?;
+        let path = PathBuf::from(&track.file_path);
+        let file_removed = self.owns_file(&path) && std::fs::remove_file(&path).is_ok();
+        Ok(DeletedTrack {
+            track,
+            file_removed,
+        })
+    }
+
+    /// Paths of tracks the user deleted while their files stayed on disk.
+    /// The watch folder consults this so a deleted track does not walk
+    /// back in on the next scan.
+    pub fn deleted_files(&self) -> Result<Vec<PathBuf>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare("SELECT file_path FROM deleted_files")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            Ok(rows
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .map(PathBuf::from)
+                .collect())
+        })
+    }
+
+    /// Forget a deletion, so the path imports normally again.
+    pub(crate) fn clear_deleted_file(&self, path: &Path) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute(
+                "DELETE FROM deleted_files WHERE file_path = ?1",
+                params![path.to_string_lossy()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// True when `path` lives under the data dir — i.e. the app downloaded
+    /// or rendered it, rather than the user pointing the library at it.
+    fn owns_file(&self, path: &Path) -> bool {
+        let data_dir = self
+            .data_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.data_dir.clone());
+        path.canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf())
+            .starts_with(data_dir)
     }
 
     /// Write BPM + musical key from the analysis pipeline (M3).
@@ -628,6 +701,14 @@ fn macro_from_row(row: &Row) -> rusqlite::Result<MacroRecord> {
         version: row.get(2)?,
         definition: row.get(3)?,
     })
+}
+
+/// What a [`Library::delete_track`] took with it: the row that is gone,
+/// and whether its audio file went too (only app-owned files do).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeletedTrack {
+    pub track: Track,
+    pub file_removed: bool,
 }
 
 /// A hot cue point (slot 0..=7) on a track.

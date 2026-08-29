@@ -225,3 +225,95 @@ fn cue_slot_and_loop_bounds_are_validated() {
     assert!(lib.add_track_loop(id, "", 5.0, 5.0).is_err());
     assert!(lib.set_track_beatgrid(id, 0.0, 0.0).is_err());
 }
+
+// ---------------------------------------------------------------------------
+// Deleting a track
+// ---------------------------------------------------------------------------
+
+#[test]
+fn deleting_a_track_takes_its_metadata_and_leaves_the_users_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("data");
+    let lib = Library::open(&data_dir).unwrap();
+    let wav = tmp.path().join("mine.wav");
+    common::write_test_wav(&wav, 440.0, 0.5);
+    let id = lib
+        .import_file(&wav, ImportOptions::default())
+        .unwrap()
+        .track()
+        .id;
+    lib.add_tag(id, "warmup").unwrap();
+    let crate_id = lib.create_crate("set").unwrap();
+    lib.add_to_crate(crate_id, id).unwrap();
+    lib.set_track_cue(id, 0, 1.0, "intro").unwrap();
+    lib.add_track_loop(id, "main", 4.0, 8.0).unwrap();
+    lib.set_track_beatgrid(id, 128.0, 0.1).unwrap();
+
+    let deleted = lib.delete_track(id).unwrap();
+    assert_eq!(deleted.track.id, id);
+    assert!(
+        !deleted.file_removed,
+        "a file outside the data dir is not ours to delete"
+    );
+    assert!(wav.exists());
+
+    assert!(lib.tracks().unwrap().is_empty());
+    assert!(lib.track(id).is_err());
+    // Nothing hanging off the row survives it.
+    assert!(lib.tags(id).unwrap().is_empty());
+    assert!(lib.crate_tracks(crate_id).unwrap().is_empty());
+    assert!(lib.track_cues(id).unwrap().is_empty());
+    assert!(lib.track_loops(id).unwrap().is_empty());
+    assert!(lib.track_beatgrid(id).unwrap().is_none());
+    assert!(lib.analysis_queue().unwrap().is_empty());
+}
+
+#[test]
+fn deleting_a_download_deletes_the_file_the_app_owns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("data");
+    let lib = Library::open(&data_dir).unwrap();
+    let downloads = lib.downloads_dir();
+    std::fs::create_dir_all(&downloads).unwrap();
+    let downloaded = downloads.join("fetched.wav");
+    common::write_test_wav(&downloaded, 330.0, 0.5);
+    let id = lib
+        .import_file(
+            &downloaded,
+            ImportOptions {
+                source: "freesound".into(),
+                ..ImportOptions::default()
+            },
+        )
+        .unwrap()
+        .track()
+        .id;
+
+    let deleted = lib.delete_track(id).unwrap();
+    assert!(deleted.file_removed);
+    assert!(!downloaded.exists());
+}
+
+#[test]
+fn a_deleted_path_is_remembered_until_it_is_imported_again() {
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::open(&tmp.path().join("data")).unwrap();
+    let wav = tmp.path().join("kept.wav");
+    common::write_test_wav(&wav, 220.0, 0.5);
+    let id = lib
+        .import_file(&wav, ImportOptions::default())
+        .unwrap()
+        .track()
+        .id;
+    lib.delete_track(id).unwrap();
+    assert_eq!(
+        lib.deleted_files().unwrap(),
+        vec![wav.canonicalize().unwrap()]
+    );
+
+    // Importing it on purpose is a change of mind: the track comes back
+    // and the deletion is forgotten.
+    let back = lib.import_file(&wav, ImportOptions::default()).unwrap();
+    assert!(matches!(back, ImportOutcome::Added(_)));
+    assert!(lib.deleted_files().unwrap().is_empty());
+}

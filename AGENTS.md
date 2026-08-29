@@ -69,6 +69,28 @@ fails if it's missing.
   (saves travel with the repo); its committed `.gitignore` excludes only
   machine-local churn (stems, downloads, autosave, SQLite WAL sidecars,
   the marker). Pinned by `crates/dj-library/tests/data_dir.rs`.
+- DELETING A LIBRARY TRACK is OWNERSHIP-BASED, and one verb:
+  `Library::delete_track` drops the row (tags, crate membership, cues,
+  loops and beatgrid follow it by `ON DELETE CASCADE`) and deletes the
+  audio file ONLY when it lives under the data dir — a provider download
+  or a rendered clip is the app's, a file in the user's own folders is
+  never touched (`DeletedTrack.file_removed` says which happened, and the
+  Library page's status line reports it). Either way the path is
+  tombstoned in `deleted_files`, because otherwise the watch folder hands
+  a deleted track straight back on the next launch; an explicit
+  `import_file` of that path clears the tombstone (a change of mind).
+  The shell's `delete_track` command composes the rest: cancel a stem
+  separation in flight FIRST (it would write into the cache dir about to
+  go), then `dj_analysis::remove_stems` (the whole `stems/<hash>/`, every
+  backend's) and `ClipCache::forget` (SQLite re-uses the freed rowid, so a
+  kept decode would answer for a different track). Nothing chases the
+  references pointing AT the track — a beatify seed, a clip source, a
+  saved patch's deck each degrade on their own, and a patch whose track
+  file is gone now LOADS with a `load_warnings` entry and an empty module
+  instead of failing (the undo/redo restore path logs and carries on).
+  Pinned by `crates/dj-library/tests/{library,watch}.rs`,
+  `dj-analysis`'s `stem_separation.rs`, the engine's `persistence.rs` and
+  `app/tests/LibraryView.test.tsx`.
 - Every new module/engine feature ships with a serialized-patch E2E golden
   audio case (see `crates/dj-engine/tests/e2e_suite/`). Existing goldens
   stay byte-identical unless intentionally regenerated and documented.

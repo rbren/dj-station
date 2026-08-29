@@ -98,6 +98,15 @@ impl ClipCache {
             .map(|(_, a)| Arc::clone(a))
     }
 
+    /// Drop every decode of a track. SQLite hands the next import the
+    /// rowid a delete freed, so a kept entry would answer for a different
+    /// track's audio.
+    pub(crate) fn forget(&self, track_id: i64) {
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.retain(|(k, _)| k.track_id != track_id);
+        }
+    }
+
     fn put(&self, key: ClipSourceRef, audio: Arc<AudioData>) {
         if let Ok(mut entries) = self.entries.lock() {
             entries.retain(|(k, _)| *k != key);

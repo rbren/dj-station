@@ -132,10 +132,15 @@ impl Library {
     /// Import an audio file into the library. The file stays where it is
     /// (the library stores its path); identical content (by hash) is
     /// deduplicated. New tracks are queued for analysis.
+    ///
+    /// Importing a path the user had deleted is a deliberate change of
+    /// mind, so it clears that deletion (the watch folder never reaches
+    /// here for one — it skips deleted paths itself).
     pub fn import_file(&self, path: &Path, opts: ImportOptions) -> Result<ImportOutcome> {
         let path = path
             .canonicalize()
             .with_context(|| format!("resolving {}", path.display()))?;
+        self.clear_deleted_file(&path)?;
         let hash = content_hash(&path)?;
         if let Some(existing) = self.track_by_hash(&hash)? {
             return Ok(ImportOutcome::Duplicate(existing));

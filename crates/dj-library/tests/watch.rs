@@ -87,3 +87,32 @@ fn watch_folder_added_at_runtime_is_picked_up() {
     assert!(wait_for_tracks(&lib, 1, Duration::from_secs(5)));
     assert_eq!(lib.tracks().unwrap()[0].title, "late");
 }
+
+#[test]
+fn a_deleted_track_is_not_re_imported_by_the_watcher() {
+    let tmp = tempfile::tempdir().unwrap();
+    let watched = tmp.path().join("watched");
+    std::fs::create_dir_all(&watched).unwrap();
+    let data_dir = tmp.path().join("data");
+    let lib = Arc::new(Library::open(&data_dir).unwrap());
+    lib.add_watch_folder(&watched).unwrap();
+    common::write_test_wav(&watched.join("unwanted.wav"), 440.0, 0.5);
+
+    {
+        let _watcher = start_watcher(lib.clone(), Duration::from_millis(100));
+        assert!(wait_for_tracks(&lib, 1, Duration::from_secs(5)));
+        // Deleting keeps the user's file where it is, so only the
+        // remembered deletion stops the folder handing it straight back.
+        let id = lib.tracks().unwrap()[0].id;
+        lib.delete_track(id).unwrap();
+    }
+
+    // A restart re-reads the folder from scratch: the file is still there
+    // and still must not come back.
+    let _watcher = start_watcher(lib.clone(), Duration::from_millis(100));
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(
+        lib.tracks().unwrap().is_empty(),
+        "deleted track was re-imported"
+    );
+}

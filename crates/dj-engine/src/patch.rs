@@ -719,7 +719,13 @@ impl Engine {
         }
         if let Some(track) = &mf.track {
             let kind = crate::builtin::BuiltinKind::from_ext_id(&mf.ext);
-            self.load_module_track(instance_id, kind, track)?;
+            // A track file that has left the disk (deleted from the
+            // library, moved, on another machine) must not brick the whole
+            // patch: the module comes up empty and the load warns.
+            if let Err(e) = self.load_module_track(instance_id, kind, track) {
+                self.load_warnings
+                    .push(format!("{instance_id}: track {track} not loaded ({e})"));
+            }
         }
         if mf.clip.is_some() {
             self.beat_clip_bind(instance_id, mf.clip.clone())?;
@@ -955,7 +961,12 @@ impl Engine {
             if let Some(track) = &mf.track {
                 if self.nodes[node].track_path.as_deref() != Some(track.as_str()) {
                     let kind = self.nodes[node].builtin_kind();
-                    self.load_module_track(instance_id, kind, track)?;
+                    // Same as the load path: a file that is no longer there
+                    // leaves the module empty rather than failing a restore
+                    // half-way through (this is undo/redo).
+                    if let Err(e) = self.load_module_track(instance_id, kind, track) {
+                        eprintln!("[dj-engine] {instance_id}: track {track} not loaded ({e:#})");
+                    }
                 }
             }
 

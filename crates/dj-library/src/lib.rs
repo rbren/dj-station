@@ -19,7 +19,7 @@ pub mod providers;
 pub mod rekordbox;
 pub mod watch;
 
-pub use db::{Beatgrid, CuePoint, Library, MacroRecord, SavedLoop, Track};
+pub use db::{Beatgrid, CuePoint, DeletedTrack, Library, MacroRecord, SavedLoop, Track};
 pub use downloads::{DownloadJob, DownloadManager, DownloadState};
 pub use import::{ImportOptions, ImportOutcome, AUDIO_EXTENSIONS};
 pub use paths::{default_data_dir, init_data_dir, legacy_data_dir, migrate_legacy_data, Migration};

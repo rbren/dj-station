@@ -57,8 +57,8 @@ pub use decode::{decode_audio, AudioData};
 pub use demucs::DemucsSeparator;
 pub use stem_jobs::{StemJob, StemJobState, StemJobs};
 pub use stems::{
-    ensure_stems, ensure_stems_cancellable, mix_stems, stem_paths, stem_union, stems_cached,
-    stems_dir, stems_dir_for, BandSeparator, CancelToken, StemSeparator, Stems,
+    ensure_stems, ensure_stems_cancellable, mix_stems, remove_stems, stem_paths, stem_union,
+    stems_cached, stems_dir, stems_dir_for, BandSeparator, CancelToken, StemSeparator, Stems,
     DEFAULT_SEPARATOR_ID, N_STEMS, STEM_NAMES,
 };
 pub use worker::{start_worker, AnalysisSettings, AnalysisWorker};

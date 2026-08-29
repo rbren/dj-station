@@ -2129,6 +2129,30 @@ fn import_track(state: State<AppState>, path: String) -> CmdResult<Track> {
         .map_err(err)
 }
 
+/// Delete a track and everything the app derived from it: the row with
+/// its DJ metadata (cues, loops, beatgrid, tags, crate membership), the
+/// stem cache keyed by its content, the Clip page's decoded copy, and the
+/// audio file itself when the app owns it (a provider download or a
+/// rendered clip — a file in the user's own folders always stays).
+///
+/// It does NOT chase the references pointing AT the track: a beatify
+/// seed, a clip source and a saved patch's deck each name a track that
+/// may already be gone, and each degrades on its own (a seed falls back
+/// to its own render, a patch load warns and comes up without the track).
+#[tauri::command]
+fn delete_track(state: State<AppState>, track_id: i64) -> CmdResult<dj_library::DeletedTrack> {
+    // A separation in flight would write stems back into the cache we are
+    // about to remove, so stop it before the row goes.
+    state.stems.cancel_track(track_id);
+    let deleted = state.library.delete_track(track_id).map_err(err)?;
+    state.clips.forget(track_id);
+    let hash = &deleted.track.content_hash;
+    if let Err(e) = dj_analysis::remove_stems(state.library.data_dir(), hash) {
+        eprintln!("[dj-analysis] removing stems for {hash}: {e:#}");
+    }
+    Ok(deleted)
+}
+
 #[derive(Serialize)]
 struct RekordboxImportSummary {
     imported: usize,
@@ -2837,6 +2861,7 @@ fn main() {
             providers,
             search_provider,
             import_track,
+            delete_track,
             import_rekordbox,
             start_download,
             download_jobs,

@@ -225,6 +225,7 @@ function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi
         Promise.resolve(RESULT_BY_PROVIDER[provider] ?? []),
       ),
     importTrack: vi.fn().mockResolvedValue(LOCAL_TRACK),
+    deleteTrack: vi.fn().mockResolvedValue({ track: LOCAL_TRACK, file_removed: false }),
     importRekordbox: vi.fn().mockResolvedValue({ imported: 0, duplicates: 0 }),
     startDownload: vi.fn().mockResolvedValue(1),
     downloadJobs: vi.fn().mockResolvedValue([doneJob()]),
@@ -563,6 +564,52 @@ describe('LibraryView', () => {
     await waitFor(() => expect(client.analyzeTrack).toHaveBeenCalledWith(LOCAL_TRACK.id));
     await waitFor(() =>
       expect(screen.getByTestId('library-status').textContent).toContain('Queued analysis'),
+    );
+  });
+
+  it('deletes a track only once the confirmation is answered', async () => {
+    const remaining: Track[] = [LOCAL_TRACK];
+    const client = mockClient({
+      tracks: vi.fn().mockImplementation(() => Promise.resolve([...remaining])),
+      deleteTrack: vi.fn().mockImplementation((id: number) => {
+        remaining.splice(
+          remaining.findIndex((t) => t.id === id),
+          1,
+        );
+        return Promise.resolve({ track: LOCAL_TRACK, file_removed: false });
+      }),
+    });
+    render(<LibraryView client={client} />);
+
+    // Asking is not deleting: the dialog names the track, and backing out
+    // of it leaves the library alone.
+    fireEvent.click(await screen.findByTestId('library-delete'));
+    expect(screen.getByTestId('library-delete-dialog').textContent).toContain('Basement Loop');
+    fireEvent.click(screen.getByTestId('library-delete-cancel'));
+    expect(screen.queryByTestId('library-delete-dialog')).toBeNull();
+    expect(client.deleteTrack).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('library-delete'));
+    fireEvent.click(screen.getByTestId('library-delete-confirm'));
+    await waitFor(() => expect(client.deleteTrack).toHaveBeenCalledWith(LOCAL_TRACK.id));
+    await waitFor(() => expect(screen.queryAllByTestId('library-track')).toHaveLength(0));
+    expect(screen.queryByTestId('library-delete-dialog')).toBeNull();
+    // A file the user owns is not the app's to delete, and the status line
+    // says so rather than leaving them guessing.
+    expect(screen.getByTestId('library-status').textContent).toContain(
+      'its file stays where it is',
+    );
+  });
+
+  it('reports a deleted download as gone from disk too', async () => {
+    const client = mockClient({
+      deleteTrack: vi.fn().mockResolvedValue({ track: LOCAL_TRACK, file_removed: true }),
+    });
+    render(<LibraryView client={client} />);
+    fireEvent.click(await screen.findByTestId('library-delete'));
+    fireEvent.click(screen.getByTestId('library-delete-confirm'));
+    await waitFor(() =>
+      expect(screen.getByTestId('library-status').textContent).toContain('and its audio file'),
     );
   });
 

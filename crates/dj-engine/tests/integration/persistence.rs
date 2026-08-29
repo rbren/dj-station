@@ -291,3 +291,46 @@ fn wire_style_roundtrips_and_default_is_omitted() {
         }
     }
 }
+
+#[test]
+fn a_patch_whose_track_file_is_gone_loads_without_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wav = tmp.path().join("deleted-from-the-library.wav");
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&wav, spec).unwrap();
+    for i in 0..48_000u32 {
+        let t = i as f64 / 48_000.0;
+        let x = (2.0 * std::f64::consts::PI * 440.0 * t).sin() * 0.5;
+        w.write_sample((x * i16::MAX as f64) as i16).unwrap();
+    }
+    w.finalize().unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
+    engine.add_module("deck1", "builtin.deck").unwrap();
+    engine.deck_load("deck1", &wav).unwrap();
+    engine.save_patch(dir.path(), "test").unwrap();
+
+    // The track was deleted from the library between save and load.
+    std::fs::remove_file(&wav).unwrap();
+
+    let reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+    assert!(
+        reloaded
+            .load_warnings
+            .iter()
+            .any(|w| w.contains("deck1") && w.contains("deleted-from-the-library.wav")),
+        "warnings: {:?}",
+        reloaded.load_warnings
+    );
+    // The deck is there, simply empty — and the rest of the patch is
+    // exactly as it was saved.
+    assert!(reloaded.deck_track("deck1").unwrap().is_none());
+    assert_eq!(reloaded.wire_specs().len(), 5);
+}

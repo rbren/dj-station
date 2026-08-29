@@ -32,6 +32,13 @@ export interface Track {
   updated_at: string;
 }
 
+/** What a delete took with it: the row that is gone, and whether its
+ *  audio file went too (only files the app downloaded or rendered do). */
+export interface DeletedTrack {
+  track: Track;
+  file_removed: boolean;
+}
+
 export interface TrackResult {
   provider: string;
   /** How this result is acquired. Explicit because a Download provider's
@@ -107,6 +114,9 @@ export interface LibraryClientApi {
     filters: Record<string, string>,
   ): Promise<TrackResult[] | null>;
   importTrack(path: string): Promise<Track | null>;
+  /** Delete a track: its row and DJ metadata, its cached stems, and the
+   *  audio file when the app owns it (a download or a rendered clip). */
+  deleteTrack(trackId: number): Promise<DeletedTrack | null>;
   /** Import a rekordbox XML export (M4): tracks/beatgrids/cues/loops. */
   importRekordbox(path: string): Promise<{ imported: number; duplicates: number } | null>;
   /** Queue a download; the transfer runs on a backend thread. Returns the
@@ -139,6 +149,9 @@ export class LibraryClient extends IpcClient implements LibraryClientApi {
   }
   importTrack(path: string) {
     return this.call<Track>('import_track', { path });
+  }
+  deleteTrack(trackId: number) {
+    return this.call<DeletedTrack>('delete_track', { trackId });
   }
   importRekordbox(path: string) {
     return this.call<{ imported: number; duplicates: number }>('import_rekordbox', { path });

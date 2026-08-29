@@ -417,6 +417,17 @@ pub fn stems_dir_for(data_dir: &Path, content_hash: &str, separator_id: &str) ->
     }
 }
 
+/// Drop a track's whole stem cache — every backend's, since the qualified
+/// directories of [`stems_dir_for`] are children of the flat one. Missing
+/// caches are fine: this is what a deleted track leaves behind.
+pub fn remove_stems(data_dir: &Path, content_hash: &str) -> std::io::Result<()> {
+    let dir = stems_dir(data_dir, content_hash);
+    match std::fs::remove_dir_all(&dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
 /// Sum stems back together — the editor's "vocals + drums, no bass" is
 /// this over the cached stem files.
 ///
