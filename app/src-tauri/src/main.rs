@@ -12,7 +12,8 @@ mod decks;
 mod launch_control;
 
 use dj_engine::{
-    AudioOutputs, Backend, CaptureWindow, Engine, EngineConfig, ExtensionRegistry, JackTelemetry,
+    AudioFocus, AudioOutputs, Backend, CaptureWindow, Engine, EngineConfig, ExtensionRegistry,
+    JackTelemetry,
     KnobConfig, KnobStyle, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroStore, Manifest,
     MidiMapKind, PatchDoc, UndoHistory, WireStyle, MACROS_DIR_NAME,
 };
@@ -1536,8 +1537,10 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     let mut engine = patch_edit(state, EditKey::Load(&dir.display().to_string()))?;
     // The loaded engine replaces this one and comes up stopped, so the
     // pre-load backend must be restarted afterwards — the frontend only
-    // calls engine_start once, at app startup.
+    // calls engine_start once, at app startup. Which PAGE is open is the
+    // session's, not the patch's, so it survives the swap too.
     let backend = engine.backend();
+    let focus = engine.audio_focus();
     engine.stop().map_err(err)?;
     let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
     // Seed the replacement engine's view of the macro store so every
@@ -1564,6 +1567,7 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     // app assembles it.
     beat_clip::hydrate(state, &mut engine);
     decks::hydrate(state, &mut engine);
+    engine.set_audio_focus(focus).map_err(err)?;
     restart_backend(&mut engine, backend, "patch load")?;
     mark_saved(state, &engine);
     let warnings = engine.load_warnings.clone();
@@ -2033,6 +2037,19 @@ fn set_audio_outputs(
         restart_backend(&mut engine, Some(Backend::Cpal), "audio output change")?;
     }
     Ok(())
+}
+
+/// Play for the page the user is looking at. ONE PAGE SOUNDS AT A TIME:
+/// the Rack is the whole patch, the Decks page is its bank (and whatever
+/// the bank is played through), and a page that makes its own sound —
+/// Clip, Beatify — or none at all leaves the engine silent. Ephemeral
+/// session state, so it is not an undoable edit and never reaches the
+/// patch; the engine keeps running either way, so a page comes back
+/// exactly where it was.
+#[tauri::command]
+fn set_audio_focus(state: State<AppState>, focus: AudioFocus) -> CmdResult<()> {
+    let mut engine = engine_lock(&state)?;
+    engine.set_audio_focus(focus).map_err(err)
 }
 
 #[tauri::command]
@@ -2814,6 +2831,7 @@ fn main() {
             engine_stop,
             audio_outputs,
             set_audio_outputs,
+            set_audio_focus,
             library_tracks,
             library_search,
             providers,

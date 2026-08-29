@@ -1166,7 +1166,16 @@ beatify::build`.
   still owes and `decks::hydrate` re-assembles it beside
   `beat_clip::hydrate` — the Decks page also calls `decks_rehydrate` once
   when it opens, which is what makes a bank restored with the app sound
-  again instead of coming back bound and silent. Golden:
+  again instead of coming back bound and silent. A BANK MUST HAVE
+  SOMEWHERE TO PLAY: `decks_connect_outputs` gives a LOOSE live pair an
+  Audio Output and a loose cue pair a Monitor Output, adding whichever
+  the patch lacks (`decks_loose_outputs` says which pairs go nowhere), and
+  `decks_ensure` calls it when the page opens as well as when it makes a
+  bank. The live pair used to be wired only if the patch happened to own
+  an Audio Output while the cue pair always got one, so a bank in a patch
+  without one played into the headphones and nowhere else. A pair the
+  user has routed is never touched, and nothing to do is not an undo
+  step. Golden:
   `decks-bank-two-clips` (the mix, the stretch, the phase); the sidecar
   carries the slot mix in a `deck_slots` section (a load resets a slot, so
   the case sets the mix after the audio).
@@ -1209,6 +1218,25 @@ beatify::build`.
   not the patch: it is stored with the app's settings, and takes effect on
   the next backend start, so `set_audio_outputs` restarts a running
   engine.
+- AUDIO FOCUS (`AudioFocus`/`Engine::set_audio_focus`, `Plan::focus` in
+  `graph.rs`, `set_audio_focus` in `main.rs`, `audioFocusForView` in
+  `app/src/App.tsx`): ONE PAGE SOUNDS AT A TIME — the Rack is the whole
+  patch, the Decks page is every bank plus everything DOWNSTREAM of one
+  (a bank played through a rack effect is still the decks — reachability
+  is per NODE, so a rack source that meets the bank inside a shared mixer
+  rides out with it), and a page that makes its own sound (Clip, Beatify)
+  or none (Library) leaves the engine silent. The graph is NOT torn down
+  for this: a hidden page keeps running, so clocks keep time and coming
+  back is instant. The gate is a
+  per-slot gain in the PLAN, applied only where a wire enters an Audio or
+  Monitor Output module's audio jacks (never its `channel_offset`/`mute`
+  jacks), and it ramps across one block so a page change fades. It rides
+  on every plan (`Engine::plan_for`), so a wire edit cannot reopen a page
+  nobody is looking at. It is SESSION state, not patch state: never
+  serialized, not an undo step, restored across a patch load, and
+  `Rack` (everything sounds) is the default every offline render and test
+  gets. Tests: `--test integration audio_focus`,
+  `app/tests/AppAudioFocus.test.tsx`.
 - `crates/dj-engine/src/stretch.rs` is THE granular time-stretch: two
   voices, Hann overlap-add at 50 % hop (exact COLA, so unity rate is
   transparent), each grain WSOLA-aligned within ±`SEARCH_SECS` of the
@@ -1661,7 +1689,12 @@ of the page.
   local state is a DRAFT of the control being dragged, which clears
   itself when the engine's reading agrees. The page reads no graph at
   all.
+- Sound: the bank keeps RUNNING on other tabs but is held at the output
+  modules (audio focus, above); opening the page also makes sure the bank
+  is WIRED to an output (`decks_ensure`), so a bank added to a patch with
+  no Audio Output is not left cue-only.
 - Tests: `app/tests/DecksView.test.tsx` (strips, lamps, drafts, the
-  output pickers, the rehydrate-on-open), plus the engine's
+  output pickers, the rehydrate-on-open, the wiring-on-open), plus the
+  engine's
   `cargo test -p dj-engine --release --test integration decks` and the
   `decks-bank-two-clips` E2E golden.

@@ -2,7 +2,8 @@
 // strips under one tempo.
 //
 // The page is a big panel for a single rack module (`builtin.decks`) — the
-// bank is in the patch and keeps playing when the tab is not looking, so
+// bank is in the patch and keeps RUNNING when the tab is not looking (it
+// is the OUTPUT that the open page owns, see `audioFocusForView`), so
 // this file only reads its state and writes edits back. Everything the
 // page shows comes from ONE poll of `decks_status` (the engine owns the
 // phase arithmetic and the stretch), which is what keeps
@@ -84,7 +85,13 @@ export function DecksView(props: DecksViewProps) {
     let cancelled = false;
     void (async () => {
       const found = await api.banks();
-      if (!cancelled && found) setBank(found[0] ?? null);
+      // A bank that is here already still has to be able to PLAY: one
+      // whose live pair goes nowhere (a bank added to a patch with no
+      // Audio Output) is given one here, which is why opening the page
+      // asks rather than just reading. `ensure` creates nothing else and
+      // is not an edit when there is nothing to do.
+      const bank = found?.[0] ? ((await api.ensure()) ?? found[0]) : null;
+      if (!cancelled && found) setBank(bank);
       const list = await clipApi.list();
       if (!cancelled && list) setClips(list);
       const outs = await outputsApi.get();

@@ -17,7 +17,9 @@ use crate::builtin::{
 use crate::capture::{CaptureRing, CaptureWindow};
 use crate::deck::{DeckCmd, DeckControl, DeckModule, DeckStatus, N_CUES};
 use crate::decks::{DecksControl, DecksRtModule, DecksShared};
-use crate::graph::{compute_plan, Graph, GraphEdit, GraphNode, GrowStorage, NodeStorage, WireSpec};
+use crate::graph::{
+    compute_plan, Graph, GraphEdit, GraphNode, GrowStorage, NodeStorage, Plan, WireSpec,
+};
 use crate::knob::{position_for_value, JackRt, KnobConfig, KnobState};
 use crate::macros::{MacroDef, MacroInstance, MacroInterface, MacroLibrary, MacroPreviewNode};
 use crate::manifest::Manifest;
@@ -58,6 +60,29 @@ pub enum Backend {
     /// Real audio output via cpal.
     #[cfg(feature = "cpal-backend")]
     Cpal,
+}
+
+/// Which PAGE of the app the engine is playing for. One page sounds at a
+/// time: what you are looking at is what you hear, and switching pages
+/// fades the other one out rather than leaving it playing in a room
+/// nobody is in.
+///
+/// The engine never stops for this — a hidden page keeps running, so its
+/// clock keeps time, its meters keep moving and coming back to it is
+/// instant. Only the last step, a wire entering an Audio or Monitor
+/// Output module, is held ([`crate::graph::Plan`]'s focus gates).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioFocus {
+    /// The Rack: the whole patch sounds, decks bank included. The default,
+    /// and what every offline render and test gets.
+    #[default]
+    Rack,
+    /// The Decks page: only what a decks bank feeds reaches the outputs.
+    Decks,
+    /// A page that makes its own sound (Clip, Beatify) or none at all
+    /// (Library): the engine holds its tongue.
+    Silent,
 }
 
 #[derive(Debug, Clone)]
@@ -415,6 +440,10 @@ pub struct Engine {
     /// Control-side state per Decks BANK node (the Decks tab's eight clip
     /// slots) — a different module from the DJ deck above.
     clip_decks: HashMap<usize, DecksControl>,
+    /// Which PAGE the engine is currently playing for. Ephemeral session
+    /// state (which tab is open is not the patch's business), and the
+    /// reason a hidden page's audio stops at the output modules.
+    audio_focus: AudioFocus,
     /// Which hardware outputs the live and monitor buses play out of.
     /// The machine's business, not the patch's — the app persists it
     /// beside its own settings and hands it back at startup.
@@ -532,6 +561,7 @@ impl Engine {
             beat_clips: HashMap::new(),
             decks: HashMap::new(),
             clip_decks: HashMap::new(),
+            audio_focus: AudioFocus::default(),
             audio_outputs: AudioOutputs::default(),
             xruns: Arc::new(AtomicU64::new(0)),
             proc_misses: Arc::new(AtomicU64::new(0)),
@@ -560,6 +590,75 @@ impl Engine {
             v[slot] = Some(info.manifest.inputs.len());
         }
         v
+    }
+
+    /// The plan for a graph shape, carrying the focus the open page asked
+    /// for. EVERY plan goes through here: the gates travel with the plan,
+    /// so a wire edit or a module add can never quietly reopen a page the
+    /// user is not looking at.
+    fn plan_for(&self, n_inputs: &[Option<usize>], wires: &[WireSpec]) -> Plan {
+        let mut plan = compute_plan(n_inputs, wires);
+        plan.set_focus(self.focus_gates(n_inputs.len(), wires));
+        plan
+    }
+
+    /// Per-slot focus gate: 1.0 for a node whose signal the open page lets
+    /// through to the outputs, 0.0 for one it holds back.
+    ///
+    /// On the Decks page that is the bank AND EVERYTHING DOWNSTREAM OF IT,
+    /// because a bank is often played through the rack (a compressor on
+    /// the way out is still the decks you are looking at); everything the
+    /// bank never reaches is the rest of the patch, and stays quiet.
+    ///
+    /// Reachability is per NODE, so a rack source that meets the bank
+    /// inside a shared module — both into one mixer, mixer into the
+    /// output — rides out with it. Cutting that would mean gating every
+    /// wire, and a wire carries clocks and CV as readily as audio.
+    fn focus_gates(&self, slots: usize, wires: &[WireSpec]) -> Vec<f32> {
+        match self.audio_focus {
+            AudioFocus::Rack => vec![1.0; slots],
+            AudioFocus::Silent => vec![0.0; slots],
+            AudioFocus::Decks => {
+                let mut open = vec![0.0; slots];
+                let mut queue: Vec<usize> = self
+                    .nodes
+                    .iter_slots()
+                    .filter(|(_, info)| {
+                        BuiltinKind::from_ext_id(&info.ext_id) == Some(BuiltinKind::Decks)
+                    })
+                    .map(|(slot, _)| slot)
+                    .collect();
+                for &slot in &queue {
+                    open[slot] = 1.0;
+                }
+                while let Some(node) = queue.pop() {
+                    for w in wires.iter().filter(|w| w.from_node == node) {
+                        if open[w.to_node] == 0.0 {
+                            open[w.to_node] = 1.0;
+                            queue.push(w.to_node);
+                        }
+                    }
+                }
+                open
+            }
+        }
+    }
+
+    /// Which page the engine is playing for.
+    pub fn audio_focus(&self) -> AudioFocus {
+        self.audio_focus
+    }
+
+    /// Play for this page. Takes effect at the next block, over one
+    /// block's fade — the graph itself is untouched, so nothing about the
+    /// patch, the transports or the meters changes with it.
+    pub fn set_audio_focus(&mut self, focus: AudioFocus) -> Result<()> {
+        if self.audio_focus == focus {
+            return Ok(());
+        }
+        self.audio_focus = focus;
+        let plan = self.plan_for(&self.n_inputs_by_slot(), &self.wires);
+        self.dispatch_edit(GraphEdit::Replan { plan })
     }
 
     /// Apply a structural edit: directly when stopped, over the RT command
@@ -603,7 +702,7 @@ impl Engine {
         if wires.len() == self.wires.len() {
             return Ok(());
         }
-        let plan = compute_plan(&self.n_inputs_by_slot(), &wires);
+        let plan = self.plan_for(&self.n_inputs_by_slot(), &wires);
         self.dispatch_edit(GraphEdit::Replan { plan })?;
         self.wires = wires;
         Ok(())
@@ -1014,6 +1113,10 @@ impl Engine {
             monitor_out: BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::MonitorOut),
             bypass_routes: manifest.bypass_routes(),
             bypassed: false,
+            // A fresh node is audible; the plan shipped with this add
+            // carries the gate the open page actually asked for, so one
+            // block later it agrees with the rest of its page.
+            focus_gain: 1.0,
         };
         // Allocate the graph slot control-side: recycle a tombstone (LIFO,
         // like the old in-graph free list) or grow the storage by one.
@@ -1033,7 +1136,7 @@ impl Engine {
             n_inputs.resize(idx + 1, None);
         }
         n_inputs[idx] = Some(n_in);
-        let plan = compute_plan(&n_inputs, &self.wires);
+        let plan = self.plan_for(&n_inputs, &self.wires);
         if let Err(e) = self.dispatch_edit(GraphEdit::AddNode {
             slot: idx,
             node: Some(node),
@@ -1138,7 +1241,7 @@ impl Engine {
             .copied()
             .filter(|w| w.from_node != slot && w.to_node != slot)
             .collect();
-        let plan = compute_plan(&n_inputs, &wires);
+        let plan = self.plan_for(&n_inputs, &wires);
         self.dispatch_edit(GraphEdit::RemoveNode {
             slot,
             plan,
@@ -1213,7 +1316,7 @@ impl Engine {
         };
         let mut wires = self.wires.clone();
         wires.push(spec);
-        let plan = compute_plan(&self.n_inputs_by_slot(), &wires);
+        let plan = self.plan_for(&self.n_inputs_by_slot(), &wires);
         self.dispatch_edit(GraphEdit::Replan { plan })?;
         self.wires = wires;
         Ok(())

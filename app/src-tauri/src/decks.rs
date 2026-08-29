@@ -2,11 +2,10 @@
 //! Beatify clips that go in them.
 //!
 //! The tab is a big panel for ONE rack module (`builtin.decks`), so
-//! everything here is an ordinary engine edit — the bank is in the patch,
-//! it is wired into the graph, and closing the tab does not stop it.
-//! [`decks_ensure`] is the page's "add the bank" gesture: it finds the
-//! module or makes one and connects it to whatever Audio Output is
-//! already there, in one undo step.
+//! everything here is an ordinary engine edit — the bank is in the patch
+//! and it is wired into the graph. [`decks_ensure`] is the page's "give
+//! me the decks" gesture: it finds the bank or makes one, and gives its
+//! live and cue pairs somewhere to play, in one undo step.
 //!
 //! A clip is placements, not audio (see [`crate::beatify_clip`]), so the
 //! patch keeps the BINDING and the samples are assembled here — when the
@@ -16,7 +15,6 @@
 //! on the main thread and would freeze the window.
 
 use dj_engine::beat_clip::BeatClipRef;
-use dj_engine::builtin::{AUDIO_OUT_ID, MONITOR_OUT_ID};
 use dj_engine::decks::{DecksStatus, SlotControl, DECKS_ID, SURFACE_PARAM};
 use dj_engine::playback::TrackData;
 use dj_engine::Engine;
@@ -31,69 +29,51 @@ pub fn decks_banks(state: State<AppState>) -> CmdResult<Vec<String>> {
     Ok(engine_lock(&state)?.decks_nodes())
 }
 
-/// The bank the Decks tab drives: the first one on the rack, or a new one
-/// wired straight into the Audio Output. One undo step, because it is one
-/// act — "give me the decks".
+/// The bank the Decks tab drives, wired so it can be HEARD: the first one
+/// on the rack, or a new one. One undo step, because it is one act —
+/// "give me the decks".
+///
+/// The page calls this when it opens as well as from its empty state, so
+/// a bank whose live pair goes nowhere — the state a bank added to a
+/// patch with no Audio Output used to be left in, audible in the
+/// headphones and nowhere else — gets an output the moment it is looked
+/// at. Nothing to do is not an edit: no bank is created without being
+/// asked, no wire is moved, and no undo step is recorded.
 #[tauri::command]
 pub fn decks_ensure(state: State<AppState>) -> CmdResult<String> {
-    {
+    let existing = {
         let engine = engine_lock(&state)?;
-        if let Some(first) = engine.decks_nodes().into_iter().next() {
-            return Ok(first);
-        }
-    }
-    let mut engine = patch_edit(&state, EditKey::Add("decks"))?;
-    let instance = fresh_id(&engine);
-    engine.add_module(&instance, DECKS_ID).map_err(err)?;
-    // Wire it to the output the patch already has; a patch with none is
-    // left alone rather than grown one behind the user's back.
-    let out = find_node(&engine, AUDIO_OUT_ID);
-    if let Some(out) = out {
-        let _ = engine.connect(&instance, "audio_l", &out, "l");
-        let _ = engine.connect(&instance, "audio_r", &out, "r");
-    }
-    // The monitor pair needs somewhere to go for the Monitor buttons to
-    // mean anything, and nothing else in a patch makes one — so the bank
-    // brings its own, in the same undo step.
-    let monitor = match find_node(&engine, MONITOR_OUT_ID) {
-        Some(existing) => Some(existing),
-        None => {
-            let id = fresh_monitor_id(&engine);
-            engine.add_module(&id, MONITOR_OUT_ID).map_err(err)?;
-            Some(id)
+        match engine.decks_nodes().into_iter().next() {
+            Some(first) => {
+                if engine.decks_loose_outputs(&first).map_err(err)? == (false, false) {
+                    return Ok(first);
+                }
+                Some(first)
+            }
+            None => None,
         }
     };
-    if let Some(monitor) = monitor {
-        let _ = engine.connect(&instance, "mon_l", &monitor, "l");
-        let _ = engine.connect(&instance, "mon_r", &monitor, "r");
-    }
+    let mut engine = patch_edit(&state, EditKey::Add("decks"))?;
+    let instance = match existing {
+        Some(bank) => bank,
+        None => {
+            let instance = fresh_id(&engine);
+            engine.add_module(&instance, DECKS_ID).map_err(err)?;
+            instance
+        }
+    };
+    engine.decks_connect_outputs(&instance).map_err(err)?;
     Ok(instance)
 }
 
-fn find_node(engine: &Engine, ext_id: &str) -> Option<String> {
-    engine
-        .nodes
-        .iter()
-        .find(|n| n.ext_id == ext_id)
-        .map(|n| n.instance_id.clone())
-}
-
 fn fresh_id(engine: &Engine) -> String {
-    fresh_named(engine, "decks")
-}
-
-fn fresh_monitor_id(engine: &Engine) -> String {
-    fresh_named(engine, "monitor")
-}
-
-fn fresh_named(engine: &Engine, stem: &str) -> String {
     let taken: std::collections::BTreeSet<&str> = engine
         .nodes
         .iter()
         .map(|n| n.instance_id.as_str())
         .collect();
     (1..)
-        .map(|n| format!("{stem}{n}"))
+        .map(|n| format!("decks{n}"))
         .find(|id| !taken.contains(id.as_str()))
         .unwrap()
 }

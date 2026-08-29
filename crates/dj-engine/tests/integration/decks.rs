@@ -477,6 +477,69 @@ fn the_surface_lamps_follow_mute_and_monitor() {
     assert!(e.decks_drain_leds().is_empty());
 }
 
+/// A bank on its own in an empty patch — what the Decks tab's "add the
+/// deck bank" gesture starts from when the rack is bare.
+fn bare_bank() -> Engine {
+    let mut e = Engine::new(
+        EngineConfig {
+            master_channels: 1,
+            ..EngineConfig::default()
+        },
+        crate::common::registry(),
+    )
+    .unwrap();
+    e.add_module("bank1", DECKS_ID).unwrap();
+    e
+}
+
+#[test]
+fn a_bank_in_a_patch_with_no_output_is_given_one() {
+    let mut e = bare_bank();
+    assert_eq!(e.decks_loose_outputs("bank1").unwrap(), (true, true));
+    e.decks_connect_outputs("bank1").unwrap();
+    assert_eq!(e.decks_loose_outputs("bank1").unwrap(), (false, false));
+    let kinds: Vec<&str> = e.nodes.iter().map(|n| n.ext_id.as_str()).collect();
+    assert!(kinds.contains(&"builtin.audio_out"), "the room hears it");
+    assert!(kinds.contains(&MONITOR_OUT_ID), "and so do the headphones");
+
+    // The live pair is the one that used to go nowhere: play a clip and
+    // it must reach the master bus, not just the cue.
+    load(&mut e, 0, 2);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    let live = e.render_offline(24_000).unwrap().remove(0);
+    assert!(peak(&live[4_800..]) > 0.1, "a bank you can hear");
+}
+
+#[test]
+fn wiring_a_bank_that_can_already_play_changes_nothing() {
+    let mut e = bare_bank();
+    e.decks_connect_outputs("bank1").unwrap();
+    let (nodes, wires) = (e.nodes.iter().count(), e.wire_specs().len());
+    e.decks_connect_outputs("bank1").unwrap();
+    assert_eq!(
+        (e.nodes.iter().count(), e.wire_specs().len()),
+        (nodes, wires)
+    );
+}
+
+#[test]
+fn a_bank_the_user_has_routed_keeps_its_routing() {
+    let mut e = bare_bank();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.connect("bank1", "audio_l", "vca1", "in").unwrap();
+    assert_eq!(e.decks_loose_outputs("bank1").unwrap(), (false, true));
+    e.decks_connect_outputs("bank1").unwrap();
+    // The live pair still goes exactly where it was put, and only the cue
+    // pair was given somewhere to go.
+    let audio_l = e
+        .wire_specs()
+        .iter()
+        .filter(|w| w.from_jack == 0)
+        .collect::<Vec<_>>();
+    assert_eq!(audio_l.len(), 1, "no second destination behind their back");
+}
+
 #[test]
 fn a_monitored_deck_leaves_the_live_mix_for_the_monitor_one() {
     let mut e = bank();

@@ -52,6 +52,11 @@ pub struct GraphNode {
     /// While true the executor copies the routes above and does NOT run
     /// the module: a bypassed module does no processing at all.
     pub bypassed: bool,
+    /// How much of this node's signal reached the output buses over the
+    /// LAST block — the RT side of the audio focus (see [`Plan::focus`]).
+    /// The gate ramps from here to the plan's value across one block, so
+    /// changing pages is a fade rather than a click.
+    pub focus_gain: f32,
 }
 
 /// Derived execution state: node order, per-jack incoming wire lists and
@@ -62,6 +67,23 @@ pub struct Plan {
     order: Vec<usize>,
     incoming: Vec<Vec<Vec<Incoming>>>,
     connected_mask: Vec<u64>,
+    /// AUDIO FOCUS, per slot: 1.0 while this node's signal may reach the
+    /// output buses, 0.0 while the page it belongs to is not the open one
+    /// (`Engine::set_audio_focus`). It is read ONLY where a wire enters an
+    /// Audio/Monitor Output node, so a page nobody is looking at still
+    /// RUNS — its clock keeps time and its meters keep moving — it just
+    /// does not reach the speakers. All-ones is "everything sounds", which
+    /// is what an offline render and a fresh engine get.
+    focus: Vec<f32>,
+}
+
+impl Plan {
+    /// Set the per-slot focus gates. Same length as the slot count the
+    /// plan was computed for — the executor indexes it by slot.
+    pub fn set_focus(&mut self, focus: Vec<f32>) {
+        debug_assert_eq!(focus.len(), self.focus.len(), "focus is per graph slot");
+        self.focus = focus;
+    }
 }
 
 /// Compute the plan for a graph shape: `n_inputs[slot]` is the input-jack
@@ -121,6 +143,8 @@ pub fn compute_plan(n_inputs: &[Option<usize>], wires: &[WireSpec]) -> Plan {
         order: postorder,
         incoming,
         connected_mask,
+        // Everything sounds until a page says otherwise.
+        focus: vec![1.0; n],
     }
 }
 
@@ -358,26 +382,51 @@ impl Graph {
         for oi in 0..self.plan.order.len() {
             let node = self.plan.order[oi];
             // Order only contains live slots (replan skips tombstones).
-            let n_in = self.nodes[node].as_ref().unwrap().n_in;
+            let (n_in, to_bus) = {
+                let gn = self.nodes[node].as_ref().unwrap();
+                (gn.n_in, gn.audio_out || gn.monitor_out)
+            };
 
             // Gather effective inputs.
             for jack in 0..n_in {
                 let rt = self.jack_rt[node][jack];
                 let wired = !self.plan.incoming[node][jack].is_empty();
+                // The audio jacks of an output module are the last place a
+                // signal can be held back before it leaves for a device —
+                // which is where the focus gate sits (`Plan::focus`). The
+                // trailing control jacks are not audio and never gated.
+                let gated = to_bus && jack < crate::builtin::AUDIO_OUT_CHANNELS;
                 if !wired {
                     self.in_bufs[node][jack][..frames].fill(rt.unwired_value);
                 } else {
                     self.in_bufs[node][jack][..frames].fill(0.0);
                     for k in 0..self.plan.incoming[node][jack].len() {
                         let (src, sjack, prev) = self.plan.incoming[node][jack][k];
+                        let (from, to) = if gated {
+                            (
+                                self.nodes[src].as_ref().unwrap().focus_gain,
+                                self.plan.focus[src],
+                            )
+                        } else {
+                            (1.0, 1.0)
+                        };
                         let src_buf = if prev {
                             &self.out_prev[src][sjack]
                         } else {
                             &self.out_curr[src][sjack]
                         };
                         let dst = &mut self.in_bufs[node][jack];
-                        for s in 0..frames {
-                            dst[s] += src_buf[s];
+                        if from == 1.0 && to == 1.0 {
+                            for s in 0..frames {
+                                dst[s] += src_buf[s];
+                            }
+                        } else {
+                            // Fade across the block rather than stepping:
+                            // a page change must not click.
+                            let step = (to - from) / frames as f32;
+                            for s in 0..frames {
+                                dst[s] += src_buf[s] * (from + step * s as f32);
+                            }
                         }
                     }
                     // Wired inputs blend with the manual knob (knob.rs docs).
@@ -472,6 +521,14 @@ impl Graph {
                         dst[s] += src[s];
                     }
                 }
+            }
+        }
+
+        // The focus fade is one block long: whatever the gate was asked
+        // for, it is there by the next one.
+        for (gn, &focus) in self.nodes.iter_mut().zip(self.plan.focus.iter()) {
+            if let Some(gn) = gn {
+                gn.focus_gain = focus;
             }
         }
 

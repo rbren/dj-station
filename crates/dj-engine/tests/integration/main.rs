@@ -17,6 +17,7 @@ mod common;
 
 mod analysis_sync;
 mod audio;
+mod audio_focus;
 mod beat_clip;
 mod bypass;
 mod choreo;

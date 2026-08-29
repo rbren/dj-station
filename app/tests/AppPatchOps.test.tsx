@@ -68,7 +68,10 @@ const fakeEngine = {
 };
 
 vi.mock('../src/engine', () => ({
-  engine: new Proxy({}, { get: (_t, prop) => fakeEngine[prop as keyof typeof fakeEngine] }),
+  engine: new Proxy(
+    {},
+    { get: (_t, prop) => fakeEngine[prop as keyof typeof fakeEngine] ?? vi.fn(async () => null) },
+  ),
   onMenuAction: (cb: (action: string) => void) => {
     const h = (e: Event) => cb((e as CustomEvent).detail as string);
     window.addEventListener('dj-menu', h);

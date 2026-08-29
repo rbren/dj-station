@@ -93,6 +93,80 @@ impl Engine {
         ids
     }
 
+    /// Which of a bank's two output pairs go NOWHERE AT ALL — the live
+    /// pair and the cue pair, in that order. A pair wired to anything (an
+    /// output module, an effect, one channel of a mixer) is the user's
+    /// routing and does not count as loose.
+    pub fn decks_loose_outputs(&self, instance_id: &str) -> Result<(bool, bool)> {
+        let node = self.decks_node(instance_id)?;
+        let loose = |a: &str, b: &str| -> Result<bool> {
+            let (a, b) = (self.out_jack_index(node, a)?, self.out_jack_index(node, b)?);
+            Ok(!self
+                .wires
+                .iter()
+                .any(|w| w.from_node == node && (w.from_jack == a || w.from_jack == b)))
+        };
+        Ok((loose("audio_l", "audio_r")?, loose("mon_l", "mon_r")?))
+    }
+
+    /// Give a bank somewhere to play: its live pair to an Audio Output and
+    /// its cue pair to a Monitor Output, adding whichever of those two the
+    /// patch does not have.
+    ///
+    /// A BANK YOU CANNOT HEAR IS NOT A BANK — the live pair used to be
+    /// wired only if the patch already happened to own an Audio Output,
+    /// while the cue pair always got a Monitor Output of its own, so a
+    /// bank added to a patch without one played through the headphones
+    /// and nowhere else. Idempotent, and it only ever touches a pair that
+    /// is wired to NOTHING ([`Engine::decks_loose_outputs`]): a bank the
+    /// user has routed through the rack is left exactly as they left it.
+    pub fn decks_connect_outputs(&mut self, instance_id: &str) -> Result<()> {
+        let (live, monitor) = self.decks_loose_outputs(instance_id)?;
+        for (loose, ext_id, stem, pair) in [
+            (
+                live,
+                crate::builtin::AUDIO_OUT_ID,
+                "out",
+                ["audio_l", "audio_r"],
+            ),
+            (
+                monitor,
+                crate::builtin::MONITOR_OUT_ID,
+                "monitor",
+                ["mon_l", "mon_r"],
+            ),
+        ] {
+            if !loose {
+                continue;
+            }
+            let existing = self
+                .nodes
+                .iter()
+                .find(|n| n.ext_id == ext_id)
+                .map(|n| n.instance_id.clone());
+            let out = match existing {
+                Some(existing) => existing,
+                None => {
+                    let id = self.fresh_instance_id(stem);
+                    self.add_module(&id, ext_id)?;
+                    id
+                }
+            };
+            for (jack, channel) in pair.into_iter().zip(["l", "r"]) {
+                self.connect(instance_id, jack, &out, channel)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `stem1`, `stem2`, … — the first one no module is called.
+    fn fresh_instance_id(&self, stem: &str) -> String {
+        (1..)
+            .map(|n| format!("{stem}{n}"))
+            .find(|id| !self.node_by_id.contains_key(id))
+            .unwrap()
+    }
+
     /// Put a clip in a slot: the audio (assembled by the app layer), what
     /// one of its beats means, and the binding a patch will remember.
     ///

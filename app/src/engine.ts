@@ -12,6 +12,10 @@ import type {
   WireStyle,
 } from './types';
 
+/** Which page the engine is playing for (`AudioFocus` in
+ *  `crates/dj-engine/src/engine.rs`). ONE PAGE SOUNDS AT A TIME. */
+export type AudioFocus = 'rack' | 'decks' | 'silent';
+
 /** Subscribe to native File-menu actions
  *  ("saved" | "save-as" | "open" | "request-new").
  *  Also listens for `dj-menu` DOM CustomEvents so tests / the dev browser
@@ -477,6 +481,12 @@ export class EngineClient extends IpcClient {
   }
   redo() {
     return this.call<boolean>('redo');
+  }
+  /** Which page the engine plays for: one page sounds at a time, and the
+   *  others are faded out at the output modules (the engine keeps running,
+   *  so coming back to a page is instant). */
+  setAudioFocus(focus: AudioFocus) {
+    return this.call<void>('set_audio_focus', { focus });
   }
   /** Returns the backend the engine actually started on: 'cpal' (device
    *  audio) or 'null' (silent fallback), or null outside Tauri. */

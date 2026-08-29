@@ -9,7 +9,14 @@
 // and knob drags re-render only the affected panels.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { engine, onMenuAction, type MacroGroup, type MacroInfo, type ModuleMove } from './engine';
+import {
+  engine,
+  onMenuAction,
+  type AudioFocus,
+  type MacroGroup,
+  type MacroInfo,
+  type ModuleMove,
+} from './engine';
 import { isEditableTarget, useFileShortcuts } from './fileShortcuts';
 import { RackKeysContext } from './keyScope';
 import { library, type Track } from './library';
@@ -89,6 +96,17 @@ const WIRE_COLORS_KEY = 'dj-wire-colors';
 const LAST_WIRE_COLOR_KEY = 'dj-wire-last-color';
 const NUM_WIRE_COLORS = WIRE_COLORS.length;
 
+type View = 'rack' | 'library' | 'clip' | 'beatify' | 'decks';
+
+/** The page the engine plays for while `view` is the open tab: the Rack is
+ *  the whole patch, the Decks page is its bank, and Library/Clip/Beatify
+ *  either make their own sound or none — so the engine goes quiet. */
+function audioFocusForView(view: View): AudioFocus {
+  if (view === 'rack') return 'rack';
+  if (view === 'decks') return 'decks';
+  return 'silent';
+}
+
 export default function App() {
   const [store] = useState(createRackStore);
   const nodes = useStoreSelector(store, (s) => s.nodes);
@@ -100,7 +118,7 @@ export default function App() {
   const [moduleLib, setModuleLib] = useState<Manifest[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
-  const [view, setView] = useState<'rack' | 'library' | 'clip' | 'beatify' | 'decks'>('rack');
+  const [view, setView] = useState<View>('rack');
   // The library's Edit button opens a track in the (always mounted) clip
   // editor, which owns what that costs the edit already in there.
   const clipView = useRef<ClipViewHandle>(null);
@@ -896,6 +914,14 @@ export default function App() {
   useEffect(() => {
     if (macroGroups.length > 0) void placeUnplacedMacros(macroGroups);
   }, [macroGroups, placeUnplacedMacros]);
+
+  // What you are looking at is what you hear: the engine plays for the
+  // open page and fades the others out at their output modules. It keeps
+  // RUNNING for all of them — clocks keep time, meters keep moving — so
+  // coming back to a page is instant.
+  useEffect(() => {
+    void engine.setAudioFocus(audioFocusForView(view));
+  }, [view]);
 
   useEffect(() => {
     void (async () => {
@@ -2246,8 +2272,9 @@ export default function App() {
       {view === 'beatify' && (
         <BeatifyView client={beatifyClient} library={library} clips={beatifyClipClient} />
       )}
-      {/* The bank is a rack module, so the page is only a view of it: it
-          keeps playing on other tabs, and unmounting costs nothing. */}
+      {/* The bank is a rack module, so the page is only a view of it and
+          unmounting costs nothing: the bank keeps RUNNING on other tabs
+          (its clock never stops), it is only held back at the outputs. */}
       {view === 'decks' && <DecksView />}
       {pickerOpen && (
         <ModulePicker

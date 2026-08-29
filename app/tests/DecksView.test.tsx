@@ -408,4 +408,23 @@ describe('a bank restored with the app', () => {
     show(api);
     await waitFor(() => expect(rehydrate).toHaveBeenCalledTimes(1));
   });
+
+  it('makes sure the bank it found can be heard', async () => {
+    // A bank whose live pair goes nowhere (added to a patch with no Audio
+    // Output) is wired up by `ensure`, so opening the page is enough to
+    // get the sound back; it is a no-op for a bank that already plays.
+    const ensure = vi.fn().mockResolvedValue('decks1');
+    const api = makeApi(makeStatus(), { ensure });
+    show(api);
+    await waitFor(() => expect(ensure).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId('decks-strips')).toBeTruthy();
+  });
+
+  it('does not conjure a bank for a rack that has none', async () => {
+    const ensure = vi.fn().mockResolvedValue('decks1');
+    const api = makeApi(makeStatus(), { banks: vi.fn().mockResolvedValue([]), ensure });
+    show(api);
+    await waitFor(() => expect(screen.getByTestId('decks-empty')).toBeTruthy());
+    expect(ensure).not.toHaveBeenCalled();
+  });
 });
