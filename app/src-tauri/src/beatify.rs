@@ -18,7 +18,7 @@
 
 use dj_analysis::beatify::{
     self, audition, detect, grid, scope, store, Agreement, Analysis, Grid, Quality, Reading, Ruler,
-    Sweep, WarpMap,
+    Sweep, TapVerdict, WarpMap,
 };
 use dj_analysis::AudioData;
 use dj_library::Track;
@@ -108,6 +108,13 @@ pub struct BeatifyAnalysis {
     pub source_grid: Grid,
     pub reading: Reading,
     pub agreement: Agreement,
+    /// Which seed's detections the grid was fitted to. `analyze` takes the
+    /// first run, which is a position rather than a merit — the modal can
+    /// name another one, and the taps can choose.
+    pub seed: String,
+    /// Every seed the tracker ran, so the picker can offer them without a
+    /// second detection pass (MOD-26).
+    pub seeds: Vec<String>,
     /// Detections in source seconds (amber: what was played).
     pub beats: Vec<f64>,
     pub confidence: Vec<f32>,
@@ -268,6 +275,8 @@ fn summarize(session: &Session, buckets: usize, track: &Track) -> BeatifyAnalysi
         source_grid: a.source_grid(session.audio.duration_secs()),
         reading: a.reading,
         agreement: a.agreement.clone(),
+        seed: a.seed.clone(),
+        seeds: a.runs.iter().map(|r| r.seed.clone()).collect(),
         beats: a.beats.clone(),
         confidence: a.confidence.clone(),
         drift: a.drift_spans(),
@@ -358,6 +367,65 @@ pub fn beatify_set_reading(
             .with_reading(reading)
             .map_err(|e| CmdError::invalid(e.to_string()))?;
         Ok(summarize(session, buckets, &track))
+    })
+}
+
+/// Fit the grid to a different seed's detections (§3.8a).
+///
+/// Every run is already in the session, so this is a re-fit and never a
+/// re-run (MOD-26). The reading is kept: which metrical level you are
+/// reading at is a separate question from which seed you believe.
+#[tauri::command(async)]
+pub fn beatify_set_seed(
+    state: State<AppState>,
+    seed: String,
+    buckets: usize,
+) -> CmdResult<BeatifyAnalysis> {
+    let track_id = state.beatify.with(|s| Ok(s.track_id))?;
+    let track = state.library.track(track_id).map_err(err)?;
+    state.beatify.with(|session| {
+        session.analysis = session
+            .analysis
+            .with_seed(&seed, &session.audio, session.analysis.reading)
+            .map_err(|e| CmdError::invalid(e.to_string()))?;
+        Ok(summarize(session, buckets, &track))
+    })
+}
+
+/// What the taps chose, and the analysis they chose (§3.8a).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatifyTapResult {
+    pub verdict: TapVerdict,
+    /// The re-seated analysis — unchanged when the verdict refused.
+    pub analysis: BeatifyAnalysis,
+}
+
+/// Reconcile a tap sequence against the seeds (§3.8a).
+///
+/// `taps` are SOURCE seconds, from the audition playhead — not wall clock,
+/// which knows nothing about seeking or looping. Nothing here is fitted to
+/// the taps: they pick one of the grids the seeds already produced, and
+/// their latency is measured, reported and discarded. A refusal changes
+/// nothing and says why.
+#[tauri::command(async)]
+pub fn beatify_taps(
+    state: State<AppState>,
+    taps: Vec<f64>,
+    buckets: usize,
+) -> CmdResult<BeatifyTapResult> {
+    let track_id = state.beatify.with(|s| Ok(s.track_id))?;
+    let track = state.library.track(track_id).map_err(err)?;
+    state.beatify.with(|session| {
+        let (next, verdict) = session
+            .analysis
+            .with_taps(&taps, &session.audio)
+            .map_err(|e| CmdError::invalid(e.to_string()))?;
+        session.analysis = next;
+        Ok(BeatifyTapResult {
+            verdict,
+            analysis: summarize(session, buckets, &track),
+        })
     })
 }
 

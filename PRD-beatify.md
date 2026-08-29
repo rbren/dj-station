@@ -236,6 +236,16 @@ Choosing a region by looking at a waveform is guesswork. The user needs to hear 
 **MOD-25.** *(`Rotate bar 1` is gone with meter. There are no bars to rotate.)*
 **MOD-26.** Both surviving controls are transforms on the fitted grid. Neither re-runs the tracker.
 
+### 3.8a Taps and seed choice
+
+The reading corrections above ask a question the modal cannot answer for itself — *which pulse is the beat?* — and the user's hand can answer it in eight bars. It must not answer it by moving anything.
+
+**MOD-32.** **A tap is a vote, not a data point.** A hand keeps time to ±30–50 ms; the models are inside 5–10 ms (`IN_BAND_SECS`). Taps therefore never enter the least-squares fit — they would only add noise to a line already better than they are. They CHOOSE among the grids the seeds have already produced: each (seed × reading) candidate is scored by how tightly the taps cluster on its beats, weighted so that ×2 and ÷2 are punished alike, and the winner is adopted whole. What the trackers get wrong is not milliseconds but which pulse, and that is exactly what a vote can settle.
+**MOD-33.** **Tap latency is measured, reported, and discarded.** Reaction time is a property of the person, not the music. Absorbing it would bake a constant lag into the render, inherit it into every clip cut from that project, and leave nothing downstream able to detect it. The number is shown so the user knows it was seen and rejected.
+**MOD-34.** **Taps that fail say why, and change nothing.** Three refusals, in order: too few to mean anything; too uneven to be a pulse (judged against a fitted line through the taps, not a first tap and a typical gap); and consistent taps that match no reading — which, when they land on a grid at a whole multiple of it, is reported as *"you were tapping bars"* rather than as a score. A refusal leaves the analysis untouched.
+**MOD-35.** **The seed is a choice, not a given.** `analyze` fits to the first run, which is a position in a list rather than a merit. The modal names every seed and can re-fit to any of them; the taps use the same door. Like MOD-26 this is a transform on detections already in hand — it never re-runs the tracker.
+**MOD-36.** **Show the raw intervals, not just the fitted BPM.** Per seed: beat count, fitted BPM, and the mean/min/max/spread of the gaps between its detections. The fit is a line through the detections and hides how they got there; a doubled beat lives in the minimum and a missed one in the maximum, and neither moves the BPM. This is the number that tells a steady pass from a ragged one that happens to average out.
+
 ### 3.9 Audition and commit
 
 **MOD-27.** **Click track** — metronome at the fitted grid over the source. The fastest human check for metrical level and phase.

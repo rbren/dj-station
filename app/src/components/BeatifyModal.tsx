@@ -26,6 +26,8 @@ import {
   qualityLevel,
   readingOf,
   scopePreMs,
+  seedStats,
+  seedStatsLabel,
   selectionLabel,
   snapSelection,
   speedLabel,
@@ -113,6 +115,10 @@ export function BeatifyModal({
   /** MOD-A18: the audition loops the region by default. */
   const [loop, setLoop] = useState(true);
   const [vp, setVp] = useState<Range | null>(null);
+  /** Taps in SOURCE seconds (§3.8a). They accumulate while the audition
+   *  plays and are handed to the backend on Use taps. */
+  const [taps, setTaps] = useState<number[]>([]);
+  const [tapNote, setTapNote] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /** Held for the sync-check render only; auditions go through the
@@ -276,6 +282,54 @@ export function BeatifyModal({
     [adopt, client],
   );
 
+  /** Fit the grid to another seed's detections. Never a re-run (MOD-26):
+   *  every seed's beats are already in the session. */
+  const applySeed = useCallback(
+    async (seed: string) => {
+      setBusy(true);
+      const next = await client.setSeed(seed, BUCKETS);
+      setBusy(false);
+      if (next) adopt(next);
+    },
+    [adopt, client],
+  );
+
+  // --- taps (§3.8a) ------------------------------------------------------
+  //
+  // A TAP IS A VOTE, NOT A DATA POINT. Twenty taps against six hundred
+  // detections carry no weight in a least-squares fit — but the models do
+  // not fail by milliseconds, they fail by hearing half-time or the
+  // offbeat, and a hand tapping along settles that at once. So the taps
+  // choose among the grids the seeds already produced; they never move
+  // one, and the latency they carry is measured and discarded.
+  //
+  // The time recorded is the TRANSPORT's, not the wall clock's: the
+  // audition can be looped, seeked and re-rendered under the tapping
+  // hand, and only the transport knows where in the source we are.
+  const tap = useCallback(() => {
+    const at = transportRef.current?.position() ?? transportRef.current?.playhead ?? null;
+    if (at === null) return;
+    setTaps((prev) => [...prev, at]);
+    setTapNote(null);
+  }, []);
+
+  const clearTaps = useCallback(() => {
+    setTaps([]);
+    setTapNote(null);
+  }, []);
+
+  const applyTaps = useCallback(async () => {
+    setBusy(true);
+    const result = await client.taps(taps, BUCKETS);
+    setBusy(false);
+    if (!result) return;
+    setTapNote(result.verdict.detail);
+    // A refusal returns the analysis untouched, so adopting it is a
+    // no-op — but the taps stay on the waveform either way, because the
+    // fix for "too few" is to keep tapping, not to start again.
+    if (result.verdict.outcome === 'chose') adopt(result.analysis);
+  }, [adopt, client, taps]);
+
   // MOD-A22: the slider is arithmetic. Debounced only to spare the IPC.
   useEffect(() => {
     if (!analysis) return;
@@ -315,17 +369,28 @@ export function BeatifyModal({
   }, [analysis, client, scopePre, strength]);
 
   // MOD-A16: spacebar plays/pauses, like every other transport here.
+  // T taps (§3.8a) — a key, because tapping a beat with the mouse is a
+  // different motor task from tapping it with a finger, and the point of
+  // the gesture is that it is the user's sense of the pulse.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT')) return;
-      if (e.key !== ' ') return;
-      e.preventDefault();
-      togglePlay();
+      if (e.key === ' ') {
+        e.preventDefault();
+        togglePlay();
+        return;
+      }
+      if (e.key === 't' || e.key === 'T') {
+        // Auto-repeat is the keyboard's tempo, not the user's.
+        if (e.repeat) return;
+        e.preventDefault();
+        tap();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay]);
+  }, [tap, togglePlay]);
 
   const syncCheck = useCallback(async () => {
     const bytes = await client.syncCheck(strength, leadInMs / 1000);
@@ -375,15 +440,20 @@ export function BeatifyModal({
     onCommitted(project);
   }, [client, leadInMs, onCommitted, chosen, projectId, projectName, rulerGroup, strength]);
 
-  /** Another track: everything on show describes the old one. */
-  const choose = useCallback((id: number) => {
-    setChosen(id);
-    setBusy(true);
-    setError(null);
-    setStatus(null);
-    setAnalysis(null);
-    transportRef.current?.stop(0);
-  }, []);
+  /** Another track: everything on show describes the old one — the taps
+   *  included, since they are times in a file we are leaving. */
+  const choose = useCallback(
+    (id: number) => {
+      setChosen(id);
+      setBusy(true);
+      setError(null);
+      setStatus(null);
+      setAnalysis(null);
+      clearTaps();
+      transportRef.current?.stop(0);
+    },
+    [clearTaps],
+  );
 
   const dismiss = useCallback(() => {
     void client.cancel();
@@ -664,6 +734,20 @@ export function BeatifyModal({
                   height={WAVE_H}
                 />
               ))}
+              {/* Taps (§3.8a). AMBER, like the detections: this is what
+                  was played — or at least what somebody heard — never
+                  what the maths says. */}
+              {taps.map((t, i) => (
+                <line
+                  key={`tap-${i}`}
+                  className="beatify-tap"
+                  data-testid="beatify-tap-mark"
+                  x1={xOf(t)}
+                  x2={xOf(t)}
+                  y1={WAVE_H * 0.62}
+                  y2={WAVE_H}
+                />
+              ))}
             </>
           )}
         />
@@ -681,6 +765,105 @@ export function BeatifyModal({
               {agreement ? agreement.tempoSpreadBpm.toFixed(2) : '—'} BPM · phase{' '}
               {agreement ? agreement.phaseAgreementPct.toFixed(1) : '—'}%
               {agreement?.metricalSplit ? ' · metrical split' : ''}
+            </p>
+            {/* WHICH SEED the grid is fitted to. `analyze` takes the first
+                run, which is a position in a list rather than a merit: when
+                the seeds split, the one that was right may not be the one
+                that was first. Switching is a re-fit of detections already
+                in hand, never a second detection pass (MOD-26). */}
+            <div className="beatify-row">
+              <span>seed</span>
+              <select
+                data-testid="beatify-seed"
+                value={analysis?.seed ?? ''}
+                disabled={busy || !analysis || (analysis?.seeds.length ?? 0) < 2}
+                onChange={(e) => void applySeed(e.target.value)}
+              >
+                {(analysis?.seeds ?? []).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <span className="beatify-seed-hint">
+                fits the grid to that seed&apos;s beats — no re-detection
+              </span>
+            </div>
+            {/* Every seed's RAW intervals. The fitted BPM is a line through
+                the detections and hides what they did to get there; a
+                doubled beat lives in the minimum, a missed one in the
+                maximum, and the spread is how ragged the pass was. */}
+            {agreement && agreement.readings.length > 0 && (
+              <table className="beatify-seed-table" data-testid="beatify-seed-table">
+                <thead>
+                  <tr>
+                    <th>seed</th>
+                    <th>beats</th>
+                    <th>BPM</th>
+                    <th>gap avg</th>
+                    <th>min</th>
+                    <th>max</th>
+                    <th>sd</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agreement.readings.map((r) => {
+                    const s = seedStats(r);
+                    return (
+                      <tr
+                        key={r.seed}
+                        className={r.seed === analysis?.seed ? 'active' : undefined}
+                        data-testid={`beatify-seed-row-${r.seed}`}
+                        title={seedStatsLabel(r)}
+                      >
+                        <td>{r.seed}</td>
+                        <td>{r.beats}</td>
+                        <td>{r.bpm.toFixed(2)}</td>
+                        <td>{s.meanMs.toFixed(1)}</td>
+                        <td>{s.minMs.toFixed(1)}</td>
+                        <td>{s.maxMs.toFixed(1)}</td>
+                        <td>{s.sdMs.toFixed(1)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            <p className="beatify-seed-caption">
+              gap statistics are the RAW intervals between one seed&apos;s detections, in
+              milliseconds — a low minimum is a doubled beat, a high maximum a missed one, and
+              neither moves the fitted BPM.
+            </p>
+            {/* TAPS (§3.8a): a vote, not a data point. They pick which seed
+                and which metrical level to believe; they never move the
+                grid, and the latency they carry is measured and dropped. */}
+            <div className="beatify-row beatify-tap-row">
+              <button data-testid="beatify-tap" disabled={!analysis} onClick={tap}>
+                Tap the beat (T)
+              </button>
+              <span data-testid="beatify-tap-count">
+                {taps.length} tap{taps.length === 1 ? '' : 's'}
+              </span>
+              <button
+                data-testid="beatify-tap-use"
+                disabled={busy || !analysis || taps.length === 0}
+                onClick={() => void applyTaps()}
+              >
+                Use taps
+              </button>
+              <button
+                data-testid="beatify-tap-clear"
+                disabled={taps.length === 0}
+                onClick={clearTaps}
+              >
+                Clear
+              </button>
+            </div>
+            <p className="beatify-line beatify-tap-note" data-testid="beatify-tap-note">
+              {tapNote ??
+                'Play the audition and tap along on every beat. Your taps pick which seed and ' +
+                  'which metrical level to believe — they never move the grid, and the delay in ' +
+                  'your hand is measured and thrown away.'}
             </p>
             <div className="beatify-row">
               <button

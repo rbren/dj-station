@@ -16,6 +16,9 @@ import type {
   BeatifyProjectSummary,
   BeatifyScope,
   BeatifySeed,
+  BeatifyTapResult,
+  SeedReading,
+  TapVerdict,
   TrackerStatus,
 } from '../src/beatify';
 import type { LibraryClientApi, Track } from '../src/library';
@@ -51,6 +54,25 @@ const GRID = { bpm: 120, period: 0.5, phase: 0.5, beats: 64 };
  *  can tell which of the two the modal is quantizing against. */
 const SOURCE_GRID = { bpm: 120, period: 0.5, phase: 0.2, beats: 120 };
 
+/** The three checkpoints a `beat_this` run produces. */
+const SEEDS = ['final0', 'final1', 'final2'];
+
+/** One seed's row in the agreement: a steady 120 BPM pass unless told
+ *  otherwise. The interval stats are RAW, so a test can hand a seed a
+ *  doubled or missed beat without touching its fitted BPM. */
+function seedReading(seed: string, overrides: Partial<SeedReading> = {}): SeedReading {
+  return {
+    seed,
+    bpm: 120,
+    beats: 64,
+    ibiMean: 0.5,
+    ibiMin: 0.5,
+    ibiMax: 0.5,
+    ibiVariance: 0,
+    ...overrides,
+  };
+}
+
 function analysis(overrides: Partial<BeatifyAnalysis> = {}): BeatifyAnalysis {
   return {
     source: {
@@ -72,9 +94,11 @@ function analysis(overrides: Partial<BeatifyAnalysis> = {}): BeatifyAnalysis {
       tempoSpreadBpm: 0,
       phaseAgreementPct: 100,
       metricalSplit: false,
-      readings: [{ seed: 'dsp', bpm: 120, beats: 64 }],
+      readings: [seedReading('dsp')],
       disagreementSpans: [],
     },
+    seed: 'dsp',
+    seeds: ['dsp'],
     beats: Array.from({ length: 64 }, (_, i) => 0.5 + i * 0.5),
     confidence: Array.from({ length: 64 }, () => 0.8),
     drift: [{ startSecs: 10, endSecs: 14, deltaBpm: 2.2 }],
@@ -93,6 +117,59 @@ function analysis(overrides: Partial<BeatifyAnalysis> = {}): BeatifyAnalysis {
     metricalFlag: false,
     outputSecs: 32.5,
     ...overrides,
+  };
+}
+
+/** A `beat_this` analysis: three seeds, the second of which doubled a
+ *  beat and missed another — same fitted BPM, different raw intervals. */
+function threeSeeds(overrides: Partial<BeatifyAnalysis> = {}): BeatifyAnalysis {
+  return analysis({
+    tracker: 'beat_this/final0+final1+final2',
+    seed: 'final0',
+    seeds: SEEDS,
+    agreement: {
+      verdict: 'mostlyAgreed',
+      tempoSpreadBpm: 0.31,
+      phaseAgreementPct: 94.5,
+      metricalSplit: false,
+      readings: [
+        seedReading('final0'),
+        seedReading('final1', {
+          beats: 65,
+          ibiMean: 0.492,
+          ibiMin: 0.25,
+          ibiMax: 1.0,
+          ibiVariance: 0.0081,
+        }),
+        seedReading('final2', { bpm: 119.7, ibiMean: 0.501 }),
+      ],
+      disagreementSpans: [[12, 15]],
+    },
+    ...overrides,
+  });
+}
+
+function tapVerdict(overrides: Partial<TapVerdict> = {}): TapVerdict {
+  return {
+    outcome: 'chose',
+    taps: 12,
+    tapBpm: 119.4,
+    selfConcentration: 0.93,
+    seed: 'final1',
+    reading: { factor: 1, halfShift: false },
+    concentration: 0.95,
+    offsetSecs: 0.048,
+    levelRatio: 1.01,
+    detail: '12 taps at 119.4 BPM chose seed final1 · your taps run 48 ms late (not applied)',
+    ...overrides,
+  };
+}
+
+function tapResult(overrides: Partial<BeatifyTapResult> = {}): BeatifyTapResult {
+  const verdict = overrides.verdict ?? tapVerdict();
+  return {
+    verdict,
+    analysis: overrides.analysis ?? threeSeeds({ seed: verdict.seed || 'final0' }),
   };
 }
 
@@ -200,6 +277,8 @@ function clientMock(overrides: Partial<BeatifyClientApi> = {}): BeatifyClientApi
     trackerStatus: vi.fn(async () => STATUS),
     analyze: vi.fn(async () => analysis()),
     setReading: vi.fn(async (reading) => analysis({ reading, grid: { ...GRID, bpm: 240 } })),
+    setSeed: vi.fn(async (seed: string) => analysis({ seed, seeds: SEEDS })),
+    taps: vi.fn(async () => tapResult()),
     meters: vi.fn(async (strength: number) => ({
       strength,
       anchorStride: 4,
@@ -434,6 +513,126 @@ describe('Beatify tab', () => {
     );
     // One analyze call: the tracker ran once, on open.
     expect((client.analyze as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
+  // --- seeds and taps (§3.8a) -------------------------------------------
+
+  it('shows every seed with its RAW interval statistics', async () => {
+    const client = clientMock({ analyze: vi.fn(async () => threeSeeds()) });
+    await openTrack(client);
+    await screen.findByTestId('beatify-seed-table');
+
+    // The doubled beat is in the minimum, the missed one in the maximum,
+    // and neither has moved the fitted BPM — which is the whole reason
+    // the raw intervals are shown beside it.
+    const row = screen.getByTestId('beatify-seed-row-final1');
+    const cells = Array.from(row.querySelectorAll('td')).map((c) => c.textContent);
+    expect(cells).toEqual(['final1', '65', '120.00', '492.0', '250.0', '1000.0', '90.0']);
+
+    // A steady seed's spread is zero, and its gap is the period.
+    const steady = screen.getByTestId('beatify-seed-row-final0');
+    const steadyCells = Array.from(steady.querySelectorAll('td')).map((c) => c.textContent);
+    expect(steadyCells.slice(3)).toEqual(['500.0', '500.0', '500.0', '0.0']);
+  });
+
+  it('fits the grid to a chosen seed without re-running the tracker (MOD-26)', async () => {
+    const client = clientMock({ analyze: vi.fn(async () => threeSeeds()) });
+    await openTrack(client);
+    const picker = (await screen.findByTestId('beatify-seed')) as HTMLSelectElement;
+    expect(picker.value).toBe('final0');
+    expect(Array.from(picker.options).map((o) => o.value)).toEqual(SEEDS);
+
+    fireEvent.change(picker, { target: { value: 'final2' } });
+    await waitFor(() => expect(client.setSeed).toHaveBeenCalledWith('final2', expect.any(Number)));
+    // The tracker ran once, on open — switching seeds is a re-fit of
+    // detections already in hand.
+    expect((client.analyze as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    await waitFor(() =>
+      expect((screen.getByTestId('beatify-seed') as HTMLSelectElement).value).toBe('final2'),
+    );
+  });
+
+  it('offers no seed choice when there is only one seed', async () => {
+    const client = clientMock();
+    await openTrack(client);
+    // The DSP fallback is one tracker: a picker with a single option is
+    // a control that cannot do anything.
+    await waitFor(() =>
+      expect((screen.getByTestId('beatify-seed') as HTMLSelectElement).disabled).toBe(true),
+    );
+  });
+
+  it('records taps at the transport position and hands them over on Use taps', async () => {
+    const client = clientMock({ analyze: vi.fn(async () => threeSeeds()) });
+    await openTrack(client);
+    const tapButton = await screen.findByTestId('beatify-tap');
+
+    fireEvent.click(tapButton);
+    fireEvent.click(tapButton);
+    fireEvent.keyDown(window, { key: 't' });
+    expect(screen.getByTestId('beatify-tap-count').textContent).toBe('3 taps');
+    // Auto-repeat is the keyboard's tempo, not the user's.
+    fireEvent.keyDown(window, { key: 't', repeat: true });
+    expect(screen.getByTestId('beatify-tap-count').textContent).toBe('3 taps');
+
+    fireEvent.click(screen.getByTestId('beatify-tap-use'));
+    await waitFor(() =>
+      expect(client.taps).toHaveBeenCalledWith(
+        [expect.any(Number), expect.any(Number), expect.any(Number)],
+        expect.any(Number),
+      ),
+    );
+  });
+
+  it('adopts the analysis the taps chose and reports the discarded latency', async () => {
+    const client = clientMock({ analyze: vi.fn(async () => threeSeeds()) });
+    await openTrack(client);
+    fireEvent.click(await screen.findByTestId('beatify-tap'));
+    fireEvent.click(screen.getByTestId('beatify-tap-use'));
+
+    await waitFor(() =>
+      expect((screen.getByTestId('beatify-seed') as HTMLSelectElement).value).toBe('final1'),
+    );
+    // The lag is told, and told that it was not used: a grid that had
+    // absorbed it would be late in every clip cut from it, for ever,
+    // with nothing downstream able to notice.
+    const note = screen.getByTestId('beatify-tap-note').textContent ?? '';
+    expect(note).toContain('48 ms late');
+    expect(note).toContain('not applied');
+  });
+
+  it('leaves the grid alone when the taps are refused, and says why', async () => {
+    const refused = tapResult({
+      verdict: tapVerdict({
+        outcome: 'uneven',
+        seed: '',
+        detail: 'those taps were too uneven to read — nothing changed',
+      }),
+    });
+    const client = clientMock({
+      analyze: vi.fn(async () => threeSeeds()),
+      taps: vi.fn(async () => refused),
+    });
+    await openTrack(client);
+    fireEvent.click(await screen.findByTestId('beatify-tap'));
+    fireEvent.click(screen.getByTestId('beatify-tap-use'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('beatify-tap-note').textContent).toContain('too uneven'),
+    );
+    // Still the seed the analysis opened on: a refusal changes nothing.
+    expect((screen.getByTestId('beatify-seed') as HTMLSelectElement).value).toBe('final0');
+  });
+
+  it('draws the taps on the waveform and clears them with the track', async () => {
+    const client = clientMock({ analyze: vi.fn(async () => threeSeeds()) });
+    await openTrack(client);
+    fireEvent.click(await screen.findByTestId('beatify-tap'));
+    fireEvent.click(screen.getByTestId('beatify-tap'));
+    expect(screen.getAllByTestId('beatify-tap-mark')).toHaveLength(2);
+
+    fireEvent.click(screen.getByTestId('beatify-tap-clear'));
+    expect(screen.queryAllByTestId('beatify-tap-mark')).toHaveLength(0);
   });
 
   it('quantizes the region to the beats it can see, not to the render (MOD-A9)', async () => {

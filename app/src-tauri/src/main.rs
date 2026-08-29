@@ -2902,6 +2902,8 @@ fn main() {
             beatify::beatify_tracker_status,
             beatify::beatify_analyze,
             beatify::beatify_set_reading,
+            beatify::beatify_set_seed,
+            beatify::beatify_taps,
             beatify::beatify_meters,
             beatify::beatify_preview,
             beatify::beatify_sync_check,

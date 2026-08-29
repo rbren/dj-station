@@ -371,6 +371,38 @@ pub struct SeedReading {
     pub seed: String,
     pub bpm: f64,
     pub beats: usize,
+    /// Mean gap between this seed's detections, seconds. The four fields
+    /// below are the RAW intervals — nothing rejected — because that is
+    /// what makes them diagnostic: a doubled beat shows up in `ibi_min`
+    /// and a missed one in `ibi_max`, which is precisely the news the
+    /// fitted BPM hides. Defaulted so records written before they existed
+    /// still read.
+    #[serde(default)]
+    pub ibi_mean: f64,
+    #[serde(default)]
+    pub ibi_min: f64,
+    #[serde(default)]
+    pub ibi_max: f64,
+    /// Population variance of those intervals, seconds².
+    #[serde(default)]
+    pub ibi_variance: f64,
+}
+
+/// Raw interval statistics of one run: mean, min, max, variance.
+fn ibi_stats(beats: &[f64]) -> (f64, f64, f64, f64) {
+    let ibis: Vec<f64> = beats.windows(2).map(|w| w[1] - w[0]).collect();
+    if ibis.is_empty() {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    let n = ibis.len() as f64;
+    let mean = ibis.iter().sum::<f64>() / n;
+    let var = ibis.iter().map(|d| (d - mean) * (d - mean)).sum::<f64>() / n;
+    (
+        mean,
+        ibis.iter().cloned().fold(f64::INFINITY, f64::min),
+        ibis.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        var,
+    )
 }
 
 /// The three axes of MOD-A4, never collapsed before the user sees them.
@@ -392,10 +424,17 @@ pub const PHASE_TOLERANCE_SECS: f64 = 0.020;
 pub fn score_agreement(runs: &[(String, Vec<f64>)]) -> Agreement {
     let readings: Vec<SeedReading> = runs
         .iter()
-        .map(|(seed, beats)| SeedReading {
-            seed: seed.clone(),
-            bpm: fit_beats(beats).map(|f| f.bpm()).unwrap_or(0.0),
-            beats: beats.len(),
+        .map(|(seed, beats)| {
+            let (ibi_mean, ibi_min, ibi_max, ibi_variance) = ibi_stats(beats);
+            SeedReading {
+                seed: seed.clone(),
+                bpm: fit_beats(beats).map(|f| f.bpm()).unwrap_or(0.0),
+                beats: beats.len(),
+                ibi_mean,
+                ibi_min,
+                ibi_max,
+                ibi_variance,
+            }
         })
         .collect();
     if runs.len() < 2 {
@@ -472,6 +511,351 @@ fn nearest_distance(beats: &[f64], t: f64) -> f64 {
         .iter()
         .map(|b| (b - t).abs())
         .fold(f64::INFINITY, f64::min)
+}
+
+// ---------------------------------------------------------------------------
+// Tap reconciliation (§3.8a)
+// ---------------------------------------------------------------------------
+//
+// A TAP IS A VOTE, NOT A DATA POINT.
+//
+// The fit is two numbers over hundreds of detections, and a tracker's
+// beats land within a few milliseconds where a human's land within a few
+// tens. Least squares weights by 1/σ², so a tap carries something like a
+// sixteenth of a detection's weight: twenty taps against six hundred
+// detections would move the grid by nothing measurable. Feeding taps into
+// `fit_beats` is arithmetic theatre.
+//
+// What taps ARE good at is the failure the models actually have. A seed
+// does not miss by 8 ms; it hears half-time, or hears the offbeat, or two
+// seeds hear one thing and the third hears another. Those are CATEGORICAL
+// errors, and a human tapping along settles them at once. So the taps
+// never move a grid — they choose between the grids already on the table:
+// every seed, at every metrical level `Reading` can express.
+//
+// The latency is measured and then THROWN AWAY. Taps arrive late (motor
+// plus output latency) by an unknown constant, and if that constant were
+// allowed to move `phase`, the user's reaction time would be rendered
+// into `warped.wav`, every clip cut from it would be late forever, and —
+// because the output contract is `phase + n × period` with nothing to
+// compare against — nothing downstream could ever notice.
+
+/// Below this a tap sequence is not evidence: the resultant of a few
+/// random times is high by luck alone (R ≈ 1/√n).
+pub const MIN_TAPS: usize = 8;
+/// How consistent the taps must be WITH THEMSELVES before they are
+/// allowed an opinion about anything else.
+pub const TAP_SELF_R_MIN: f64 = 0.70;
+/// Concentration a candidate must reach to be chosen at all.
+pub const TAP_MATCH_MIN: f64 = 0.55;
+/// Metrical levels offered to the taps, as `Reading::factor`. A 2:1
+/// misread is the whole failure mode; deeper relatives are not a thing
+/// the trackers do.
+pub const TAP_LEVELS: [f64; 3] = [0.5, 1.0, 2.0];
+/// Width of the level weight in octaves: ±3 % tapping scores ~1, a
+/// half-time tap scores ~0.
+const TAP_LEVEL_SIGMA: f64 = 0.18;
+/// A lag longer than this is not a human's latency any more, so the
+/// choice is reported with that caveat rather than quietly trusted.
+pub const TAP_LAG_IMPLAUSIBLE_SECS: f64 = 0.12;
+
+const TAU: f64 = std::f64::consts::TAU;
+
+/// How well a tap sequence sits on one grid.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TapAlignment {
+    /// Circular concentration (mean resultant length), 0..=1. Invariant
+    /// to the unknown latency, which is exactly why it is the measure.
+    pub concentration: f64,
+    /// Mean lag behind the grid line, wrapped into ±half a period. The
+    /// user's body, not the track's phase.
+    pub offset_secs: f64,
+}
+
+/// Concentration and mean lag of `taps` against the line
+/// `phase + n × period`.
+pub fn tap_alignment(taps: &[f64], period: f64, phase: f64) -> TapAlignment {
+    if taps.is_empty() || !(period.is_finite() && period > 0.0) {
+        return TapAlignment {
+            concentration: 0.0,
+            offset_secs: 0.0,
+        };
+    }
+    let (sx, sy) = taps.iter().fold((0.0, 0.0), |(x, y), t| {
+        let angle = TAU * ((t - phase) / period).rem_euclid(1.0);
+        (x + angle.cos(), y + angle.sin())
+    });
+    let n = taps.len() as f64;
+    TapAlignment {
+        concentration: (sx * sx + sy * sy).sqrt() / n,
+        offset_secs: sy.atan2(sx) / TAU * period,
+    }
+}
+
+/// What a tap sequence turned out to be worth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TapOutcome {
+    /// Fewer than [`MIN_TAPS`].
+    TooFew,
+    /// The taps do not agree with themselves.
+    Uneven,
+    /// Consistent taps that fit none of the candidates — the user is
+    /// hearing something no seed heard, which is news, not an error.
+    NoMatch,
+    /// The taps pick a seed and a reading.
+    Chose,
+}
+
+/// The taps' answer: which seed, read how, and every number behind it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TapVerdict {
+    pub outcome: TapOutcome,
+    pub taps: usize,
+    /// Tempo of the tapping itself, from the median gap.
+    pub tap_bpm: f64,
+    /// Concentration of the taps against their own median-gap grid.
+    pub self_concentration: f64,
+    /// Chosen seed, empty unless [`TapOutcome::Chose`].
+    pub seed: String,
+    pub reading: Reading,
+    /// Concentration against the chosen candidate.
+    pub concentration: f64,
+    /// Measured tap latency — REPORTED, never applied to the grid.
+    pub offset_secs: f64,
+    /// Tap gap over the chosen candidate's period: 1 is tapping every
+    /// beat, 4 is tapping bars at a candidate whose beat is four times
+    /// as fast.
+    pub level_ratio: f64,
+    /// One line, for the modal to show verbatim.
+    pub detail: String,
+}
+
+impl TapVerdict {
+    fn refused(outcome: TapOutcome, taps: usize, tap_bpm: f64, self_r: f64, detail: &str) -> Self {
+        TapVerdict {
+            outcome,
+            taps,
+            tap_bpm,
+            self_concentration: self_r,
+            seed: String::new(),
+            reading: Reading::default(),
+            concentration: 0.0,
+            offset_secs: 0.0,
+            level_ratio: 0.0,
+            detail: detail.to_string(),
+        }
+    }
+}
+
+/// The tempo of the tapping itself, and how steadily it was kept.
+///
+/// The period comes from a least-squares fit over the whole sequence, not
+/// the median gap: a median is a local statistic, and judging twenty taps
+/// against a line drawn from the first one and a typical gap accumulates
+/// the error of every gap before it — a hand 2 % fast reads as having no
+/// pulse at all by the twentieth tap. [`fit_beats`] is the same line the
+/// detections get.
+fn tap_pulse(taps: &[f64]) -> Option<(f64, f64)> {
+    let fit = fit_beats(taps)?;
+    let r = tap_alignment(taps, fit.period, fit.phase).concentration;
+    Some((fit.period, r))
+}
+
+/// How much a candidate period is penalised for not being what the user
+/// was tapping. Gaussian in octaves, so ×2 and ÷2 are punished equally.
+fn level_weight(ratio: f64) -> f64 {
+    if !(ratio.is_finite() && ratio > 0.0) {
+        return 0.0;
+    }
+    let octaves = ratio.log2();
+    (-(octaves * octaves) / (2.0 * TAP_LEVEL_SIGMA * TAP_LEVEL_SIGMA)).exp()
+}
+
+/// Choose the grid the taps agree with, among every seed at every
+/// metrical level (§3.8a).
+///
+/// Nothing here fits anything to the taps: `runs` are the detections, the
+/// candidates are their fits under each [`TAP_LEVELS`] reading, and the
+/// taps only say which one they land on. The half-beat phase is decided
+/// by the measured lag — the one place the latency is USED rather than
+/// discarded, because a lag past a quarter period is not a late tap, it
+/// is a tap on the line in between.
+pub fn reconcile_taps(runs: &[(String, Vec<f64>)], taps: &[f64]) -> TapVerdict {
+    let mut taps: Vec<f64> = taps.iter().copied().filter(|t| t.is_finite()).collect();
+    taps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = taps.len();
+    if n < MIN_TAPS {
+        return TapVerdict::refused(
+            TapOutcome::TooFew,
+            n,
+            0.0,
+            0.0,
+            &format!("{n} taps — keep going, {MIN_TAPS} is the least that means anything"),
+        );
+    }
+    let Some((tap_period, self_r)) = tap_pulse(&taps) else {
+        return TapVerdict::refused(TapOutcome::Uneven, n, 0.0, 0.0, "those taps had no tempo");
+    };
+    let tap_bpm = 60.0 / tap_period;
+    // Self-consistency FIRST: taps that disagree with themselves must not
+    // be able to overrule three models that agree.
+    if self_r < TAP_SELF_R_MIN {
+        return TapVerdict::refused(
+            TapOutcome::Uneven,
+            n,
+            tap_bpm,
+            self_r,
+            "those taps were too uneven to read — nothing changed",
+        );
+    }
+
+    let mut best: Option<(f64, TapVerdict)> = None;
+    // Kept separately, on raw concentration alone: when nothing scores,
+    // the argmax of a field of zeroes says nothing, and the candidate the
+    // taps actually LAND on — at the wrong rate — is what explains why.
+    let mut closest: Option<(f64, f64)> = None;
+    for (seed, beats) in runs {
+        let Some(base) = fit_beats(beats) else {
+            continue;
+        };
+        for factor in TAP_LEVELS {
+            let level = apply_reading(
+                &base,
+                Reading {
+                    factor,
+                    half_shift: false,
+                },
+            );
+            let (period, phase) = (level.period, level.phase);
+            if !(period.is_finite() && period > 0.0) {
+                continue;
+            }
+            let on = tap_alignment(&taps, period, phase);
+            // Half a period away is the offbeat, not a slow hand.
+            let half_shift = on.offset_secs.abs() > period / 4.0;
+            let offset = if half_shift {
+                let shifted = tap_alignment(&taps, period, phase + period / 2.0);
+                shifted.offset_secs
+            } else {
+                on.offset_secs
+            };
+            let ratio = tap_period / period;
+            if closest.is_none_or(|(r, _)| on.concentration > r) {
+                closest = Some((on.concentration, ratio));
+            }
+            let score = on.concentration * level_weight(ratio);
+            // A tie is two candidates describing the SAME grid — a seed
+            // that heard the pulse, and another that heard half of it and
+            // is being doubled back. Prefer the one that needs no
+            // correction: it is the reading whose detections are really
+            // there, and the one whose ÷2/×2 buttons will then read as
+            // untouched.
+            if best
+                .as_ref()
+                .is_some_and(|(b, v)| *b > score + 1e-9 || (*b >= score - 1e-9 && !corrected(v)))
+            {
+                continue;
+            }
+            best = Some((
+                score,
+                TapVerdict {
+                    outcome: TapOutcome::Chose,
+                    taps: n,
+                    tap_bpm,
+                    self_concentration: self_r,
+                    seed: seed.clone(),
+                    reading: Reading { factor, half_shift },
+                    concentration: on.concentration,
+                    offset_secs: offset,
+                    level_ratio: ratio,
+                    detail: String::new(),
+                },
+            ));
+        }
+    }
+
+    let Some((score, mut verdict)) = best else {
+        return TapVerdict::refused(
+            TapOutcome::NoMatch,
+            n,
+            tap_bpm,
+            self_r,
+            "no seed produced a grid to compare those taps against",
+        );
+    };
+    if score < TAP_MATCH_MIN {
+        let mut refusal = TapVerdict::refused(TapOutcome::NoMatch, n, tap_bpm, self_r, "");
+        // The ratio worth reporting belongs to the grid the taps LAND on,
+        // not to whichever candidate won a contest between near-zeroes.
+        let (concentration, ratio) = closest.unwrap_or((0.0, verdict.level_ratio));
+        refusal.concentration = concentration;
+        refusal.level_ratio = ratio;
+        refusal.detail = no_match_detail(concentration, ratio, tap_bpm);
+        return refusal;
+    }
+    verdict.detail = chose_detail(&verdict);
+    verdict
+}
+
+/// Did this candidate need a reading correction to fit the taps?
+fn corrected(v: &TapVerdict) -> bool {
+    (v.reading.factor - 1.0).abs() > 1e-9 || v.reading.half_shift
+}
+
+/// Why consistent taps matched nothing.
+///
+/// Taps that sit ON a grid but run at a whole multiple of it are the
+/// commonest case by far — someone counting bars, or every other beat —
+/// and saying so is worth more than any score. Anything else is a real
+/// disagreement, which is news about the material rather than a mistake.
+fn no_match_detail(concentration: f64, ratio: f64, tap_bpm: f64) -> String {
+    let every = ratio.round();
+    if concentration > TAP_MATCH_MIN && ratio > 1.5 && (ratio - every).abs() < 0.15 * every {
+        return format!(
+            "those taps landed on the beat but ran one per {every:.0} — Beatify counts beats, \
+             not bars, so tap every beat"
+        );
+    }
+    format!(
+        "your taps ({tap_bpm:.1} BPM) match none of the readings — the seeds may all be hearing \
+         this differently from you; try tapping a steadier stretch, or re-run on a smaller region"
+    )
+}
+
+fn chose_detail(v: &TapVerdict) -> String {
+    let level = if v.reading.factor > 1.0 {
+        " ×2"
+    } else if v.reading.factor < 1.0 {
+        " ÷2"
+    } else {
+        ""
+    };
+    let shift = if v.reading.half_shift {
+        " · shifted half a beat onto the pulse you tapped"
+    } else {
+        ""
+    };
+    let lag = format!(
+        " · your taps run {:.0} ms {} (not applied)",
+        v.offset_secs.abs() * 1000.0,
+        if v.offset_secs >= 0.0 {
+            "late"
+        } else {
+            "early"
+        },
+    );
+    let caveat = if v.offset_secs.abs() > TAP_LAG_IMPLAUSIBLE_SECS {
+        " — far enough that the beat you meant is a guess"
+    } else {
+        ""
+    };
+    format!(
+        "{} taps at {:.1} BPM chose seed {}{}{}{}{}",
+        v.taps, v.tap_bpm, v.seed, level, shift, lag, caveat
+    )
 }
 
 /// Group scattered times into spans, joining anything closer than `gap`.

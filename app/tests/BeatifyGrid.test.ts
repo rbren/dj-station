@@ -21,6 +21,8 @@ import {
   SCOPE_PRE_MAX_MS,
   SCOPE_PRE_MS,
   scopePreMs,
+  seedStats,
+  seedStatsLabel,
   selectionLabel,
   snapSelection,
   snapTime,
@@ -161,6 +163,44 @@ describe('warp slider', () => {
     for (const s of [0.05, 0.2, 0.4, 0.6, 0.8, 0.95]) {
       expect(anchorStride(s)).toBe(expected(s));
     }
+  });
+});
+
+describe('seed statistics (§3.8a)', () => {
+  const reading = {
+    seed: 'final1',
+    bpm: 120,
+    beats: 65,
+    ibiMean: 0.492,
+    ibiMin: 0.25,
+    ibiMax: 1.0,
+    ibiVariance: 0.0081,
+  };
+
+  it('reads the intervals in milliseconds, spread as a standard deviation', () => {
+    const s = seedStats(reading);
+    expect(s.meanMs).toBeCloseTo(492, 6);
+    expect(s.minMs).toBeCloseTo(250, 6);
+    expect(s.maxMs).toBeCloseTo(1000, 6);
+    // The stored variance is seconds², which nobody can judge by eye;
+    // its root beside a 492 ms gap is a number that means something.
+    expect(s.sdMs).toBeCloseTo(90, 6);
+  });
+
+  it('survives a seed whose variance is zero or absent', () => {
+    expect(seedStats({ ...reading, ibiVariance: 0 }).sdMs).toBe(0);
+    // Records written before the stats existed default to 0 in Rust.
+    expect(seedStats({ ...reading, ibiVariance: -0 }).sdMs).toBe(0);
+  });
+
+  it('labels a seed with the numbers the fitted BPM hides', () => {
+    // Same tempo, different passes: only the raw intervals tell them
+    // apart, which is why the label carries all four.
+    const label = seedStatsLabel(reading);
+    expect(label).toContain('65 beats');
+    expect(label).toContain('120.00 BPM');
+    expect(label).toContain('250.0–1000.0');
+    expect(label).toContain('sd 90.0 ms');
   });
 });
 

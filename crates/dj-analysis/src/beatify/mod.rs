@@ -34,7 +34,8 @@ use crate::decode::AudioData;
 pub use build::Lay;
 pub use detect::{BeatRun, BeatThisTracker, BeatTracker, DspTracker, TrackerStatus};
 pub use grid::{
-    Agreement, Anchor, Fit, Grid, Quality, Reading, SeedReading, Sweep, SweepPoint, Verdict,
+    Agreement, Anchor, Fit, Grid, Quality, Reading, SeedReading, Sweep, SweepPoint, TapAlignment,
+    TapOutcome, TapVerdict, Verdict,
 };
 pub use store::BEATIFY_DIR_NAME;
 pub use warp::WarpMap;
@@ -49,6 +50,13 @@ pub const DEFAULT_RULER_GROUP: u32 = 4;
 #[derive(Debug, Clone)]
 pub struct Analysis {
     pub tracker: String,
+    /// Every tracker pass, kept whole. The grid is fitted to ONE of them
+    /// (`seed`); the others are what the agreement score is made of, what
+    /// the seed picker offers, and what taps choose between — none of
+    /// which can re-run the tracker (MOD-26).
+    pub runs: Vec<BeatRun>,
+    /// Which run `beats` came from.
+    pub seed: String,
     /// Detections of the reference seed, source seconds.
     pub beats: Vec<f64>,
     pub confidence: Vec<f32>,
@@ -188,6 +196,8 @@ impl Analysis {
         let base = base_fit(&self.beats)?;
         assemble(
             self.tracker.clone(),
+            self.runs.clone(),
+            self.seed.clone(),
             self.beats.clone(),
             self.confidence.clone(),
             self.agreement.clone(),
@@ -196,6 +206,65 @@ impl Analysis {
             self.region,
             self.lead_in,
         )
+    }
+
+    /// Fit the grid to a DIFFERENT seed's detections (§3.8a).
+    ///
+    /// `analyze` takes the first run as reference, which is a position in
+    /// a list rather than a merit; when the seeds split, the one that was
+    /// right may not be the one that was first. Every run is already in
+    /// hand, so this is a re-fit, never a re-run (MOD-26) — but confidence
+    /// and the lead-in are measurements of THESE beats against the audio,
+    /// so they are taken again rather than carried over.
+    pub fn with_seed(&self, seed: &str, audio: &AudioData, reading: Reading) -> Result<Analysis> {
+        let run = self
+            .runs
+            .iter()
+            .find(|r| r.seed == seed)
+            .ok_or_else(|| anyhow!("no seed called {seed} in this analysis"))?;
+        if run.beats.len() < 4 {
+            return Err(anyhow!("seed {seed} found too few beats to fit a grid"));
+        }
+        let beats = run.beats.clone();
+        let mono = audio.mono_mix();
+        let confidence = grid::beat_confidence(&mono, audio.sample_rate, &beats);
+        let lead_in = grid::measure_lead_in(&mono, audio.sample_rate, &beats);
+        let base = base_fit(&beats)?;
+        assemble(
+            self.tracker.clone(),
+            self.runs.clone(),
+            seed.to_string(),
+            beats,
+            confidence,
+            self.agreement.clone(),
+            base,
+            reading,
+            self.region,
+            lead_in,
+        )
+    }
+
+    /// Let a tap sequence choose the seed and the reading (§3.8a).
+    ///
+    /// The taps do not touch the grid: [`grid::reconcile_taps`] picks a
+    /// candidate that already exists and this re-seats the analysis onto
+    /// it. A refused verdict changes nothing and says why.
+    pub fn with_taps(
+        &self,
+        taps: &[f64],
+        audio: &AudioData,
+    ) -> Result<(Analysis, grid::TapVerdict)> {
+        let runs: Vec<(String, Vec<f64>)> = self
+            .runs
+            .iter()
+            .map(|r| (r.seed.clone(), r.beats.clone()))
+            .collect();
+        let verdict = grid::reconcile_taps(&runs, taps);
+        if verdict.outcome != grid::TapOutcome::Chose {
+            return Ok((self.clone(), verdict));
+        }
+        let next = self.with_seed(&verdict.seed, audio, verdict.reading)?;
+        Ok((next, verdict))
     }
 }
 
@@ -207,6 +276,8 @@ fn base_fit(beats: &[f64]) -> Result<Fit> {
 #[allow(clippy::too_many_arguments)]
 fn assemble(
     tracker: String,
+    runs: Vec<BeatRun>,
+    seed: String,
     beats: Vec<f64>,
     confidence: Vec<f32>,
     agreement: Agreement,
@@ -233,6 +304,8 @@ fn assemble(
     let metrical_flag = grid::ibi_bimodal(&beats);
     Ok(Analysis {
         tracker,
+        runs,
+        seed,
         beats,
         confidence,
         agreement,
@@ -260,11 +333,10 @@ pub fn analyze(
     reading: Reading,
 ) -> Result<Analysis> {
     let runs = tracker.detect(audio, region)?;
-    let reference = runs
+    let first = runs
         .first()
-        .ok_or_else(|| anyhow!("the tracker returned no beats"))?
-        .beats
-        .clone();
+        .ok_or_else(|| anyhow!("the tracker returned no beats"))?;
+    let (seed, reference) = (first.seed.clone(), first.beats.clone());
     if reference.len() < 4 {
         return Err(anyhow!("too few beats in that region to fit a grid"));
     }
@@ -283,6 +355,8 @@ pub fn analyze(
         .unwrap_or([0.0, audio.duration_secs()]);
     assemble(
         tracker.id(),
+        runs,
+        seed,
         reference,
         confidence,
         agreement,

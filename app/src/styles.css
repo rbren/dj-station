@@ -4835,6 +4835,56 @@ body {
   font-size: var(--fs-sm);
 }
 
+/* Taps (§3.8a). Amber, like the detections: what somebody heard, never
+   what the maths says. */
+.beatify-tap {
+  stroke: var(--cue);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.85;
+}
+
+.beatify-tap-row {
+  align-items: center;
+}
+
+.beatify-tap-note {
+  max-width: 72em;
+}
+
+.beatify-seed-hint,
+.beatify-seed-caption {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+}
+
+.beatify-seed-caption {
+  margin: 0;
+  max-width: 72em;
+}
+
+.beatify-seed-table {
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.beatify-seed-table th,
+.beatify-seed-table td {
+  padding: 2px 10px 2px 0;
+  text-align: right;
+  color: var(--ink-dim);
+}
+
+.beatify-seed-table th:first-child,
+.beatify-seed-table td:first-child {
+  text-align: left;
+}
+
+.beatify-seed-table tr.active td {
+  color: var(--ink);
+}
+
 .beatify-modal button.active,
 .beatify-transport button.active {
   border-color: var(--brand);

@@ -1345,6 +1345,41 @@ beatify::build`.
   tested default — and the header carries the install hint. Multi-seed
   agreement (three `beat_this` checkpoints) is what fills the verdict
   line; a single tracker reports `singleTracker`, never a fake consensus.
+- A TAP IS A VOTE, NOT A DATA POINT (§3.8a, `grid::reconcile_taps`). A
+  hand keeps time to ±30–50 ms where the models are inside 5–10 ms
+  (`IN_BAND_SECS`), so taps must NEVER reach `fit_beats`: twenty of them
+  against six hundred detections would only add noise to a line that is
+  already better than they are. What the models get wrong is not
+  milliseconds but WHICH PULSE — half-time, double-time, the offbeat —
+  and that a tapping hand settles at once. So the taps CHOOSE among the
+  grids the seeds already produced: every (seed × `TAP_LEVELS` reading)
+  candidate is scored by the circular concentration of the taps against
+  it, weighted by `level_weight` (Gaussian in octaves, so ×2 and ÷2 are
+  punished alike), and the winner is adopted whole. Three refusals come
+  before any of that and each says why: fewer than `MIN_TAPS`, taps that
+  disagree with THEMSELVES (`TAP_SELF_R_MIN`, measured against a
+  `fit_beats` line through the taps — never a median gap and a first tap,
+  whose error accumulates over the sequence), and a best score under
+  `TAP_MATCH_MIN`; a refusal changes nothing at all. The tap LATENCY is
+  measured, reported and DISCARDED — applying it would render the user's
+  reaction time into the file, where every clip cut from it inherits the
+  lag and nothing downstream can see it. Ties prefer the candidate that
+  needed no reading correction (the seed that heard the pulse, not one
+  being doubled back), and a no-match reports the ratio of the grid the
+  taps actually LAND on, which is what makes "you were tapping bars"
+  sayable. Pinned by the tap cases in
+  `crates/dj-analysis/tests/beatify.rs`.
+- Which SEED the grid is fitted to is a choice, not a given: `Analysis`
+  keeps every `BeatRun` plus the selected `seed`, `analyze` takes the
+  first run (a position in a list, not a merit) and
+  `beatify_set_seed`/`with_seed` re-fits to another one. Like the ÷2/×2
+  buttons that is a re-fit of detections already in hand and NEVER a
+  second detection pass (MOD-26) — the taps use the same door. The
+  modal's debug table shows each seed's RAW interval statistics
+  (`SeedReading`'s `ibi_mean/min/max/variance`, formatted by `seedStats`
+  in ms): the fitted BPM is a line through the detections and hides how
+  they got there, where a doubled beat shows in the minimum and a missed
+  one in the maximum without either moving the fit.
 - Beatify's meter law exists twice: `grid.rs` (`FLAM_GREEN_MS`,
   `STRETCH_GREEN_PCT`, `IN_BAND_SECS`, `LEAD_IN_MAX`, `MIN/MAX_STRIDE`,
   `anchor_stride`) and `app/src/beatify.ts`. `app/tests/BeatifyGrid.test.ts`
@@ -1521,7 +1556,8 @@ The detail is in the `Conventions` bullets above; this is the map.
   the warp slider re-query it, so the frontend never recomputes a grid.
   The builder owns the live `ClipDraft`.
 - Commands, all `#[tauri::command(async)]`: `beatify_tracker_status`,
-  `_analyze`, `_set_reading`, `_meters`, `_scope`, `_preview`,
+  `_analyze`, `_set_reading`, `_set_seed`, `_taps`, `_meters`, `_scope`,
+  `_preview`,
   `_sync_check`, `_save`, `_warp_map`, `_cancel`; projects add
   `beatify_projects`, `_project_new`/`_open`/`_rename`/`_delete`,
   `_project_set_bpm`, `_project_audio` (by `seedId`), `_seed_delete`,

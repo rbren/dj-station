@@ -276,6 +276,229 @@ fn one_tracker_reports_single_rather_than_faking_agreement() {
     assert_eq!(agreement.readings.len(), 1);
 }
 
+#[test]
+fn each_seed_reports_its_raw_interval_statistics() {
+    // A doubled beat and a missed one, both in a run whose fitted BPM is
+    // unchanged by either: the stats are what tells them apart.
+    let clean = drifting_beats(120.0, 120.0, 24, 0.0);
+    let mut ragged = clean.clone();
+    ragged.insert(10, (ragged[9] + ragged[10]) / 2.0);
+    ragged.remove(18);
+    let runs = vec![
+        ("final0".to_string(), clean),
+        ("final1".to_string(), ragged),
+    ];
+    let readings = grid::score_agreement(&runs).readings;
+
+    let steady = &readings[0];
+    assert!((steady.ibi_mean - 0.5).abs() < 1e-9);
+    assert!((steady.ibi_min - 0.5).abs() < 1e-9);
+    assert!((steady.ibi_max - 0.5).abs() < 1e-9);
+    assert!(steady.ibi_variance < 1e-12);
+
+    let messy = &readings[1];
+    assert!((messy.ibi_min - 0.25).abs() < 1e-9, "the doubled beat");
+    assert!((messy.ibi_max - 1.0).abs() < 1e-9, "the missed beat");
+    assert!(messy.ibi_variance > steady.ibi_variance);
+    // Both still fit the same tempo — which is the point.
+    assert!((messy.bpm - steady.bpm).abs() < 0.5);
+}
+
+// ---------------------------------------------------------------------------
+// Tap reconciliation (§3.8a)
+// ---------------------------------------------------------------------------
+
+/// Taps on `times`, each late by `lag` and jittered deterministically by
+/// up to `jitter` — a human hand, without a random number generator.
+fn tapped(times: &[f64], lag: f64, jitter: f64) -> Vec<f64> {
+    times
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let wobble = ((i * 7 % 5) as f64 / 4.0 - 0.5) * 2.0;
+            t + lag + wobble * jitter
+        })
+        .collect()
+}
+
+#[test]
+fn taps_choose_the_seed_that_heard_the_same_pulse() {
+    let truth = drifting_beats(120.0, 120.0, 40, 0.25);
+    let half = drifting_beats(60.0, 60.0, 20, 0.25);
+    let runs = vec![
+        // The first run is the half-time misread — which `analyze` would
+        // have taken as reference purely for being first.
+        ("final0".to_string(), half),
+        ("final1".to_string(), truth.clone()),
+    ];
+    let verdict = grid::reconcile_taps(&runs, &tapped(&truth[..16], 0.045, 0.012));
+    assert_eq!(verdict.outcome, grid::TapOutcome::Chose);
+    assert_eq!(verdict.seed, "final1");
+    assert!((verdict.reading.factor - 1.0).abs() < 1e-9);
+    assert!(!verdict.reading.half_shift);
+    assert!(verdict.concentration > 0.9, "{verdict:?}");
+}
+
+#[test]
+fn taps_fix_a_half_time_reading_without_touching_the_tempo() {
+    // One seed, read half-time. The taps cannot change its period —
+    // only which multiple of it is called a beat.
+    let half = drifting_beats(60.0, 60.0, 24, 0.1);
+    let runs = vec![("final0".to_string(), half.clone())];
+    let doubled: Vec<f64> = (0..24).map(|i| 0.1 + i as f64 * 0.5).collect();
+    let verdict = grid::reconcile_taps(&runs, &tapped(&doubled[..16], 0.04, 0.01));
+    assert_eq!(verdict.outcome, grid::TapOutcome::Chose);
+    assert!((verdict.reading.factor - 2.0).abs() < 1e-9, "{verdict:?}");
+    // The fitted period is the seed's own; the reading renames it.
+    let fit = grid::fit_beats(&half).expect("fit");
+    let read = grid::apply_reading(&fit, verdict.reading);
+    assert!((read.period - fit.period / 2.0).abs() < 1e-6);
+}
+
+#[test]
+fn taps_on_the_offbeat_shift_the_grid_half_a_beat() {
+    let beats = drifting_beats(120.0, 120.0, 40, 0.2);
+    let offbeats: Vec<f64> = beats.iter().map(|t| t + 0.25).collect();
+    let runs = vec![("final0".to_string(), beats)];
+    let verdict = grid::reconcile_taps(&runs, &tapped(&offbeats[..16], 0.03, 0.008));
+    assert_eq!(verdict.outcome, grid::TapOutcome::Chose);
+    assert!(verdict.reading.half_shift, "{verdict:?}");
+    assert!((verdict.reading.factor - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn the_tap_latency_is_measured_and_never_applied() {
+    let beats = drifting_beats(120.0, 120.0, 40, 0.2);
+    let runs = vec![("final0".to_string(), beats.clone())];
+    let lag = 0.055;
+    let verdict = grid::reconcile_taps(&runs, &tapped(&beats[..16], lag, 0.006));
+    assert_eq!(verdict.outcome, grid::TapOutcome::Chose);
+    // Reported…
+    assert!(
+        (verdict.offset_secs - lag).abs() < 0.008,
+        "offset {}",
+        verdict.offset_secs
+    );
+    // …and absent from the reading, which is all the grid is told.
+    assert_eq!(verdict.reading, Reading::default());
+    assert!(verdict.detail.contains("not applied"));
+}
+
+#[test]
+fn a_late_hand_never_becomes_an_offbeat_reading() {
+    // 90 ms late at 150 BPM is a fifth of a beat: plainly a slow hand,
+    // and shifting the grid for it would be wrong.
+    let beats = drifting_beats(150.0, 150.0, 40, 0.2);
+    let runs = vec![("final0".to_string(), beats.clone())];
+    let verdict = grid::reconcile_taps(&runs, &tapped(&beats[..16], 0.09, 0.01));
+    assert_eq!(verdict.outcome, grid::TapOutcome::Chose);
+    assert!(!verdict.reading.half_shift, "{verdict:?}");
+}
+
+#[test]
+fn uneven_taps_are_refused_rather_than_believed() {
+    let beats = drifting_beats(120.0, 120.0, 40, 0.2);
+    let runs = vec![("final0".to_string(), beats)];
+    // Taps at wildly varying intervals: no tempo, no phase, no opinion.
+    let ragged = [0.2, 0.9, 1.05, 2.4, 2.6, 4.1, 4.15, 5.9, 7.7, 7.75];
+    let verdict = grid::reconcile_taps(&runs, &ragged);
+    assert_eq!(verdict.outcome, grid::TapOutcome::Uneven);
+    assert!(verdict.seed.is_empty());
+    assert_eq!(verdict.reading, Reading::default());
+}
+
+#[test]
+fn too_few_taps_say_so_instead_of_guessing() {
+    let beats = drifting_beats(120.0, 120.0, 40, 0.2);
+    let runs = vec![("final0".to_string(), beats.clone())];
+    let verdict = grid::reconcile_taps(&runs, &beats[..4]);
+    assert_eq!(verdict.outcome, grid::TapOutcome::TooFew);
+    assert_eq!(verdict.taps, 4);
+}
+
+#[test]
+fn tapping_bars_is_reported_as_tapping_bars() {
+    // Steady taps, one per four beats: consistent with themselves and
+    // with nothing on offer, since Beatify has no bars.
+    let beats = drifting_beats(120.0, 120.0, 64, 0.2);
+    let runs = vec![("final0".to_string(), beats.clone())];
+    let bars: Vec<f64> = beats.iter().step_by(4).copied().collect();
+    let verdict = grid::reconcile_taps(&runs, &tapped(&bars[..12], 0.04, 0.01));
+    assert_eq!(verdict.outcome, grid::TapOutcome::NoMatch);
+    assert!(verdict.detail.contains("not bars"), "{}", verdict.detail);
+}
+
+#[test]
+fn taps_reseat_the_analysis_on_the_seed_they_chose() {
+    // The whole path: a first-run half-time misread, corrected by taps,
+    // through `Analysis` rather than the scoring function alone.
+    let truth = drifting_beats(120.0, 120.0, 48, 0.3);
+    let audio = click_track(&truth, 1.0);
+    let analysis =
+        beatify::analyze(&audio, &DspTracker, None, Reading::default()).expect("analyze");
+
+    let mut stubbed = analysis.clone();
+    stubbed.runs = vec![
+        beatify::BeatRun {
+            seed: "final0".into(),
+            beats: truth.iter().step_by(2).copied().collect(),
+        },
+        beatify::BeatRun {
+            seed: "final1".into(),
+            beats: truth.clone(),
+        },
+    ];
+    stubbed.seed = "final0".into();
+
+    let taps = tapped(&truth[..20], 0.05, 0.012);
+    let (next, verdict) = stubbed.with_taps(&taps, &audio).expect("taps");
+    assert_eq!(verdict.outcome, grid::TapOutcome::Chose);
+    assert_eq!(next.seed, "final1");
+    assert!((next.grid.bpm - 120.0).abs() < 1.0, "{}", next.grid.bpm);
+    // The runs travel with the analysis, so the choice can be revisited.
+    assert_eq!(next.runs.len(), 2);
+}
+
+#[test]
+fn refused_taps_leave_the_analysis_exactly_as_it_was() {
+    let truth = drifting_beats(120.0, 120.0, 48, 0.3);
+    let audio = click_track(&truth, 1.0);
+    let analysis =
+        beatify::analyze(&audio, &DspTracker, None, Reading::default()).expect("analyze");
+    let (next, verdict) = analysis.with_taps(&[0.1, 0.2], &audio).expect("taps");
+    assert_eq!(verdict.outcome, grid::TapOutcome::TooFew);
+    assert_eq!(next.grid, analysis.grid);
+    assert_eq!(next.seed, analysis.seed);
+}
+
+#[test]
+fn a_seed_can_be_chosen_by_hand_without_re_running_the_tracker() {
+    let truth = drifting_beats(126.0, 126.0, 48, 0.3);
+    let audio = click_track(&truth, 1.0);
+    let analysis =
+        beatify::analyze(&audio, &DspTracker, None, Reading::default()).expect("analyze");
+    let mut stubbed = analysis.clone();
+    stubbed.runs = vec![
+        beatify::BeatRun {
+            seed: "final0".into(),
+            beats: truth.clone(),
+        },
+        beatify::BeatRun {
+            seed: "final1".into(),
+            beats: truth.iter().step_by(2).copied().collect(),
+        },
+    ];
+    stubbed.seed = "final0".into();
+    let half = stubbed
+        .with_seed("final1", &audio, Reading::default())
+        .expect("seed");
+    assert_eq!(half.seed, "final1");
+    assert!((half.grid.bpm - 63.0).abs() < 1.0, "{}", half.grid.bpm);
+    assert!(stubbed
+        .with_seed("nope", &audio, Reading::default())
+        .is_err());
+}
+
 // ---------------------------------------------------------------------------
 // Warp meters and the recommended zone (§3.6)
 // ---------------------------------------------------------------------------

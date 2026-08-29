@@ -30,6 +30,43 @@ export interface SeedReading {
   seed: string;
   bpm: number;
   beats: number;
+  /** RAW interval statistics — nothing rejected, which is what makes them
+   *  diagnostic: a doubled beat shows in `ibiMin`, a missed one in
+   *  `ibiMax`, and neither moves the fitted `bpm`. Seconds. */
+  ibiMean: number;
+  ibiMin: number;
+  ibiMax: number;
+  /** Population variance of those intervals, seconds². */
+  ibiVariance: number;
+}
+
+/** What a tap sequence turned out to be worth (§3.8a). */
+export type TapOutcome = 'tooFew' | 'uneven' | 'noMatch' | 'chose';
+
+export interface TapVerdict {
+  outcome: TapOutcome;
+  taps: number;
+  /** Tempo of the tapping itself. */
+  tapBpm: number;
+  /** How steadily the taps were kept, 0..1. */
+  selfConcentration: number;
+  /** Chosen seed — empty unless `outcome` is `chose`. */
+  seed: string;
+  reading: Reading;
+  /** How well the taps sit on the chosen grid, 0..1. */
+  concentration: number;
+  /** Measured tap latency, seconds. REPORTED, never applied: letting it
+   *  move the grid would render the user's reaction time into the file. */
+  offsetSecs: number;
+  /** Tap gap over the chosen period — 4 means they were tapping bars. */
+  levelRatio: number;
+  detail: string;
+}
+
+export interface BeatifyTapResult {
+  verdict: TapVerdict;
+  /** Unchanged when the verdict refused. */
+  analysis: BeatifyAnalysis;
 }
 
 export interface Agreement {
@@ -88,6 +125,10 @@ export interface BeatifyAnalysis {
   sourceGrid: Grid;
   reading: Reading;
   agreement: Agreement;
+  /** Which seed's detections this grid was fitted to. */
+  seed: string;
+  /** Every seed the tracker ran — the picker's options, no re-run. */
+  seeds: string[];
   beats: number[];
   confidence: number[];
   drift: DriftSpan[];
@@ -405,6 +446,34 @@ export function verdictLabel(agreement: Agreement): string {
   }
 }
 
+/** A seed's raw interval statistics, in the units the eye reads them in.
+ *
+ *  Milliseconds throughout, INCLUDING the spread — the stored variance is
+ *  in seconds², which is a number nobody can judge by looking at it. The
+ *  square root is a standard deviation, and beside a mean of 500 ms a
+ *  spread of 3 ms says "steady" at a glance where 9e-6 says nothing. */
+export function seedStats(r: SeedReading): {
+  meanMs: number;
+  minMs: number;
+  maxMs: number;
+  sdMs: number;
+} {
+  return {
+    meanMs: r.ibiMean * 1000,
+    minMs: r.ibiMin * 1000,
+    maxMs: r.ibiMax * 1000,
+    sdMs: Math.sqrt(Math.max(0, r.ibiVariance)) * 1000,
+  };
+}
+
+/** One line per seed for the debug table. */
+export function seedStatsLabel(r: SeedReading): string {
+  const s = seedStats(r);
+  return `${r.beats} beats · ${r.bpm.toFixed(2)} BPM · gap ${s.meanMs.toFixed(1)} ms (${s.minMs.toFixed(
+    1,
+  )}–${s.maxMs.toFixed(1)}) · sd ${s.sdMs.toFixed(1)} ms`;
+}
+
 /** Green / amber / red for the verdict line (MOD-30). */
 export function qualityLevel(q: Quality): 'good' | 'warn' | 'bad' {
   if (q.worstFlamMs < FLAM_GREEN_MS && q.peakStretchPct < STRETCH_GREEN_PCT) return 'good';
@@ -454,6 +523,8 @@ export interface BeatifyClientApi {
     buckets: number,
   ): Promise<BeatifyAnalysis | null>;
   setReading(reading: Reading, buckets: number): Promise<BeatifyAnalysis | null>;
+  setSeed(seed: string, buckets: number): Promise<BeatifyAnalysis | null>;
+  taps(taps: number[], buckets: number): Promise<BeatifyTapResult | null>;
   meters(strength: number): Promise<BeatifyMeters | null>;
   preview(
     startSecs: number,
@@ -499,6 +570,12 @@ export class BeatifyClient extends IpcClient implements BeatifyClientApi {
   }
   setReading(reading: Reading, buckets: number) {
     return this.call<BeatifyAnalysis>('beatify_set_reading', { reading, buckets });
+  }
+  setSeed(seed: string, buckets: number) {
+    return this.call<BeatifyAnalysis>('beatify_set_seed', { seed, buckets });
+  }
+  taps(taps: number[], buckets: number) {
+    return this.call<BeatifyTapResult>('beatify_taps', { taps, buckets });
   }
   meters(strength: number) {
     return this.call<BeatifyMeters>('beatify_meters', { strength });
