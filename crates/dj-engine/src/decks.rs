@@ -1,18 +1,23 @@
 //! Built-in Decks module (`builtin.decks`): eight Beatify clips on ONE
 //! clock, mixed down to a stereo pair — the engine behind the Decks tab.
 //!
-//! - Inputs: `bpm` (the bank's tempo; every slot is stretched to it) and
-//!   `reset` (a rising edge parks the whole bank on beat 0).
+//! - Inputs: `bpm` (the bank's tempo; every slot is stretched to it),
+//!   `reset` (a rising edge parks the whole bank on beat 0) and a RETURN
+//!   pair per deck (`d1_in_l`…`d8_in_r`).
 //! - Outputs: `audio_l`/`audio_r` (the live mix), `mon_l`/`mon_r` (the
-//!   decks switched to Monitor) and `clock` (one pulse per bank beat, for
-//!   anything in the rack that wants to run on the bank's grid).
+//!   decks switched to Monitor), `clock` (one pulse per bank beat), and
+//!   per deck a SEND pair (`d1_l`/`d1_r`) plus its three tone controls as
+//!   CV (`d1_high`/`d1_mid`/`d1_low`).
 //! - Params: `surface` (does this bank listen to the Launch Control XL).
 //!
-//! A DECK IS A CHANNEL STRIP, NOT A PATCH POINT: level, mute, monitor and
-//! the three tone controls are all a slot has, and they always do exactly
-//! that one job. The bank mixes its own decks; per-deck sends, returns and
-//! knob CV were tried and taken back out — the Rack tab is where signal is
-//! routed.
+//! THE RACK IS THE BANK'S EFFECTS LOOP. A deck's send always carries its
+//! audio; wiring anything back into that deck's return makes the modules
+//! in between its INSERT — the deck's own path stops reaching the mix, so
+//! nothing is heard twice — and the fader, mute and monitor switch still
+//! belong to the deck. The three tone controls work the same way round:
+//! their CV outputs always carry the knob positions, and patching one
+//! takes that band OFF the deck's audio (it sits flat) because a knob
+//! doing two jobs is a knob you cannot read.
 //!
 //! MONITOR IS A CUE, NOT A SOLO: a deck switched to it leaves the live
 //! pair and comes out of the monitor pair instead, and every other deck
@@ -75,7 +80,11 @@ pub const SURFACE_PARAM: &str = "surface";
 
 pub(crate) const IN_BPM: usize = 0;
 pub(crate) const IN_RESET: usize = 1;
-pub const N_INPUTS: usize = 2;
+/// First per-slot RETURN jack. Two (L/R) per slot: wire a deck's send
+/// through the rack and back in here and the modules become that deck's
+/// insert — what comes back is what the bank mixes.
+pub(crate) const IN_RETURN_BASE: usize = 2;
+pub const N_INPUTS: usize = IN_RETURN_BASE + SLOTS * 2;
 
 const OUT_AUDIO_L: usize = 0;
 const OUT_AUDIO_R: usize = 1;
@@ -85,11 +94,30 @@ const OUT_MON_L: usize = 2;
 const OUT_MON_R: usize = 3;
 /// One pulse per beat of the bank's own clock, for the rack.
 const OUT_CLOCK: usize = 4;
-pub const N_OUTPUTS: usize = 5;
+/// First per-slot output. Five each: the send pair, then the three tone
+/// controls as CV.
+pub(crate) const OUT_SLOT_BASE: usize = 5;
+pub(crate) const OUT_PER_SLOT: usize = 5;
+pub const N_OUTPUTS: usize = OUT_SLOT_BASE + SLOTS * OUT_PER_SLOT;
 
-/// Tone controls, in the order the surface's three knob rows sit: high,
-/// mid, low.
+/// Tone controls, in the order their CV outputs (and the surface's three
+/// knob rows) sit: high, mid, low.
 pub const TONES: [SlotControl; 3] = [SlotControl::High, SlotControl::Mid, SlotControl::Low];
+
+/// A slot's return jack (`ch` 0 = L, 1 = R).
+pub fn return_jack(slot: usize, ch: usize) -> usize {
+    IN_RETURN_BASE + slot * 2 + ch
+}
+
+/// A slot's send jack (`ch` 0 = L, 1 = R).
+pub fn send_jack(slot: usize, ch: usize) -> usize {
+    OUT_SLOT_BASE + slot * OUT_PER_SLOT + ch
+}
+
+/// A slot's tone-control CV output (`tone` indexes [`TONES`]).
+pub fn tone_jack(slot: usize, tone: usize) -> usize {
+    OUT_SLOT_BASE + slot * OUT_PER_SLOT + 2 + tone
+}
 
 /// How long the clock output's pulse is held, in seconds (~1 ms, the
 /// width the built-in MIDI clock uses).
@@ -201,7 +229,22 @@ pub fn decks_manifest() -> Manifest {
                 }),
                 display: None,
             },
-        ],
+        ]
+        .into_iter()
+        // A deck's RETURN: the far end of its insert. Plain wire jacks
+        // (no knob) — this is audio coming back, not a control.
+        .chain((0..SLOTS).flat_map(|slot| {
+            [("l", "L"), ("r", "R")].map(|(side, name)| JackDecl {
+                id: format!("d{}_in_{side}", slot + 1),
+                name: format!("Deck {} Return {name}", slot + 1),
+                default: 0.0,
+                audio: true,
+                capture: false,
+                knob: None,
+                display: None,
+            })
+        }))
+        .collect(),
         outputs: vec![
             OutputDecl {
                 id: "audio_l".into(),
@@ -228,7 +271,39 @@ pub fn decks_manifest() -> Manifest {
                 name: "Clock".into(),
                 display: None,
             },
-        ],
+        ]
+        .into_iter()
+        .chain((0..SLOTS).flat_map(|slot| {
+            let n = slot + 1;
+            [
+                OutputDecl {
+                    id: format!("d{n}_l"),
+                    name: format!("Deck {n} Send L"),
+                    display: None,
+                },
+                OutputDecl {
+                    id: format!("d{n}_r"),
+                    name: format!("Deck {n} Send R"),
+                    display: None,
+                },
+                OutputDecl {
+                    id: format!("d{n}_high"),
+                    name: format!("Deck {n} High CV"),
+                    display: None,
+                },
+                OutputDecl {
+                    id: format!("d{n}_mid"),
+                    name: format!("Deck {n} Mid CV"),
+                    display: None,
+                },
+                OutputDecl {
+                    id: format!("d{n}_low"),
+                    name: format!("Deck {n} Low CV"),
+                    display: None,
+                },
+            ]
+        }))
+        .collect(),
         params: vec![ParamDecl {
             id: SURFACE_PARAM.into(),
             name: "Follow Launch Control XL".into(),
@@ -469,6 +544,13 @@ pub enum DecksCmd {
         tail: u32,
         phase: i32,
     },
+    /// Which of a slot's three tone controls have their CV output patched
+    /// into the rack — those stop touching the audio (see
+    /// [`DecksRtModule::process`]).
+    Tone {
+        slot: u8,
+        patched: [bool; 3],
+    },
     /// Park the bank on beat 0.
     Reset,
 }
@@ -561,6 +643,13 @@ pub struct DeckSlotStatus {
     pub mute: bool,
     /// Cueing: this deck is on the monitor pair instead of the live mix.
     pub monitor: bool,
+    /// Whether this deck's return is wired — its send goes through the
+    /// rack and what comes back is what the bank mixes.
+    pub insert: bool,
+    /// Which of the three tone controls have their CV output patched into
+    /// the rack, in [`TONES`] order (high, mid, low). A patched one drives
+    /// that jack and leaves the deck's own tone alone.
+    pub tone_patched: [bool; 3],
     pub duration_secs: f64,
     pub position_secs: f64,
     /// Beat of its own loop the slot is on — the silent tail counts too,
@@ -619,6 +708,9 @@ struct RtSlot {
     high: f32,
     mute: bool,
     monitor: bool,
+    /// Tone controls whose CV output is patched into the rack (high, mid,
+    /// low): those bands stay flat here.
+    tone_patched: [bool; 3],
     /// Smoothed level actually applied, so mute/monitor/fader moves ramp.
     gain: f32,
     grains: GrainStretch,
@@ -639,10 +731,22 @@ impl RtSlot {
             high: 1.0,
             mute: true,
             monitor: false,
+            tone_patched: [false; 3],
             gain: 0.0,
             grains: GrainStretch::new(engine_rate),
             eq: [BandSplit::default(); 2],
         }
+    }
+
+    /// The three band gains this slot's audio actually gets: a tone
+    /// control whose CV output is patched has left the deck, so its band
+    /// sits flat.
+    fn bands(&self) -> (f32, f32, f32) {
+        (
+            if self.tone_patched[2] { 1.0 } else { self.low },
+            if self.tone_patched[1] { 1.0 } else { self.mid },
+            if self.tone_patched[0] { 1.0 } else { self.high },
+        )
     }
 
     fn length_beats(&self) -> u32 {
@@ -755,6 +859,12 @@ impl DecksRtModule {
                 s.tail = tail;
                 s.phase = phase;
             }
+            DecksCmd::Tone { slot, patched } => {
+                let Some(s) = self.slots.get_mut(slot as usize) else {
+                    return;
+                };
+                s.tone_patched = patched;
+            }
             DecksCmd::Reset => {
                 self.beat_pos = 0.0;
                 for slot in &mut self.slots {
@@ -766,15 +876,24 @@ impl DecksRtModule {
 }
 
 impl HostModule for DecksRtModule {
-    fn process(
-        &mut self,
-        inputs: &[Vec<f32>],
-        outputs: &mut [Vec<f32>],
-        _mask: u64,
-        frames: usize,
-    ) {
+    fn process(&mut self, inputs: &[Vec<f32>], outputs: &mut [Vec<f32>], mask: u64, frames: usize) {
         while let Ok(cmd) = self.rx.pop() {
             self.apply(cmd);
+        }
+
+        // The three tone controls go out as CV whether or not the deck is
+        // playing: they are knob positions, and a knob has a position even
+        // in silence. Constant across the block, like every control read.
+        for (i, slot) in self.slots.iter().enumerate() {
+            for (t, control) in TONES.iter().enumerate() {
+                let value = match control {
+                    SlotControl::High => slot.high,
+                    SlotControl::Mid => slot.mid,
+                    _ => slot.low,
+                };
+                let volts = (value / EQ_MAX).clamp(0.0, 1.0) * SIGNAL_MAX;
+                outputs[tone_jack(i, t)][..frames].fill(volts);
+            }
         }
 
         let bpm = &inputs[IN_BPM];
@@ -808,40 +927,62 @@ impl HostModule for DecksRtModule {
             let tempo = bpm[s].clamp(MIN_BPM, MAX_BPM) as f64;
             let (mut mix_l, mut mix_r) = (0.0f32, 0.0f32);
             let (mut mon_l, mut mon_r) = (0.0f32, 0.0f32);
-            for slot in &mut self.slots {
+            for (i, slot) in self.slots.iter_mut().enumerate() {
                 let target = if slot.mute { 0.0 } else { slot.level.max(0.0) };
                 slot.gain += a_gain * (target - slot.gain);
+                // A wired return makes the rack this deck's insert: what
+                // comes back is what the bank mixes, in place of the
+                // deck's own path.
+                let insert =
+                    mask & (1 << return_jack(i, 0)) != 0 || mask & (1 << return_jack(i, 1)) != 0;
 
-                let Some(track) = &slot.track else { continue };
-                let len = slot.length_beats();
-                if len == 0 {
-                    continue;
-                }
-                let beat_frames = 60.0 / slot.source_bpm as f64 * track.sample_rate as f64;
-                let local = (self.beat_pos - slot.phase as f64).rem_euclid(len as f64);
-                let pos = local * beat_frames;
-                // The tail is silence: past the clip's own beats there is
-                // nothing to read, but the slot keeps counting.
-                if local >= slot.beats as f64 || pos >= track.frames() as f64 {
-                    continue;
-                }
-                // Grains read at the clip's own rate while the playhead
-                // moves at the bank's — that split is the whole stretch.
-                let step = track.sample_rate as f64 / engine_rate as f64;
-                let taps = slot.grains.tick(pos, step, &track.channels[0]);
+                // The deck's own audio, which is also what its send
+                // carries — silent whenever there is nothing to read (no
+                // clip, or the loop's silent tail).
                 let (mut l, mut r) = (0.0f32, 0.0f32);
-                for tap in taps.iter().flatten() {
-                    let gl = sample_at(&track.channels[0], tap.pos);
-                    let gr = if track.channels.len() > 1 {
-                        sample_at(&track.channels[1], tap.pos)
+                let mut sounding = false;
+                if let Some(track) = &slot.track {
+                    let len = slot.length_beats();
+                    let beat_frames = 60.0 / slot.source_bpm as f64 * track.sample_rate as f64;
+                    let local = if len > 0 {
+                        (self.beat_pos - slot.phase as f64).rem_euclid(len as f64)
                     } else {
-                        gl
+                        0.0
                     };
-                    l += gl * tap.gain;
-                    r += gr * tap.gain;
+                    let pos = local * beat_frames;
+                    if len > 0 && local < slot.beats as f64 && pos < track.frames() as f64 {
+                        // Grains read at the clip's own rate while the
+                        // playhead moves at the bank's — that split is the
+                        // whole stretch.
+                        let step = track.sample_rate as f64 / engine_rate as f64;
+                        let taps = slot.grains.tick(pos, step, &track.channels[0]);
+                        for tap in taps.iter().flatten() {
+                            let gl = sample_at(&track.channels[0], tap.pos);
+                            let gr = if track.channels.len() > 1 {
+                                sample_at(&track.channels[1], tap.pos)
+                            } else {
+                                gl
+                            };
+                            l += gl * tap.gain;
+                            r += gr * tap.gain;
+                        }
+                        let (low, mid, high) = slot.bands();
+                        l = slot.eq[0].process(l, a_low, a_high, low, mid, high);
+                        r = slot.eq[1].process(r, a_low, a_high, low, mid, high);
+                        sounding = true;
+                    }
                 }
-                let l = slot.eq[0].process(l, a_low, a_high, slot.low, slot.mid, slot.high);
-                let r = slot.eq[1].process(r, a_low, a_high, slot.low, slot.mid, slot.high);
+                outputs[send_jack(i, 0)][s] = l * SIGNAL_MAX;
+                outputs[send_jack(i, 1)][s] = r * SIGNAL_MAX;
+
+                if insert {
+                    // Back off the rack in engine units; the fader and the
+                    // mute still belong to the deck.
+                    l = inputs[return_jack(i, 0)][s] / SIGNAL_MAX;
+                    r = inputs[return_jack(i, 1)][s] / SIGNAL_MAX;
+                } else if !sounding {
+                    continue;
+                }
                 // Monitor takes the deck OFF the live pair and puts it on
                 // the monitor one — it is a cue, not a solo: nothing else
                 // changes.
@@ -926,17 +1067,27 @@ mod tests {
     use crate::launch_control::{decode, jack_index};
 
     #[test]
-    fn manifest_is_a_tempo_a_reset_two_pairs_and_a_clock() {
+    fn manifest_is_one_clock_two_pairs_and_a_loop_per_deck() {
         let m = decks_manifest();
         assert_eq!(m.id, DECKS_ID);
         let ins: Vec<&str> = m.inputs.iter().map(|i| i.id.as_str()).collect();
-        assert_eq!(ins, ["bpm", "reset"]);
         assert_eq!(ins.len(), N_INPUTS);
-        // The bank mixes its own decks: what leaves it is the live pair,
-        // the cue pair and the clock, and nothing is per slot.
+        assert_eq!(&ins[..2], ["bpm", "reset"]);
+        // The tempo and the reset first, then a return pair per deck.
+        assert_eq!(ins[return_jack(0, 0)], "d1_in_l");
+        assert_eq!(ins[return_jack(7, 1)], "d8_in_r");
         let outs: Vec<&str> = m.outputs.iter().map(|o| o.id.as_str()).collect();
-        assert_eq!(outs, ["audio_l", "audio_r", "mon_l", "mon_r", "clock"]);
         assert_eq!(outs.len(), N_OUTPUTS);
+        assert_eq!(
+            &outs[..5],
+            ["audio_l", "audio_r", "mon_l", "mon_r", "clock"]
+        );
+        assert_eq!(outs[send_jack(0, 0)], "d1_l");
+        assert_eq!(outs[tone_jack(0, 0)], "d1_high");
+        assert_eq!(outs[tone_jack(0, 2)], "d1_low");
+        assert_eq!(outs[tone_jack(7, 2)], "d8_low");
+        // The mask the RT reads is a u64, so the jacks have to fit in it.
+        const { assert!(N_INPUTS <= 64) };
         // Following the surface is a mode toggle, so it is a param and
         // rides in the patch (params-vs-inputs rule).
         assert_eq!(m.params.len(), 1);
@@ -1019,11 +1170,13 @@ mod tests {
         (outputs.remove(0), shared)
     }
 
-    /// The same render, keeping every output: the live pair, the monitor
-    /// pair and the clock.
-    fn render_buses(
+    /// Render with wires: `mask` says which input jacks are connected and
+    /// `returns` fills them, so an insert can be tested.
+    fn render_patched(
         setup: impl FnOnce(&mut rtrb::Producer<DecksCmd>),
         frames: usize,
+        mask: u64,
+        returns: impl Fn(usize, usize) -> f32,
     ) -> Vec<Vec<f32>> {
         let (mut tx, rx) = rtrb::RingBuffer::new(64);
         let (garbage_tx, _garbage_rx) = rtrb::RingBuffer::new(64);
@@ -1032,8 +1185,16 @@ mod tests {
         setup(&mut tx);
         let mut inputs = vec![vec![0.0; frames]; N_INPUTS];
         inputs[IN_BPM].fill(120.0);
+        for (jack, buf) in inputs.iter_mut().enumerate() {
+            if mask & (1 << jack) == 0 {
+                continue;
+            }
+            for (s, v) in buf.iter_mut().enumerate() {
+                *v = returns(jack, s);
+            }
+        }
         let mut outputs = vec![vec![0.0; frames]; N_OUTPUTS];
-        m.process(&inputs, &mut outputs, 0, frames);
+        m.process(&inputs, &mut outputs, mask, frames);
         outputs
     }
 
@@ -1123,7 +1284,7 @@ mod tests {
 
     #[test]
     fn monitor_moves_a_deck_to_the_cue_pair_and_leaves_the_rest_alone() {
-        let out = render_buses(
+        let out = render_patched(
             |tx| {
                 load(tx, 0, 2, 0.5);
                 mix(tx, 0, 1.0, false, false);
@@ -1131,6 +1292,8 @@ mod tests {
                 mix(tx, 1, 1.0, false, true);
             },
             4800,
+            0,
+            |_, _| 0.0,
         );
         let live = &out[OUT_AUDIO_L][4700..];
         let mon = &out[OUT_MON_L][4700..];
@@ -1145,14 +1308,85 @@ mod tests {
     }
 
     #[test]
+    fn a_wired_return_makes_the_rack_that_decks_insert() {
+        // Slot 1's return carries a constant; its own clip must not reach
+        // the mix as well, or the deck would be heard twice.
+        let mask = 1 << return_jack(0, 0) | 1 << return_jack(0, 1);
+        let out = render_patched(
+            |tx| {
+                load(tx, 0, 2, 0.5);
+                mix(tx, 0, 1.0, false, false);
+            },
+            4800,
+            mask,
+            |_, _| 0.25 * SIGNAL_MAX,
+        );
+        let live = &out[OUT_AUDIO_L][4700..];
+        assert!(
+            live.iter().all(|s| (*s - 0.25 * SIGNAL_MAX).abs() < 0.05),
+            "what comes back is what is mixed, at the deck's own fader"
+        );
+        let send = &out[send_jack(0, 0)][4700..];
+        assert!(
+            send.iter().all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
+            "and the send still carries the deck's own audio, pre-fader"
+        );
+    }
+
+    #[test]
+    fn a_patched_tone_control_drives_its_jack_and_leaves_the_audio_flat() {
+        let mask = 0;
+        let out = render_patched(
+            |tx| {
+                load(tx, 0, 2, 0.5);
+                tx.push(DecksCmd::Mix {
+                    slot: 0,
+                    level: 1.0,
+                    low: 0.0,
+                    mid: 1.0,
+                    high: 1.0,
+                    mute: false,
+                    monitor: false,
+                })
+                .unwrap();
+                // Low is patched into the rack: it stops cutting the bass.
+                tx.push(DecksCmd::Tone {
+                    slot: 0,
+                    patched: [false, false, true],
+                })
+                .unwrap();
+            },
+            4800,
+            mask,
+            |_, _| 0.0,
+        );
+        // Low at 0 with the CV unpatched would gut a DC-ish clip; patched,
+        // the audio comes through at unity.
+        let live = &out[OUT_AUDIO_L][4700..];
+        assert!(
+            live.iter().all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
+            "a patched tone control leaves its band alone: {:?}",
+            &live[..4]
+        );
+        // ...and the jack carries the knob position, 0 V for a cut.
+        assert!(out[tone_jack(0, 2)].iter().all(|v| *v == 0.0));
+        // A control still on the deck sits at its own value: unity is
+        // half of the 0..EQ_MAX span.
+        let mid = out[tone_jack(0, 1)][0];
+        assert!((mid - SIGNAL_MAX / EQ_MAX).abs() < 1e-6, "mid CV {mid}");
+    }
+
+    #[test]
     fn the_clock_output_pulses_once_a_beat() {
         // Two beats at 120 BPM = one second.
-        let out = render_buses(
+        let out = render_patched(
             |tx| {
                 load(tx, 0, 2, 0.5);
                 mix(tx, 0, 1.0, false, false);
             },
             48_000,
+            0,
+            |_, _| 0.0,
         );
         let clock = &out[OUT_CLOCK];
         let edges = clock

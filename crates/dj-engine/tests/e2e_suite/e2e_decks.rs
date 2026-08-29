@@ -99,10 +99,71 @@ fn slot_defaults() -> DecksSlotSpec {
     }
 }
 
+/// `decks-rack-insert`: one deck routed OUT of the bank and back again.
+/// Its send feeds a VCA per channel, the VCAs' outputs come back into the
+/// deck's return, and the deck's LOW tone control — patched, so it no
+/// longer cuts the bass — is what opens those VCAs. So the golden pins
+/// three things at once: that a wired return replaces the deck's own path
+/// with what the rack hands back, that the CV a tone control puts out is
+/// the knob's position on the 0..10 V scale, and that the band it used to
+/// cut stays flat while it is patched.
+fn regen_decks_rack_insert() {
+    let dir = case_dir("decks-rack-insert");
+    write_case_tone(&dir.join("two-beat.wav"), 220.0, 1.0);
+
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
+    e.add_module("bank1", "builtin.decks").unwrap();
+    e.add_module("vca_l", "com.dj.vca").unwrap();
+    e.add_module("vca_r", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.set_knob_value("bank1", "bpm", 120.0).unwrap();
+    for (send, vca, ret) in [("d1_l", "vca_l", "d1_in_l"), ("d1_r", "vca_r", "d1_in_r")] {
+        e.connect("bank1", send, vca, "in").unwrap();
+        e.connect("bank1", "d1_low", vca, "cv").unwrap();
+        e.connect(vca, "out", "bank1", ret).unwrap();
+    }
+    e.connect("bank1", "audio_l", "out1", "l").unwrap();
+    e.connect("bank1", "audio_r", "out1", "r").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-decks-rack-insert")
+        .unwrap();
+    write_events(
+        &dir,
+        &EventsFile {
+            seconds: 1.0,
+            tracks: vec![TrackLoadSpec {
+                instance: "bank1".into(),
+                file: "two-beat.wav".into(),
+                bpm: Some(120.0),
+                slot: Some(0),
+            }],
+            deck_slots: vec![DecksSlotSpec {
+                instance: "bank1".into(),
+                slot: 0,
+                level: Some(0.9),
+                // A low that would gut the clip if it were still cutting
+                // the band; patched, it is 2 V of gain for the VCAs.
+                low: Some(0.4),
+                mute: Some(false),
+                ..slot_defaults()
+            }],
+            ..EventsFile::default()
+        },
+    );
+}
+
 #[test]
 fn decks_bank_two_clips() {
     if regen() {
         regen_decks_bank_two_clips();
     }
     check_case("decks-bank-two-clips");
+}
+
+#[test]
+fn decks_rack_insert() {
+    if regen() {
+        regen_decks_rack_insert();
+    }
+    check_case("decks-rack-insert");
 }

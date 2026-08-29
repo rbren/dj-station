@@ -1,0 +1,34 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio_l",
+      "to": "out1",
+      "to_jack": "l"
+    },
+    {
+      "from_jack": "audio_r",
+      "to": "out1",
+      "to_jack": "r"
+    },
+    {
+      "from_jack": "d1_l",
+      "to": "vca_l",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "d1_low",
+      "to": "vca_l",
+      "to_jack": "cv"
+    },
+    {
+      "from_jack": "d1_low",
+      "to": "vca_r",
+      "to_jack": "cv"
+    },
+    {
+      "from_jack": "d1_r",
+      "to": "vca_r",
+      "to_jack": "in"
+    }
+  ]
+}

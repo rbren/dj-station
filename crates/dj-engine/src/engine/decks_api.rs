@@ -14,8 +14,9 @@
 
 use super::*;
 use crate::decks::{
-    cycle_beats, led_for, DeckSlotState, DeckSlotStatus, DecksCmd, DecksState, DecksStatus,
-    SlotControl, EQ_MAX, IN_BPM, MAX_TAIL_BEATS, MOMENTARY_RELEASE_SECS, SLOTS, SURFACE_PARAM,
+    cycle_beats, led_for, return_jack, tone_jack, DeckSlotState, DeckSlotStatus, DecksCmd,
+    DecksState, DecksStatus, SlotControl, EQ_MAX, IN_BPM, MAX_TAIL_BEATS, MOMENTARY_RELEASE_SECS,
+    SLOTS, SURFACE_PARAM,
 };
 use crate::launch_control::{jack_index, row, BUTTON_GATE_VOLTS};
 
@@ -66,6 +67,47 @@ impl Engine {
             .push(timing)
             .map_err(|_| anyhow!("too many pending deck edits"))?;
         Ok(())
+    }
+
+    /// Which of a slot's three tone-control CV outputs are patched into
+    /// the rack, in [`TONES`] order.
+    fn tone_patched(&self, node: usize, slot: usize) -> [bool; 3] {
+        let mut out = [false; 3];
+        for (t, patched) in out.iter_mut().enumerate() {
+            let jack = tone_jack(slot, t);
+            *patched = self
+                .wires
+                .iter()
+                .any(|w| w.from_node == node && w.from_jack == jack);
+        }
+        out
+    }
+
+    /// Whether a slot's return is wired — the rack is its insert.
+    fn insert_wired(&self, node: usize, slot: usize) -> bool {
+        (0..2).any(|ch| {
+            let jack = return_jack(slot, ch);
+            self.wires
+                .iter()
+                .any(|w| w.to_node == node && w.to_jack == jack)
+        })
+    }
+
+    /// Tell every bank which of its tone controls have left the deck for
+    /// the rack. Called after any wire change, because that is the only
+    /// thing that can change the answer.
+    pub(crate) fn sync_decks_routing(&mut self) {
+        let nodes: Vec<usize> = self.clip_decks.keys().copied().collect();
+        for node in nodes {
+            for slot in 0..SLOTS {
+                let patched = self.tone_patched(node, slot);
+                let ctl = self.clip_decks.get_mut(&node).unwrap();
+                let _ = ctl.tx.push(DecksCmd::Tone {
+                    slot: slot as u8,
+                    patched,
+                });
+            }
+        }
     }
 
     /// Edit one slot's control state and mirror it to the RT thread.
@@ -407,6 +449,8 @@ impl Engine {
                 high: s.high,
                 mute: s.mute,
                 monitor: s.monitor,
+                insert: self.insert_wired(node, i),
+                tone_patched: self.tone_patched(node, i),
                 duration_secs: ctl.tracks[i]
                     .as_ref()
                     .map(|t| t.duration_secs())

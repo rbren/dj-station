@@ -2,7 +2,7 @@
   "ext": "builtin.decks",
   "knobs": {
     "bpm": {
-      "position": 0.4642857,
+      "position": 0.35714287,
       "atten": 1.0,
       "offset": 0.0
     },
