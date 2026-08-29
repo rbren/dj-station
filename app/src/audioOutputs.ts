@@ -1,7 +1,8 @@
 // Where the two output buses play: the LIVE mix (the room) and the
 // MONITOR mix (the headphones a deck's Monitor button cues into). Mirrors
 // the `audio_outputs` / `set_audio_outputs` commands in
-// `app/src-tauri/src/main.rs`.
+// `app/src-tauri/src/main.rs`; the control that drives it is
+// `components/AudioOutputPicker.tsx`, in the chrome at the top of the app.
 //
 // The choice is a property of the MACHINE, not of the patch — it is kept
 // beside the app's data, and a patch carried to another computer picks up
@@ -15,6 +16,14 @@ export interface AudioOutputSettings {
   devices: string[];
   live: string | null;
   monitor: string | null;
+  /** The devices the engine actually REACHED. Not always the ones above:
+   *  hardware can leave mid-set (the headphones come out), and then the
+   *  live mix falls back to the system default and the cue stops. `null`
+   *  = that bus is playing nowhere. */
+  playing_live: string | null;
+  playing_monitor: string | null;
+  /** One line on why the engine is not playing where it was asked to. */
+  note: string | null;
 }
 
 export interface AudioOutputsApi {

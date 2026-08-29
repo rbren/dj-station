@@ -1248,7 +1248,37 @@ beatify::build`.
   loses the cue, never the live output. The choice belongs to the MACHINE,
   not the patch: it is stored with the app's settings, and takes effect on
   the next backend start, so `set_audio_outputs` restarts a running
-  engine.
+  engine (re-picking the device already chosen is a no-op UNLESS nothing
+  is playing, which makes the picker a "try again" button).
+- A DEVICE CAN LEAVE MID-SET (the headphones come out), and the `dj-cpal`
+  thread is a SUPERVISOR, not a one-shot setup, because of it. It watches
+  the streams it opened — `StreamWatch`: cpal's `DeviceNotAvailable`, or
+  the callback counter standing still for `DEVICE_STALL` (CoreAudio just
+  stops pulling, with no error to wait for) — drops them when one is
+  gone, and re-opens every `DEVICE_RETRY` (a named live device that is not
+  there falls back to the system DEFAULT; the cue never falls back, since
+  a private mix in the room's speakers is worse than no cue). The two
+  streams are ONE session, rebuilt as a pair, because the ring between
+  them is built with them. WHILE THERE IS NO DEVICE THE GRAPH STILL RUNS:
+  `pace_silent` processes blocks at wall-clock pace into nothing. That is
+  the whole fix for "unplugging the headphones freezes everything" — a
+  graph nobody processes never drains the RT command ring, so every
+  control-thread edit behind it blocked (`dispatch_edit`'s 500 ms
+  deadline, once per command, with the engine mutex held) and the app
+  froze. What actually reached hardware is published as
+  `AudioDeviceStatus` (`Engine::audio_device_status`, `playing_live` /
+  `playing_monitor` / `note` on the `audio_outputs` command) — never
+  guessed by the UI. Pinned by `lifecycle.rs`'s own unit tests (the stall
+  clock) and `--test integration telemetry`
+  (`a_backend_with_no_device_claims_no_output`).
+- The OUTPUT PICKER is app CHROME, not a page's furniture:
+  `app/src/components/AudioOutputPicker.tsx` sits in `.app-header` beside
+  the engine-status pill on every tab (the Decks bar used to own the only
+  copy — it does not any more, and there must never be two). It polls
+  `audio_outputs` every 2 s, because devices come and go without the app
+  doing anything, and it shows the engine's `note` verbatim rather than
+  inventing an explanation. Tests: `app/tests/AudioOutputPicker.test.tsx`
+  (the control) and `AppAudioOutputs.test.tsx` (its place in the chrome).
 - AUDIO FOCUS (`AudioFocus`/`Engine::set_audio_focus`, `Plan::focus` in
   `graph.rs`, `set_audio_focus` in `main.rs`, `audioFocusForView` in
   `app/src/App.tsx`): ONE PAGE SOUNDS AT A TIME — the Rack is the whole
@@ -1743,8 +1773,8 @@ of the page.
 
 - Where the code is. Frontend: `app/src/decks.ts` (`DecksApi`, the slot
   model and the jack-name helpers `sendJack`/`returnJack`/`toneJack`/
-  `CLOCK_JACK`), `app/src/audioOutputs.ts` (the live/monitor device
-  pickers) and `app/src/components/Decks{View,Slot,ClipPicker}.tsx`.
+  `CLOCK_JACK`) and `app/src/components/Decks{View,Slot,ClipPicker}.tsx`
+  (the device pickers are in the app header, not on this page).
   Backend: `app/src-tauri/src/decks.rs` over `Engine`'s `decks_*` API.
 - Layout: the page is CHROME AROUND THE REAL RACK CANVAS. App keeps the
   one `.app-body`/`.rack-area` (panels, store, WireOverlay, pan/zoom,
@@ -1801,7 +1831,7 @@ of the page.
   no Audio Output is not left cue-only. Graph edits made by the chrome
   (ensure, jack clicks) flow back through `onGraphChange`/App.refresh.
 - Tests: `app/tests/DecksView.test.tsx` (strips, lamps, drafts, the
-  output pickers, the rehydrate-on-open, the wiring-on-open, the chrome
+  the rehydrate-on-open, the wiring-on-open, the chrome
   jacks), `DecksChromeWires.test.tsx` (cable endpoint geometry),
   `DecksDock.test.tsx` (collapse/resize, their persistence and the
   cables through both),

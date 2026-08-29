@@ -42,8 +42,8 @@ pub use choreo::{ChoreoState, ChoreoTrack, ChoreoTrackData, NoteStep, CHOREO_ID}
 #[cfg(feature = "midi-hw")]
 pub use engine::HardwareMidiSink;
 pub use engine::{
-    audio_output_devices, normalize_module_name, AudioFocus, AudioOutputs, Backend, Engine,
-    EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE,
+    audio_output_devices, normalize_module_name, AudioDeviceStatus, AudioFocus, AudioOutputs,
+    Backend, Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE,
 };
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle, WireStyle};

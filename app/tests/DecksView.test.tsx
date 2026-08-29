@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { DecksView } from '../src/components/DecksView';
 import { stretchLabel, type DecksApi, type DecksStatus, type DeckSlotStatus } from '../src/decks';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
-import type { AudioOutputSettings, AudioOutputsApi } from '../src/audioOutputs';
 
 function emptySlot(slot: number): DeckSlotStatus {
   return {
@@ -87,21 +86,6 @@ function makeApi(status: DecksStatus, over: Partial<DecksApi> = {}): DecksApi {
   };
 }
 
-function makeOutputs(
-  settings: AudioOutputSettings = {
-    devices: ['Speakers', 'Headphones'],
-    live: null,
-    monitor: null,
-  },
-  over: Partial<AudioOutputsApi> = {},
-): AudioOutputsApi {
-  return {
-    get: vi.fn().mockResolvedValue(settings),
-    set: vi.fn().mockResolvedValue(null),
-    ...over,
-  };
-}
-
 const CLIPS: BeatClipEntry[] = [
   {
     projectId: 'p1',
@@ -133,12 +117,8 @@ function makeClips(entries = CLIPS): BeatClipApi {
 
 const NO_POLL = 100000;
 
-function show(
-  api: DecksApi,
-  clips: BeatClipApi = makeClips(),
-  outputs: AudioOutputsApi = makeOutputs(),
-) {
-  return render(<DecksView api={api} clips={clips} outputs={outputs} pollMs={NO_POLL} />);
+function show(api: DecksApi, clips: BeatClipApi = makeClips()) {
+  return render(<DecksView api={api} clips={clips} pollMs={NO_POLL} />);
 }
 
 describe('DecksView', () => {
@@ -382,32 +362,6 @@ describe('decks readouts', () => {
     expect(stretchLabel(1)).toBe('±0.0%');
     expect(stretchLabel(128 / 120)).toBe('+6.7%');
     expect(stretchLabel(0.94)).toBe('−6.0%');
-  });
-});
-
-describe('the decks audio outputs', () => {
-  it('sends the live mix and the monitor mix to devices of their own', async () => {
-    const outputs = makeOutputs({
-      devices: ['Speakers', 'Headphones'],
-      live: 'Speakers',
-      monitor: null,
-    });
-    show(makeApi(makeStatus()), makeClips(), outputs);
-    const live = await screen.findByTestId<HTMLSelectElement>('decks-output-live');
-    await waitFor(() => expect(live.value).toBe('Speakers'));
-
-    fireEvent.change(screen.getByTestId('decks-output-monitor'), {
-      target: { value: 'Headphones' },
-    });
-    await waitFor(() => expect(outputs.set).toHaveBeenCalledWith('Speakers', 'Headphones'));
-  });
-
-  it('still shows a remembered device that is not plugged in today', async () => {
-    const outputs = makeOutputs({ devices: ['Speakers'], live: null, monitor: 'Old Interface' });
-    show(makeApi(makeStatus()), makeClips(), outputs);
-    const monitor = await screen.findByTestId<HTMLSelectElement>('decks-output-monitor');
-    await waitFor(() => expect(monitor.value).toBe('Old Interface'));
-    expect(monitor.textContent).toContain('not found');
   });
 });
 

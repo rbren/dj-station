@@ -6,17 +6,86 @@
 //! the live callback ever touches the engine core; the monitor stream is
 //! fed from it over a ring, because the two devices run on their own
 //! clocks and neither may wait for the other.
+//!
+//! A DEVICE CAN LEAVE AT ANY MOMENT (the headphones come out mid-set), so
+//! the cpal thread is a SUPERVISOR, not a one-shot setup: it watches the
+//! streams it opened, and when one stops calling back it drops them and
+//! looks for an output again. While there is nowhere to play, it keeps
+//! processing blocks at wall-clock pace with the audio going nowhere —
+//! that is what keeps the app alive, because a graph nobody processes
+//! never drains the RT command ring and every edit behind it blocks.
 
 use super::*;
 
 /// Which hardware output each bus plays out of, by device name. `None` is
 /// "the system default" for the live mix and "no monitoring at all" for
-/// the monitor — a name the machine no longer has is reported, never
-/// silently swapped.
+/// the monitor. A name the machine no longer has is REPORTED (see
+/// [`AudioDeviceStatus::note`]) — the live mix falls back to the default device
+/// so the room keeps hearing something, and the cue, which would be a
+/// private mix in the room's speakers, does not fall back at all.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AudioOutputs {
     pub live: Option<String>,
     pub monitor: Option<String>,
+}
+
+/// What the audio backend is doing RIGHT NOW, as opposed to what it was
+/// asked for: the device each bus actually reached, and one line saying
+/// why that is not what the user picked. Published by the cpal supervisor
+/// thread; read by the app's output picker.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AudioDeviceStatus {
+    /// The device the live mix is coming out of. `None` = nothing is
+    /// playing: no output could be opened, or no cpal backend is running.
+    pub live: Option<String>,
+    /// The device the cue is coming out of, when there is one.
+    pub monitor: Option<String>,
+    /// What the engine had to do differently from what was asked.
+    pub note: Option<String>,
+}
+
+/// A stream that has gone this long without a callback is playing to a
+/// device that is no longer there: CoreAudio just stops pulling when the
+/// hardware a stream was opened on is unplugged, with no error to wait for.
+#[cfg(feature = "cpal-backend")]
+const DEVICE_STALL: Duration = Duration::from_millis(1500);
+
+/// How often a missing output is looked for again — a device coming back
+/// (or being plugged in for the first time) is picked up within this.
+#[cfg(feature = "cpal-backend")]
+const DEVICE_RETRY: Duration = Duration::from_millis(1000);
+
+/// Is the stream we opened still being pulled? The callback counter is the
+/// only honest liveness signal a cpal backend gives us, so device loss is
+/// "the count stopped moving" (or an explicit device-gone error).
+#[cfg(feature = "cpal-backend")]
+struct StreamWatch {
+    callbacks: u64,
+    last_moved: Instant,
+}
+
+#[cfg(feature = "cpal-backend")]
+impl StreamWatch {
+    fn new(callbacks: u64, now: Instant) -> Self {
+        Self {
+            callbacks,
+            last_moved: now,
+        }
+    }
+
+    /// True once the device is gone for good. `errored` is cpal's own
+    /// device-not-available report, which some hosts give and some don't.
+    fn lost(&mut self, callbacks: u64, errored: bool, now: Instant) -> bool {
+        if errored {
+            return true;
+        }
+        if callbacks != self.callbacks {
+            self.callbacks = callbacks;
+            self.last_moved = now;
+            return false;
+        }
+        now.duration_since(self.last_moved) >= DEVICE_STALL
+    }
 }
 
 /// Every hardware audio output this machine can play through, by name —
@@ -45,6 +114,336 @@ fn named_output(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
     host.output_devices()
         .ok()?
         .find(|d| d.name().map(|n| n == name).unwrap_or(false))
+}
+
+/// Everything the live audio callback needs, kept beside the streams so
+/// they can be BUILT AGAIN after a device is lost — a closure's captures
+/// go with the stream that owned them.
+#[cfg(feature = "cpal-backend")]
+struct LiveDeps {
+    slot: Arc<Mutex<Option<Box<EngineCore>>>>,
+    callbacks: Arc<AtomicU64>,
+    samples: Arc<AtomicU64>,
+    peak_bits: Arc<std::sync::atomic::AtomicU32>,
+    starved: Arc<AtomicU64>,
+    xruns: Arc<AtomicU64>,
+    block: usize,
+    channels: usize,
+    block_secs: f64,
+}
+
+/// One open output stream, and what says whether it is still there.
+#[cfg(feature = "cpal-backend")]
+struct Playing {
+    /// Held for its Drop: dropping the stream is what closes the device.
+    _stream: cpal::Stream,
+    device: String,
+    errored: Arc<AtomicBool>,
+    callbacks: Arc<AtomicU64>,
+    watch: StreamWatch,
+}
+
+#[cfg(feature = "cpal-backend")]
+impl Playing {
+    fn lost(&mut self, now: Instant) -> bool {
+        self.watch.lost(
+            self.callbacks.load(Ordering::Relaxed),
+            self.errored.load(Ordering::Relaxed),
+            now,
+        )
+    }
+}
+
+/// The two streams are ONE session: the ring the live callback feeds the
+/// cue over is built with them, so a device lost on either side rebuilds
+/// both.
+#[cfg(feature = "cpal-backend")]
+struct Session {
+    live: Playing,
+    /// Absent when no cue was asked for, or its device is not here.
+    monitor: Option<Playing>,
+    status: AudioDeviceStatus,
+}
+
+#[cfg(feature = "cpal-backend")]
+impl Session {
+    /// The device that has stopped answering, if one has.
+    fn lost(&mut self, now: Instant) -> Option<String> {
+        if self.live.lost(now) {
+            return Some(self.live.device.clone());
+        }
+        let mon = self.monitor.as_mut()?;
+        mon.lost(now).then(|| mon.device.clone())
+    }
+
+    /// True when a cue was asked for, is not open, and its device is on
+    /// the machine again (the headphones went back in).
+    fn wants_monitor_back(&self, host: &cpal::Host, outputs: &AudioOutputs) -> bool {
+        self.monitor.is_none()
+            && outputs
+                .monitor
+                .as_deref()
+                .is_some_and(|name| named_output(host, name).is_some())
+    }
+}
+
+/// A stream's error callback: log everything, and flag the one error that
+/// means the hardware is gone, so the supervisor stops waiting for
+/// callbacks that are never coming.
+#[cfg(feature = "cpal-backend")]
+fn on_stream_error(what: &'static str, errored: Arc<AtomicBool>) -> impl FnMut(cpal::StreamError) {
+    move |err| {
+        eprintln!("[dj-audio] {what} stream error: {err}");
+        if matches!(err, cpal::StreamError::DeviceNotAvailable) {
+            errored.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Build the live stream: the one callback that holds the engine core,
+/// and (when there is a cue) fills the ring the monitor stream drains.
+#[cfg(feature = "cpal-backend")]
+fn build_live(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    deps: &LiveDeps,
+    mut mon_tx: Option<rtrb::Producer<f32>>,
+    errored: Arc<AtomicBool>,
+) -> std::result::Result<cpal::Stream, String> {
+    use cpal::traits::DeviceTrait;
+    let slot = deps.slot.clone();
+    let (callbacks, samples, peak_bits, starved, xruns) = (
+        deps.callbacks.clone(),
+        deps.samples.clone(),
+        deps.peak_bits.clone(),
+        deps.starved.clone(),
+        deps.xruns.clone(),
+    );
+    let (block, channels, block_secs) = (deps.block, deps.channels, deps.block_secs);
+    let mut leftover: Vec<f32> = Vec::with_capacity(block * channels);
+    let data_cb = move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
+        callbacks.fetch_add(1, Ordering::Relaxed);
+        samples.fetch_add(out.len() as u64, Ordering::Relaxed);
+        let mut guard = match slot.try_lock() {
+            Ok(g) => g,
+            Err(_) => {
+                starved.fetch_add(1, Ordering::Relaxed);
+                out.fill(0.0);
+                return;
+            }
+        };
+        let Some(core) = guard.as_mut() else {
+            starved.fetch_add(1, Ordering::Relaxed);
+            out.fill(0.0);
+            return;
+        };
+        let t0 = Instant::now();
+        let mut written = 0;
+        while written < out.len() {
+            if leftover.is_empty() {
+                core.process_block(block);
+                for s in 0..block {
+                    for ch in 0..channels {
+                        leftover
+                            .push((core.master[ch][s] / crate::graph::SIGNAL_MAX).clamp(-1.0, 1.0));
+                        if let Some(tx) = mon_tx.as_mut() {
+                            // Full ring = the monitor device is behind;
+                            // drop rather than block the live callback.
+                            let _ = tx.push(
+                                (core.monitor[ch][s] / crate::graph::SIGNAL_MAX).clamp(-1.0, 1.0),
+                            );
+                        }
+                    }
+                }
+            }
+            let n = (out.len() - written).min(leftover.len());
+            out[written..written + n].copy_from_slice(&leftover[..n]);
+            leftover.drain(..n);
+            written += n;
+        }
+        // Track the peak sample per report interval (racy max is fine for
+        // a debug readout; no locks/allocation).
+        let mut peak = 0.0f32;
+        for &s in out.iter() {
+            peak = peak.max(s.abs());
+        }
+        if peak > f32::from_bits(peak_bits.load(Ordering::Relaxed)) {
+            peak_bits.store(peak.to_bits(), Ordering::Relaxed);
+        }
+        let budget = block_secs * (out.len() as f64 / (block * channels) as f64);
+        if t0.elapsed().as_secs_f64() > budget {
+            xruns.fetch_add(1, Ordering::Relaxed);
+        }
+    };
+    device
+        .build_output_stream(config, data_cb, on_stream_error("live", errored), None)
+        .map_err(|e| format!("build_output_stream: {e}"))
+}
+
+/// Build the cue stream: it never touches the core, only the ring.
+#[cfg(feature = "cpal-backend")]
+fn build_monitor(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    mut mon_rx: rtrb::Consumer<f32>,
+    callbacks: Arc<AtomicU64>,
+    errored: Arc<AtomicBool>,
+) -> std::result::Result<cpal::Stream, String> {
+    use cpal::traits::DeviceTrait;
+    let mon_cb = move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
+        callbacks.fetch_add(1, Ordering::Relaxed);
+        for s in out.iter_mut() {
+            // Nothing queued yet (or the live stream is late): silence is
+            // the only honest thing to play.
+            *s = mon_rx.pop().unwrap_or(0.0);
+        }
+    };
+    device
+        .build_output_stream(config, mon_cb, on_stream_error("monitor", errored), None)
+        .map_err(|e| format!("build_output_stream: {e}"))
+}
+
+/// Open both streams on the devices the user asked for, or on the nearest
+/// thing the machine still has. Errs only when there is no live output at
+/// all — a missing cue device costs the cue, never the room.
+#[cfg(feature = "cpal-backend")]
+fn open_session(
+    host: &cpal::Host,
+    config: &cpal::StreamConfig,
+    deps: &LiveDeps,
+    outputs: &AudioOutputs,
+    mon_capacity: usize,
+) -> std::result::Result<Session, String> {
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    let mut notes: Vec<String> = Vec::new();
+    let device = match &outputs.live {
+        Some(name) => match named_output(host, name) {
+            Some(device) => device,
+            None => {
+                notes.push(format!(
+                    "{name} is not here — playing on the system default"
+                ));
+                host.default_output_device()
+                    .ok_or_else(|| "no audio output device".to_string())?
+            }
+        },
+        None => host
+            .default_output_device()
+            .ok_or_else(|| "no audio output device".to_string())?,
+    };
+    let live_name = device.name().unwrap_or_else(|e| format!("<unknown: {e}>"));
+    eprintln!("[dj-audio] live output device: {live_name:?}");
+    match device.default_output_config() {
+        Ok(def) => eprintln!(
+            "[dj-audio] device default config: {} ch @ {} Hz, {:?}, buffer {:?}",
+            def.channels(),
+            def.sample_rate().0,
+            def.sample_format(),
+            def.buffer_size()
+        ),
+        Err(e) => eprintln!("[dj-audio] default_output_config failed: {e}"),
+    }
+    let (mon_tx, mon_rx) = match outputs.monitor {
+        Some(_) => {
+            let (tx, rx) = rtrb::RingBuffer::<f32>::new(mon_capacity);
+            (Some(tx), Some(rx))
+        }
+        None => (None, None),
+    };
+    let live_errored = Arc::new(AtomicBool::new(false));
+    let stream = build_live(&device, config, deps, mon_tx, live_errored.clone())?;
+    stream.play().map_err(|e| format!("play: {e}"))?;
+    eprintln!("[dj-audio] stream playing");
+    let now = Instant::now();
+    let live = Playing {
+        _stream: stream,
+        device: live_name.clone(),
+        errored: live_errored,
+        watch: StreamWatch::new(deps.callbacks.load(Ordering::Relaxed), now),
+        callbacks: deps.callbacks.clone(),
+    };
+
+    // The cue is optional in the strongest sense: if it cannot be opened
+    // the live output still plays, and the cue is what is lost. It never
+    // falls back to another device — a private mix in the room's speakers
+    // is worse than no cue at all.
+    let monitor = match (&outputs.monitor, mon_rx) {
+        (Some(name), Some(mon_rx)) => {
+            let errored = Arc::new(AtomicBool::new(false));
+            let callbacks = Arc::new(AtomicU64::new(0));
+            let built = named_output(host, name)
+                .ok_or_else(|| format!("no output device named {name:?}"))
+                .and_then(|dev| {
+                    let stream =
+                        build_monitor(&dev, config, mon_rx, callbacks.clone(), errored.clone())?;
+                    stream.play().map_err(|e| format!("play: {e}"))?;
+                    Ok(stream)
+                });
+            match built {
+                Ok(stream) => {
+                    eprintln!("[dj-audio] monitor stream playing on {name:?}");
+                    Some(Playing {
+                        _stream: stream,
+                        device: name.clone(),
+                        errored,
+                        watch: StreamWatch::new(0, now),
+                        callbacks,
+                    })
+                }
+                Err(e) => {
+                    eprintln!("[dj-audio] monitor stream on {name:?} failed: {e}");
+                    notes.push(format!("no cue: {name} is not here"));
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+    let status = AudioDeviceStatus {
+        live: Some(live_name),
+        monitor: monitor.as_ref().map(|m| m.device.clone()),
+        note: (!notes.is_empty()).then(|| notes.join("; ")),
+    };
+    Ok(Session {
+        live,
+        monitor,
+        status,
+    })
+}
+
+#[cfg(feature = "cpal-backend")]
+fn publish(cell: &Arc<Mutex<AudioDeviceStatus>>, status: AudioDeviceStatus) {
+    if let Ok(mut held) = cell.lock() {
+        *held = status;
+    }
+}
+
+/// No device: run the graph anyway, at wall-clock pace, into nothing.
+/// The audio of those blocks is lost — but clocks keep time and, above
+/// all, the RT command ring KEEPS DRAINING, so the control thread's edits
+/// do not pile up behind hardware that is not there. That is the
+/// difference between "the headphones came out" and "the app froze".
+#[cfg(feature = "cpal-backend")]
+fn pace_silent(
+    slot: &Arc<Mutex<Option<Box<EngineCore>>>>,
+    block: usize,
+    block_dur: Duration,
+    deadline: &mut Instant,
+) {
+    if let Ok(mut guard) = slot.lock() {
+        if let Some(core) = guard.as_mut() {
+            core.process_block(block);
+        }
+    }
+    let now = Instant::now();
+    if *deadline <= now {
+        // Late (or just back from a device that was pulling): start the
+        // pacing again from here rather than sprinting to catch up.
+        *deadline = now + block_dur;
+    } else {
+        std::thread::sleep(*deadline - now);
+        *deadline += block_dur;
+    }
 }
 
 impl Engine {
@@ -194,10 +593,19 @@ impl Engine {
         self.audio_outputs = outputs;
     }
 
+    /// What the backend is playing through RIGHT NOW — which is not always
+    /// what was asked for, because a device can be unplugged mid-set. All
+    /// `None` means nothing is playing (stopped, or no output at all).
+    pub fn audio_device_status(&self) -> AudioDeviceStatus {
+        self.audio_device_status
+            .lock()
+            .map(|held| held.clone())
+            .unwrap_or_default()
+    }
+
     /// Start the cpal device backend (requires a working audio device).
     #[cfg(feature = "cpal-backend")]
     pub fn start_cpal(&mut self) -> Result<()> {
-        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
         let core = match std::mem::replace(&mut self.state, EngineState::Empty) {
             EngineState::Stopped(core) => core,
             other => {
@@ -216,22 +624,8 @@ impl Engine {
         );
         let block = self.config.block_size;
         let channels = self.config.master_channels;
-        let xruns = self.xruns.clone();
-        let xruns_report = self.xruns.clone();
-        let block_dur = block as f64 / self.config.sample_rate as f64;
-
-        // Debug counters for the periodic level report (updated lock-free
-        // from the audio callback, printed by the control loop below).
-        let dbg_callbacks = Arc::new(AtomicU64::new(0));
-        let dbg_samples = Arc::new(AtomicU64::new(0));
-        let dbg_peak_bits = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let dbg_starved = Arc::new(AtomicU64::new(0));
-        let (cb_callbacks, cb_samples, cb_peak_bits, cb_starved) = (
-            dbg_callbacks.clone(),
-            dbg_samples.clone(),
-            dbg_peak_bits.clone(),
-            dbg_starved.clone(),
-        );
+        let block_secs = block as f64 / self.config.sample_rate as f64;
+        let block_dur = Duration::from_secs_f64(block_secs);
 
         // The core lives in a shared slot for the whole cpal run. The audio
         // callback try_locks it per callback: a single uncontended CAS in
@@ -240,216 +634,154 @@ impl Engine {
         // stream setup fails (fall back to another backend) and at stop()
         // (structural edits like adding modules/wires need the graph back).
         let slot: Arc<Mutex<Option<Box<EngineCore>>>> = Arc::new(Mutex::new(Some(core)));
-        let slot_cb = slot.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = stop.clone();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::result::Result<(), String>>();
 
-        // The monitor device is a SECOND stream, fed by the live callback
-        // over a ring: only one thread may hold the core, and the two
-        // devices run on their own clocks. A quarter second of slack
-        // absorbs the drift between them; whoever is late finds silence
-        // rather than blocking the other.
+        // Debug counters for the periodic level report (updated lock-free
+        // from the audio callback, printed by the supervisor loop below).
+        let deps = LiveDeps {
+            slot: slot.clone(),
+            callbacks: Arc::new(AtomicU64::new(0)),
+            samples: Arc::new(AtomicU64::new(0)),
+            peak_bits: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            starved: Arc::new(AtomicU64::new(0)),
+            xruns: self.xruns.clone(),
+            block,
+            channels,
+            block_secs,
+        };
+        let (dbg_callbacks, dbg_samples, dbg_peak_bits, dbg_starved) = (
+            deps.callbacks.clone(),
+            deps.samples.clone(),
+            deps.peak_bits.clone(),
+            deps.starved.clone(),
+        );
+        let xruns_report = self.xruns.clone();
+
+        // A quarter second of slack on the ring between the two streams
+        // absorbs the drift between two devices on their own clocks.
         let outputs = self.audio_outputs.clone();
         let mon_capacity = channels * self.config.sample_rate as usize / 4;
-        let (mon_tx, mon_rx) = rtrb::RingBuffer::<f32>::new(mon_capacity);
-        let mut mon_tx = mon_tx;
-        let mut mon_rx = mon_rx;
-        let want_monitor = outputs.monitor.is_some();
+        let status = self.audio_device_status.clone();
 
-        // The stream is created, driven, and dropped entirely on this
+        // The streams are created, driven, and dropped entirely on this
         // thread: cpal::Stream is !Send on CoreAudio, so it must never
         // cross threads (and Engine must stay Send for the Tauri shell).
         let join = std::thread::Builder::new()
             .name("dj-cpal".into())
             .spawn(move || {
-                let mut leftover: Vec<f32> = Vec::with_capacity(block * channels);
-                let data_cb = move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    cb_callbacks.fetch_add(1, Ordering::Relaxed);
-                    cb_samples.fetch_add(out.len() as u64, Ordering::Relaxed);
-                    let mut guard = match slot_cb.try_lock() {
-                        Ok(g) => g,
-                        Err(_) => {
-                            cb_starved.fetch_add(1, Ordering::Relaxed);
-                            out.fill(0.0);
-                            return;
-                        }
-                    };
-                    let Some(core) = guard.as_mut() else {
-                        cb_starved.fetch_add(1, Ordering::Relaxed);
-                        out.fill(0.0);
-                        return;
-                    };
-                    let t0 = Instant::now();
-                    let mut written = 0;
-                    while written < out.len() {
-                        if leftover.is_empty() {
-                            core.process_block(block);
-                            for s in 0..block {
-                                for ch in 0..channels {
-                                    leftover.push(
-                                        (core.master[ch][s] / crate::graph::SIGNAL_MAX)
-                                            .clamp(-1.0, 1.0),
-                                    );
-                                    if want_monitor {
-                                        // Full ring = the monitor device is
-                                        // behind; drop rather than block the
-                                        // live callback.
-                                        let _ = mon_tx.push(
-                                            (core.monitor[ch][s] / crate::graph::SIGNAL_MAX)
-                                                .clamp(-1.0, 1.0),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        let n = (out.len() - written).min(leftover.len());
-                        out[written..written + n].copy_from_slice(&leftover[..n]);
-                        leftover.drain(..n);
-                        written += n;
-                    }
-                    // Track the peak sample per report interval (racy max is
-                    // fine for a debug readout; no locks/allocation).
-                    let mut peak = 0.0f32;
-                    for &s in out.iter() {
-                        peak = peak.max(s.abs());
-                    }
-                    if peak > f32::from_bits(cb_peak_bits.load(Ordering::Relaxed)) {
-                        cb_peak_bits.store(peak.to_bits(), Ordering::Relaxed);
-                    }
-                    let budget = block_dur * (out.len() as f64 / (block * channels) as f64);
-                    if t0.elapsed().as_secs_f64() > budget {
-                        xruns.fetch_add(1, Ordering::Relaxed);
-                    }
-                };
-                let mon_cb = move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    for s in out.iter_mut() {
-                        // Nothing queued yet (or the live stream is late):
-                        // silence is the only honest thing to play.
-                        *s = mon_rx.pop().unwrap_or(0.0);
-                    }
-                };
-                let result =
-                    (|| -> std::result::Result<(cpal::Stream, Option<cpal::Stream>), String> {
-                        let host = cpal::default_host();
-                        eprintln!("[dj-audio] cpal host: {:?}", host.id());
-                        let device = match &outputs.live {
-                            Some(name) => named_output(&host, name)
-                                .ok_or_else(|| format!("no audio output device named {name:?}"))?,
-                            None => host
-                                .default_output_device()
-                                .ok_or("no audio output device")?,
-                        };
-                        eprintln!(
-                            "[dj-audio] live output device: {:?}",
-                            device.name().unwrap_or_else(|e| format!("<unknown: {e}>"))
-                        );
-                        match device.default_output_config() {
-                            Ok(def) => eprintln!(
-                            "[dj-audio] device default config: {} ch @ {} Hz, {:?}, buffer {:?}",
-                            def.channels(),
-                            def.sample_rate().0,
-                            def.sample_format(),
-                            def.buffer_size()
-                        ),
-                            Err(e) => eprintln!("[dj-audio] default_output_config failed: {e}"),
-                        }
-                        let stream = device
-                            .build_output_stream(
-                                &config,
-                                data_cb,
-                                |err| eprintln!("[dj-audio] cpal stream error: {err}"),
-                                None,
-                            )
-                            .map_err(|e| format!("build_output_stream: {e}"))?;
-                        eprintln!("[dj-audio] output stream built, calling play()");
-                        stream.play().map_err(|e| format!("play: {e}"))?;
-                        eprintln!("[dj-audio] stream playing");
-                        // The monitor device is optional in the strongest
-                        // sense: if it cannot be opened the live output still
-                        // plays, and the cue is what is lost.
-                        let monitor = match &outputs.monitor {
-                            Some(name) => match named_output(&host, name) {
-                                Some(dev) => match dev.build_output_stream(
-                                    &config,
-                                    mon_cb,
-                                    |err| eprintln!("[dj-audio] monitor stream error: {err}"),
-                                    None,
-                                ) {
-                                    Ok(s) => match s.play() {
-                                        Ok(()) => {
-                                            eprintln!(
-                                                "[dj-audio] monitor stream playing on {name:?}"
-                                            );
-                                            Some(s)
-                                        }
-                                        Err(e) => {
-                                            eprintln!("[dj-audio] monitor play failed: {e}");
-                                            None
-                                        }
-                                    },
-                                    Err(e) => {
-                                        eprintln!("[dj-audio] monitor stream build failed: {e}");
-                                        None
-                                    }
-                                },
-                                None => {
-                                    eprintln!("[dj-audio] no monitor device named {name:?}");
-                                    None
-                                }
-                            },
-                            None => None,
-                        };
-                        Ok((stream, monitor))
-                    })();
-                match result {
-                    Ok((stream, monitor)) => {
+                let host = cpal::default_host();
+                eprintln!("[dj-audio] cpal host: {:?}", host.id());
+                let mut open = match open_session(&host, &config, &deps, &outputs, mon_capacity) {
+                    Ok(session) => {
+                        publish(&status, session.status.clone());
                         let _ = ready_tx.send(Ok(()));
-                        // Periodic debug report: proves whether the device is
-                        // pulling audio (callbacks > 0) and whether the graph
-                        // is producing signal (peak > 0). A running stream
-                        // with peak 0.000 means the patch renders silence
-                        // (e.g. the demo patch's VCA gate never opened).
-                        let mut last_report = Instant::now();
-                        let mut last_callbacks = 0u64;
-                        let mut last_samples = 0u64;
-                        while !stop_thread.load(Ordering::Relaxed) {
-                            std::thread::sleep(Duration::from_millis(50));
-                            if last_report.elapsed() >= Duration::from_secs(2) {
-                                let cbs = dbg_callbacks.load(Ordering::Relaxed);
-                                let samples = dbg_samples.load(Ordering::Relaxed);
-                                let peak = f32::from_bits(dbg_peak_bits.swap(0, Ordering::Relaxed));
-                                let starved = dbg_starved.load(Ordering::Relaxed);
-                                eprintln!(
-                                    "[dj-audio] cpal report: callbacks +{} ({} total), \
-                                     samples +{}, peak {:.4}, starved {}, xruns {}",
-                                    cbs - last_callbacks,
-                                    cbs,
-                                    samples - last_samples,
-                                    peak,
-                                    starved,
-                                    xruns_report.load(Ordering::Relaxed),
-                                );
-                                if cbs == last_callbacks {
-                                    eprintln!(
-                                        "[dj-audio] WARNING: no cpal callbacks in the last 2s — \
-                                         the OS is not pulling audio (device/permission issue?)"
-                                    );
-                                }
-                                last_callbacks = cbs;
-                                last_samples = samples;
-                                last_report = Instant::now();
-                            }
-                        }
-                        eprintln!("[dj-audio] stop requested, dropping cpal stream");
-                        drop(monitor);
-                        drop(stream);
+                        Some(session)
                     }
                     Err(e) => {
+                        // No output at all at start: the caller falls back
+                        // to the null backend, which is this thread's job
+                        // done.
                         eprintln!("[dj-audio] cpal setup FAILED: {e}");
                         let _ = ready_tx.send(Err(e));
+                        return;
+                    }
+                };
+                let mut next_try = Instant::now() + DEVICE_RETRY;
+                let mut silent_deadline = Instant::now();
+                let mut last_report = Instant::now();
+                let mut last_callbacks = 0u64;
+                let mut last_samples = 0u64;
+                while !stop_thread.load(Ordering::Relaxed) {
+                    let now = Instant::now();
+                    if let Some(session) = open.as_mut() {
+                        if let Some(gone) = session.lost(now) {
+                            eprintln!(
+                                "[dj-audio] {gone:?} stopped answering — dropping the streams \
+                                 and looking for an output"
+                            );
+                            publish(
+                                &status,
+                                AudioDeviceStatus {
+                                    note: Some(format!("{gone} is gone — looking for an output")),
+                                    ..AudioDeviceStatus::default()
+                                },
+                            );
+                            open = None;
+                            // Give the OS a moment to settle its default
+                            // device before asking it for one.
+                            next_try = now + DEVICE_RETRY;
+                            silent_deadline = now;
+                            continue;
+                        }
+                        // The cue device the user asked for may have come
+                        // back. The ring between the two streams is built
+                        // with them, so taking it back rebuilds both.
+                        if now >= next_try {
+                            next_try = now + DEVICE_RETRY;
+                            if session.wants_monitor_back(&host, &outputs) {
+                                eprintln!("[dj-audio] the cue device is back — reopening");
+                                open = None;
+                                next_try = now;
+                                continue;
+                            }
+                        }
+                    }
+                    if open.is_none() && now >= next_try {
+                        next_try = now + DEVICE_RETRY;
+                        match open_session(&host, &config, &deps, &outputs, mon_capacity) {
+                            Ok(session) => {
+                                publish(&status, session.status.clone());
+                                open = Some(session);
+                                last_report = Instant::now();
+                            }
+                            Err(e) => publish(
+                                &status,
+                                AudioDeviceStatus {
+                                    note: Some(format!("no audio output ({e})")),
+                                    ..AudioDeviceStatus::default()
+                                },
+                            ),
+                        }
+                    }
+                    if open.is_none() {
+                        // Nowhere to play, so play nowhere — but KEEP
+                        // PROCESSING: a graph nobody runs never drains the
+                        // RT command ring, and every control-thread edit
+                        // behind it would block. See `pace_silent`.
+                        pace_silent(&deps.slot, block, block_dur, &mut silent_deadline);
+                        continue;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                    // Periodic debug report: proves whether the device is
+                    // pulling audio (callbacks > 0) and whether the graph
+                    // is producing signal (peak > 0). A running stream
+                    // with peak 0.000 means the patch renders silence
+                    // (e.g. the demo patch's VCA gate never opened).
+                    if last_report.elapsed() >= Duration::from_secs(2) {
+                        let cbs = dbg_callbacks.load(Ordering::Relaxed);
+                        let samples = dbg_samples.load(Ordering::Relaxed);
+                        let peak = f32::from_bits(dbg_peak_bits.swap(0, Ordering::Relaxed));
+                        let starved = dbg_starved.load(Ordering::Relaxed);
+                        eprintln!(
+                            "[dj-audio] cpal report: callbacks +{} ({} total), \
+                             samples +{}, peak {:.4}, starved {}, xruns {}",
+                            cbs - last_callbacks,
+                            cbs,
+                            samples - last_samples,
+                            peak,
+                            starved,
+                            xruns_report.load(Ordering::Relaxed),
+                        );
+                        last_callbacks = cbs;
+                        last_samples = samples;
+                        last_report = Instant::now();
                     }
                 }
+                eprintln!("[dj-audio] stop requested, dropping cpal streams");
+                drop(open);
+                publish(&status, AudioDeviceStatus::default());
             })?;
 
         match ready_rx.recv() {
@@ -504,6 +836,9 @@ impl Engine {
         if let EngineState::Stopped(core) = &mut self.state {
             core.apply_commands();
         }
+        if let Ok(mut status) = self.audio_device_status.lock() {
+            *status = AudioDeviceStatus::default();
+        }
         self.drain_garbage();
         Ok(())
     }
@@ -525,5 +860,56 @@ impl Engine {
         for ctl in self.beat_clips.values_mut() {
             while ctl.garbage_rx.pop().is_ok() {}
         }
+    }
+}
+
+/// Device loss is decided by a clock, so the decision is tested on one: a
+/// stream whose callback count has stopped moving is a device that has
+/// gone, and the engine must not sit waiting for it.
+#[cfg(all(test, feature = "cpal-backend"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stream_being_pulled_is_never_called_lost() {
+        let t0 = Instant::now();
+        let mut watch = StreamWatch::new(0, t0);
+        for tick in 1..=200u64 {
+            let now = t0 + Duration::from_millis(50 * tick);
+            assert!(!watch.lost(tick, false, now), "tick {tick}");
+        }
+    }
+
+    #[test]
+    fn a_stream_that_stops_calling_back_is_lost_after_the_stall_window() {
+        let t0 = Instant::now();
+        let mut watch = StreamWatch::new(0, t0);
+        let last_pull = t0 + Duration::from_millis(50);
+        assert!(!watch.lost(7, false, last_pull));
+        // The count is frozen from here on: the headphones are out.
+        assert!(!watch.lost(
+            7,
+            false,
+            last_pull + DEVICE_STALL - Duration::from_millis(1)
+        ));
+        assert!(watch.lost(7, false, last_pull + DEVICE_STALL));
+    }
+
+    #[test]
+    fn a_device_gone_error_is_not_waited_out() {
+        let t0 = Instant::now();
+        let mut watch = StreamWatch::new(0, t0);
+        assert!(watch.lost(0, true, t0));
+    }
+
+    #[test]
+    fn callbacks_resuming_restart_the_stall_window() {
+        let t0 = Instant::now();
+        let mut watch = StreamWatch::new(0, t0);
+        let late = t0 + DEVICE_STALL - Duration::from_millis(1);
+        assert!(!watch.lost(1, false, late));
+        // A pull that late is still a pull: the window runs again from it.
+        assert!(!watch.lost(1, false, late + DEVICE_STALL - Duration::from_millis(1)));
+        assert!(watch.lost(1, false, late + DEVICE_STALL));
     }
 }

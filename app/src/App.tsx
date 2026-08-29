@@ -20,6 +20,7 @@ import {
 import { isEditableTarget, useFileShortcuts } from './fileShortcuts';
 import { RackKeysContext } from './keyScope';
 import { library, type Track } from './library';
+import { AudioOutputPicker } from './components/AudioOutputPicker';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MacroBoxes } from './components/MacroBoxes';
 import { AudioUIContext } from './components/AudioPanel';
@@ -2019,6 +2020,10 @@ export default function App() {
         >
           {patchName}
         </span>
+        {/* Where the sound goes, in the chrome above every page: a device
+            can leave mid-set, and picking another one must never mean
+            hunting for the page that happens to own the picker. */}
+        <AudioOutputPicker />
         <span
           className="engine-status"
           data-testid="engine-status"

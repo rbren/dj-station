@@ -38,11 +38,6 @@
 // themselves — there is no timer, and no "who is right" ambiguity.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  audioOutputs as defaultOutputs,
-  type AudioOutputSettings,
-  type AudioOutputsApi,
-} from '../audioOutputs';
 import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '../beatClip';
 import {
   decks as defaultApi,
@@ -96,7 +91,6 @@ export function clampDockHeight(px: number, viewport: number): number {
 export interface DecksViewProps {
   api?: DecksApi;
   clips?: BeatClipApi;
-  outputs?: AudioOutputsApi;
   /** The page keeps polling only while it is the open tab. */
   active?: boolean;
   pollMs?: number;
@@ -136,7 +130,6 @@ type DraftKey = `${number}:${SlotControl}`;
 export function DecksView(props: DecksViewProps) {
   const api = props.api ?? defaultApi;
   const clipApi = props.clips ?? defaultClips;
-  const outputsApi = props.outputs ?? defaultOutputs;
   const active = props.active ?? true;
   const [bank, setBank] = useState<string | null>(null);
   const [status, setStatus] = useState<DecksStatus | null>(null);
@@ -145,7 +138,6 @@ export function DecksView(props: DecksViewProps) {
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Partial<Record<DraftKey, number>>>({});
   const [bpmDraft, setBpmDraft] = useState<number | null>(null);
-  const [outputs, setOutputs] = useState<AudioOutputSettings | null>(null);
   const rehydrated = useRef(false);
   const [collapsed, setCollapsed] = useState(
     () => loadJson<boolean>(DOCK_COLLAPSED_KEY, false) === true,
@@ -191,8 +183,6 @@ export function DecksView(props: DecksViewProps) {
       if (!cancelled && bank) props.onGraphChange?.();
       const list = await clipApi.list();
       if (!cancelled && list) setClips(list);
-      const outs = await outputsApi.get();
-      if (!cancelled && outs) setOutputs(outs);
       // A bank restored at startup can come back bound but silent — its
       // clips are re-assembled from disk and that can fail while the app
       // is still coming up. Asking once, when the page opens, is what
@@ -209,7 +199,7 @@ export function DecksView(props: DecksViewProps) {
     // `poll` is deliberately out: this runs when the tab opens, not on
     // every status change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, clipApi, outputsApi, active]);
+  }, [api, clipApi, active]);
 
   useEffect(() => {
     if (!active || !bank) return;
@@ -286,17 +276,6 @@ export function DecksView(props: DecksViewProps) {
       void write(() => api.setControl(bank, slot, control, value));
     },
     [api, bank, write],
-  );
-
-  const setOutput = useCallback(
-    async (bus: 'live' | 'monitor', device: string | null) => {
-      const next = { ...(outputs ?? { devices: [], live: null, monitor: null }), [bus]: device };
-      setOutputs(next);
-      await outputsApi.set(next.live, next.monitor);
-      const fresh = await outputsApi.get();
-      if (fresh) setOutputs(fresh);
-    },
-    [outputs, outputsApi],
   );
 
   // The dock: how much of the body the strips take, and whether they are
@@ -444,32 +423,6 @@ export function DecksView(props: DecksViewProps) {
               onClick={(shift) => onJack(CLOCK_JACK, 'output', shift)}
             />
           </span>
-        </div>
-        <div className="decks-outputs" data-testid="decks-outputs">
-          {(['live', 'monitor'] as const).map((bus) => (
-            <label className="decks-output" key={bus}>
-              <span className="decks-output-label">{bus}</span>
-              <select
-                data-testid={`decks-output-${bus}`}
-                aria-label={`${bus} audio output`}
-                value={outputs?.[bus] ?? ''}
-                onChange={(e) => void setOutput(bus, e.target.value || null)}
-              >
-                <option value="">system default</option>
-                {(outputs?.devices ?? []).map((device) => (
-                  <option key={device} value={device}>
-                    {device}
-                  </option>
-                ))}
-                {/* A remembered device that is not plugged in today still
-                    has to be shown, or the picker would silently say
-                    something the engine does not. */}
-                {outputs?.[bus] && !outputs.devices.includes(outputs[bus]) && (
-                  <option value={outputs[bus]}>{outputs[bus]} (not found)</option>
-                )}
-              </select>
-            </label>
-          ))}
         </div>
         <div className="decks-bar-actions">
           <span

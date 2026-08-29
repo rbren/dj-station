@@ -41,7 +41,7 @@ mod hands_api;
 mod hot_reload;
 mod launch_control_api;
 mod lifecycle;
-pub use lifecycle::{audio_output_devices, AudioOutputs};
+pub use lifecycle::{audio_output_devices, AudioDeviceStatus, AudioOutputs};
 mod macros_api;
 mod midi;
 mod qwerty_api;
@@ -448,6 +448,10 @@ pub struct Engine {
     /// The machine's business, not the patch's — the app persists it
     /// beside its own settings and hands it back at startup.
     audio_outputs: AudioOutputs,
+    /// What the running backend actually reached, published by the cpal
+    /// supervisor thread: a device can leave while the app is playing, and
+    /// the picker in the chrome has to be able to say so.
+    audio_device_status: Arc<Mutex<AudioDeviceStatus>>,
     xruns: Arc<AtomicU64>,
     /// Blocks whose *processing* alone exceeded the block period — the
     /// engine itself was the bottleneck (as opposed to `xruns`, which on the
@@ -563,6 +567,7 @@ impl Engine {
             clip_decks: HashMap::new(),
             audio_focus: AudioFocus::default(),
             audio_outputs: AudioOutputs::default(),
+            audio_device_status: Arc::new(Mutex::new(AudioDeviceStatus::default())),
             xruns: Arc::new(AtomicU64::new(0)),
             proc_misses: Arc::new(AtomicU64::new(0)),
             max_proc_nanos: Arc::new(AtomicU64::new(0)),

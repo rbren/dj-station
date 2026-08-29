@@ -340,6 +340,44 @@ body {
   background: var(--warn);
 }
 
+/* Where the sound goes, in the header beside the engine's own state. The
+   two buses read as one control group; the note only appears when the
+   engine has something to say (a device left, nothing could be opened),
+   and wears --cue because it is "look here", not a fault. */
+.audio-outputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audio-output {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.audio-output-label {
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.audio-output select {
+  max-width: 150px;
+  font-size: var(--fs-xs);
+}
+
+.audio-outputs[data-state='adrift'] select {
+  border-color: color-mix(in srgb, var(--cue) 55%, var(--line-strong));
+}
+
+.audio-output-note {
+  color: var(--cue);
+  font-size: var(--fs-xs);
+  max-width: 26ch;
+}
+
 /* Free placement canvas: placed panels are absolutely positioned on a
    coarse 48px grid; unplaced panels (tests/stories) still flow. */
 .rack {
@@ -5872,30 +5910,6 @@ body {
 .decks-clock-jack {
   display: inline-flex;
   align-items: center;
-}
-
-.decks-outputs {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.decks-output {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.decks-output-label {
-  color: var(--ink-dim);
-  font-size: var(--fs-nano);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.decks-output select {
-  max-width: 150px;
-  font-size: var(--fs-xs);
 }
 
 .decks-mix {

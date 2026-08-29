@@ -243,3 +243,22 @@ fn master_tap_reports_output_level() {
     let t2 = engine.tap_master(1).unwrap();
     assert!(t2.rms_100ms < 1e-6, "{t2:?}");
 }
+
+/// The device readout is about HARDWARE the engine actually reached, and
+/// only the cpal backend ever reaches any: a headless run must say
+/// "nothing is playing" rather than name a device it never opened, and
+/// stopping must take the claim back. The app's output picker draws its
+/// "silent" state from exactly this.
+#[test]
+fn a_backend_with_no_device_claims_no_output() {
+    let mut engine = crate::common::default_engine();
+    assert_eq!(engine.audio_device_status(), Default::default());
+
+    engine.start_null_realtime().unwrap();
+    let running = engine.audio_device_status();
+    assert_eq!(running.live, None, "{running:?}");
+    assert_eq!(running.monitor, None, "{running:?}");
+
+    engine.stop().unwrap();
+    assert_eq!(engine.audio_device_status(), Default::default());
+}

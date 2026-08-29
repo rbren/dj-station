@@ -1977,14 +1977,20 @@ fn qwerty_key(state: State<AppState>, instance: String, key: String, down: bool)
     engine.qwerty_key(&instance, frame, &key, down).map_err(err)
 }
 
-/// Where the two buses play: the hardware outputs and the pair currently
-/// chosen. The names are the machine's, so the pickers can show what is
-/// actually there and say when a remembered device has gone.
+/// Where the two buses play: the hardware outputs, the pair currently
+/// chosen, and the pair actually REACHED. The names are the machine's, so
+/// the pickers can show what is there, and the `playing_*` pair is what
+/// lets them say "your headphones are gone, this is coming out of the
+/// speakers" instead of leaving the user staring at a dead choice.
 #[derive(Serialize)]
 struct AudioOutputSettings {
     devices: Vec<String>,
     live: Option<String>,
     monitor: Option<String>,
+    playing_live: Option<String>,
+    playing_monitor: Option<String>,
+    /// One line on why the engine is not playing where it was asked to.
+    note: Option<String>,
 }
 
 /// Device choices live beside the app's other data, NOT in the patch: a
@@ -2004,10 +2010,14 @@ fn load_audio_outputs() -> AudioOutputs {
 fn audio_outputs(state: State<AppState>) -> CmdResult<AudioOutputSettings> {
     let engine = engine_lock(&state)?;
     let chosen = engine.audio_outputs().clone();
+    let playing = engine.audio_device_status();
     Ok(AudioOutputSettings {
         devices: dj_engine::audio_output_devices(),
         live: chosen.live,
         monitor: chosen.monitor,
+        playing_live: playing.live,
+        playing_monitor: playing.monitor,
+        note: playing.note,
     })
 }
 
@@ -2027,7 +2037,10 @@ fn set_audio_outputs(
     }
     std::fs::write(&path, serde_json::to_string_pretty(&outputs).map_err(err)?).map_err(err)?;
     let mut engine = engine_lock(&state)?;
-    if engine.audio_outputs() == &outputs {
+    // Re-picking what is already chosen is a no-op — unless nothing is
+    // playing, in which case the user has just told a silent engine to try
+    // that device again, and it should.
+    if engine.audio_outputs() == &outputs && engine.audio_device_status().live.is_some() {
         return Ok(());
     }
     engine.set_audio_outputs(outputs);
