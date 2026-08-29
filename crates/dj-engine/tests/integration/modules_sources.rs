@@ -484,6 +484,213 @@ fn noise_is_deterministic_across_instances() {
 }
 
 // ---------------------------------------------------------------------------
+// Spectral Noise
+// ---------------------------------------------------------------------------
+
+/// A Spectral Noise on the master bus with its three controls set.
+fn spectral(tilt: f32, pivot_hz: f32, curve: f32) -> Engine {
+    let mut e = source_patch("com.dj.spectral_noise", "out");
+    e.set_knob_value("src", "tilt", tilt).unwrap();
+    e.set_knob_value("src", "pivot", pitch_of(pivot_hz))
+        .unwrap();
+    e.set_knob_value("src", "curve", curve).unwrap();
+    e
+}
+
+/// Two seconds of shaped noise, past the filter's start-up transient.
+fn spectral_render(tilt: f32, pivot_hz: f32, curve: f32) -> Vec<f32> {
+    let out = render(&mut spectral(tilt, pivot_hz, curve), 2.0);
+    out[9_600..].to_vec()
+}
+
+/// The shaping filter's response in dB in a third-octave band around `f`,
+/// read off two renders of the SAME noise realization (the generator is a
+/// fixed-seed PRNG stepped once per frame whatever the controls do), so
+/// this is the filter's actual response rather than an estimate of a
+/// spectrum.
+fn response_db(shaped: &[f32], flat: &[f32], f: f32) -> f32 {
+    let (lo, hi) = (f / 1.12, f * 1.12);
+    10.0 * (band_power(shaped, lo, hi) / band_power(flat, lo, hi)).log10()
+}
+
+#[test]
+fn spectral_noise_defaults_to_flat_white() {
+    let out = spectral_render(0.0, 1_000.0, 0.0);
+    assert!(
+        slope_db_per_octave(&out).abs() < 0.3,
+        "default slope {:.2} dB/oct is not white",
+        slope_db_per_octave(&out)
+    );
+    // Flat means flat everywhere, not just between the two end bands.
+    let bands = [
+        (50.0, 100.0),
+        (200.0, 400.0),
+        (800.0, 1_600.0),
+        (3_200.0, 6_400.0),
+        (8_000.0, 16_000.0),
+    ];
+    let db: Vec<f32> = bands
+        .iter()
+        .map(|(lo, hi)| 10.0 * band_power(&out, *lo, *hi).log10())
+        .collect();
+    let mean = db.iter().sum::<f32>() / db.len() as f32;
+    for (band, d) in bands.iter().zip(&db) {
+        assert!(
+            (d - mean).abs() < 1.0,
+            "band {band:?} is {:.2} dB off flat",
+            d - mean
+        );
+    }
+    assert!(
+        (rms(&out) - 2.0).abs() < 0.1,
+        "white sits at {} V RMS",
+        rms(&out)
+    );
+}
+
+#[test]
+fn spectral_noise_tilt_is_a_straight_slope_through_the_pivot() {
+    // The colours ARE the tilt values: -3 pink, -6 red/brown, +3 blue.
+    for tilt in [-9.0f32, -6.0, -3.0, 3.0, 6.0] {
+        let out = spectral_render(tilt, 1_000.0, 0.0);
+        let slope = slope_db_per_octave(&out);
+        assert!(
+            (slope - tilt).abs() < 0.6,
+            "tilt {tilt}: measured {slope:.2} dB/oct"
+        );
+    }
+
+    // Straight, not just steep: every octave step between 125 Hz and 8 kHz
+    // carries the same dB, whichever way the tilt runs.
+    let flat = spectral_render(0.0, 1_000.0, 0.0);
+    for tilt in [-6.0f32, 6.0] {
+        let shaped = spectral_render(tilt, 1_000.0, 0.0);
+        let mut f = 125.0;
+        while f < 8_000.0 {
+            let step = response_db(&shaped, &flat, f * 2.0) - response_db(&shaped, &flat, f);
+            assert!(
+                (step - tilt).abs() < 1.0,
+                "tilt {tilt}: {f:.0} Hz -> {:.0} Hz is {step:.2} dB",
+                f * 2.0
+            );
+            f *= 2.0;
+        }
+    }
+}
+
+#[test]
+fn spectral_noise_curvature_is_a_bipolar_bell_on_the_pivot() {
+    let flat = spectral_render(0.0, 1_000.0, 0.0);
+    let boost = spectral_render(0.0, 1_000.0, 12.0);
+    let cut = spectral_render(0.0, 1_000.0, -12.0);
+
+    let at = |x: &[f32], f: f32| response_db(x, &flat, f);
+    // A boost peaks at the pivot and falls away either side of it...
+    assert!(
+        at(&boost, 1_000.0) > at(&boost, 250.0) + 6.0
+            && at(&boost, 1_000.0) > at(&boost, 4_000.0) + 6.0,
+        "no bell: {:.1} dB at the pivot vs {:.1} / {:.1} two octaves out",
+        at(&boost, 1_000.0),
+        at(&boost, 250.0),
+        at(&boost, 4_000.0)
+    );
+    // ...symmetrically in log frequency (it is curvature about the pivot,
+    // not a tilt).
+    assert!(
+        (at(&boost, 250.0) - at(&boost, 4_000.0)).abs() < 1.5,
+        "bell is lopsided: {:.1} vs {:.1} dB",
+        at(&boost, 250.0),
+        at(&boost, 4_000.0)
+    );
+    // Negative curvature is the same bell, scooped out.
+    assert!(
+        at(&cut, 1_000.0) < at(&cut, 250.0) - 6.0 && at(&cut, 1_000.0) < at(&cut, 4_000.0) - 6.0,
+        "negative curvature does not scoop: {:.1} dB at the pivot",
+        at(&cut, 1_000.0)
+    );
+}
+
+#[test]
+fn spectral_noise_pivot_moves_both_terms() {
+    let probes = [125.0f32, 250.0, 500.0, 1_000.0, 2_000.0, 4_000.0];
+    for pivot in [250.0f32, 4_000.0] {
+        let flat = spectral_render(0.0, pivot, 0.0);
+        let boost = spectral_render(0.0, pivot, 12.0);
+        let peak_at = probes
+            .iter()
+            .copied()
+            .max_by(|a, b| {
+                response_db(&boost, &flat, *a)
+                    .total_cmp(&response_db(&boost, &flat, *b))
+                    .then(std::cmp::Ordering::Equal)
+            })
+            .unwrap();
+        assert_eq!(
+            peak_at, pivot,
+            "bell did not follow the pivot to {pivot} Hz"
+        );
+    }
+
+    // The tilt runs out beyond the pivot's span, so a low pivot leaves the
+    // top of the spectrum flatter than a high one does.
+    let low = spectral_render(-6.0, 60.0, 0.0);
+    let high = spectral_render(-6.0, 4_000.0, 0.0);
+    let top_slope = |x: &[f32]| {
+        10.0 * (band_power(x, 8_000.0, 16_000.0) / band_power(x, 2_000.0, 4_000.0)).log10() / 2.0
+    };
+    assert!(
+        top_slope(&low) > top_slope(&high) + 2.0,
+        "pivot does not move the slope's span: {:.2} vs {:.2} dB/oct on top",
+        top_slope(&low),
+        top_slope(&high)
+    );
+}
+
+#[test]
+fn spectral_noise_holds_one_level_across_the_colours() {
+    // Colour is tone, never loudness: without the power normalization
+    // violet would run ~20 dB hotter than white and slam the rails.
+    for tilt in [-9.0f32, -6.0, -3.0, 0.0, 3.0, 6.0, 9.0] {
+        let out = spectral_render(tilt, 1_000.0, 0.0);
+        let level = rms(&out);
+        assert!(
+            level > 1.6 && level < 2.6,
+            "tilt {tilt}: {level} V RMS is off the house level"
+        );
+        assert!(peak(&out) < 10.0, "tilt {tilt}: peak {}", peak(&out));
+    }
+    for curve in [-15.0f32, 15.0] {
+        let out = spectral_render(0.0, 1_000.0, curve);
+        assert!(
+            rms(&out) > 1.6 && rms(&out) < 2.6,
+            "curve {curve}: {} V RMS",
+            rms(&out)
+        );
+        assert!(peak(&out) < 10.0, "curve {curve}: peak {}", peak(&out));
+    }
+}
+
+#[test]
+fn spectral_noise_colour_presets_render_their_colours() {
+    for (preset, slope) in [
+        ("White", 0.0f32),
+        ("Pink", -3.0),
+        ("Red / brown", -6.0),
+        ("Blue", 3.0),
+        ("Violet", 6.0),
+    ] {
+        let mut e = source_patch("com.dj.spectral_noise", "out");
+        e.apply_preset("src", preset).unwrap();
+        let out = render(&mut e, 2.0);
+        let measured = slope_db_per_octave(&out[9_600..]);
+        assert!(
+            (measured - slope).abs() < 0.6,
+            "preset {preset}: {measured:.2} dB/oct, expected {slope}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Drum voice
 // ---------------------------------------------------------------------------
 

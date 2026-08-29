@@ -3404,6 +3404,27 @@ body {
   font-style: italic;
 }
 
+/* Submenu (module presets): the parent row is a flex item like any other
+   button, with its flyout positioned against it. */
+.context-menu-sub {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.context-menu-arrow {
+  color: var(--ink-dim);
+}
+
+.context-menu-flyout {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-left: 2px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
 /* In-app module documentation (DocsPanel.tsx). */
 .docs-backdrop {
   position: fixed;

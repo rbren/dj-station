@@ -1842,6 +1842,7 @@ export default function App() {
     const group = selected.includes(instance) && selected.length > 1 ? selected : [instance];
     const suffix = group.length > 1 ? ` (${group.length} modules)` : '';
     const macroGroup = ctxMenu.macroGroup;
+    const presets = nodes.find((n) => n.instance_id === instance)?.manifest.presets ?? [];
     return [
       {
         label: `Copy${suffix}`,
@@ -1878,6 +1879,23 @@ export default function App() {
             },
           ]
         : []),
+      // Built-in presets are manifest data, so any module can offer them:
+      // a submenu of named value sets for the one module clicked.
+      ...(group.length === 1 && presets.length > 0
+        ? [
+            {
+              label: 'Presets',
+              testId: 'ctx-presets',
+              items: presets.map((p) => ({
+                label: p.name,
+                testId: `ctx-preset-${p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+                onSelect: () => {
+                  void engine.applyPreset(instance, p.name).then(refresh);
+                },
+              })),
+            },
+          ]
+        : []),
       ...(group.length === 1
         ? [
             {
@@ -1898,6 +1916,7 @@ export default function App() {
   }, [
     ctxMenu,
     fileMenuItems,
+    nodes,
     selected,
     clipboardFilled,
     copyModules,

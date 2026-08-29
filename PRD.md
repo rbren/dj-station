@@ -84,11 +84,16 @@ my-module/
   ],
   "ui": "ui.js",                    // optional
   "bypass": { "out": "in" },        // optional: output -> input passthrough
+  "presets": [                      // optional: built-in starting points
+    { "name": "Gentle", "values": { "fold": 1.5 } },
+    { "name": "Shred",  "values": { "fold": 7.0 } }
+  ],
   "latency_samples": 0
 }
 ```
 
 Notes:
+- **`presets` are named sets of input-jack values**, in menu order, offered as a "Presets" submenu in the module's right-click menu. Recalling one only moves knobs — wiring, attenuverter/offset spread and knob config overrides are untouched, and jacks a preset omits keep their current value — so it lands as one ordinary undo step and the patch stores the resulting values, never the preset's name. Built-in presets ship in the manifest; user-saved presets are a later addition beside them.
 - **`bypass` declares the module bypassable**: a map from output jack id to the input jack id that output carries, untouched, while bypass is engaged. Any module with audio in → audio out should declare it, including one that fans a single input out to a stereo pair (`{"out_l": "in", "out_r": "in"}`); an output with no route (a `gr` readout, say) goes silent. The host then draws a bypass toggle in the panel's title bar, and while it is on the engine skips the module's `process` entirely and copies the declared routes. The flag is per-module state: it is saved in the patch and undoable like a knob.
 - Every **input** is simultaneously a jack and a knob target. If a wire is plugged in, the knob becomes an attenuverter/offset on the incoming signal (host behavior, uniform everywhere).
 - **Knob config is data, not code.** Right-click any input to reconfigure: style (`continuous` | `switch` | `button` | `stepped`), endpoint values (any two values for switch/interp range), curve (`linear` | `exp` | `log` | custom breakpoints). User overrides are saved in the patch, not the manifest.

@@ -102,6 +102,7 @@ pub fn hands_manifest() -> Manifest {
         ui: None,
         latency_samples: 0,
         bypass: Default::default(),
+        presets: Default::default(),
     }
 }
 

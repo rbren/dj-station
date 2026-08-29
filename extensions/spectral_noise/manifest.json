@@ -1,0 +1,32 @@
+{
+  "id": "com.dj.spectral_noise",
+  "name": "Spectral Noise",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Sources",
+  "inputs": [
+    { "id": "tilt", "name": "Tilt", "default": 0.0,
+      "knob": { "style": "continuous", "min": -9.0, "max": 9.0, "curve": "linear" },
+      "display": { "unit": "dB/oct" } },
+    { "id": "pivot", "name": "Tilt Freq", "default": 1.9344,
+      "knob": { "style": "continuous", "min": -3.7, "max": 6.1, "curve": "linear" },
+      "display": { "unit": "Hz", "map": { "kind": "volt_per_octave" } } },
+    { "id": "curve", "name": "Curvature", "default": 0.0,
+      "knob": { "style": "continuous", "min": -15.0, "max": 15.0, "curve": "linear" },
+      "display": { "unit": "dB" } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Out" }
+  ],
+  "presets": [
+    { "name": "White", "values": { "tilt": 0.0, "pivot": 1.9344, "curve": 0.0 } },
+    { "name": "Pink", "values": { "tilt": -3.0, "pivot": 1.9344, "curve": 0.0 } },
+    { "name": "Red / brown", "values": { "tilt": -6.0, "pivot": 1.9344, "curve": 0.0 } },
+    { "name": "Black", "values": { "tilt": -9.0, "pivot": 1.9344, "curve": 0.0 } },
+    { "name": "Blue", "values": { "tilt": 3.0, "pivot": 1.9344, "curve": 0.0 } },
+    { "name": "Violet", "values": { "tilt": 6.0, "pivot": 1.9344, "curve": 0.0 } },
+    { "name": "Grey", "values": { "tilt": 0.0, "pivot": 3.2564, "curve": -12.0 } },
+    { "name": "Green", "values": { "tilt": -3.0, "pivot": 0.9344, "curve": 9.0 } }
+  ],
+  "latency_samples": 0
+}

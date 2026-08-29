@@ -206,6 +206,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-spectral-noise"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-step-seq"
 version = "0.1.0"
 dependencies = [

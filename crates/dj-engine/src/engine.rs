@@ -1596,6 +1596,25 @@ impl Engine {
         Ok(())
     }
 
+    /// Recall one of a module's built-in presets (manifest `presets`, PRD
+    /// §5.1): a named set of input-jack VALUES. A preset only moves knobs
+    /// — wiring, attenuverter settings, knob config overrides and any jack
+    /// the preset leaves out are untouched, exactly as if the user had
+    /// turned those controls by hand.
+    pub fn apply_preset(&mut self, instance_id: &str, preset: &str) -> Result<()> {
+        let node = self.node_idx(instance_id)?;
+        let values = self.nodes[node]
+            .manifest
+            .preset(preset)
+            .ok_or_else(|| anyhow!("module {instance_id:?} has no preset {preset:?}"))?
+            .values
+            .clone();
+        for (jack_id, value) in values {
+            self.set_knob_value(instance_id, &jack_id, value)?;
+        }
+        Ok(())
+    }
+
     /// Right-click knob reconfiguration: style/endpoints/curve, per patch.
     pub fn set_knob_config(
         &mut self,

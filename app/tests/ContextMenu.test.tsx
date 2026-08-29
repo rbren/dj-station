@@ -31,6 +31,26 @@ const VCA: Manifest = {
   params: [],
 };
 
+/** A module that ships built-in presets (manifest `presets`). */
+const SPECTRAL: Manifest = {
+  id: 'com.dj.spectral_noise',
+  name: 'Spectral Noise',
+  version: '0.1.0',
+  abi: 'wasm-1',
+  inputs: [
+    { id: 'tilt', name: 'Tilt' },
+    { id: 'pivot', name: 'Tilt Freq' },
+    { id: 'curve', name: 'Curvature' },
+  ],
+  outputs: [{ id: 'out', name: 'Out' }],
+  params: [],
+  presets: [
+    { name: 'White', values: { tilt: 0, pivot: 1.9344, curve: 0 } },
+    { name: 'Pink', values: { tilt: -3, pivot: 1.9344, curve: 0 } },
+    { name: 'Red / brown', values: { tilt: -6, pivot: 1.9344, curve: 0 } },
+  ],
+};
+
 const state = {
   nodes: [] as unknown[],
 };
@@ -55,6 +75,7 @@ const fakeEngine = {
   removeModules: vi.fn(async () => {}),
   resetModule: vi.fn(async () => {}),
   resetModules: vi.fn(async () => {}),
+  applyPreset: vi.fn(async () => {}),
   copyModules: vi.fn(async () => 'CLIP'),
   pasteModules: vi.fn(async () => ({})),
   endEdit: vi.fn(async () => {}),
@@ -223,6 +244,60 @@ describe('module context menu', () => {
     fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 10, clientY: 10 });
     fireEvent.mouseDown(document.body);
     expect(screen.queryByTestId('context-menu')).toBeNull();
+  });
+});
+
+describe('module presets submenu', () => {
+  /** Rack with a preset-carrying module beside the plain ones. */
+  async function renderWithPresets() {
+    state.nodes = [node('osc1', OSC), node('vca1', VCA), node('snoise1', SPECTRAL)];
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('module-snoise1')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+  }
+
+  it('lists the manifest presets and applies the one clicked', async () => {
+    await renderWithPresets();
+    fireEvent.contextMenu(screen.getByTestId('module-snoise1'), { clientX: 20, clientY: 20 });
+    // The submenu is closed until its parent row is opened.
+    expect(screen.queryByTestId('ctx-preset-pink')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('ctx-presets'));
+    expect(screen.getByTestId('ctx-presets-menu')).toBeTruthy();
+    expect(screen.getByTestId('ctx-preset-white')).toBeTruthy();
+    expect(screen.getByTestId('ctx-preset-red-brown').textContent).toContain('Red / brown');
+
+    fireEvent.click(screen.getByTestId('ctx-preset-pink'));
+    await waitFor(() => expect(fakeEngine.applyPreset).toHaveBeenCalledWith('snoise1', 'Pink'));
+    // Recalling a preset closes the menu like any other action, and never
+    // touches the module's structure.
+    expect(screen.queryByTestId('context-menu')).toBeNull();
+    expect(fakeEngine.resetModules).not.toHaveBeenCalled();
+    expect(fakeEngine.removeModules).not.toHaveBeenCalled();
+  });
+
+  it('opens on hover and closes again when the pointer moves to another row', async () => {
+    await renderWithPresets();
+    fireEvent.contextMenu(screen.getByTestId('module-snoise1'), { clientX: 20, clientY: 20 });
+    fireEvent.mouseEnter(screen.getByTestId('ctx-presets'));
+    expect(screen.getByTestId('ctx-preset-white')).toBeTruthy();
+    fireEvent.mouseEnter(screen.getByTestId('ctx-delete'));
+    expect(screen.queryByTestId('ctx-preset-white')).toBeNull();
+  });
+
+  it('modules without presets get no Presets row, and neither does a group', async () => {
+    await renderWithPresets();
+    fireEvent.contextMenu(screen.getByTestId('module-osc1'), { clientX: 10, clientY: 10 });
+    expect(screen.queryByTestId('ctx-presets')).toBeNull();
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    // A multi-selection acts on the whole group, and a preset belongs to
+    // one module.
+    fireEvent.mouseDown(screen.getByTestId('module-header-snoise1'), { shiftKey: true });
+    fireEvent.mouseDown(screen.getByTestId('module-header-osc1'), { shiftKey: true });
+    fireEvent.contextMenu(screen.getByTestId('module-snoise1'), { clientX: 10, clientY: 10 });
+    expect(screen.getByTestId('ctx-copy').textContent).toContain('2 modules');
+    expect(screen.queryByTestId('ctx-presets')).toBeNull();
   });
 });
 

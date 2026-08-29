@@ -235,6 +235,12 @@ export class EngineClient extends IpcClient {
   resetModules(instances: string[]) {
     return this.call<void>('reset_modules', { instances });
   }
+  /** Recall one of a module's built-in presets (manifest `presets`): a
+   *  named set of input-jack values. Moves knobs only — wires, spread and
+   *  knob config overrides stay as they are. */
+  applyPreset(instance: string, preset: string) {
+    return this.call<void>('apply_preset', { instance, preset });
+  }
   /** Copy the selection as an opaque clipboard string (wires internal to
    *  the selection ride along; external wires are dropped). */
   copyModules(instances: string[]) {

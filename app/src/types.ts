@@ -65,6 +65,15 @@ export interface ParamDecl {
   max?: number;
 }
 
+/** A module's built-in preset: a named set of input-jack values, recalled
+ *  from the module's right-click menu. Jacks the preset omits keep their
+ *  current value; applying one moves knobs and nothing else.
+ *  (Mirrors `PresetDecl` in crates/dj-engine/src/manifest.rs.) */
+export interface PresetDecl {
+  name: string;
+  values: Record<string, number>;
+}
+
 export interface Manifest {
   id: string;
   name: string;
@@ -80,6 +89,9 @@ export interface Manifest {
    *  through untouched while the module is bypassed. A non-empty map is
    *  what makes a module bypassable (the title bar's ⏻ toggle). */
   bypass?: Record<string, string>;
+  /** Built-in presets, in menu order. A non-empty list is what puts a
+   *  "Presets" submenu in the module's right-click menu. */
+  presets?: PresetDecl[];
 }
 
 export interface JackTelemetry {

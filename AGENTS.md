@@ -346,6 +346,43 @@ fails if it's missing.
   rate, so the knob still applies (1x ⇒ 2 Hz out) and the next edge
   re-phases the grid. Its output jack is `out`, not `clock`: no other
   manifest reuses one id across both directions, so don't start.
+- Module PRESETS are manifest DATA, not code, so any module can adopt
+  them: `"presets": [{ "name": …, "values": { <input jack id>: value } }]`
+  (`PresetDecl` in `manifest.rs`, values in the jack's own units, jacks
+  the preset omits keep what the user set; `Extension::load` rejects a
+  preset naming a jack the manifest lacks). `Engine::apply_preset` walks
+  them through `set_knob_value`, so recalling one MOVES KNOBS AND NOTHING
+  ELSE — wires, spread (atten/offset), wire mode and per-patch knob
+  config overrides survive, and the result is ordinary knob state that
+  round-trips through the patch (there is no "current preset" field, and
+  a patch never records which preset it came from). The Tauri command is
+  `apply_preset` under `EditKey::Preset` (one undo step); the frontend
+  reads `manifest.presets` off the node it right-clicked and renders a
+  "Presets" submenu — `ContextMenuItem.items` (one level deep,
+  hover-or-click flyout, `.context-menu-sub`/`-flyout`). User-defined
+  presets are NOT implemented; when they are, they belong beside this
+  list, not inside it. Pinned by `tests/integration/presets.rs` and the
+  "module presets submenu" cases in `app/tests/ContextMenu.test.tsx`.
+- Spectral Noise (`extensions/spectral_noise`, `com.dj.spectral_noise`):
+  white noise shaped by the first two terms of a spectral polynomial
+  about the tilt frequency — `gain(f) dB = tilt·log2(f/f0) + curve·bell`.
+  `tilt` IS the colour in dB/oct (0 white, -3 pink, -6 red/brown, +3
+  blue, +6 violet — the built-in presets are just tilt values, plus grey
+  and green which use the curvature term), `pivot` is the frequency both
+  terms are written about, `curve` is the quadratic term realized as a
+  bounded RBJ bell on the pivot (a literal x² diverges at both ends).
+  The slope is a cascade of half-octave-spaced first-order low shelves
+  over ±5 octaves around the pivot (straight to ~0.5 dB across the band;
+  it flattens outside that span and near Nyquist, which is what makes the
+  pivot audible for a pure tilt), and LEVEL IS NORMALIZED: the shaping
+  filter's white-noise power gain is integrated on a fixed log grid at
+  block rate and divided out, so a colour change is tone, never loudness,
+  and violet cannot run 20 dB hot. At the defaults every section is an
+  exact identity and the power gain is exactly 1.0, so white is white
+  with no filtering at all — the tests lean on that (and on the fixed-seed
+  PRNG being stepped once per frame whatever the controls do, which makes
+  two renders' per-band ratio the filter's response rather than an
+  estimate of it). Golden: `sources-spectral-noise`.
 - Units & display mapping: jack values are Volts to the engine; a
   manifest input/output may carry a `display` spec (unit string —
   default "V" — plus optional `volt_per_octave` map and per-step

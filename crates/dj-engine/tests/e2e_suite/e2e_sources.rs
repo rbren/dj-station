@@ -126,6 +126,43 @@ fn regen_drum_noise() {
     );
 }
 
+/// Spectral Noise on the "Pink" preset (a preset is knob values, so the
+/// saved patch carries the colour) with an LFO walking the tilt pivot up
+/// and down the spectrum, through a VCA.
+fn regen_spectral_noise() {
+    let dir = case_dir("sources-spectral-noise");
+    let mut e = mono_engine();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("noise1", "com.dj.spectral_noise").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    e.apply_preset("noise1", "Pink").unwrap();
+    e.set_knob_value("lfo1", "rate", 3.0).unwrap();
+    e.connect("lfo1", "bi", "noise1", "pivot").unwrap();
+    e.set_knob_atten_offset("noise1", "pivot", 0.3, 0.0)
+        .unwrap();
+    // A standing scoop under the moving slope: both polynomial terms are
+    // in play.
+    e.set_knob_value("noise1", "curve", -9.0).unwrap();
+
+    e.connect("noise1", "out", "vca1", "in").unwrap();
+    e.set_knob_value("vca1", "cv", 2.0).unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-sources-spectral-noise")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(0.5));
+}
+
+#[test]
+fn e2e_sources_spectral_noise() {
+    if regen() {
+        regen_spectral_noise();
+    }
+    check_case("sources-spectral-noise");
+}
+
 #[test]
 fn e2e_sources_vco_wavetable() {
     if regen() {

@@ -118,6 +118,8 @@ enum EditKey<'a> {
     WireStyle(&'a str, &'a str),
     ModuleReset(&'a str),
     ModuleResetMany,
+    /// A built-in preset recalled from a module's right-click menu.
+    Preset(&'a str, &'a str),
     /// A completed module-drag gesture ([`move_modules`] ends the gesture
     /// itself, so every drag is exactly one undo step).
     Move,
@@ -165,6 +167,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::WireStyle(i, j) => write!(f, "wirestyle:{i}:{j}"),
             EditKey::ModuleReset(i) => write!(f, "modreset:{i}"),
             EditKey::ModuleResetMany => write!(f, "modreset_many"),
+            EditKey::Preset(i, p) => write!(f, "preset:{i}:{p}"),
             EditKey::Move => write!(f, "move"),
             EditKey::Param(i, p) => write!(f, "param:{i}:{p}"),
             EditKey::Bypass(i) => write!(f, "bypass:{i}"),
@@ -1284,6 +1287,14 @@ fn reset_modules(state: State<AppState>, instances: Vec<String>) -> CmdResult<()
         engine.reset_module(instance).map_err(err)?;
     }
     Ok(())
+}
+
+/// Module context menu "Presets" submenu: recall one of the module's
+/// built-in presets (a named set of input-jack values from its manifest).
+#[tauri::command]
+fn apply_preset(state: State<AppState>, instance: String, preset: String) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::Preset(&instance, &preset))?;
+    engine.apply_preset(&instance, &preset).map_err(err)
 }
 
 /// Copy: the selected modules (with wires internal to the selection) as a
@@ -2747,6 +2758,7 @@ fn main() {
             reset_knob,
             reset_module,
             reset_modules,
+            apply_preset,
             copy_modules,
             paste_modules,
             remove_modules,

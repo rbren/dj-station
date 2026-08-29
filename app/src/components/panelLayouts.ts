@@ -441,6 +441,19 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     groups: [{ inputs: ['clock', 'rate'] }],
   }),
 
+  'com.dj.spectral_noise': () => ({
+    groups: [
+      {
+        title: 'spectrum',
+        inputs: [
+          { jack: 'tilt', label: 'tilt' },
+          { jack: 'pivot', label: 'freq' },
+          { jack: 'curve', label: 'curve' },
+        ],
+      },
+    ],
+  }),
+
   'com.dj.sample_hold': () => ({
     groups: [{ inputs: ['in', 'trig', 'mode', 'slew'] }],
   }),

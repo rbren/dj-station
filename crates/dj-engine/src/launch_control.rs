@@ -133,6 +133,7 @@ pub fn launch_control_manifest() -> Manifest {
         ui: None,
         latency_samples: 0,
         bypass: Default::default(),
+        presets: Default::default(),
     }
 }
 

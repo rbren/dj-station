@@ -34,12 +34,32 @@ pub struct Manifest {
     /// bypassed — a bypassed module's DSP does not run at all.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bypass: BTreeMap<String, String>,
+    /// Built-in presets: named sets of input-jack VALUES the user can
+    /// recall from the module's right-click menu. Data, not code — any
+    /// module can declare them, and applying one only moves knobs (see
+    /// [`crate::Engine::apply_preset`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<PresetDecl>,
+}
+
+/// One named preset: input jack id -> the value that jack should read.
+/// Jacks the preset leaves out keep whatever the user set.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresetDecl {
+    pub name: String,
+    #[serde(default)]
+    pub values: BTreeMap<String, f32>,
 }
 
 impl Manifest {
     /// Whether the module offers a bypass toggle (it declared routes).
     pub fn is_bypassable(&self) -> bool {
         !self.bypass.is_empty()
+    }
+
+    /// A preset by name (exact match).
+    pub fn preset(&self, name: &str) -> Option<&PresetDecl> {
+        self.presets.iter().find(|p| p.name == name)
     }
 
     /// [`Manifest::bypass`] resolved to jack indices: per output jack, the
@@ -231,6 +251,16 @@ impl Extension {
                 "bypass route names unknown input {input:?} in {}",
                 manifest_path.display()
             );
+        }
+        for preset in &manifest.presets {
+            for jack in preset.values.keys() {
+                anyhow::ensure!(
+                    manifest.inputs.iter().any(|i| &i.id == jack),
+                    "preset {:?} names unknown input {jack:?} in {}",
+                    preset.name,
+                    manifest_path.display()
+                );
+            }
         }
         let dsp_path = match manifest.abi.as_str() {
             "wasm-1" => {

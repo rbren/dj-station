@@ -197,6 +197,7 @@ fn out_manifest(id: &str, name: &str) -> Manifest {
         ui: None,
         latency_samples: 0,
         bypass: Default::default(),
+        presets: Default::default(),
     }
 }
 
@@ -250,6 +251,7 @@ pub fn midi_manifest() -> Manifest {
         ui: None,
         latency_samples: 0,
         bypass: Default::default(),
+        presets: Default::default(),
     }
 }
 

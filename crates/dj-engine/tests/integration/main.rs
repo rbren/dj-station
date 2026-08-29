@@ -43,6 +43,7 @@ mod modules_sources;
 mod modules_utilities;
 mod persistence;
 mod playback;
+mod presets;
 mod qwerty;
 mod rename;
 mod scope;

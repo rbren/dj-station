@@ -157,6 +157,37 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'white -> Filter in, Euclidean ch1 -> ADSR gate for hi-hats.',
     ],
   },
+  'com.dj.spectral_noise': {
+    summary:
+      'Noise whose spectrum is the instrument: one output shaped by the ' +
+      'first two terms of a spectral polynomial about the tilt frequency ' +
+      '\u2014 a straight slope (tilt) plus a bell on the pivot ' +
+      '(curvature). The classic colours are single tilt values (0 white, ' +
+      '-3 pink, -6 red/brown, +3 blue, +6 violet) and ship as built-in ' +
+      'presets in the right-click menu, with grey and green using the ' +
+      'curvature term. The level is normalized, so changing colour is a ' +
+      'change of tone and never of loudness.',
+    inputs: {
+      tilt:
+        'Spectral slope in dB per octave through the pivot: 0 white, -3 ' +
+        'pink, -6 red/brown, +3 blue, +6 violet.',
+      pivot:
+        'Tilt frequency: the point the slope turns about and the centre of ' +
+        'the curvature bell. The slope spans about five octaves either ' +
+        'side of it and flattens beyond.',
+      curve:
+        'Curvature in dB: a bell on the pivot, positive for a boost, ' +
+        'negative for a scoop \u2014 the quadratic term, bounded.',
+    },
+    outputs: {
+      out: 'The shaped noise, ~2 V RMS whatever the colour.',
+    },
+    examples: [
+      'Right-click the panel \u2192 Presets \u2192 Pink for a wind/surf bed.',
+      'LFO bi -> curve for a slowly breathing resonant band.',
+      'out -> Filter in, Euclidean ch1 -> ADSR gate for tuned percussion.',
+    ],
+  },
   'com.dj.drum': {
     summary:
       'Three-voice analog-style drum machine: kick, snare and hi-hat with ' +
