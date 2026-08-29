@@ -1201,15 +1201,24 @@ beatify::build`.
   `decks-bank-two-clips` (the mix, the stretch, the phase); the sidecar
   carries the slot mix in a `deck_slots` section (a load resets a slot, so
   the case sets the mix after the audio).
-- Decks JACKS are DELIBERATELY FEW (`decks_manifest`): `bpm` and `reset`
-  in; `audio_l/r`, the monitor pair `mon_l/r` and one `clock` gate (a
-  pulse a beat) out. Nothing is per slot. A bank once had a send, a return
-  and three CV outs per deck — a wired return made the rack that deck's
-  insert and a patched tone knob stopped cutting its band — and it was
-  taken back out: A DECK IS A CHANNEL STRIP, its knobs always do their one
-  job, and signal is routed on the Rack tab (where the bank is an ordinary
-  module card, `clock` included). Do not re-add per-slot jacks without the
-  user asking twice.
+- Decks JACKS (`decks_manifest`): `bpm` and `reset` in, plus a RETURN
+  pair per deck (`d<N>_in_l/r`); `audio_l/r`, the monitor pair `mon_l/r`,
+  one `clock` gate (a pulse a beat) and per deck a SEND pair (`d<N>_l/r`)
+  and the three tone controls as CV (`d<N>_high/mid/low`) out. THE RACK
+  IS THE BANK'S EFFECTS LOOP: a deck's send always carries its audio; a
+  wired return makes the modules in between that deck's INSERT (its own
+  path leaves the mix — the insert is read off the block's input mask, so
+  the RT thread never walks the wire list) while fader/mute/monitor stay
+  the deck's; and a PATCHED tone CV takes that band off the deck (it
+  sits flat — a knob doing two jobs is a knob you cannot read) and the
+  knob drives the jack instead. `sync_decks_routing` pushes the patched
+  set to the RT thread after every wire change (`DecksCmd::Tone`);
+  `DeckSlotStatus.insert`/`tone_patched` report it to the page. The
+  per-slot jacks were built (f11c2a4), reverted (c82217c — the bespoke
+  in-tab mini-rack around them "turned out horribly"), and REBUILT on an
+  explicit second ask, this time with the real rack canvas (see the
+  Decks page section below). Golden: `decks-rack-insert` (a deck routed
+  out through two VCAs and back).
 - Launch Control XL + decks (`launch_control.rs`, `decks_api.rs`,
   `app/src-tauri/src/launch_control.rs`): the surface drives a bank
   COLUMN-PER-SLOT (knobs high/mid/low, fader level, the two buttons TOGGLE
@@ -1732,27 +1741,55 @@ The detail is in the `Conventions` bullets above; this is the map.
 The engine detail is in the `Conventions` bullets above; this is the map
 of the page.
 
-- Where the code is. Frontend: `app/src/decks.ts` (`DecksApi` and the
-  slot model), `app/src/audioOutputs.ts` (the live/monitor device
+- Where the code is. Frontend: `app/src/decks.ts` (`DecksApi`, the slot
+  model and the jack-name helpers `sendJack`/`returnJack`/`toneJack`/
+  `CLOCK_JACK`), `app/src/audioOutputs.ts` (the live/monitor device
   pickers) and `app/src/components/Decks{View,Slot,ClipPicker}.tsx`.
   Backend: `app/src-tauri/src/decks.rs` over `Engine`'s `decks_*` API.
-- Layout: a top bar (tempo, beat readout, the two output pickers, the
-  surface toggle) over eight FULL-HEIGHT channel strips, and that is all.
-  NO PATCHING HERE — an in-tab rack grid with per-deck sends, returns and
-  knob CV was built and reverted; cables live on the Rack tab, which
-  already draws the bank (clock and monitor pair included) as a module.
-  A strip's lamp row draws EVERY beat of the loop, silence included.
+- Layout: the page is CHROME AROUND THE REAL RACK CANVAS. App keeps the
+  one `.app-body`/`.rack-area` (panels, store, WireOverlay, pan/zoom,
+  marquee, picker, shortcuts) mounted and VISIBLE on this tab —
+  `.app-body` is a flex COLUMN and flex `order` places the tempo bar
+  above the canvas and the strip row below it, so the canvas element
+  never reparents (a reparent remounts every panel). `DecksView` renders
+  only the chrome (`.decks-view { display: contents }`); rack keyboard
+  scope (`RackKeysContext`, App's shortcut effect) covers `rack` AND
+  `decks`. Do NOT rebuild a bespoke mini-rack here — that was f11c2a4
+  and it was reverted whole.
+- The chrome IS the bank: on this tab App renders no panel for
+  `DECKS_TYPE` modules, and the strips/top bar carry the bank's real
+  jacks (`data-jack` on the bank instance) — send/return at the top of
+  each strip, a CV jack under each tone knob (with `is-patched` state
+  from `tone_patched`), the clock next to the beat readout. Jack clicks
+  go through App's `onJackClick` (one grammar, one color set).
+- CHROME-TO-CANVAS CABLES are the tricky part, and they have their own
+  layer: chrome jacks sit OUTSIDE the pan/zoom transform, so DecksView
+  draws every wire touching the bank with a SECOND WireOverlay in screen
+  coordinates over the whole `.app-body` (`overlayContainer`, zoom 1,
+  `.decks-chrome-overlay`), re-measured on pan/zoom via
+  `overlayLayoutKey` (the rack overlay keeps its no-re-measure pan/zoom
+  path), on inner scrolls (capture-phase listener in WireOverlay) and on
+  chrome childList changes (attribute churn under `.decks-chrome` — beat
+  lamps, pills — is ignored like telemetry). The pending preview moves to
+  the chrome overlay on this tab so it is never clipped at the
+  `.rack-area` edge; a bank jack with no chrome socket (bpm, the mix
+  pairs) resolves nowhere and its cable simply is not drawn here.
+  Endpoint GEOMETRY is pinned by `app/tests/DecksChromeWires.test.tsx` —
+  keep pinning numbers, not just "a wire exists".
 - State ownership: `decks_status` is the single poll (the engine owns
-  phase and stretch — never recompute them in the page), and the only
-  local state is a DRAFT of the control being dragged, which clears
-  itself when the engine's reading agrees. The page reads no graph at
-  all.
+  phase, stretch, `insert` and `tone_patched` — never recompute them in
+  the page), and the only local state is a DRAFT of the control being
+  dragged, which clears itself when the engine's reading agrees. The
+  graph (nodes/wires/pending) is App's rack store, handed down as props.
 - Sound: the bank keeps RUNNING on other tabs but is held at the output
   modules (audio focus, above); opening the page also makes sure the bank
   is WIRED to an output (`decks_ensure`), so a bank added to a patch with
-  no Audio Output is not left cue-only.
+  no Audio Output is not left cue-only. Graph edits made by the chrome
+  (ensure, jack clicks) flow back through `onGraphChange`/App.refresh.
 - Tests: `app/tests/DecksView.test.tsx` (strips, lamps, drafts, the
-  output pickers, the rehydrate-on-open, the wiring-on-open), plus the
-  engine's
+  output pickers, the rehydrate-on-open, the wiring-on-open, the chrome
+  jacks), `DecksChromeWires.test.tsx` (cable endpoint geometry),
+  `AppDecksRack.test.tsx` (the canvas on the tab, no bank panel,
+  chrome-to-module wiring), plus the engine's
   `cargo test -p dj-engine --release --test integration decks` and the
-  `decks-bank-two-clips` E2E golden.
+  `decks-bank-two-clips` / `decks-rack-insert` E2E goldens.

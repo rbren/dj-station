@@ -359,6 +359,20 @@ radii, three scrim opacities (0.5 / 0.55 / 0.72).
 step shared by all of them, and the same `--dur-slow` fade. (A shared
 overlay component with focus trapping was cut.)
 
+**D13 — The Decks page became chrome around the rack (post-overhaul).**
+Not a fix from the review — a layout decision recorded so it is not
+undone by accident. The tab shows the ONE rack canvas with the deck bank
+as fixed chrome: tempo bar above, eight strips in a bottom band
+(`max-height: 44%`, on `--surface-sunken` with a `--line` top rule, so
+the band reads as a console edge and the canvas as the space behind it).
+The strips carry real jacks (send/return per deck, a CV jack under each
+tone knob, the clock in the bar) in the rack's own jack language — same
+socket, same colors, same glow — and chrome-to-module cables draw in a
+screen-space layer above both, so a cable from a strip into the rack
+looks continuous instead of dying at the canvas border. A patched tone
+knob keeps its knob but recolors its jack label with `--cue`: the visual
+statement that the knob now drives the rack, not its band.
+
 ---
 
 ## G. Still open after this pass
