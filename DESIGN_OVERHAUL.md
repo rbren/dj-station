@@ -339,9 +339,10 @@ than the title text. (Replacing previews with docs summaries was cut:
 markup and data plumbing.)
 
 ~~**D11 — Empty states are unreadable dead ends (P2).**~~ ✔
-*one `.empty-state` treatment covers rack, library, clip and picker, and the
+*one `.empty-state` treatment covers library, clip and picker, and the
 store tabs (which showed *nothing* before a search) now say so. The Beatify
-clip grid is still a silent empty box.*
+clip grid is still a silent empty box. The rack's zero state was later
+removed entirely (an empty canvas is just an empty canvas).*
 Rack: *"No engine connection — run via `./run.sh` (Tauri)…"*. Library:
 *"No tracks yet — search a store tab…"* at 11 px gray. Clip: one gray
 sentence at the top-left of a black 1600 px page. Picker: lowercase *"no

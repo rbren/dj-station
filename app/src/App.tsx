@@ -2390,12 +2390,6 @@ export default function App() {
                         />
                       ),
                     )}
-                    {nodes.length === 0 && (
-                      <p className="rack-empty">
-                        No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
-                        rack.
-                      </p>
-                    )}
                     {marquee && (
                       <div
                         className="marquee"

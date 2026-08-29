@@ -238,7 +238,6 @@ input[type='range']::-moz-range-thumb {
 /* One empty-state treatment for every surface that can be empty:
    readable size, real breathing room, and a muted supporting line. */
 .empty-state,
-.rack-empty,
 .library-empty,
 .clip-empty,
 .beatify-empty,
@@ -401,11 +400,6 @@ body {
 .module-title-draggable {
   cursor: grab;
   user-select: none;
-}
-
-.rack-empty {
-  color: var(--ink-dim);
-  padding: 2rem;
 }
 
 /* Panels occupy whole grid cells: explicit width/height are set inline
