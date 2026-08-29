@@ -1239,8 +1239,11 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'up, so nothing changes pitch) and started on the shared grid, so a ' +
       'two-beat clip and an eight-beat clip come round on the same beat. ' +
       'A slot arrives muted, with a level, three tone controls, mute and ' +
-      'solo \u2014 the same six controls a Launch Control XL column ' +
-      'carries, which is what the surface drives when Follow is on. Beats ' +
+      'monitor \u2014 the same six controls a Launch Control XL column ' +
+      'carries, which is what the surface drives when Follow is on. A ' +
+      'monitored deck leaves the live mix for the monitor pair, which the ' +
+      'app plays out of its own device: it is a cue, so nothing else ' +
+      'changes. Beats ' +
       'of silence can be hung on the end of a clip and the whole clip ' +
       'shifted a beat at a time, both on that same grid. Load clips on the ' +
       'Decks tab; the bank is an ordinary module, so it keeps playing ' +
@@ -1249,14 +1252,21 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       bpm: 'Tempo of the whole bank \u2014 every slot is stretched to it.',
       reset: 'Park the bank on beat 0.',
     },
-    outputs: { audio_l: 'Left of the bank mix.', audio_r: 'Right of the bank mix.' },
+    outputs: {
+      audio_l: 'Left of the live bank mix.',
+      audio_r: 'Right of the live bank mix.',
+      mon_l: 'Left of the cue mix \u2014 the decks switched to Monitor.',
+      mon_r: 'Right of the cue mix \u2014 the decks switched to Monitor.',
+      clock: 'One pulse per beat of the bank\u2019s own clock.',
+    },
     params: {
       surface:
         'Whether this bank follows the Launch Control XL: one column per ' +
-        'slot, knobs high/mid/low, fader level, buttons mute and solo.',
+        'slot, knobs high/mid/low, fader level, buttons mute and monitor.',
     },
     examples: [
       'audio_l/audio_r -> Audio Output: the eight decks as one mix.',
+      'clock -> Step Sequencer clock: the rack runs on the bank\u2019s beat.',
       'Step Sequencer trigger -> reset: drop the whole bank back on cue.',
     ],
   },

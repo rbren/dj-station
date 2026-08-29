@@ -606,7 +606,6 @@ impl Engine {
         let plan = compute_plan(&self.n_inputs_by_slot(), &wires);
         self.dispatch_edit(GraphEdit::Replan { plan })?;
         self.wires = wires;
-        self.sync_decks_routing();
         Ok(())
     }
 
@@ -1217,7 +1216,6 @@ impl Engine {
         let plan = compute_plan(&self.n_inputs_by_slot(), &wires);
         self.dispatch_edit(GraphEdit::Replan { plan })?;
         self.wires = wires;
-        self.sync_decks_routing();
         Ok(())
     }
 

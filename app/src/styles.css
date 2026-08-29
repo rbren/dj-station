@@ -5480,120 +5480,6 @@ body {
   padding: 7px 14px;
 }
 
-/* The rack and the decks share one box: the cables between them are one
-   overlay, measured off the jack sockets in both, so the box must not
-   scroll under it (its two halves scroll on their own instead). */
-.decks-patch {
-  position: relative;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* The rack is a grid of small cards over the decks — enough of the
-   screen to patch in, never enough to push the decks off it. */
-.decks-rack {
-  display: flex;
-  flex: 0 1 auto;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 0;
-  max-height: 42%;
-  padding: 8px 10px;
-  background: var(--surface-sunken);
-  border-bottom: 1px solid var(--line);
-}
-
-.decks-rack-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.decks-rack-title {
-  margin: 0;
-  color: var(--ink-dim);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.decks-rack-hint {
-  color: var(--ink-dim);
-  font-size: var(--fs-nano);
-}
-
-.decks-rack-add {
-  margin-left: auto;
-  font-size: var(--fs-xs);
-}
-
-.decks-rack-empty {
-  margin: 0;
-  color: var(--ink-dim);
-  font-size: var(--fs-xs);
-  line-height: 1.4;
-}
-
-.decks-rack-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
-  min-height: 0;
-  overflow: auto;
-}
-
-.decks-rack-module {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.decks-rack-module-head {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.decks-rack-module-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-xs);
-}
-
-.decks-rack-remove {
-  padding: 0 4px;
-  color: var(--ink-dim);
-  font-size: var(--fs-nano);
-}
-
-.decks-rack-jacks {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.decks-rack-ins,
-.decks-rack-outs {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.decks-rack-outs {
-  align-items: flex-end;
-}
-
 .decks-strips {
   display: grid;
   grid-auto-flow: column;
@@ -5605,14 +5491,11 @@ body {
   min-height: 0;
 }
 
-/* The strip is deliberately SHORT: the rack sits above it and both have
-   to fit without scrolling on a laptop, so everything here is compact
-   and the three facts read across rather than down. */
 .decks-slot {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 6px;
+  gap: 8px;
+  padding: 8px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -5661,14 +5544,15 @@ body {
    letting a clip in. */
 .decks-slot-facts {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   margin: 0;
 }
 
 .decks-slot-facts > div {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
+  justify-content: space-between;
+  gap: 6px;
 }
 
 .decks-slot-facts dt {
@@ -5739,40 +5623,6 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 4px;
-}
-
-.decks-tone-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-/* A tone control that has been wired into the rack no longer cuts its
-   band, so its jack lights the way a live output does. */
-.decks-tone-jack.is-patched .jack-name {
-  color: var(--cue);
-}
-
-/* A deck's own send and return, the far ends of the rack's insert. */
-.decks-slot-io {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 2px 4px;
-}
-
-.decks-io-label {
-  color: var(--ink-dim);
-  font-size: var(--fs-nano);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* The bank's clock, up in the bar with the beat it counts. */
-.decks-clock-jack {
-  display: inline-flex;
-  align-items: center;
 }
 
 .decks-outputs {

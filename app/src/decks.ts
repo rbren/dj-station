@@ -22,15 +22,10 @@ export const MAX_BPM = 300;
  *  carries. */
 export type SlotControl = 'level' | 'high' | 'mid' | 'low' | 'mute' | 'monitor';
 
-/** The bank's own jacks, by name (mirrors `decks_manifest`). A deck's
- *  SEND carries its audio out to the rack and its RETURN brings the
- *  rack's answer back; the three tone controls each have a CV out. */
-export const CLOCK_JACK = 'clock';
-export const sendJack = (slot: number, side: 'l' | 'r') => `d${slot + 1}_${side}`;
-export const returnJack = (slot: number, side: 'l' | 'r') => `d${slot + 1}_in_${side}`;
+/** The tone controls of a strip, top to bottom — the order the surface's
+ *  three knob rows are in. */
 export const TONES = ['high', 'mid', 'low'] as const;
 export type Tone = (typeof TONES)[number];
-export const toneJack = (slot: number, tone: Tone) => `d${slot + 1}_${tone}`;
 
 export interface DeckSlotStatus {
   slot: number;
@@ -51,11 +46,6 @@ export interface DeckSlotStatus {
   mute: boolean;
   /** On the monitor pair instead of the live mix (the cue button). */
   monitor: boolean;
-  /** Whether the deck's return is wired — the rack is its insert. */
-  insert: boolean;
-  /** Which tone controls have left the deck for the rack, in TONES
-   *  order: a patched one is a CV source and stops cutting its band. */
-  tone_patched: [boolean, boolean, boolean];
   duration_secs: number;
   position_secs: number;
   /** Beat of the slot's LOOP the playhead is on, silence included; -1

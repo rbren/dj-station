@@ -482,24 +482,4 @@ export class EngineClient extends IpcClient {
   }
 }
 
-/** The slice of the engine a page that draws part of the rack needs (the
- *  Decks tab's rack strip): the graph, the module library, and the four
- *  structural edits. `EngineClient` satisfies it, and tests substitute a
- *  mock rather than a whole client. */
-export interface EngineApi {
-  nodes(): Promise<NodeSnapshot[] | null>;
-  wires(): Promise<WireSnapshot[] | null>;
-  listModules(): Promise<Manifest[] | null>;
-  addModule(instance: string, typeId: string): Promise<void | null>;
-  removeModule(instance: string): Promise<void | null>;
-  connectWire(
-    from: { instance: string; jack: string },
-    to: { instance: string; jack: string },
-  ): Promise<void | null>;
-  disconnectWire(
-    from: { instance: string; jack: string },
-    to: { instance: string; jack: string },
-  ): Promise<void | null>;
-}
-
 export const engine = new EngineClient();
