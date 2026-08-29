@@ -67,7 +67,12 @@ function mayMoveJacks(records: MutationRecord[]): boolean {
     if (r.type !== 'attributes') return true;
     // .macro-box: no jacks inside — it only moves when member panels move,
     // and those panels' own mutations already schedule a re-measure.
-    return !el.closest?.('.jack, .knob, .level-meter, .module-custom-ui, .macro-box');
+    // .decks-chrome: the Decks page's fixed bars restyle themselves on
+    // every status poll (beat lamps, surface pill) but their jacks only
+    // move on STRUCTURAL changes (childList) — those still count.
+    return !el.closest?.(
+      '.jack, .knob, .level-meter, .module-custom-ui, .macro-box, .decks-chrome',
+    );
   });
 }
 
@@ -166,6 +171,11 @@ export function WireOverlay({
     };
     measure();
     window.addEventListener('resize', schedule);
+    // Capture-phase scroll: an inner scroller (the Decks chrome's strip
+    // row) moves its jacks under the overlay without any DOM mutation.
+    // The rack canvas itself never scrolls (it pans by transform), so on
+    // the Rack tab this never fires.
+    window.addEventListener('scroll', schedule, true);
     // Panels are absolutely positioned, so the container itself never
     // resizes when a panel grows (e.g. deck waveform loading in) — observe
     // every panel, and jack-moving DOM mutations (mayMoveJacks filters out
@@ -183,6 +193,7 @@ export function WireOverlay({
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
       ro?.disconnect();
       mo?.disconnect();
     };

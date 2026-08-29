@@ -2091,11 +2091,32 @@ body {
 }
 
 /* Fills the shell below the header; the .rack-area child stretches to it
-   (min-height: 0 so the rack's minimum size can't re-inflate the row). */
+   (min-height: 0 so the rack's minimum size can't re-inflate the row).
+   A COLUMN, because the Decks tab dresses the same canvas in chrome: the
+   tempo bar above the .rack-area and the strip row below it, placed by
+   flex `order` (the chrome renders before the canvas in the DOM so the
+   canvas element itself never reparents — a remount would reset every
+   panel). position: relative anchors the Decks chrome's screen-space
+   cable overlay. */
 .app-body {
+  position: relative;
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+.app-body > .rack-area {
+  order: 1;
+}
+
+.decks-bar {
+  order: 0;
+}
+
+.decks-strips,
+.decks-empty-bar {
+  order: 2;
 }
 
 /* Cmd+M module picker: a modal gallery of zoomed-out live module panels.
@@ -5424,15 +5445,33 @@ body {
 /* Decks tab: eight clips on one clock                                 */
 /* ------------------------------------------------------------------ */
 
-/* Eight channel strips, sized so the whole bank is on screen at once —
-   a mixer you have to scroll is a mixer you cannot read mid-mix. Below
-   that width the strips keep their minimum and the row scrolls. */
+/* The Decks page is CHROME around the rack canvas: the wrapper melts away
+   (display: contents) so the tempo bar, the strip row and the cable
+   overlay become flex items of .app-body, placed around .rack-area by the
+   `order` rules next to it. */
 .decks-view {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  display: contents;
+}
+
+/* The screen-space cable layer for wires that touch the bank's chrome
+   jacks: covers the whole .app-body (chrome AND canvas), above both, so a
+   cable from a strip to a module is never clipped at the canvas edge. */
+.decks-chrome-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+/* The no-bank offer sits where the strips would: a bar under the canvas,
+   not a page of its own. */
+.decks-empty-bar {
+  flex: none;
+  margin: 0;
+  padding: 1rem;
+  text-align: center;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
 }
 
 .decks-bar {
@@ -5551,6 +5590,11 @@ body {
   padding: 7px 14px;
 }
 
+/* Eight strips in a bottom band — chrome over the canvas, so they take
+   the lower part of the screen and leave the rest to the rack. Sized so
+   the whole bank is on screen at once; below that width the strips keep
+   their minimum and the row scrolls (the cable overlay re-measures on
+   scroll). */
 .decks-strips {
   display: grid;
   grid-auto-flow: column;
@@ -5558,8 +5602,11 @@ body {
   gap: 8px;
   padding: 10px;
   overflow: auto;
-  flex: 1;
+  flex: none;
+  max-height: 44%;
   min-height: 0;
+  border-top: 1px solid var(--line);
+  background: var(--surface-sunken);
 }
 
 .decks-slot {
@@ -5694,6 +5741,43 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 4px;
+}
+
+.decks-tone-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+/* A tone control that has been wired into the rack no longer cuts its
+   band, so its jack lights the way a live output does. */
+.decks-tone-jack.is-patched .jack-name {
+  color: var(--cue);
+}
+
+/* A deck's own send and return — the patch points at the very top of the
+   strip, where the cables from the canvas arrive. */
+.decks-slot-io {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.decks-io-label {
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* The bank's clock, up in the bar with the beat it counts. */
+.decks-clock-jack {
+  display: inline-flex;
+  align-items: center;
 }
 
 .decks-outputs {

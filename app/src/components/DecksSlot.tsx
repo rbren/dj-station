@@ -9,10 +9,30 @@
 // for a tone control, flat at 1 — and the knob positions are the linear
 // mapping of those, so a Launch Control XL knob at 12 o'clock and a dial
 // pointing up mean the same thing.
+//
+// The strip is also the bank's PATCH BAY for this deck — chrome over the
+// rack canvas below it. At the top sit the deck's audio OUT (its send)
+// and IN (its return): wire the out through rack modules and back into
+// the in, and those modules become the deck's insert. Each tone knob
+// carries a CV jack too; wiring one takes the knob OFF the band (it sits
+// flat) and makes it drive the connected module instead, which the strip
+// says out loud rather than leaving the knob looking broken. The jacks
+// are the REAL bank jacks (`data-jack` on the bank instance) — the same
+// wire overlay and click-to-wire grammar the Rack tab uses.
 
 import { Knob } from './Knob';
+import { LiveJack } from './Jack';
 import { StemTags } from './StemTags';
-import { loopBeats, stretchLabel, EQ_MAX, TONES, type DeckSlotStatus } from '../decks';
+import {
+  loopBeats,
+  returnJack,
+  sendJack,
+  stretchLabel,
+  toneJack,
+  EQ_MAX,
+  TONES,
+  type DeckSlotStatus,
+} from '../decks';
 import type { KnobConfig } from '../types';
 
 const FADER_CONFIG: KnobConfig = { style: 'continuous', min: 0, max: 1, curve: 'linear' };
@@ -20,6 +40,8 @@ const TONE_CONFIG: KnobConfig = { style: 'continuous', min: 0, max: EQ_MAX, curv
 
 export interface DecksSlotProps {
   slot: DeckSlotStatus;
+  /** The bank this deck belongs to — its jacks are the bank's. */
+  instance: string;
   onLoad(): void;
   onClear(): void;
   onControl(control: 'level' | 'high' | 'mid' | 'low', value: number): void;
@@ -27,13 +49,35 @@ export interface DecksSlotProps {
   onTail(tail: number): void;
   onPhase(phase: number): void;
   onRelease(): void;
+  /** Arm/complete/unplug a wire at one of this deck's jacks (the Rack
+   *  tab's own jack-click grammar; shift unplugs). */
+  onJack(jack: string, kind: 'input' | 'output', shift: boolean): void;
+  /** Whether a jack is armed as the pending wire's end. */
+  isArmed(jack: string, kind: 'input' | 'output'): boolean;
+  /** Whether a jack has a cable in it. */
+  isWired(jack: string, kind: 'input' | 'output'): boolean;
+  /** Outline color for an armed jack — the pending cable's color. */
+  armedColor?: string;
 }
 
 export function DecksSlot(props: DecksSlotProps) {
-  const { slot } = props;
+  const { slot, instance } = props;
   const n = slot.slot + 1;
   const empty = slot.beats === 0;
   const loop = loopBeats(slot);
+
+  const jack = (id: string, kind: 'input' | 'output', label: string) => (
+    <LiveJack
+      instance={instance}
+      id={id}
+      kind={kind}
+      label={label}
+      wired={props.isWired(id, kind)}
+      selected={props.isArmed(id, kind)}
+      selectedColor={props.armedColor}
+      onClick={(shift) => props.onJack(id, kind, shift)}
+    />
+  );
 
   return (
     <section
@@ -41,6 +85,23 @@ export function DecksSlot(props: DecksSlotProps) {
       data-testid={`decks-slot-${slot.slot}`}
       aria-label={`Deck ${n}`}
     >
+      {/* The deck's patch points, at the very top where the cables from
+          the rack canvas arrive: OUT is the deck's audio (its send), IN
+          brings the rack's answer back and makes it the deck's insert. */}
+      <div className="decks-slot-io" data-testid={`decks-io-${slot.slot}`}>
+        <span className="decks-io-label">out</span>
+        {jack(sendJack(slot.slot, 'l'), 'output', 'L')}
+        {jack(sendJack(slot.slot, 'r'), 'output', 'R')}
+        <span className="decks-io-label">in</span>
+        {jack(returnJack(slot.slot, 'l'), 'input', 'L')}
+        {jack(returnJack(slot.slot, 'r'), 'input', 'R')}
+        {slot.insert && (
+          <span className="decks-slot-note" data-testid={`decks-insert-${slot.slot}`}>
+            through the rack
+          </span>
+        )}
+      </div>
+
       <header className="decks-slot-head">
         <span className="decks-slot-number mono">{n}</span>
         <button
@@ -121,15 +182,30 @@ export function DecksSlot(props: DecksSlotProps) {
       </div>
 
       <div className="decks-tone">
-        {TONES.map((tone) => (
-          <Knob
-            key={tone}
-            label={`${n} ${tone.toUpperCase()}`}
-            config={TONE_CONFIG}
-            position={slot[tone] / EQ_MAX}
-            onPosition={(p) => props.onControl(tone, p * EQ_MAX)}
-            onRelease={props.onRelease}
-          />
+        {TONES.map((tone, i) => (
+          <div className="decks-tone-cell" key={tone}>
+            <Knob
+              label={`${n} ${tone.toUpperCase()}`}
+              config={TONE_CONFIG}
+              position={slot[tone] / EQ_MAX}
+              onPosition={(p) => props.onControl(tone, p * EQ_MAX)}
+              onRelease={props.onRelease}
+            />
+            {/* The knob's CV jack: wired, the knob leaves the band (it
+                sits flat) and drives the connected module instead. */}
+            <span
+              className={`decks-tone-jack${slot.tone_patched[i] ? ' is-patched' : ''}`}
+              data-testid={`decks-tone-jack-${slot.slot}-${tone}`}
+              data-patched={slot.tone_patched[i] ? 'yes' : 'no'}
+              title={
+                slot.tone_patched[i]
+                  ? `deck ${n} ${tone}: driving the rack, not the ${tone} band`
+                  : `deck ${n} ${tone}: cutting the ${tone} band — wire it to send it to the rack instead`
+              }
+            >
+              {jack(toneJack(slot.slot, tone), 'output', tone)}
+            </span>
+          </div>
         ))}
       </div>
 

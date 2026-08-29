@@ -1,5 +1,9 @@
 // The Decks page: eight Beatify clips on one clock, as eight channel
-// strips under one tempo.
+// strips under one tempo — CHROME around the real rack canvas. App keeps
+// the one rack (`.rack-area`, panels, wire overlay, pan/zoom) mounted and
+// visible on this tab, and this component renders the deck furniture
+// around it: the tempo bar (with the bank's clock on a jack) above, the
+// eight strips (each with its send/return and tone-CV jacks) below.
 //
 // The page is a big panel for a single rack module (`builtin.decks`) — the
 // bank is in the patch and keeps RUNNING when the tab is not looking (it
@@ -8,8 +12,18 @@
 // page shows comes from ONE poll of `decks_status` (the engine owns the
 // phase arithmetic and the stretch), which is what keeps
 // the page and a Launch Control XL saying the same thing: the hardware
-// writes the same state through the same commands. SIGNAL IS NOT ROUTED
-// HERE: a deck is a channel strip, and the patch is the Rack tab's.
+// writes the same state through the same commands.
+//
+// PATCHING here is the Rack tab's own machinery, not a copy: jack clicks
+// go through App's `onJackClick` (same pending-wire grammar, same colors),
+// the wires prop is the same store slice the rack overlay draws, and the
+// bank's chrome jacks carry the same `data-jack` sockets. What is special
+// is only GEOMETRY: chrome jacks live outside the pan/zoom-transformed
+// rack, so the cables that touch the bank are drawn by a second
+// WireOverlay in SCREEN coordinates over the whole app body (zoom 1), and
+// re-measured whenever the canvas pans/zooms (overlayLayoutKey). The bank
+// module's own panel is NOT rendered on this tab (App skips it) — the
+// chrome IS the bank, so each bank jack resolves to exactly one socket.
 //
 // The one piece of local state is a DRAFT of a control being dragged: a
 // fader streams faster than the poll, so the drag's value wins until the
@@ -25,6 +39,7 @@ import {
 import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '../beatClip';
 import {
   decks as defaultApi,
+  CLOCK_JACK,
   MAX_BPM,
   MIN_BPM,
   type DecksApi,
@@ -32,8 +47,12 @@ import {
   type DeckSlotStatus,
   type SlotControl,
 } from '../decks';
+import type { WireSnapshot } from '../engine';
+import type { PendingWire } from '../rackStore';
 import { DecksClipPicker } from './DecksClipPicker';
 import { DecksSlot } from './DecksSlot';
+import { LiveJack } from './Jack';
+import { WIRE_COLORS, WireOverlay } from './WireOverlay';
 
 const POLL_MS = 100;
 
@@ -44,6 +63,35 @@ export interface DecksViewProps {
   /** The page keeps polling only while it is the open tab. */
   active?: boolean;
   pollMs?: number;
+  /** The Rack tab's jack-click grammar (App.onJackClick): arm, complete,
+   *  pick up or shift-unplug a wire at a bank jack. Absent = the chrome
+   *  jacks are inert (headless tests). */
+  onJackClick?(
+    instance: string,
+    kind: 'input' | 'output',
+    jack: string,
+    shift?: boolean,
+  ): Promise<void> | void;
+  /** The patch's wires — the same rack-store slice the rack overlay
+   *  draws, so a chrome jack knows when it holds a cable. */
+  wires?: WireSnapshot[];
+  /** The armed wire end (rack-store slice), for the lit jack and the
+   *  cursor-following preview cable. */
+  pending?: PendingWire | null;
+  /** Wire key → color index, shared with the rack overlay. */
+  wireColors?: Record<string, number>;
+  /** The element the chrome cable overlay renders inside and measures
+   *  against: the app body that contains BOTH the chrome bars and the
+   *  rack canvas. Absent = no chrome cables (standalone render). */
+  overlayContainer?: HTMLElement | null;
+  /** Changes whenever module jacks may have MOVED ON SCREEN — pan, zoom,
+   *  module positions. Chrome jacks are fixed while the canvas moves
+   *  under them, so unlike the rack overlay this one re-measures on
+   *  every pan/zoom change. */
+  overlayLayoutKey?: string;
+  /** Called after this page changed the graph (made or wired the bank),
+   *  so App re-reads nodes/wires. */
+  onGraphChange?(): void;
 }
 
 type DraftKey = `${number}:${SlotControl}`;
@@ -92,6 +140,9 @@ export function DecksView(props: DecksViewProps) {
       // is not an edit when there is nothing to do.
       const bank = found?.[0] ? ((await api.ensure()) ?? found[0]) : null;
       if (!cancelled && found) setBank(bank);
+      // `ensure` may have wired an output for the bank — a graph change
+      // the rack canvas behind this chrome must re-read.
+      if (!cancelled && bank) props.onGraphChange?.();
       const list = await clipApi.list();
       if (!cancelled && list) setClips(list);
       const outs = await outputsApi.get();
@@ -128,8 +179,51 @@ export function DecksView(props: DecksViewProps) {
     setBusy(true);
     const created = await api.ensure();
     setBusy(false);
-    if (created) setBank(created);
-  }, [api]);
+    if (created) {
+      setBank(created);
+      // A new module (and its outputs) just entered the patch — the rack
+      // canvas behind this chrome must re-read the graph.
+      props.onGraphChange?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, props.onGraphChange]);
+
+  // The chrome's own patching hooks: the Rack tab's grammar, on the
+  // bank's jacks. All optional — a standalone render is inert chrome.
+  const wires = props.wires;
+  const pending = props.pending;
+  const onJack = useCallback(
+    (jack: string, kind: 'input' | 'output', shift: boolean) => {
+      if (bank) void props.onJackClick?.(bank, kind, jack, shift);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bank, props.onJackClick],
+  );
+  const isWired = useCallback(
+    (jack: string, kind: 'input' | 'output') =>
+      (wires ?? []).some((w) =>
+        kind === 'input'
+          ? w.to_instance === bank && w.to_jack === jack
+          : w.from_instance === bank && w.from_jack === jack,
+      ),
+    [wires, bank],
+  );
+  const isArmed = useCallback(
+    (jack: string, kind: 'input' | 'output') =>
+      pending?.instance === bank && pending.kind === kind && pending.jack === jack,
+    [pending, bank],
+  );
+  const armedColor = pending ? WIRE_COLORS[pending.color % WIRE_COLORS.length] : undefined;
+  // The cables the CHROME overlay owns: every wire touching the bank.
+  // Module-to-module cables stay with the rack overlay (they pan/zoom for
+  // free); a bank wire's chrome end sits still while the canvas moves, so
+  // these are measured in screen coordinates and re-measured on pan/zoom
+  // (overlayLayoutKey). A bank jack with no chrome socket (bpm, the mix
+  // pairs) simply does not resolve, and its cable is not drawn here.
+  const chromeWires = useMemo(
+    () => (wires ?? []).filter((w) => w.from_instance === bank || w.to_instance === bank),
+    [wires, bank],
+  );
 
   const write = useCallback(
     async (fn: () => Promise<unknown>) => {
@@ -166,7 +260,7 @@ export function DecksView(props: DecksViewProps) {
   if (!bank) {
     return (
       <div className="decks-view" data-testid="decks-view">
-        <p className="empty-state" data-testid="decks-empty">
+        <p className="empty-state decks-empty-bar" data-testid="decks-empty">
           A deck bank plays eight Beatify clips together, on one tempo.
           <br />
           <button
@@ -184,7 +278,7 @@ export function DecksView(props: DecksViewProps) {
 
   return (
     <div className="decks-view" data-testid="decks-view">
-      <header className="decks-bar">
+      <header className="decks-bar decks-chrome">
         <div className="decks-tempo">
           <label className="decks-tempo-label" htmlFor="decks-bpm">
             Tempo
@@ -239,6 +333,21 @@ export function DecksView(props: DecksViewProps) {
               ? `bank comes round every ${status.cycle_beats} beats`
               : 'nothing loaded'}
           </span>
+          {/* The bank's clock, on a jack: one pulse per beat, wired into
+              the rack below (an LFO, a sequencer) to run it on the same
+              grid the decks are on. */}
+          <span className="decks-clock-jack" data-testid="decks-clock-jack">
+            <LiveJack
+              instance={bank}
+              id={CLOCK_JACK}
+              kind="output"
+              label="clock"
+              wired={isWired(CLOCK_JACK, 'output')}
+              selected={isArmed(CLOCK_JACK, 'output')}
+              selectedColor={armedColor}
+              onClick={(shift) => onJack(CLOCK_JACK, 'output', shift)}
+            />
+          </span>
         </div>
         <div className="decks-outputs" data-testid="decks-outputs">
           {(['live', 'monitor'] as const).map((bus) => (
@@ -292,11 +401,12 @@ export function DecksView(props: DecksViewProps) {
         </div>
       </header>
 
-      <div className="decks-strips" data-testid="decks-strips">
+      <div className="decks-strips decks-chrome" data-testid="decks-strips">
         {shownSlots.map((slot) => (
           <DecksSlot
             key={slot.slot}
             slot={slot}
+            instance={bank}
             onLoad={() => setPicking(slot.slot)}
             onClear={() => void write(() => api.clear(bank, slot.slot))}
             onControl={(control, value) => setControl(slot.slot, control, value)}
@@ -304,9 +414,31 @@ export function DecksView(props: DecksViewProps) {
             onTail={(tail) => void write(() => api.setTail(bank, slot.slot, Math.max(0, tail)))}
             onPhase={(phase) => void write(() => api.setPhase(bank, slot.slot, phase))}
             onRelease={() => void api.endEdit()}
+            onJack={onJack}
+            isArmed={isArmed}
+            isWired={isWired}
+            armedColor={armedColor}
           />
         ))}
       </div>
+
+      {/* The chrome cable layer: every wire that touches the bank, drawn
+          in SCREEN coordinates over the whole app body — one end on a
+          fixed chrome jack, the other on a module inside the pan/zoomed
+          canvas. The pending preview also lives here while this page is
+          up, so it is never clipped at the canvas edge. */}
+      {props.overlayContainer && (
+        <div className="decks-chrome-overlay" data-testid="decks-chrome-overlay">
+          <WireOverlay
+            wires={chromeWires}
+            container={props.overlayContainer}
+            colors={props.wireColors}
+            pending={pending}
+            zoom={1}
+            layoutKey={props.overlayLayoutKey}
+          />
+        </div>
+      )}
 
       {picking !== null && (
         <DecksClipPicker

@@ -25,6 +25,8 @@ function emptySlot(slot: number): DeckSlotStatus {
     high: 1,
     mute: true,
     monitor: false,
+    insert: false,
+    tone_patched: [false, false, false],
     duration_secs: 0,
     position_secs: 0,
     beat: -1,
@@ -426,5 +428,94 @@ describe('a bank restored with the app', () => {
     show(api);
     await waitFor(() => expect(screen.getByTestId('decks-empty')).toBeTruthy());
     expect(ensure).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------
+// The deck chrome as a patch bay: the strips and the top bar carry the
+// BANK's own jacks (send/return pair per deck, a CV out per tone knob,
+// the clock in the bar), and clicking them goes through the Rack tab's
+// own jack grammar. The screen-space cable overlay's GEOMETRY is pinned
+// in DecksChromeWires.test.tsx.
+// ---------------------------------------------------------------------
+
+function jackSocket(container: HTMLElement, key: string): HTMLElement | null {
+  return container.querySelector(`[data-jack="${key}"]`);
+}
+
+describe('the deck chrome is the bank, on jacks', () => {
+  it('every deck carries its send, its return and a CV jack per tone knob', async () => {
+    const api = makeApi(makeStatus());
+    const { container } = show(api);
+    await screen.findByTestId('decks-io-0');
+    for (const deck of [1, 8]) {
+      expect(jackSocket(container, `decks1:output:d${deck}_l`)).toBeTruthy();
+      expect(jackSocket(container, `decks1:output:d${deck}_r`)).toBeTruthy();
+      expect(jackSocket(container, `decks1:input:d${deck}_in_l`)).toBeTruthy();
+      expect(jackSocket(container, `decks1:input:d${deck}_in_r`)).toBeTruthy();
+      for (const tone of ['high', 'mid', 'low']) {
+        expect(jackSocket(container, `decks1:output:d${deck}_${tone}`)).toBeTruthy();
+      }
+    }
+    // The bank's clock rides in the top bar, next to the beat it counts.
+    const clock = screen.getByTestId('decks-clock-jack');
+    expect(within(clock).getByTestId('jack-output-clock')).toBeTruthy();
+    expect(jackSocket(container, 'decks1:output:clock')).toBeTruthy();
+  });
+
+  it('clicking a chrome jack goes through the rack grammar, bank instance first', async () => {
+    const api = makeApi(makeStatus());
+    const onJackClick = vi.fn();
+    render(<DecksView api={api} clips={makeClips()} pollMs={NO_POLL} onJackClick={onJackClick} />);
+    const io = await screen.findByTestId('decks-io-0');
+    fireEvent.click(within(io).getByTestId('jack-output-d1_l'));
+    expect(onJackClick).toHaveBeenCalledWith('decks1', 'output', 'd1_l', false);
+    fireEvent.click(within(io).getByTestId('jack-input-d1_in_r'), { shiftKey: true });
+    expect(onJackClick).toHaveBeenCalledWith('decks1', 'input', 'd1_in_r', true);
+    fireEvent.click(screen.getByTestId('jack-output-clock'));
+    expect(onJackClick).toHaveBeenCalledWith('decks1', 'output', 'clock', false);
+  });
+
+  it('a wired chrome jack shows its cable, and the armed one lights in the pending color', async () => {
+    const api = makeApi(makeStatus());
+    render(
+      <DecksView
+        api={api}
+        clips={makeClips()}
+        pollMs={NO_POLL}
+        wires={[
+          { from_instance: 'decks1', from_jack: 'd1_l', to_instance: 'vca1', to_jack: 'in' },
+          { from_instance: 'lfo1', from_jack: 'out', to_instance: 'decks1', to_jack: 'd2_in_l' },
+        ]}
+        pending={{ instance: 'decks1', jack: 'clock', kind: 'output', color: 3 }}
+      />,
+    );
+    const io0 = await screen.findByTestId('decks-io-0');
+    expect(within(io0).getByTestId('jack-output-d1_l').className).toContain('jack-wired');
+    expect(within(io0).getByTestId('jack-output-d1_r').className).not.toContain('jack-wired');
+    const io1 = screen.getByTestId('decks-io-1');
+    expect(within(io1).getByTestId('jack-input-d2_in_l').className).toContain('jack-wired');
+    const clock = within(screen.getByTestId('decks-clock-jack')).getByTestId('jack-output-clock');
+    expect(clock.className).toContain('jack-selected');
+  });
+
+  it('a patched tone knob says it is driving the rack, not its band', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[2] = { ...loadedSlot(2), tone_patched: [false, true, false] };
+    const api = makeApi(makeStatus({ slots }));
+    show(api);
+    await screen.findByTestId('decks-io-0');
+    expect(screen.getByTestId('decks-tone-jack-2-mid').getAttribute('data-patched')).toBe('yes');
+    expect(screen.getByTestId('decks-tone-jack-2-high').getAttribute('data-patched')).toBe('no');
+  });
+
+  it('a deck with a wired return says its signal goes through the rack', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[4] = { ...loadedSlot(4), insert: true };
+    const api = makeApi(makeStatus({ slots }));
+    show(api);
+    await screen.findByTestId('decks-io-0');
+    expect(screen.getByTestId('decks-insert-4')).toBeTruthy();
+    expect(screen.queryByTestId('decks-insert-0')).toBeNull();
   });
 });

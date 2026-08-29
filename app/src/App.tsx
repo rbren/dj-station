@@ -33,6 +33,7 @@ import { beatClip, type BeatClipEntry, BEAT_CLIP_TYPE } from './beatClip';
 import { beatifyClipClient } from './beatifyClip';
 import { BeatifyView } from './components/BeatifyView';
 import { DecksView } from './components/DecksView';
+import { DECKS_TYPE } from './decks';
 import { clipClient } from './clip';
 import { beatifyClient } from './beatify';
 import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
@@ -210,6 +211,9 @@ export default function App() {
   // it and measures jacks in rack coordinates, so panning/zooming moves
   // cables via the CSS transform with no re-measure.
   const [rackInnerEl, setRackInnerEl] = useState<HTMLDivElement | null>(null);
+  // The app body around the rack area — the box the Decks chrome and its
+  // screen-space cable overlay live in (see DecksView's overlayContainer).
+  const [appBodyEl, setAppBodyEl] = useState<HTMLDivElement | null>(null);
   // Marquee select: dragging on the rack background sweeps a rectangle
   // (rack coordinates); on release every module whose rect intersects it
   // joins the selection (replacing it, or adding with shift/cmd/ctrl).
@@ -1446,10 +1450,12 @@ export default function App() {
   // Rack shortcuts: undo/redo (cmd/ctrl+Z, cmd/ctrl+Y, cmd/ctrl+shift+Z),
   // rack zoom (cmd/ctrl +/-/0), select-all (cmd/ctrl+A), selection
   // copy/paste (cmd/ctrl+C/V) and selection delete (Backspace). All of it
-  // acts on the patch/canvas, so none of it listens on other pages (only
-  // Save/Open/New in fileShortcuts.ts is app-global).
+  // acts on the patch/canvas, which is on screen on BOTH the Rack tab and
+  // the Decks tab (the decks are chrome around the same canvas), so it
+  // listens on those two pages and no other (only Save/Open/New in
+  // fileShortcuts.ts is app-global).
   useEffect(() => {
-    if (view !== 'rack') return;
+    if (view !== 'rack' && view !== 'decks') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         store.set({ pending: null });
@@ -2272,10 +2278,6 @@ export default function App() {
       {view === 'beatify' && (
         <BeatifyView client={beatifyClient} library={library} clips={beatifyClipClient} />
       )}
-      {/* The bank is a rack module, so the page is only a view of it and
-          unmounting costs nothing: the bank keeps RUNNING on other tabs
-          (its clock never stops), it is only held back at the outputs. */}
-      {view === 'decks' && <DecksView />}
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}
@@ -2289,12 +2291,34 @@ export default function App() {
       )}
       {/* The rack stays mounted on other pages (hidden, not unmounted, so
           panel state survives) — RackKeysContext tells its window key
-          listeners (QwertyPanel, MidiPanel) to go quiet and release. */}
-      <div className="app-body" style={view === 'rack' ? undefined : { display: 'none' }}>
-        <RackKeysContext.Provider value={view === 'rack'}>
+          listeners (QwertyPanel, MidiPanel) to go quiet and release. The
+          Decks tab shows the SAME canvas, dressed in deck chrome: the
+          tempo bar above, the eight strips below (flex `order` places
+          them around .rack-area), and a screen-space cable overlay for
+          the wires that touch the bank's chrome jacks. */}
+      <div
+        className={`app-body${view === 'decks' ? ' decks-mode' : ''}`}
+        ref={setAppBodyEl}
+        style={view === 'rack' || view === 'decks' ? undefined : { display: 'none' }}
+      >
+        <RackKeysContext.Provider value={view === 'rack' || view === 'decks'}>
           <RackStoreContext.Provider value={store}>
             <DeckUIContext.Provider value={deckUI}>
               <AudioUIContext.Provider value={audioUI}>
+                {/* The bank keeps RUNNING when the tab is not looking (its
+                    clock never stops; it is only held back at the outputs),
+                    so unmounting the chrome costs nothing. */}
+                {view === 'decks' && (
+                  <DecksView
+                    onJackClick={onJackClick}
+                    wires={wires}
+                    pending={pending}
+                    wireColors={wireColors}
+                    overlayContainer={appBodyEl}
+                    overlayLayoutKey={`${JSON.stringify(positions)}|${pan.x},${pan.y},${zoom}`}
+                    onGraphChange={() => void refresh()}
+                  />
+                )}
                 <div
                   className="rack-area"
                   ref={setRackEl}
@@ -2350,23 +2374,29 @@ export default function App() {
                       onMoveEnd={() => endModuleDrag()}
                       onContextMenu={onMacroBoxContextMenu}
                     />
-                    {nodes.map((node, i) => (
-                      <RackModule
-                        key={node.instance_id}
-                        instanceId={node.instance_id}
-                        index={i}
-                        refresh={refresh}
-                        moveModule={moveModule}
-                        endModuleDrag={endModuleDrag}
-                        zoom={zoom}
-                        removeModule={removeModule}
-                        renameModule={renameModule}
-                        openDocs={openDocs}
-                        selectModule={selectModule}
-                        onJackClick={onJackClick}
-                        onContextMenu={onModuleContextMenu}
-                      />
-                    ))}
+                    {/* On the Decks tab the bank has no panel in the grid:
+                        the deck chrome IS the bank, so its jacks resolve
+                        to exactly one socket (the chrome one) and the
+                        cables that touch it are the chrome overlay's. */}
+                    {nodes.map((node, i) =>
+                      view === 'decks' && node.type_id === DECKS_TYPE ? null : (
+                        <RackModule
+                          key={node.instance_id}
+                          instanceId={node.instance_id}
+                          index={i}
+                          refresh={refresh}
+                          moveModule={moveModule}
+                          endModuleDrag={endModuleDrag}
+                          zoom={zoom}
+                          removeModule={removeModule}
+                          renameModule={renameModule}
+                          openDocs={openDocs}
+                          selectModule={selectModule}
+                          onJackClick={onJackClick}
+                          onContextMenu={onModuleContextMenu}
+                        />
+                      ),
+                    )}
                     {nodes.length === 0 && (
                       <p className="rack-empty">
                         No engine connection — run via <code>./run.sh</code> (Tauri) to see the live
@@ -2387,12 +2417,19 @@ export default function App() {
                     )}
                     {/* Inside the transformed rack, in rack coordinates: pan
                     and zoom move the cables through the CSS transform, so
-                    they are deliberately NOT part of layoutKey. */}
+                    they are deliberately NOT part of layoutKey. Cables that
+                    touch the bank's CHROME jacks on the Decks tab cannot
+                    live here (the chrome does not pan and the .rack-area
+                    clips at its edge) — they, and the pending preview while
+                    that page is up, are drawn by DecksView's screen-space
+                    overlay instead. A wire to a bank jack simply fails to
+                    resolve here on that tab (the bank has no panel), so
+                    nothing is drawn twice. */}
                     <WireOverlay
                       wires={wires}
                       container={rackInnerEl}
                       colors={wireColors}
-                      pending={pending}
+                      pending={view === 'decks' ? null : pending}
                       zoom={zoom}
                       layoutKey={JSON.stringify(positions)}
                     />

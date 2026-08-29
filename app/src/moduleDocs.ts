@@ -1278,10 +1278,21 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'of silence can be hung on the end of a clip and the whole clip ' +
       'shifted a beat at a time, both on that same grid. Load clips on the ' +
       'Decks tab; the bank is an ordinary module, so it keeps playing ' +
-      'wherever you are.',
+      'wherever you are. The rack is the bank\u2019s effects loop: each ' +
+      'deck has a SEND pair that always carries its audio, a RETURN pair ' +
+      'that \u2014 once wired \u2014 makes whatever sits between them that ' +
+      'deck\u2019s insert (its own path leaves the mix, so nothing is ' +
+      'heard twice), and a CV output under each tone control. Patching a ' +
+      'tone CV takes that band OFF the deck (it sits flat) and the knob ' +
+      'drives the rack instead. On the Decks tab all of these sit on the ' +
+      'deck strips themselves.',
     inputs: {
       bpm: 'Tempo of the whole bank \u2014 every slot is stretched to it.',
       reset: 'Park the bank on beat 0.',
+      'd#_in_l':
+        'Deck # return, left: wire the deck\u2019s send back in here and ' +
+        'the modules in between become its insert.',
+      'd#_in_r': 'Deck # return, right.',
     },
     outputs: {
       audio_l: 'Left of the live bank mix.',
@@ -1289,6 +1300,13 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       mon_l: 'Left of the cue mix \u2014 the decks switched to Monitor.',
       mon_r: 'Right of the cue mix \u2014 the decks switched to Monitor.',
       clock: 'One pulse per beat of the bank\u2019s own clock.',
+      'd#_l': 'Deck # send, left \u2014 always carries the deck\u2019s audio.',
+      'd#_r': 'Deck # send, right.',
+      'd#_high':
+        'Deck #\u2019s HIGH knob as CV. Patched, the knob leaves the ' +
+        'band (it sits flat) and drives the rack instead.',
+      'd#_mid': 'Deck #\u2019s MID knob as CV (patched = the band sits flat).',
+      'd#_low': 'Deck #\u2019s LOW knob as CV (patched = the band sits flat).',
     },
     params: {
       surface:
@@ -1297,6 +1315,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     },
     examples: [
       'audio_l/audio_r -> Audio Output: the eight decks as one mix.',
+      'd1_l/d1_r -> Resonator -> d1_in_l/d1_in_r: the resonator is deck 1\u2019s insert.',
+      'd1_low -> VCA cv: deck 1\u2019s LOW knob rides a rack level instead of its band.',
       'clock -> Step Sequencer clock: the rack runs on the bank\u2019s beat.',
       'Step Sequencer trigger -> reset: drop the whole bank back on cue.',
     ],

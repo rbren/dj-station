@@ -44,8 +44,11 @@ describe('app shell layout (CSS-level pin)', () => {
     expect(rule('.clip-view')).toMatch(/overflow-y:\s*auto/);
     expect(rule('.docs-body')).toMatch(/overflow-y:\s*auto/);
     expect(rule('.picker-body')).toMatch(/overflow-y:\s*auto/);
-    // The Decks bank scrolls its own row of strips; the page must not.
-    expect(rule('.decks-view')).toMatch(/min-height:\s*0/);
+    // The Decks chrome melts into the app-body flex column (its bars are
+    // placed around the rack canvas by `order`); only the strip row
+    // scrolls, never the page.
+    expect(rule('.decks-view')).toMatch(/display:\s*contents/);
     expect(rule('.decks-strips')).toMatch(/overflow:\s*auto/);
+    expect(rule('.decks-strips')).toMatch(/flex:\s*none/);
   });
 });
