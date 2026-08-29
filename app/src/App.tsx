@@ -2068,18 +2068,6 @@ export default function App() {
             </button>
           </form>
         )}
-        {pending && (
-          <span className="wiring-hint" data-testid="wiring-hint">
-            <span
-              className="wire-color-swatch"
-              data-testid="wire-color-swatch"
-              style={{ background: WIRE_COLORS[pending.color] }}
-            />
-            wiring from {pending.instance}:{pending.jack} — click an{' '}
-            {pending.kind === 'output' ? 'input' : 'output'} jack (re-click to change color, esc to
-            cancel)
-          </span>
-        )}
       </header>
       <ErrorBanner />
       {ctxMenu && (

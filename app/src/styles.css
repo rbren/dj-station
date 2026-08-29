@@ -2430,11 +2430,6 @@ body {
   opacity: 0.85;
 }
 
-.wiring-hint {
-  font-size: var(--fs-md);
-  color: var(--cue);
-}
-
 /* Outputs live in a dashed box on a lighter shade of the panel gray
    (convention: anything inside the dashed box is a source). Output
    groups get a small caption and flow left-to-right. */
@@ -2505,16 +2500,6 @@ body {
   border-top: 1px dashed var(--line-strong);
   padding-top: 4px;
   margin-top: 2px;
-}
-
-.wire-color-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-right: 6px;
-  vertical-align: middle;
-  border: 1px solid rgba(0, 0, 0, 0.4);
 }
 
 .wire-cable-pending {

@@ -187,8 +187,9 @@ describe('the Decks tab wraps the real rack canvas', () => {
 
     // Click the deck's OUT, then the module's IN — the Rack tab's own
     // grammar, arriving at the same connect_wire.
-    fireEvent.click(io.querySelector('[data-testid="jack-output-d1_l"]') as HTMLElement);
-    expect(screen.getByTestId('wiring-hint').textContent).toContain('bank1:d1_l');
+    const out = io.querySelector('[data-testid="jack-output-d1_l"]') as HTMLElement;
+    fireEvent.click(out);
+    expect(out.className).toContain('jack-selected');
     fireEvent.click(screen.getByTestId('jack-input-in'));
     await waitFor(() =>
       expect(fakeEngine.connectWire).toHaveBeenCalledWith(
