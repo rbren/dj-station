@@ -49,6 +49,10 @@ describe('app shell layout (CSS-level pin)', () => {
     // scrolls, never the page.
     expect(rule('.decks-view')).toMatch(/display:\s*contents/);
     expect(rule('.decks-strips')).toMatch(/overflow:\s*auto/);
-    expect(rule('.decks-strips')).toMatch(/flex:\s*none/);
+    // The dock is the sized band (its height is the user's, so it never
+    // flexes); the strips fill it and scroll inside it.
+    expect(rule('.decks-dock')).toMatch(/flex:\s*none/);
+    expect(rule('.decks-dock')).toMatch(/min-height:\s*0/);
+    expect(rule('.decks-strips')).toMatch(/min-height:\s*0/);
   });
 });

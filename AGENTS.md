@@ -1756,6 +1756,20 @@ of the page.
   scope (`RackKeysContext`, App's shortcut effect) covers `rack` AND
   `decks`. Do NOT rebuild a bespoke mini-rack here — that was f11c2a4
   and it was reverted whole.
+- The strip row is a DOCK the user sizes (`.decks-dock`): a grip on its
+  top edge drags its height (pointer or arrow keys, clamped between
+  `DOCK_MIN_HEIGHT` and 70 % of the app body) and its label collapses it
+  to that bar alone. Height and collapsed flag are cosmetic app state in
+  localStorage (`dj-decks-dock-height` / `dj-decks-dock-collapsed`), like
+  the rack's zoom and pan — never patch state. The dock is `flex: none`
+  with an inline height, so every pixel it gives up goes to `.rack-area`.
+  Both moves MOVE THE CHROME JACKS, and an inline style on a
+  `.decks-chrome` element is exactly what the wire overlay's mutation
+  filter ignores by design, so the dock's geometry is folded into the
+  chrome overlay's `layoutKey` — that is what re-measures the cables
+  frame by frame during a drag. Collapsed, the strips leave the DOM and
+  their cables simply stop resolving (the same rule as bpm/the mix
+  pairs); the top bar's clock jack stays wired.
 - The chrome IS the bank: on this tab App renders no panel for
   `DECKS_TYPE` modules, and the strips/top bar carry the bank's real
   jacks (`data-jack` on the bank instance) — send/return at the top of
@@ -1789,6 +1803,8 @@ of the page.
 - Tests: `app/tests/DecksView.test.tsx` (strips, lamps, drafts, the
   output pickers, the rehydrate-on-open, the wiring-on-open, the chrome
   jacks), `DecksChromeWires.test.tsx` (cable endpoint geometry),
+  `DecksDock.test.tsx` (collapse/resize, their persistence and the
+  cables through both),
   `AppDecksRack.test.tsx` (the canvas on the tab, no bank panel,
   chrome-to-module wiring), plus the engine's
   `cargo test -p dj-engine --release --test integration decks` and the

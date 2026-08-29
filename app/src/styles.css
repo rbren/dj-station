@@ -2114,7 +2114,7 @@ body {
   order: 0;
 }
 
-.decks-strips,
+.decks-dock,
 .decks-empty-bar {
   order: 2;
 }
@@ -5590,23 +5590,117 @@ body {
   padding: 7px 14px;
 }
 
-/* Eight strips in a bottom band — chrome over the canvas, so they take
-   the lower part of the screen and leave the rest to the rack. Sized so
-   the whole bank is on screen at once; below that width the strips keep
-   their minimum and the row scrolls (the cable overlay re-measures on
-   scroll). */
+/* The strip dock: the bottom band of chrome, whose height the user owns.
+   An explicit inline height (clamped in DecksView, persisted in
+   localStorage) with `flex: none`, so every pixel it gives up goes to the
+   .rack-area above it; collapsed it is only its own bar. */
+.decks-dock {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
+  /* The same ceiling the drag clamps to, so a height saved on a taller
+     window can never swallow the canvas on a shorter one. */
+  max-height: 70%;
+  border-top: 1px solid var(--line);
+  background: var(--surface-sunken);
+}
+
+.decks-dock[data-collapsed='true'] {
+  height: auto;
+}
+
+/* The bar is the handle AND the switch: the label toggles, the grip to
+   its right resizes. */
+.decks-dock-bar {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  gap: 8px;
+  height: 18px;
+}
+
+.decks-dock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.decks-dock-toggle:hover {
+  color: var(--ink);
+}
+
+.decks-dock-chevron {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentcolor;
+}
+
+.decks-dock[data-collapsed='true'] .decks-dock-chevron {
+  transform: rotate(-90deg);
+}
+
+.decks-dock-summary {
+  align-self: center;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+}
+
+/* Grabbing anywhere along the top edge resizes; the ruled line is drawn
+   in the middle of a target tall enough to hit. */
+.decks-dock-grip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.decks-dock-grip::before {
+  content: '';
+  flex: 1;
+  height: 2px;
+  margin-right: 8px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.decks-dock-grip:hover::before,
+.decks-dock.is-resizing .decks-dock-grip::before {
+  background: var(--brand);
+}
+
+/* While the handle is held the pointer must not land on a fader it
+   dragged past. */
+.decks-dock.is-resizing .decks-strips {
+  pointer-events: none;
+}
+
+/* Eight strips filling the dock. Sized so the whole bank is on screen at
+   once; below that width the strips keep their minimum and the row
+   scrolls (the cable overlay re-measures on scroll). */
 .decks-strips {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(156px, 1fr);
   gap: 8px;
-  padding: 10px;
+  padding: 0 10px 10px;
   overflow: auto;
-  flex: none;
-  max-height: 44%;
+  flex: 1;
   min-height: 0;
-  border-top: 1px solid var(--line);
-  background: var(--surface-sunken);
 }
 
 .decks-slot {

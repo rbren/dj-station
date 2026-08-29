@@ -25,7 +25,14 @@
 // module's own panel is NOT rendered on this tab (App skips it) — the
 // chrome IS the bank, so each bank jack resolves to exactly one socket.
 //
-// The one piece of local state is a DRAFT of a control being dragged: a
+// The strip row is a DOCK the user sizes: a handle on its top edge drags
+// its height (clamped, persisted in localStorage like the rack's zoom and
+// pan) and its label collapses it to a bar. Every pixel it gives up goes
+// to the canvas — and because both moves slide the chrome jacks, the
+// dock's geometry is part of the cable overlay's layout key, so the wires
+// follow the drag frame by frame.
+//
+// The other piece of local state is a DRAFT of a control being dragged: a
 // fader streams faster than the poll, so the drag's value wins until the
 // engine's own reading agrees with it. Drafts converge and clear
 // themselves — there is no timer, and no "who is right" ambiguity.
@@ -48,13 +55,43 @@ import {
   type SlotControl,
 } from '../decks';
 import type { WireSnapshot } from '../engine';
-import type { PendingWire } from '../rackStore';
+import { loadJson, saveJson, type PendingWire } from '../rackStore';
 import { DecksClipPicker } from './DecksClipPicker';
 import { DecksSlot } from './DecksSlot';
 import { LiveJack } from './Jack';
 import { WIRE_COLORS, WireOverlay } from './WireOverlay';
 
 const POLL_MS = 100;
+
+/** How tall the strip dock is, and whether it is open at all: cosmetic
+ *  app-layer state, persisted in localStorage beside the rack's zoom and
+ *  pan (never in the patch — the bank is the same bank at any height). */
+export const DOCK_HEIGHT_KEY = 'dj-decks-dock-height';
+export const DOCK_COLLAPSED_KEY = 'dj-decks-dock-collapsed';
+/** Under this a strip loses its faders before it loses anything else. */
+export const DOCK_MIN_HEIGHT = 140;
+export const DOCK_DEFAULT_HEIGHT = 300;
+/** The canvas is the point of the page: the decks never take more than
+ *  this share of the body, however hard the handle is dragged. */
+const DOCK_MAX_FRACTION = 0.7;
+/** Arrow-key nudge on the focused handle. */
+const DOCK_KEY_STEP = 24;
+
+/** What the clamps are measured against: the app body the chrome shares
+ *  with the canvas, or the window when the page is rendered standalone
+ *  (headless tests, where nothing has a layout box). */
+function viewportHeight(container: HTMLElement | null | undefined): number {
+  return container?.clientHeight || window.innerHeight || DOCK_DEFAULT_HEIGHT;
+}
+
+export function dockMaxHeight(viewport: number): number {
+  return Math.max(DOCK_MIN_HEIGHT, Math.round(viewport * DOCK_MAX_FRACTION));
+}
+
+export function clampDockHeight(px: number, viewport: number): number {
+  if (!Number.isFinite(px)) return DOCK_DEFAULT_HEIGHT;
+  return Math.min(dockMaxHeight(viewport), Math.max(DOCK_MIN_HEIGHT, Math.round(px)));
+}
 
 export interface DecksViewProps {
   api?: DecksApi;
@@ -110,6 +147,15 @@ export function DecksView(props: DecksViewProps) {
   const [bpmDraft, setBpmDraft] = useState<number | null>(null);
   const [outputs, setOutputs] = useState<AudioOutputSettings | null>(null);
   const rehydrated = useRef(false);
+  const [collapsed, setCollapsed] = useState(
+    () => loadJson<boolean>(DOCK_COLLAPSED_KEY, false) === true,
+  );
+  const [dockHeight, setDockHeight] = useState(() =>
+    clampDockHeight(loadJson(DOCK_HEIGHT_KEY, DOCK_DEFAULT_HEIGHT), viewportHeight(null)),
+  );
+  const [resizing, setResizing] = useState(false);
+  const grab = useRef<{ y: number; height: number } | null>(null);
+  const heightRef = useRef(dockHeight);
 
   const poll = useCallback(async () => {
     if (!bank) return;
@@ -252,6 +298,55 @@ export function DecksView(props: DecksViewProps) {
     },
     [outputs, outputsApi],
   );
+
+  // The dock: how much of the body the strips take, and whether they are
+  // showing at all. Both are pure chrome geometry — the bank plays the
+  // same either way — but they MOVE THE CHROME JACKS, so every change is
+  // folded into the cable overlay's layout key below and the wires are
+  // re-measured mid-drag, not just at the end.
+  const applyHeight = useCallback(
+    (px: number) => {
+      const next = clampDockHeight(px, viewportHeight(props.overlayContainer));
+      heightRef.current = next;
+      setDockHeight(next);
+      return next;
+    },
+    [props.overlayContainer],
+  );
+
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: PointerEvent) => {
+      const from = grab.current;
+      if (!from) return;
+      // The handle is on TOP of the dock, so dragging up makes it taller.
+      applyHeight(from.height + (from.y - e.clientY));
+    };
+    const onUp = () => {
+      grab.current = null;
+      setResizing(false);
+      saveJson(DOCK_HEIGHT_KEY, heightRef.current);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [resizing, applyHeight]);
+
+  const nudgeHeight = useCallback(
+    (delta: number) => saveJson(DOCK_HEIGHT_KEY, applyHeight(heightRef.current + delta)),
+    [applyHeight],
+  );
+
+  const toggleCollapsed = useCallback(() => {
+    const next = !collapsed;
+    setCollapsed(next);
+    saveJson(DOCK_COLLAPSED_KEY, next);
+  }, [collapsed]);
 
   const bpm = bpmDraft ?? status?.bpm ?? 120;
   const slots = useMemo(() => status?.slots ?? [], [status]);
@@ -401,25 +496,83 @@ export function DecksView(props: DecksViewProps) {
         </div>
       </header>
 
-      <div className="decks-strips decks-chrome" data-testid="decks-strips">
-        {shownSlots.map((slot) => (
-          <DecksSlot
-            key={slot.slot}
-            slot={slot}
-            instance={bank}
-            onLoad={() => setPicking(slot.slot)}
-            onClear={() => void write(() => api.clear(bank, slot.slot))}
-            onControl={(control, value) => setControl(slot.slot, control, value)}
-            onToggle={(control) => setControl(slot.slot, control, slot[control] ? 0 : 1)}
-            onTail={(tail) => void write(() => api.setTail(bank, slot.slot, Math.max(0, tail)))}
-            onPhase={(phase) => void write(() => api.setPhase(bank, slot.slot, phase))}
-            onRelease={() => void api.endEdit()}
-            onJack={onJack}
-            isArmed={isArmed}
-            isWired={isWired}
-            armedColor={armedColor}
-          />
-        ))}
+      {/* The strip dock: a band of chrome the canvas gets back when it is
+          made shorter or shut. Collapsed it is just its own bar — the
+          strips (and with them their send/return/tone jacks) leave the
+          DOM, so their cables stop resolving and are not drawn, exactly
+          like a bank jack that has no chrome socket. */}
+      <div
+        className={`decks-dock decks-chrome${resizing ? ' is-resizing' : ''}`}
+        data-testid="decks-dock"
+        data-collapsed={collapsed ? 'true' : 'false'}
+        style={collapsed ? undefined : { height: dockHeight }}
+      >
+        <div className="decks-dock-bar">
+          <button
+            className="decks-dock-toggle"
+            data-testid="decks-dock-toggle"
+            aria-expanded={!collapsed}
+            aria-controls="decks-strips"
+            title={collapsed ? 'Show the decks' : 'Hide the decks'}
+            onClick={toggleCollapsed}
+          >
+            <span className="decks-dock-chevron" aria-hidden="true" />
+            Decks
+          </button>
+          {collapsed ? (
+            <span className="decks-dock-summary" data-testid="decks-dock-summary">
+              {slots.filter((s) => s.loaded).length} of {slots.length} loaded
+            </span>
+          ) : (
+            <div
+              className="decks-dock-grip"
+              data-testid="decks-dock-grip"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize the decks"
+              aria-valuenow={dockHeight}
+              aria-valuemin={DOCK_MIN_HEIGHT}
+              aria-valuemax={dockMaxHeight(viewportHeight(props.overlayContainer))}
+              tabIndex={0}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return;
+                // Never let the grab turn into a text selection.
+                e.preventDefault();
+                grab.current = { y: e.clientY, height: dockHeight };
+                setResizing(true);
+              }}
+              onDoubleClick={() => nudgeHeight(DOCK_DEFAULT_HEIGHT - heightRef.current)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowUp') nudgeHeight(DOCK_KEY_STEP);
+                else if (e.key === 'ArrowDown') nudgeHeight(-DOCK_KEY_STEP);
+                else return;
+                e.preventDefault();
+              }}
+            />
+          )}
+        </div>
+        {!collapsed && (
+          <div className="decks-strips" id="decks-strips" data-testid="decks-strips">
+            {shownSlots.map((slot) => (
+              <DecksSlot
+                key={slot.slot}
+                slot={slot}
+                instance={bank}
+                onLoad={() => setPicking(slot.slot)}
+                onClear={() => void write(() => api.clear(bank, slot.slot))}
+                onControl={(control, value) => setControl(slot.slot, control, value)}
+                onToggle={(control) => setControl(slot.slot, control, slot[control] ? 0 : 1)}
+                onTail={(tail) => void write(() => api.setTail(bank, slot.slot, Math.max(0, tail)))}
+                onPhase={(phase) => void write(() => api.setPhase(bank, slot.slot, phase))}
+                onRelease={() => void api.endEdit()}
+                onJack={onJack}
+                isArmed={isArmed}
+                isWired={isWired}
+                armedColor={armedColor}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* The chrome cable layer: every wire that touches the bank, drawn
@@ -435,7 +588,12 @@ export function DecksView(props: DecksViewProps) {
             colors={props.wireColors}
             pending={pending}
             zoom={1}
-            layoutKey={props.overlayLayoutKey}
+            // The dock's own geometry is part of the layout: its height
+            // changes by an inline style on a `.decks-chrome` element,
+            // which the overlay's mutation filter ignores by design, so
+            // the key is what re-measures the chrome ends every frame of
+            // a resize and on collapse.
+            layoutKey={`${props.overlayLayoutKey ?? ''}|${collapsed ? 'shut' : dockHeight}`}
           />
         </div>
       )}
