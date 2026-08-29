@@ -345,13 +345,21 @@ describe('DecksView', () => {
     await waitFor(() => expect(api.setSurface).toHaveBeenCalledWith('decks1', false));
   });
 
-  it('says when the bank comes round, and restarts it on demand', async () => {
+  it('counts beats against the cycle length, and restarts the bank on demand', async () => {
     const api = makeApi(makeStatus({ cycle_beats: 24, beat: 5.5 }));
     show(api);
-    await waitFor(() => expect(screen.getByTestId('decks-cycle').textContent).toContain('24'));
-    expect(screen.getByTestId('decks-beat').textContent).toBe('beat 6');
+    await waitFor(() => expect(screen.getByTestId('decks-beat').textContent).toBe('beat 6/24'));
+    expect(screen.queryByTestId('decks-cycle')).toBeNull();
     fireEvent.click(screen.getByTestId('decks-restart'));
     await waitFor(() => expect(api.reset).toHaveBeenCalledWith('decks1'));
+  });
+
+  it('a bank with no cycle length says nothing is loaded instead of a divisor', async () => {
+    show(makeApi(makeStatus({ cycle_beats: 0, beat: 0 })));
+    await waitFor(() =>
+      expect(screen.getByTestId('decks-cycle').textContent).toBe('nothing loaded'),
+    );
+    expect(screen.getByTestId('decks-beat').textContent).toBe('beat 1');
   });
 
   it('a bound deck whose clip cannot be assembled says so rather than looking loaded', async () => {

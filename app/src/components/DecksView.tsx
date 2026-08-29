@@ -422,12 +422,13 @@ export function DecksView(props: DecksViewProps) {
         <div className="decks-readout">
           <span className="decks-beat mono" data-testid="decks-beat">
             beat {Math.floor(status?.beat ?? 0) + 1}
+            {status && status.cycle_beats > 0 ? `/${status.cycle_beats}` : ''}
           </span>
-          <span className="decks-cycle" data-testid="decks-cycle">
-            {status && status.cycle_beats > 0
-              ? `bank comes round every ${status.cycle_beats} beats`
-              : 'nothing loaded'}
-          </span>
+          {(!status || status.cycle_beats <= 0) && (
+            <span className="decks-cycle" data-testid="decks-cycle">
+              nothing loaded
+            </span>
+          )}
           {/* The bank's clock, on a jack: one pulse per beat, wired into
               the rack below (an LFO, a sequencer) to run it on the same
               grid the decks are on. */}
