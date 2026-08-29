@@ -19,6 +19,7 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const search = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     search.current?.focus();
@@ -35,6 +36,11 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
 
   // Typing re-aims at the first match; ↑/↓ walk from there, clamped.
   const active = Math.min(index, Math.max(shown.length - 1, 0));
+
+  useEffect(() => {
+    // jsdom has no scrollIntoView; the optional call keeps tests honest.
+    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [active]);
 
   return (
     <div
@@ -78,7 +84,7 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
           }}
         />
         {shown.length > 0 ? (
-          <ul className="picker-clip-list" role="listbox" aria-label="Clips">
+          <ul ref={list} className="picker-clip-list" role="listbox" aria-label="Clips">
             {shown.map((c, i) => (
               <li
                 key={`${c.projectId}/${c.clipId}`}

@@ -5698,4 +5698,14 @@ body {
 
 .decks-clip-dialog {
   width: min(680px, 90vw);
+  max-height: min(560px, 85vh);
+}
+
+/* The list is the only part of the dialog allowed to grow: it scrolls
+   within the bounded dialog so the search box and Cancel stay in reach
+   however many clips there are. */
+.decks-clip-dialog .picker-clip-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
