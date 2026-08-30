@@ -1,5 +1,5 @@
-//! Behaviour tests for the Utilities modules (mixer, attenuverter, mult,
-//! quantizer, logic, sequential switch).
+//! Behaviour tests for the Utilities modules (the mixer family,
+//! attenuverter, mult, quantizer, logic, sequential switch).
 //!
 //! Each test renders a small offline patch and asserts on the samples.
 //! Module outputs are observed by routing them to master channels through
@@ -52,37 +52,102 @@ fn assert_near(actual: f32, expected: f32, what: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// Mixer
+// Mixer family
 // ---------------------------------------------------------------------------
+
+/// Every mixer width: module type, channels, and whether its strips are
+/// FULL (level, pan, mute, solo) or level-only. One shared DSP, one set of
+/// laws, so the tests below run against the whole family — including the
+/// retired 6-channel Mixer, whose behaviour must not move.
+const MIXER_FAMILY: [(&str, usize, bool); 4] = [
+    ("com.dj.mixer4", 4, true),
+    ("com.dj.mixer8", 8, true),
+    ("com.dj.mixer16", 16, false),
+    ("com.dj.mixer", 6, true),
+];
+
+/// The widths whose strips carry pan and mute/solo.
+fn full_strip_mixers() -> impl Iterator<Item = (&'static str, usize)> {
+    MIXER_FAMILY
+        .iter()
+        .filter(|(_, _, full)| *full)
+        .map(|(id, channels, _)| (*id, *channels))
+}
+
+/// A stereo probe desk: one mixer of `type_id` (instance `mx`) with its
+/// outputs on master channels 0 and 1.
+fn desk(type_id: &str) -> Engine {
+    let mut e = probe_engine(2);
+    e.add_module("mx", type_id).unwrap();
+    probe(&mut e, "mx", "out_l", 0);
+    probe(&mut e, "mx", "out_r", 1);
+    e
+}
+
+/// The strip is manifest data: each width declares exactly the jacks its
+/// DSP reads, stays inside the ABI's 64-input ceiling (which is why the
+/// 16 is level-only), and only the retired one is flagged deprecated.
+#[test]
+fn every_mixer_width_declares_its_strip_and_fits_the_abi() {
+    let reg = crate::common::registry();
+    for (id, channels, full) in MIXER_FAMILY {
+        let m = reg.manifest(id).unwrap_or_else(|| panic!("{id} not found"));
+        let jack = |id: &str| m.inputs.iter().any(|i| i.id == id);
+        for ch in 1..=channels {
+            for suffix in [format!("in{ch}_l"), format!("in{ch}_r"), format!("lvl{ch}")] {
+                assert!(jack(&suffix), "{id} is missing {suffix}");
+            }
+            for extra in [format!("pan{ch}"), format!("mute{ch}"), format!("solo{ch}")] {
+                assert_eq!(jack(&extra), full, "{id} strip jack {extra}");
+            }
+        }
+        assert!(jack("master"), "{id} has no master fader");
+        let stride = if full { 6 } else { 3 };
+        assert_eq!(
+            m.inputs.len(),
+            channels * stride + 1,
+            "{id} declares jacks its DSP does not read (or the reverse)"
+        );
+        assert!(
+            m.inputs.len() <= 64,
+            "{id} has {} inputs; the ABI's connected mask holds 64",
+            m.inputs.len()
+        );
+        assert_eq!(
+            m.deprecated,
+            id == "com.dj.mixer",
+            "{id} deprecation flag: only the 6-channel desk is retired"
+        );
+    }
+}
 
 #[test]
 fn mixer_sums_stereo_channels_with_levels() {
-    let mut e = probe_engine(2);
-    e.add_module("mx", "com.dj.mixer").unwrap();
-    probe(&mut e, "mx", "out_l", 0);
-    probe(&mut e, "mx", "out_r", 1);
+    for (id, _, _) in MIXER_FAMILY {
+        let mut e = desk(id);
 
-    // Channel 1: +3 V at unity (lvl 10). Channel 2: +4 V at half (lvl 5).
-    // Pans stay centred: both sides at unity.
-    e.set_knob_value("mx", "in1_l", 3.0).unwrap();
-    e.set_knob_value("mx", "lvl1", 10.0).unwrap();
-    e.set_knob_value("mx", "in2_l", 4.0).unwrap();
-    e.set_knob_value("mx", "lvl2", 5.0).unwrap();
-    let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 3.0 + 2.0, "mixer left sum");
-    assert_near(tail[1], 3.0 + 2.0, "mixer right sum (R normalled to L)");
+        // Channel 1: +3 V at unity (lvl 10). Channel 2: +4 V at half
+        // (lvl 5). Pans stay centred: both sides at unity.
+        e.set_knob_value("mx", "in1_l", 3.0).unwrap();
+        e.set_knob_value("mx", "lvl1", 10.0).unwrap();
+        e.set_knob_value("mx", "in2_l", 4.0).unwrap();
+        e.set_knob_value("mx", "lvl2", 5.0).unwrap();
+        let tail = render_tail(&mut e, 0.01);
+        assert_near(tail[0], 3.0 + 2.0, &format!("{id} left sum"));
+        assert_near(tail[1], 3.0 + 2.0, &format!("{id} right sum (R normalled)"));
 
-    // Master scales the whole sum.
-    e.set_knob_value("mx", "master", 2.0).unwrap();
-    let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 0.2 * 5.0, "mixer sum with master at 0.2");
+        // Master scales the whole sum.
+        e.set_knob_value("mx", "master", 2.0).unwrap();
+        let tail = render_tail(&mut e, 0.01);
+        assert_near(tail[0], 0.2 * 5.0, &format!("{id} sum at master 0.2"));
 
-    // Channels with the fader down contribute nothing.
-    e.set_knob_value("mx", "master", 10.0).unwrap();
-    e.set_knob_value("mx", "lvl1", 0.0).unwrap();
-    e.set_knob_value("mx", "lvl2", 0.0).unwrap();
-    let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 0.0, "mixer silent with faders down");
+        // Channels with the fader down contribute nothing.
+        e.set_knob_value("mx", "master", 10.0).unwrap();
+        e.set_knob_value("mx", "lvl1", 0.0).unwrap();
+        e.set_knob_value("mx", "lvl2", 0.0).unwrap();
+        let tail = render_tail(&mut e, 0.01);
+        assert_near(tail[0], 0.0, &format!("{id} silent with faders down"));
+    }
 }
 
 /// A fader at 0 kills its channel EXACTLY — with every input jack wired,
@@ -95,99 +160,180 @@ fn mixer_level_at_zero_is_exact_silence_on_a_full_desk() {
         (p(&out[0]), p(&out[1]))
     };
 
-    let mut e = probe_engine(2);
-    e.add_module("osc1", "com.dj.oscillator").unwrap();
-    e.add_module("lfo1", "com.dj.lfo").unwrap();
-    e.add_module("mx", "com.dj.mixer").unwrap();
-    probe(&mut e, "mx", "out_l", 0);
-    probe(&mut e, "mx", "out_r", 1);
-    for ch in 1..=6 {
-        e.connect("osc1", "audio", "mx", &format!("in{ch}_l"))
-            .unwrap();
-        // Odd channels take a wired R, even ones keep the L normal.
-        if ch % 2 == 1 {
-            e.connect("osc1", "audio", "mx", &format!("in{ch}_r"))
+    for (id, channels, full) in MIXER_FAMILY {
+        let mut e = desk(id);
+        e.add_module("osc1", "com.dj.oscillator").unwrap();
+        e.add_module("lfo1", "com.dj.lfo").unwrap();
+        for ch in 1..=channels {
+            e.connect("osc1", "audio", "mx", &format!("in{ch}_l"))
                 .unwrap();
+            // Odd channels take a wired R, even ones keep the L normal.
+            if ch % 2 == 1 {
+                e.connect("osc1", "audio", "mx", &format!("in{ch}_r"))
+                    .unwrap();
+            }
+            if full {
+                e.connect("lfo1", "bi", "mx", &format!("pan{ch}")).unwrap();
+            }
+            e.set_knob_value("mx", &format!("lvl{ch}"), 10.0).unwrap();
         }
-        e.connect("lfo1", "bi", "mx", &format!("pan{ch}")).unwrap();
-        e.set_knob_value("mx", &format!("lvl{ch}"), 10.0).unwrap();
-    }
-    let (loud_l, loud_r) = peaks(&mut e);
-    assert!(loud_l > 4.9 && loud_r > 4.9, "desk should be loud first");
+        let (loud_l, loud_r) = peaks(&mut e);
+        assert!(
+            loud_l > 4.9 && loud_r > 4.9,
+            "{id} desk should be loud first"
+        );
 
-    // Every fader down: digital silence, not a residue of six channels.
-    for ch in 1..=6 {
-        e.set_knob_value("mx", &format!("lvl{ch}"), 0.0).unwrap();
-    }
-    assert_eq!(peaks(&mut e), (0.0, 0.0), "faders down must be silent");
+        // Every fader down: digital silence, not a residue of N channels.
+        for ch in 1..=channels {
+            e.set_knob_value("mx", &format!("lvl{ch}"), 0.0).unwrap();
+        }
+        assert_eq!(peaks(&mut e), (0.0, 0.0), "{id} faders down must be silent");
 
-    // ... and a single fader brings its own channel back, so the silence
-    // above was the faders' doing and not a dead patch. (Its pan sits
-    // wherever the LFO left it, so only the favoured side is at unity.)
-    e.set_knob_value("mx", "lvl4", 10.0).unwrap();
-    let (l, r) = peaks(&mut e);
-    assert!(l.max(r) > 4.9, "channel 4 alone should play: {l}, {r}");
+        // ... and a single fader brings its own channel back, so the
+        // silence above was the faders' doing and not a dead patch. (On a
+        // full strip its pan sits wherever the LFO left it, so only the
+        // favoured side is at unity.)
+        e.set_knob_value("mx", "lvl4", 10.0).unwrap();
+        let (l, r) = peaks(&mut e);
+        assert!(l.max(r) > 4.9, "{id} channel 4 alone should play: {l}, {r}");
+    }
 }
 
 #[test]
 fn mixer_pan_places_a_mono_source_in_the_field() {
-    let mut e = probe_engine(2);
-    e.add_module("mx", "com.dj.mixer").unwrap();
-    probe(&mut e, "mx", "out_l", 0);
-    probe(&mut e, "mx", "out_r", 1);
-    e.set_knob_value("mx", "in1_l", 4.0).unwrap();
-    e.set_knob_value("mx", "lvl1", 10.0).unwrap();
+    for (id, _) in full_strip_mixers() {
+        let mut e = desk(id);
+        e.set_knob_value("mx", "in1_l", 4.0).unwrap();
+        e.set_knob_value("mx", "lvl1", 10.0).unwrap();
 
-    // Hard left: L at unity, R silent.
-    e.set_knob_value("mx", "pan1", -10.0).unwrap();
-    let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 4.0, "hard left keeps L at unity");
-    assert_near(tail[1], 0.0, "hard left silences R");
+        // Hard left: L at unity, R silent.
+        e.set_knob_value("mx", "pan1", -10.0).unwrap();
+        let tail = render_tail(&mut e, 0.01);
+        assert_near(tail[0], 4.0, &format!("{id} hard left keeps L at unity"));
+        assert_near(tail[1], 0.0, &format!("{id} hard left silences R"));
 
-    // Half right: L fades to half, R stays at unity (balance law).
-    e.set_knob_value("mx", "pan1", 5.0).unwrap();
-    let tail = render_tail(&mut e, 0.01);
-    assert_near(tail[0], 2.0, "half right fades L");
-    assert_near(tail[1], 4.0, "half right keeps R at unity");
+        // Half right: L fades to half, R stays at unity (balance law).
+        e.set_knob_value("mx", "pan1", 5.0).unwrap();
+        let tail = render_tail(&mut e, 0.01);
+        assert_near(tail[0], 2.0, &format!("{id} half right fades L"));
+        assert_near(tail[1], 4.0, &format!("{id} half right keeps R at unity"));
+    }
 }
 
 #[test]
 fn mixer_right_input_breaks_the_left_normal_when_wired() {
-    let mut e = probe_engine(2);
-    e.add_module("osc1", "com.dj.oscillator").unwrap();
-    e.add_module("mx", "com.dj.mixer").unwrap();
-    e.connect("osc1", "audio", "mx", "in1_l").unwrap();
-    e.set_knob_value("mx", "lvl1", 10.0).unwrap();
-    probe(&mut e, "mx", "out_l", 0);
-    probe(&mut e, "mx", "out_r", 1);
+    for (id, _, _) in MIXER_FAMILY {
+        let mut e = desk(id);
+        e.add_module("osc1", "com.dj.oscillator").unwrap();
+        e.connect("osc1", "audio", "mx", "in1_l").unwrap();
+        e.set_knob_value("mx", "lvl1", 10.0).unwrap();
 
-    // R unwired: normalled to L, both sides identical.
-    let out = e.render_offline((0.1 * SR) as usize).unwrap();
-    let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
-    assert!(peak > 4.9, "oscillator should reach ±5, got {peak}");
-    for (i, (&l, &r)) in out[0].iter().zip(&out[1]).enumerate() {
-        assert!((l - r).abs() < 1e-6, "sample {i}: normalled R {r} != L {l}");
+        // R unwired: normalled to L, both sides identical.
+        let out = e.render_offline((0.1 * SR) as usize).unwrap();
+        let peak = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+        assert!(peak > 4.9, "{id}: oscillator should reach ±5, got {peak}");
+        for (i, (&l, &r)) in out[0].iter().zip(&out[1]).enumerate() {
+            assert!(
+                (l - r).abs() < 1e-6,
+                "{id} sample {i}: normalled R {r} != L {l}"
+            );
+        }
+
+        // Wiring R replaces the normal with the jack's own signal (silent
+        // here).
+        e.add_module("att", "com.dj.attenuverter").unwrap();
+        e.connect("att", "out1", "mx", "in1_r").unwrap();
+        let out = e.render_offline((0.1 * SR) as usize).unwrap();
+        let peak_l = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+        let peak_r = out[1].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+        assert!(peak_l > 4.9, "{id}: L keeps the oscillator, got {peak_l}");
+        assert!(
+            peak_r < 1e-6,
+            "{id}: wired-but-silent R must not mirror L: {peak_r}"
+        );
     }
+}
 
-    // Wiring R replaces the normal with the jack's own signal (silent here).
-    e.add_module("att", "com.dj.attenuverter").unwrap();
-    e.connect("att", "out1", "mx", "in1_r").unwrap();
-    let out = e.render_offline((0.1 * SR) as usize).unwrap();
-    let peak_l = out[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
-    let peak_r = out[1].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
-    assert!(peak_l > 4.9, "L keeps the oscillator, got {peak_l}");
-    assert!(
-        peak_r < 1e-6,
-        "wired-but-silent R must not mirror L: {peak_r}"
-    );
+/// The widest desk trades the full strip for channels: sixteen stereo
+/// pairs and a master, summed into the ±10 V rails.
+#[test]
+fn mixer16_sums_sixteen_channels_into_the_rails() {
+    let mut e = desk("com.dj.mixer16");
+    for ch in 1..=16 {
+        e.set_knob_value("mx", &format!("in{ch}_l"), 1.0).unwrap();
+        e.set_knob_value("mx", &format!("lvl{ch}"), 10.0).unwrap();
+    }
+    let tail = render_tail(&mut e, 0.01);
+    assert_near(tail[0], 10.0, "sixteen volts clamp to the rail");
+    assert_near(tail[1], 10.0, "... on both sides (R normalled to L)");
+
+    // Backed off, the sum is the honest arithmetic one.
+    e.set_knob_value("mx", "master", 5.0).unwrap();
+    assert_near(render_tail(&mut e, 0.01)[0], 8.0, "16 V at half master");
+}
+
+/// Bypass is the channel-1 pair, straight through: the DSP does not run,
+/// so the levels, the master and even the R-to-L normal are out of the
+/// picture.
+#[test]
+fn a_bypassed_mixer_passes_channel_one_through() {
+    let frames = (0.05 * SR) as usize;
+    for (id, _, _) in MIXER_FAMILY {
+        let reg = crate::common::registry();
+        let bypassable = reg.manifest(id).unwrap().is_bypassable();
+        // The retired 6-channel desk never declared routes; leave its
+        // manifest bytes alone rather than growing it a new control.
+        assert_eq!(bypassable, id != "com.dj.mixer", "{id} bypassability");
+        if !bypassable {
+            continue;
+        }
+
+        // A stereo pair into channel 1, a third voice into channel 2, and
+        // the master shut: nothing survives the DSP path.
+        let patched = |bypassed: bool| {
+            let mut e = desk(id);
+            e.add_module("osc1", "com.dj.oscillator").unwrap();
+            e.add_module("osc2", "com.dj.oscillator").unwrap();
+            e.add_module("osc3", "com.dj.oscillator").unwrap();
+            e.set_knob_value("osc2", "pitch", 7.0 / 12.0).unwrap();
+            e.set_knob_value("osc3", "pitch", -1.0).unwrap();
+            e.connect("osc1", "audio", "mx", "in1_l").unwrap();
+            e.connect("osc2", "audio", "mx", "in1_r").unwrap();
+            e.connect("osc3", "audio", "mx", "in2_l").unwrap();
+            e.set_knob_value("mx", "master", 0.0).unwrap();
+            e.set_bypass("mx", bypassed).unwrap();
+            e.render_offline(frames).unwrap()
+        };
+        let live = patched(false);
+        assert_eq!(
+            live[0].iter().fold(0.0f32, |m, &x| m.max(x.abs())),
+            0.0,
+            "{id} with the master shut should be silent unbypassed"
+        );
+
+        // Channel 1's pair, untouched — nothing else on the desk.
+        let mut dry = probe_engine(2);
+        dry.add_module("osc1", "com.dj.oscillator").unwrap();
+        dry.add_module("osc2", "com.dj.oscillator").unwrap();
+        dry.set_knob_value("osc2", "pitch", 7.0 / 12.0).unwrap();
+        probe(&mut dry, "osc1", "audio", 0);
+        probe(&mut dry, "osc2", "audio", 1);
+        let dry = dry.render_offline(frames).unwrap();
+
+        let bypassed = patched(true);
+        for (ch, side) in ["L", "R"].iter().enumerate() {
+            let worst = bypassed[ch]
+                .iter()
+                .zip(&dry[ch])
+                .fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+            assert_eq!(worst, 0.0, "{id} bypassed {side} is channel 1 {side}");
+        }
+    }
 }
 
 /// Three DC channels at unity, so a sum reads the audible set directly.
-fn mute_solo_engine() -> Engine {
-    let mut e = probe_engine(2);
-    e.add_module("mx", "com.dj.mixer").unwrap();
-    probe(&mut e, "mx", "out_l", 0);
-    probe(&mut e, "mx", "out_r", 1);
+fn mute_solo_engine(type_id: &str) -> Engine {
+    let mut e = desk(type_id);
     for (ch, volts) in [1.0f32, 2.0, 4.0].iter().enumerate() {
         e.set_knob_value("mx", &format!("in{}_l", ch + 1), *volts)
             .unwrap();
@@ -205,84 +351,94 @@ fn switch(e: &mut Engine, jack: &str, on: bool) {
 
 #[test]
 fn mixer_mute_silences_only_its_own_channel() {
-    let mut e = mute_solo_engine();
-    assert_near(render_tail(&mut e, 0.02)[0], 7.0, "all three channels sum");
+    for (id, _) in full_strip_mixers() {
+        let mut e = mute_solo_engine(id);
+        assert_near(render_tail(&mut e, 0.02)[0], 7.0, "all three channels sum");
 
-    switch(&mut e, "mute2", true);
-    assert_near(render_tail(&mut e, 0.02)[0], 5.0, "channel 2 muted");
+        switch(&mut e, "mute2", true);
+        assert_near(render_tail(&mut e, 0.02)[0], 5.0, "channel 2 muted");
 
-    switch(&mut e, "mute1", true);
-    assert_near(render_tail(&mut e, 0.02)[0], 4.0, "channels 1 + 2 muted");
+        switch(&mut e, "mute1", true);
+        assert_near(render_tail(&mut e, 0.02)[0], 4.0, "channels 1 + 2 muted");
 
-    switch(&mut e, "mute1", false);
-    switch(&mut e, "mute2", false);
-    assert_near(render_tail(&mut e, 0.02)[0], 7.0, "un-muted again");
+        switch(&mut e, "mute1", false);
+        switch(&mut e, "mute2", false);
+        assert_near(render_tail(&mut e, 0.02)[0], 7.0, "un-muted again");
+    }
 }
 
 #[test]
 fn mixer_solo_silences_every_channel_that_is_not_soloed() {
-    let mut e = mute_solo_engine();
-    switch(&mut e, "solo2", true);
-    assert_near(render_tail(&mut e, 0.02)[0], 2.0, "only the soloed channel");
+    for (id, _) in full_strip_mixers() {
+        let mut e = mute_solo_engine(id);
+        switch(&mut e, "solo2", true);
+        assert_near(render_tail(&mut e, 0.02)[0], 2.0, "only the soloed channel");
 
-    // Solo is additive: soloing a second channel adds it to the bus.
-    switch(&mut e, "solo3", true);
-    assert_near(render_tail(&mut e, 0.02)[0], 6.0, "two soloed channels");
+        // Solo is additive: soloing a second channel adds it to the bus.
+        switch(&mut e, "solo3", true);
+        assert_near(render_tail(&mut e, 0.02)[0], 6.0, "two soloed channels");
 
-    // Mute is independent of solo: a muted soloed channel stays silent.
-    switch(&mut e, "mute3", true);
-    assert_near(render_tail(&mut e, 0.02)[0], 2.0, "muted solo stays silent");
+        // Mute is independent of solo: a muted soloed channel stays silent.
+        switch(&mut e, "mute3", true);
+        assert_near(render_tail(&mut e, 0.02)[0], 2.0, "muted solo stays silent");
 
-    // Dropping every solo hands the bus back to the un-muted channels.
-    switch(&mut e, "solo2", false);
-    switch(&mut e, "solo3", false);
-    assert_near(render_tail(&mut e, 0.02)[0], 3.0, "solo cleared, 3 muted");
+        // Dropping every solo hands the bus back to the un-muted channels.
+        switch(&mut e, "solo2", false);
+        switch(&mut e, "solo3", false);
+        assert_near(render_tail(&mut e, 0.02)[0], 3.0, "solo cleared, 3 muted");
+    }
 }
 
 /// A mute switch is a jack like any other: CV can gate it.
 #[test]
 fn mixer_mute_accepts_a_wired_gate() {
-    let mut e = mute_solo_engine();
-    e.add_module("att", "com.dj.attenuverter").unwrap();
-    e.connect("att", "out1", "mx", "mute1").unwrap();
-    assert_near(render_tail(&mut e, 0.02)[0], 7.0, "gate low: nothing muted");
+    for (id, _) in full_strip_mixers() {
+        let mut e = mute_solo_engine(id);
+        e.add_module("att", "com.dj.attenuverter").unwrap();
+        e.connect("att", "out1", "mx", "mute1").unwrap();
+        assert_near(render_tail(&mut e, 0.02)[0], 7.0, "gate low: nothing muted");
 
-    e.set_knob_value("att", "offset1", 5.0).unwrap();
-    assert_near(render_tail(&mut e, 0.02)[0], 6.0, "gate high mutes ch 1");
+        e.set_knob_value("att", "offset1", 5.0).unwrap();
+        assert_near(render_tail(&mut e, 0.02)[0], 6.0, "gate high mutes ch 1");
+    }
 }
 
 /// Toggling mute fades over a few ms — a hard cut would click.
 #[test]
 fn mixer_mute_fades_instead_of_stepping() {
-    let mut e = mute_solo_engine();
-    render_tail(&mut e, 0.02);
-    switch(&mut e, "mute3", true);
-    let out = e.render_offline((0.02 * SR) as usize).unwrap();
-    let biggest_step = out[0]
-        .windows(2)
-        .fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
-    // 4 V over a 5 ms fade at 48 kHz ~= 0.017 V per sample.
-    assert!(
-        biggest_step < 0.05,
-        "mute should ramp, biggest sample step was {biggest_step} V"
-    );
-    assert_near(*out[0].last().unwrap(), 3.0, "fade settles at the new mix");
+    for (id, _) in full_strip_mixers() {
+        let mut e = mute_solo_engine(id);
+        render_tail(&mut e, 0.02);
+        switch(&mut e, "mute3", true);
+        let out = e.render_offline((0.02 * SR) as usize).unwrap();
+        let biggest_step = out[0]
+            .windows(2)
+            .fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        // 4 V over a 5 ms fade at 48 kHz ~= 0.017 V per sample.
+        assert!(
+            biggest_step < 0.05,
+            "{id} mute should ramp, biggest sample step was {biggest_step} V"
+        );
+        assert_near(*out[0].last().unwrap(), 3.0, "fade settles at the new mix");
+    }
 }
 
 #[test]
 fn mixer_mute_and_solo_persist_through_save_load() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut e = mute_solo_engine();
-    switch(&mut e, "mute1", true);
-    switch(&mut e, "solo2", true);
-    e.save_patch(dir.path(), "mixer-mute-solo").unwrap();
+    for (id, _) in full_strip_mixers() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut e = mute_solo_engine(id);
+        switch(&mut e, "mute1", true);
+        switch(&mut e, "solo2", true);
+        e.save_patch(dir.path(), "mixer-mute-solo").unwrap();
 
-    let mut reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
-    assert_near(
-        render_tail(&mut reloaded, 0.02)[0],
-        2.0,
-        "reloaded patch keeps ch 1 muted and ch 2 soloed",
-    );
+        let mut reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+        assert_near(
+            render_tail(&mut reloaded, 0.02)[0],
+            2.0,
+            &format!("{id} reloaded with ch 1 muted and ch 2 soloed"),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

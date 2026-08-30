@@ -805,16 +805,46 @@ offset))`, offset in position units — so the knob's curve shapes the
   from the bar), and
   `App.renameModule` remaps positions/selection to the returned id — a
   backend rejection resolves null (error banner) and the refresh reverts.
-- Mixer mute/solo (`extensions/mixer`) are per-channel `switch` INPUT
-  jacks (`mute{n}`/`solo{n}`, gate law >= 1 V), not params — the WASM
-  "params vs. inputs" rule above — so they are wireable and persist as
-  ordinary knob state. The law lives once, in `process`: heard =
-  un-muted AND (nothing soloed OR soloed), evaluated per sample so CV
-  can drive it, with a 5 ms per-channel fade (`FADE_SECONDS`) that keeps
-  a toggle from clicking; the first processed sample snaps instead of
-  fading (`primed`). Per-channel input stride is 6 — adding a channel
-  control means updating `STRIDE`, the manifest and the channel strip in
-  `panelLayouts.ts` together. Golden: `utilities-mixer-mute-solo`.
+- The MIXER FAMILY is ONE desk at several widths: `com.dj.mixer4`,
+  `com.dj.mixer8` and `com.dj.mixer16` are thin cdylib crates
+  (`extensions/mixer{4,8,16}`) over the shared generic DSP in
+  `extensions/mixer_core` — `Mixer<CHANNELS, FULL>`, an rlib, the ONLY
+  crate under `extensions/` that is not a module (the workspace takes it
+  as a member; `build-extensions.sh` skips any crate whose
+  `crate-type` has no `cdylib`). A new width is a `Cargo.toml`, an
+  `export_module!(Mixer<N, full>)` line and a manifest — never a copy of
+  `process`.
+  WIDTH COSTS CONTROLS: a module may declare at most 64 input jacks
+  (the `connected_mask` is a `u64`, enforced by `Extension::load` and by
+  a const assert on `Mixer::N_INPUTS`), so a FULL strip (`in{n}_l`,
+  `in{n}_r`, `lvl{n}`, `pan{n}`, `mute{n}`, `solo{n}` — stride 6) tops
+  out at 8 channels + master = 49 jacks, and the 16 is a LEVEL-ONLY
+  summing desk (stride 3, no pan/mute/solo; 16 full strips would need
+  97). `FULL` is the only thing that differs in the DSP, and a
+  level-only strip is exactly a centred, un-muted full one, so both
+  widths sum through the same arithmetic — adding a channel control
+  means updating `FULL_STRIDE`, the manifest and `mixerLayout` in
+  `panelLayouts.ts` together. The new widths declare
+  `"bypass": {"out_l": "in1_l", "out_r": "in1_r"}` (channel 1 straight
+  through, normals and master out of the picture, like the other stereo
+  effects). Docs are one function too (`mixerDoc` in `moduleDocs.ts`),
+  and every width shares `MixerUI`'s master meters.
+  Mute/solo are per-channel `switch` INPUT jacks (`mute{n}`/`solo{n}`,
+  gate law >= 1 V), not params — the WASM "params vs. inputs" rule above
+  — so they are wireable and persist as ordinary knob state. The law
+  lives once, in `process`: heard = un-muted AND (nothing soloed OR
+  soloed), evaluated per sample so CV can drive it, with a 5 ms
+  per-channel fade (`FADE_SECONDS`) that keeps a toggle from clicking;
+  the first processed sample snaps instead of fading (`primed`).
+  The 6-channel `com.dj.mixer` is RETIRED (`"deprecated": true`), not
+  deleted or changed: it renders through the same shared DSP and its
+  goldens (`utilities-mixer-mute-solo`, `utilities-mixer-stereo-pan`)
+  are byte-identical, which is the proof the generic version did not
+  move a sample. It gained no bypass map either — a retired module grows
+  no new controls. Goldens for the rest: `utilities-mixer4-stereo-desk`,
+  `utilities-mixer8-solo-chord`, `utilities-mixer16-summing`; the laws
+  are pinned once per family in `modules_utilities.rs` (`MIXER_FAMILY`
+  drives every mixer test).
 - VCA `cv` ("Gain / CV") input default is 0.0 (closed/silent) in
   `extensions/vca/manifest.json` — the manifest is the single source of
   truth for module defaults (engine derives initial knob position via
@@ -1614,7 +1644,9 @@ beatify::build`.
   and the docs panel shows the same word beside the category. One picker
   serves the Rack and Decks tabs, so this is one rule, not two. Pinned by
   the "deprecated modules" cases in `app/tests/ModulePicker.test.tsx`,
-  `ModuleDocs.test.tsx` and `manifest.rs`'s unit test.
+  `ModuleDocs.test.tsx` and `manifest.rs`'s unit test. The 6-channel
+  Mixer (`com.dj.mixer`, superseded by the mixer family above) is the
+  first module shipped this way.
 - Copy/paste of a Beat Clip carries the audio, not just the binding:
   `paste_modules` calls `Engine::beat_clip_copy(from, to)` for each
   renamed pair that is a clip module on both ends (the `Arc<TrackData>` is

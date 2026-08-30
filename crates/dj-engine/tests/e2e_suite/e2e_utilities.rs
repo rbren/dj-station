@@ -16,6 +16,15 @@
 //!   for good and one soloed on and off by a square LFO — the solo law
 //!   (soloing silences the rest) and the mute law (a muted channel stays
 //!   silent even when soloed) audible in one render.
+//! - `utilities-mixer4-stereo-desk`: four voices across the 4-channel
+//!   desk, panned hard left to hard right with one channel muted.
+//! - `utilities-mixer8-solo-chord`: an eight-voice chord on the
+//!   8-channel desk, with channel 5's solo gated by a square LFO — the
+//!   chord and the one voice, alternating.
+//! - `utilities-mixer16-summing`: sixteen voices on the level-only
+//!   16-channel desk, faders tapering across the bank and every even
+//!   channel's right input taking its neighbour's voice, so the sum is a
+//!   real stereo image rather than sixteen copies of the L normal.
 //!
 //! The shared harness lives in `tests/common/e2e.rs`.
 
@@ -212,6 +221,120 @@ fn regen_attenuverter1_vibrato() {
     write_events(&dir, &EventsFile::seconds(0.5));
 }
 
+fn regen_mixer4_stereo_desk() {
+    let dir = crate::common::e2e::case_dir("utilities-mixer4-stereo-desk");
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
+    e.add_module("mix", "com.dj.mixer4").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    // A C major seventh spread across the field, hard left to hard right.
+    for (ch, (pitch, pan)) in [
+        (0.0f32, -10.0f32),
+        (4.0 / 12.0, -4.0),
+        (7.0 / 12.0, 4.0),
+        (11.0 / 12.0, 10.0),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let osc = format!("osc{}", ch + 1);
+        e.add_module(&osc, "com.dj.oscillator").unwrap();
+        e.set_knob_value(&osc, "pitch", *pitch).unwrap();
+        e.connect(&osc, "audio", "mix", &format!("in{}_l", ch + 1))
+            .unwrap();
+        e.set_knob_value("mix", &format!("lvl{}", ch + 1), 10.0)
+            .unwrap();
+        e.set_knob_value("mix", &format!("pan{}", ch + 1), *pan)
+            .unwrap();
+    }
+
+    // Channel 3 sits out: the seventh chord plays as a triad.
+    e.set_knob_position("mix", "mute3", 1.0).unwrap();
+
+    e.set_knob_value("mix", "master", 4.0).unwrap();
+    e.connect("mix", "out_l", "out1", "l").unwrap();
+    e.connect("mix", "out_r", "out1", "r").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-utilities-mixer4-stereo-desk")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(0.5));
+}
+
+fn regen_mixer8_solo_chord() {
+    let dir = crate::common::e2e::case_dir("utilities-mixer8-solo-chord");
+    let mut e = mono_engine();
+    e.add_module("mix", "com.dj.mixer8").unwrap();
+    e.add_module("lfo", "com.dj.oscillator").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    // Eight voices, a stacked C major chord over two octaves.
+    for (ch, semitones) in [0.0f32, 4.0, 7.0, 12.0, 16.0, 19.0, 24.0, 28.0]
+        .iter()
+        .enumerate()
+    {
+        let osc = format!("osc{}", ch + 1);
+        e.add_module(&osc, "com.dj.oscillator").unwrap();
+        e.set_knob_value(&osc, "pitch", semitones / 12.0).unwrap();
+        e.connect(&osc, "audio", "mix", &format!("in{}_l", ch + 1))
+            .unwrap();
+        e.set_knob_value("mix", &format!("lvl{}", ch + 1), 8.0)
+            .unwrap();
+    }
+
+    // Channel 5's solo rides a ~2 Hz square: the whole chord, then E5
+    // alone, and back.
+    e.set_knob_position("lfo", "waveform", 2.0 / 3.0).unwrap();
+    e.set_knob_value("lfo", "pitch", -7.0).unwrap();
+    e.connect("lfo", "audio", "mix", "solo5").unwrap();
+
+    e.set_knob_value("mix", "master", 3.0).unwrap();
+    e.connect("mix", "out_l", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-utilities-mixer8-solo-chord")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(1.0));
+}
+
+fn regen_mixer16_summing() {
+    let dir = crate::common::e2e::case_dir("utilities-mixer16-summing");
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
+    e.add_module("mix", "com.dj.mixer16").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    // Sixteen voices walking up a whole-tone cluster, faders tapering
+    // from unity to a whisper across the bank.
+    for ch in 1..=16 {
+        let osc = format!("osc{ch}");
+        e.add_module(&osc, "com.dj.oscillator").unwrap();
+        e.set_knob_value(&osc, "pitch", (ch as f32 - 8.0) * 2.0 / 12.0)
+            .unwrap();
+        e.connect(&osc, "audio", "mix", &format!("in{ch}_l"))
+            .unwrap();
+        e.set_knob_value("mix", &format!("lvl{ch}"), 10.0 - (ch as f32 - 1.0) * 0.5)
+            .unwrap();
+        // Even channels take their neighbour's voice on the right input,
+        // so half the desk breaks the L normal and the sum is a real
+        // stereo image.
+        if ch % 2 == 0 {
+            e.connect(
+                &format!("osc{}", ch - 1),
+                "audio",
+                "mix",
+                &format!("in{ch}_r"),
+            )
+            .unwrap();
+        }
+    }
+
+    e.set_knob_value("mix", "master", 2.0).unwrap();
+    e.connect("mix", "out_l", "out1", "l").unwrap();
+    e.connect("mix", "out_r", "out1", "r").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-utilities-mixer16-summing")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(0.5));
+}
+
 #[test]
 fn e2e_utilities_quantized_voice() {
     if regen() {
@@ -250,4 +373,28 @@ fn e2e_utilities_attenuverter1_vibrato() {
         regen_attenuverter1_vibrato();
     }
     check_case("utilities-attenuverter1-vibrato");
+}
+
+#[test]
+fn e2e_utilities_mixer4_stereo_desk() {
+    if regen() {
+        regen_mixer4_stereo_desk();
+    }
+    check_case("utilities-mixer4-stereo-desk");
+}
+
+#[test]
+fn e2e_utilities_mixer8_solo_chord() {
+    if regen() {
+        regen_mixer8_solo_chord();
+    }
+    check_case("utilities-mixer8-solo-chord");
+}
+
+#[test]
+fn e2e_utilities_mixer16_summing() {
+    if regen() {
+        regen_mixer16_summing();
+    }
+    check_case("utilities-mixer16-summing");
 }

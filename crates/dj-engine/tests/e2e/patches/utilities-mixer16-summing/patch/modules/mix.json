@@ -1,0 +1,251 @@
+{
+  "ext": "com.dj.mixer16",
+  "knobs": {
+    "in10_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in10_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in11_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in11_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in12_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in12_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in13_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in13_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in14_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in14_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in15_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in15_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in16_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in16_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in1_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in1_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in2_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in2_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in3_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in3_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in4_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in4_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in5_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in5_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in6_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in6_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in7_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in7_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in8_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in8_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in9_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in9_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl1": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl10": {
+      "position": 0.55,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl11": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl12": {
+      "position": 0.45,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl13": {
+      "position": 0.4,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl14": {
+      "position": 0.35,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl15": {
+      "position": 0.3,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl16": {
+      "position": 0.25,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl2": {
+      "position": 0.95,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl3": {
+      "position": 0.9,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl4": {
+      "position": 0.85,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl5": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl6": {
+      "position": 0.75,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl7": {
+      "position": 0.7,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl8": {
+      "position": 0.65,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl9": {
+      "position": 0.6,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "master": {
+      "position": 0.2,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

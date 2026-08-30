@@ -114,6 +114,40 @@ const lcRow = (title: string, suffix: string, control: OutputControl): OutputGro
 
 type LayoutFactory = (manifest: Manifest) => PanelLayout;
 
+/** A real-mixer look for any width of the mixer family: one strip per
+ *  channel — stereo input jacks on top, the pan knob (full strips only),
+ *  then the level fader with mute/solo under it, as on a console — plus a
+ *  master strip. `full` mirrors the module's manifest: the 16-channel desk
+ *  trades pan and mute/solo for its width. */
+const mixerLayout =
+  (channels: number, full: boolean): LayoutFactory =>
+  () => ({
+    groups: [
+      ...Array.from({ length: channels }, (_, i) => i + 1).map((ch) => ({
+        title: String(ch),
+        kind: 'column' as const,
+        inputs: [
+          { jack: `in${ch}_l`, label: 'L' },
+          { jack: `in${ch}_r`, label: 'R' },
+          ...(full ? [{ jack: `pan${ch}`, label: 'pan' }] : []),
+          { jack: `lvl${ch}`, control: 'fader' as const, hideLabel: true },
+          ...(full
+            ? [
+                { jack: `mute${ch}`, label: 'mute' },
+                { jack: `solo${ch}`, label: 'solo' },
+              ]
+            : []),
+        ],
+      })),
+      {
+        title: 'mstr',
+        kind: 'column' as const,
+        inputs: [{ jack: 'master', control: 'fader' as const, hideLabel: true }],
+      },
+    ],
+    outputGroups: [{ title: 'out', outputs: ['out_l', 'out_r'] }],
+  });
+
 /** Per-module layouts, keyed by manifest id. */
 const LAYOUTS: Record<string, LayoutFactory> = {
   'com.dj.oscillator': () => ({
@@ -218,31 +252,10 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
-  // A real-mixer look: one strip per channel — stereo input jacks on top,
-  // pan knob, then the level fader with mute/solo under it, as on a
-  // console — plus a master strip.
-  'com.dj.mixer': () => ({
-    groups: [
-      ...[1, 2, 3, 4, 5, 6].map((ch) => ({
-        title: String(ch),
-        kind: 'column' as const,
-        inputs: [
-          { jack: `in${ch}_l`, label: 'L' },
-          { jack: `in${ch}_r`, label: 'R' },
-          { jack: `pan${ch}`, label: 'pan' },
-          { jack: `lvl${ch}`, control: 'fader' as const, hideLabel: true },
-          { jack: `mute${ch}`, label: 'mute' },
-          { jack: `solo${ch}`, label: 'solo' },
-        ],
-      })),
-      {
-        title: 'mstr',
-        kind: 'column',
-        inputs: [{ jack: 'master', control: 'fader', hideLabel: true }],
-      },
-    ],
-    outputGroups: [{ title: 'out', outputs: ['out_l', 'out_r'] }],
-  }),
+  'com.dj.mixer': mixerLayout(6, true),
+  'com.dj.mixer4': mixerLayout(4, true),
+  'com.dj.mixer8': mixerLayout(8, true),
+  'com.dj.mixer16': mixerLayout(16, false),
 
   // One short column per channel, signal flowing top to bottom:
   // in -> atten -> offset -> out, so each output lines up under its input.

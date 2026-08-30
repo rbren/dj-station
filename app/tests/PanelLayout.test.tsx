@@ -149,6 +149,21 @@ describe('ModulePanel with layouts', () => {
     expect(screen.getByTestId('input-cell-master').querySelector('.fader-v')).toBeTruthy();
   });
 
+  // The 16-channel desk is the same strip minus the controls its width
+  // has no jacks left for: faders and a master, nothing else.
+  it('the 16-channel mixer draws a level-only strip per channel', () => {
+    const channels = Array.from({ length: 16 }, (_, i) => i + 1);
+    const inputs = channels.flatMap((c) => [`in${c}_l`, `in${c}_r`, `lvl${c}`]);
+    const m = manifest('com.dj.mixer16', [...inputs, 'master'], ['out_l', 'out_r']);
+    render(<ModulePanel {...baseProps} instanceId="mix1" manifest={m} />);
+    for (const ch of channels) {
+      expect(screen.getByTestId(`input-cell-lvl${ch}`).querySelector('.fader-v')).toBeTruthy();
+      expect(screen.queryByTestId(`input-cell-pan${ch}`)).toBeNull();
+      expect(screen.queryByTestId(`input-cell-mute${ch}`)).toBeNull();
+    }
+    expect(screen.getByTestId('input-cell-master').querySelector('.fader-v')).toBeTruthy();
+  });
+
   // A level wired in override mode is set by the signal, not the fader:
   // the cap has to ride the incoming level instead of the inert baseline.
   it('a mixer level in override mode rides the wire, not its baseline', () => {

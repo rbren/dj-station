@@ -1,0 +1,62 @@
+{
+  "id": "com.dj.mixer4",
+  "name": "Mixer 4",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Utilities",
+  "inputs": [
+    { "id": "in1_l", "name": "In 1 L", "default": 0.0, "audio": true },
+    { "id": "in1_r", "name": "In 1 R", "default": 0.0, "audio": true },
+    { "id": "lvl1", "name": "Level 1", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "pan1", "name": "Pan 1", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute1", "name": "Mute 1", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo1", "name": "Solo 1", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in2_l", "name": "In 2 L", "default": 0.0, "audio": true },
+    { "id": "in2_r", "name": "In 2 R", "default": 0.0, "audio": true },
+    { "id": "lvl2", "name": "Level 2", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "pan2", "name": "Pan 2", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute2", "name": "Mute 2", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo2", "name": "Solo 2", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in3_l", "name": "In 3 L", "default": 0.0, "audio": true },
+    { "id": "in3_r", "name": "In 3 R", "default": 0.0, "audio": true },
+    { "id": "lvl3", "name": "Level 3", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "pan3", "name": "Pan 3", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute3", "name": "Mute 3", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo3", "name": "Solo 3", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in4_l", "name": "In 4 L", "default": 0.0, "audio": true },
+    { "id": "in4_r", "name": "In 4 R", "default": 0.0, "audio": true },
+    { "id": "lvl4", "name": "Level 4", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "pan4", "name": "Pan 4", "default": 0.0,
+      "knob": { "style": "continuous", "min": -10.0, "max": 10.0, "curve": "linear" } },
+    { "id": "mute4", "name": "Mute 4", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+    { "id": "solo4", "name": "Solo 4", "default": 0.0,
+      "knob": { "style": "switch", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "master", "name": "Master", "default": 10.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out_l", "name": "Out L" },
+    { "id": "out_r", "name": "Out R" }
+  ],
+  "params": [],
+  "latency_samples": 0,
+  "bypass": { "out_l": "in1_l", "out_r": "in1_r" }
+}

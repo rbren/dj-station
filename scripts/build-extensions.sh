@@ -19,6 +19,9 @@ for cargo_toml in extensions/*/Cargo.toml; do
   name="$(basename "$folder")"
   # gain-native is a separate workspace built by build-native-extensions.sh.
   [ "$name" = "gain-native" ] && continue
+  # Library-only crates (shared DSP, e.g. mixer_core) build no cdylib and
+  # ship no module of their own.
+  grep -q '^crate-type *=.*cdylib' "$cargo_toml" || continue
   pkg="$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$cargo_toml" | head -1)"
   lib="$(echo "$pkg" | tr '-' '_')"
   src="$TARGET/${lib}.wasm"

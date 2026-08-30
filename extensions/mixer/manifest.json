@@ -3,6 +3,7 @@
   "name": "Mixer",
   "version": "0.3.0",
   "abi": "wasm-1",
+  "deprecated": true,
   "category": "Utilities",
   "inputs": [
     { "id": "in1_l", "name": "In 1 L", "default": 0.0, "audio": true },

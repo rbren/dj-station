@@ -1,0 +1,98 @@
+{
+  "id": "com.dj.mixer16",
+  "name": "Mixer 16",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Utilities",
+  "inputs": [
+    { "id": "in1_l", "name": "In 1 L", "default": 0.0, "audio": true },
+    { "id": "in1_r", "name": "In 1 R", "default": 0.0, "audio": true },
+    { "id": "lvl1", "name": "Level 1", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in2_l", "name": "In 2 L", "default": 0.0, "audio": true },
+    { "id": "in2_r", "name": "In 2 R", "default": 0.0, "audio": true },
+    { "id": "lvl2", "name": "Level 2", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in3_l", "name": "In 3 L", "default": 0.0, "audio": true },
+    { "id": "in3_r", "name": "In 3 R", "default": 0.0, "audio": true },
+    { "id": "lvl3", "name": "Level 3", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in4_l", "name": "In 4 L", "default": 0.0, "audio": true },
+    { "id": "in4_r", "name": "In 4 R", "default": 0.0, "audio": true },
+    { "id": "lvl4", "name": "Level 4", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in5_l", "name": "In 5 L", "default": 0.0, "audio": true },
+    { "id": "in5_r", "name": "In 5 R", "default": 0.0, "audio": true },
+    { "id": "lvl5", "name": "Level 5", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in6_l", "name": "In 6 L", "default": 0.0, "audio": true },
+    { "id": "in6_r", "name": "In 6 R", "default": 0.0, "audio": true },
+    { "id": "lvl6", "name": "Level 6", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in7_l", "name": "In 7 L", "default": 0.0, "audio": true },
+    { "id": "in7_r", "name": "In 7 R", "default": 0.0, "audio": true },
+    { "id": "lvl7", "name": "Level 7", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in8_l", "name": "In 8 L", "default": 0.0, "audio": true },
+    { "id": "in8_r", "name": "In 8 R", "default": 0.0, "audio": true },
+    { "id": "lvl8", "name": "Level 8", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in9_l", "name": "In 9 L", "default": 0.0, "audio": true },
+    { "id": "in9_r", "name": "In 9 R", "default": 0.0, "audio": true },
+    { "id": "lvl9", "name": "Level 9", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in10_l", "name": "In 10 L", "default": 0.0, "audio": true },
+    { "id": "in10_r", "name": "In 10 R", "default": 0.0, "audio": true },
+    { "id": "lvl10", "name": "Level 10", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in11_l", "name": "In 11 L", "default": 0.0, "audio": true },
+    { "id": "in11_r", "name": "In 11 R", "default": 0.0, "audio": true },
+    { "id": "lvl11", "name": "Level 11", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in12_l", "name": "In 12 L", "default": 0.0, "audio": true },
+    { "id": "in12_r", "name": "In 12 R", "default": 0.0, "audio": true },
+    { "id": "lvl12", "name": "Level 12", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in13_l", "name": "In 13 L", "default": 0.0, "audio": true },
+    { "id": "in13_r", "name": "In 13 R", "default": 0.0, "audio": true },
+    { "id": "lvl13", "name": "Level 13", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in14_l", "name": "In 14 L", "default": 0.0, "audio": true },
+    { "id": "in14_r", "name": "In 14 R", "default": 0.0, "audio": true },
+    { "id": "lvl14", "name": "Level 14", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in15_l", "name": "In 15 L", "default": 0.0, "audio": true },
+    { "id": "in15_r", "name": "In 15 R", "default": 0.0, "audio": true },
+    { "id": "lvl15", "name": "Level 15", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "in16_l", "name": "In 16 L", "default": 0.0, "audio": true },
+    { "id": "in16_r", "name": "In 16 R", "default": 0.0, "audio": true },
+    { "id": "lvl16", "name": "Level 16", "default": 8.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } },
+
+    { "id": "master", "name": "Master", "default": 10.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 10.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out_l", "name": "Out L" },
+    { "id": "out_r", "name": "Out R" }
+  ],
+  "params": [],
+  "latency_samples": 0,
+  "bypass": { "out_l": "in1_l", "out_r": "in1_r" }
+}

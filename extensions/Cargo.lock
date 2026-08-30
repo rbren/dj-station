@@ -139,6 +139,38 @@ dependencies = [
 name = "dj-ext-mixer"
 version = "0.1.0"
 dependencies = [
+ "dj-ext-mixer-core",
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-mixer-core"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-mixer16"
+version = "0.1.0"
+dependencies = [
+ "dj-ext-mixer-core",
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-mixer4"
+version = "0.1.0"
+dependencies = [
+ "dj-ext-mixer-core",
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-mixer8"
+version = "0.1.0"
+dependencies = [
+ "dj-ext-mixer-core",
  "dj-module-sdk",
 ]
 

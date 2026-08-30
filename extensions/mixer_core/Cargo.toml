@@ -1,0 +1,13 @@
+[package]
+name = "dj-ext-mixer-core"
+version = "0.1.0"
+edition = "2021"
+
+# Library only: the mixer family's DSP, shared by the mixer4/8/16 (and the
+# retired 6-channel) cdylibs. It calls no `export_module!`, so nothing here
+# claims the wasm-1 entry points, and it ships no dsp.wasm of its own.
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+dj-module-sdk.workspace = true

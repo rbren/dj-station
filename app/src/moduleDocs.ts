@@ -45,6 +45,61 @@ export const MACRO_DOC: ModuleDoc = {
   ],
 };
 
+/** The mixer family is one desk at four widths, so its prose is one
+ *  function of the channel count and the strip. `full` strips carry pan
+ *  and mute/solo; the 16 trades them for its width (a module may declare
+ *  at most 64 input jacks). `preamble` marks the retired 6-channel one. */
+function mixerDoc(channels: number, full: boolean, preamble = ''): ModuleDoc {
+  const strip = full ? 'level, pan, mute and solo' : 'level faders';
+  const inputs: Record<string, string> = {
+    'in#_l': 'Channel # left input (audio).',
+    'in#_r': 'Channel # right input (audio; mirrors L when unpatched).',
+    'lvl#': 'Channel # level fader, 0..10 (10 = unity).',
+    master: 'Master output level.',
+  };
+  if (full) {
+    inputs['pan#'] = 'Channel # pan/balance, -10 (left) .. +10 (right).';
+    inputs['mute#'] = 'Channel # mute: on (or a gate >= 1 V) silences it.';
+    inputs['solo#'] =
+      'Channel # solo: while any solo is on, only soloed (and un-muted) channels are heard.';
+  }
+  return {
+    summary:
+      preamble +
+      `${channels}-channel stereo mixer with per-channel ${strip} plus a ` +
+      'master level. Each channel is an L/R pair; leave R unpatched and ' +
+      'it mirrors L, so a mono source ' +
+      (full ? 'pans across the stereo field. ' : 'lands in the middle of the field. ') +
+      (full
+        ? 'Solo follows the console law — the moment any channel is ' +
+          'soloed the rest go quiet — while mute stands on its own, so a ' +
+          'muted channel stays silent even when soloed. '
+        : `This is the summing desk: ${channels} faders and a master, ` +
+          'with pan and mute/solo traded away for the width (a module ' +
+          `can declare at most 64 input jacks, and ${channels} full ` +
+          `strips would need ${channels * 6 + 1}). Reach for the Mixer 8 ` +
+          'or a VCA when a channel needs placing or muting. ') +
+      'Good for summing a multi-oscillator stack into one fat voice, ' +
+      'balancing parts into a stereo submix' +
+      (full ? ', or auditioning one part alone.' : ', or collecting a whole rack into one output.'),
+    inputs,
+    outputs: {
+      out_l: 'Left mix output.',
+      out_r: 'Right mix output.',
+    },
+    examples: [
+      'Sum a three-oscillator stack before one Filter.',
+      full
+        ? 'Pan two voices apart for instant stereo width.'
+        : 'Collect every voice in a big patch and ride one master fader.',
+      full
+        ? 'Solo one channel to audition a part, or gate a mute from an ' +
+          'LFO square for rhythmic drop-outs.'
+        : 'Bypass it to hear channel 1 alone, straight through.',
+    ],
+  };
+}
+
 export const MODULE_DOCS: Record<string, ModuleDoc> = {
   // ---------------------------------------------------------------- Sources
   'com.dj.oscillator': {
@@ -851,37 +906,16 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   },
 
   // --------------------------------------------------------------- Utilities
-  'com.dj.mixer': {
-    summary:
-      'Six-channel stereo mixer with per-channel level, pan, mute and ' +
-      'solo plus a master level. Each channel is an L/R pair; leave R ' +
-      'unpatched and it mirrors L, so a mono source pans across the ' +
-      'stereo field. Solo follows the console law — the moment any ' +
-      'channel is soloed the rest go quiet — while mute stands on its ' +
-      'own, so a muted channel stays silent even when soloed. Good for ' +
-      'summing a multi-oscillator stack into one fat voice, balancing a ' +
-      'few parts into a stereo submix, or auditioning one part alone.',
-    inputs: {
-      'in#_l': 'Channel # left input (audio).',
-      'in#_r': 'Channel # right input (audio; mirrors L when unpatched).',
-      'lvl#': 'Channel # level fader, 0..10 (10 = unity).',
-      'pan#': 'Channel # pan/balance, -10 (left) .. +10 (right).',
-      'mute#': 'Channel # mute: on (or a gate >= 1 V) silences it.',
-      'solo#':
-        'Channel # solo: while any solo is on, only soloed (and ' + 'un-muted) channels are heard.',
-      master: 'Master output level.',
-    },
-    outputs: {
-      out_l: 'Left mix output.',
-      out_r: 'Right mix output.',
-    },
-    examples: [
-      'Sum a three-oscillator stack before one Filter.',
-      'Pan two voices apart for instant stereo width.',
-      'Solo one channel to audition a part, or gate a mute from an LFO ' +
-        'square for rhythmic drop-outs.',
-    ],
-  },
+  'com.dj.mixer4': mixerDoc(4, true),
+  'com.dj.mixer8': mixerDoc(8, true),
+  'com.dj.mixer16': mixerDoc(16, false),
+  'com.dj.mixer': mixerDoc(
+    6,
+    true,
+    'Retired: the Mixer 4, Mixer 8 and Mixer 16 are the same desk at the ' +
+      'widths a rack reaches for. Patches built on this one keep working ' +
+      'and sound identical, so there is no rush to replace it. ',
+  ),
   'com.dj.alias': {
     summary:
       'A nameable pass-through: one input, one output, audio bit-identical. ' +

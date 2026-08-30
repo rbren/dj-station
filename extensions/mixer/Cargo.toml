@@ -8,3 +8,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 dj-module-sdk.workspace = true
+dj-ext-mixer-core = { path = "../mixer_core" }

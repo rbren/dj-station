@@ -17,7 +17,7 @@ import delay from '../../../extensions/delay/manifest.json';
 import euclid from '../../../extensions/euclid/manifest.json';
 import filter from '../../../extensions/filter/manifest.json';
 import lfo from '../../../extensions/lfo/manifest.json';
-import mixer from '../../../extensions/mixer/manifest.json';
+import mixer8 from '../../../extensions/mixer8/manifest.json';
 import noise from '../../../extensions/noise/manifest.json';
 import oscillator from '../../../extensions/oscillator/manifest.json';
 import quantizer from '../../../extensions/quantizer/manifest.json';
@@ -28,7 +28,7 @@ import turing from '../../../extensions/turing/manifest.json';
 import vca from '../../../extensions/vca/manifest.json';
 import waveshaper from '../../../extensions/waveshaper/manifest.json';
 
-/** Representative type mix, heavy panels included (mixer: 37 inputs,
+/** Representative type mix, heavy panels included (mixer8: 49 inputs,
  *  step_seq: 56; lfo/scope run rAF canvas custom UIs). Cycled to fill N. */
 const MANIFESTS = [
   oscillator,
@@ -45,7 +45,7 @@ const MANIFESTS = [
   turing,
   delay,
   scope,
-  mixer,
+  mixer8,
   stepSeq,
 ] as unknown as Manifest[];
 
