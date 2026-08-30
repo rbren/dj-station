@@ -38,6 +38,7 @@ pub fn crossfader_manifest() -> Manifest {
         version: "0.1.0".into(),
         abi: "native-1".into(),
         category: categories::DJ.into(),
+        deprecated: false,
         inputs: vec![
             audio_in("a_l", "A Left"),
             audio_in("a_r", "A Right"),

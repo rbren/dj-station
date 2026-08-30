@@ -16,6 +16,11 @@ pub struct Manifest {
     /// Library grouping shown in the UI; see [`categories`].
     #[serde(default = "default_category")]
     pub category: String,
+    /// Retired module: still loadable and instantiable (patches that use
+    /// it must keep working), but kept out of the module picker's default
+    /// listing — it is only offered under the picker's "Deprecated" tag.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deprecated: bool,
     #[serde(default)]
     pub inputs: Vec<JackDecl>,
     #[serde(default)]
@@ -286,5 +291,38 @@ impl Extension {
             dir: dir.to_path_buf(),
             dsp_path,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINIMAL: &str = r#"{
+        "id": "com.dj.old",
+        "name": "Old",
+        "version": "0.1.0",
+        "abi": "wasm-1",
+        "category": "Utilities"
+    }"#;
+
+    #[test]
+    fn deprecated_is_opt_in_and_stays_out_of_an_unset_manifest_bytes() {
+        let live: Manifest = serde_json::from_str(MINIMAL).unwrap();
+        assert!(!live.deprecated, "a module is current unless it says so");
+        let json = serde_json::to_string(&live).unwrap();
+        assert!(
+            !json.contains("deprecated"),
+            "an unset flag must not appear in a manifest's bytes: {json}"
+        );
+
+        let retired: Manifest = serde_json::from_str(
+            &MINIMAL.replace("\"category\"", "\"deprecated\": true, \"category\""),
+        )
+        .unwrap();
+        assert!(retired.deprecated);
+        assert!(serde_json::to_string(&retired)
+            .unwrap()
+            .contains("\"deprecated\":true"));
     }
 }

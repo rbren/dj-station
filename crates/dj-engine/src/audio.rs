@@ -56,6 +56,7 @@ pub fn audio_manifest() -> Manifest {
         version: "0.1.0".into(),
         abi: "native-1".into(),
         category: categories::DJ.into(),
+        deprecated: false,
         inputs: vec![
             JackDecl {
                 id: "play".into(),

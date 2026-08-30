@@ -87,6 +87,7 @@ pub fn choreo_manifest() -> Manifest {
         version: "0.1.0".into(),
         abi: "native-1".into(),
         category: categories::SEQUENCING.into(),
+        deprecated: false,
         inputs: vec![trig("clock", "Clock"), trig("reset", "Reset")],
         // Output jacks are dynamic (allocated per track); the graph
         // preallocates MAX_CHOREO_JACKS output buffers.

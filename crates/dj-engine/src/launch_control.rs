@@ -112,6 +112,7 @@ pub fn launch_control_manifest() -> Manifest {
         version: "0.1.0".into(),
         abi: "native-1".into(),
         category: categories::ANALYSIS.into(),
+        deprecated: false,
         inputs: vec![],
         outputs: (0..COLUMNS)
             .flat_map(|col| {

@@ -1458,6 +1458,21 @@ beatify::build`.
   not "beatclip1") via `rename_module`, numbering a name already in the
   rack, and RETURNS the resulting instance id — the frontend re-keys its
   rack positions onto it exactly like a user rename.
+- RETIRING a module is manifest DATA too: `"deprecated": true`
+  (`Manifest.deprecated`, `skip_serializing_if` false so old manifests and
+  goldens keep their bytes). The engine does not care — the type loads and
+  instantiates as before, because the patches that use it must keep
+  working — the picker does: `taggedModules` in `ModulePicker.tsx` keeps a
+  deprecated module out of the default gallery, out of the search AND out
+  of its own category pill, and offers it only under the `DEPRECATED_TAG`
+  pill at the end of the pill row (which only exists when something in the
+  library is deprecated; a category with nothing but retired modules loses
+  its pill too). The tag is selected like a category and is mutually
+  exclusive with one; entries listed under it carry a `deprecated` chip,
+  and the docs panel shows the same word beside the category. One picker
+  serves the Rack and Decks tabs, so this is one rule, not two. Pinned by
+  the "deprecated modules" cases in `app/tests/ModulePicker.test.tsx`,
+  `ModuleDocs.test.tsx` and `manifest.rs`'s unit test.
 - Copy/paste of a Beat Clip carries the audio, not just the binding:
   `paste_modules` calls `Engine::beat_clip_copy(from, to)` for each
   renamed pair that is a clip module on both ends (the `Arc<TrackData>` is

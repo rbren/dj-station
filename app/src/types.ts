@@ -81,6 +81,10 @@ export interface Manifest {
   abi: string;
   /** Library grouping ("Sources", "Shaping", ...). */
   category?: string;
+  /** Retired module: instantiable as ever (old patches keep working), but
+   *  kept out of the picker's default listing — only the "Deprecated" tag
+   *  shows it. */
+  deprecated?: boolean;
   inputs: JackDecl[];
   outputs: OutputDecl[];
   params: ParamDecl[];

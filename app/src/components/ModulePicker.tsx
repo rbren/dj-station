@@ -3,7 +3,7 @@
 // panel rendered zoomed out. Click an entry to drop it at the center of the
 // current view, or drag it onto the canvas (the modal hides itself during
 // the drag so the rack underneath can take the drop). Includes a category
-// filter and a search box.
+// filter, a "Deprecated" tag and a search box.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BEAT_CLIP_TYPE, type BeatClipEntry } from '../beatClip';
@@ -35,6 +35,14 @@ export const CATEGORY_ORDER = [
 ];
 
 const UNCATEGORIZED = 'Other';
+
+/** The one pill that is a TAG rather than a category: a module whose
+ *  manifest sets `deprecated` is kept out of every other listing — the
+ *  default gallery, the search, its own category — and is offered here
+ *  alone, so a retired module stays reachable (an old patch may need it
+ *  rebuilding) without cluttering the search everyone else does. Selected
+ *  like a category, and mutually exclusive with one. */
+export const DEPRECATED_TAG = 'Deprecated';
 
 /** The picker's two halves. Clips are a TAB, not a module category: what
  *  they hold are clips rather than module types (each adds a Beat Clip
@@ -68,6 +76,14 @@ function categoryOf(m: Manifest): string {
   // manifest category.
   if (m.abi === 'macro-1') return 'Macros';
   return m.category ?? UNCATEGORIZED;
+}
+
+/** The modules a pill selection offers: `null` (and every category) means
+ *  the current ones, the Deprecated tag means only the retired ones. */
+export function taggedModules(modules: Manifest[], selected: string | null): Manifest[] {
+  if (selected === DEPRECATED_TAG) return modules.filter((m) => m.deprecated);
+  const current = modules.filter((m) => !m.deprecated);
+  return selected ? current.filter((m) => categoryOf(m) === selected) : current;
 }
 
 /** Modules whose name, id or category matches every whitespace-separated
@@ -332,6 +348,11 @@ function PickerEntry({ m, onAdd, onDragging, onMacroMenu }: PickerEntryProps) {
       </div>
       <div className="picker-entry-caption">
         <span className="picker-entry-name">{m.name}</span>
+        {m.deprecated && (
+          <span className="picker-entry-tag" data-testid={`picker-deprecated-${m.id}`}>
+            deprecated
+          </span>
+        )}
         <span className="picker-entry-io">
           {m.inputs.length} in · {m.outputs.length} out
         </span>
@@ -422,13 +443,18 @@ export function ModulePicker({
   // The Beat Clip module type never stands on its own in the gallery: its
   // entries are the clips in the Clips tab.
   const moduleTypes = useMemo(() => modules.filter((m) => m.id !== BEAT_CLIP_TYPE), [modules]);
-  const allGroups = useMemo(() => groupByCategory(moduleTypes), [moduleTypes]);
+  // Category pills come from the CURRENT modules: a category nothing but
+  // retired modules lives in has no pill, since clicking it would list
+  // nothing.
+  const allGroups = useMemo(() => groupByCategory(taggedModules(moduleTypes, null)), [moduleTypes]);
   const categories = allGroups.map(([c]) => c);
+  // No deprecated module in the library, no tag to filter by.
+  const hasDeprecated = useMemo(() => moduleTypes.some((m) => m.deprecated), [moduleTypes]);
   const clipsTab = tab === 'clips';
-  const shown = useMemo(() => {
-    const matched = filterModules(moduleTypes, query);
-    return groupByCategory(category ? matched.filter((m) => categoryOf(m) === category) : matched);
-  }, [moduleTypes, query, category]);
+  const shown = useMemo(
+    () => groupByCategory(filterModules(taggedModules(moduleTypes, category), query)),
+    [moduleTypes, query, category],
+  );
   const shownClips = useMemo(() => filterClips(clips ?? [], query), [clips, query]);
   // The cursor is remembered PER QUERY, so typing re-aims it at the best
   // match (the first row) by derivation rather than by an effect.
@@ -548,6 +574,17 @@ export function ModulePicker({
                 {c}
               </button>
             ))}
+            {hasDeprecated && (
+              <button
+                className={`picker-category picker-tag${category === DEPRECATED_TAG ? ' active' : ''}`}
+                data-testid={`picker-category-${DEPRECATED_TAG}`}
+                onClick={() =>
+                  setCategory((prev) => (prev === DEPRECATED_TAG ? null : DEPRECATED_TAG))
+                }
+              >
+                {DEPRECATED_TAG}
+              </button>
+            )}
           </div>
         )}
         <div className="picker-body">

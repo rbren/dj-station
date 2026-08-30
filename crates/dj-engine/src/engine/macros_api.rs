@@ -63,6 +63,7 @@ impl Engine {
             version: String::new(),
             abi: "macro-1".into(),
             category: crate::manifest::categories::MACROS.into(),
+            deprecated: false,
             inputs: def
                 .interface
                 .inputs

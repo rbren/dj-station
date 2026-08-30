@@ -140,6 +140,11 @@ export function DocsPanel({ typeId, manifest, onClose }: DocsPanelProps) {
             {manifest.name} <code className="docs-type-id">{typeId}</code>
           </h3>
           {manifest.category && <span className="docs-category">{manifest.category}</span>}
+          {manifest.deprecated && (
+            <span className="docs-category" data-testid="docs-deprecated">
+              deprecated
+            </span>
+          )}
           <button className="docs-close" data-testid="docs-close" onClick={onClose}>
             ✕
           </button>

@@ -158,6 +158,25 @@ describe('DocsPanel rendering', () => {
     expect(screen.getByTestId('docs-row-keylock').textContent).toMatch(/key/i);
   });
 
+  it('says so when the module type is deprecated', () => {
+    const m: Manifest = {
+      id: 'com.example.old',
+      name: 'Old Thing',
+      version: '0.0.1',
+      abi: 'wasm-1',
+      category: 'Utilities',
+      deprecated: true,
+      inputs: [{ id: 'in', name: 'In' }],
+      outputs: [],
+      params: [],
+    };
+    const { unmount } = render(<DocsPanel typeId={m.id} manifest={m} onClose={() => {}} />);
+    expect(screen.getByTestId('docs-deprecated').textContent).toBe('deprecated');
+    unmount();
+    render(<DocsPanel typeId={m.id} manifest={{ ...m, deprecated: false }} onClose={() => {}} />);
+    expect(screen.queryByTestId('docs-deprecated')).toBeNull();
+  });
+
   it('renders a fallback for unknown module types', () => {
     const m: Manifest = {
       id: 'com.example.mystery',

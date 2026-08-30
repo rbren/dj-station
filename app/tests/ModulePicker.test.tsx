@@ -266,6 +266,11 @@ describe('ModulePicker', () => {
     expect(screen.getByTestId('library-no-results')).toBeTruthy();
   });
 
+  it('the Deprecated tag only appears when a module carries the flag', () => {
+    renderPicker();
+    expect(screen.queryByTestId('picker-category-Deprecated')).toBeNull();
+  });
+
   it('Escape, the ✕ button and a backdrop click all close the picker', () => {
     const { onClose } = renderPicker();
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -278,6 +283,89 @@ describe('ModulePicker', () => {
     const { onClose } = renderPicker();
     fireEvent.click(screen.getByTestId('library-search'));
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// A module whose manifest sets `deprecated` is kept for the patches that
+// still use it, but stays out of the search everyone else does: only the
+// Deprecated tag lists it.
+describe('ModulePicker deprecated modules', () => {
+  const oldFilter: Manifest = {
+    id: 'com.dj.filter_v1',
+    name: 'Filter (old)',
+    version: '0.1.0',
+    abi: 'wasm-1',
+    category: 'Shaping',
+    deprecated: true,
+    inputs: [{ id: 'in', name: 'In' }],
+    outputs: [{ id: 'out', name: 'Out' }],
+    params: [],
+  };
+  // The sole module of its category, so its pill has nothing to list.
+  const oldReverb: Manifest = {
+    ...oldFilter,
+    id: 'com.dj.reverb_v1',
+    name: 'Reverb (old)',
+    category: 'Effects',
+  };
+
+  function renderPickerWith(onAdd = vi.fn()) {
+    render(
+      <ModulePicker modules={[...MODULES, oldFilter, oldReverb]} onAdd={onAdd} onClose={vi.fn()} />,
+    );
+    return onAdd;
+  }
+
+  it('stays out of the default gallery, the search and its own category', () => {
+    renderPickerWith();
+    expect(screen.getByTestId('library-add-com.dj.filter')).toBeTruthy();
+    expect(screen.queryByTestId('library-add-com.dj.filter_v1')).toBeNull();
+
+    const search = screen.getByTestId('library-search');
+    fireEvent.change(search, { target: { value: 'filter' } });
+    expect(screen.getByTestId('library-add-com.dj.filter')).toBeTruthy();
+    expect(screen.queryByTestId('library-add-com.dj.filter_v1')).toBeNull();
+
+    fireEvent.change(search, { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('picker-category-Shaping'));
+    expect(screen.queryByTestId('library-add-com.dj.filter_v1')).toBeNull();
+  });
+
+  it('a category holding nothing but deprecated modules has no pill', () => {
+    renderPickerWith();
+    expect(screen.getByTestId('picker-category-Shaping')).toBeTruthy();
+    expect(screen.queryByTestId('picker-category-Effects')).toBeNull();
+  });
+
+  it('the Deprecated tag lists the retired modules and nothing else', () => {
+    const onAdd = renderPickerWith();
+    fireEvent.click(screen.getByTestId('picker-category-Deprecated'));
+    expect(screen.getByTestId('library-add-com.dj.filter_v1')).toBeTruthy();
+    expect(screen.getByTestId('library-add-com.dj.reverb_v1')).toBeTruthy();
+    expect(screen.queryByTestId('library-add-com.dj.filter')).toBeNull();
+    // Grouped under their real categories, and each entry says why it is
+    // on screen.
+    const headings = [...document.querySelectorAll('.picker-group-title')].map(
+      (h) => h.textContent,
+    );
+    expect(headings).toEqual(['Shaping', 'Effects']);
+    expect(screen.getByTestId('picker-deprecated-com.dj.filter_v1')).toBeTruthy();
+
+    // The search box narrows the tag's listing like any other.
+    const search = screen.getByTestId('library-search');
+    fireEvent.change(search, { target: { value: 'filter' } });
+    expect(screen.getByTestId('library-add-com.dj.filter_v1')).toBeTruthy();
+    expect(screen.queryByTestId('library-add-com.dj.reverb_v1')).toBeNull();
+
+    // A retired module still instantiates — that is the point of keeping it.
+    fireEvent.click(screen.getByTestId('library-add-com.dj.filter_v1'));
+    expect(onAdd).toHaveBeenCalledWith('com.dj.filter_v1');
+
+    // Clicking the tag again goes back to the current modules.
+    fireEvent.change(search, { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('picker-category-Deprecated'));
+    expect(screen.getByTestId('library-add-com.dj.filter')).toBeTruthy();
+    expect(screen.queryByTestId('library-add-com.dj.filter_v1')).toBeNull();
   });
 });
 

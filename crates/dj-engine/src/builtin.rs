@@ -148,6 +148,7 @@ fn out_manifest(id: &str, name: &str) -> Manifest {
         version: "0.1.0".into(),
         abi: "native-1".into(),
         category: categories::ANALYSIS.into(),
+        deprecated: false,
         inputs: AUDIO_OUT_JACKS
             .iter()
             .map(|(id, name)| JackDecl {
@@ -208,6 +209,7 @@ pub fn midi_manifest() -> Manifest {
         version: "0.1.0".into(),
         abi: "native-1".into(),
         category: categories::ANALYSIS.into(),
+        deprecated: false,
         // Input jacks drive controller LEDs/feedback (one per LED mapping;
         // named like output mappings). Fixed count so graph buffers are
         // preallocated.

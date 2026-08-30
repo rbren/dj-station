@@ -2311,6 +2311,15 @@ body {
   color: var(--brand);
 }
 
+/* The Deprecated tag is not one of the categories: it sits at the far end
+   of the row, dashed, so the pills before it stay a list of places to look
+   and this one reads as the door to the retired ones. */
+.picker-tag {
+  margin-left: auto;
+  border-style: dashed;
+  color: var(--ink-muted);
+}
+
 .picker-body {
   flex: 1;
   overflow-y: auto;
@@ -2392,6 +2401,17 @@ body {
 .library-empty {
   font-size: var(--fs-xs);
   color: var(--ink-dim);
+}
+
+/* Why a module nobody searched for is on screen: it came in under the
+   Deprecated tag. */
+.picker-entry-tag {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  font-size: var(--fs-micro);
+  padding: 0 6px;
+  white-space: nowrap;
 }
 
 /* Infinite canvas viewport: the .rack inside is translated by the pan and
