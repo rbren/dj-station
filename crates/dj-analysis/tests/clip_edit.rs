@@ -12,7 +12,7 @@ use dj_analysis::clip::{
     beats_from_taps, clips_dir, delete_beat_clip, load_beat_clip, migrate_beat_clips, pad_to_beats,
     peaks, program_duration_secs, read_beat_clips, render_clip, save_beat_clip, warp_time_secs,
     wav16_bytes, write_clip, BeatClipEdit, BeatClipSource, BleedAudio, ClipEq, ClipEqBand,
-    ClipOverlay, ClipProgram, ClipRegion, LevelPoint,
+    ClipProgram, ClipRegion, LevelPoint,
 };
 use dj_analysis::AudioData;
 use std::path::{Path, PathBuf};
@@ -240,64 +240,6 @@ fn parametric_eq_bells_boost_and_cut_at_their_frequency() {
     };
     let out = render_clip(&[&low], &zeroed).unwrap();
     assert_eq!(out.channels[0], low.channels[0]);
-}
-
-#[test]
-fn overlays_mix_on_top_and_extend_the_clip() {
-    let base = tone(220.0, 1.0);
-    let extra = tone(330.0, 1.0);
-    // Overlay 0.5 s of source 1 starting at 0.75 s: the first half is the
-    // base alone, the middle is a mix, and the last 0.25 s exists only
-    // because the overlay extended the clip.
-    let program = ClipProgram {
-        regions: vec![whole(0, &base)],
-        overlays: vec![ClipOverlay {
-            at_secs: 0.75,
-            region: span(1, 0.0, 0.5),
-        }],
-        crossfade_ms: 0.0,
-        ..ClipProgram::default()
-    };
-    let out = render_clip(&[&base, &extra], &program).unwrap();
-
-    assert_eq!(out.frames(), (1.25 * SR as f64) as usize);
-    assert!((program_duration_secs(&program) - 1.25).abs() < 1e-9);
-    // Before the overlay: untouched base material.
-    let i = (0.5 * SR as f64) as usize;
-    assert_eq!(out.channels[0][i], base.channels[0][i]);
-    // Inside the overlap: the sum of both sources.
-    let j = (0.9 * SR as f64) as usize;
-    let k = j - (0.75 * SR as f64) as usize;
-    assert!((out.channels[0][j] - (base.channels[0][j] + extra.channels[0][k])).abs() < 1e-6);
-    // Past the base clip's end: overlay material alone.
-    let l = (1.1 * SR as f64) as usize;
-    let m = l - (0.75 * SR as f64) as usize;
-    assert!((out.channels[0][l] - extra.channels[0][m]).abs() < 1e-6);
-}
-
-#[test]
-fn overlay_edges_are_ramped_when_crossfade_is_set() {
-    let base = tone(220.0, 1.0);
-    let extra = tone(330.0, 1.0);
-    // Start the overlay mid-waveform: without the declick ramp the mix
-    // would step at the entry point.
-    let overlay = ClipOverlay {
-        at_secs: 0.3,
-        region: span(1, 0.2501, 0.7501),
-    };
-    let ramped = ClipProgram {
-        regions: vec![whole(0, &base)],
-        overlays: vec![overlay.clone()],
-        ..ClipProgram::default()
-    };
-    let hard = ClipProgram {
-        crossfade_ms: 0.0,
-        ..ramped.clone()
-    };
-    let max_step = |a: &[f32]| a.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
-    let out_ramped = render_clip(&[&base, &extra], &ramped).unwrap();
-    let out_hard = render_clip(&[&base, &extra], &hard).unwrap();
-    assert!(max_step(&out_ramped.channels[0]) < max_step(&out_hard.channels[0]));
 }
 
 #[test]
@@ -943,13 +885,6 @@ fn golden_program() -> ClipProgram {
             },
             span(0, 0.60, 0.85),
         ],
-        overlays: vec![ClipOverlay {
-            at_secs: 0.30,
-            region: ClipRegion {
-                gain_db: -6.0,
-                ..span(1, 0.55, 0.95)
-            },
-        }],
         eq: ClipEq {
             bands: vec![
                 ClipEqBand {
@@ -1001,7 +936,7 @@ fn read_wav(path: &Path) -> (hound::WavSpec, Vec<i16>) {
 
 #[test]
 fn golden_clip_edit() {
-    let case = "clip-cut-splice-overlay-eq-level";
+    let case = "clip-cut-splice-eq-level";
     let program_path = e2e_dir().join("clips").join(format!("{case}.json"));
     let golden_path = e2e_dir().join("goldens").join(format!("{case}.wav"));
 

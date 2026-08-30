@@ -266,7 +266,7 @@ Unified in-app search fans out across enabled providers; results are tagged by s
 
 - **Patch canvas:** pan/zoom module board, wire dragging, right-click knob config, multi-select, collapse-to-macro.
 - **Library view:** search (local + iTunes), crates, analysis status, drag tracks onto decks.
-- **Clip view:** offline waveform editor over library tracks — cut/trim, splice (also across tracks), reverse, 3-band EQ and level automation, rendered off-thread into a NEW library track (sources are never modified).
+- **Clip view:** offline waveform editor over one library track — cut/trim, splice, reverse, 3-band EQ and level automation, rendered off-thread into a NEW library track (the source is never modified).
 - **Hover inspector:** value readout, Hz/note conversion, oscilloscope — implemented once in the host, driven by `graph.tap`.
 - Signal telemetry to UI at ~30 fps via a single shared ring buffer per tapped wire; no per-frame IPC storms.
 

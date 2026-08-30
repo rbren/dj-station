@@ -1027,14 +1027,17 @@ offset))`, offset in position units — so the knob's curve shapes the
   with `dj_analysis::clip` on a worker thread and are NOT undoable
   (`engine_lock` isn't even taken; ClipView keeps its own undo/redo
   stacks). The edit is a `ClipProgram`: regions (source index + in/out +
-  reverse + gain), overlays (a region MIXED over the output timeline at
-  `at_secs` instead of spliced — it can extend the clip; edges get the
-  same crossfade-length declick ramp), a parametric EQ (`bands` of RBJ
-  peaking bells — same filter as the EQ module; empty/all-0 dB bands are
-  an exact bypass), dB level breakpoints on the OUTPUT timeline
-  (automation is timeline-based, so a cut shifts audio under it —
-  deliberate, like a DAW), `crossfade_ms`, and a beat-tap `warp` +
-  `beat_grid` (below).
+  reverse + gain), a parametric EQ (`bands` of RBJ peaking bells — same
+  filter as the EQ module; empty/all-0 dB bands are an exact bypass), dB
+  level breakpoints on the OUTPUT timeline (automation is timeline-based,
+  so a cut shifts audio under it — deliberate, like a DAW),
+  `crossfade_ms`, and a beat-tap `warp` + `beat_grid` (below).
+  The page edits ONE source: `Open` REPLACES what is loaded, and there is
+  no "splice on end" and no overlay lane — both were removed, model and
+  all (the program has no `overlays`, and `ClipOverlay` is gone from
+  `dj_analysis::clip`). `region.source` and the request's `sources` stay
+  a LIST because that is the saved beat clip's format
+  (`BeatClipEdit.sources`) and the renderer's own ability, not a UI one.
   Adjacent regions OVERLAP by the crossfade, capped at half of either
   neighbour: that one law exists twice — `splice` in
   `crates/dj-analysis/src/clip.rs` and `regionSpans` in `app/src/clip.ts`
@@ -1195,9 +1198,8 @@ offset))`, offset in position units — so the knob's curve shapes the
   is already sample-exact, so any audible gap is the frontend's. What an
   edit costs playback depends on WHAT changed (in the transport's path —
   a selection's tone costs it nothing, see the live player below): a
-  TIMELINE change
-  (sources/regions/overlays/crossfade — identity-compared on the memoized
-  `request`, so keep `sourceRefs` memoized separately) invalidates,
+  TIMELINE change (sources/regions/crossfade — identity-compared on the
+  memoized `request`, so keep `sourceRefs` memoized separately) invalidates,
   because every output time now means something else; a TONE-ONLY change
   (EQ, level) re-renders the window in place, debounced, and resumes at
   the same loop phase, since pausing for an EQ tweak would make the
@@ -1305,8 +1307,8 @@ offset))`, offset in position units — so the knob's curve shapes the
   is ~0.5 s of DSP for EQ alone and ~7 s once a tap warp is in the
   program, on top of a 350 ms debounce: several seconds before a knob was
   audible. The split that fixes it: the BACKEND renders the TIMELINE
-  (regions, overlays, crossfades, the WSOLA warp — what audio exists and
-  when) and the WEBVIEW applies TONE (parametric EQ, level automation —
+  (regions, crossfades, the WSOLA warp — what audio exists and when) and
+  the WEBVIEW applies TONE (parametric EQ, level automation —
   a filter coefficient and a gain). `ClipLivePlayer` (`app/src/clipLive.ts`)
   fetches the DRY selection once, loops it on an `AudioBufferSourceNode`
   through peaking biquads into a gain, and moves those params under the
@@ -1340,8 +1342,8 @@ offset))`, offset in position units — so the knob's curve shapes the
   remount leaves nothing behind). Loops wrap at a sample boundary via an
   `AudioBufferSourceNode` (`<audio loop>` drops ~100 ms), falling back to
   the media element where Web Audio is absent. A TIMELINE edit
-  (sources/regions/overlays/crossfade) halts playback; a MATERIAL edit (a
-  stem swapped) re-renders the window in place and swaps without
+  (sources/regions/crossfade) halts playback; a MATERIAL edit (a stem
+  swapped) re-renders the window in place and swaps without
   stopping; a TONE-ONLY edit (EQ, level) costs the transport a debounced
   re-render (and the live player nothing at all) — keep that split, and
   keep the staleness identity checks allocation-free or every keystroke
@@ -2515,3 +2517,9 @@ of the page.
   the event timelines of the most recent worker conversations (tool wall
   time vs. LLM think time, broken down by command type) and reported the
   breakdown in chat; no code changes.
+- 2026-08-30 — "remove 'splice on end' and 'overlay' from the clip UI",
+  "also remove any leftover/dead logic". Both went end to end: the two
+  buttons and `loadTrack`'s modes, the `overlays` program field with
+  `ClipOverlay`/`addOverlay`/`removeOverlay`/`apply_overlay` and the
+  now-unused `sameSource`, their tests, the `.clip-overlay-span` rule and
+  the golden case (regenerated as `clip-cut-splice-eq-level`).

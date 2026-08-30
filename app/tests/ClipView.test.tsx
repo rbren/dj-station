@@ -1,5 +1,5 @@
 // Clip page: load a library track, edit it (select, drag, cut, reverse,
-// overlay, EQ, automation), tap out a beat grid, play the result and save
+// EQ, automation), tap out a beat grid, play the result and save
 // a span of it as a BEAT CLIP the decks can load. The backend is mocked;
 // the edit math itself is pinned by ClipEdits.test.ts and the rendered
 // audio by dj-analysis's golden test.
@@ -626,16 +626,6 @@ describe('ClipView', () => {
     await waitFor(() => expect(joins()).toHaveLength(1));
   });
 
-  it('splices a second library track onto the end', async () => {
-    const clip = clipMock();
-    await openTrack(clip);
-    fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '8' } });
-    fireEvent.click(screen.getByTestId('clip-append-track'));
-    await waitFor(() => expect(joins()).toHaveLength(2));
-    expect(clip.loadSource).toHaveBeenLastCalledWith(8, [], expect.any(Number));
-    expect(screen.getByTestId('clip-sources').textContent).toContain('2. Hat Loop');
-  });
-
   it('fades and automation points land on the level lane', async () => {
     await openTrack(clipMock());
     // The lane lives under the SELECTION now: it is drawn against the
@@ -654,25 +644,6 @@ describe('ClipView', () => {
 
     fireEvent.click(screen.getByTestId('clip-clear-level'));
     expect(screen.queryByTestId('clip-level-point-0')).toBeNull();
-  });
-
-  it('overlays a second track at the selection and undo removes it', async () => {
-    const clip = clipMock();
-    await openTrack(clip);
-    select(2, 6);
-    fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '8' } });
-    fireEvent.click(screen.getByTestId('clip-overlay-track'));
-    await waitFor(() => expect(screen.getByTestId('clip-overlay-span-0')).toBeTruthy());
-
-    // A 10 s overlay starting at 2 s extends the clip to 12 s.
-    expect(screen.getByTestId('clip-readout').textContent).toContain('0:12.00 total');
-    const p = await programNow(clip, (p) => p.overlays.length === 1);
-    expect(p.overlays[0].at_secs).toBe(2);
-    expect(screen.getByTestId('clip-sources').textContent).toContain('2. Hat Loop');
-
-    fireEvent.click(screen.getByTestId('clip-undo'));
-    expect(screen.queryByTestId('clip-overlay-span-0')).toBeNull();
-    expect(screen.getByTestId('clip-readout').textContent).toContain('0:10.00 total');
   });
 
   it('dragging an EQ handle shapes a band and lands in the program', async () => {
@@ -1814,7 +1785,7 @@ describe('ClipView', () => {
     await flip('bass');
     await flip('other');
     await waitFor(() =>
-      expect(screen.getByTestId('clip-sources').textContent).toBe('1. Basement Loop'),
+      expect(screen.getByTestId('clip-sources').textContent).toBe('Basement Loop'),
     );
     const full = (clip.loadSource as ReturnType<typeof vi.fn>).mock.calls.at(-1);
     expect(full?.[1]).toEqual([]);
@@ -1870,7 +1841,7 @@ describe('ClipView', () => {
     );
     expect(joins()).toHaveLength(2);
     // One lane still, swapped in place rather than added alongside.
-    expect(screen.getByTestId('clip-sources').textContent).toBe('1. Basement Loop — no bass');
+    expect(screen.getByTestId('clip-sources').textContent).toBe('Basement Loop — no bass');
   });
 
   it('refuses to mute every stem, since that is just silence', async () => {

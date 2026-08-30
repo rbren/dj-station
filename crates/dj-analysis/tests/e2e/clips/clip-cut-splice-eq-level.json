@@ -22,16 +22,6 @@
       "gain_db": 0.0
     }
   ],
-  "overlays": [
-    {
-      "at_secs": 0.3,
-      "source": 1,
-      "start_secs": 0.55,
-      "end_secs": 0.95,
-      "reverse": false,
-      "gain_db": -6.0
-    }
-  ],
   "eq": {
     "bands": [
       {
@@ -69,5 +59,6 @@
       "gain_db": -60.0
     }
   ],
-  "crossfade_ms": 8.0
+  "crossfade_ms": 8.0,
+  "warp_smoothing": 0.0
 }

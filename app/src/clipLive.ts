@@ -10,7 +10,7 @@
 // 10 MB round trip. An EQ knob is useless at that latency.
 //
 // The split that fixes it: the BACKEND renders the timeline (regions,
-// overlays, crossfades, the WSOLA warp) — things that decide what audio
+// crossfades, the WSOLA warp) — things that decide what audio
 // exists and when — and the WEBVIEW applies TONE (parametric EQ, level
 // automation), which is just a filter coefficient and a gain. So the
 // rendered selection is fetched ONCE and the knobs move inside a running

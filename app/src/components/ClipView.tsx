@@ -1,7 +1,7 @@
-// Clip page (PRD §9): load library tracks, cut/splice/reverse/overlay/EQ
-// them and automate their level, then save a span of the edit as a BEAT
-// CLIP — whole beats at a known tempo, loadable into the decks exactly
-// like a Beatify clip.
+// Clip page (PRD §9): load a library track, cut/splice/reverse/EQ it and
+// automate its level, then save a span of the edit as a BEAT CLIP —
+// whole beats at a known tempo, loadable into the decks exactly like a
+// Beatify clip.
 //
 // The edit itself is a plain ClipProgram (src/clip.ts) — every operation is
 // a pure function over it, so this component only owns selection, undo/redo
@@ -69,7 +69,6 @@ import {
 } from 'react';
 import type { MouseEvent as ReactMouseEvent, Ref } from 'react';
 import {
-  addOverlay,
   appendSource,
   beatSpan,
   clearLevel,
@@ -91,7 +90,6 @@ import {
   quantizeRange,
   regionSpans,
   removeLevelPoint,
-  sameSource,
   reverseRange,
   setLevelPoint,
   sourceLabel,
@@ -445,10 +443,10 @@ export function ClipView({
   // through a whole EQ session. The full `request` above is what the SAVE
   // sends (and what the fallback audition path plays, where there is no
   // live graph to apply tone).
-  const { regions, overlays, crossfade_ms, warp, warp_smoothing, beat_grid } = program;
+  const { regions, crossfade_ms, warp, warp_smoothing, beat_grid } = program;
   const dryProgram = useMemo<ClipProgram>(
-    () => ({ ...emptyProgram(), regions, overlays, crossfade_ms, warp, warp_smoothing, beat_grid }),
-    [regions, overlays, crossfade_ms, warp, warp_smoothing, beat_grid],
+    () => ({ ...emptyProgram(), regions, crossfade_ms, warp, warp_smoothing, beat_grid }),
+    [regions, crossfade_ms, warp, warp_smoothing, beat_grid],
   );
   const dryRequest = useMemo(
     () => ({ sources: sourceRefs, program: dryProgram }),
@@ -865,26 +863,15 @@ export function ClipView({
     [regenerate, tapSession, tunable],
   );
 
+  /** Open a track: the page edits ONE source, so this starts the edit
+   *  over rather than adding a lane to the one in hand. */
   const loadTrack = useCallback(
-    async (
-      trackId: number,
-      mode: 'open' | 'append' | 'overlay',
-      stemsWanted = stemSet(stemsOn),
-    ) => {
+    async (trackId: number, stemsWanted = stemSet(stemsOn)) => {
       const stems = stemsWanted;
       setBusy(true);
       setError(null);
       try {
-        // Re-adding a source that is already loaded reuses its slot — the
-        // stem set is part of that identity, so "vocals" and the full mix
-        // of the same track are two lanes.
-        const existing = sources.findIndex((s) =>
-          sameSource(sourceRef(s), { track_id: trackId, stems }),
-        );
-        const source =
-          mode !== 'open' && existing >= 0
-            ? sources[existing]
-            : await clip.loadSource(trackId, stems, MIN_BUCKETS);
+        const source = await clip.loadSource(trackId, stems, MIN_BUCKETS);
         if (!source) {
           logError(
             'clip.loadSource',
@@ -897,46 +884,21 @@ export function ClipView({
           );
           return;
         }
-        const label = sourceLabel(source);
-        if (mode === 'open') {
-          setSources([source]);
-          setProgram(appendSource(emptyProgram(), 0, source.duration_secs));
-          setPast([]);
-          setFuture([]);
-          setSelection(null);
-          setTapSession(null);
-          setVp(null);
-          // A different program entirely: stop, don't play the old render.
-          transportRef.current?.stop(0);
-          setName(
-            stems.length ? `${source.title} (${stemLabel(stems)})` : `${source.title} (clip)`,
-          );
-          return;
-        }
-        const index = existing >= 0 ? existing : sources.length;
-        if (existing < 0) setSources([...sources, source]);
-        setPast((h) => [...h.slice(-HISTORY_DEPTH), program]);
+        setSources([source]);
+        setProgram(appendSource(emptyProgram(), 0, source.duration_secs));
+        setPast([]);
         setFuture([]);
-        if (mode === 'append') {
-          setProgram(appendSource(dropGrid(program), index, source.duration_secs));
-          setStatus(`Spliced "${label}" onto the end`);
-        } else {
-          const at = sel ? sel.start : playhead;
-          setProgram(
-            addOverlay(
-              dropGrid(program),
-              index,
-              source.duration_secs,
-              warpSource(program.warp, at, program.warp_smoothing),
-            ),
-          );
-          setStatus(`Overlaid "${label}" at ${timecode(at)}`);
-        }
+        setSelection(null);
+        setTapSession(null);
+        setVp(null);
+        // A different program entirely: stop, don't play the old render.
+        transportRef.current?.stop(0);
+        setName(stems.length ? `${source.title} (${stemLabel(stems)})` : `${source.title} (clip)`);
       } finally {
         setBusy(false);
       }
     },
-    [clip, playhead, program, sel, sources, stemsOn],
+    [clip, stemsOn],
   );
 
   /** Flip one stem of the picked track on or off.
@@ -1105,7 +1067,7 @@ export function ClipView({
       setPendingOpen(null);
       setPick(trackId);
       setStemChoice({ trackId, on: [...STEM_NAMES] });
-      void loadTrack(trackId, 'open', []);
+      void loadTrack(trackId, []);
     },
     [loadTrack],
   );
@@ -1243,7 +1205,7 @@ export function ClipView({
   // An edit makes the fetched audio stale. What that costs playback
   // depends on WHAT changed:
   //
-  // - the TIMELINE (regions/overlays/crossfade/warp): every output time
+  // - the TIMELINE (regions/crossfade/warp): every output time
   //   now means something else, so the transport stops rather than play
   //   the old render (the live player re-fetches its span instead);
   // - the MATERIAL (a stem switched): the timeline still means what it
@@ -1260,7 +1222,6 @@ export function ClipView({
     lastRequest.current = dryRequest;
     const timelineChanged =
       prev.program.regions !== dryRequest.program.regions ||
-      prev.program.overlays !== dryRequest.program.overlays ||
       prev.program.crossfade_ms !== dryRequest.program.crossfade_ms ||
       prev.program.warp !== dryRequest.program.warp ||
       prev.program.warp_smoothing !== dryRequest.program.warp_smoothing;
@@ -1577,24 +1538,9 @@ export function ClipView({
         <button
           data-testid="clip-open-track"
           disabled={pick === null || busy}
-          onClick={() => pick !== null && void loadTrack(pick, 'open')}
+          onClick={() => pick !== null && void loadTrack(pick)}
         >
           Open
-        </button>
-        <button
-          data-testid="clip-append-track"
-          disabled={pick === null || busy || disabled}
-          onClick={() => pick !== null && void loadTrack(pick, 'append')}
-        >
-          Splice on end
-        </button>
-        <button
-          data-testid="clip-overlay-track"
-          disabled={pick === null || busy || disabled}
-          title="Mix the track over the timeline at the selection (or playhead)"
-          onClick={() => pick !== null && void loadTrack(pick, 'overlay')}
-        >
-          Overlay
         </button>
         <span className="clip-sources" data-testid="clip-sources">
           {sources.map((s, i) => (
@@ -1602,7 +1548,7 @@ export function ClipView({
               className="tag tag-source"
               key={`${s.track_id}:${s.stems.join('+') || 'mix'}:${i}`}
             >
-              {i + 1}. {sourceLabel(s)}
+              {sourceLabel(s)}
             </span>
           ))}
         </span>
@@ -1784,19 +1730,6 @@ export function ClipView({
                 ))}
               </>
             )}
-            renderOver={(xOf) =>
-              program.overlays.map((o, i) => (
-                <rect
-                  key={`ov${i}`}
-                  data-testid={`clip-overlay-span-${i}`}
-                  className="clip-overlay-span"
-                  x={xOf(Math.max(0, o.at_secs))}
-                  y={0}
-                  width={Math.max(1, xOf(o.at_secs + (o.end_secs - o.start_secs)) - xOf(o.at_secs))}
-                  height={10}
-                />
-              ))
-            }
             readoutExtra={
               (grid && sel ? ` · ${beatsLabel(grid, sel)}` : '') +
               (preview ? ` · ${preview.channels}ch ${preview.sample_rate} Hz` : ' · rendering…')

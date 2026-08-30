@@ -13,14 +13,11 @@
 //!    piece out is "two regions that skip it"; splicing is "regions from
 //!    different sources in a row". Neighbouring regions are joined with a
 //!    short equal-power crossfade so edits never click.
-//! 2. **Overlays** ([`ClipOverlay`]): the same region material, mixed on
-//!    top of the assembled timeline at a chosen output time (layering two
-//!    tracks instead of splicing them). Edges get a short declick ramp.
-//! 3. **EQ** ([`ClipEq`]): parametric peaking bells in series — the same
+//! 2. **EQ** ([`ClipEq`]): parametric peaking bells in series — the same
 //!    RBJ filters as the rack's EQ module — bypassed exactly at 0 dB.
-//! 4. **Level automation** ([`LevelPoint`]): a breakpoint envelope in dB
+//! 3. **Level automation** ([`LevelPoint`]): a breakpoint envelope in dB
 //!    over the *output* timeline — fades in/out are just endpoints.
-//! 5. **Beat warp** (`warp`): anchor pairs `[from, to]` on the output
+//! 4. **Beat warp** (`warp`): anchor pairs `[from, to]` on the output
 //!    timeline, applied last through the Beatify WSOLA stretch
 //!    ([`crate::beatify::warp`]) — how tapped beats become an even grid.
 //!    Outside the anchors the audio is untouched (identity slope).
@@ -63,18 +60,6 @@ impl ClipRegion {
     pub fn duration_secs(&self) -> f64 {
         (self.end_secs - self.start_secs).max(0.0)
     }
-}
-
-/// A source span mixed OVER the assembled timeline (instead of spliced
-/// into it) starting at `at_secs` of the output. Extends the clip when it
-/// runs past the end.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ClipOverlay {
-    /// Where on the output timeline the overlay starts.
-    pub at_secs: f64,
-    #[serde(flatten)]
-    pub region: ClipRegion,
 }
 
 /// One parametric EQ band: an RBJ peaking bell, exact pass-through at
@@ -129,8 +114,6 @@ pub struct LevelPoint {
 #[serde(default)]
 pub struct ClipProgram {
     pub regions: Vec<ClipRegion>,
-    /// Material mixed over the spliced timeline (see [`ClipOverlay`]).
-    pub overlays: Vec<ClipOverlay>,
     pub eq: ClipEq,
     /// Level automation breakpoints (unsorted input is fine). Empty means
     /// unity gain throughout.
@@ -196,7 +179,6 @@ impl Default for ClipProgram {
     fn default() -> Self {
         ClipProgram {
             regions: Vec::new(),
-            overlays: Vec::new(),
             eq: ClipEq::default(),
             level: Vec::new(),
             crossfade_ms: DEFAULT_CROSSFADE_MS,
@@ -370,41 +352,6 @@ fn apply_eq(channels: &mut [Vec<f32>], eq: &ClipEq, sr: u32) {
     }
 }
 
-/// Mix overlay material into the assembled timeline, extending it when an
-/// overlay runs past the end. Short linear ramps at the overlay's edges
-/// declick the entry/exit (the material may start mid-waveform).
-fn apply_overlay(
-    channels: &mut [Vec<f32>],
-    material: Vec<Vec<f32>>,
-    at_frame: usize,
-    ramp_frames: usize,
-) {
-    let len = material.first().map(|c| c.len()).unwrap_or(0);
-    if len == 0 {
-        return;
-    }
-    let needed = at_frame + len;
-    for chan in channels.iter_mut() {
-        if chan.len() < needed {
-            chan.resize(needed, 0.0);
-        }
-    }
-    let ramp = ramp_frames.min(len / 2);
-    for (c, chan) in channels.iter_mut().enumerate() {
-        for (i, &s) in material[c].iter().enumerate() {
-            let mut g = 1.0f32;
-            if ramp > 0 {
-                if i < ramp {
-                    g = (i as f32 + 0.5) / ramp as f32;
-                } else if i >= len - ramp {
-                    g = ((len - i) as f32 - 0.5) / ramp as f32;
-                }
-            }
-            chan[at_frame + i] += s * g;
-        }
-    }
-}
-
 /// Envelope value (dB) at `t`, holding the first/last point outside the
 /// breakpoint range. `points` must be sorted by time.
 fn level_db_at(points: &[LevelPoint], t: f64) -> f64 {
@@ -481,14 +428,6 @@ pub fn render_clip(sources: &[&AudioData], program: &ClipProgram) -> Result<Audi
         !channels[0].is_empty(),
         "clip render: the edit is empty (all regions are zero-length)"
     );
-    for overlay in &program.overlays {
-        let src = sources.get(overlay.region.source).ok_or_else(|| {
-            anyhow::anyhow!("clip render: unknown source {}", overlay.region.source)
-        })?;
-        let material = region_material(src, &overlay.region, sample_rate, n_ch);
-        let at_frame = (overlay.at_secs.max(0.0) * sample_rate as f64).round() as usize;
-        apply_overlay(&mut channels, material, at_frame, crossfade_frames);
-    }
     apply_eq(&mut channels, &program.eq, sample_rate);
     apply_level(&mut channels, &program.level, sample_rate);
     apply_warp(
@@ -604,7 +543,7 @@ pub fn warp_time_secs(warp: &[[f64; 2]], secs: f64, smoothing: f64) -> f64 {
 }
 
 /// Output length of a program without rendering it (region durations minus
-/// the crossfade overlaps, extended by overlays that run past the end).
+/// the crossfade overlaps).
 pub fn program_duration_secs(program: &ClipProgram) -> f64 {
     let xf = program.crossfade_ms.max(0.0) / 1000.0;
     let mut total = 0.0;
@@ -619,9 +558,6 @@ pub fn program_duration_secs(program: &ClipProgram) -> f64 {
         }
         total += d;
         prev = Some(d);
-    }
-    for o in &program.overlays {
-        total = total.max(o.at_secs.max(0.0) + o.region.duration_secs());
     }
     warp_time_secs(&program.warp, total, program.warp_smoothing)
 }

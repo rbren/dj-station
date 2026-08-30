@@ -4421,11 +4421,6 @@ body {
   pointer-events: none;
 }
 
-.clip-overlay-span {
-  fill: rgba(224, 108, 117, 0.5);
-  pointer-events: none;
-}
-
 .clip-stems {
   display: flex;
   align-items: center;

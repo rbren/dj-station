@@ -21,9 +21,6 @@ export interface ClipRegion {
   gain_db: number;
 }
 
-/** A span mixed OVER the timeline at `at_secs` instead of spliced in. */
-export type ClipOverlay = ClipRegion & { at_secs: number };
-
 /** One parametric EQ band — an RBJ peaking bell, pass-through at 0 dB.
  *  Same filter as the rack's EQ module. */
 export interface ClipEqBand {
@@ -72,7 +69,6 @@ export interface ClipGrid extends Grid {
 
 export interface ClipProgram {
   regions: ClipRegion[];
-  overlays: ClipOverlay[];
   eq: ClipEq;
   level: LevelPoint[];
   crossfade_ms: number;
@@ -196,14 +192,6 @@ export function stemSet(on: readonly string[]): string[] {
   return kept.length === STEM_NAMES.length ? [] : kept;
 }
 
-export function sameSource(a: ClipSourceRef, b: ClipSourceRef): boolean {
-  return (
-    a.track_id === b.track_id &&
-    a.stems.length === b.stems.length &&
-    a.stems.every((s, i) => s === b.stems[i])
-  );
-}
-
 /** The rendered edit (no file written). */
 export interface ClipRender {
   duration_secs: number;
@@ -224,7 +212,6 @@ export const DEFAULT_WARP_SMOOTHING = 0.3;
 export function emptyProgram(): ClipProgram {
   return {
     regions: [],
-    overlays: [],
     eq: { bands: defaultEqBands() },
     level: [],
     crossfade_ms: DEFAULT_CROSSFADE_MS,
@@ -263,10 +250,7 @@ export function regionSpans(program: ClipProgram): RegionSpan[] {
 
 export function programDuration(program: ClipProgram): number {
   const spans = regionSpans(program);
-  let total = spans.length ? spans[spans.length - 1].end : 0;
-  for (const o of program.overlays) {
-    total = Math.max(total, Math.max(0, o.at_secs) + regionDuration(o));
-  }
+  const total = spans.length ? spans[spans.length - 1].end : 0;
   return warpTime(program.warp, total, program.warp_smoothing);
 }
 
@@ -842,7 +826,8 @@ export function duplicateRange(program: ClipProgram, from: number, to: number): 
   return withRegions(program, iso.regions);
 }
 
-/** Splice a whole source onto the end of the clip. */
+/** Add a whole source to the end of the program — what opening a track
+ *  lays down for it. */
 export function appendSource(
   program: ClipProgram,
   source: number,
@@ -859,28 +844,6 @@ export function removeRegion(program: ClipProgram, index: number): ClipProgram {
     program,
     program.regions.filter((_, i) => i !== index),
   );
-}
-
-/** Mix a whole source over the timeline starting at `atSecs`. */
-export function addOverlay(
-  program: ClipProgram,
-  source: number,
-  durationSecs: number,
-  atSecs: number,
-): ClipProgram {
-  const overlay: ClipOverlay = {
-    source,
-    start_secs: 0,
-    end_secs: durationSecs,
-    reverse: false,
-    gain_db: 0,
-    at_secs: Math.max(0, atSecs),
-  };
-  return { ...program, overlays: [...program.overlays, overlay] };
-}
-
-export function removeOverlay(program: ClipProgram, index: number): ClipProgram {
-  return { ...program, overlays: program.overlays.filter((_, i) => i !== index) };
 }
 
 // ---------------------------------------------------------------------------

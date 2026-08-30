@@ -5,7 +5,6 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  addOverlay,
   appendSource,
   beatSpan,
   composeWarp,
@@ -25,7 +24,6 @@ import {
   programDuration,
   quantizeRange,
   regionSpans,
-  removeOverlay,
   rulerTicks,
   resizeSelection,
   reverseRange,
@@ -152,21 +150,6 @@ describe('clip region math', () => {
     expect(end.regions[end.regions.length - 1]).toMatchObject({ start_secs: 4, end_secs: 6 });
     // Moving the whole clip is a no-op shape-wise.
     expect(moveRange(base(), 0, 10, 3).regions).toEqual(base().regions);
-  });
-
-  it('overlays mix over the timeline and extend the duration', () => {
-    const p = addOverlay(base(), 1, 4, 8);
-    expect(p.overlays).toHaveLength(1);
-    expect(p.overlays[0]).toMatchObject({ source: 1, at_secs: 8, start_secs: 0, end_secs: 4 });
-    // 8 s in + 4 s of overlay outruns the 10 s base.
-    expect(programDuration(p)).toBeCloseTo(12, 9);
-    expect(programDuration(removeOverlay(p, 0))).toBeCloseTo(10, 9);
-  });
-
-  it('appends another source for splicing', () => {
-    const p = appendSource(base(), 1, 6);
-    expect(p.regions.map((r) => r.source)).toEqual([0, 1]);
-    expect(programDuration(p)).toBeCloseTo(16, 9);
   });
 
   it('ignores empty selections', () => {
