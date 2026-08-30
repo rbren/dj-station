@@ -197,7 +197,9 @@ describe('copy buffer follows the selection', () => {
     await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenLastCalledWith(['osc1']));
     state.nodes = [node('osc1', OSC), node('vca1', VCA), node('osc2', OSC)];
     fireEvent.keyDown(window, { key: 'v', metaKey: true });
-    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenLastCalledWith('CLIP:osc1'));
+    await waitFor(() =>
+      expect(fakeEngine.pasteModules).toHaveBeenLastCalledWith('CLIP:osc1', 'rack'),
+    );
     await waitFor(() => expect(isSelected('osc2')).toBe(true));
 
     // Select module B with a slightly wobbly click (mousedown, small move,
@@ -213,7 +215,9 @@ describe('copy buffer follows the selection', () => {
     fireEvent.keyDown(window, { key: 'c', metaKey: true });
     await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenLastCalledWith(['vca1']));
     fireEvent.keyDown(window, { key: 'v', metaKey: true });
-    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenLastCalledWith('CLIP:vca1'));
+    await waitFor(() =>
+      expect(fakeEngine.pasteModules).toHaveBeenLastCalledWith('CLIP:vca1', 'rack'),
+    );
   });
 });
 

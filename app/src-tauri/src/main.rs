@@ -15,7 +15,7 @@ use dj_engine::{
     AudioFocus, AudioOutputs, Backend, CaptureWindow, Engine, EngineConfig, ExtensionRegistry,
     JackTelemetry,
     KnobConfig, KnobStyle, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroStore, Manifest,
-    MidiMapKind, PatchDoc, UndoHistory, WireStyle, MACROS_DIR_NAME,
+    MidiMapKind, PatchDoc, UndoHistory, WireStyle, Workspace, MACROS_DIR_NAME,
 };
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
@@ -33,14 +33,20 @@ struct AppState {
     /// Provider downloads in flight (off the main thread, progress polled
     /// by the library view).
     downloads: dj_library::DownloadManager,
-    /// Name of the patch currently being edited (used by save/autosave).
+    /// Name of the rack-workspace patch currently being edited (used by
+    /// save/autosave; the autosave header carries it across restarts).
     patch_name: Mutex<String>,
+    /// Name of the decks-workspace patch currently being edited (the
+    /// autosave dir carries it in a sidecar — one header, two names).
+    deck_patch_name: Mutex<String>,
     /// Last autosaved document, to skip disk writes when nothing changed.
     last_autosave: Mutex<Option<PatchDoc>>,
-    /// Snapshot at the last save/load/new — the clean baseline
-    /// `patch_dirty` compares against so destructive actions (New Patch,
-    /// Open) can prompt to save or discard first.
-    last_saved: Mutex<Option<PatchDoc>>,
+    /// Per-workspace snapshot at the last save/load/new — the clean
+    /// baseline `patch_dirty` compares against so destructive actions
+    /// (New Patch, Open) can prompt to save or discard first. Rack and
+    /// decks baselines are independent: an edit on one tab never makes
+    /// the OTHER tab's patch dirty. Indexed by [`ws_index`].
+    last_saved: Mutex<[Option<PatchDoc>; 2]>,
     /// Watch-folder scanner; kept alive for the app's lifetime.
     _watcher: dj_library::WatchHandle,
     /// Background analysis worker (M3): drains the library queue so
@@ -62,6 +68,49 @@ struct AppState {
 /// the repo checkout unless `DJ_STATION_DATA_DIR` overrides it.
 fn patches_dir() -> PathBuf {
     dj_library::default_data_dir().join("patches")
+}
+
+/// Deck patches (the Decks tab's workspace: bank + its rack) get their
+/// own folder, a sibling of `patches/` — the two tabs are two different
+/// racks and their saves never mix.
+fn deck_patches_dir() -> PathBuf {
+    dj_library::default_data_dir().join("deck_patches")
+}
+
+/// Where a workspace's named patches live.
+fn workspace_patches_dir(ws: Workspace) -> PathBuf {
+    match ws {
+        Workspace::Rack => patches_dir(),
+        Workspace::Decks => deck_patches_dir(),
+    }
+}
+
+/// Parse a command's optional `workspace` argument. Absent means the Rack
+/// tab's workspace — every pre-workspace caller keeps its behavior.
+fn ws_arg(workspace: Option<&str>) -> CmdResult<Workspace> {
+    match workspace {
+        None | Some("rack") => Ok(Workspace::Rack),
+        Some("decks") => Ok(Workspace::Decks),
+        Some(other) => Err(CmdError::invalid(format!("unknown workspace {other:?}"))),
+    }
+}
+
+fn other_workspace(ws: Workspace) -> Workspace {
+    match ws {
+        Workspace::Rack => Workspace::Decks,
+        Workspace::Decks => Workspace::Rack,
+    }
+}
+
+/// One workspace of the engine as a standalone patch document, tags
+/// normalized away: what its Save writes and what its dirty-check
+/// compares. A patch FILE is workspace-neutral — which rack it loads
+/// into is the folder it lives in.
+fn workspace_doc(engine: &Engine, ws: Workspace, name: &str) -> PatchDoc {
+    let mut doc = engine.snapshot(name);
+    doc.retain_workspace(ws);
+    doc.strip_workspaces();
+    doc
 }
 
 /// Crash-recovery autosave location (outside the named patches).
@@ -86,7 +135,14 @@ fn autosave_now(state: &AppState) {
         return;
     }
     match engine.save_patch(&autosave_dir(), &name) {
-        Ok(()) => *last = Some(doc),
+        Ok(()) => {
+            // The autosave header names the RACK patch; the deck patch
+            // name rides in a sidecar so a restart can restore both.
+            if let Ok(deck_name) = state.deck_patch_name.lock() {
+                let _ = std::fs::write(autosave_dir().join("deck_name.txt"), deck_name.as_str());
+            }
+            *last = Some(doc);
+        }
         Err(e) => eprintln!("[dj-audio] autosave failed: {e:#}"),
     }
 }
@@ -195,30 +251,45 @@ fn record_edit(state: &State<AppState>, engine: &Engine, key: &EditKey) {
     }
 }
 
-/// Record the current engine state as the clean baseline for
-/// [`patch_dirty`]. Call after every save/load/new; a failure to lock is
-/// never allowed to block the operation itself. The snapshot name is fixed
-/// so the comparison ignores patch renames.
-fn mark_saved(state: &State<AppState>, engine: &Engine) {
-    if let Ok(mut last) = state.last_saved.lock() {
-        *last = Some(engine.snapshot("baseline"));
+/// `last_saved` slot for a workspace. Baselines use a fixed snapshot name
+/// so the dirty comparison ignores patch renames, and a failure to lock is
+/// never allowed to block the save/load/new itself.
+fn ws_index(ws: Workspace) -> usize {
+    match ws {
+        Workspace::Rack => 0,
+        Workspace::Decks => 1,
     }
 }
 
-/// True when the live patch differs from its last saved/loaded/new state,
-/// i.e. a destructive action (New Patch, Open) would lose work. Rack layout
-/// is ignored: positions are UI passthrough kept in the local layout store
-/// too (and captured by autosave), so a mere rearrange — or the engine
-/// lazily adopting frontend positions via `sync_positions` — must not
-/// trigger save prompts.
+/// Record ONE workspace's clean baseline (its save/load/new just landed).
+fn mark_saved_ws(state: &State<AppState>, engine: &Engine, ws: Workspace) {
+    if let Ok(mut last) = state.last_saved.lock() {
+        last[ws_index(ws)] = Some(workspace_doc(engine, ws, "baseline"));
+    }
+}
+
+/// Record both baselines (a whole-engine load/new just landed).
+fn mark_saved(state: &State<AppState>, engine: &Engine) {
+    mark_saved_ws(state, engine, Workspace::Rack);
+    mark_saved_ws(state, engine, Workspace::Decks);
+}
+
+/// True when a workspace's patch differs from its last saved/loaded/new
+/// state, i.e. a destructive action (New Patch, Open) would lose work.
+/// Each tab asks about ITS OWN workspace — an edit on the other tab never
+/// dirties this one. Rack layout is ignored: positions are UI passthrough
+/// kept in the local layout store too (and captured by autosave), so a
+/// mere rearrange — or the engine lazily adopting frontend positions via
+/// `sync_positions` — must not trigger save prompts.
 #[tauri::command]
-fn patch_dirty(state: State<AppState>) -> CmdResult<bool> {
+fn patch_dirty(state: State<AppState>, workspace: Option<String>) -> CmdResult<bool> {
+    let ws = ws_arg(workspace.as_deref())?;
     let engine = engine_lock(&state)?;
     let last = state.last_saved.lock().map_err(err)?;
-    let Some(last) = last.as_ref() else {
+    let Some(last) = last[ws_index(ws)].as_ref() else {
         return Ok(true);
     };
-    let mut current = engine.snapshot("baseline");
+    let mut current = workspace_doc(&engine, ws, "baseline");
     current.layout = last.layout.clone();
     Ok(*last != current)
 }
@@ -548,6 +619,9 @@ struct NodeSnapshot {
     /// frontend adopts it on refresh — this is how undo/redo moves panels
     /// back. `None` = engine has no opinion; the local layout store wins.
     position: Option<(f32, f32)>,
+    /// Which rack workspace ("rack" or "decks") the module lives in: each
+    /// tab renders only its own.
+    workspace: Workspace,
 }
 
 #[tauri::command]
@@ -680,6 +754,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                 .collect(),
             bypassed: n.bypassed,
             position: n.position,
+            workspace: n.workspace,
         })
         .collect();
     Ok(out)
@@ -794,9 +869,18 @@ fn macro_preview(
 }
 
 #[tauri::command]
-fn add_module(state: State<AppState>, instance: String, type_id: String) -> CmdResult<()> {
+fn add_module(
+    state: State<AppState>,
+    instance: String,
+    type_id: String,
+    workspace: Option<String>,
+) -> CmdResult<()> {
+    let ws = ws_arg(workspace.as_deref())?;
     let mut engine = patch_edit(&state, EditKey::Add(&instance))?;
-    engine.add_module(&instance, &type_id).map_err(err)
+    engine.add_module(&instance, &type_id).map_err(err)?;
+    // The module lands in the workspace of the tab that added it (macro
+    // members follow their instance).
+    engine.set_module_workspace(&instance, ws).map_err(err)
 }
 
 #[tauri::command]
@@ -1177,6 +1261,12 @@ fn load_demo_patch(state: State<AppState>) -> CmdResult<()> {
                 {
                     *state.patch_name.lock().map_err(err)? = name;
                 }
+                if let Ok(deck_name) = std::fs::read_to_string(autosave.join("deck_name.txt")) {
+                    let deck_name = deck_name.trim();
+                    if !deck_name.is_empty() {
+                        *state.deck_patch_name.lock().map_err(err)? = deck_name.to_string();
+                    }
+                }
                 // The startup restore is not an edit: without this, undoing
                 // past the session's first change restores the pre-load
                 // EMPTY engine (blank rack, telemetry "no node" spam).
@@ -1315,12 +1405,24 @@ fn copy_modules(state: State<AppState>, instances: Vec<String>) -> CmdResult<Str
 /// wires remapped). One undo step; returns copied id -> created id so the
 /// frontend can place each paste near its source module.
 #[tauri::command]
-fn paste_modules(state: State<AppState>, clipboard: String) -> CmdResult<BTreeMap<String, String>> {
+fn paste_modules(
+    state: State<AppState>,
+    clipboard: String,
+    workspace: Option<String>,
+) -> CmdResult<BTreeMap<String, String>> {
+    let ws = ws_arg(workspace.as_deref())?;
     let clip: PatchDoc = serde_json::from_str(&clipboard)
         .map_err(|e| CmdError::invalid(format!("bad clipboard: {e}")))?;
     let mut engine = patch_edit(&state, EditKey::Paste)?;
     let mut doc = engine.snapshot("paste");
     let renames = doc.paste(&clip);
+    // The copies land in the workspace of the tab pasting them, wherever
+    // the copy came from.
+    for id in renames.values() {
+        if let Some(mf) = doc.modules.get_mut(id) {
+            mf.workspace = ws;
+        }
+    }
     engine.apply_doc(&doc).map_err(err)?;
     // A pasted Beat Clip carries only its binding; hand each copy the
     // audio its source already holds — nothing to re-assemble, and it
@@ -1449,10 +1551,18 @@ fn tap_all(state: State<AppState>) -> CmdResult<BTreeMap<String, BTreeMap<String
 }
 
 #[tauri::command]
-fn save_patch(state: State<AppState>, dir: String, name: String) -> CmdResult<()> {
+fn save_patch(
+    state: State<AppState>,
+    dir: String,
+    name: String,
+    workspace: Option<String>,
+) -> CmdResult<()> {
+    let ws = ws_arg(workspace.as_deref())?;
     let engine = engine_lock(&state)?;
-    engine.save_patch(&PathBuf::from(dir), &name).map_err(err)?;
-    mark_saved(&state, &engine);
+    workspace_doc(&engine, ws, &name)
+        .write(Path::new(&dir))
+        .map_err(err)?;
+    mark_saved_ws(&state, &engine, ws);
     Ok(())
 }
 
@@ -1467,44 +1577,53 @@ fn valid_patch_name(name: &str) -> bool {
             .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
 }
 
+/// The current-patch-name cell for a workspace.
+fn ws_name(state: &AppState, ws: Workspace) -> &Mutex<String> {
+    match ws {
+        Workspace::Rack => &state.patch_name,
+        Workspace::Decks => &state.deck_patch_name,
+    }
+}
+
 #[tauri::command]
-fn save_patch_as(state: State<AppState>, name: String) -> CmdResult<()> {
+fn save_patch_as(state: State<AppState>, name: String, workspace: Option<String>) -> CmdResult<()> {
+    let ws = ws_arg(workspace.as_deref())?;
     let name = name.trim().to_string();
     if !valid_patch_name(&name) {
         return Err(CmdError::invalid(format!("invalid patch name: {name:?}")));
     }
     let engine = engine_lock(&state)?;
-    engine
-        .save_patch(&patches_dir().join(&name), &name)
+    workspace_doc(&engine, ws, &name)
+        .write(&workspace_patches_dir(ws).join(&name))
         .map_err(err)?;
-    mark_saved(&state, &engine);
-    *state.patch_name.lock().map_err(err)? = name;
+    mark_saved_ws(&state, &engine, ws);
+    *ws_name(&state, ws).lock().map_err(err)? = name;
     Ok(())
 }
 
-/// File > New Patch: replace the rack with a fresh empty engine (undoable)
-/// and reset the working name to "untitled".
+/// File > New Patch, for ONE workspace: clear its modules out of the live
+/// engine (undoable) and reset its working name to "untitled". The other
+/// workspace — the other tab's rack — is untouched: the engine keeps
+/// running and only the emptied side goes quiet. A decks New leaves the
+/// workspace truly empty; the page's next `decks_ensure` builds the fresh
+/// bank, exactly like the first visit ever did.
 #[tauri::command]
-fn new_patch(state: State<AppState>) -> CmdResult<()> {
+fn new_patch(state: State<AppState>, workspace: Option<String>) -> CmdResult<()> {
+    let ws = ws_arg(workspace.as_deref())?;
     let mut engine = patch_edit(&state, EditKey::NewPatch)?;
-    let registry = ExtensionRegistry::discover(&extension_dirs()).map_err(err)?;
-    let mut fresh = Engine::new(EngineConfig::default(), registry).map_err(err)?;
-    for def in store_macro_library().defs.into_values() {
-        fresh.register_macro(def);
-    }
-    with_stopped(&mut engine, |e| {
-        *e = fresh;
-        Ok(())
-    })?;
-    mark_saved(&state, &engine);
-    *state.patch_name.lock().map_err(err)? = "untitled".into();
+    let mut doc = engine.snapshot("new");
+    doc.retain_workspace(other_workspace(ws));
+    restore_doc(&state, &mut engine, &doc)?;
+    mark_saved_ws(&state, &engine, ws);
+    *ws_name(&state, ws).lock().map_err(err)? = "untitled".into();
     Ok(())
 }
 
 #[tauri::command]
-fn list_patches() -> CmdResult<Vec<String>> {
+fn list_patches(workspace: Option<String>) -> CmdResult<Vec<String>> {
+    let ws = ws_arg(workspace.as_deref())?;
     let mut names = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(patches_dir()) {
+    if let Ok(entries) = std::fs::read_dir(workspace_patches_dir(ws)) {
         for entry in entries.flatten() {
             if entry.path().join("patch.json").is_file() {
                 names.push(entry.file_name().to_string_lossy().into_owned());
@@ -1515,21 +1634,43 @@ fn list_patches() -> CmdResult<Vec<String>> {
     Ok(names)
 }
 
-/// Returns non-fatal load warnings (e.g. wires dropped because a newer
-/// module manifest no longer has the saved jack) for the UI banner.
+/// Open a named patch INTO one workspace of the live engine: the
+/// workspace's current modules leave, the patch's arrive under its tag
+/// (renamed only away from a collision with the other workspace), and the
+/// other workspace is untouched — DSP state, telemetry and all. One undo
+/// step. Returns non-fatal load warnings for the UI banner.
 #[tauri::command]
-fn load_patch_by_name(state: State<AppState>, name: String) -> CmdResult<Vec<String>> {
+fn load_patch_by_name(
+    state: State<AppState>,
+    name: String,
+    workspace: Option<String>,
+) -> CmdResult<Vec<String>> {
+    let ws = ws_arg(workspace.as_deref())?;
     if !valid_patch_name(&name) {
         return Err(CmdError::invalid(format!("invalid patch name: {name:?}")));
     }
-    let warnings = load_patch_dir(&state, &patches_dir().join(&name))?;
-    *state.patch_name.lock().map_err(err)? = name;
+    let dir = workspace_patches_dir(ws).join(&name);
+    let incoming = PatchDoc::read(&dir).map_err(err)?;
+    let mut engine = patch_edit(&state, EditKey::Load(&dir.display().to_string()))?;
+    // Warnings accumulate on the engine; report only this load's.
+    engine.load_warnings.clear();
+    let mut doc = engine.snapshot("load");
+    doc.retain_workspace(other_workspace(ws));
+    doc.merge_workspace(&incoming, ws);
+    restore_doc(&state, &mut engine, &doc)?;
+    mark_saved_ws(&state, &engine, ws);
+    *ws_name(&state, ws).lock().map_err(err)? = name;
+    let warnings = engine.load_warnings.clone();
+    for w in &warnings {
+        eprintln!("[dj-audio] patch load ({}): {w}", dir.display());
+    }
     Ok(warnings)
 }
 
 #[tauri::command]
-fn current_patch(state: State<AppState>) -> CmdResult<String> {
-    Ok(state.patch_name.lock().map_err(err)?.clone())
+fn current_patch(state: State<AppState>, workspace: Option<String>) -> CmdResult<String> {
+    let ws = ws_arg(workspace.as_deref())?;
+    Ok(ws_name(&state, ws).lock().map_err(err)?.clone())
 }
 
 /// Returns the engine's non-fatal load warnings (dropped stale wires/params).
@@ -2642,8 +2783,9 @@ fn main() {
             hub,
             downloads,
             patch_name: Mutex::new("untitled".into()),
+            deck_patch_name: Mutex::new("untitled".into()),
             last_autosave: Mutex::new(None),
-            last_saved: Mutex::new(None),
+            last_saved: Mutex::new([None, None]),
             _watcher: watcher,
             analysis,
             clips: clip::ClipCache::default(),
@@ -2767,14 +2909,24 @@ fn main() {
             }
             // Save with the current name directly in the backend; Save As /
             // Open need frontend interaction (name prompt / patch picker).
+            // The save targets the workspace of the page the user is ON —
+            // the audio focus the frontend reports on every tab switch is
+            // exactly "which page is open".
             "file_save" => {
                 let state = app.state::<AppState>();
-                let name = state
-                    .patch_name
+                let ws = match state.engine.lock().map(|e| e.audio_focus()) {
+                    Ok(AudioFocus::Decks) => Workspace::Decks,
+                    _ => Workspace::Rack,
+                };
+                let name = ws_name(&state, ws)
                     .lock()
                     .map(|n| n.clone())
                     .unwrap_or_else(|_| "untitled".into());
-                if let Err(e) = save_patch_as(app.state::<AppState>(), name) {
+                let ws_str = match ws {
+                    Workspace::Rack => None,
+                    Workspace::Decks => Some("decks".to_string()),
+                };
+                if let Err(e) = save_patch_as(app.state::<AppState>(), name, ws_str) {
                     eprintln!("[dj-station] save failed: {e}");
                 } else {
                     let _ = app.emit("dj-menu", "saved");

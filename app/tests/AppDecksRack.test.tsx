@@ -52,6 +52,9 @@ function node(instance: string, manifest: Manifest) {
     params: {},
     wired_inputs: [],
     midi_mappings: [],
+    // The Decks tab renders only its own workspace: the bank and the
+    // modules racked around it live there.
+    workspace: 'decks',
   };
 }
 
@@ -154,10 +157,14 @@ beforeEach(() => {
 describe('the Decks tab wraps the real rack canvas', () => {
   it('keeps the canvas on screen, with the chrome around it and no bank panel in the grid', async () => {
     render(<App />);
-    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
+    // The decks workspace is not the Rack tab's: its modules only render
+    // once the Decks tab (their own rack) is up.
+    await waitFor(() => expect(fakeEngine.nodes).toHaveBeenCalled());
+    expect(screen.queryByTestId('module-vca1')).toBeNull();
 
     fireEvent.click(screen.getByTestId('tab-decks'));
     await waitFor(() => expect(screen.getByTestId('decks-io-0')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
 
     // The SAME rack area is visible (not display:none'd away like on the
     // Library tab), other modules keep their panels…
@@ -172,17 +179,18 @@ describe('the Decks tab wraps the real rack canvas', () => {
     // The chrome cable overlay is up.
     expect(screen.getByTestId('decks-chrome-overlay')).toBeTruthy();
 
-    // Back on the Rack tab the bank gets its panel back and the chrome
-    // goes away.
+    // Back on the Rack tab the chrome goes away and so does the whole
+    // decks workspace: the two tabs are two separate racks.
     fireEvent.click(screen.getByTestId('tab-rack'));
-    await waitFor(() => expect(screen.getByTestId('module-bank1')).toBeTruthy());
+    await waitFor(() => expect(screen.queryByTestId('module-vca1')).toBeNull());
+    expect(screen.queryByTestId('module-bank1')).toBeNull();
     expect(screen.queryByTestId('decks-strips')).toBeNull();
   });
 
   it('wires a deck send to a module input through the same engine command as the rack', async () => {
     render(<App />);
-    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
     fireEvent.click(screen.getByTestId('tab-decks'));
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
     const io = await screen.findByTestId('decks-io-0');
 
     // Click the deck's OUT, then the module's IN — the Rack tab's own
@@ -201,8 +209,8 @@ describe('the Decks tab wraps the real rack canvas', () => {
 
   it('wires the top-bar clock into a module input', async () => {
     render(<App />);
-    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
     fireEvent.click(screen.getByTestId('tab-decks'));
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
     const clock = await screen.findByTestId('decks-clock-jack');
 
     fireEvent.click(clock.querySelector('[data-testid="jack-output-clock"]') as HTMLElement);

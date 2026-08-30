@@ -164,6 +164,9 @@ impl Engine {
     /// user has routed through the rack is left exactly as they left it.
     pub fn decks_connect_outputs(&mut self, instance_id: &str) -> Result<()> {
         let (live, monitor) = self.decks_loose_outputs(instance_id)?;
+        // Outputs live in the bank's own workspace: a decks-tab bank must
+        // not reach across into (or borrow) the Rack tab's output modules.
+        let workspace = self.module_workspace(instance_id)?;
         for (loose, ext_id, stem, pair) in [
             (
                 live,
@@ -184,13 +187,14 @@ impl Engine {
             let existing = self
                 .nodes
                 .iter()
-                .find(|n| n.ext_id == ext_id)
+                .find(|n| n.ext_id == ext_id && n.workspace == workspace)
                 .map(|n| n.instance_id.clone());
             let out = match existing {
                 Some(existing) => existing,
                 None => {
                     let id = self.fresh_instance_id(stem);
                     self.add_module(&id, ext_id)?;
+                    self.set_module_workspace(&id, workspace)?;
                     id
                 }
             };

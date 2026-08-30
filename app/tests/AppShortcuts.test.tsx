@@ -197,7 +197,7 @@ describe('selection copy/paste/delete shortcuts', () => {
     fireEvent.keyDown(window, { key: 'c', metaKey: true });
     await waitFor(() => expect(fakeEngine.copyModules).toHaveBeenCalledWith(['osc1']));
     fireEvent.keyDown(window, { key: 'v', metaKey: true });
-    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenCalledWith('CLIP'));
+    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenCalledWith('CLIP', 'rack'));
   });
 
   it('cmd+C with nothing selected does nothing; paste with an empty clipboard too', async () => {
@@ -252,7 +252,7 @@ describe('cmd+M module picker', () => {
     expect(screen.getByTestId('module-picker')).toBeTruthy();
     fireEvent.click(screen.getByTestId('library-add-com.dj.oscillator'));
     await waitFor(() =>
-      expect(fakeEngine.addModule).toHaveBeenCalledWith('oscillat1', 'com.dj.oscillator'),
+      expect(fakeEngine.addModule).toHaveBeenCalledWith('oscillat1', 'com.dj.oscillator', 'rack'),
     );
     expect(screen.queryByTestId('module-picker')).toBeNull();
     fireEvent.keyDown(window, { key: 'm', ctrlKey: true });
@@ -285,7 +285,7 @@ describe('cmd+M module picker', () => {
     });
     fireEvent(rackArea, drop);
     await waitFor(() =>
-      expect(fakeEngine.addModule).toHaveBeenCalledWith('oscillat1', 'com.dj.oscillator'),
+      expect(fakeEngine.addModule).toHaveBeenCalledWith('oscillat1', 'com.dj.oscillator', 'rack'),
     );
     // 100px/60px snapped to the 48px grid (jsdom rects are at 0,0), then
     // moved to the NEAREST free grid spot: (96,48) overlaps osc1's nominal

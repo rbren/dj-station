@@ -25,3 +25,4 @@ mod e2e_sequencing;
 mod e2e_shaping;
 mod e2e_sources;
 mod e2e_utilities;
+mod e2e_workspace;

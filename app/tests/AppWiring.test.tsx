@@ -298,7 +298,7 @@ describe('App wiring flow', () => {
     await waitFor(() =>
       // osc1 is taken by the existing node's instance id namespace; the
       // generator only avoids ids in use ("oscillat" prefix is free).
-      expect(fakeEngine.addModule).toHaveBeenCalledWith('oscillat1', 'com.dj.oscillator'),
+      expect(fakeEngine.addModule).toHaveBeenCalledWith('oscillat1', 'com.dj.oscillator', 'rack'),
     );
   });
 });

@@ -91,6 +91,7 @@ function makeNodes(n: number): NodeSnapshot[] {
       wired_inputs: [] as string[],
       midi_mappings: [],
       midi_led_mappings: [],
+      workspace: 'rack' as const,
     };
   });
 }

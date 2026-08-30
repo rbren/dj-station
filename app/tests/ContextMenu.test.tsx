@@ -183,7 +183,7 @@ describe('module context menu', () => {
     const paste = screen.getByTestId('ctx-paste') as HTMLButtonElement;
     expect(paste.disabled).toBe(false);
     fireEvent.click(paste);
-    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenCalledWith('CLIP'));
+    await waitFor(() => expect(fakeEngine.pasteModules).toHaveBeenCalledWith('CLIP', 'rack'));
   });
 
   it('right-click inside a multi-selection acts on the whole group', async () => {
@@ -322,7 +322,7 @@ describe('background context menu', () => {
     expect(screen.queryByTestId('ctx-delete')).toBeNull();
 
     fireEvent.click(screen.getByTestId('ctx-save'));
-    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo'));
+    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo', 'rack'));
     expect(screen.queryByTestId('context-menu')).toBeNull();
   });
 

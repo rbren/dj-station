@@ -85,6 +85,30 @@ pub enum AudioFocus {
     Silent,
 }
 
+/// Which of the app's two rack WORKSPACES a module lives in. The Rack tab
+/// and the Decks tab are two different racks sharing one engine: every
+/// module belongs to exactly one, each tab shows and edits only its own,
+/// and each saves to its own patch. The tag is control-side passthrough
+/// (like [`NodeInfo::position`]) except that audio focus reads it: the
+/// page you are looking at plays ITS workspace ([`Engine::focus_gates`]).
+///
+/// Default is Rack, everywhere — tests, offline renders and pre-workspace
+/// patches never see the field, so nothing about them changes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Workspace {
+    #[default]
+    Rack,
+    Decks,
+}
+
+impl Workspace {
+    /// serde skip helper: only Decks tags are ever written.
+    pub fn is_rack(&self) -> bool {
+        *self == Workspace::Rack
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
     pub sample_rate: f32,
@@ -192,6 +216,10 @@ pub struct NodeInfo {
     /// means "never placed via the engine" (the frontend keeps a local
     /// fallback layout).
     pub position: Option<(f32, f32)>,
+    /// Which rack workspace (Rack tab or Decks tab) the module lives in.
+    /// Control-side; the RT thread sees it only through the focus gates a
+    /// plan carries. Macro members carry their instance's tag.
+    pub workspace: Workspace,
 }
 
 impl NodeInfo {
@@ -610,10 +638,14 @@ impl Engine {
     /// Per-slot focus gate: 1.0 for a node whose signal the open page lets
     /// through to the outputs, 0.0 for one it holds back.
     ///
-    /// On the Decks page that is the bank AND EVERYTHING DOWNSTREAM OF IT,
-    /// because a bank is often played through the rack (a compressor on
-    /// the way out is still the decks you are looking at); everything the
-    /// bank never reaches is the rest of the patch, and stays quiet.
+    /// Each page plays ITS OWN WORKSPACE ([`Workspace`]): the Rack tab the
+    /// rack-workspace modules (the default tag, so tests, offline renders
+    /// and pre-workspace patches all stay wide open), the Decks tab the
+    /// decks-workspace modules. On the Decks page everything DOWNSTREAM OF
+    /// A BANK opens too, whatever its tag — a bank is often played through
+    /// modules (a compressor on the way out is still the decks you are
+    /// looking at), and a pre-workspace session keeps sounding until its
+    /// modules are re-tagged.
     ///
     /// Reachability is per NODE, so a rack source that meets the bank
     /// inside a shared module — both into one mixer, mixer into the
@@ -621,7 +653,15 @@ impl Engine {
     /// wire, and a wire carries clocks and CV as readily as audio.
     fn focus_gates(&self, slots: usize, wires: &[WireSpec]) -> Vec<f32> {
         match self.audio_focus {
-            AudioFocus::Rack => vec![1.0; slots],
+            AudioFocus::Rack => {
+                let mut open = vec![1.0; slots];
+                for (slot, info) in self.nodes.iter_slots() {
+                    if info.workspace == Workspace::Decks {
+                        open[slot] = 0.0;
+                    }
+                }
+                open
+            }
             AudioFocus::Silent => vec![0.0; slots],
             AudioFocus::Decks => {
                 let mut open = vec![0.0; slots];
@@ -629,7 +669,8 @@ impl Engine {
                     .nodes
                     .iter_slots()
                     .filter(|(_, info)| {
-                        BuiltinKind::from_ext_id(&info.ext_id) == Some(BuiltinKind::Decks)
+                        info.workspace == Workspace::Decks
+                            || BuiltinKind::from_ext_id(&info.ext_id) == Some(BuiltinKind::Decks)
                     })
                     .map(|(slot, _)| slot)
                     .collect();
@@ -647,6 +688,42 @@ impl Engine {
                 open
             }
         }
+    }
+
+    /// Move a top-level module (macro members follow their instance) to a
+    /// workspace. Control-side bookkeeping plus one replan: the focus
+    /// gates read the tag, so a module changing rooms changes what the
+    /// open page plays.
+    pub fn set_module_workspace(&mut self, instance_id: &str, workspace: Workspace) -> Result<()> {
+        let prefix = format!("{instance_id}/");
+        let mut hit = false;
+        let mut changed = false;
+        for info in self.nodes.iter_mut() {
+            if info.instance_id == instance_id || info.instance_id.starts_with(&prefix) {
+                hit = true;
+                changed |= info.workspace != workspace;
+                info.workspace = workspace;
+            }
+        }
+        // A macro instance with zero members cannot exist; a bare miss is
+        // a caller bug.
+        anyhow::ensure!(hit, "no module named {instance_id:?}");
+        if changed {
+            let plan = self.plan_for(&self.n_inputs_by_slot(), &self.wires);
+            self.dispatch_edit(GraphEdit::Replan { plan })?;
+        }
+        Ok(())
+    }
+
+    /// The workspace of a top-level module (a macro instance answers via
+    /// its members — they all carry the same tag).
+    pub fn module_workspace(&self, instance_id: &str) -> Result<Workspace> {
+        let prefix = format!("{instance_id}/");
+        self.nodes
+            .iter()
+            .find(|n| n.instance_id == instance_id || n.instance_id.starts_with(&prefix))
+            .map(|n| n.workspace)
+            .ok_or_else(|| anyhow::anyhow!("no module named {instance_id:?}"))
     }
 
     /// Which page the engine is playing for.
@@ -1102,6 +1179,7 @@ impl Engine {
             clip: None,
             bypassed: false,
             position: None,
+            workspace: Workspace::default(),
         };
 
         // Apply default params before the module ships to the RT thread.

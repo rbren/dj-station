@@ -135,6 +135,11 @@ pub struct EventsFile {
     pub deck_slots: Vec<DecksSlotSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hands: Vec<HandsTraceSpec>,
+    /// Audio focus for the whole render ("rack" is the engine default;
+    /// "decks"/"silent" gate by workspace tag) — how a golden pins the
+    /// per-page gating of the workspace tags a patch carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<String>,
 }
 
 impl EventsFile {
@@ -194,6 +199,15 @@ fn render_case(case: &str) -> PathBuf {
         serde_json::from_str(&std::fs::read_to_string(case_dir.join("events.json")).unwrap())
             .unwrap();
     let mut engine = Engine::load_patch(&case_dir.join("patch"), super::registry()).unwrap();
+    if let Some(focus) = &events.focus {
+        let focus = match focus.as_str() {
+            "rack" => dj_engine::AudioFocus::Rack,
+            "decks" => dj_engine::AudioFocus::Decks,
+            "silent" => dj_engine::AudioFocus::Silent,
+            other => panic!("unknown focus {other:?}"),
+        };
+        engine.set_audio_focus(focus).unwrap();
+    }
     for t in &events.tracks {
         let ext = engine
             .nodes

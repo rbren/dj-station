@@ -210,6 +210,7 @@ describe('collapse-to-macro UI', () => {
       expect(fakeEngine.addModule).toHaveBeenCalledWith(
         expect.stringMatching(/^tone/),
         'macro.tone',
+        'rack',
       ),
     );
   });

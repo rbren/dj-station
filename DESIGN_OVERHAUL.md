@@ -374,6 +374,16 @@ looks continuous instead of dying at the canvas border. A patched tone
 knob keeps its knob but recolors its jack label with `--cue`: the visual
 statement that the knob now drives the rack, not its band.
 
+**D14 — Decks and Rack are two workspaces (post-overhaul).** Also a
+recorded decision, not a review fix. The Decks tab's rack is its OWN
+workspace: the modules racked around the bank never appear on the Rack
+tab, and each tab keeps its own patch name in the one header title slot
+(`patch-title` swaps with the tab — no second title, no "which patch is
+this" chrome). File > Save/Open/New always mean the tab you are on;
+deck patches live in their own folder so the open dialog never mixes
+the two lists. The visual grammar did not change — same canvas, same
+chrome — only what the canvas contains per tab.
+
 ---
 
 ## G. Still open after this pass

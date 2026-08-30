@@ -51,3 +51,4 @@ mod scope;
 mod telemetry;
 mod undo;
 mod wire_summing;
+mod workspaces;

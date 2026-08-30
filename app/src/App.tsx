@@ -16,6 +16,8 @@ import {
   type MacroGroup,
   type MacroInfo,
   type ModuleMove,
+  type NodeSnapshot,
+  type Workspace,
 } from './engine';
 import { isEditableTarget, useFileShortcuts } from './fileShortcuts';
 import { RackKeysContext } from './keyScope';
@@ -72,6 +74,16 @@ const ZOOM_STEP = 1.2;
 const ZOOM_MIN = 0.04;
 const ZOOM_MAX = 2.5;
 
+/** Each workspace is its own canvas, so each keeps its own view: the
+ *  rack's pan/zoom under the pre-workspace keys (nothing saved moves),
+ *  the decks rack under its own. */
+function zoomKey(ws: Workspace): string {
+  return ws === 'decks' ? 'dj-decks-zoom' : ZOOM_KEY;
+}
+function panKey(ws: Workspace): string {
+  return ws === 'decks' ? 'dj-decks-pan' : PAN_KEY;
+}
+
 /** Background dot-grid spacing: below ~0.25 zoom the 48px lattice collapses
  *  into moiré, so double the spacing until dots sit ≥ 12px apart. Doubling
  *  keeps every remaining dot on a rack grid intersection, so the grid still
@@ -82,15 +94,15 @@ function dotGridSize(zoom: number): number {
   return size;
 }
 
-function loadZoom(): number {
-  const z = Number(localStorage.getItem(ZOOM_KEY));
+function loadZoom(ws: Workspace): number {
+  const z = Number(localStorage.getItem(zoomKey(ws)));
   return Number.isFinite(z) && z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 1;
 }
 
 const PAN_KEY = 'dj-rack-pan';
 
-function loadPan(): { x: number; y: number } {
-  const p = loadJson<{ x: number; y: number }>(PAN_KEY, { x: 0, y: 0 });
+function loadPan(ws: Workspace): { x: number; y: number } {
+  const p = loadJson<{ x: number; y: number }>(panKey(ws), { x: 0, y: 0 });
   return Number.isFinite(p.x) && Number.isFinite(p.y) ? p : { x: 0, y: 0 };
 }
 
@@ -107,6 +119,18 @@ function audioFocusForView(view: View): AudioFocus {
   if (view === 'rack') return 'rack';
   if (view === 'decks') return 'decks';
   return 'silent';
+}
+
+/** The rack workspace a tab edits (and saves): the Decks tab its own, every
+ *  other tab the Rack's — the canvas is only on screen on those two, and
+ *  the app-global file shortcuts keep meaning the rack patch elsewhere. */
+function workspaceForView(view: View): Workspace {
+  return view === 'decks' ? 'decks' : 'rack';
+}
+
+/** A node's workspace; absent means 'rack' (the wire-format default). */
+function inWorkspace(n: NodeSnapshot, ws: Workspace): boolean {
+  return (n.workspace ?? 'rack') === ws;
 }
 
 export default function App() {
@@ -127,8 +151,23 @@ export default function App() {
   const [wireColors, setWireColors] = useState<Record<string, number>>(() =>
     loadJson(WIRE_COLORS_KEY, {}),
   );
-  const [patchName, setPatchName] = useState('untitled');
+  // One working patch name PER WORKSPACE: the Rack tab and the Decks tab
+  // are two separate racks with two separate patch files. `patchName` (and
+  // every file action below) means the OPEN tab's workspace.
+  const workspace = workspaceForView(view);
+  const [patchNames, setPatchNames] = useState<Record<Workspace, string>>({
+    rack: 'untitled',
+    decks: 'untitled',
+  });
+  const patchName = patchNames[workspace];
+  const setPatchName = useCallback(
+    (name: string, ws: Workspace) => setPatchNames((prev) => ({ ...prev, [ws]: name })),
+    [],
+  );
   const [patchList, setPatchList] = useState<string[]>([]);
+  // Remount key for the Decks chrome: a decks-workspace New/Open replaces
+  // the bank out from under the page, and a remount re-runs its discovery.
+  const [decksEpoch, setDecksEpoch] = useState(0);
   // File-menu dialogs (Save As… / Open Patch…), driven by native menu events.
   const [fileDialog, setFileDialog] = useState<null | 'save-as' | 'open'>(null);
   const [saveAsName, setSaveAsName] = useState('untitled');
@@ -200,11 +239,14 @@ export default function App() {
   // Beatify clips offered in the picker's Clips tab, fetched while it is
   // open (a clip saved in another tab shows up the next time it opens).
   const [beatClips, setBeatClips] = useState<BeatClipEntry[]>([]);
-  const [zoom, setZoom] = useState<number>(() => loadZoom());
+  const [zoom, setZoom] = useState<number>(() => loadZoom('rack'));
   // Infinite canvas: the rack is translated by `pan` (screen px) before the
   // zoom scale, so scrolling/dragging the background opens up new area in
   // every direction — positions themselves may be negative.
-  const [pan, setPan] = useState<{ x: number; y: number }>(() => loadPan());
+  const [pan, setPan] = useState<{ x: number; y: number }>(() => loadPan('rack'));
+  // The open tab's workspace, for handlers whose identity must not churn
+  // with tab switches (wheel-pan, zoom): they read the CURRENT value here.
+  const workspaceRef = useRef<Workspace>(workspace);
   // Callback ref (state, not useRef) so the overlay re-renders once the
   // rack element mounts.
   const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
@@ -296,7 +338,7 @@ export default function App() {
       e.preventDefault();
       setPan((prev) => {
         const next = { x: prev.x - e.deltaX, y: prev.y - e.deltaY };
-        saveJson(PAN_KEY, next);
+        saveJson(panKey(workspaceRef.current), next);
         return next;
       });
     };
@@ -309,7 +351,7 @@ export default function App() {
       const next =
         direction === 0 ? 1 : Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev * ZOOM_STEP ** direction));
       try {
-        localStorage.setItem(ZOOM_KEY, String(next));
+        localStorage.setItem(zoomKey(workspaceRef.current), String(next));
       } catch {
         // persistence is best-effort
       }
@@ -319,7 +361,7 @@ export default function App() {
     // lost in empty canvas always has a way home.
     if (direction === 0) {
       setPan({ x: 0, y: 0 });
-      saveJson(PAN_KEY, { x: 0, y: 0 });
+      saveJson(panKey(workspaceRef.current), { x: 0, y: 0 });
     }
   }, []);
 
@@ -805,11 +847,18 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [nodes, setPositions, macroOwner]);
 
+  // The engine's FULL node list (both workspaces): the rack store carries
+  // only the open tab's workspace — the canvas, marquee, select-all and
+  // collision all mean "this tab's rack" — and a tab switch re-filters
+  // from here without another round-trip.
+  const allNodes = useRef<NodeSnapshot[]>([]);
+
   const refresh = useCallback(async () => {
     const snapshot = await engine.nodes();
     setConnected(snapshot !== null);
     if (snapshot) {
-      store.setNodes(snapshot);
+      allNodes.current = snapshot;
+      store.setNodes(snapshot.filter((n) => inWorkspace(n, workspaceRef.current)));
       // Adopt engine-known rack positions: undo/redo restores (moves,
       // deletes, macro deletes) land here. Nodes the engine has no
       // position for keep their local layout.
@@ -836,6 +885,19 @@ export default function App() {
     const tracks = await library.tracks();
     if (tracks) setLibraryTracks(tracks);
   }, [store]);
+
+  // Tab switch = workspace switch: swap the canvas to the incoming
+  // workspace's modules (setNodes prunes the selection and any pending
+  // wire against the new list, so neither ever crosses workspaces) and to
+  // its own remembered pan/zoom. Wires stay unfiltered: one that leads
+  // out of the workspace simply finds no panel to land on.
+  useEffect(() => {
+    if (workspaceRef.current === workspace) return;
+    workspaceRef.current = workspace;
+    store.setNodes(allNodes.current.filter((n) => inWorkspace(n, workspace)));
+    setZoom(loadZoom(workspace));
+    setPan(loadPan(workspace));
+  }, [workspace, store]);
 
   /** Place a macro instance's expanded members using the definition's
    *  saved arrangement (relative positions), anchored at `at` (falling
@@ -935,25 +997,27 @@ export default function App() {
         setBackend(await engine.start());
         const modules = await engine.listModules();
         if (modules) setModuleLib(modules);
-        const current = await engine.currentPatch();
-        if (current) setPatchName(current);
-        setPatchList((await engine.listPatches()) ?? []);
+        const current = await engine.currentPatch('rack');
+        if (current) setPatchName(current, 'rack');
+        const deckCurrent = await engine.currentPatch('decks');
+        if (deckCurrent) setPatchName(deckCurrent, 'decks');
+        setPatchList((await engine.listPatches('rack')) ?? []);
         await refresh();
       } catch (err) {
         // Startup problems land in the banner; the shell still renders.
         reportError('startup', err);
       }
     })();
-  }, [refresh]);
+  }, [refresh, setPatchName]);
 
   const savePatch = useCallback(
     async (name?: string) => {
       const finalName = (name ?? patchName).trim() || 'untitled';
-      await engine.savePatchAs(finalName);
-      setPatchName(finalName);
-      setPatchList((await engine.listPatches()) ?? []);
+      await engine.savePatchAs(finalName, workspace);
+      setPatchName(finalName, workspace);
+      setPatchList((await engine.listPatches(workspace)) ?? []);
     },
-    [patchName],
+    [patchName, workspace, setPatchName],
   );
 
   const loadNamedPatch = useCallback(
@@ -961,12 +1025,15 @@ export default function App() {
       // Warnings are non-fatal (e.g. a wire dropped because a newer module
       // version no longer has the saved jack): the patch still loaded, but
       // the user should know what got dropped.
-      const warnings = (await engine.loadPatchByName(name)) ?? [];
+      const warnings = (await engine.loadPatchByName(name, workspace)) ?? [];
       for (const w of warnings) reportError(`load ${name}`, w);
-      setPatchName(name);
+      setPatchName(name, workspace);
+      // The decks chrome discovered its bank when the page opened; the
+      // load may have brought a different one (or none), so remount it.
+      if (workspace === 'decks') setDecksEpoch((n) => n + 1);
       await refresh();
     },
-    [refresh],
+    [refresh, workspace, setPatchName],
   );
 
   // EVERY write to the module selection goes through here: it also clears
@@ -987,24 +1054,30 @@ export default function App() {
   const afterNewPatch = useCallback(async () => {
     setSelected([]);
     store.set({ pending: null });
-    setPatchName('untitled');
+    setPatchName('untitled', workspace);
+    // A decks New empties the bank out from under the chrome: remount it
+    // so its empty state (and its "add decks" button) is what renders.
+    if (workspace === 'decks') setDecksEpoch((n) => n + 1);
     await refresh();
-  }, [store, refresh, setSelected]);
+  }, [store, refresh, setSelected, setPatchName, workspace]);
 
   const newPatch = useCallback(async () => {
-    await engine.newPatch();
+    await engine.newPatch(workspace);
     await afterNewPatch();
-  }, [afterNewPatch]);
+  }, [afterNewPatch, workspace]);
 
   // Gate a destructive action (New Patch, loading another patch) behind
-  // the unsaved-changes prompt: when the live patch has edits since the
-  // last save/load/new, ask to save or discard before running it.
-  const guardUnsaved = useCallback((action: () => void) => {
-    void engine.patchDirty().then((dirty) => {
-      if (dirty) setConfirmDiscard({ proceed: action });
-      else action();
-    });
-  }, []);
+  // the unsaved-changes prompt: when the open tab's workspace has edits
+  // since its last save/load/new, ask to save or discard before running it.
+  const guardUnsaved = useCallback(
+    (action: () => void) => {
+      void engine.patchDirty(workspace).then((dirty) => {
+        if (dirty) setConfirmDiscard({ proceed: action });
+        else action();
+      });
+    },
+    [workspace],
+  );
 
   const requestNewPatch = useCallback(
     () => guardUnsaved(() => void newPatch()),
@@ -1022,9 +1095,9 @@ export default function App() {
   }, [patchName]);
 
   const openOpenDialog = useCallback(() => {
-    void engine.listPatches().then((l) => setPatchList(l ?? []));
+    void engine.listPatches(workspace).then((l) => setPatchList(l ?? []));
     setFileDialog('open');
-  }, []);
+  }, [workspace]);
 
   // Native File menu (Save is handled fully in the backend; Save As /
   // Open open in-app dialogs; New asks the frontend so the unsaved-changes
@@ -1033,10 +1106,12 @@ export default function App() {
     () =>
       onMenuAction((action) => {
         if (action === 'saved') {
-          void engine.currentPatch().then((n) => {
-            if (n) setPatchName(n);
+          // The backend's File > Save routes by audio focus, which tracks
+          // the open tab — the same workspace this frontend save targets.
+          void engine.currentPatch(workspace).then((n) => {
+            if (n) setPatchName(n, workspace);
           });
-          void engine.listPatches().then((l) => setPatchList(l ?? []));
+          void engine.listPatches(workspace).then((l) => setPatchList(l ?? []));
         } else if (action === 'request-new') {
           requestNewPatch();
         } else if (action === 'save-as') {
@@ -1045,7 +1120,7 @@ export default function App() {
           openOpenDialog();
         }
       }),
-    [requestNewPatch, openSaveAsDialog, openOpenDialog],
+    [requestNewPatch, openSaveAsDialog, openOpenDialog, workspace, setPatchName],
   );
 
   // cmd/ctrl+S / +O / +N mirror File > Save / Open Patch… / New Patch.
@@ -1105,9 +1180,12 @@ export default function App() {
   const addModule = useCallback(
     async (typeId: string, at?: { x: number; y: number }) => {
       const { nodes, positions } = store.getState();
-      const taken = new Set(nodes.map((n) => n.instance_id));
+      // Instance ids are engine-global: the OTHER workspace's modules are
+      // not in the store but still own their names.
+      const taken = new Set(allNodes.current.map((n) => n.instance_id));
       const instance = nextInstanceId(typeId, taken);
-      await engine.addModule(instance, typeId);
+      // The module lands in the open tab's rack.
+      await engine.addModule(instance, typeId, workspaceRef.current);
       const isMacro = moduleLib.find((m) => m.id === typeId)?.abi === 'macro-1';
       if (isMacro) {
         // A macro expands to a group of panels: lay them out from the
@@ -1227,7 +1305,9 @@ export default function App() {
   const pasteModules = useCallback(async () => {
     const clip = clipboard.current;
     if (!clip) return;
-    const renames = await engine.pasteModules(clip.payload);
+    // Paste lands in the open tab's rack — which is also how a selection
+    // travels between the two workspaces (copy there, paste here).
+    const renames = await engine.pasteModules(clip.payload, workspaceRef.current);
     if (!renames) return;
     // The group pastes as ONE rigid unit: relative arrangement preserved,
     // its bounding box centered on the pointer (or one grid step down-right
@@ -2297,6 +2377,7 @@ export default function App() {
                     so unmounting the chrome costs nothing. */}
                 {view === 'decks' && (
                   <DecksView
+                    key={decksEpoch}
                     onJackClick={onJackClick}
                     wires={wires}
                     pending={pending}

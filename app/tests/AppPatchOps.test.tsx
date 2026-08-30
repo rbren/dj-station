@@ -123,7 +123,7 @@ describe('file menu patch save/load', () => {
     expect(nameInput.value).toBe('demo');
     fireEvent.change(nameInput, { target: { value: 'my-patch' } });
     fireEvent.click(screen.getByTestId('file-dialog-confirm'));
-    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('my-patch'));
+    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('my-patch', 'rack'));
     // Dialog closes; header shows the new name; patch list refreshed.
     await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
     await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('my-patch'));
@@ -135,7 +135,7 @@ describe('file menu patch save/load', () => {
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
     fireEvent.keyDown(window, { key: 's', metaKey: true });
-    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo'));
+    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo', 'rack'));
   });
 
   it('File > Open lists saved patches and loads the chosen one', async () => {
@@ -145,7 +145,9 @@ describe('file menu patch save/load', () => {
     fireMenu('open');
     const entry = await screen.findByTestId('file-dialog-patch-live-set');
     fireEvent.click(entry);
-    await waitFor(() => expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set'));
+    await waitFor(() =>
+      expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set', 'rack'),
+    );
     await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
     await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('live-set'));
     // A clean load raises no warnings.
@@ -215,7 +217,7 @@ describe('unsaved-changes prompt before destructive actions', () => {
     fireMenu('request-new');
     await screen.findByTestId('unsaved-dialog');
     fireEvent.click(screen.getByTestId('unsaved-save'));
-    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo'));
+    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo', 'rack'));
     await waitFor(() => expect(fakeEngine.newPatch).toHaveBeenCalled());
   });
 
@@ -245,7 +247,9 @@ describe('unsaved-changes prompt before destructive actions', () => {
     expect(fakeEngine.loadPatchByName).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('unsaved-discard'));
-    await waitFor(() => expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set'));
+    await waitFor(() =>
+      expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set', 'rack'),
+    );
     await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('live-set'));
   });
 });

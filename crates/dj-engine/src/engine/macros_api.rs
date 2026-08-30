@@ -433,6 +433,9 @@ impl Engine {
                     mf.sync_to = None;
                 }
             }
+            // A definition is workspace-neutral: the tag lives on the
+            // INSTANCE (its members' NodeInfo), never in the adopted copy.
+            mf.workspace = crate::engine::Workspace::default();
             def_modules.insert(id.clone(), mf);
         }
         let mut def_wires: BTreeMap<String, crate::patch::WireFile> = BTreeMap::new();
@@ -545,6 +548,13 @@ impl Engine {
                 clip: None,
                 sync_to: None,
                 bypassed: false,
+                // The instance stays in the room its members were in
+                // (they must all share one — the UI only selects within
+                // a workspace).
+                workspace: sel
+                    .first()
+                    .and_then(|id| self.module_workspace(id).ok())
+                    .unwrap_or_default(),
             },
         );
         // Rack layout survives the rebuild: collapsed members keep their

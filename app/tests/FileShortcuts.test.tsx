@@ -81,7 +81,7 @@ describe('file shortcuts', () => {
   it('cmd/ctrl+S saves the patch under its current name', async () => {
     await renderApp();
     fireEvent.keyDown(window, { key: 's', ctrlKey: true });
-    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo'));
+    await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo', 'rack'));
   });
 
   it('cmd/ctrl+O opens the Open Patch dialog', async () => {

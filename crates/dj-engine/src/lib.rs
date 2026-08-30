@@ -43,7 +43,7 @@ pub use choreo::{ChoreoState, ChoreoTrack, ChoreoTrackData, NoteStep, CHOREO_ID}
 pub use engine::HardwareMidiSink;
 pub use engine::{
     audio_output_devices, normalize_module_name, AudioDeviceStatus, AudioFocus, AudioOutputs,
-    Backend, Engine, EngineConfig, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE,
+    Backend, Engine, EngineConfig, Workspace, DEFAULT_BLOCK_SIZE, DEFAULT_SAMPLE_RATE,
 };
 pub use history::UndoHistory;
 pub use knob::{Curve, KnobConfig, KnobState, KnobStyle, WireStyle};

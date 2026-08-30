@@ -78,7 +78,16 @@ export interface NodeSnapshot {
    *  refresh so undo/redo restores module moves; absent/null means the
    *  engine has no opinion and the local layout store wins. */
   position?: [number, number] | null;
+  /** Which rack workspace the module lives in: the Rack tab and the Decks
+   *  tab are two separate racks sharing one engine, and each tab renders
+   *  (and saves) only its own. Absent means 'rack' (the wire-format
+   *  default, same as patch files). */
+  workspace?: Workspace;
 }
+
+/** The Rack tab's workspace is 'rack' (the engine default); the Decks
+ *  tab's is 'decks'. */
+export type Workspace = 'rack' | 'decks';
 
 /** One module's displacement within a completed drag gesture. */
 export interface ModuleMove {
@@ -182,8 +191,8 @@ export class EngineClient extends IpcClient {
   wires() {
     return this.call<WireSnapshot[]>('engine_wires');
   }
-  addModule(instance: string, typeId: string) {
-    return this.call<void>('add_module', { instance, typeId });
+  addModule(instance: string, typeId: string, workspace?: Workspace) {
+    return this.call<void>('add_module', { instance, typeId, workspace });
   }
   /** Rename a module. The typed name keeps caps/spaces for display; its
    *  normalized form becomes the new instance id (returned). Rejects —
@@ -250,9 +259,10 @@ export class EngineClient extends IpcClient {
   copyModules(instances: string[]) {
     return this.call<string>('copy_modules', { instances });
   }
-  /** Paste a copyModules clipboard; returns copied id -> new instance id. */
-  pasteModules(clipboard: string) {
-    return this.call<Record<string, string>>('paste_modules', { clipboard });
+  /** Paste a copyModules clipboard into a workspace; returns copied id ->
+   *  new instance id. */
+  pasteModules(clipboard: string, workspace?: Workspace) {
+    return this.call<Record<string, string>>('paste_modules', { clipboard, workspace });
   }
   /** Delete a whole selection as one undo step. */
   removeModules(instances: string[]) {
@@ -286,8 +296,8 @@ export class EngineClient extends IpcClient {
   jackCapture(instance: string, jack: string) {
     return this.call<CaptureWindow>('jack_capture', { instance, jack }, { quiet: true });
   }
-  savePatch(dir: string, name: string) {
-    return this.call<void>('save_patch', { dir, name });
+  savePatch(dir: string, name: string, workspace?: Workspace) {
+    return this.call<void>('save_patch', { dir, name, workspace });
   }
   /** Loads a patch. Patches are self-contained — each macro instance
    *  carries its own copy of the definition — so this never prompts;
@@ -359,28 +369,32 @@ export class EngineClient extends IpcClient {
   breakMacro(instance: string) {
     return this.call<Record<string, string>>('break_macro', { instance });
   }
-  savePatchAs(name: string) {
-    return this.call<void>('save_patch_as', { name });
+  savePatchAs(name: string, workspace?: Workspace) {
+    return this.call<void>('save_patch_as', { name, workspace });
   }
-  /** File > New Patch: replace the rack with a fresh empty engine. */
-  newPatch() {
-    return this.call<void>('new_patch');
+  /** File > New Patch for one workspace: empty that tab's rack (the other
+   *  tab's is untouched) and reset its working name. */
+  newPatch(workspace?: Workspace) {
+    return this.call<void>('new_patch', { workspace });
   }
-  /** True when the patch has edits since the last save/load/new — i.e. a
-   *  destructive action (New Patch, Open) should prompt to save first. */
-  patchDirty() {
-    return this.call<boolean>('patch_dirty');
+  /** True when the workspace's patch has edits since its last
+   *  save/load/new — i.e. a destructive action (New Patch, Open) should
+   *  prompt to save first. Edits on the OTHER tab never dirty this one. */
+  patchDirty(workspace?: Workspace) {
+    return this.call<boolean>('patch_dirty', { workspace });
   }
-  listPatches() {
-    return this.call<string[]>('list_patches');
+  listPatches(workspace?: Workspace) {
+    return this.call<string[]>('list_patches', { workspace });
   }
-  /** Resolves to non-fatal load warnings (e.g. wires dropped because a
-   *  newer module version no longer has the saved jack). */
-  loadPatchByName(name: string) {
-    return this.call<string[]>('load_patch_by_name', { name });
+  /** Open a named patch into one workspace of the live engine (the other
+   *  workspace keeps playing untouched). Resolves to non-fatal load
+   *  warnings (e.g. wires dropped because a newer module version no
+   *  longer has the saved jack). */
+  loadPatchByName(name: string, workspace?: Workspace) {
+    return this.call<string[]>('load_patch_by_name', { name, workspace });
   }
-  currentPatch() {
-    return this.call<string>('current_patch');
+  currentPatch(workspace?: Workspace) {
+    return this.call<string>('current_patch', { workspace });
   }
   removeModule(instance: string) {
     return this.call<void>('remove_module', { instance });

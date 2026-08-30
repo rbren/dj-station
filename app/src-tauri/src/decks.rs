@@ -17,7 +17,7 @@
 use dj_engine::beat_clip::BeatClipRef;
 use dj_engine::decks::{DecksStatus, SlotControl, DECKS_ID, SURFACE_PARAM};
 use dj_engine::playback::TrackData;
-use dj_engine::Engine;
+use dj_engine::{Engine, Workspace};
 use tauri::State;
 
 use crate::beatify_clip::{render_clip, RenderedClip};
@@ -45,7 +45,12 @@ pub fn decks_ensure(state: State<AppState>) -> CmdResult<String> {
         let engine = engine_lock(&state)?;
         match engine.decks_nodes().into_iter().next() {
             Some(first) => {
-                if engine.decks_loose_outputs(&first).map_err(err)? == (false, false) {
+                // The bank belongs to the Decks workspace. A pre-workspace
+                // session's bank carries the Rack default and gets moved
+                // (below) the first time the page looks at it.
+                if engine.module_workspace(&first).map_err(err)? == Workspace::Decks
+                    && engine.decks_loose_outputs(&first).map_err(err)? == (false, false)
+                {
                     return Ok(first);
                 }
                 Some(first)
@@ -62,6 +67,9 @@ pub fn decks_ensure(state: State<AppState>) -> CmdResult<String> {
             instance
         }
     };
+    engine
+        .set_module_workspace(&instance, Workspace::Decks)
+        .map_err(err)?;
     engine.decks_connect_outputs(&instance).map_err(err)?;
     Ok(instance)
 }

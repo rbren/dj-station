@@ -1324,13 +1324,48 @@ beatify::build`.
   doing anything, and it shows the engine's `note` verbatim rather than
   inventing an explanation. Tests: `app/tests/AudioOutputPicker.test.tsx`
   (the control) and `AppAudioOutputs.test.tsx` (its place in the chrome).
+- WORKSPACES (`Workspace` in `crates/dj-engine/src/engine.rs`): the Rack
+  tab and the Decks tab are TWO SEPARATE RACKS sharing one engine. Every
+  top-level module carries a `workspace` tag (`NodeInfo.workspace`,
+  `rack`/`decks`; `rack` is the serde default and is skipped when
+  serialized, so pre-workspace patches and hand-written test docs load
+  unchanged). Macro members inherit their instance's tag; `collapse_to_
+  macro` keeps the members' workspace and `break_macro` frees them into
+  the instance's (`macros_api.rs`). `Engine::set_module_workspace` /
+  `module_workspace` move/read tags with one replan. PATCH FILES ARE
+  WORKSPACE-NEUTRAL: a named save writes ONE workspace as a standalone
+  doc with tags stripped (`PatchDoc::retain_workspace` +
+  `strip_workspaces`, composed by `workspace_doc` in `main.rs`), and a
+  load re-tags what it merges (`PatchDoc::merge_workspace`, which keeps
+  the resident workspace's ids and renames incoming collisions away) —
+  which rack a file loads into is the FOLDER it lives in: rack patches
+  under `patches/`, deck patches under the sibling `deck_patches/`
+  (`workspace_patches_dir`). The shell keeps one working name + saved
+  baseline PER workspace (`ws_name`, `mark_saved_ws`, `patch_dirty`), so
+  New/Open/Save on one tab never dirty or reset the other; the autosave
+  is the ONE full-engine snapshot that keeps tags (its `deck_name.txt`
+  sidecar restores the decks working name on restart). All patch/file
+  commands take an optional `workspace` arg; absent means rack, so every
+  pre-workspace caller keeps its meaning (`ws_arg`). The frontend mirrors
+  this: the rack store holds ONLY the open tab's workspace (App filters
+  the engine snapshot through `inWorkspace`; `allNodes` keeps the full
+  list for instance-id uniqueness), `addModule`/`pasteModules` tag the
+  open workspace, zoom/pan/patch-name are per-workspace state, and the
+  header patch title, cmd+S/O/N, the File menu (backend `file_save`
+  routes by audio focus) and the context menu all act on the open tab's
+  patch. Tests: `cargo test -p dj-engine --release --test integration
+  workspaces`, the `workspace-focus-split` E2E golden,
+  `app/tests/AppWorkspaces.test.tsx`.
 - AUDIO FOCUS (`AudioFocus`/`Engine::set_audio_focus`, `Plan::focus` in
   `graph.rs`, `set_audio_focus` in `main.rs`, `audioFocusForView` in
-  `app/src/App.tsx`): ONE PAGE SOUNDS AT A TIME — the Rack is the whole
-  patch, the Decks page is every bank plus everything DOWNSTREAM of one
-  (a bank played through a rack effect is still the decks — reachability
-  is per NODE, so a rack source that meets the bank inside a shared mixer
-  rides out with it), and a page that makes its own sound (Clip, Beatify)
+  `app/src/App.tsx`): ONE PAGE SOUNDS AT A TIME — each page plays its own
+  WORKSPACE: the Rack tab the rack-tagged modules (the default tag, so
+  tests, offline renders and pre-workspace patches stay wide open), the
+  Decks tab the decks-tagged modules plus every bank and everything
+  DOWNSTREAM of one whatever its tag (a bank played through a rack effect
+  is still the decks — reachability is per NODE, so a rack source that
+  meets the bank inside a shared mixer rides out with it), and a page
+  that makes its own sound (Clip, Beatify)
   or none (Library) leaves the engine silent. The graph is NOT torn down
   for this: a hidden page keeps running, so clocks keep time and coming
   back is instant. The gate is a
@@ -1872,6 +1907,13 @@ of the page.
   the page), and the only local state is a DRAFT of the control being
   dragged, which clears itself when the engine's reading agrees. The
   graph (nodes/wires/pending) is App's rack store, handed down as props.
+- The tab is its OWN WORKSPACE (see the WORKSPACES bullet): its modules
+  are decks-tagged, the Rack tab never shows them (and vice versa), and
+  it has its own patch files under `deck_patches/` with its own working
+  name in the header — File > Save/Open/New on this tab save, list and
+  reset only the decks rack. `decks_ensure` tags the bank it creates,
+  App remounts `DecksView` (keyed on `decksEpoch`) after a decks New/Open
+  so the chrome re-runs its ensure/rehydrate/wire-to-output pass.
 - Sound: the bank keeps RUNNING on other tabs but is held at the output
   modules (audio focus, above); opening the page also makes sure the bank
   is WIRED to an output (`decks_ensure`), so a bank added to a patch with
@@ -1883,6 +1925,8 @@ of the page.
   `DecksDock.test.tsx` (collapse/resize, their persistence and the
   cables through both),
   `AppDecksRack.test.tsx` (the canvas on the tab, no bank panel,
-  chrome-to-module wiring), plus the engine's
-  `cargo test -p dj-engine --release --test integration decks` and the
-  `decks-bank-two-clips` / `decks-rack-insert` E2E goldens.
+  chrome-to-module wiring), `AppWorkspaces.test.tsx` (workspace
+  isolation and the per-workspace file ops), plus the engine's
+  `cargo test -p dj-engine --release --test integration decks` /
+  `integration workspaces` and the `decks-bank-two-clips` /
+  `decks-rack-insert` / `workspace-focus-split` E2E goldens.

@@ -21,7 +21,7 @@ use std::path::Path;
 use crate::beat_clip::BeatClipRef;
 use crate::choreo::ChoreoState;
 use crate::decks::DecksState;
-use crate::engine::{Engine, EngineConfig, MidiMappingInfo};
+use crate::engine::{Engine, EngineConfig, MidiMappingInfo, Workspace};
 use crate::knob::KnobState;
 use crate::macros::{MacroDef, MacroInstance, MacroLibrary};
 use crate::registry::ExtensionRegistry;
@@ -88,6 +88,12 @@ pub struct ModuleFile {
     /// byte-identical to what it was.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bypassed: bool,
+    /// Which rack workspace (Rack tab or Decks tab) the module lives in.
+    /// Omitted for Rack — the default — so pre-workspace patches, and
+    /// every single-workspace patch file, are byte-identical to what they
+    /// were. Mixed docs (the autosave, undo snapshots) carry the tags.
+    #[serde(default, skip_serializing_if = "Workspace::is_rack")]
+    pub workspace: Workspace,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -291,6 +297,103 @@ impl PatchDoc {
         }
         renames
     }
+
+    /// Cut the document down to ONE workspace: modules tagged `ws` stay,
+    /// everything else leaves with its wires, macro copy and layout
+    /// entries. This is how each tab's save/dirty-check sees only its own
+    /// rack in the shared engine.
+    pub fn retain_workspace(&mut self, ws: Workspace) {
+        let drop: Vec<String> = self
+            .modules
+            .iter()
+            .filter(|(_, mf)| mf.workspace != ws)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in drop {
+            self.remove_module(&id);
+        }
+    }
+
+    /// Clear every workspace tag (back to the Rack default). A deck patch
+    /// FILE is an ordinary patch — where it loads into is the folder it
+    /// came from, not a tag baked into it — so saves normalize.
+    pub fn strip_workspaces(&mut self) {
+        for mf in self.modules.values_mut() {
+            mf.workspace = Workspace::default();
+        }
+    }
+
+    /// Merge another patch's modules into this document, tagging every
+    /// incoming module `ws`. Like [`PatchDoc::paste`], except an incoming
+    /// module KEEPS its id (and display name, and layout entry) when the
+    /// id is free — this is a patch loading into its workspace, not a
+    /// copy landing next to its source — and is renamed away from a
+    /// collision with the other workspace otherwise. Returns old -> new
+    /// ids for the renamed ones only.
+    pub fn merge_workspace(
+        &mut self,
+        incoming: &PatchDoc,
+        ws: Workspace,
+    ) -> BTreeMap<String, String> {
+        let mut renames: BTreeMap<String, String> = BTreeMap::new();
+        for old in incoming.modules.keys() {
+            if !self.modules.contains_key(old) && !renames.values().any(|v| v == old) {
+                continue; // id free: keep it
+            }
+            let base = old.trim_end_matches(|c: char| c.is_ascii_digit());
+            let base = if base.is_empty() { "mod" } else { base };
+            let fresh = (1..)
+                .map(|n| format!("{base}{n}"))
+                .find(|c| {
+                    !self.modules.contains_key(c)
+                        && !incoming.modules.contains_key(c)
+                        && !renames.values().any(|v| v == c)
+                })
+                .unwrap();
+            renames.insert(old.clone(), fresh);
+        }
+        let new_id = |id: &str| renames.get(id).cloned().unwrap_or_else(|| id.to_string());
+        for (old, file) in &incoming.macros {
+            self.macros.insert(new_id(old), file.clone());
+        }
+        for (old, mf) in &incoming.modules {
+            let mut mf = mf.clone();
+            mf.sync_to = mf.sync_to.map(|s| new_id(&s));
+            mf.workspace = ws;
+            if renames.contains_key(old) {
+                // A renamed copy cannot keep a display name whose
+                // normalized form no longer matches its id.
+                mf.name = None;
+            }
+            self.modules.insert(new_id(old), mf);
+        }
+        for (src, wf) in &incoming.wires {
+            let entries: Vec<WireEntry> = wf
+                .wires
+                .iter()
+                .map(|w| WireEntry {
+                    from_jack: w.from_jack.clone(),
+                    to: new_id(&w.to),
+                    to_jack: w.to_jack.clone(),
+                })
+                .collect();
+            self.wires.insert(new_id(src), WireFile { wires: entries });
+        }
+        // Layout rides along (macro members under their `/`-prefixed ids).
+        for (id, pos) in &incoming.layout {
+            let (owner, tail) = match id.split_once('/') {
+                Some((o, t)) => (o, Some(t)),
+                None => (id.as_str(), None),
+            };
+            let owner = new_id(owner);
+            let key = match tail {
+                Some(t) => format!("{owner}/{t}"),
+                None => owner,
+            };
+            self.layout.insert(key, *pos);
+        }
+        renames
+    }
 }
 
 impl Engine {
@@ -347,6 +450,8 @@ impl Engine {
                     clip: None,
                     sync_to: None,
                     bypassed: false,
+                    // Members all carry the instance's tag.
+                    workspace: self.module_workspace(iid).unwrap_or_default(),
                 },
             );
         }
@@ -411,6 +516,7 @@ impl Engine {
             clip: info.clip.clone(),
             sync_to: self.deck_sync_to_by_node(node_idx),
             bypassed: info.bypassed,
+            workspace: info.workspace,
         }
     }
 
@@ -433,6 +539,11 @@ impl Engine {
             mf.sync_to = mf
                 .sync_to
                 .and_then(|s| s.strip_prefix(&prefix).map(str::to_string));
+            // A definition is workspace-neutral: members carry the
+            // INSTANCE's tag at runtime, never in the saved definition
+            // (otherwise instance_state would drift from the adopted copy
+            // the moment an instance changed rooms).
+            mf.workspace = Workspace::default();
             modules.insert(inner.to_string(), mf);
         }
         // Internal wires come straight off the graph: `wire_entries` hides
@@ -470,7 +581,16 @@ impl Engine {
 
     /// Save the current patch to `dir` as a directory tree.
     pub fn save_patch(&self, dir: &Path, name: &str) -> Result<()> {
-        let doc = self.snapshot(name);
+        self.snapshot(name).write(dir)
+    }
+}
+
+impl PatchDoc {
+    /// Write the document as a patch directory tree (the disk half of
+    /// [`Engine::save_patch`]; subset saves — one workspace of a shared
+    /// engine — come through here with a filtered document).
+    pub fn write(&self, dir: &Path) -> Result<()> {
+        let doc = self;
         std::fs::create_dir_all(dir.join("modules"))?;
         std::fs::create_dir_all(dir.join("wires"))?;
         write_if_changed(&dir.join("patch.json"), &to_pretty(&doc.header)?)?;
@@ -532,7 +652,9 @@ impl Engine {
         }
         Ok(())
     }
+}
 
+impl Engine {
     /// Collect wires grouped by source instance, with jack names resolved.
     /// Macro-aware: wires fully inside one macro instance are part of its
     /// definition (skipped); wires crossing a macro boundary are rewritten
@@ -755,6 +877,11 @@ impl Engine {
             // (dropped wires warn separately) — skip it silently.
             let _ = self.restore_knob(instance_id, jack, state.clone());
         }
+        if !mf.workspace.is_rack() {
+            // Rack is what add_module/adopt_macro left; only a Decks tag
+            // needs applying (macro members included).
+            self.set_module_workspace(instance_id, mf.workspace)?;
+        }
         Ok(())
     }
 
@@ -905,6 +1032,10 @@ impl Engine {
         // Display name (covers undo/redo of renames; ids that changed
         // recreate the module upstream, keys being the ids).
         self.set_display_name(instance_id, mf.name.clone())?;
+
+        // Workspace (covers undo/redo of a module changing rooms; a no-op
+        // replan is skipped inside).
+        self.set_module_workspace(instance_id, mf.workspace)?;
 
         // MIDI mappings: rebuilt wholesale when the set differs (jack
         // allocation is order-dependent; wires re-resolve by name later).

@@ -336,6 +336,7 @@ fn macros_may_not_nest() {
             clip: None,
             sync_to: None,
             bypassed: false,
+            workspace: Default::default(),
         },
     );
     e.register_macro(nested);
