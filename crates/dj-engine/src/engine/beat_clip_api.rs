@@ -3,10 +3,10 @@
 //! [`Engine`] only.
 //!
 //! The BINDING and the AUDIO are separate on purpose. A patch persists the
-//! binding ([`BeatClipRef`]) because a Beatify clip is placements rather
-//! than a file; the samples come from the app layer, which re-assembles
-//! them after a load — [`Engine::beat_clip_pending`] is how it finds the
-//! nodes still waiting for that.
+//! binding ([`BeatClipRef`]) rather than seconds of samples; the audio
+//! comes from the app layer, which loads it out of the clip store after a
+//! patch load — [`Engine::beat_clip_pending`] is how it finds the nodes
+//! still waiting for that.
 
 use super::*;
 use crate::beat_clip::{beats_of, BeatClipRef, BeatClipStatus, IN_BPM};
@@ -64,7 +64,7 @@ impl Engine {
     }
 
     /// Load a rendered clip from a file (tests and E2E cases, where the
-    /// Beatify project a binding would name does not exist).
+    /// clip store a binding would name does not exist).
     pub fn beat_clip_load_file(
         &mut self,
         instance_id: &str,

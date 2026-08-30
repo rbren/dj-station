@@ -1,5 +1,5 @@
 //! Decks tab IPC: the bank of eight clip slots the page draws, and the
-//! Beatify clips that go in them.
+//! beat clips that go in them.
 //!
 //! The tab is a big panel for ONE rack module (`builtin.decks`), so
 //! everything here is an ordinary engine edit — the bank is in the patch
@@ -7,19 +7,19 @@
 //! me the decks" gesture: it finds the bank or makes one, and gives its
 //! live and cue pairs somewhere to play, in one undo step.
 //!
-//! A clip is placements, not audio (see [`crate::beatify_clip`]), so the
-//! patch keeps the BINDING and the samples are assembled here — when the
-//! user drops a clip into a slot, and again after a patch load or an undo
-//! that brought the bank back ([`hydrate`]). Assembling decodes and mixes
-//! seconds of audio, so those commands are `async`: a sync command runs
-//! on the main thread and would freeze the window.
+//! The patch keeps the BINDING (see [`crate::beat_clip`]) and the samples
+//! are loaded here — when the user drops a clip into a slot, and again
+//! after a patch load or an undo that brought the bank back
+//! ([`hydrate`]). Loading decodes seconds of audio, so those commands are
+//! `async`: a sync command runs on the main thread and would freeze the
+//! window.
 
 use dj_engine::beat_clip::BeatClipRef;
 use dj_engine::decks::{DeckArm, DecksStatus, MasterBus, SlotControl, DECKS_ID, SURFACE_PARAM};
 use dj_engine::{Engine, Workspace};
 use tauri::State;
 
-use crate::beatify_clip::render_clip;
+use crate::beat_clip::render_clip;
 use crate::{engine_lock, err, patch_edit, AppState, CmdResult, EditKey};
 
 /// Every Decks bank on the rack (usually one).
@@ -91,7 +91,7 @@ pub fn decks_status(state: State<AppState>, instance: String) -> CmdResult<Decks
     engine.decks_status(&instance).map_err(err)
 }
 
-/// Assemble a Beatify clip and drop it into a slot. It arrives cued to
+/// Load a saved beat clip into a slot. It arrives cued to
 /// the monitor — unmuted, out of the live mix — and on the bank's grid
 /// (`Engine::decks_load`); the level and tone controls the slot already
 /// had stay where the user left them.
@@ -100,13 +100,12 @@ pub fn decks_load(
     state: State<AppState>,
     instance: String,
     slot: usize,
-    project_id: String,
     clip_id: String,
 ) -> CmdResult<()> {
-    // Assemble BEFORE taking the engine lock: this decodes and mixes.
-    let rendered = render_clip(&state, &project_id, &clip_id)?;
+    // Load BEFORE taking the engine lock: this decodes seconds of audio.
+    let rendered = render_clip(&state, &clip_id)?;
     let clip = BeatClipRef {
-        project: project_id,
+        project: crate::clip::BEAT_CLIPS_PROJECT.into(),
         clip: clip_id,
         name: rendered.name.clone(),
         project_name: rendered.project_name.clone(),
@@ -258,12 +257,11 @@ pub fn decks_set_running(state: State<AppState>, instance: String, running: bool
     engine.decks_set_running(&instance, running).map_err(err)
 }
 
-/// Assemble any slot still waiting for its audio. The page calls this
-/// when it opens: a bank restored from the autosave at startup can find
-/// its clips unassembled (the Beatify projects they name are read off
-/// disk, and that can fail while the app is still coming up), and the
-/// symptom is a deck that looks loaded and makes no sound. Assembling
-/// again is free when nothing is pending.
+/// Load any slot still waiting for its audio. The page calls this when it
+/// opens: a bank restored from the autosave at startup can find its clips
+/// unloaded (the store is read off disk, and that can fail while the app
+/// is still coming up), and the symptom is a deck that looks loaded and
+/// makes no sound. Asking again is free when nothing is pending.
 #[tauri::command(async)]
 pub fn decks_rehydrate(state: State<AppState>) -> CmdResult<usize> {
     let mut engine = engine_lock(&state)?;
@@ -275,14 +273,14 @@ pub fn decks_rehydrate(state: State<AppState>) -> CmdResult<usize> {
     Ok(pending - engine.decks_pending().len())
 }
 
-/// Re-assemble every bank slot that knows which clip it plays but has no
+/// Re-load every bank slot that knows which clip it plays but has no
 /// audio behind it — after a patch load, or an undo/redo that recreated
-/// the module. A clip whose project has been deleted leaves its slot
-/// silent (and says so in the log): losing the source should cost the
-/// sound, never the patch.
+/// the module. A clip that has been deleted leaves its slot silent (and
+/// says so in the log): losing the source should cost the sound, never
+/// the patch.
 pub fn hydrate(state: &AppState, engine: &mut Engine) {
     for (instance, slot, clip) in engine.decks_pending() {
-        match render_clip(state, &clip.project, &clip.clip) {
+        match render_clip(state, &clip.clip) {
             Ok(rendered) => {
                 let audio = rendered.clip_audio();
                 let bpm = rendered.bpm;

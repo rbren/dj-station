@@ -215,18 +215,21 @@ function SourceTag({ source }: { source: string }) {
 
 /** The tracks on this machine — everything a clip can be cut from. */
 const SOURCES_TAB = 'sources';
-/** Every saved beat clip, whichever store it lives in. */
+/** Every saved beat clip. */
 const CLIPS_TAB = 'beat-clips';
 
 export interface LibraryViewProps {
   client: LibraryClientApi;
   /** Open a track in the Clip editor. Absent means no Clip column. */
   onEdit?: (track: Track) => void;
+  /** Open a saved beat clip in the Clip editor. Absent means the Beat
+   *  Clips tab shows no Edit buttons. */
+  onEditClip?: (clip: BeatClipEntry) => void;
   /** Saved beat clips. Absent means no Beat Clips tab. */
   clips?: BeatClipApi;
 }
 
-export function LibraryView({ client, onEdit, clips }: LibraryViewProps) {
+export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewProps) {
   const [query, setQuery] = useState('');
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   // Active tab: SOURCES_TAB, CLIPS_TAB or a provider id.
@@ -332,11 +335,9 @@ export function LibraryView({ client, onEdit, clips }: LibraryViewProps) {
     [client, query, refreshTracks],
   );
 
-  // Saved clips live in two stores (Beatify's projects and the Clip
-  // page's), and the backend answers for both as one list. Re-read it
-  // whenever either tab is opened: the Clip page and Beatify file clips
-  // while this page is off screen, and the Sources tab counts them per
-  // track.
+  // Re-read the saved clips whenever either tab is opened: the Clip page
+  // files them while this page is off screen, and the Sources tab counts
+  // them per track.
   useEffect(() => {
     if (!clips || (tab !== CLIPS_TAB && tab !== SOURCES_TAB)) return;
     let live = true;
@@ -354,7 +355,7 @@ export function LibraryView({ client, onEdit, clips }: LibraryViewProps) {
     async (entry: BeatClipEntry) => {
       setPendingClipDelete(null);
       if (!clips) return;
-      const list = await clips.delete(entry.projectId, entry.clipId);
+      const list = await clips.delete(entry.clipId);
       if (!list) return;
       setBeatClips(list);
       setStatus(`Deleted the beat clip “${entry.name}”`);
@@ -388,10 +389,7 @@ export function LibraryView({ client, onEdit, clips }: LibraryViewProps) {
     .filter(
       (c) =>
         !needle ||
-        [c.name, c.projectName, ...c.sources.map((s) => s.title ?? '')]
-          .join(' ')
-          .toLowerCase()
-          .includes(needle),
+        [c.name, ...c.sources.map((s) => s.title ?? '')].join(' ').toLowerCase().includes(needle),
     );
 
   const pending = queue ? queue.queued.length + (queue.current !== null ? 1 : 0) : 0;
@@ -704,7 +702,7 @@ export function LibraryView({ client, onEdit, clips }: LibraryViewProps) {
           {shownClips.length === 0 ? (
             <p className="library-empty" data-testid="beat-clips-empty">
               {beatClips.length === 0
-                ? 'No beat clips yet — cut one on the Clip page, or build one in Beatify.'
+                ? 'No beat clips yet — cut one on the Clip page.'
                 : 'No beat clip matches that.'}
             </p>
           ) : (
@@ -713,7 +711,6 @@ export function LibraryView({ client, onEdit, clips }: LibraryViewProps) {
                 <tr>
                   <th>Name</th>
                   <th>Cut from</th>
-                  <th>Made in</th>
                   <th>BPM</th>
                   <th>Beats</th>
                   <th>Parts</th>
@@ -722,18 +719,29 @@ export function LibraryView({ client, onEdit, clips }: LibraryViewProps) {
               </thead>
               <tbody>
                 {shownClips.map((c) => (
-                  <tr key={`${c.projectId}:${c.clipId}`} data-testid="beat-clip-row">
+                  <tr key={c.clipId} data-testid="beat-clip-row">
                     <td data-testid="beat-clip-name">{c.name}</td>
                     <td>
                       <ClipSources sources={c.sources} />
-                    </td>
-                    <td>
-                      <SourceTag source={c.projectName} />
                     </td>
                     <td>{fixed(c.bpm, 1)}</td>
                     <td>{c.beats}</td>
                     <td>{c.stems.length > 0 ? c.stems.join(' + ') : '—'}</td>
                     <td>
+                      {onEditClip && (
+                        <button
+                          data-testid="beat-clip-edit"
+                          disabled={!c.editable}
+                          data-tip={
+                            c.editable
+                              ? 'open this clip in the Clip page'
+                              : 'this clip was cut before clips recorded how, so it cannot be reopened'
+                          }
+                          onClick={() => onEditClip(c)}
+                        >
+                          Edit
+                        </button>
+                      )}
                       <button
                         className="is-danger"
                         data-testid="beat-clip-delete"

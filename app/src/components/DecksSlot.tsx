@@ -1,4 +1,4 @@
-// One deck: a channel strip for a Beatify clip. Reading down, it is the
+// One deck: a channel strip for a beat clip. Reading down, it is the
 // order a DJ's hand works in — what is loaded, what it costs to run it at
 // the bank's tempo, where it sits on the grid, then the three tone
 // controls, the fader, and mute/monitor — with queue/drop, the same mute

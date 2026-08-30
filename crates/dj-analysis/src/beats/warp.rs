@@ -15,7 +15,7 @@
 //! Identity maps (the no-warp slider position, MOD-17) short-circuit to a
 //! sample-exact copy: no overlap-add runs when nothing is being bent.
 
-use crate::beatify::grid::Anchor;
+use crate::beats::grid::Anchor;
 use crate::decode::AudioData;
 
 /// Analysis/synthesis window and search radius, in seconds. 46 ms is long
@@ -238,7 +238,7 @@ fn add_window(dst: &mut [f32], at: usize, src: &[f32], start: i64, window: &[f32
 /// the map asked for it, in cosine-similarity units at the full search
 /// radius. Quasi-periodic material (a click track, a kick pattern)
 /// correlates almost as well one period away, and taking that alignment
-/// would move the transient off its grid line — the one thing Beatify
+/// would move the transient off its grid line — the one thing the warp
 /// exists to prevent. Tuned on the drifting-click test: the measured beat
 /// spread in the rendered audio falls from 10.6 ms (penalty 1) to 5.0 ms
 /// (penalty 8) with no measurable loss of tonal energy at the ~1–3 %

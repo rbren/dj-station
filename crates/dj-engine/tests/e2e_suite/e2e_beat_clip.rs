@@ -6,8 +6,8 @@
 //! playback rate, the phase every edge re-anchors, and the wrap back to
 //! beat 0 on the tick after the clip's last beat. Left is the clip, right
 //! the clock that drives it. The clip's audio and the tempo it was
-//! rendered at come from the sidecar (the app layer assembles clips out of
-//! a Beatify project, like deck metadata coming from the library).
+//! rendered at come from the sidecar (the app layer loads clips out of the
+//! clip store, like deck metadata coming from the library).
 //!
 //! Regenerate with `REGEN_GOLDENS=1 cargo test -p dj-engine --release
 //! --test e2e_suite beat_clip` (or `./scripts/regen-goldens.sh`).

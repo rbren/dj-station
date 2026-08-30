@@ -7,12 +7,12 @@
 //! `tests/e2e/goldens/<case>.wav`. Regenerate intentional changes with
 //! `./scripts/regen-goldens.sh` and review the diff.
 
-use dj_analysis::beatify::detect::DspTracker;
+use dj_analysis::beats::detect::DspTracker;
 use dj_analysis::clip::{
     beats_from_taps, clips_dir, delete_beat_clip, load_beat_clip, migrate_beat_clips, pad_to_beats,
-    peaks, program_duration_secs, read_beat_clips, render_clip, save_beat_clip, warp_time_secs,
-    wav16_bytes, write_clip, BeatClipEdit, BeatClipSource, BleedAudio, ClipEq, ClipEqBand,
-    ClipProgram, ClipRegion, LevelPoint,
+    peaks, program_duration_secs, read_beat_clips, render_clip, save_beat_clip, update_beat_clip,
+    warp_time_secs, wav16_bytes, write_clip, BeatClipEdit, BeatClipSource, BeatGrid, BleedAudio,
+    ClipEq, ClipEqBand, ClipProgram, ClipRegion, LevelPoint,
 };
 use dj_analysis::AudioData;
 use std::path::{Path, PathBuf};
@@ -502,7 +502,7 @@ fn pad_to_beats_cuts_to_exactly_the_asked_count() {
 }
 
 /// A percussive burst on every beat over a quiet tonal bed — the same
-/// material the Beatify tests track (theirs at 44.1 kHz, this at SR).
+/// material the beat-analysis tests track (theirs at 44.1 kHz, this at SR).
 fn click_track(beats: &[f64], tail_secs: f64) -> AudioData {
     let end = beats.last().copied().unwrap_or(0.0) + tail_secs;
     let n = (end * SR as f64) as usize;
@@ -670,6 +670,95 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
         .find(|c| c.id == "b2")
         .unwrap();
     assert_eq!(no_edit.edit, None);
+}
+
+#[test]
+fn a_clip_keeps_only_the_beats_it_holds() {
+    // Eight tapped beats, of which a clip takes the middle four: the
+    // grid it carries is those four, with the ones that fall in it — the
+    // beats either side were never part of the clip.
+    let grid = BeatGrid {
+        bpm: 120.0,
+        period: 0.5,
+        phase: 0.0,
+        beats: 8,
+        times: (0..8).map(|i| i as f64 * 0.5).collect(),
+        ones: vec![0, 4],
+    };
+    let cut = grid.cut_to(1.0, 2.5);
+    assert_eq!(cut.times, [1.0, 1.5, 2.0, 2.5]);
+    assert_eq!(cut.beats, 4);
+    assert_eq!(cut.phase, 1.0);
+    assert_eq!(cut.bpm, 120.0);
+    // The downbeat at 2.0 s is the third beat of what was kept; the one
+    // at 0.0 s is outside and simply gone.
+    assert_eq!(cut.ones, [2]);
+
+    // A span with no beat in it keeps none rather than inventing any.
+    assert!(grid.cut_to(1.6, 1.9).times.is_empty());
+}
+
+#[test]
+fn saving_an_open_clip_again_revises_it_in_place() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bleed = BleedAudio {
+        left: Some(tone(220.0, 0.1)),
+        right: None,
+    };
+    let first = save_beat_clip(
+        tmp.path(),
+        "chorus stack",
+        &tone(220.0, 2.0),
+        120.0,
+        4,
+        vec!["drums".into()],
+        None,
+        &bleed,
+    )
+    .unwrap();
+
+    // The editor is still on that clip, so saving again REVISES it: same
+    // id, same files, one row in the store.
+    let again = update_beat_clip(
+        tmp.path(),
+        &first.id,
+        "chorus stack (tighter)",
+        &tone(330.0, 1.0),
+        120.0,
+        2,
+        vec!["drums".into()],
+        None,
+        &BleedAudio::default(),
+    )
+    .unwrap();
+    assert_eq!(again.id, first.id);
+    assert_eq!(again.file, first.file);
+    let clips = read_beat_clips(tmp.path());
+    assert_eq!(clips.len(), 1);
+    assert_eq!(clips[0].name, "chorus stack (tighter)");
+
+    // The audio behind it is the new take, and the bleed the revision
+    // dropped is gone rather than left to be played over it.
+    let (meta, audio, bleed) = load_beat_clip(tmp.path(), &first.id).unwrap();
+    assert_eq!(meta.beats, 2);
+    assert_eq!(audio.frames(), SR as usize);
+    assert!(bleed.left.is_none());
+    assert_eq!((meta.left_bleed_ms, meta.right_bleed_ms), (0.0, 0.0));
+
+    // A clip that is not there cannot be revised: the caller is acting on
+    // a stale list, and writing would mint a clip nobody asked for.
+    assert!(update_beat_clip(
+        tmp.path(),
+        "b99",
+        "ghost",
+        &tone(220.0, 1.0),
+        120.0,
+        2,
+        vec![],
+        None,
+        &BleedAudio::default()
+    )
+    .is_err());
 }
 
 #[test]

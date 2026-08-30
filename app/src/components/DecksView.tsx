@@ -1,4 +1,4 @@
-// The Decks page: eight Beatify clips on one clock, as eight channel
+// The Decks page: eight beat clips on one clock, as eight channel
 // strips under one tempo — CHROME around the real rack canvas. App keeps
 // the one rack (`.rack-area`, panels, wire overlay, pan/zoom) mounted and
 // visible on this tab, and this component renders the deck furniture
@@ -391,7 +391,7 @@ export function DecksView(props: DecksViewProps) {
     return (
       <div className="decks-view" data-testid="decks-view">
         <p className="empty-state decks-empty-bar" data-testid="decks-empty">
-          A deck bank plays eight Beatify clips together, on one tempo.
+          A deck bank plays eight beat clips together, on one tempo.
           <br />
           <button
             className="is-primary decks-add"
@@ -668,7 +668,7 @@ export function DecksView(props: DecksViewProps) {
           onPick={(clip) => {
             const slot = picking;
             setPicking(null);
-            void write(() => api.load(bank, slot, clip.projectId, clip.clipId));
+            void write(() => api.load(bank, slot, clip.clipId));
           }}
         />
       )}

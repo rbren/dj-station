@@ -8,7 +8,7 @@
 // type to filter, ↑/↓ to walk what is listed, Enter to take it.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { BEAT_CLIP_TYPE, type BeatClipEntry } from '../beatClip';
+import { BEAT_CLIP_TYPE, clipSourceLabel, type BeatClipEntry } from '../beatClip';
 import { StemTags } from './StemTags';
 import { engine, type MacroPreviewNode } from '../engine';
 import { loadJson, saveJson } from '../rackStore';
@@ -63,12 +63,12 @@ function loadTab(): PickerTab {
   return loadJson<PickerTab>(PICKER_TAB_KEY, 'modules') === 'clips' ? 'clips' : 'modules';
 }
 
-/** Clips whose name or project matches every term of `query`. */
+/** Clips whose name or source matches every term of `query`. */
 export function filterClips(clips: BeatClipEntry[], query: string): BeatClipEntry[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return clips;
   return clips.filter((c) => {
-    const haystack = `${c.name} ${c.projectName}`.toLowerCase();
+    const haystack = `${c.name} ${clipSourceLabel(c)}`.toLowerCase();
     return terms.every((t) => haystack.includes(t));
   });
 }
@@ -379,8 +379,8 @@ interface PickerEntryProps {
 
 /** One clip in the Clips tab: a LIST row, not a tile. A clip has no panel
  *  to preview — it is material, not a module type — so a row of name,
- *  the Beatify project it was cut in, and its length says everything a
- *  card could, and keeps the list scannable while you type at it. */
+ *  what it was cut from, and its length says everything a card could, and
+ *  keeps the list scannable while you type at it. */
 function ClipRow({
   clip,
   active,
@@ -396,7 +396,7 @@ function ClipRow({
   return (
     <li
       className={`picker-clip-row${active ? ' active' : ''}`}
-      data-testid={`picker-clip-${clip.projectId}-${clip.clipId}`}
+      data-testid={`picker-clip-${clip.clipId}`}
       data-active={active ? 'true' : undefined}
       role="option"
       aria-selected={active}
@@ -404,8 +404,8 @@ function ClipRow({
       onClick={() => onAdd(clip)}
     >
       <span className="picker-clip-name">{clip.name}</span>
-      <span className="picker-clip-project">{clip.projectName}</span>
-      <StemTags stems={clip.stems} testId={`picker-clip-stems-${clip.projectId}-${clip.clipId}`} />
+      <span className="picker-clip-project">{clipSourceLabel(clip)}</span>
+      <StemTags stems={clip.stems} testId={`picker-clip-stems-${clip.clipId}`} />
       <span className="picker-clip-beats">{clip.beats} beats</span>
       <span className="picker-clip-bpm">{clip.bpm > 0 ? `${clip.bpm.toFixed(1)} BPM` : '—'}</span>
     </li>
@@ -422,7 +422,8 @@ export function ModulePicker({
   onDeleteMacro,
 }: {
   modules: Manifest[];
-  /** Beatify clips offered in the Clips tab (empty without a backend). */
+  /** Saved beat clips offered in the Clips tab (empty without a
+   *  backend). */
   clips?: BeatClipEntry[];
   onAdd(typeId: string): void;
   /** Add a Beat Clip module loaded with this clip. */
@@ -635,7 +636,7 @@ export function ModulePicker({
             >
               {shownClips.map((c, i) => (
                 <ClipRow
-                  key={`${c.projectId}/${c.clipId}`}
+                  key={c.clipId}
                   clip={c}
                   active={i === activeIndex}
                   onHover={() => setCursor({ key: cursorKey, index: i })}
@@ -647,7 +648,7 @@ export function ModulePicker({
           {clipsTab && shownClips.length === 0 && (
             <p className="library-empty" data-testid="picker-no-clips">
               {(clips ?? []).length === 0
-                ? 'no clips yet — build one in the Beatify tab'
+                ? 'no clips yet — cut one on the Clip page'
                 : `no clips match “${query}”`}
             </p>
           )}

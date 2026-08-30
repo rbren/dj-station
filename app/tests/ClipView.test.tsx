@@ -113,8 +113,9 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
         beats: number,
         leftBleedMs: number,
         rightBleedMs: number,
+        replace?: string | null,
       ) => ({
-        id: 'b1',
+        id: replace ?? 'b1',
         name: title,
         bpm,
         beats,
@@ -124,6 +125,7 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
         rightBleedMs,
       }),
     ),
+    openBeatClip: vi.fn(async () => null),
     stemBackend: vi.fn(async () => ({
       backend: 'htdemucs_ft',
       available: true,
@@ -789,7 +791,8 @@ describe('ClipView', () => {
     await savedProgram(clip);
 
     const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call.slice(2)).toEqual([2, 6, 120, 8, 25, 10]);
+    // Trailing null: the first save of an edit files a NEW clip.
+    expect(call.slice(2)).toEqual([2, 6, 120, 8, 25, 10, null]);
   });
 
   it('says when a fractional selection will be padded to whole beats', async () => {
@@ -814,7 +817,7 @@ describe('ClipView', () => {
     fireEvent.click(screen.getByTestId('clip-save'));
     await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
     const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call.slice(2)).toEqual([2, 5.75, 120, 8, 0, 0]);
+    expect(call.slice(2)).toEqual([2, 5.75, 120, 8, 0, 0, null]);
   });
 
   it('turns right-shift taps during playback into a beat grid over the tapped span', async () => {
@@ -1985,6 +1988,106 @@ describe('ClipView', () => {
       expect(screen.getByTestId('clip-stem-hint').textContent).toContain('OutOfMemoryError'),
     );
     expect(screen.queryByTestId('clip-stem-loading')).toBeNull();
+  });
+
+  it('keeps saving the clip it filed, until another track is opened', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    select(2, 6);
+    await savedProgram(clip);
+    const save = clip.saveBeatClip as ReturnType<typeof vi.fn>;
+    expect(save.mock.calls[0][8]).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('clip-status').textContent).toMatch(/^Saved /));
+
+    // The second save revises what the first filed rather than leaving a
+    // near-copy of it beside it.
+    select(2, 5);
+    const button = screen.getByTestId('clip-save') as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false), { timeout: 3000 });
+    fireEvent.click(button);
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1][8]).toBe('b1');
+    await waitFor(() => expect(screen.getByTestId('clip-status').textContent).toMatch(/^Updated /));
+
+    // Opening another track is a new clip: the binding is dropped.
+    fireEvent.change(screen.getByTestId('clip-track-select'), {
+      target: { value: String(OTHER.id) },
+    });
+    fireEvent.click(screen.getByTestId('clip-open-track'));
+    await waitFor(() =>
+      expect((screen.getByTestId('clip-name') as HTMLInputElement).value).toContain(OTHER.title),
+    );
+    select(1, 4);
+    await savedProgram(clip);
+    expect(save.mock.calls[2][8]).toBeNull();
+  });
+
+  it('opens a saved beat clip as the edit that made it, and saves back to it', async () => {
+    const clip = clipMock({
+      openBeatClip: vi.fn(async () => ({
+        clipId: 'b7',
+        name: 'chorus stack',
+        startSecs: 2,
+        endSecs: 6,
+        leftBleedMs: 30,
+        rightBleedMs: 12,
+        program: {
+          regions: [{ source: 0, start_secs: 0, end_secs: 10, reverse: false, gain_db: 0 }],
+          overlays: [],
+          eq: { bands: [] },
+          level: [],
+          crossfade_ms: 5,
+          warp: [],
+          warp_smoothing: 0,
+          beat_grid: { bpm: 120, period: 0.5, phase: 2, beats: 4, times: [2, 2.5, 3, 3.5] },
+        },
+        sources: [{ track_id: OTHER.id, stems: ['drums'] }],
+        problem: null,
+      })),
+    });
+    const handle = createRef<ClipViewHandle>();
+    render(<ClipView ref={handle} clip={clip} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+
+    act(() => handle.current?.openClip('b7'));
+    await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
+    // Its source lane, its span, its bleed and its name all come back.
+    expect(clip.loadSource).toHaveBeenCalledWith(OTHER.id, ['drums'], expect.any(Number));
+    expect((screen.getByTestId('clip-name') as HTMLInputElement).value).toBe('chorus stack');
+    expect((screen.getByTestId('clip-bleed-left') as HTMLInputElement).value).toBe('30');
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:02.00–0:06.00');
+
+    const save = screen.getByTestId('clip-save') as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false), { timeout: 3000 });
+    fireEvent.click(save);
+    await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
+    expect((clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0][8]).toBe('b7');
+  });
+
+  it('a clip that cannot be taken apart says so instead of offering an editor', async () => {
+    const clip = clipMock({
+      openBeatClip: vi.fn(async () => ({
+        clipId: 'b9',
+        name: 'old bass run',
+        startSecs: 0,
+        endSecs: 0,
+        leftBleedMs: 0,
+        rightBleedMs: 0,
+        program: null,
+        sources: [],
+        problem: 'this clip was cut from a track the library no longer has.',
+      })),
+    });
+    const handle = createRef<ClipViewHandle>();
+    render(<ClipView ref={handle} clip={clip} library={libraryMock()} />);
+    await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+
+    act(() => handle.current?.openClip('b9'));
+    const said = await screen.findByTestId('clip-unopenable');
+    expect(said.textContent).toContain('old bass run');
+    expect(said.textContent).toContain('no longer has');
+    expect(screen.queryByTestId('clip-waveform')).toBeNull();
+    expect(clip.loadSource).not.toHaveBeenCalled();
   });
 
   it('hides, pauses playback and detaches shortcuts while inactive', async () => {

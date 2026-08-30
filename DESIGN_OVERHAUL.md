@@ -20,15 +20,13 @@ fake backend installed through the same hook the dev stress harness uses
 (`window.__DJ_STRESS_INVOKE__`, see `app/src/ipc.ts`), fed with real module
 manifests and plausible DJ data: two loaded decks, a crossfader / LFO /
 delay / beat-clip / Launch Control patch, seven library tracks in mixed
-analysis states, store search results, a two-source clip edit, and a
-Beatify project with two seeds, two clips and a full analysis payload.
+analysis states, store search results and a two-source clip edit.
 
 Screens reviewed: rack at 100 % and 60 % zoom; deck, choreography, grid
 sequencer, MIDI, QWERTY, ADSR, EQ, Turing panels; Add Module modal
 (Modules tab, Clips tab, no hits); context menu; knob popover; docs panel;
 Save As / Open Patch / Unsaved Changes dialogs; wiring-in-progress; jack
 tooltip; Library (local, stores, empty); Clip (empty, loaded, selection);
-Beatify (shelf, import dialog, analysis modal, track view, clip builder);
 900 px viewport.
 
 ## Verdict
@@ -48,9 +46,9 @@ shows up in the type or the palette. The one place the product's own world
 11 px in gray, while the largest thing on screen is a 1.9 rem module title
 repeating what the user already knows.
 
-Beatify, the newest surface, shows the problem is systemic rather than
-historical: a brand-new feature that re-picks the waveform color,
-re-invents the buttons, and hides its Save button below the fold. Until
+The newest surfaces show the problem is systemic rather than historical:
+each one re-picks the waveform color, re-invents the buttons, and hides
+its primary action below the fold. Until
 there are tokens and a quality floor, every new feature adds entropy faster
 than a redesign can remove it.
 
@@ -95,8 +93,7 @@ but ten on a 8-step scale; 0 focus rings → one global `:focus-visible`;
 across ~26 distinct values: `0.55 … 1.9 rem` plus `7, 8, 9, 10, 11, 12, 13,
 14, 20 px`. Sizes were chosen locally to make things fit, and the hierarchy
 inverted: a 1.9 rem module title over 9 px group labels and 7 px EQ axis
-ticks. On the Beatify track view the word `group` is larger than the seed
-names beside it.
+ticks — the word `group` is larger than the names beside it.
 **Fix:** one scale as custom properties in `:root`
 (`--fs-micro … --fs-display`, 11 / 12 / 13 / 15 / 18 / 22 / 30 px), every
 declaration re-mapped onto it, nothing below 11 px except true axis marks.
@@ -130,8 +127,8 @@ as one instrument instead of a toy box.
 
 ~~**A4 — Buttons are re-invented per feature area (P1).**~~ ✔
 `.store-tab`, `.add-module-btn`, `.clip-tools button`, `.file-dialog
-button`, `.deck-cue`, `.context-menu-item`, `.beatify-clip-new`,
-`.beatify-commit`, `.track-picker-more` each redefine background / border /
+button`, `.deck-cue`, `.context-menu-item`, `.track-picker-more` each
+redefine background / border /
 radius / padding with values a pixel or two apart (`#1b1d22` vs `#1d2026`;
 `4px 12px` vs `6px 12px` vs `6px 14px`). Disabled buttons look enabled
 (only the label dims), and primary actions carry no more weight than
@@ -143,9 +140,9 @@ and the per-area recipes reduced to the differences that matter. (A shared
 
 ~~**A5 — Selectors that cancel each other out (P2).**~~ ✔
 Eight top-level selectors are defined twice — `.jack` (`:258`, `:1911`),
-`.deck-cue`, `.library-empty`, `.track-picker-more`, `.beatify-builder`,
-`.beatify-open-name` (two *different* colors), `.beatify-track-waveform`,
-`.beatify-warn`. Also only 17 `:hover` rules in 4788 lines: most of the app
+`.deck-cue`, `.library-empty`, `.track-picker-more` among them, two of
+them in *different* colors. Also only 17 `:hover` rules in 4788 lines:
+most of the app
 does not acknowledge the pointer.
 **Fix:** reconcile the conflicting pairs (colors, not layout) and add one
 hover/active convention through the shared primitives.
@@ -177,7 +174,7 @@ title down to `--fs-lg`; utility buttons quieter. Title-bar geometry
 quantizer key) sit at `--fs-mark` 8 px, which is documented in the token
 block as the one exception.*
 Group titles are 0.58 rem uppercase `#6f7987` — 4.1:1 contrast, below AA,
-at 9 px. Beatify's `#7c869a` facts lines and 7 px axis marks are worse.
+at 9 px. The `#7c869a` facts lines and 7 px axis marks are worse.
 **Fix:** 11 px floor, `--ink-dim` at ≥ 4.5:1, and one casing rule applied
 with `text-transform` (never by rewriting label text, which tests pin).
 
@@ -189,10 +186,9 @@ drag has no lift.
 box-shadow only, so nothing in the collision geometry moves.
 
 ~~**B5 — Waveforms change color per page for no reason (P1).**~~ ✔
-`.beatify-peaks / .beatify-track-peaks { fill: #d8a15f }`
-(`styles.css:3999`) against `.waveform-peaks { fill: #3f7fbf }`
-(`styles.css:2482`) on deck and Clip. Tan here, blue there, and neither
-means anything.
+A tan `fill: #d8a15f` on one page against `.waveform-peaks
+{ fill: #3f7fbf }` (`styles.css:2482`) on deck and Clip. Tan here, blue
+there, and neither means anything.
 **Fix:** one waveform treatment app-wide; color encodes state (playing,
 selected, muted stem), never which page you are on.
 
@@ -211,9 +207,9 @@ trapping and `role="dialog"` were cut: behavior, not paint.)
 
 ~~**C2 — Motion ignores `prefers-reduced-motion` (P0).**~~ ✔
 Three `@keyframes` — `jack-volatile-pulse` (`:331`, infinite 0.5 s
-brightness on *every* volatile jack, i.e. dozens at once), `search-spin`,
-`beatify-stems-settling` — and **zero** matches for `prefers-reduced-motion`
-in the codebase.
+brightness on *every* volatile jack, i.e. dozens at once), `search-spin`
+and one stems-settling shimmer — and **zero** matches for
+`prefers-reduced-motion` in the codebase.
 **Fix:** a global reduced-motion block that stops continuous animation and
 collapses transitions; the volatile jack keeps a static ring in that mode
 so no information is lost.
@@ -227,7 +223,7 @@ nothing can shift a measurement — and one overlay fade-in. Guarded by C2.
 
 ~~**C4 — Hit targets are smaller than the gesture (P2).**~~ ✔
 `.jack-socket` is 16 px (`:278`), `.deck-cue` 26 × 22 px (`:2529`), title
-glyphs ~14 px, Beatify's seed ✎/× ~12 px. Patching is the core gesture.
+glyphs ~14 px, row ✎/× ~12 px. Patching is the core gesture.
 **Fix:** grow the *hit* area with a transparent `::after` inset overlay,
 leaving the painted size and every measured box exactly as it is.
 
@@ -287,43 +283,6 @@ of which seven are disabled but look enabled.
 **Fix:** `.is-primary` on the save action, the real disabled treatment from
 A4, and the tool row visually grouped away from it.
 
-~~**D6 — Beatify’s shelf rows do not align (P1).**~~ ✔
-`.beatify-project` is a flex row whose `.beatify-project-open` child is
-`flex: 1` with the source-missing warning as a *sibling*
-(`styles.css:3755-3772`), so a row with a warning is shorter and its ✎ / ×
-land at a different x than every other row (screenshot: x ≈ 627 vs 937).
-**Fix:** a fixed grid template so the actions column is the same width on
-every row, the warning inside the card, and the cards on the shared surface
-tokens.
-
-~~**D7 — Beatify’s seed rail is 180 px and everything in it wraps (P1).**~~ ✔
-`.beatify-clip-list { width: 180px }` (`:4395`) holds a title that wraps to
-three lines, a facts line that wraps to three, four 0.65 rem stem chips,
-and a three-line hint repeated under *every* seed — while ~1400 × 400 px of
-the page is empty. Available, unavailable and enabled stem chips look
-nearly identical.
-**Fix:** a wider rail, single-line titles with ellipsis + `title` tooltip,
-and three visually distinct chip states (`.beatify-stem-on` /
-`-off` / `:disabled` already exist as hooks).
-
-~~**D8 — Beatify’s tracker banner shouts a shell command forever (P1).**~~ ✔
-`beat_this not installed — using the built-in DSP tracker. pip install
-beat-this torch` sits in warning amber beside the primary actions, on every
-visit. Its text is pinned by `BeatifyView.test.tsx`, so this is a styling
-fix only: it must stop looking like an error.
-**Fix:** render `.beatify-tracker.fallback` as a quiet muted chip
-(`--ink-dim`, panel-raised background, no alert hue); reserve amber for
-states the user must act on.
-
-~~**D9 — The analysis modal hides its own Save (P1).**~~ ✔
-`.beatify-modal` is `max-height: 92vh; overflow-y: auto` (`:3843`) with a
-static footer, so at a 1000 px viewport the commit row scrolls out of
-sight. Its two sliders are native `<input type=range>` with the browser's
-default blue thumb — the inconsistency the Clip page already fixed.
-**Fix:** `position: sticky` footer with a token background and a top rule,
-`.is-primary` on the commit button, and one styled `input[type=range]`
-appearance shared by every range in the app.
-
 ~~**D10 — Add Module cards leak and get sliced (P2).**~~ ✔
 *previews are clipped to their card and faded at the bottom edge, and the
 modal hugs its content instead of always being 720 px tall. Wide panels still
@@ -340,9 +299,9 @@ markup and data plumbing.)
 
 ~~**D11 — Empty states are unreadable dead ends (P2).**~~ ✔
 *one `.empty-state` treatment covers library, clip and picker, and the
-store tabs (which showed *nothing* before a search) now say so. The Beatify
-clip grid is still a silent empty box. The rack's zero state was later
-removed entirely (an empty canvas is just an empty canvas).*
+store tabs (which showed *nothing* before a search) now say so. The rack's
+zero state was later removed entirely (an empty canvas is just an empty
+canvas).*
 Rack: *"No engine connection — run via `./run.sh` (Tauri)…"*. Library:
 *"No tracks yet — search a store tab…"* at 11 px gray. Clip: one gray
 sentence at the top-left of a black 1600 px page. Picker: lowercase *"no
@@ -353,7 +312,7 @@ padding — applied to the existing markup, plus copy edits *only* where no
 test pins the string. (New buttons/CTAs were cut: new behavior.)
 
 ~~**D12 — Overlays are six different objects (P2).**~~ ✔
-`.module-picker`, `.file-dialog`, `.beatify-modal`, `.track-picker`,
+`.module-picker`, `.file-dialog`, `.track-picker`,
 `.docs-panel`, `.context-menu`, `.knob-config-menu`: six paddings, six
 radii, three scrim opacities (0.5 / 0.55 / 0.72).
 **Fix:** one scrim value, one radius, one elevation shadow and one padding
@@ -385,10 +344,10 @@ the two lists. The visual grammar did not change — same canvas, same
 chrome — only what the canvas contains per tab.
 
 **D15 — A deck strip says each thing once (post-overhaul).** A 156 px
-column had five label rows above its knobs: clip name, project, a beat
-count, a clip tempo and a stretch, plus "out"/"in" and an L/R on each of
-the four patch sockets. What survives is a two-line title at the old
-project line's size (the Beatify project, then the clip, each ellipsized
+column had five label rows above its knobs: clip name, where it came
+from, a beat count, a clip tempo and a stretch, plus "out"/"in" and an L/R
+on each of the four patch sockets. What survives is a two-line title at
+the old source line's size (the store, then the clip, each ellipsized
 inside the one load button), one tempo line (`140 bpm +9.3%`) and an
 arrow per socket pair — ↑ for the send, ↓ for the return. The beat count
 went because the lamp row under it draws the same number, silence
@@ -473,12 +432,7 @@ Small, concrete, and each one honest about why it did not land yet.
 3. **Add Module previews clip at the right edge (P3).** Wide panels
    (Wavetable, Drum Voice) are cut off mid-panel; a scale-to-fit would
    need `PICKER_SCALE` to become per-card in `ModulePicker.tsx`.
-4. **Beatify's clip grid is a silent empty box (P3).** 0 runs renders an
-   empty 90 px lane with no invitation; the string would be new markup in
-   `BeatifyClipEditor.tsx`.
-5. **The seed rail prints "clip" under every clip name (P3).** A subtitle
-   that repeats the section header — copy, in `BeatifyClipList.tsx`.
-6. **In-glyph numerals sit at 8 px (`--fs-mark`) (P3).** EQ handles and
+4. **In-glyph numerals sit at 8 px (`--fs-mark`) (P3).** EQ handles and
    quantizer keys. Legible at 1× because they are single digits on a solid
    disc, but they are the last thing below the 11 px floor.
 
@@ -517,9 +471,6 @@ of scope for a visual pass and kept here as a backlog note.
 | Empty states gain real CTAs ("Import files…", "Open a track") | New behavior |
 | Library sorting, artwork, preview, load-to-deck | New behavior |
 | Region tinting by source on the clip timeline | Needs render-model changes |
-| Beatify: analysis overlays (confidence/drift/disagreement) | New drawing code over the timeline |
-| Beatify: one stems hint per page, clip-grid drop invitation | Markup and state changes |
-| Beatify: rename one of the two meanings of "seeds" | User-facing vocabulary + tests |
 | Wiring hint follows the cursor; compatible-jack highlighting | New interaction state |
 | Shared `<Button>` / `<Overlay>` components, focus trapping | Cross-cutting refactor of every screen |
 | Tooltip viewport clamping | Layout logic in `TooltipLayer` |

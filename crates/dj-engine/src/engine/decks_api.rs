@@ -353,7 +353,7 @@ impl Engine {
     }
 
     /// Load a rendered clip from a file (tests and E2E cases, where the
-    /// Beatify project a binding would name does not exist).
+    /// clip store a binding would name does not exist).
     pub fn decks_load_file(
         &mut self,
         instance_id: &str,

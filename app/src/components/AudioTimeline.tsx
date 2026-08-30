@@ -1,15 +1,15 @@
 // The shared audition timeline: waveform + ruler + selection + transport.
 //
 // Extracted from the Clip page so every page that plays a stretch of
-// audio (Clip, Beatify's import modal, Beatify's track view) gets the
-// same gestures instead of three hand-rolled copies:
+// audio gets the same gestures instead of a hand-rolled copy each:
 //
 //   - sweep to select; grab an edge to resize; drag inside to slide;
 //     shift-click extends the nearest edge; click seeks
 //   - wheel zooms around the cursor, shift/horizontal wheel pans,
 //     +/−/Fit buttons zoom around the selection or playhead
 //   - the ruler is HTML (SVG text would stretch with the viewBox) and its
-//     ticks are pluggable: seconds by default, beats on Beatify
+//     ticks are pluggable: seconds by default, beats where a page has
+//     a grid
 //
 // The component draws and gestures; it OWNS no audio and no domain state.
 // Selection and viewport are controlled props, playback is a playhead and
@@ -19,9 +19,9 @@
 // the current x-mapping so annotations move with every zoom and scroll.
 //
 // Quantized selections: a parent may pass `snap` — every gesture routes
-// its raw times through it, so on Beatify a sweep lands on whole beats
-// and a click seeks to the nearest beat while the DRAWN geometry always
-// reflects the snapped result the parent stored.
+// its raw times through it, so a sweep can land on whole beats and a
+// click seek to the nearest beat while the DRAWN geometry always reflects
+// the snapped result the parent stored.
 //
 // Test ids and CSS classes are `${idPrefix}-…`, so the Clip page keeps
 // its established `clip-*` contract byte for byte.
@@ -84,11 +84,11 @@ export interface TimelineSnap {
   /** Snap a click/seek time. `free` is true when ⌘/ctrl frees the click
    *  from the grid. */
   seek?(secs: number, free: boolean): number;
-  /** Snap a swept/resized selection (Beatify: outward to whole beats).
+  /** Snap a swept/resized selection (outward to whole beats, say).
    *  Bypassed while ⌘/ctrl is held, which is how an end is dragged off
    *  the grid onto a pickup or short of a tail. */
   range?(r: Range): Range;
-  /** Snap a slid selection (Beatify: keep length, move by whole beats).
+  /** Snap a slid selection (keep length, move by whole beats, say).
    *  ⌘/ctrl frees this one too. */
   slide?(r: Range): Range;
 }
@@ -141,8 +141,8 @@ export interface AudioTimelineProps {
   /** A ■ beside ▶, only where a page still wants one. Pause keeps the
    *  playhead where playback got to and playing again carries on from
    *  there, which leaves Stop as "pause, and also throw away where I
-   *  was" — a second button for a thing nobody asked it for. Beatify
-   *  passes none; the Clip page still does. */
+   *  was" — a second button for a thing nobody asked it for. The Clip
+   *  page still passes one. */
   onStop?(): void;
   onToggleLoop(): void;
   onSeek(secs: number): void;
@@ -150,20 +150,20 @@ export interface AudioTimelineProps {
   /** Ruler marks; seconds (`rulerTicks`) when absent. */
   ticks?: TimeTick[];
   /** Which ticks get grid lines across the waveform: the labelled ones
-   *  (`major`, the Clip default) or every tick (`all`, Beatify's beat
-   *  grid, where labelled ticks render emphasized). */
+   *  (`major`, the Clip default) or every tick (`all`, for a beat grid,
+   *  where labelled ticks render emphasized). */
   tickGrid?: 'major' | 'all';
   /** Slide-from-inside is an editing gesture; pages that only select
-   *  (Beatify's modal) turn it off so inside-drags sweep instead. */
+   *  turn it off so inside-drags sweep instead. */
   allowSlide?: boolean;
   /** Pulling the selection DOWNWARD out of the timeline, if the page has
-   *  somewhere for it to go (Beatify's clip editor does). Called once,
-   *  mid-drag, after which the gesture belongs to the caller. */
+   *  somewhere for it to go. Called once, mid-drag, after which the
+   *  gesture belongs to the caller. */
   onPullOut?(): void;
   /** A slide ended: `delta` seconds from `base`; `audio` means alt asked
    *  for the material to move too (the Clip page re-splices). */
   onSelectionSlid?(base: Range, delta: number, audio: boolean): void;
-  /** Double-click, in (snapped-free) seconds — Beatify selects the group. */
+  /** Double-click, in (snapped-free) seconds. */
   onDoubleClickAt?(secs: number): void;
   /** Extra transport-row controls, after zoom (Clip: undo/redo). */
   transportExtra?: ReactNode;

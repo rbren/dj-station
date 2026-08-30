@@ -18,8 +18,8 @@
 //! 3. **Level automation** ([`LevelPoint`]): a breakpoint envelope in dB
 //!    over the *output* timeline — fades in/out are just endpoints.
 //! 4. **Beat warp** (`warp`): anchor pairs `[from, to]` on the output
-//!    timeline, applied last through the Beatify WSOLA stretch
-//!    ([`crate::beatify::warp`]) — how tapped beats become an even grid.
+//!    timeline, applied last through the WSOLA stretch
+//!    ([`crate::beats::warp`]) — how tapped beats become an even grid.
 //!    Outside the anchors the audio is untouched (identity slope).
 //!    `warp_smoothing` eases the stretch WITHIN each anchor pair
 //!    ([`smooth_warp`]) so the rate does not step at the anchors.
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 use std::path::Path;
 
-use crate::beatify::{self, detect::BeatTracker, grid as beat_fit};
+use crate::beats::{self, detect::BeatTracker, grid as beat_fit};
 use crate::decode::AudioData;
 
 /// Default equal-power join between adjacent regions (declick).
@@ -160,6 +160,37 @@ pub struct BeatGrid {
     /// need not know where its one is.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ones: Vec<usize>,
+}
+
+impl BeatGrid {
+    /// Only the beats of this grid that lie inside `[start, end]`, on the
+    /// same output timeline.
+    ///
+    /// What a beat clip keeps is the grid of the span it IS, not the grid
+    /// of the whole edit it was cut out of: the beats either side of it
+    /// were never in the clip and say nothing about it. `ones` follows
+    /// the beats it flags, so the downbeat of a saved clip stays the same
+    /// beat; a clip whose span holds none simply has none.
+    pub fn cut_to(&self, start: f64, end: f64) -> BeatGrid {
+        let eps = 1e-6;
+        let kept: Vec<usize> = (0..self.times.len())
+            .filter(|&i| self.times[i] >= start - eps && self.times[i] <= end + eps)
+            .collect();
+        let ones = self
+            .ones
+            .iter()
+            .filter_map(|one| kept.iter().position(|k| k == one))
+            .collect();
+        let times: Vec<f64> = kept.iter().map(|&i| self.times[i]).collect();
+        BeatGrid {
+            bpm: self.bpm,
+            period: self.period,
+            phase: times.first().copied().unwrap_or(self.phase),
+            beats: times.len(),
+            times,
+            ones,
+        }
+    }
 }
 
 impl Default for BeatGrid {
@@ -499,7 +530,7 @@ pub fn smooth_warp(warp: &[[f64; 2]], smoothing: f64) -> Vec<[f64; 2]> {
 /// `smoothing`, then guarded on both sides with slope-1 points so
 /// everything outside the tapped span stays exactly where it is (the map
 /// extrapolates its END SEGMENTS' slopes otherwise).
-fn warp_map(warp: &[[f64; 2]], smoothing: f64) -> Result<Option<crate::beatify::WarpMap>> {
+fn warp_map(warp: &[[f64; 2]], smoothing: f64) -> Result<Option<crate::beats::WarpMap>> {
     if warp.len() < 2 {
         ensure!(warp.is_empty(), "clip render: a warp needs two anchors");
         return Ok(None);
@@ -516,7 +547,7 @@ fn warp_map(warp: &[[f64; 2]], smoothing: f64) -> Result<Option<crate::beatify::
     points.push((first[0] - 1.0, first[1] - 1.0));
     points.extend(eased.iter().map(|p| (p[0], p[1])));
     points.push((last[0] + 1.0, last[1] + 1.0));
-    Ok(Some(crate::beatify::WarpMap { points }))
+    Ok(Some(crate::beats::WarpMap { points }))
 }
 
 /// Stretch the rendered output through the tap warp. A missing or
@@ -529,7 +560,7 @@ fn apply_warp(audio: AudioData, warp: &[[f64; 2]], smoothing: f64) -> Result<Aud
         return Ok(audio);
     }
     let out_secs = map.map_time(audio.duration_secs());
-    Ok(crate::beatify::warp::render(&audio, &map, out_secs))
+    Ok(crate::beats::warp::render(&audio, &map, out_secs))
 }
 
 /// Where the warp puts an output time. Identity for the empty (or
@@ -658,7 +689,7 @@ pub fn beats_from_taps(
     let gap = (last - first) / (taps.len() - 1) as f64;
     let dur = audio.duration_secs();
     let region = ((first - gap).max(0.0), (last + gap).min(dur));
-    let analysis = beatify::analyze(audio, tracker, Some(region), Default::default())
+    let analysis = beats::analyze(audio, tracker, Some(region), Default::default())
         .map_err(|e| anyhow!("measuring the tapped span: {e}"))?;
     let runs: Vec<(String, Vec<f64>)> = analysis
         .runs
@@ -816,13 +847,13 @@ pub fn write_clip(path: &Path, audio: &AudioData) -> Result<()> {
 //
 // A BEAT CLIP is a rendered span cut to a whole number of beats at a
 // known tempo — what the rack's Beat Clip module (and so the Decks) can
-// play on a clock, exactly like a Beatify clip. The store is one FLAC +
+// play on a clock. The store is one FLAC +
 // one meta JSON per clip under `<data_dir>/beat-clips/`, ids minted
-// `b<n>` — a sibling of `clips/` and the Beatify store.
+// `b<n>` — a sibling of `clips/`.
 
 /// A library track a beat clip was cut from, named by the ONE id of a
 /// track that nothing can change: the hash of its audio
-/// (`dj_library::content_hash`, the same handle a Beatify seed keeps).
+/// (`dj_library::content_hash`).
 /// A row id is re-assigned on re-import and a title/artist is the user's
 /// to edit — a clip that stored either would go stale the moment it did.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -854,7 +885,7 @@ pub struct BeatClipEdit {
 }
 
 /// One saved beat clip, as filed beside its audio. camelCase on disk,
-/// like Beatify's records — one convention per feature family.
+/// like the rest of the clip records.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BeatClipMeta {
@@ -1046,23 +1077,77 @@ pub fn save_beat_clip(
     edit: Option<BeatClipEdit>,
     bleed: &BleedAudio,
 ) -> Result<BeatClipMeta> {
-    let name = name.trim();
-    ensure!(!name.is_empty(), "beat clip: it needs a name");
-    let padded = pad_to_beats(audio, bpm, beats)?;
-    let dir = beat_clips_dir(data_dir);
-    std::fs::create_dir_all(&dir)?;
     let next = read_beat_clips(data_dir)
         .iter()
         .filter_map(|c| c.id.trim_start_matches('b').parse::<u64>().ok())
         .max()
         .unwrap_or(0)
         + 1;
+    write_beat_clip(
+        data_dir,
+        &format!("b{next}"),
+        name,
+        audio,
+        bpm,
+        beats,
+        stems,
+        edit,
+        bleed,
+    )
+}
+
+/// Re-file an EXISTING beat clip: same id, same file names, new audio and
+/// new record. This is what a second save on the Clip page does — the
+/// editor is still working on the clip it filed, so saving again is a
+/// revision of it rather than a second copy in the store (and every deck
+/// binding that names it keeps working).
+#[allow(clippy::too_many_arguments)]
+pub fn update_beat_clip(
+    data_dir: &Path,
+    clip_id: &str,
+    name: &str,
+    audio: &AudioData,
+    bpm: f64,
+    beats: usize,
+    stems: Vec<String>,
+    edit: Option<BeatClipEdit>,
+    bleed: &BleedAudio,
+) -> Result<BeatClipMeta> {
+    let known = read_beat_clips(data_dir)
+        .into_iter()
+        .any(|c| c.id == clip_id);
+    ensure!(known, "no saved beat clip {clip_id}");
+    write_beat_clip(
+        data_dir, clip_id, name, audio, bpm, beats, stems, edit, bleed,
+    )
+}
+
+/// Write one record and its audio under `clip_id`, replacing whatever was
+/// filed there. The bleed files are rewritten from scratch, so a revision
+/// that dropped its bleed does not leave the old one to be played.
+#[allow(clippy::too_many_arguments)]
+fn write_beat_clip(
+    data_dir: &Path,
+    clip_id: &str,
+    name: &str,
+    audio: &AudioData,
+    bpm: f64,
+    beats: usize,
+    stems: Vec<String>,
+    edit: Option<BeatClipEdit>,
+    bleed: &BleedAudio,
+) -> Result<BeatClipMeta> {
+    let name = name.trim();
+    ensure!(!name.is_empty(), "beat clip: it needs a name");
+    let padded = pad_to_beats(audio, bpm, beats)?;
+    let dir = beat_clips_dir(data_dir);
+    std::fs::create_dir_all(&dir)?;
     let meta = BeatClipMeta {
-        id: format!("b{next}"),
+        id: clip_id.to_string(),
         name: name.to_string(),
         bpm,
         beats,
-        file: format!("b{next}.flac"),
+        file: format!("{clip_id}.flac"),
         stems,
         edit,
         left_bleed_ms: bleed_ms(&bleed.left),
@@ -1071,20 +1156,23 @@ pub fn save_beat_clip(
     };
     write_clip(&dir.join(&meta.file), &padded)?;
     for (side, audio) in [(true, &bleed.left), (false, &bleed.right)] {
-        if let Some(audio) = audio.as_ref().filter(|a| a.frames() > 0) {
-            write_clip(&dir.join(bleed_file(&meta.id, side)), audio)?;
+        let path = dir.join(bleed_file(clip_id, side));
+        match audio.as_ref().filter(|a| a.frames() > 0) {
+            Some(audio) => write_clip(&path, audio)?,
+            None if path.is_file() => std::fs::remove_file(&path)?,
+            None => {}
         }
     }
     std::fs::write(
-        dir.join(format!("b{next}.json")),
+        dir.join(format!("{clip_id}.json")),
         serde_json::to_string_pretty(&meta)?,
     )?;
     Ok(meta)
 }
 
-/// Delete a beat clip: its record and its audio. Unknown ids are an
-/// error — the caller is acting on a list, and a row that is not there
-/// means the list is stale.
+/// Delete a beat clip: its record, its audio and the bleed beside it.
+/// Unknown ids are an error — the caller is acting on a list, and a row
+/// that is not there means the list is stale.
 pub fn delete_beat_clip(data_dir: &Path, clip_id: &str) -> Result<BeatClipMeta> {
     let (path, meta) = beat_clip_files(data_dir)
         .into_iter()
@@ -1093,9 +1181,13 @@ pub fn delete_beat_clip(data_dir: &Path, clip_id: &str) -> Result<BeatClipMeta> 
     // The audio first: a record with no file left is a clip that plays
     // nothing, where a file with no record is simply unreachable.
     if let Some(dir) = path.parent() {
-        let audio = dir.join(&meta.file);
-        if audio.is_file() {
-            std::fs::remove_file(&audio)?;
+        let files = [
+            dir.join(&meta.file),
+            dir.join(bleed_file(&meta.id, true)),
+            dir.join(bleed_file(&meta.id, false)),
+        ];
+        for file in files.iter().filter(|f| f.is_file()) {
+            std::fs::remove_file(file)?;
         }
     }
     std::fs::remove_file(&path)?;

@@ -21,30 +21,32 @@ export interface BeatClipSourceInfo {
 
 /** One clip a Beat Clip module can be built from. */
 export interface BeatClipEntry {
-  projectId: string;
-  projectName: string;
   clipId: string;
   name: string;
-  /** The project's tempo — a clip is laid out on its grid. */
+  /** The tempo the clip's beats are laid out at. */
   bpm: number;
   /** Clip length in beats (trailing silence included). */
   beats: number;
   /** Which parts of a track it is made of, `STEM_NAMES` order — the tags
    *  the row shows. All four means it was cut from whole mixes. */
   stems: string[];
+  /** Can it be opened in the Clip page again? Only a clip filed with the
+   *  edit behind it can. */
+  editable: boolean;
   /** The tracks it points at, resolved against the library as it now
    *  stands. Empty when the clip records no source at all. */
   sources: BeatClipSourceInfo[];
 }
 
 /** Which clip a module is bound to. The patch persists this, never the
- *  audio: a clip is placements, re-assembled on load. */
+ *  audio: the clip is loaded out of the store on every patch load. */
 export interface BeatClipRef {
+  /** The store it was filed in — see `clip::BEAT_CLIPS_PROJECT`. */
   project: string;
   clip: string;
   name: string;
-  /** The Beatify project it was cut in, by name — display only, and
-   *  empty in a patch saved before clips said. */
+  /** The store it came from, by name — display only, and empty in a
+   *  patch saved before clips said. */
   project_name?: string;
   /** What the clip held when it was bound — display only, and absent in
    *  a patch saved before clips said. Refreshed on every load. */
@@ -73,26 +75,34 @@ export interface BeatClipApi {
   list(): Promise<BeatClipEntry[] | null>;
   /** Resolves to the module's instance id, which the load renames after
    *  the clip ("chorus stack"), so the caller can re-key its layout. */
-  load(instance: string, projectId: string, clipId: string): Promise<string | null>;
+  load(instance: string, clipId: string): Promise<string | null>;
   status(instance: string): Promise<BeatClipStatus | null>;
-  /** Delete a saved clip from whichever store holds it. Resolves to the
-   *  list as it now stands. */
-  delete(projectId: string, clipId: string): Promise<BeatClipEntry[] | null>;
+  /** Delete a saved clip. Resolves to the list as it now stands. */
+  delete(clipId: string): Promise<BeatClipEntry[] | null>;
 }
 
 export class BeatClipClient extends IpcClient implements BeatClipApi {
   list() {
     return this.call<BeatClipEntry[]>('beat_clip_list');
   }
-  load(instance: string, projectId: string, clipId: string) {
-    return this.call<string>('beat_clip_load', { instance, projectId, clipId });
+  load(instance: string, clipId: string) {
+    return this.call<string>('beat_clip_load', { instance, clipId });
   }
   status(instance: string) {
     return this.call<BeatClipStatus>('beat_clip_status', { instance });
   }
-  delete(projectId: string, clipId: string) {
-    return this.call<BeatClipEntry[]>('beat_clip_delete', { projectId, clipId });
+  delete(clipId: string) {
+    return this.call<BeatClipEntry[]>('beat_clip_delete', { clipId });
   }
 }
 
 export const beatClip = new BeatClipClient();
+
+/** What a clip row says it was cut from: the titles of its sources, or
+ *  an honest line when the library no longer has them (a clip outlives
+ *  its source, and the pickers still have to name it somehow). */
+export function clipSourceLabel(clip: BeatClipEntry): string {
+  const titles = clip.sources.map((s) => s.title).filter((t): t is string => !!t);
+  if (titles.length > 0) return titles.join(' + ');
+  return clip.sources.length > 0 ? 'source not in the library' : 'no source recorded';
+}

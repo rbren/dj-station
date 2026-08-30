@@ -603,23 +603,21 @@ describe('ModulePicker macro management', () => {
 describe('ModulePicker clips tab', () => {
   const CLIPS: BeatClipEntry[] = [
     {
-      projectId: 'p1',
-      projectName: 'Night Bus',
       clipId: '1',
       name: 'intro loop',
       bpm: 128,
       beats: 8,
       stems: ['vocals', 'drums', 'bass', 'other'],
+      editable: true,
       sources: [{ trackHash: 'abc123', title: 'Night Bus Take', artist: 'Me' }],
     },
     {
-      projectId: 'p2',
-      projectName: 'Sunroom',
       clipId: '3',
       name: 'chorus stack',
       bpm: 92.5,
       beats: 4,
       stems: ['drums', 'bass'],
+      editable: false,
       sources: [],
     },
   ];
@@ -650,16 +648,16 @@ describe('ModulePicker clips tab', () => {
     return { ...view, onAdd, onAddClip };
   }
 
-  it('is a tab of its own, listing every clip with its project and length', () => {
+  it('is a tab of its own, listing every clip with its source and length', () => {
     renderClips();
     // The gallery is module types: clips appear once the tab is picked.
-    expect(screen.queryByTestId('picker-clip-p1-1')).toBeNull();
+    expect(screen.queryByTestId('picker-clip-1')).toBeNull();
     fireEvent.click(screen.getByTestId('picker-tab-clips'));
     expect(screen.getByText('intro loop')).toBeTruthy();
-    expect(screen.getByText('Night Bus')).toBeTruthy();
+    expect(screen.getByText('Night Bus Take')).toBeTruthy();
     expect(screen.getByText('8 beats')).toBeTruthy();
     expect(screen.getByText('128.0 BPM')).toBeTruthy();
-    expect(screen.getByTestId('picker-clip-p2-3')).toBeTruthy();
+    expect(screen.getByTestId('picker-clip-3')).toBeTruthy();
     // A list, not a gallery of tiles — and not a module category either.
     expect(screen.getByTestId('picker-clip-list').tagName).toBe('UL');
     expect(screen.queryByTestId('picker-category-Clips')).toBeNull();
@@ -671,10 +669,10 @@ describe('ModulePicker clips tab', () => {
   it('says what each clip is made of, so a drum loop is not mistaken for a mix', () => {
     renderClips();
     fireEvent.click(screen.getByTestId('picker-tab-clips'));
-    // Two clips from two projects: one cut from whole mixes, one that is
-    // only the rhythm section. The row says which without opening it.
-    expect(screen.getByTestId('picker-clip-stems-p1-1').textContent).toBe('mix');
-    expect(screen.getByTestId('picker-clip-stems-p2-3').textContent).toBe('drumsbass');
+    // Two clips: one cut from whole mixes, one that is only the rhythm
+    // section. The row says which without opening it.
+    expect(screen.getByTestId('picker-clip-stems-1').textContent).toBe('mix');
+    expect(screen.getByTestId('picker-clip-stems-3').textContent).toBe('drumsbass');
   });
 
   it('reopens on the tab that was used last', () => {
@@ -693,7 +691,7 @@ describe('ModulePicker clips tab', () => {
   it('clicking a clip imports it as a Beat Clip module', () => {
     const { onAddClip, onAdd } = renderClips();
     fireEvent.click(screen.getByTestId('picker-tab-clips'));
-    fireEvent.click(screen.getByTestId('picker-clip-p2-3'));
+    fireEvent.click(screen.getByTestId('picker-clip-3'));
     expect(onAddClip).toHaveBeenCalledWith(CLIPS[1]);
     // A clip is not a module type: the plain add path stays untouched.
     expect(onAdd).not.toHaveBeenCalled();
@@ -710,17 +708,17 @@ describe('ModulePicker clips tab', () => {
     const { onAddClip } = renderClips();
     fireEvent.click(screen.getByTestId('picker-tab-clips'));
     // The first entry is selected without touching anything.
-    expect(screen.getByTestId('picker-clip-p1-1').dataset.active).toBe('true');
+    expect(screen.getByTestId('picker-clip-1').dataset.active).toBe('true');
 
     fireEvent.keyDown(window, { key: 'ArrowDown' });
-    expect(screen.getByTestId('picker-clip-p2-3').dataset.active).toBe('true');
-    expect(screen.getByTestId('picker-clip-p1-1').dataset.active).toBeUndefined();
+    expect(screen.getByTestId('picker-clip-3').dataset.active).toBe('true');
+    expect(screen.getByTestId('picker-clip-1').dataset.active).toBeUndefined();
     // The ends hold: no wrapping past the last or before the first.
     fireEvent.keyDown(window, { key: 'ArrowDown' });
-    expect(screen.getByTestId('picker-clip-p2-3').dataset.active).toBe('true');
+    expect(screen.getByTestId('picker-clip-3').dataset.active).toBe('true');
     fireEvent.keyDown(window, { key: 'ArrowUp' });
     fireEvent.keyDown(window, { key: 'ArrowUp' });
-    expect(screen.getByTestId('picker-clip-p1-1').dataset.active).toBe('true');
+    expect(screen.getByTestId('picker-clip-1').dataset.active).toBe('true');
 
     fireEvent.keyDown(window, { key: 'Enter' });
     expect(onAddClip).toHaveBeenCalledWith(CLIPS[0]);
@@ -731,7 +729,7 @@ describe('ModulePicker clips tab', () => {
     fireEvent.click(screen.getByTestId('picker-tab-clips'));
     fireEvent.keyDown(window, { key: 'ArrowDown' });
     fireEvent.change(screen.getByTestId('library-search'), { target: { value: 'o' } });
-    expect(screen.getByTestId('picker-clip-p1-1').dataset.active).toBe('true');
+    expect(screen.getByTestId('picker-clip-1').dataset.active).toBe('true');
     fireEvent.keyDown(window, { key: 'Enter' });
     expect(onAddClip).toHaveBeenCalledWith(CLIPS[0]);
   });
@@ -754,7 +752,7 @@ describe('ModulePicker clips tab', () => {
 
     // Switching tabs re-aims the cursor at the first row of the new list.
     fireEvent.click(screen.getByTestId('picker-tab-clips'));
-    expect(screen.getByTestId('picker-clip-p1-1').dataset.active).toBe('true');
+    expect(screen.getByTestId('picker-clip-1').dataset.active).toBe('true');
     fireEvent.keyDown(window, { key: 'Enter' });
     expect(onAddClip).toHaveBeenCalledWith(CLIPS[0]);
     expect(onAdd).toHaveBeenCalledTimes(1);
@@ -766,20 +764,20 @@ describe('ModulePicker clips tab', () => {
     expect(screen.getByTestId('library-add-com.dj.oscillator')).toBeTruthy();
   });
 
-  it('search filters clips by name or project, and says when nothing matches', () => {
+  it('search filters clips by name or source, and says when nothing matches', () => {
     renderClips();
     fireEvent.click(screen.getByTestId('picker-tab-clips'));
-    fireEvent.change(screen.getByTestId('library-search'), { target: { value: 'sunroom' } });
-    expect(screen.getByTestId('picker-clip-p2-3')).toBeTruthy();
-    expect(screen.queryByTestId('picker-clip-p1-1')).toBeNull();
+    fireEvent.change(screen.getByTestId('library-search'), { target: { value: 'chorus' } });
+    expect(screen.getByTestId('picker-clip-3')).toBeTruthy();
+    expect(screen.queryByTestId('picker-clip-1')).toBeNull();
     fireEvent.change(screen.getByTestId('library-search'), { target: { value: 'zzz' } });
     expect(screen.getByTestId('picker-no-clips')).toBeTruthy();
   });
 
-  it('an empty Clips tab points at the Beatify tab', () => {
+  it('an empty Clips tab points at the Clip page', () => {
     renderClips([]);
     fireEvent.click(screen.getByTestId('picker-tab-clips'));
-    expect(screen.getByTestId('picker-no-clips').textContent).toContain('Beatify');
+    expect(screen.getByTestId('picker-no-clips').textContent).toContain('Clip page');
   });
 });
 

@@ -36,7 +36,7 @@ pub struct TempoResult {
 }
 
 /// The onset-strength envelope step 1 produces, with the geometry needed
-/// to map frames back to seconds. Shared with the Beatify beat tracker so
+/// to map frames back to seconds. Shared with the beat tracker so
 /// both read the same onset function.
 #[derive(Debug, Clone)]
 pub struct OnsetEnvelope {

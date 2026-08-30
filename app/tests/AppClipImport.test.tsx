@@ -1,4 +1,4 @@
-// Importing a Beatify clip from the picker's Clips tab: a Beat Clip
+// Importing a beat clip from the picker's Clips tab: a Beat Clip
 // module lands in the rack loaded with that clip and WEARING ITS NAME —
 // the backend renames the module as it loads, so the frontend has to
 // follow the module to its new instance id (its rack position is keyed by
@@ -21,13 +21,12 @@ const BEAT_CLIP: Manifest = {
 };
 
 const CLIP: BeatClipEntry = {
-  projectId: 'p2',
-  projectName: 'Sunroom',
   clipId: '3',
   name: 'chorus stack',
   bpm: 92.5,
   beats: 4,
   stems: ['drums', 'bass'],
+  editable: true,
   sources: [{ trackHash: 'abc123', title: 'Sunroom Take', artist: 'Me' }],
 };
 
@@ -111,9 +110,9 @@ describe('importing a clip from the picker', () => {
     fireEvent.keyDown(window, { key: 'm', metaKey: true });
     await waitFor(() => expect(beatClipMock.list).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId('picker-tab-clips'));
-    fireEvent.click(await screen.findByTestId('picker-clip-p2-3'));
+    fireEvent.click(await screen.findByTestId('picker-clip-3'));
 
-    await waitFor(() => expect(beatClipMock.load).toHaveBeenCalledWith('beatclip1', 'p2', '3'));
+    await waitFor(() => expect(beatClipMock.load).toHaveBeenCalledWith('beatclip1', '3'));
     // The panel that lands is the renamed one, titled with the clip.
     const title = await screen.findByTestId('module-name-chorus_stack');
     expect(title.textContent).toBe('chorus stack');

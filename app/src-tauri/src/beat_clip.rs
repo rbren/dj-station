@@ -1,24 +1,25 @@
-//! Beat Clip module IPC: which Beatify clips can be imported into the
+//! Beat Clip module IPC: which saved beat clips can be imported into the
 //! rack, and putting one inside a `builtin.beat_clip` module.
 //!
-//! A clip is placements, not audio (see [`crate::beatify_clip`]), so what
-//! the patch keeps is the BINDING — project id + clip id — and the samples
-//! are assembled here, on demand: when the user imports one from the
-//! module picker, and again after a patch load or an undo that brought a
-//! module back ([`hydrate`]). That is the deck-metadata pattern: the
-//! engine holds what it plays, the app layer knows where it came from.
+//! What the patch keeps is the BINDING — the store id + the clip id — and
+//! the samples are loaded here, on demand: when the user imports one from
+//! the module picker, and again after a patch load or an undo that
+//! brought a module back ([`hydrate`]). That is the deck-metadata
+//! pattern: the engine holds what it plays, the app layer knows where it
+//! came from.
 //!
-//! Assembling decodes and mixes seconds of audio, so the commands are
-//! `async` — a sync command runs on the main thread and would freeze the
-//! window.
+//! Loading decodes seconds of audio, so the commands are `async` — a sync
+//! command runs on the main thread and would freeze the window.
 
+use dj_analysis::AudioData;
 use dj_engine::beat_clip::BeatClipRef;
+use dj_engine::playback::{ClipAudio, ClipBleed, TrackData};
 use dj_engine::Engine;
 use serde::Serialize;
+use std::sync::Arc;
 use tauri::State;
 
-use crate::beatify_clip::render_clip;
-use crate::{engine_lock, err, patch_edit, AppState, CmdResult, EditKey};
+use crate::{engine_lock, err, patch_edit, AppState, CmdError, CmdResult, EditKey};
 
 /// A library track a clip was cut from, as a row can show it: the
 /// POINTER — the hash of the track's audio, which nothing can change —
@@ -38,17 +39,19 @@ pub struct BeatClipSourceInfo {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BeatClipEntry {
-    pub project_id: String,
-    pub project_name: String,
     pub clip_id: String,
     pub name: String,
-    /// The project's tempo — a clip is laid out on its grid.
+    /// The tempo the clip's beats are laid out at.
     pub bpm: f64,
     /// Clip length in beats (trailing silence included).
     pub beats: usize,
     /// Which parts of a track it is made of, `STEM_NAMES` order — all
     /// four for a clip cut from whole mixes, and empty for an empty clip.
     pub stems: Vec<String>,
+    /// Can it be opened in the Clip page again? Only a clip filed with
+    /// its edit can (`BeatClipMeta.edit`); the older ones are audio and
+    /// a name.
+    pub editable: bool,
     /// The tracks it points at, resolved against the library as it now
     /// stands. Empty when the clip records no source at all.
     pub sources: Vec<BeatClipSourceInfo>,
@@ -65,78 +68,95 @@ fn source_info(state: &AppState, track_hash: &str) -> BeatClipSourceInfo {
     }
 }
 
-/// Every clip in every Beatify project, newest project first (the order
-/// `store::list` sorts them in), then the Clip tab's beat clips — same
-/// rows, same load path, a different store behind them.
+/// Every saved beat clip, oldest first — the one store, the one list.
 #[tauri::command(async)]
 pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
     let data_dir = state.library.data_dir();
-    let mut out = Vec::new();
-    for project in dj_analysis::beatify::store::list(data_dir).map_err(err)? {
-        // 0 for a project with no seed in it yet: it has no tempo, and a
-        // clip cut on no grid is not one the picker can promise anything
-        // about.
-        let bpm = project.bpm.unwrap_or(0.0);
-        let clips = crate::beatify_clip::project_clips(&state, &project.id)?;
-        for clip in &clips {
-            // A Beatify clip points at its seeds, and a seed carries the
-            // same handle a beat clip does: the source audio's hash.
-            let sources = crate::beatify_clip::clip_seeds(clip, &clips, &project, 0)
-                .into_iter()
-                .map(|seed| source_info(&state, &seed.source_hash))
+    Ok(dj_analysis::clip::read_beat_clips(data_dir)
+        .into_iter()
+        .map(|meta| {
+            let sources = meta
+                .edit
+                .iter()
+                .flat_map(|edit| edit.sources.iter())
+                .map(|source| source_info(&state, &source.track_hash))
                 .collect();
-            out.push(BeatClipEntry {
-                project_id: project.id.clone(),
-                project_name: project.name.clone(),
-                clip_id: clip.id.clone(),
-                name: clip.name.clone(),
-                bpm,
-                beats: clip.columns.max(1),
-                stems: clip.stems.clone(),
+            BeatClipEntry {
+                clip_id: meta.id,
+                name: meta.name,
+                bpm: meta.bpm,
+                beats: meta.beats.max(1),
+                stems: meta.stems,
+                // A clip filed before the edit was kept says nothing about
+                // where it came from, and cannot be opened again.
+                editable: meta.edit.is_some(),
                 sources,
-            });
-        }
-    }
-    for meta in dj_analysis::clip::read_beat_clips(data_dir) {
-        let sources = meta
-            .edit
-            .iter()
-            .flat_map(|edit| edit.sources.iter())
-            .map(|source| source_info(&state, &source.track_hash))
-            .collect();
-        out.push(BeatClipEntry {
-            project_id: crate::clip::BEAT_CLIPS_PROJECT.into(),
-            // Which store it came from, where a Beatify clip names its
-            // project.
-            project_name: crate::clip::BEAT_CLIPS_PROJECT_NAME.into(),
-            clip_id: meta.id,
-            name: meta.name,
-            bpm: meta.bpm,
-            beats: meta.beats.max(1),
-            stems: meta.stems,
-            sources,
-        });
-    }
-    Ok(out)
+            }
+        })
+        .collect())
 }
 
-/// Delete a saved clip, whichever store it lives in, and answer with the
-/// list as it now stands. Modules already playing it keep their audio —
-/// a Beat Clip module holds samples, not a file handle — but nothing can
-/// load it again.
+/// Delete a saved clip and answer with the list as it now stands. Modules
+/// already playing it keep their audio — a Beat Clip module holds
+/// samples, not a file handle — but nothing can load it again.
 #[tauri::command(async)]
-pub fn beat_clip_delete(
-    state: State<AppState>,
-    project_id: String,
-    clip_id: String,
-) -> CmdResult<Vec<BeatClipEntry>> {
-    if project_id == crate::clip::BEAT_CLIPS_PROJECT {
-        dj_analysis::clip::delete_beat_clip(state.library.data_dir(), &clip_id)
-            .map_err(|e| crate::CmdError::invalid(format!("clip: {e}")))?;
-    } else {
-        crate::beatify_clip::delete_clip(&state, &project_id, &clip_id)?;
-    }
+pub fn beat_clip_delete(state: State<AppState>, clip_id: String) -> CmdResult<Vec<BeatClipEntry>> {
+    dj_analysis::clip::delete_beat_clip(state.library.data_dir(), &clip_id)
+        .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
     beat_clip_list(state)
+}
+
+/// A saved beat clip, loaded: what the rack's Beat Clip module (and a
+/// deck) plays, and the tempo it is laid out at.
+pub struct RenderedClip {
+    pub audio: AudioData,
+    /// Material from OUTSIDE the loop that the player lays over its seam
+    /// (the Clip page's bleed controls); empty for a clip saved without.
+    pub bleed: dj_analysis::clip::BleedAudio,
+    pub bpm: f64,
+    pub name: String,
+    /// Which store it came from — what a deck shows beside the clip's own
+    /// name.
+    pub project_name: String,
+    /// What it is made of, for the module that ends up playing it.
+    pub stems: Vec<String>,
+}
+
+impl RenderedClip {
+    /// The samples as a player takes them (`Engine::beat_clip_load`,
+    /// `Engine::decks_load`): the loop, and the bleed that goes over its
+    /// seam.
+    pub fn clip_audio(&self) -> ClipAudio {
+        let track = |a: &AudioData| {
+            Arc::new(TrackData {
+                channels: a.channels.clone(),
+                sample_rate: a.sample_rate as f32,
+            })
+        };
+        ClipAudio {
+            track: track(&self.audio),
+            bleed: ClipBleed {
+                left: self.bleed.left.as_ref().map(track),
+                right: self.bleed.right.as_ref().map(track),
+            },
+        }
+    }
+}
+
+/// Load a saved clip out of the store. A binding whose clip is not there
+/// any more (deleted, or filed by a store this build no longer has) is an
+/// error the caller reports without losing anything else.
+pub fn render_clip(state: &AppState, clip_id: &str) -> CmdResult<RenderedClip> {
+    let (meta, audio, bleed) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), clip_id)
+        .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+    Ok(RenderedClip {
+        audio,
+        bleed,
+        bpm: meta.bpm,
+        project_name: crate::clip::BEAT_CLIPS_PROJECT_NAME.into(),
+        name: meta.name,
+        stems: meta.stems,
+    })
 }
 
 /// Assemble a clip and hand it to a Beat Clip module, binding the module
@@ -148,13 +168,12 @@ pub fn beat_clip_delete(
 pub fn beat_clip_load(
     state: State<AppState>,
     instance: String,
-    project_id: String,
     clip_id: String,
 ) -> CmdResult<String> {
-    // Assemble BEFORE taking the engine lock: this decodes and mixes.
-    let rendered = render_clip(&state, &project_id, &clip_id)?;
+    // Load BEFORE taking the engine lock: this decodes seconds of audio.
+    let rendered = render_clip(&state, &clip_id)?;
     let clip = BeatClipRef {
-        project: project_id,
+        project: crate::clip::BEAT_CLIPS_PROJECT.into(),
         clip: clip_id,
         name: rendered.name.clone(),
         project_name: rendered.project_name.clone(),
@@ -198,14 +217,14 @@ pub fn beat_clip_status(
     engine.beat_clip_status(&instance).map_err(err)
 }
 
-/// Re-assemble every Beat Clip module that knows which clip it plays but
-/// has no audio behind it — after a patch load, or an undo/redo that
-/// recreated one. A clip whose project has been deleted leaves its module
-/// silent (and says so in the log): losing the source should cost the
-/// sound, never the patch.
+/// Re-load every Beat Clip module that knows which clip it plays but has
+/// no audio behind it — after a patch load, or an undo/redo that
+/// recreated one. A clip that has been deleted leaves its module silent
+/// (and says so in the log): losing the source should cost the sound,
+/// never the patch.
 pub fn hydrate(state: &AppState, engine: &mut Engine) {
     for (instance, clip) in engine.beat_clip_pending() {
-        match render_clip(state, &clip.project, &clip.clip) {
+        match render_clip(state, &clip.clip) {
             Ok(rendered) => {
                 let audio = rendered.clip_audio();
                 let bpm = rendered.bpm;

@@ -157,7 +157,7 @@ export interface DecksApi {
    *  none. Resolves to its instance id. */
   ensure(): Promise<string | null>;
   status(instance: string): Promise<DecksStatus | null>;
-  load(instance: string, slot: number, projectId: string, clipId: string): Promise<void | null>;
+  load(instance: string, slot: number, clipId: string): Promise<void | null>;
   clear(instance: string, slot: number): Promise<void | null>;
   setControl(
     instance: string,
@@ -196,8 +196,8 @@ export class DecksClient extends IpcClient implements DecksApi {
     // race, not news for the error banner.
     return this.call<DecksStatus>('decks_status', { instance }, { quiet: true });
   }
-  load(instance: string, slot: number, projectId: string, clipId: string) {
-    return this.call<void>('decks_load', { instance, slot, projectId, clipId });
+  load(instance: string, slot: number, clipId: string) {
+    return this.call<void>('decks_load', { instance, slot, clipId });
   }
   clear(instance: string, slot: number) {
     return this.call<void>('decks_clear', { instance, slot });
@@ -295,10 +295,10 @@ export function bpmLabel(sourceBpm: number, ratio = 1): string {
 }
 
 /** The two halves a deck names its clip by, kept apart so a strip can
- *  give each of them a line and truncate it on its own: the Beatify
- *  project the clip was cut in (its base track, falling back to the
- *  project id for a patch saved before clips carried the name) and the
- *  clip. Null when the deck holds nothing. */
+ *  give each of them a line and truncate it on its own: where the clip
+ *  came from (falling back to the store id for a patch saved before clips
+ *  carried the name) and the clip itself. Null when the deck holds
+ *  nothing. */
 export function clipParts(clip: BeatClipRef | null): { project: string; name: string } | null {
   if (!clip?.name) return null;
   return { project: clip.project_name || clip.project, name: clip.name };

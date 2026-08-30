@@ -935,7 +935,7 @@ fn no_match_detail(concentration: f64, ratio: f64, tap_bpm: f64) -> String {
     let every = ratio.round();
     if concentration > TAP_MATCH_MIN && ratio > 1.5 && (ratio - every).abs() < 0.15 * every {
         return format!(
-            "those taps landed on the beat but ran one per {every:.0} — Beatify counts beats, \
+            "those taps landed on the beat but ran one per {every:.0} — this counts beats, \
              not bars, so tap every beat"
         );
     }
@@ -1089,7 +1089,7 @@ impl Quality {
 /// Per-beat residual after warping, in the output timeline (the error
 /// strip of §3.4, and the input to every meter).
 pub fn warped_residuals(fit: &Fit, anchors: &[Anchor], first: f64, head_pad: f64) -> Vec<f64> {
-    let map = crate::beatify::warp::WarpMap::from_anchors(anchors);
+    let map = crate::beats::warp::WarpMap::from_anchors(anchors);
     fit.beats
         .iter()
         .filter(|b| b.index >= first)

@@ -80,9 +80,9 @@ pub struct ModuleFile {
     /// re-applied by the app layer after load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<String>,
-    /// Which Beatify clip a Beat Clip node plays. The clip's AUDIO is not
-    /// persisted (a clip is placements, re-assembled on demand) — the app
-    /// layer loads it after a patch load, like deck metadata.
+    /// Which saved beat clip a Beat Clip node plays. The clip's AUDIO is
+    /// not persisted — the app layer loads it after a patch load, like
+    /// deck metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip: Option<BeatClipRef>,
     /// Deck instance this deck is beat-synced to.

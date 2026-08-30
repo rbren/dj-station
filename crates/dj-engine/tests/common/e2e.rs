@@ -240,9 +240,9 @@ fn render_case(case: &str) -> PathBuf {
                 .audio_load(&t.instance, &case_dir.join(&t.file), t.bpm)
                 .unwrap();
         } else if ext == "builtin.decks" {
-            // A bank's clips come from Beatify projects the same way a
-            // Beat Clip's do, so the case carries the rendered audio and
-            // the tempo it was rendered at.
+            // A bank's clips come from the clip store the same way a Beat
+            // Clip's do, so the case carries the rendered audio and the
+            // tempo it was rendered at.
             engine
                 .decks_load_file(
                     &t.instance,
@@ -252,8 +252,8 @@ fn render_case(case: &str) -> PathBuf {
                 )
                 .unwrap();
         } else if ext == "builtin.beat_clip" {
-            // A clip is assembled by the app layer from a Beatify project,
-            // so cases carry the rendered audio (and the tempo it was
+            // A clip is loaded by the app layer out of the clip store, so
+            // cases carry the rendered audio (and the tempo it was
             // rendered at) in the sidecar, like deck metadata.
             engine
                 .beat_clip_load_file(&t.instance, &case_dir.join(&t.file), t.bpm.unwrap_or(120.0))

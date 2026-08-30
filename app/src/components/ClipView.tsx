@@ -1,7 +1,15 @@
 // Clip page (PRD §9): load a library track, cut/splice/reverse/EQ it and
 // automate its level, then save a span of the edit as a BEAT CLIP —
-// whole beats at a known tempo, loadable into the decks exactly like a
-// Beatify clip.
+// whole beats at a known tempo, loadable into the decks and the rack's
+// Beat Clip module.
+//
+// A SAVE BINDS THE PAGE TO WHAT IT FILED. The first save mints a clip;
+// every save after it re-files THAT clip (`editing`), so shaping a loop
+// leaves one clip in the store rather than a trail of near-copies. The
+// binding breaks when the top row picks a different track — a new source
+// is a new clip — and it is also what the Library's Edit button sets when
+// it hands a saved clip back (`openClip`): the clip carries the edit that
+// made it, so it opens as the edit rather than as audio.
 //
 // The edit itself is a plain ClipProgram (src/clip.ts) — every operation is
 // a pure function over it, so this component only owns selection, undo/redo
@@ -28,7 +36,7 @@
 //
 // BEATS ARE TAPPED: right-shift during playback drops a marker at the
 // playhead (drawn on the waveform), and when playback stops the tapped
-// span is MEASURED — the Beatify tracker runs over it and the taps pick
+// span is MEASURED — the beat tracker runs over it and the taps pick
 // the seed (and metrical reading) that best fits them (clip_tap_beats),
 // so the grid is the chosen seed's beat times; when nothing fits, the
 // taps themselves are the grid at their average BPM. Every OTHER seed's
@@ -50,7 +58,7 @@
 // whole tap session — grid, warp, extensions, slider moves, seed picks —
 // is ONE undo step (`tapSession` regenerates in place).
 // Selections then quantize to the grid's actual beats; ⌘-drag frees
-// them. A selection that was never tapped is measured by the Beatify
+// them. A selection that was never tapped is measured by the beat
 // tracker (beat_this when installed) the moment the save row needs
 // numbers to show.
 //
@@ -349,6 +357,10 @@ export interface ClipViewHandle {
   /** Open a library track for editing. Asks first if that would throw
    *  away an unsaved edit. */
   open: (trackId: number) => void;
+  /** Open a SAVED beat clip: its edit, its span and its name, with saves
+   *  going back to that clip. A clip that cannot be taken apart says so
+   *  where the editor would have been. */
+  openClip: (clipId: string) => void;
 }
 
 export function ClipView({
@@ -370,6 +382,15 @@ export function ClipView({
   const [selection, setSelection] = useState<Range | null>(null);
   const [previewState, setPreview] = useState<ClipRender | null>(null);
   const [name, setName] = useState('');
+  /** The saved beat clip this page is revising: set by the first save,
+   *  and by opening one from the Library. While it holds, saving re-files
+   *  THAT clip instead of minting another — picking a different track in
+   *  the top row is what ends it. */
+  const [editing, setEditing] = useState<{ clipId: string } | null>(null);
+  /** A saved clip that cannot be opened, and why. Shown INSTEAD of the
+   *  editor: there is nothing to edit, and pretending otherwise would
+   *  offer edits that could never be saved back. */
+  const [unopenable, setUnopenable] = useState<{ name: string; problem: string } | null>(null);
   /** BLEED, in milliseconds, as the selection's two bookends: material
    *  from OUTSIDE the span, filed with the clip as metadata and laid over
    *  the loop's seam by whatever plays it — never mixed into the loop
@@ -892,6 +913,10 @@ export function ClipView({
         setSelection(null);
         setTapSession(null);
         setVp(null);
+        // A new source is a new clip: saves stop going back to whatever
+        // was filed from the last one.
+        setEditing(null);
+        setUnopenable(null);
         // A different program entirely: stop, don't play the old render.
         transportRef.current?.stop(0);
         setName(stems.length ? `${source.title} (${stemLabel(stems)})` : `${source.title} (clip)`);
@@ -1073,6 +1098,69 @@ export function ClipView({
     [loadTrack],
   );
 
+  /** Open a SAVED beat clip: put its edit back on the page and aim the
+   *  save row at it. The sources come back as library track ids resolved
+   *  from the hashes the clip filed, so a re-imported track still opens;
+   *  a clip that names one the library has lost — or that was filed
+   *  before clips carried their edit — shows its problem instead of an
+   *  editor, because there is nothing here to cut. */
+  const openSavedClip = useCallback(
+    async (clipId: string) => {
+      setBusy(true);
+      setError(null);
+      setStatus(null);
+      try {
+        const open = await clip.openBeatClip(clipId);
+        if (!open) {
+          logError('clip.openBeatClip', `could not open beat clip ${clipId}`);
+          setError('Could not open that beat clip');
+          return;
+        }
+        if (open.problem || !open.program) {
+          setUnopenable({
+            name: open.name,
+            problem: open.problem ?? 'this clip records no edit to open',
+          });
+          return;
+        }
+        const loaded = await Promise.all(
+          open.sources.map((s) => clip.loadSource(s.track_id, s.stems, MIN_BUCKETS)),
+        );
+        if (loaded.some((s) => !s)) {
+          setUnopenable({
+            name: open.name,
+            problem: 'one of the tracks this clip was cut from could not be decoded',
+          });
+          return;
+        }
+        transportRef.current?.stop(0);
+        setUnopenable(null);
+        setSources(loaded as ClipSource[]);
+        setProgram(open.program);
+        setPast([]);
+        setFuture([]);
+        setTapSession(null);
+        setVp(null);
+        setSelection({ start: open.startSecs, end: open.endSecs });
+        setBleed({ left: open.leftBleedMs, right: open.rightBleedMs });
+        setName(open.name);
+        setEditing({ clipId: open.clipId });
+        const first = open.sources[0];
+        if (first) {
+          setPick(first.track_id);
+          setStemChoice({
+            trackId: first.track_id,
+            on: first.stems.length > 0 ? [...first.stems] : [...STEM_NAMES],
+          });
+        }
+        setStatus(`Editing the beat clip “${open.name}” — saving files it back`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [clip],
+  );
+
   const dirtyEdit = past.length > 0 && program.regions.length > 0;
   useImperativeHandle(
     ref,
@@ -1081,8 +1169,9 @@ export function ClipView({
         if (dirtyEdit) setPendingOpen(trackId);
         else openFromLibrary(trackId);
       },
+      openClip: (clipId: string) => void openSavedClip(clipId),
     }),
-    [dirtyEdit, openFromLibrary],
+    [dirtyEdit, openFromLibrary, openSavedClip],
   );
 
   // --- playback: commands -------------------------------------------------
@@ -1311,7 +1400,7 @@ export function ClipView({
         }
       } else if (!mod && e.key === 'Escape') {
         // Clicking no longer drops the selection, so this is the way out
-        // of one — the same key the Beatify track view uses.
+        // of one.
         setSelection(null);
       }
     };
@@ -1388,6 +1477,7 @@ export function ClipView({
     setError(null);
     setStatus(null);
     try {
+      const revising = editing?.clipId ?? null;
       const saved = await clip.saveBeatClip(
         request,
         name,
@@ -1397,17 +1487,22 @@ export function ClipView({
         tempo.beats,
         bleed.left,
         bleed.right,
+        revising,
       );
       if (saved) {
+        // The page now works ON the clip it filed: saving again revises
+        // it, until a different track is picked up top.
+        setEditing({ clipId: saved.id });
+        const what = revising ? 'Updated' : 'Saved';
         setStatus(
-          `Saved "${saved.name}" — ${saved.beats} ${saved.beats === 1 ? 'beat' : 'beats'} at ` +
+          `${what} "${saved.name}" — ${saved.beats} ${saved.beats === 1 ? 'beat' : 'beats'} at ` +
             `${fixed(saved.bpm, 1)} BPM, ready for the decks' clip pickers`,
         );
       }
     } finally {
       setBusy(false);
     }
-  }, [bleed, clip, name, range, request, tempo]);
+  }, [bleed, clip, editing, name, range, request, tempo]);
 
   // Selections quantize to the tapped grid; AudioTimeline reads ⌘ live
   // and skips these, which is how the window is dragged off the beat.
@@ -1614,7 +1709,12 @@ export function ClipView({
         )}
       </div>
 
-      {disabled ? (
+      {unopenable ? (
+        <p className="clip-empty" data-testid="clip-unopenable">
+          “{unopenable.name}” cannot be edited: {unopenable.problem} Open a track above to start a
+          new clip.
+        </p>
+      ) : disabled ? (
         <p className="clip-empty" data-testid="clip-empty">
           Open a library track to start editing. Saving files a new beat clip the decks can load —
           sources are never overwritten.
@@ -1986,9 +2086,14 @@ export function ClipView({
               className="clip-save-button"
               data-testid="clip-save"
               disabled={busy || name.trim() === '' || !tempo}
+              title={
+                editing
+                  ? 'Save over the clip this page is editing — open a track above to start another'
+                  : 'File this span as a new beat clip'
+              }
               onClick={() => void save()}
             >
-              Save as new beat clip
+              {editing ? 'Save this beat clip' : 'Save as new beat clip'}
             </button>
             <audio ref={audioRef} data-testid="clip-audio" />
           </div>

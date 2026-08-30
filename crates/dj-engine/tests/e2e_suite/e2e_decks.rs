@@ -10,8 +10,8 @@
 //! room would hear it.
 //!
 //! The clips' audio and the tempo they were rendered at come from the
-//! sidecar, like a Beat Clip's: the app layer assembles a bank's clips out
-//! of a Beatify project.
+//! sidecar, like a Beat Clip's: the app layer loads a bank's clips out of
+//! the clip store.
 //!
 //! Regenerate with `REGEN_GOLDENS=1 cargo test -p dj-engine --release
 //! --test e2e_suite decks` (or `./scripts/regen-goldens.sh`).

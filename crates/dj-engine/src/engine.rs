@@ -81,8 +81,8 @@ pub enum AudioFocus {
     Rack,
     /// The Decks page: only what a decks bank feeds reaches the outputs.
     Decks,
-    /// A page that makes its own sound (Clip, Beatify) or none at all
-    /// (Library): the engine holds its tongue.
+    /// A page that makes its own sound (Clip) or none at all (Library):
+    /// the engine holds its tongue.
     Silent,
 }
 
@@ -204,9 +204,9 @@ pub struct NodeInfo {
     /// Path of the track loaded into a Playback/Deck node (persisted in the
     /// patch).
     pub track_path: Option<String>,
-    /// Which Beatify clip a Beat Clip node plays (persisted in the patch;
-    /// the audio itself is re-assembled by the app layer after a load, the
-    /// way deck metadata is re-applied).
+    /// Which saved beat clip a Beat Clip node plays (persisted in the
+    /// patch; the audio itself is re-loaded by the app layer after a load,
+    /// the way deck metadata is re-applied).
     pub clip: Option<BeatClipRef>,
     /// Whether the module is bypassed: its declared bypass routes copy
     /// input to output and its DSP does not run. Persisted in the patch

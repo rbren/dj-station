@@ -1,9 +1,9 @@
-//! Built-in Beat Clip module: a clip built in the Beatify tab, played in
-//! the rack at whatever tempo its clock runs at.
+//! Built-in Beat Clip module: a clip cut on the Clip page, played in the
+//! rack at whatever tempo its clock runs at.
 //!
 //! - Inputs: `clock` (a rising edge is a beat), `reset` (re-arms, so the
 //!   next clock plays beat 0), `bpm` (the tempo the clip's audio was
-//!   rendered at — the project's, written by the loader).
+//!   rendered at — the clip's own, written by the loader).
 //! - Outputs: `audio_l`, `audio_r` (mono clips feed both).
 //!
 //! THE CLOCK OWNS BOTH TEMPO AND PHASE. The interval between the last two
@@ -26,9 +26,9 @@
 //! clock's, so a clip played faster keeps its pitch. Same machinery as the
 //! deck's keylock.
 //!
-//! What the patch keeps is the BINDING ([`BeatClipRef`]: which project,
-//! which clip), never the audio — a clip is placements, not a file (see
-//! `app/src-tauri/src/beatify_clip.rs`), so the app re-assembles it after
+//! What the patch keeps is the BINDING ([`BeatClipRef`]: which store,
+//! which clip), never the audio — seconds of samples do not belong in a
+//! patch (see `app/src-tauri/src/beat_clip.rs`), so the app loads it after
 //! a patch load and hands the samples over the same SPSC ring the Audio
 //! module uses.
 
@@ -60,21 +60,21 @@ pub const DEFAULT_BPM: f32 = 120.0;
 /// clip beat over the whole gap.
 const MAX_INTERVAL_SECS: f32 = 10.0;
 
-/// Which clip a Beat Clip module plays: the Beatify project and the clip
-/// inside it. This — not the audio — is what a patch persists, so a saved
-/// patch reloads the clip as it now stands.
+/// Which clip a Beat Clip module plays: the store and the clip inside it.
+/// This — not the audio — is what a patch persists, so a saved patch
+/// reloads the clip as it now stands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BeatClipRef {
-    /// Beatify project id (`p3`).
+    /// Store the clip lives in (`beat-clips`).
     pub project: String,
-    /// Clip id within that project (`clips.json`).
+    /// Clip id within that store (`b3`).
     pub clip: String,
     /// The clip's name when it was bound — display only.
     #[serde(default)]
     pub name: String,
-    /// The Beatify project the clip was cut in, by name — display only,
-    /// like `name`: a deck says where its clip came from, and two decks
-    /// holding an "intro" each are told apart by it.
+    /// The store the clip came from, by name — display only, like `name`:
+    /// a deck says where its clip came from, and two decks holding an
+    /// "intro" each are told apart by it.
     #[serde(default)]
     pub project_name: String,
     /// Which parts of a track the clip is made of ("drums", "bass", …),

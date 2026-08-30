@@ -114,23 +114,21 @@ function makeApi(status: DecksStatus, over: Partial<DecksApi> = {}): DecksApi {
 
 const CLIPS: BeatClipEntry[] = [
   {
-    projectId: 'p1',
     clipId: 'c1',
     name: 'intro loop',
-    projectName: 'set one',
     beats: 8,
     bpm: 120,
     stems: ['drums', 'bass'],
+    editable: true,
     sources: [{ trackHash: 'abc123', title: 'Basement Loop', artist: 'Me' }],
   },
   {
-    projectId: 'p1',
     clipId: 'c2',
     name: 'hat stab',
-    projectName: 'set one',
     beats: 2,
     bpm: 120,
     stems: [],
+    editable: false,
     sources: [],
   },
 ];
@@ -281,7 +279,7 @@ describe('DecksView', () => {
     expect(long.style.getPropertyValue('--beat-gap')).toBe('0px');
   });
 
-  it('a deck names the Beatify project its clip was cut in, on a line above the clip', async () => {
+  it('a deck names where its clip came from, on a line above the clip', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[0] = loadedSlot(0);
     slots[1] = loadedSlot(1, {
@@ -290,7 +288,7 @@ describe('DecksView', () => {
     show(makeApi(makeStatus({ slots })));
     await waitFor(() => expect(screen.getByTestId('decks-project-0').textContent).toBe('set one'));
     expect(screen.getByTestId('decks-clip-0').textContent).toBe('clip 0');
-    // A patch saved before clips carried the project name falls back to
+    // A patch saved before clips carried the store's name falls back to
     // its id rather than leaving the line blank.
     expect(screen.getByTestId('decks-project-1').textContent).toBe('p9');
     expect(screen.getByTestId('decks-clip-1').textContent).toBe('stab');
@@ -673,12 +671,12 @@ describe('DecksView', () => {
     fireEvent.click(screen.getByTestId('decks-name-5'));
 
     const dialog = await screen.findByTestId('decks-clip-picker');
-    expect(within(dialog).getByTestId('decks-clip-p1-c1')).toBeTruthy();
+    expect(within(dialog).getByTestId('decks-clip-c1')).toBeTruthy();
     fireEvent.change(screen.getByTestId('decks-clip-search'), { target: { value: 'hat' } });
-    expect(within(dialog).queryByTestId('decks-clip-p1-c1')).toBeNull();
-    fireEvent.click(within(dialog).getByTestId('decks-clip-p1-c2'));
+    expect(within(dialog).queryByTestId('decks-clip-c1')).toBeNull();
+    fireEvent.click(within(dialog).getByTestId('decks-clip-c2'));
 
-    await waitFor(() => expect(api.load).toHaveBeenCalledWith('decks1', 5, 'p1', 'c2'));
+    await waitFor(() => expect(api.load).toHaveBeenCalledWith('decks1', 5, 'c2'));
     await waitFor(() => expect(screen.queryByTestId('decks-clip-picker')).toBeNull());
   });
 
@@ -687,7 +685,7 @@ describe('DecksView', () => {
     await waitFor(() => expect(screen.getByTestId('decks-name-0')).toBeTruthy());
     fireEvent.click(screen.getByTestId('decks-name-0'));
     const empty = await screen.findByTestId('decks-no-clips');
-    expect(empty.textContent).toContain('Beatify');
+    expect(empty.textContent).toContain('Clip page');
   });
 
   it('a deck says what its clip is made of, here and in the picker', async () => {
@@ -704,7 +702,7 @@ describe('DecksView', () => {
 
     fireEvent.click(screen.getByTestId('decks-name-3'));
     const dialog = await screen.findByTestId('decks-clip-picker');
-    expect(within(dialog).getByTestId('decks-clip-stems-p1-c1-bass')).toBeTruthy();
+    expect(within(dialog).getByTestId('decks-clip-stems-c1-bass')).toBeTruthy();
   });
 
   it('the picker’s stem tags filter the list to clips containing that part', async () => {
@@ -720,21 +718,21 @@ describe('DecksView', () => {
     // One tag narrows to clips that say they contain the part; a clip
     // that makes no claim about its parts drops out.
     fireEvent.click(within(dialog).getByTestId('decks-clip-filter-drums'));
-    expect(within(dialog).getByTestId('decks-clip-p1-c1')).toBeTruthy();
-    expect(within(dialog).queryByTestId('decks-clip-p1-c2')).toBeNull();
+    expect(within(dialog).getByTestId('decks-clip-c1')).toBeTruthy();
+    expect(within(dialog).queryByTestId('decks-clip-c2')).toBeNull();
 
     // Multi-select narrows further: every selected part must be present.
     fireEvent.click(within(dialog).getByTestId('decks-clip-filter-vocals'));
-    expect(within(dialog).queryByTestId('decks-clip-p1-c1')).toBeNull();
+    expect(within(dialog).queryByTestId('decks-clip-c1')).toBeNull();
     expect(within(dialog).getByTestId('decks-no-clips').textContent).toContain('stems');
 
     // Clicking a pressed tag releases it…
     fireEvent.click(within(dialog).getByTestId('decks-clip-filter-vocals'));
-    expect(within(dialog).getByTestId('decks-clip-p1-c1')).toBeTruthy();
+    expect(within(dialog).getByTestId('decks-clip-c1')).toBeTruthy();
 
     // …and ALL clears the lot.
     fireEvent.click(within(dialog).getByTestId('decks-clip-filter-all'));
-    expect(within(dialog).getByTestId('decks-clip-p1-c2')).toBeTruthy();
+    expect(within(dialog).getByTestId('decks-clip-c2')).toBeTruthy();
     expect(within(dialog).getByTestId('decks-clip-filter-all').getAttribute('aria-pressed')).toBe(
       'true',
     );

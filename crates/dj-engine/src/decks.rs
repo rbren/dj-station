@@ -1,4 +1,4 @@
-//! Built-in Decks module (`builtin.decks`): eight Beatify clips on ONE
+//! Built-in Decks module (`builtin.decks`): eight beat clips on ONE
 //! clock, mixed down to a stereo pair — the engine behind the Decks tab.
 //!
 //! - Inputs: `bpm` (the bank's tempo; every slot is stretched to it),
@@ -64,7 +64,7 @@
 //! rate it was rendered at, so the pitch stays where the clip put it (the
 //! deck's keylock and the Beat Clip module use the same machinery). What
 //! one clip beat means is the slot's `source_bpm`, written by the loader
-//! from the Beatify project the clip was cut in.
+//! from the clip it loaded.
 //!
 //! A DECK CAN RUN AT A RATIO OF THE BANK'S GRID
 //! ([`DeckSlotState::ratio`], the page's BPM label): a deck at 2 is in
@@ -396,7 +396,7 @@ pub fn decks_manifest() -> Manifest {
 
 /// One slot's control state: what it plays, where it sits on the bank's
 /// grid, and how it is mixed. Persisted in the patch (the AUDIO is not —
-/// a Beatify clip is placements, re-assembled on load).
+/// it is loaded out of the clip store on load).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeckSlotState {
     #[serde(default, skip_serializing_if = "Option::is_none")]

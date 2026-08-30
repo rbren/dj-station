@@ -4,7 +4,7 @@
 // thing to learn.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { BeatClipEntry } from '../beatClip';
+import { clipSourceLabel, type BeatClipEntry } from '../beatClip';
 import { STEM_NAMES, type StemName } from '../clip';
 import { StemTags, STEM_TAG_SHORT } from './StemTags';
 
@@ -35,7 +35,7 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
     return clips.filter((c) => {
       if (!stemFilter.every((s) => c.stems.includes(s))) return false;
       if (words.length === 0) return true;
-      const hay = `${c.name} ${c.projectName}`.toLowerCase();
+      const hay = `${c.name} ${clipSourceLabel(c)}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
   }, [clips, query, stemFilter]);
@@ -137,17 +137,17 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
           <ul ref={list} className="picker-clip-list" role="listbox" aria-label="Clips">
             {shown.map((c, i) => (
               <li
-                key={`${c.projectId}/${c.clipId}`}
+                key={c.clipId}
                 className={`picker-clip-row${i === active ? ' active' : ''}`}
-                data-testid={`decks-clip-${c.projectId}-${c.clipId}`}
+                data-testid={`decks-clip-${c.clipId}`}
                 role="option"
                 aria-selected={i === active}
                 onMouseEnter={() => setIndex(i)}
                 onClick={() => onPick(c)}
               >
                 <span className="picker-clip-name">{c.name}</span>
-                <span className="picker-clip-project">{c.projectName}</span>
-                <StemTags stems={c.stems} testId={`decks-clip-stems-${c.projectId}-${c.clipId}`} />
+                <span className="picker-clip-project">{clipSourceLabel(c)}</span>
+                <StemTags stems={c.stems} testId={`decks-clip-stems-${c.clipId}`} />
                 <span className="picker-clip-beats">{c.beats} beats</span>
                 <span className="picker-clip-bpm">
                   {c.bpm > 0 ? `${c.bpm.toFixed(1)} BPM` : '—'}
@@ -158,7 +158,7 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
         ) : (
           <p className="empty-state" data-testid="decks-no-clips">
             {clips.length === 0
-              ? 'No clips yet. Cut one in the Beatify tab and it will show up here.'
+              ? 'No clips yet. Cut one on the Clip page and it will show up here.'
               : query
                 ? `No clips match “${query}”.`
                 : 'No clips contain those stems.'}

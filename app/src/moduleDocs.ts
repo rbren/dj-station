@@ -1415,7 +1415,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   },
   'builtin.decks': {
     summary:
-      'Eight Beatify clips on one clock \u2014 the bank behind the Decks ' +
+      'Eight beat clips on one clock \u2014 the bank behind the Decks ' +
       'tab. Every slot is stretched to the bank\u2019s tempo (not sped ' +
       'up, so nothing changes pitch) and started on the shared grid, so a ' +
       'two-beat clip and an eight-beat clip come round on the same beat. ' +
@@ -1481,7 +1481,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   },
   'builtin.beat_clip': {
     summary:
-      'Plays a clip built in the Beatify tab, locked to a clock. Import ' +
+      'Plays a clip cut on the Clip page, locked to a clock. Import ' +
       'one from the Clips tab of the module picker and the module arrives ' +
       'loaded with that clip and the tempo its project is laid out at. ' +
       'The clock does the rest: the gap between its last two ticks is the ' +

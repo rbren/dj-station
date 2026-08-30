@@ -33,12 +33,9 @@ import { reportError } from './errors';
 import { LibraryView } from './components/LibraryView';
 import { ClipView, type ClipViewHandle } from './components/ClipView';
 import { beatClip, type BeatClipEntry, BEAT_CLIP_TYPE } from './beatClip';
-import { beatifyClipClient } from './beatifyClip';
-import { BeatifyView } from './components/BeatifyView';
 import { DecksView } from './components/DecksView';
 import { DECKS_HIDDEN_TYPES } from './decks';
 import { clipClient } from './clip';
-import { beatifyClient } from './beatify';
 import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
 import { GRID, snap } from './components/ModulePanel';
 import { RackModule } from './components/RackModule';
@@ -110,11 +107,11 @@ const WIRE_COLORS_KEY = 'dj-wire-colors';
 const LAST_WIRE_COLOR_KEY = 'dj-wire-last-color';
 const NUM_WIRE_COLORS = WIRE_COLORS.length;
 
-type View = 'rack' | 'library' | 'clip' | 'beatify' | 'decks';
+type View = 'rack' | 'library' | 'clip' | 'decks';
 
 /** The page the engine plays for while `view` is the open tab: the Rack is
- *  the whole patch, the Decks page is its bank, and Library/Clip/Beatify
- *  either make their own sound or none — so the engine goes quiet. */
+ *  the whole patch, the Decks page is its bank, and Library/Clip either
+ *  make their own sound or none — so the engine goes quiet. */
 function audioFocusForView(view: View): AudioFocus {
   if (view === 'rack') return 'rack';
   if (view === 'decks') return 'decks';
@@ -236,8 +233,8 @@ export default function App() {
   const [docs, setDocs] = useState<null | { typeId: string; manifest: Manifest }>(null);
   // Cmd+M module picker modal.
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Beatify clips offered in the picker's Clips tab, fetched while it is
-  // open (a clip saved in another tab shows up the next time it opens).
+  // Saved beat clips offered in the picker's Clips tab, fetched while it
+  // is open (a clip saved in another tab shows up the next time it opens).
   const [beatClips, setBeatClips] = useState<BeatClipEntry[]>([]);
   const [zoom, setZoom] = useState<number>(() => loadZoom('rack'));
   // Infinite canvas: the rack is translated by `pan` (screen px) before the
@@ -1623,8 +1620,8 @@ export default function App() {
     [insertPoint, addModule],
   );
 
-  // The picker's Clips tab lists what Beatify has saved; only refetched
-  // while the modal is up, so a rack session costs nothing.
+  // The picker's Clips tab lists what the Clip page has saved; only
+  // refetched while the modal is up, so a rack session costs nothing.
   useEffect(() => {
     if (!pickerOpen) return;
     let live = true;
@@ -1646,7 +1643,7 @@ export default function App() {
       setPickerOpen(false);
       void (async () => {
         const instance = await addModule(BEAT_CLIP_TYPE, at);
-        const named = await beatClip.load(instance, clip.projectId, clip.clipId);
+        const named = await beatClip.load(instance, clip.clipId);
         const renamedTo = named && named !== instance ? named : null;
         if (renamedTo) carryPositions({ [instance]: renamedTo });
         await refresh();
@@ -2085,13 +2082,6 @@ export default function App() {
             Clip
           </button>
           <button
-            className={view === 'beatify' ? 'tab active' : 'tab'}
-            onClick={() => setView('beatify')}
-            data-testid="tab-beatify"
-          >
-            Beatify
-          </button>
-          <button
             className={view === 'decks' ? 'tab active' : 'tab'}
             onClick={() => setView('decks')}
             data-testid="tab-decks"
@@ -2352,14 +2342,15 @@ export default function App() {
             clipView.current?.open(t.id);
             setView('clip');
           }}
+          onEditClip={(c) => {
+            clipView.current?.openClip(c.clipId);
+            setView('clip');
+          }}
         />
       )}
       {/* The clip editor stays mounted so the edit survives tab switches;
           it hides itself and pauses playback while inactive. */}
       <ClipView clip={clipClient} library={library} active={view === 'clip'} ref={clipView} />
-      {view === 'beatify' && (
-        <BeatifyView client={beatifyClient} library={library} clips={beatifyClipClient} />
-      )}
       {pickerOpen && (
         <ModulePicker
           modules={moduleLib}

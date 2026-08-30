@@ -5,8 +5,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod beat_clip;
-mod beatify;
-mod beatify_clip;
 mod clip;
 mod decks;
 mod launch_control;
@@ -60,8 +58,6 @@ struct AppState {
     /// Keeps the stem cache filled by itself — every downloaded track,
     /// history included — so the Clip page never has to ask for one.
     auto_stems: dj_analysis::AutoStemService,
-    /// The Beatify tab's in-flight analysis (ephemeral until Save).
-    beatify: beatify::BeatifySession,
 }
 
 /// Named patches live under the single data dir (PRD §3) — `custom/` in
@@ -2230,8 +2226,8 @@ fn set_audio_outputs(
 
 /// Play for the page the user is looking at. ONE PAGE SOUNDS AT A TIME:
 /// the Rack is the whole patch, the Decks page is its bank (and whatever
-/// the bank is played through), and a page that makes its own sound —
-/// Clip, Beatify — or none at all leaves the engine silent. Ephemeral
+/// the bank is played through), and a page that makes its own sound (the
+/// Clip page) or none at all leaves the engine silent. Ephemeral
 /// session state, so it is not an undoable edit and never reaches the
 /// patch; the engine keeps running either way, so a page comes back
 /// exactly where it was.
@@ -2339,10 +2335,11 @@ fn set_track_names(
 /// audio file itself when the app owns it (a provider download or a
 /// rendered clip — a file in the user's own folders always stays).
 ///
-/// It does NOT chase the references pointing AT the track: a beatify
-/// seed, a clip source and a saved patch's deck each name a track that
-/// may already be gone, and each degrades on its own (a seed falls back
-/// to its own render, a patch load warns and comes up without the track).
+/// It does NOT chase the references pointing AT the track: a beat clip's
+/// source and a saved patch's deck each name a track that may already be
+/// gone, and each degrades on its own (a clip keeps its audio and says
+/// its source is unknown, a patch load warns and comes up without the
+/// track).
 #[tauri::command]
 fn delete_track(state: State<AppState>, track_id: i64) -> CmdResult<dj_library::DeletedTrack> {
     // A separation in flight would write stems back into the cache we are
@@ -2844,7 +2841,6 @@ fn main() {
             clips: clip::ClipCache::default(),
             stems,
             auto_stems,
-            beatify: beatify::BeatifySession::default(),
         })
         .setup(|app| {
             // Camera module (getUserMedia) permission plumbing. macOS: wry's
@@ -3120,35 +3116,9 @@ fn main() {
             clip::clip_detect_beats,
             clip::clip_tap_beats,
             clip::clip_save_beat_clip,
+            clip::clip_open_beat_clip,
             clip::clip_stem_backend,
             clip::clip_stem_status,
-            beatify::beatify_tracker_status,
-            beatify::beatify_analyze,
-            beatify::beatify_set_reading,
-            beatify::beatify_set_seed,
-            beatify::beatify_taps,
-            beatify::beatify_meters,
-            beatify::beatify_preview,
-            beatify::beatify_sync_check,
-            beatify::beatify_scope,
-            beatify::beatify_save,
-            beatify::beatify_projects,
-            beatify::beatify_project_new,
-            beatify::beatify_project_open,
-            beatify::beatify_project_set_bpm,
-            beatify::beatify_seed_delete,
-            beatify::beatify_seed_rename,
-            beatify::beatify_project_rename,
-            beatify::beatify_project_delete,
-            beatify::beatify_project_audio,
-            beatify::beatify_cancel,
-            beatify::beatify_warp_map,
-            beatify_clip::beatify_clip_sources,
-            beatify_clip::beatify_clip_open,
-            beatify_clip::beatify_clip_audio,
-            beatify_clip::beatify_clip_preview,
-            beatify_clip::beatify_clip_save,
-            beatify_clip::beatify_clip_delete,
             beat_clip::beat_clip_list,
             beat_clip::beat_clip_delete,
             beat_clip::beat_clip_load,

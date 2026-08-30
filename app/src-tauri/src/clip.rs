@@ -1,5 +1,5 @@
 //! Clip page IPC (PRD §9): edit library tracks into BEAT CLIPS the decks
-//! can load like any Beatify clip.
+//! and the rack's Beat Clip module can load.
 //!
 //! The editor is a pure control-plane feature — it never touches the
 //! engine or the RT thread. Commands decode library tracks (cached here so
@@ -420,25 +420,21 @@ pub fn clip_preview_audio(
 //
 // A BEAT CLIP is a rendered span of the edit cut to a whole number of
 // beats — the thing the Decks (and the module picker's Clips tab) can
-// load exactly like a Beatify clip. The store itself lives in
-// `dj_analysis::clip` (`<data_dir>/beat-clips/`); it is surfaced through
-// the SAME doors Beatify clips use: appended to `beat_clip_list` under
-// the reserved project id [`BEAT_CLIPS_PROJECT`], and
-// `beatify_clip::render_clip` routes that id here — so `beat_clip_load`,
-// patch-load hydration and copy/paste need no second code path.
+// load. The store itself lives in `dj_analysis::clip`
+// (`<data_dir>/beat-clips/`) and is reached through `beat_clip.rs`, which
+// lists it, loads it and deletes from it.
 
-/// Reserved "project" id beat clips are listed under. Beatify mints
-/// project ids as `p<n>` (legacy: source-hash directory names), so this
-/// can never collide with a real project.
+/// The store a patch's clip binding names. A binding is a store id plus a
+/// clip id (`BeatClipRef`), and there is one store left, so this is what
+/// every binding written now carries.
 pub const BEAT_CLIPS_PROJECT: &str = "beat-clips";
-/// Where the pickers say a beat clip came from: the store, in the place a
-/// Beatify clip names its project. The TRACK it was cut from is not a
-/// label any more — it is a pointer (`BeatClipEdit.sources`), resolved
-/// against the library when something wants to show it.
+/// Where a deck says a clip came from. The TRACK it was cut from is not a
+/// label — it is a pointer (`BeatClipEdit.sources`), resolved against the
+/// library when something wants to show it.
 pub const BEAT_CLIPS_PROJECT_NAME: &str = "Clip tab";
 
 /// Tempo of a span of the edit, measured: what the save row shows when
-/// the selection was never tapped. Runs the Beatify tracker (`beat_this`
+/// the selection was never tapped. Runs the beat tracker (`beat_this`
 /// when installed, the DSP fallback otherwise) over the rendered output.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -460,8 +456,8 @@ pub fn clip_detect_beats(
 ) -> CmdResult<ClipBeats> {
     let rendered = request.render(&state)?;
     let (a, b) = span_of(&rendered, start_secs, end_secs)?;
-    let tracker = dj_analysis::beatify::detect::default_tracker();
-    let analysis = dj_analysis::beatify::analyze(
+    let tracker = dj_analysis::beats::detect::default_tracker();
+    let analysis = dj_analysis::beats::analyze(
         &rendered,
         tracker.as_ref(),
         Some((a, b)),
@@ -497,7 +493,7 @@ pub struct ClipTapBeats {
 }
 
 /// The measured beat grid for a run of right-shift taps (PRD §9): the
-/// Beatify tracker runs over the span the taps covered, the taps choose
+/// tracker runs over the span the taps covered, the taps choose
 /// the seed (and metrical reading) that best fits them, and the chosen
 /// seed's beat times come back for the UI to stretch by the same rules
 /// raw taps use. Refusals are an answer, not an error — the taps still
@@ -509,7 +505,7 @@ pub fn clip_tap_beats(
     taps: Vec<f64>,
 ) -> CmdResult<ClipTapBeats> {
     let rendered = request.render(&state)?;
-    let tracker = dj_analysis::beatify::detect::default_tracker();
+    let tracker = dj_analysis::beats::detect::default_tracker();
     match clip::beats_from_taps(&rendered, tracker.as_ref(), &taps) {
         Ok(heard) => Ok(ClipTapBeats {
             detail: format!(
@@ -551,7 +547,7 @@ fn span_of(rendered: &AudioData, start_secs: f64, end_secs: f64) -> CmdResult<(f
 /// `beats` whole beats at `bpm` — the numbers the save row showed, so
 /// selecting two beats files two (a fractional tail is silence-filled,
 /// an overhang trimmed). The saved clip loads into the decks exactly
-/// like a Beatify clip (see `beat_clip.rs`).
+/// through `beat_clip.rs` like any other saved clip.
 ///
 /// The EDIT is filed with it: the sources by the hash of their audio
 /// (never by title — that is the user's to change, and a row id is
@@ -575,6 +571,7 @@ pub fn clip_save_beat_clip(
     beats: usize,
     left_bleed_ms: f64,
     right_bleed_ms: f64,
+    replace: Option<String>,
 ) -> CmdResult<clip::BeatClipMeta> {
     let rendered = request.render(&state)?;
     let (a, b) = span_of(&rendered, start_secs, end_secs)?;
@@ -614,22 +611,138 @@ pub fn clip_save_beat_clip(
             })
         })
         .collect::<CmdResult<Vec<_>>>()?;
+    // The clip keeps the beats it HOLDS, not the grid the whole edit was
+    // tapped on: the beats either side of the span were never in it.
+    let mut program = request.program.clone();
+    program.beat_grid = program.beat_grid.as_ref().map(|grid| grid.cut_to(a, b));
     let edit = clip::BeatClipEdit {
         sources: pointers,
-        program: request.program.clone(),
+        program,
         start_secs: a,
         end_secs: b,
     };
 
-    clip::save_beat_clip(
-        state.library.data_dir(),
-        &title,
-        &span,
-        bpm,
-        beats,
-        stems,
-        Some(edit),
-        &bleed,
-    )
+    let data_dir = state.library.data_dir();
+    match replace {
+        // Saving again while still editing what was filed is a REVISION
+        // of that clip, not a second copy of it.
+        Some(clip_id) => clip::update_beat_clip(
+            data_dir,
+            &clip_id,
+            &title,
+            &span,
+            bpm,
+            beats,
+            stems,
+            Some(edit),
+            &bleed,
+        ),
+        None => clip::save_beat_clip(data_dir, &title, &span, bpm, beats, stems, Some(edit), &bleed),
+    }
     .map_err(|e| CmdError::invalid(format!("clip: {e}")))
+}
+
+/// A saved beat clip as the editor takes it back: the edit that made it,
+/// with every source resolved to the library row that holds that audio
+/// TODAY (the clip points at a content hash, and a row id is re-assigned
+/// on re-import).
+///
+/// `problem` is how a clip that cannot be edited says so — it is a
+/// message for the page, not an error: the clip itself is fine, it just
+/// cannot be taken apart again. `program` and `sources` are empty then.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatClipEditOpen {
+    pub clip_id: String,
+    pub name: String,
+    /// The span of the edit the clip was cut from, output seconds.
+    pub start_secs: f64,
+    pub end_secs: f64,
+    pub left_bleed_ms: f64,
+    pub right_bleed_ms: f64,
+    pub program: Option<ClipProgram>,
+    /// Index for index with `program`'s region sources.
+    pub sources: Vec<ClipSourceRef>,
+    pub problem: Option<String>,
+}
+
+impl BeatClipEditOpen {
+    fn refused(meta: &clip::BeatClipMeta, problem: String) -> BeatClipEditOpen {
+        BeatClipEditOpen {
+            clip_id: meta.id.clone(),
+            name: meta.name.clone(),
+            start_secs: 0.0,
+            end_secs: 0.0,
+            left_bleed_ms: meta.left_bleed_ms,
+            right_bleed_ms: meta.right_bleed_ms,
+            program: None,
+            sources: Vec::new(),
+            problem: Some(problem),
+        }
+    }
+}
+
+/// Open a saved beat clip in the Clip page again.
+///
+/// A clip is editable only if it was filed with its edit AND every track
+/// that edit names is still in the library: the audio behind a region is
+/// the source file, and there is nothing to cut without it. Both refusals
+/// come back as a `problem` line rather than a rejection, because the
+/// page shows them where the editor would have been.
+#[tauri::command(async)]
+pub fn clip_open_beat_clip(state: State<AppState>, clip_id: String) -> CmdResult<BeatClipEditOpen> {
+    let meta = clip::read_beat_clips(state.library.data_dir())
+        .into_iter()
+        .find(|c| c.id == clip_id)
+        .ok_or_else(|| CmdError::invalid(format!("clip: no saved beat clip {clip_id}")))?;
+    let Some(edit) = meta.edit.clone() else {
+        return Ok(BeatClipEditOpen::refused(
+            &meta,
+            "this clip was filed before clips recorded how they were cut, so there is nothing to \
+             open — its audio still plays."
+                .into(),
+        ));
+    };
+    let mut sources = Vec::new();
+    let mut missing = Vec::new();
+    for source in &edit.sources {
+        match state.library.track_by_hash(&source.track_hash).map_err(err)? {
+            Some(track) => sources.push(ClipSourceRef {
+                track_id: track.id,
+                stems: source.stems.clone(),
+            }),
+            None => missing.push(source.track_hash.clone()),
+        }
+    }
+    if !missing.is_empty() {
+        return Ok(BeatClipEditOpen::refused(
+            &meta,
+            format!(
+                "this clip was cut from {} the library no longer has ({}) — re-import {} to edit \
+                 it.",
+                if missing.len() == 1 {
+                    "a track"
+                } else {
+                    "tracks"
+                },
+                missing
+                    .iter()
+                    .map(|h| h.chars().take(12).collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if missing.len() == 1 { "it" } else { "them" },
+            ),
+        ));
+    }
+    Ok(BeatClipEditOpen {
+        clip_id: meta.id,
+        name: meta.name,
+        start_secs: edit.start_secs,
+        end_secs: edit.end_secs,
+        left_bleed_ms: meta.left_bleed_ms,
+        right_bleed_ms: meta.right_bleed_ms,
+        program: Some(edit.program),
+        sources,
+        problem: None,
+    })
 }

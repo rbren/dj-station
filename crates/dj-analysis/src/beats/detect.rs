@@ -1,4 +1,4 @@
-//! Beat detection for Beatify (PRD §2.1).
+//! Beat detection: two trackers behind one trait.
 //!
 //! Two trackers behind one [`BeatTracker`] trait, mirroring the stem
 //! separator split (deterministic DSP default, heavy model behind an
@@ -44,7 +44,7 @@ pub const ENV_DEVICE: &str = "DJ_BEAT_THIS_DEVICE";
 /// Comma-separated checkpoint list; the default is the three seeds.
 pub const ENV_CHECKPOINTS: &str = "DJ_BEAT_THIS_CHECKPOINTS";
 /// Force the DSP fallback even when `beat_this` is importable (tests).
-pub const ENV_FORCE_DSP: &str = "DJ_BEATIFY_FORCE_DSP";
+pub const ENV_FORCE_DSP: &str = "DJ_BEATS_FORCE_DSP";
 
 pub const DEFAULT_PYTHON: &str = "python3";
 /// Ask torch what the machine has (cuda > mps > cpu) instead of assuming.
@@ -159,7 +159,7 @@ pub fn tracker_status() -> TrackerStatus {
     }
 }
 
-/// The tracker Beatify runs: `beat_this` when installed, DSP otherwise.
+/// The tracker beat analysis runs: `beat_this` when installed, DSP otherwise.
 pub fn default_tracker() -> Box<dyn BeatTracker> {
     if !env_flag(ENV_FORCE_DSP) && probe_beat_this().is_ok() {
         Box::new(FallbackTracker::default())
@@ -226,7 +226,7 @@ impl BeatTracker for FallbackTracker {
                 .take(FAILURE_DETAIL)
                 .collect::<String>(),
         };
-        eprintln!("beatify: {failure} — falling back to the DSP tracker");
+        eprintln!("beats: {failure} — falling back to the DSP tracker");
         let runs = DspTracker.detect(audio, span)?;
         if let Ok(mut used) = self.used.lock() {
             *used = Some(format!("dsp (beat_this failed: {failure})"));
@@ -684,10 +684,9 @@ impl TempFile {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        TempFile(std::env::temp_dir().join(format!(
-            "dj-beatify-{}-{stamp}-{n}.{ext}",
-            std::process::id()
-        )))
+        TempFile(
+            std::env::temp_dir().join(format!("dj-beats-{}-{stamp}-{n}.{ext}", std::process::id())),
+        )
     }
 
     fn wav(audio: &AudioData) -> Result<Self> {

@@ -215,42 +215,38 @@ function mockClientWithJob(job: DownloadJob) {
   });
 }
 
-// Two saved clips, one from each store: the Clip page's own (which
-// points at its source by the hash of that track's audio) and a Beatify
-// project's (which points at its seed's).
+// A saved clip that points at its source by the hash of that track's
+// audio, and can be opened in the editor again.
 const CLIP_TAB_CLIP: BeatClipEntry = {
-  projectId: 'beat-clips',
-  projectName: 'Clip tab',
   clipId: 'b1',
   name: 'main drums',
   bpm: 120,
   beats: 4,
   stems: ['drums'],
+  editable: true,
   sources: [{ trackHash: 'abc', title: 'Basement Loop', artist: 'Me' }],
 };
 
 // Its source is gone from the library — deleted, or never tracked at all
 // when the clip was cut.
 const ORPHAN_CLIP: BeatClipEntry = {
-  projectId: 'p1',
-  projectName: 'Live Set A',
   clipId: '1',
   name: 'chorus stack',
   bpm: 174,
   beats: 8,
   stems: [],
+  editable: true,
   sources: [{ trackHash: 'deadbeefcafe', title: null, artist: null }],
 };
 
 // Cut before clips recorded where they came from.
 const UNTRACKED_CLIP: BeatClipEntry = {
-  projectId: 'beat-clips',
-  projectName: 'Clip tab',
   clipId: 'b2',
   name: 'old bass run',
   bpm: 90,
   beats: 2,
   stems: [],
+  editable: false,
   sources: [],
 };
 
@@ -260,8 +256,8 @@ function mockClips(entries: BeatClipEntry[] = [CLIP_TAB_CLIP, ORPHAN_CLIP, UNTRA
     list: vi.fn().mockImplementation(() => Promise.resolve([...list])),
     load: vi.fn().mockResolvedValue('beatclip1'),
     status: vi.fn().mockResolvedValue(null),
-    delete: vi.fn().mockImplementation((projectId: string, clipId: string) => {
-      const at = list.findIndex((c) => c.projectId === projectId && c.clipId === clipId);
+    delete: vi.fn().mockImplementation((clipId: string) => {
+      const at = list.findIndex((c) => c.clipId === clipId);
       if (at >= 0) list.splice(at, 1);
       return Promise.resolve([...list]);
     }),
@@ -788,7 +784,7 @@ describe('LibraryView', () => {
     expect(screen.getByTestId('library-fair-use')).toBeTruthy();
   });
 
-  it('lists every saved beat clip, whichever store it came from', async () => {
+  it('lists every saved beat clip, by name and by what it was cut from', async () => {
     const clips = mockClips();
     render(<LibraryView client={mockClient()} clips={clips} />);
     await openClipsTab();
@@ -801,10 +797,7 @@ describe('LibraryView', () => {
     expect(rows[0].querySelector('[data-testid="clip-source"]')?.textContent).toContain(
       'Basement Loop',
     );
-    expect(rows[0].textContent).toContain('Clip tab');
-    // A Beatify clip lists the same way, under its project.
     expect(rows[1].textContent).toContain('chorus stack');
-    expect(rows[1].textContent).toContain('Live Set A');
   });
 
   it('says so when a clip has no source to show, and never hides the clip', async () => {
@@ -823,6 +816,20 @@ describe('LibraryView', () => {
     );
   });
 
+  it('offers Edit on the clips that carry the edit that made them', async () => {
+    const onEditClip = vi.fn();
+    render(<LibraryView client={mockClient()} clips={mockClips()} onEditClip={onEditClip} />);
+    await openClipsTab();
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+
+    const edits = screen.getAllByTestId('beat-clip-edit') as HTMLButtonElement[];
+    fireEvent.click(edits[0]);
+    expect(onEditClip).toHaveBeenCalledWith(expect.objectContaining({ clipId: 'b1' }));
+    // A clip filed before clips recorded how they were cut has nothing to
+    // open: the button is there, and says why it is not offered.
+    expect(edits[2].disabled).toBe(true);
+  });
+
   it('deletes a beat clip once it is confirmed', async () => {
     const clips = mockClips();
     render(<LibraryView client={mockClient()} clips={clips} />);
@@ -837,7 +844,7 @@ describe('LibraryView', () => {
     fireEvent.click(screen.getAllByTestId('beat-clip-delete')[0]);
     fireEvent.click(screen.getByTestId('beat-clip-delete-confirm'));
     await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(2));
-    expect(clips.delete).toHaveBeenCalledWith('beat-clips', 'b1');
+    expect(clips.delete).toHaveBeenCalledWith('b1');
     expect(screen.getByTestId('library-status').textContent).toContain('main drums');
   });
 

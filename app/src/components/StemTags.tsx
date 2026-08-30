@@ -1,11 +1,11 @@
 // What a clip is made of, as tags: "drums", "bass", "vocals", "other".
 //
-// A clip is cut from seeds whose parts can be switched off (the Beatify
-// clip builder's stem toggles), so two clips from the same track can hold
+// A clip is cut from sources whose parts can be switched off (the Clip
+// page's stem toggles), so two clips from the same track can hold
 // entirely different material — a drum loop and an a cappella look alike
-// in a list and sound nothing alike. The backend reads what a clip
-// contains off its placements (`beatify_clip::stems_of_clip`) and every
-// surface that offers a clip shows the answer here, the same way.
+// in a list and sound nothing alike. The clip records what it was cut
+// from, and every surface that offers one shows the answer here, the same
+// way.
 //
 // ALL FOUR IS ONE TAG. A clip cut from untouched mixes contains every
 // part, and four chips saying so on every row is noise that hides the

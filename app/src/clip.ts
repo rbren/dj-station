@@ -9,8 +9,17 @@
 // tap warp's time mapping exists on both sides too (`warpTime` /
 // `warp_time_secs`).
 
-import type { Grid } from './beatify';
 import { IpcClient } from './ipc';
+
+/** An even beat grid: the two numbers a tempo is, and how far it runs.
+ *  Twin: `Grid` in `dj_analysis::beats`. */
+export interface Grid {
+  bpm: number;
+  period: number;
+  /** Seconds of beat 0. */
+  phase: number;
+  beats: number;
+}
 
 export interface ClipRegion {
   /** Index into the request's `sources` (library track ids). */
@@ -1040,6 +1049,24 @@ export interface ClipTapSeed {
   fit: number;
 }
 
+/** A saved beat clip taken back apart for the editor
+ *  (`clip_open_beat_clip`): the edit it was cut with, its sources
+ *  resolved to the library rows that hold that audio TODAY, and the span
+ *  of the edit it filed. `problem` says why it cannot be opened — no edit
+ *  was recorded, or a source track is gone — and then there is nothing
+ *  else in it. */
+export interface BeatClipEdit {
+  clipId: string;
+  name: string;
+  startSecs: number;
+  endSecs: number;
+  leftBleedMs: number;
+  rightBleedMs: number;
+  program: ClipProgram | null;
+  sources: ClipSourceRef[];
+  problem: string | null;
+}
+
 /** What a beat-clip save filed: the record the decks' clip pickers list.
  *  A beat clip wears ONE name; where it came from is a pointer to the
  *  source tracks by the hash of their audio (`edit`), not a copy of
@@ -1074,11 +1101,13 @@ export interface ClipClientApi {
   tapBeats(request: ClipRequest, taps: number[]): Promise<ClipTapBeats | null>;
   /** Render a span as a beat clip, cut to exactly `beats` whole beats at
    *  `bpm` (the save row's numbers). The edit is filed with it — the
-   *  sources by the hash of their audio, the program's timestamps, beat
-   *  grid and warp — and it lands in the decks' clip pickers, like a
-   *  Beatify clip. The bleed milliseconds are the selection's bookends:
+   *  sources by the hash of their audio, the program's timestamps, the
+   *  beats of THAT span and the warp — and it lands in the decks' clip
+   *  pickers. The bleed milliseconds are the selection's bookends:
    *  material from either side of the span, filed as metadata for the
-   *  decks to lay over the loop's seam rather than mixed into it. */
+   *  decks to lay over the loop's seam rather than mixed into it.
+   *  `replace` re-files an existing clip in place — what a second save
+   *  on a clip already filed does, so a revision is not a second copy. */
   saveBeatClip(
     request: ClipRequest,
     title: string,
@@ -1088,7 +1117,10 @@ export interface ClipClientApi {
     beats: number,
     leftBleedMs: number,
     rightBleedMs: number,
+    replace?: string | null,
   ): Promise<SavedBeatClip | null>;
+  /** Take a saved beat clip back apart, for editing it again. */
+  openBeatClip(clipId: string): Promise<BeatClipEdit | null>;
   /** Which separation backend is configured, and is it installed? */
   stemBackend(): Promise<ClipStemBackend | null>;
   /** Where this track's stems stand — asking also puts it at the front
@@ -1121,6 +1153,7 @@ export class ClipClient extends IpcClient implements ClipClientApi {
     beats: number,
     leftBleedMs: number,
     rightBleedMs: number,
+    replace?: string | null,
   ) {
     return this.call<SavedBeatClip>('clip_save_beat_clip', {
       request,
@@ -1131,7 +1164,11 @@ export class ClipClient extends IpcClient implements ClipClientApi {
       beats,
       leftBleedMs,
       rightBleedMs,
+      replace: replace ?? null,
     });
+  }
+  openBeatClip(clipId: string) {
+    return this.call<BeatClipEdit>('clip_open_beat_clip', { clipId });
   }
   stemBackend() {
     return this.call<ClipStemBackend>('clip_stem_backend', {});
