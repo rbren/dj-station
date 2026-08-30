@@ -295,29 +295,38 @@ export function DecksSlot(props: DecksSlotProps) {
           at sixteen lied about where a long clip was. The lamps fill a
           FIELD of fixed size — rows of a power of two, lamps grown or
           shrunk to fit it — so a 4-beat clip and a 1024-beat one take the
-          same space and nothing below moves when one replaces the other. */}
-      <div
-        className="decks-beats"
-        data-testid={`decks-dots-${slot.slot}`}
-        aria-label={empty ? 'no clip' : `beat ${slot.beat + 1} of ${loop}`}
-        style={
-          {
-            '--beat-field-w': `${BEAT_FIELD_WIDTH}px`,
-            '--beat-field-h': `${BEAT_FIELD_HEIGHT}px`,
-            '--beat-cols': grid.cols,
-            '--beat-cell': `${grid.cell}px`,
-            '--beat-gap': `${grid.gap}px`,
-          } as CSSProperties
-        }
-      >
-        {Array.from({ length: loop }, (_, i) => (
-          <span
-            key={i}
-            className={`decks-beat-dot${i === slot.beat ? ' on' : ''}${
-              i >= slot.beats ? ' decks-beat-tail' : ''
-            }`}
-          />
-        ))}
+          same space and nothing below moves when one replaces the other.
+          The bare number beside the field is the same total, silence
+          included, for when the lamps are too small to count. */}
+      <div className="decks-beats-row">
+        <div
+          className="decks-beats"
+          data-testid={`decks-dots-${slot.slot}`}
+          aria-label={empty ? 'no clip' : `beat ${slot.beat + 1} of ${loop}`}
+          style={
+            {
+              '--beat-field-w': `${BEAT_FIELD_WIDTH}px`,
+              '--beat-field-h': `${BEAT_FIELD_HEIGHT}px`,
+              '--beat-cols': grid.cols,
+              '--beat-cell': `${grid.cell}px`,
+              '--beat-gap': `${grid.gap}px`,
+            } as CSSProperties
+          }
+        >
+          {Array.from({ length: loop }, (_, i) => (
+            <span
+              key={i}
+              className={`decks-beat-dot${i === slot.beat ? ' on' : ''}${
+                i >= slot.beats ? ' decks-beat-tail' : ''
+              }`}
+            />
+          ))}
+        </div>
+        {!empty && (
+          <span className="decks-beats-count" data-testid={`decks-beat-count-${slot.slot}`}>
+            {loop}
+          </span>
+        )}
       </div>
 
       <div className="decks-tone">

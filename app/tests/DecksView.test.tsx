@@ -202,6 +202,10 @@ describe('DecksView', () => {
     expect(dots.filter((d) => d.className.includes('on')).length).toBe(1);
     expect(dots[2].className).toContain('on');
     expect(dots[8].className).toContain('decks-beat-tail');
+    // The bare number beside the grid is the same total, silence included;
+    // an empty strip shows no number at all.
+    expect(screen.getByTestId('decks-beat-count-0').textContent).toBe('10');
+    expect(screen.queryByTestId('decks-beat-count-3')).toBeNull();
   });
 
   it('the BPM label runs a deck at a ratio of the bank grid', async () => {

@@ -5267,6 +5267,21 @@ body {
   color: var(--fault);
 }
 
+.decks-beats-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The loop's total, silence included, as a bare number beside the field —
+   the lamps say where the loop is, the number says how long it is when
+   they are too small to count. */
+.decks-beats-count {
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  font-variant-numeric: tabular-nums;
+}
+
 /* The beat lamps live in a FIELD of fixed size (4:1): how many across,
    how big and how far apart are `beatGridLayout` in decks.ts, handed down
    as the custom properties below, so a clip of any length costs the strip
