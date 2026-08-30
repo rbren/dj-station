@@ -2002,6 +2002,11 @@ of the page.
   `CLOCK_JACK`) and `app/src/components/Decks{View,Slot,ClipPicker}.tsx`
   (the device pickers are in the app header, not on this page).
   Backend: `app/src-tauri/src/decks.rs` over `Engine`'s `decks_*` API.
+- Tone knobs have TWO orders: `TONES` (`high, mid, low`) is canonical —
+  CV jack indices, `tone_patched` and the Launch Control XL row mapping
+  (high on top) all read it — while `TONES_ACROSS` (`low, mid, high`) is
+  the DISPLAY order across a strip. Index into `tone_patched` by the
+  `TONES` position, never by the rendered cell.
 - Layout: the page is CHROME AROUND THE REAL RACK CANVAS. App keeps the
   one `.app-body`/`.rack-area` (panels, store, WireOverlay, pan/zoom,
   marquee, picker, shortcuts) mounted and VISIBLE on this tab —
