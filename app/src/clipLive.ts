@@ -34,6 +34,14 @@
 // re-runs every 100 ms, wrapping where the loop wraps. Sampling the
 // envelope from a timer would smear a hard cut over the tick.
 //
+// The BLEED is fetched with the loop, not made from it: the two bookend
+// windows are renders of the edit either side of the span, summed over
+// the head and tail of a COPY of the loop before it is installed. The
+// selection loops for as long as it is auditioned, so the pass it plays
+// is a MIDDLE one — both bookends over the seam, which is the join they
+// exist to smooth. Which passes go bare is a matter for the players that
+// have a first and a last one (decks.rs, beat_clip.rs).
+//
 // The preview is a very close TWIN of the saved render, not a bit-exact
 // copy: Web Audio's peaking biquads are the same RBJ cookbook filters as
 // `dj_analysis::clip`'s but run in float32, and the envelope is ramped
@@ -60,6 +68,9 @@ export interface LiveHost {
   /** Render `[start, start + lenSecs)` of the DRY edit — the timeline
    *  with NO eq and NO level, since those are applied here. */
   render(startSecs: number, lenSecs: number): Promise<ArrayBuffer | null>;
+  /** How long the whole edit is. The bleed's bookends are windows of it
+   *  OUTSIDE the span, so they have to be clamped to what exists. */
+  duration(): number;
   /** New material decoded (or lost): what the selection's waveform is
    *  drawn from. */
   onBuffer(buffer: AudioBuffer | null): void;
@@ -90,6 +101,55 @@ const EPS = 1e-4;
 export interface LiveRange {
   start: number;
   end: number;
+}
+
+/** The selection's bookends, in milliseconds (see ClipView). */
+export interface LiveBleed {
+  leftMs: number;
+  rightMs: number;
+}
+
+/** A window of the edit to fetch, in output-timeline seconds. */
+export interface BleedWindow {
+  start: number;
+  len: number;
+}
+
+/**
+ * The BOOKEND windows a bleed asks the backend for: the material just
+ * BEFORE the span (which sounds over the loop's end) and just AFTER it
+ * (which sounds over its start).
+ *
+ * Clamped to what the edit actually has — a selection at the head of the
+ * clip has nothing behind it, one at its tail nothing after — because an
+ * empty window is an error at the other end, not silence. A side that
+ * asks for nothing (the default, 0 ms) is null, and costs no render.
+ */
+export function bleedWindows(
+  span: LiveRange,
+  bleed: LiveBleed,
+  editSecs: number,
+): { left: BleedWindow | null; right: BleedWindow | null } {
+  const left = Math.min(Math.max(bleed.leftMs, 0) / 1000, Math.max(0, span.start));
+  const right = Math.min(Math.max(bleed.rightMs, 0) / 1000, Math.max(0, editSecs - span.end));
+  return {
+    left: left > EPS ? { start: span.start - left, len: left } : null,
+    right: right > EPS ? { start: span.end, len: right } : null,
+  };
+}
+
+/**
+ * Sum a bookend into the loop at `at`, in place — the same plain overlay
+ * the engine does per grain (`playback::ClipBleed::tap`), and the same
+ * alignment: a bookend longer than the loop loses the end that hangs
+ * over, not the material that meets the seam.
+ */
+export function mixInto(loop: Float32Array, bookend: Float32Array, at: number): void {
+  for (let i = Math.max(0, -at); i < bookend.length; i++) {
+    const j = at + i;
+    if (j >= loop.length) break;
+    loop[j] += bookend[i];
+  }
 }
 
 /** Amplitude for the level envelope at an OUTPUT-timeline second.
@@ -256,6 +316,44 @@ export function liveAudioAvailable(): boolean {
   return audioAvailable();
 }
 
+/** Decode rendered bytes, or null where there are none (a side with no
+ *  bleed) and where they will not decode. Makes no sound. */
+async function decode(ctx: AudioContext, bytes: ArrayBuffer | null): Promise<AudioBuffer | null> {
+  if (!bytes) return null;
+  try {
+    // decodeAudioData detaches its input, so it gets a copy.
+    return await ctx.decodeAudioData(bytes.slice(0));
+  } catch {
+    return null;
+  }
+}
+
+/** A bookend's channel for a loop channel: material with fewer channels
+ *  is heard on all of them, as it is in the engine. */
+function bookendChannel(buffer: AudioBuffer, channel: number): Float32Array {
+  return buffer.getChannelData(Math.min(channel, buffer.numberOfChannels - 1));
+}
+
+/** The loop as it SOUNDS with its bookends over it: the right bleed
+ *  summed at the head, the left at the tail, in a copy of the same
+ *  length — the bleed lies over the seam, it never lengthens the loop
+ *  or edits it. */
+function withBleed(
+  ctx: AudioContext,
+  loop: AudioBuffer,
+  left: AudioBuffer | null,
+  right: AudioBuffer | null,
+): AudioBuffer {
+  const out = ctx.createBuffer(loop.numberOfChannels, loop.length, loop.sampleRate);
+  for (let c = 0; c < loop.numberOfChannels; c++) {
+    const dst = out.getChannelData(c);
+    dst.set(loop.getChannelData(c));
+    if (right) mixInto(dst, bookendChannel(right, c), 0);
+    if (left) mixInto(dst, bookendChannel(left, c), loop.length - left.length);
+  }
+  return out;
+}
+
 /** One voice: a looping buffer source and the gain it fades in on. */
 interface Voice {
   src: AudioBufferSourceNode;
@@ -291,6 +389,7 @@ export class ClipLivePlayer {
   private buffer: AudioBuffer | null = null;
 
   private span: LiveRange = { start: 0, end: 0 };
+  private bleed: LiveBleed = { leftMs: 0, rightMs: 0 };
   private bands: ClipEqBand[] = [];
   private level: LevelPoint[] = [];
 
@@ -340,6 +439,16 @@ export class ClipLivePlayer {
     this.span = { start, end };
     this.parked = 0;
     this.laterFetch(false);
+  }
+
+  /** New BOOKENDS: how much of the track either side of the span sounds
+   *  over the loop's seam. The bleed is material, not tone, so it costs
+   *  a fetch — but the pass in the air carries on into it. */
+  setBleed(leftMs: number, rightMs: number): void {
+    if (this.disposed) return;
+    if (leftMs === this.bleed.leftMs && rightMs === this.bleed.rightMs) return;
+    this.bleed = { leftMs, rightMs };
+    this.laterFetch(true);
   }
 
   /** The MATERIAL changed under the same span — a stem swapped, a
@@ -446,17 +555,29 @@ export class ClipLivePlayer {
     const epoch = ++this.epoch;
     this.loadingNow = true;
     this.notify();
-    const bytes = await this.host.render(span.start, len);
+    // The loop and its bookends are all windows of the SAME edit, asked
+    // for together: the bleed is material the selection left behind, not
+    // something the loop can be made to say.
+    const windows = bleedWindows(span, this.bleed, this.host.duration());
+    const [bytes, leftBytes, rightBytes] = await Promise.all([
+      this.host.render(span.start, len),
+      windows.left ? this.host.render(windows.left.start, windows.left.len) : null,
+      windows.right ? this.host.render(windows.right.start, windows.right.len) : null,
+    ]);
     if (this.stale(epoch)) return;
     let buffer: AudioBuffer | null = null;
     const ctx = this.context();
     if (bytes && ctx) {
-      try {
-        // decodeAudioData detaches its input, so it gets a copy.
-        buffer = await ctx.decodeAudioData(bytes.slice(0));
-      } catch {
-        buffer = null;
-      }
+      const [loop, left, right] = await Promise.all([
+        decode(ctx, bytes),
+        decode(ctx, leftBytes),
+        decode(ctx, rightBytes),
+      ]);
+      // What the page auditions is a MIDDLE pass — both bookends over
+      // the seam — because that is the join the bleed exists to smooth.
+      // The bare loop is untouched underneath: the bleed only ever goes
+      // over a copy, exactly as it does on the decks.
+      buffer = loop && (left || right) ? withBleed(ctx, loop, left, right) : loop;
     }
     // NOTHING SOUNDS BEFORE THIS CHECK: decoding is side-effect free, so
     // a superseded fetch simply drops the buffer it decoded.

@@ -663,6 +663,7 @@ export function ClipView({
     const liveHost: LiveHost = {
       // The DRY span: this graph applies the tone itself.
       render: (start, len) => live.current.clip.previewAudio(live.current.dryRequest, start, len),
+      duration: () => live.current.duration,
       onBuffer: (buffer) => setSelBuffer(buffer),
       onStatus: (s) => {
         if (!s.playing) commitTaps();
@@ -1164,6 +1165,13 @@ export function ClipView({
     liveRef.current?.setSpan(sel.start, sel.end);
   }, [liveOn, sel]);
 
+  // The bookends are AUDITIONED, not just filed: the live loop plays the
+  // bleed over its seam, so a millisecond typed here is heard on the next
+  // pass and can be dialled in by ear.
+  useEffect(() => {
+    liveRef.current?.setBleed(bleed.left, bleed.right);
+  }, [bleed]);
+
   // TONE IS NOT A RENDER. EQ and level go straight into the running graph
   // — no fetch, no gap, and the drag that produced them is still under
   // the user's finger.
@@ -1440,9 +1448,9 @@ export function ClipView({
   }, [liveOn, selPeaks, sel, duration, peaks]);
 
   /** One BOOKEND of the selection: how many milliseconds of the material
-   *  beyond that edge ride with the clip as bleed. It is a save-time
-   *  setting, not an edit — nothing about the program moves — so it sits
-   *  outside the undo stacks. */
+   *  beyond that edge ride with the clip as bleed. Not an edit — nothing
+   *  about the program moves, so it sits outside the undo stacks — but
+   *  the live loop lays it over the seam, so it is set by ear. */
   const bleedBookend = (side: 'left' | 'right') => (
     <label
       className={`clip-bleed clip-bleed-${side}`}

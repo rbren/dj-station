@@ -201,6 +201,20 @@ interface FakeAudio {
   gains: FakeGain[];
 }
 
+/** A minimal AudioBuffer at 48 kHz. It carries channel data as well as a
+ *  duration because the live player mixes a bleed into a COPY of the
+ *  loop; what those samples hold is pinned in ClipLive.test.ts. */
+function fakeBuffer(length: number): AudioBuffer {
+  const data = new Float32Array(length);
+  return {
+    duration: length / 48000,
+    length,
+    numberOfChannels: 1,
+    sampleRate: 48000,
+    getChannelData: () => data,
+  } as unknown as AudioBuffer;
+}
+
 /** jsdom has no Web Audio. Install just enough of it to observe how the
  *  loop transport drives an AudioBufferSourceNode, and what the live
  *  selection player's tone chain is set to. */
@@ -240,7 +254,10 @@ function installWebAudio(bufferSecs = 4): FakeAudio {
     destination = {};
     sampleRate = 48000;
     async decodeAudioData() {
-      return { duration: bufferSecs, sampleRate: 48000 } as AudioBuffer;
+      return fakeBuffer(Math.round(bufferSecs * 48000));
+    }
+    createBuffer(_channels: number, length: number) {
+      return fakeBuffer(length);
     }
     createBufferSource() {
       return new FakeSource() as unknown as AudioBufferSourceNode;
@@ -1456,6 +1473,35 @@ describe('ClipView', () => {
       fireEvent.click(screen.getByTestId('clip-sel-play'));
       await waitFor(() => expect(gains.length).toBeGreaterThan(0));
       await waitFor(() => expect(gains[0].gain.value).toBeGreaterThan(0));
+    });
+
+    it('auditions the bleed a bookend asks for, without stopping the loop', async () => {
+      const { starts } = installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+      fireEvent.click(screen.getByTestId('clip-sel-play'));
+      await waitFor(() => expect(starts.filter((x) => !x.stopped)).toHaveLength(1));
+
+      // The right bookend is the material AFTER the selection: the live
+      // loop fetches it and lays it over its own start, so the seam can
+      // be dialled in by ear instead of by saving and loading a deck.
+      fireEvent.change(screen.getByTestId('clip-bleed-right'), { target: { value: '120' } });
+      await waitFor(() =>
+        expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 6, 0.12),
+      );
+
+      // The left bookend is the material BEFORE it, and comes from the
+      // other side of the span.
+      fireEvent.change(screen.getByTestId('clip-bleed-left'), { target: { value: '250' } });
+      await waitFor(() =>
+        expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 1.75, 0.25),
+      );
+
+      // A bleed is material, so it costs a fetch — but the pass in the
+      // air carries on into it: one source, still sounding.
+      await waitFor(() => expect(starts.filter((x) => !x.stopped)).toHaveLength(1));
+      expect(screen.getByTestId('clip-sel-play').textContent).toBe('❚❚');
     });
 
     it('swaps stems under the loop without stopping it', async () => {

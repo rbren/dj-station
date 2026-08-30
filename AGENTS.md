@@ -1580,10 +1580,21 @@ beatify::build`.
   over; the count rides through a hot reload in `save_state`) and never
   has a last pass, while a Decks slot counts a pass only while it is being
   heard — so a queued deck comes in on a first pass — and takes no left
-  bleed while it is armed to DROP. Pinned by `clip_edit.rs`'s
+  bleed while it is armed to DROP. The Clip page's LIVE SELECTION is the
+  third such player, so a bleed is set by ear rather than by saving one
+  and loading a deck: `ClipLivePlayer` fetches the two bookend windows
+  (`bleedWindows`, clamped to what the edit has — an empty window is an
+  error at the other end, not silence) alongside the span itself and sums
+  them into a COPY of the loop (`mixInto`: the same plain overlay, and
+  the same alignment, as `ClipBleed::tap`) before it installs the buffer.
+  Pre-mixing what the engine does per grain is honest here because an
+  auditioned selection loops for as long as it is watched — every pass it
+  plays is a MIDDLE one, both bookends over the seam — and the bare loop
+  underneath is still never edited. Pinned by `clip_edit.rs`'s
   `a_clips_bleed_is_filed_beside_its_loop_never_inside_it`, decks.rs's
   `the_bleed_skips_the_pass_a_deck_comes_in_on_and_the_pass_a_drop_ends`,
-  the `beat_clip` integration suite and `ClipView.test.tsx`.
+  the `beat_clip` integration suite, `ClipLive.test.ts`'s "the live loop
+  plays its bleed" and `ClipView.test.tsx`.
 - Decks bank (`builtin.decks`, `crates/dj-engine/src/decks.rs` +
   `engine/decks_api.rs`, Tauri `app/src-tauri/src/decks.rs`, page
   `app/src/components/DecksView.tsx`): EIGHT Beatify clips on ONE clock —
