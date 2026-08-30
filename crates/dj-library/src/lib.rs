@@ -24,7 +24,7 @@ pub mod watch;
 pub use db::{Beatgrid, CuePoint, DeletedTrack, Library, MacroRecord, SavedLoop, Track};
 pub use downloads::{DownloadJob, DownloadManager, DownloadState};
 pub use import::{ImportOptions, ImportOutcome, AUDIO_EXTENSIONS};
-pub use naming::strip_artist;
+pub use naming::{strip_artist, strip_noise, tidy_title};
 pub use paths::{default_data_dir, init_data_dir, legacy_data_dir, migrate_legacy_data, Migration};
 pub use providers::{
     Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, FetchProgress, FilterOption,

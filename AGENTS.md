@@ -103,20 +103,27 @@ fails if it's missing.
   Pinned by `crates/dj-library/tests/{library,watch}.rs`,
   `dj-analysis`'s `stem_separation.rs`, the engine's `persistence.rs` and
   `app/tests/LibraryView.test.tsx`.
-- A TRACK'S NAME IS THE USER'S, in two halves. At IMPORT the credit comes
-  out of the title once, in `dj_library::naming::strip_artist` (called by
+- A TRACK'S NAME IS THE USER'S, in two halves. At IMPORT the title is
+  tidied once, in `dj_library::naming::tidy_title` (called by
   `import_file`, so downloads, the watch folder and rekordbox's local
-  files all get it): `Lizzo - Boys` with artist `Lizzo` files as `Boys`.
-  It is deliberately timid — the credit must match the artist character
-  for character (case aside) at the START or the END of the title, the
-  join must contain real punctuation (`Lizzo Boys` and `Lizzo's Boys`
-  are titles, not credits), and it never empties a title.
+  files all get it): the artist credit comes out (`strip_artist` —
+  `Lizzo - Boys` with artist `Lizzo` files as `Boys`) and video-platform
+  parentheticals go (`strip_noise` — `(Official *)`, `(HQ)`, `(HD)`,
+  `(4K)`, `(Lyrics)`-style tags, an ALLOW-LIST so `(Remix)`, `(feat. X)`
+  and `(Live)` survive). Both are deliberately timid — the credit must
+  match the artist character for character (case aside) at the START or
+  the END of the title, the join must contain real punctuation
+  (`Lizzo Boys` and `Lizzo's Boys` are titles, not credits), and neither
+  ever empties a title.
   There is no "raw title" column: a wrong guess is fixed by EDITING, the
   other half — `Library::set_track_names` (trims both, refuses a blank
   title, allows a blank artist) behind the `set_track_names` command and
   the click-to-edit title/artist cells in the Library page's rows, which
   patch the returned row in place instead of re-running the query the
-  user is looking at. Pinned by
+  user is looking at. An edit that CHANGES THE ARTIST re-runs
+  `tidy_title` on the title (the corrected credit is what lets a stale
+  `Lizzo - …` be recognised); a title-only edit is stored verbatim, so
+  hand-edits stick. Pinned by
   `crates/dj-library/tests/library.rs`, the `naming.rs` unit tests and
   `app/tests/LibraryView.test.tsx`.
 - Every new module/engine feature ships with a serialized-patch E2E golden

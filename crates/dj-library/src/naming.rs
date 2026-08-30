@@ -1,12 +1,17 @@
-//! Track-title tidying at import time.
+//! Track-title tidying.
 //!
 //! Downloads and loose files name a track the way a file browser does —
 //! `Lizzo - Boys`, `Boys (Lizzo)`, `Boys_-_LIZZO` — while the library
 //! shows title and artist in their own columns, so the credit reads
 //! twice. [`strip_artist`] takes it out of the title exactly when the
 //! title really does open or close with the artist we already know, and
-//! leaves everything else alone: a title is the user's text, and a wrong
-//! guess here is worse than a redundant one.
+//! [`strip_noise`] drops the video-platform parentheticals — `(Official
+//! Video)`, `[HQ]` — that say nothing about the music. [`tidy_title`]
+//! is the two together, run once at import and again when a track's
+//! artist is EDITED (a new credit can expose a redundant one still in
+//! the title); a title-only edit is the user's text and is never
+//! re-tidied. Everything else is left alone: a wrong guess here is
+//! worse than a redundant word.
 
 /// Punctuation that can JOIN an artist credit to a title. Quotes and
 /// apostrophes are deliberately absent: `Lizzo's Boys` is a title, not a
@@ -46,6 +51,68 @@ pub fn strip_artist(title: &str, artist: &str) -> String {
     }
 
     title.to_string()
+}
+
+/// The full tidy: platform noise out first (so a credit it was hiding —
+/// `Boys (Official Video) - Lizzo` — sits at the edge where
+/// [`strip_artist`] can see it), then the artist credit. Run at import
+/// and re-run when the artist is edited.
+pub fn tidy_title(title: &str, artist: &str) -> String {
+    strip_artist(&strip_noise(title), artist)
+}
+
+/// The title with video-platform parentheticals removed: `(Official
+/// Video)`, `(Official Music Video)`, `[Official Audio]`, `(HQ)`,
+/// `(HD)`, `(Lyrics)` and the like. Deliberately a short allow-list
+/// (see [`is_noise`]) — `(Remix)`, `(feat. X)`, `(Live)` are music, not
+/// noise — and it never empties a title.
+pub fn strip_noise(title: &str) -> String {
+    let mut out = String::new();
+    let mut removed = false;
+    let mut rest = title;
+    while let Some(open) = rest.find(['(', '[']) {
+        let close = if rest.as_bytes()[open] == b'(' {
+            ')'
+        } else {
+            ']'
+        };
+        let Some(len) = rest[open..].find(close) else {
+            break;
+        };
+        if is_noise(&rest[open + 1..open + len]) {
+            removed = true;
+            out.push_str(&rest[..open]);
+        } else {
+            out.push_str(&rest[..open + len + close.len_utf8()]);
+        }
+        rest = &rest[open + len + close.len_utf8()..];
+    }
+    if !removed {
+        return title.trim().to_string();
+    }
+    out.push_str(rest);
+    // Removing a group leaves a doubled space behind; collapse runs.
+    let cleaned = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() {
+        title.trim().to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Is this parenthetical platform noise? `Official …` in any flavour,
+/// plus the handful of exact quality/format tags a video title carries.
+/// An allow-list, not a heuristic: anything unrecognised is part of the
+/// title.
+fn is_noise(content: &str) -> bool {
+    let content = content.trim().to_lowercase();
+    if let Some(rest) = content.strip_prefix("official") {
+        return rest.is_empty() || rest.starts_with(char::is_whitespace);
+    }
+    matches!(
+        content.as_str(),
+        "hq" | "hd" | "4k" | "audio" | "video" | "music video" | "lyrics" | "lyric video"
+    )
 }
 
 /// Leading/trailing decoration a credit may sit inside (`(Lizzo) Boys`).
@@ -114,7 +181,7 @@ fn eq_ci(a: char, b: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_artist;
+    use super::{strip_artist, strip_noise, tidy_title};
 
     #[test]
     fn strips_a_leading_credit() {
@@ -167,5 +234,58 @@ mod tests {
             "Harder, Better, Faster, Stronger"
         );
         assert_eq!(strip_artist("  Lizzo -  Boys  ", "Lizzo"), "Boys");
+    }
+
+    #[test]
+    fn strips_platform_noise_parentheticals() {
+        assert_eq!(strip_noise("Boys (Official Video)"), "Boys");
+        assert_eq!(strip_noise("Boys (Official Music Video)"), "Boys");
+        assert_eq!(strip_noise("Boys (official audio)"), "Boys");
+        assert_eq!(strip_noise("Boys (Official)"), "Boys");
+        assert_eq!(strip_noise("Boys [Official Visualizer]"), "Boys");
+        assert_eq!(strip_noise("Boys (HQ)"), "Boys");
+        assert_eq!(strip_noise("Boys [HD]"), "Boys");
+        assert_eq!(strip_noise("Boys (4K)"), "Boys");
+        assert_eq!(strip_noise("Boys (Lyrics)"), "Boys");
+        assert_eq!(strip_noise("Boys (Lyric Video)"), "Boys");
+        assert_eq!(strip_noise("Boys (Audio)"), "Boys");
+        // Noise in the middle closes the gap it leaves.
+        assert_eq!(strip_noise("Boys (HQ) (HD)"), "Boys");
+        assert_eq!(strip_noise("Boys (Official Video) - Live"), "Boys - Live");
+    }
+
+    #[test]
+    fn keeps_parentheticals_that_are_music() {
+        assert_eq!(strip_noise("Boys (Remix)"), "Boys (Remix)");
+        assert_eq!(
+            strip_noise("Boys (feat. Missy Elliott)"),
+            "Boys (feat. Missy Elliott)"
+        );
+        assert_eq!(strip_noise("Boys (Live)"), "Boys (Live)");
+        assert_eq!(strip_noise("Boys (Acoustic)"), "Boys (Acoustic)");
+        assert_eq!(strip_noise("Boys (Radio Edit)"), "Boys (Radio Edit)");
+        // "official" as a word of the title, not a tag of its own.
+        assert_eq!(
+            strip_noise("Officially Missing You"),
+            "Officially Missing You"
+        );
+        assert_eq!(strip_noise("(Officially) Yours"), "(Officially) Yours");
+        // An unclosed group is title text.
+        assert_eq!(strip_noise("Boys (Official"), "Boys (Official");
+        // Never empties a title.
+        assert_eq!(strip_noise("(Official Video)"), "(Official Video)");
+    }
+
+    #[test]
+    fn tidy_title_strips_noise_and_credit_together() {
+        assert_eq!(tidy_title("Lizzo - Boys (Official Video)", "Lizzo"), "Boys");
+        // Noise goes first, so the credit it hid is found.
+        assert_eq!(tidy_title("Boys (Official Video) - Lizzo", "Lizzo"), "Boys");
+        assert_eq!(tidy_title("Boys [HQ]", ""), "Boys");
+        // Music parentheticals survive the full tidy.
+        assert_eq!(
+            tidy_title("Lizzo - Boys (Remix) (Official Audio)", "Lizzo"),
+            "Boys (Remix)"
+        );
     }
 }

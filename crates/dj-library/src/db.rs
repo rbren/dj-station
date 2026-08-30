@@ -295,10 +295,21 @@ impl Library {
     /// title) regularly get wrong. Both are trimmed; a blank title is
     /// refused, because a row with no name cannot be found again. A blank
     /// artist is fine — plenty of material has none.
+    ///
+    /// Changing the ARTIST re-runs the import-time tidy on the title
+    /// ([`crate::naming::tidy_title`]): the corrected credit is exactly
+    /// what lets a `Lizzo - Boys (Official Video)` still sitting in the
+    /// title be recognised and stripped. A title-only edit is the user's
+    /// text and is stored verbatim.
     pub fn set_track_names(&self, track_id: i64, title: &str, artist: &str) -> Result<Track> {
         let title = title.trim();
         let artist = artist.trim();
         anyhow::ensure!(!title.is_empty(), "a track needs a title");
+        let title = if artist != self.track(track_id)?.artist {
+            crate::naming::tidy_title(title, artist)
+        } else {
+            title.to_string()
+        };
         let changed = self.with_conn(|c| {
             Ok(c.execute(
                 "UPDATE tracks SET title = ?2, artist = ?3, \

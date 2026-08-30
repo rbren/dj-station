@@ -132,8 +132,9 @@ impl Library {
     /// Import an audio file into the library. The file stays where it is
     /// (the library stores its path); identical content (by hash) is
     /// deduplicated. New tracks are queued for analysis, and a title that
-    /// opens or closes with the artist we just learned is tidied by
-    /// [`crate::naming::strip_artist`] (the Library page edits either
+    /// opens or closes with the artist we just learned — or carries a
+    /// video platform's `(Official Video)` / `(HQ)` noise — is tidied by
+    /// [`crate::naming::tidy_title`] (the Library page edits either
     /// field afterwards).
     ///
     /// Importing a path the user had deleted is a deliberate change of
@@ -165,7 +166,7 @@ impl Library {
         let artist = opts.artist.or(probed.artist).unwrap_or_default();
         // What a downloader or a file browser writes ("Lizzo - Boys") says
         // the artist twice once the row has an artist column of its own.
-        let title = crate::naming::strip_artist(
+        let title = crate::naming::tidy_title(
             &opts.title.or(probed.title).unwrap_or(fallback_title),
             &artist,
         );

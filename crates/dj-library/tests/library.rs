@@ -49,7 +49,7 @@ fn import_takes_the_artist_credit_out_of_the_title() {
         .unwrap()
         .track()
         .clone();
-    assert_eq!(track.title, "Boys (Official Video)");
+    assert_eq!(track.title, "Boys");
     assert_eq!(track.artist, "Lizzo");
 
     // A file named the way a browser names one, with the artist known.
@@ -108,6 +108,41 @@ fn a_track_can_be_renamed() {
     assert!(lib.set_track_names(track.id, "   ", "Lizzo").is_err());
     assert!(lib.set_track_names(track.id + 99, "Boys", "").is_err());
     assert_eq!(lib.track(track.id).unwrap().title, "Boys");
+}
+
+#[test]
+fn changing_the_artist_re_tidies_the_title() {
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::open(&tmp.path().join("data")).unwrap();
+    let wav = tmp.path().join("take.wav");
+    common::write_test_wav(&wav, 220.0, 0.4);
+    let track = lib
+        .import_file(
+            &wav,
+            ImportOptions {
+                title: Some("Lizzo - Boys (Official Video)".into()),
+                ..ImportOptions::default()
+            },
+        )
+        .unwrap()
+        .track()
+        .clone();
+    // Import strips the platform noise on its own, but no artist was
+    // known, so the credit stayed in the title.
+    assert_eq!(track.title, "Lizzo - Boys");
+
+    // Correcting the artist re-runs the tidy: the credit goes.
+    let renamed = lib
+        .set_track_names(track.id, &track.title, "Lizzo")
+        .unwrap();
+    assert_eq!(renamed.title, "Boys");
+    assert_eq!(renamed.artist, "Lizzo");
+
+    // A title-only edit is the user's text, stored verbatim.
+    let renamed = lib
+        .set_track_names(track.id, "Lizzo - Boys (HQ)", "Lizzo")
+        .unwrap();
+    assert_eq!(renamed.title, "Lizzo - Boys (HQ)");
 }
 
 #[test]
