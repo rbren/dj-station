@@ -218,10 +218,12 @@ describe('DecksView', () => {
     fireEvent.click(screen.getByTestId('decks-monitor-2'));
     await waitFor(() => expect(api.setControl).toHaveBeenCalledWith('decks1', 2, 'monitor', 1));
 
-    // The three tone controls are the rack's own knobs, one per band.
-    expect(screen.getByTestId('knob-3 HIGH')).toBeTruthy();
-    expect(screen.getByTestId('knob-3 MID')).toBeTruthy();
-    expect(screen.getByTestId('knob-3 LOW')).toBeTruthy();
+    // The three tone controls are the rack's own knobs, one per band, and
+    // the row is the EQ column on its side: it reads right to left.
+    const tone = screen.getByTestId('decks-slot-2').querySelector('.decks-tone')!;
+    expect(
+      Array.from(tone.querySelectorAll('.knob')).map((k) => k.getAttribute('data-testid')),
+    ).toEqual(['knob-3 LOW', 'knob-3 MID', 'knob-3 HIGH']);
     expect(screen.getByTestId('knob-3 LEVEL')).toBeTruthy();
   });
 
@@ -611,11 +613,16 @@ describe('the deck chrome is the bank, on jacks', () => {
   it('a patched tone knob says it is driving the rack, not its band', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[2] = { ...loadedSlot(2), tone_patched: [false, true, false] };
+    // `tone_patched` is in TONES order (high, mid, low), whichever way
+    // round the row is drawn.
+    slots[3] = { ...loadedSlot(3), tone_patched: [true, false, false] };
     const api = makeApi(makeStatus({ slots }));
     show(api);
     await screen.findByTestId('decks-io-0');
     expect(screen.getByTestId('decks-tone-jack-2-mid').getAttribute('data-patched')).toBe('yes');
     expect(screen.getByTestId('decks-tone-jack-2-high').getAttribute('data-patched')).toBe('no');
+    expect(screen.getByTestId('decks-tone-jack-3-high').getAttribute('data-patched')).toBe('yes');
+    expect(screen.getByTestId('decks-tone-jack-3-low').getAttribute('data-patched')).toBe('no');
   });
 
   it('a deck with a wired return says its signal goes through the rack', async () => {

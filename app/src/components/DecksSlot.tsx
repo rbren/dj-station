@@ -2,7 +2,9 @@
 // order a DJ's hand works in — what is loaded, what it costs to run it at
 // the bank's tempo, where it sits on the grid, then the three tone
 // controls, the fader, and mute/monitor — with queue/drop, the same mute
-// taken on the bank's grid — at the bottom where the thumb is.
+// taken on the bank's grid — at the bottom where the thumb is. The tone
+// row is a mixer's EQ column laid on its side, so it reads RIGHT TO LEFT
+// (low, mid, high from the left); the surface's rows stay high on top.
 //
 // The dial/fader controls ARE the rack's own Knob (same look, same drag
 // law, same tooltip): a bank's slot is a mixer channel, not a new kind of
@@ -33,6 +35,7 @@ import {
   toneJack,
   EQ_MAX,
   TONES,
+  TONES_ACROSS,
   type DeckArm,
   type DeckSlotStatus,
 } from '../decks';
@@ -172,31 +175,34 @@ export function DecksSlot(props: DecksSlotProps) {
       </div>
 
       <div className="decks-tone">
-        {TONES.map((tone, i) => (
-          <div className="decks-tone-cell" key={tone}>
-            <Knob
-              label={`${n} ${tone.toUpperCase()}`}
-              config={TONE_CONFIG}
-              position={slot[tone] / EQ_MAX}
-              onPosition={(p) => props.onControl(tone, p * EQ_MAX)}
-              onRelease={props.onRelease}
-            />
-            {/* The knob's CV jack: wired, the knob leaves the band (it
-                sits flat) and drives the connected module instead. */}
-            <span
-              className={`decks-tone-jack${slot.tone_patched[i] ? ' is-patched' : ''}`}
-              data-testid={`decks-tone-jack-${slot.slot}-${tone}`}
-              data-patched={slot.tone_patched[i] ? 'yes' : 'no'}
-              title={
-                slot.tone_patched[i]
-                  ? `deck ${n} ${tone}: driving the rack, not the ${tone} band`
-                  : `deck ${n} ${tone}: cutting the ${tone} band — wire it to send it to the rack instead`
-              }
-            >
-              {jack(toneJack(slot.slot, tone), 'output', tone)}
-            </span>
-          </div>
-        ))}
+        {TONES_ACROSS.map((tone) => {
+          const patched = slot.tone_patched[TONES.indexOf(tone)];
+          return (
+            <div className="decks-tone-cell" key={tone}>
+              <Knob
+                label={`${n} ${tone.toUpperCase()}`}
+                config={TONE_CONFIG}
+                position={slot[tone] / EQ_MAX}
+                onPosition={(p) => props.onControl(tone, p * EQ_MAX)}
+                onRelease={props.onRelease}
+              />
+              {/* The knob's CV jack: wired, the knob leaves the band (it
+                  sits flat) and drives the connected module instead. */}
+              <span
+                className={`decks-tone-jack${patched ? ' is-patched' : ''}`}
+                data-testid={`decks-tone-jack-${slot.slot}-${tone}`}
+                data-patched={patched ? 'yes' : 'no'}
+                title={
+                  patched
+                    ? `deck ${n} ${tone}: driving the rack, not the ${tone} band`
+                    : `deck ${n} ${tone}: cutting the ${tone} band — wire it to send it to the rack instead`
+                }
+              >
+                {jack(toneJack(slot.slot, tone), 'output', tone)}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       <div className="decks-mix">

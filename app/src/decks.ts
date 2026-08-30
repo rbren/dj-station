@@ -44,6 +44,10 @@ export const returnJack = (slot: number, side: 'l' | 'r') => `d${slot + 1}_in_${
  *  three knob rows are in. */
 export const TONES = ['high', 'mid', 'low'] as const;
 export type Tone = (typeof TONES)[number];
+/** The same three ACROSS a strip: that column of knobs laid on its side,
+ *  so the row reads right to left — low, mid, high from the left, high
+ *  still the one the surface's top row drives. */
+export const TONES_ACROSS: readonly Tone[] = [...TONES].reverse();
 export const toneJack = (slot: number, tone: Tone) => `d${slot + 1}_${tone}`;
 
 export interface DeckSlotStatus {
