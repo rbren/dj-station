@@ -32,11 +32,15 @@ as an iteration loop.
   `rustup update stable` first and reproduce on the same version CI uses.
 - Frontend: run a single test file during iteration
   (`npx vitest run tests/<File>.test.tsx`), not the whole vitest suite.
-- Do exactly ONE full CI-equivalent pass at the end of a milestone/task:
-  `cargo test --workspace --release`, workspace clippy `-D warnings`,
-  `cargo fmt --all --check`, `cd app && npm run lint && npm test &&
-npm run build`, then `cargo build --manifest-path app/src-tauri/Cargo.toml`.
-  If a late fix lands after that pass, re-verify only the affected scope.
+- LEAN ON CI. Do NOT run a full workspace/CI-equivalent sweep to be sure —
+  CI runs it on every push and is there to catch what you missed. Before
+  pushing, run only the scoped checks for what you touched (the crate's or
+  file's tests, `cargo fmt`, scoped clippy). Once those pass and you are
+  reasonably confident the tree builds, finish and push to main; let CI
+  report anything else. A full `cargo test --workspace --release` /
+  workspace clippy / `npm test` sweep is justified only for a change that
+  is genuinely workspace-wide (a cross-crate refactor, a toolchain or
+  dependency bump), not for ordinary feature work.
 
 ## Build ordering
 
