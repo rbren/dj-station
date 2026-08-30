@@ -1039,7 +1039,14 @@ offset))`, offset in position units — so the knob's curve shapes the
   fractional tail with silence or trims a flam/rounding overhang, so two
   selected beats file as two — and files it in
   `dj_analysis::clip`'s store (`<data_dir>/beat-clips/`, `b<n>.flac` +
-  `b<n>.json`, ignored by `custom/.gitignore` like `clips/`). Those clips
+  `b<n>.json`, ignored by `custom/.gitignore` like `clips/`). A save
+  files TWO titles: the clip's own name and the SOURCE TRACK's
+  (`BeatClipMeta.source_title`, `sourceTitle` on disk) — the beat-clip
+  twin of a Beatify clip's project name, so a deck shows both. The save
+  row prefills it from the opened track and it is editable there
+  (`clip-source-title`); `clip::beat_clip_source_name` is the one place
+  the display falls back to `BEAT_CLIPS_PROJECT_NAME` ("Clip tab") for
+  clips saved before the field existed. Those clips
   reach the decks through the SAME doors Beatify clips use:
   `beat_clip_list` appends them under the reserved project id
   `clip::BEAT_CLIPS_PROJECT` ("beat-clips" — Beatify mints `p<n>`, no

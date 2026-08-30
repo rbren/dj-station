@@ -65,7 +65,9 @@ pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
     for meta in dj_analysis::clip::read_beat_clips(data_dir) {
         out.push(BeatClipEntry {
             project_id: crate::clip::BEAT_CLIPS_PROJECT.into(),
-            project_name: crate::clip::BEAT_CLIPS_PROJECT_NAME.into(),
+            // The source track stands where a Beatify clip's project
+            // name does: both name what the clip was cut from.
+            project_name: crate::clip::beat_clip_source_name(&meta),
             clip_id: meta.id,
             name: meta.name,
             bpm: meta.bpm,

@@ -679,8 +679,10 @@ pub fn render_clip(state: &AppState, project_id: &str, clip_id: &str) -> CmdResu
         return Ok(RenderedClip {
             audio,
             bpm: meta.bpm,
+            // The source track it was cut from — what a deck shows
+            // where a Beatify clip shows its project name.
+            project_name: crate::clip::beat_clip_source_name(&meta),
             name: meta.name,
-            project_name: crate::clip::BEAT_CLIPS_PROJECT_NAME.into(),
             stems: meta.stems,
         });
     }

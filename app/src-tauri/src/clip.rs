@@ -414,8 +414,21 @@ pub fn clip_preview_audio(
 /// project ids as `p<n>` (legacy: source-hash directory names), so this
 /// can never collide with a real project.
 pub const BEAT_CLIPS_PROJECT: &str = "beat-clips";
-/// Where the pickers say a beat clip came from.
+/// Where the pickers say a beat clip came from when it does not say
+/// itself — clips saved before they carried a source-track title.
 pub const BEAT_CLIPS_PROJECT_NAME: &str = "Clip tab";
+
+/// The title a beat clip shows where a Beatify clip shows its project
+/// name: the source track it was cut from, as saved (and edited) on the
+/// Clip page, falling back to [`BEAT_CLIPS_PROJECT_NAME`] for clips
+/// saved before the field existed.
+pub fn beat_clip_source_name(meta: &clip::BeatClipMeta) -> String {
+    if meta.source_title.is_empty() {
+        BEAT_CLIPS_PROJECT_NAME.into()
+    } else {
+        meta.source_title.clone()
+    }
+}
 
 /// Tempo of a span of the edit, measured: what the save row shows when
 /// the selection was never tapped. Runs the Beatify tracker (`beat_this`
@@ -521,12 +534,19 @@ fn span_of(rendered: &AudioData, start_secs: f64, end_secs: f64) -> CmdResult<(f
 /// `beats` whole beats at `bpm` — the numbers the save row showed, so
 /// selecting two beats files two (a fractional tail is silence-filled,
 /// an overhang trimmed). The saved clip loads into the decks exactly
-/// like a Beatify clip (see `beat_clip.rs`).
+/// like a Beatify clip (see `beat_clip.rs`). `source_title` is the
+/// second name filed with it — the track it was cut from, as shown (and
+/// edited) in the save row — which the decks display where a Beatify
+/// clip shows its project name.
 #[tauri::command(async)]
+// The arguments ARE the IPC surface: each one is a field the save row
+// sends by name, so bundling them into a struct would only move the list.
+#[allow(clippy::too_many_arguments)]
 pub fn clip_save_beat_clip(
     state: State<AppState>,
     request: ClipRequest,
     title: String,
+    source_title: String,
     start_secs: f64,
     end_secs: f64,
     bpm: f64,
@@ -546,6 +566,14 @@ pub fn clip_save_beat_clip(
             .collect::<CmdResult<Vec<_>>>()?,
     );
 
-    clip::save_beat_clip(state.library.data_dir(), &title, &span, bpm, beats, stems)
-        .map_err(|e| CmdError::invalid(format!("clip: {e}")))
+    clip::save_beat_clip(
+        state.library.data_dir(),
+        &title,
+        &source_title,
+        &span,
+        bpm,
+        beats,
+        stems,
+    )
+    .map_err(|e| CmdError::invalid(format!("clip: {e}")))
 }

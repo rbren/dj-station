@@ -556,10 +556,12 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
     assert!(read_beat_clips(tmp.path()).is_empty());
     assert!(load_beat_clip(tmp.path(), "b1").is_err());
 
-    // 1.75 s at 120 BPM: filed as 4 whole beats (2.0 s).
+    // 1.75 s at 120 BPM: filed as 4 whole beats (2.0 s). Both titles
+    // travel with it — the clip's own and the source track's.
     let first = save_beat_clip(
         tmp.path(),
         "kick pattern",
+        " Basement Loop ",
         &tone(220.0, 1.75),
         120.0,
         4,
@@ -567,10 +569,19 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
     )
     .unwrap();
     assert_eq!((first.id.as_str(), first.beats), ("b1", 4));
-    let second =
-        save_beat_clip(tmp.path(), "bass run", &tone(110.0, 2.0), 120.0, 4, vec![]).unwrap();
+    assert_eq!(first.source_title, "Basement Loop");
+    let second = save_beat_clip(
+        tmp.path(),
+        "bass run",
+        "",
+        &tone(110.0, 2.0),
+        120.0,
+        4,
+        vec![],
+    )
+    .unwrap();
     assert_eq!(second.id, "b2");
-    assert!(save_beat_clip(tmp.path(), "  ", &tone(220.0, 1.0), 120.0, 2, vec![]).is_err());
+    assert!(save_beat_clip(tmp.path(), "  ", "", &tone(220.0, 1.0), 120.0, 2, vec![]).is_err());
 
     let clips = read_beat_clips(tmp.path());
     assert_eq!(
@@ -583,9 +594,23 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
     let (meta, audio) = load_beat_clip(tmp.path(), "b1").unwrap();
     assert_eq!(meta.bpm, 120.0);
     assert_eq!(meta.stems, ["drums"]);
+    assert_eq!(meta.source_title, "Basement Loop");
     assert_eq!(audio.frames(), 2 * SR as usize);
     let tail = (1.75 * SR as f64) as usize;
     assert!(audio.channels[0][tail + 16..].iter().all(|&s| s == 0.0));
+
+    // A record filed before clips carried a source title still parses:
+    // the field defaults to empty (displays fall back downstream).
+    std::fs::write(
+        tmp.path().join("beat-clips/b3.json"),
+        r#"{"id":"b3","name":"old","bpm":120.0,"beats":2,"file":"b3.flac"}"#,
+    )
+    .unwrap();
+    let old = read_beat_clips(tmp.path())
+        .into_iter()
+        .find(|c| c.id == "b3")
+        .unwrap();
+    assert_eq!(old.source_title, "");
 }
 
 #[test]

@@ -881,6 +881,9 @@ export interface ClipTapBeats {
 export interface SavedBeatClip {
   id: string;
   name: string;
+  /** The source track it was cut from — the second title the decks show,
+   *  where a Beatify clip shows its project name. */
+  sourceTitle: string;
   bpm: number;
   beats: number;
   file: string;
@@ -903,11 +906,13 @@ export interface ClipClientApi {
    *  grid is built from (the taps themselves when nothing fits). */
   tapBeats(request: ClipRequest, taps: number[]): Promise<ClipTapBeats | null>;
   /** Render a span as a beat clip, cut to exactly `beats` whole beats at
-   *  `bpm` (the save row's numbers). It lands in the decks' clip
-   *  pickers, like a Beatify clip. */
+   *  `bpm` (the save row's numbers). It files BOTH titles — the clip's
+   *  own and the source track's, editable side by side in the save row —
+   *  and lands in the decks' clip pickers, like a Beatify clip. */
   saveBeatClip(
     request: ClipRequest,
     title: string,
+    sourceTitle: string,
     startSecs: number,
     endSecs: number,
     bpm: number,
@@ -939,6 +944,7 @@ export class ClipClient extends IpcClient implements ClipClientApi {
   saveBeatClip(
     request: ClipRequest,
     title: string,
+    sourceTitle: string,
     startSecs: number,
     endSecs: number,
     bpm: number,
@@ -947,6 +953,7 @@ export class ClipClient extends IpcClient implements ClipClientApi {
     return this.call<SavedBeatClip>('clip_save_beat_clip', {
       request,
       title,
+      sourceTitle,
       startSecs,
       endSecs,
       bpm,

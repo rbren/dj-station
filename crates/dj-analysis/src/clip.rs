@@ -778,6 +778,12 @@ pub fn write_clip(path: &Path, audio: &AudioData) -> Result<()> {
 pub struct BeatClipMeta {
     pub id: String,
     pub name: String,
+    /// The track the span was cut from, by title — the second name the
+    /// decks show beside the clip's own, where a Beatify clip carries
+    /// its project name. Edited at save time; empty for clips saved
+    /// before it existed.
+    #[serde(default)]
+    pub source_title: String,
     /// Tempo of the (perfectly even) beat grid the audio was cut on.
     pub bpm: f64,
     /// Whole beats the clip holds — the last one silence-padded when the
@@ -832,6 +838,7 @@ pub fn load_beat_clip(data_dir: &Path, clip_id: &str) -> Result<(BeatClipMeta, A
 pub fn save_beat_clip(
     data_dir: &Path,
     name: &str,
+    source_title: &str,
     audio: &AudioData,
     bpm: f64,
     beats: usize,
@@ -851,6 +858,7 @@ pub fn save_beat_clip(
     let meta = BeatClipMeta {
         id: format!("b{next}"),
         name: name.to_string(),
+        source_title: source_title.trim().to_string(),
         bpm,
         beats,
         file: format!("b{next}.flac"),

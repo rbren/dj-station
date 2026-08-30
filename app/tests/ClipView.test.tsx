@@ -86,6 +86,7 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
       async (
         _r: ClipRequest,
         title: string,
+        sourceTitle: string,
         _startSecs: number,
         _endSecs: number,
         bpm: number,
@@ -93,6 +94,7 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
       ) => ({
         id: 'b1',
         name: title,
+        sourceTitle,
         bpm,
         beats,
         file: 'b1.flac',
@@ -634,17 +636,26 @@ describe('ClipView', () => {
     );
     expect(clip.detectBeats).toHaveBeenCalledWith(expect.anything(), 0, 10);
 
+    // The source-track title is prefilled from the opened track and
+    // editable — it files with the clip, the way a Beatify clip carries
+    // its project name.
+    const sourceInput = screen.getByTestId('clip-source-title') as HTMLInputElement;
+    expect(sourceInput.value).toBe('Basement Loop');
+    fireEvent.change(sourceInput, { target: { value: 'Basement Loop (VIP)' } });
+
     fireEvent.change(screen.getByTestId('clip-name'), { target: { value: 'Basement Edit' } });
     fireEvent.click(screen.getByTestId('clip-save'));
     await waitFor(() =>
       expect(screen.getByTestId('clip-status').textContent).toMatch(/20 beats at 120\.0 BPM/),
     );
 
-    const [request, title, start, end, bpm, beats] = (clip.saveBeatClip as ReturnType<typeof vi.fn>)
-      .mock.calls[0];
+    const [request, title, sourceTitle, start, end, bpm, beats] = (
+      clip.saveBeatClip as ReturnType<typeof vi.fn>
+    ).mock.calls[0];
     expect(request.sources).toEqual([{ track_id: 7, stems: [] }]);
     expect(request.program.regions).toHaveLength(1);
     expect(title).toBe('Basement Edit');
+    expect(sourceTitle).toBe('Basement Loop (VIP)');
     expect([start, end, bpm, beats]).toEqual([0, 10, 120, 20]);
   });
 
@@ -670,7 +681,7 @@ describe('ClipView', () => {
     fireEvent.click(screen.getByTestId('clip-save'));
     await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
     const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call.slice(2)).toEqual([2, 5.75, 120, 8]);
+    expect(call.slice(3)).toEqual([2, 5.75, 120, 8]);
   });
 
   it('turns right-shift taps during playback into a beat grid over the tapped span', async () => {
@@ -725,9 +736,9 @@ describe('ClipView', () => {
     fireEvent.click(screen.getByTestId('clip-save'));
     await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
     const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call.slice(2, 4)).toEqual([1.6, 3.0]);
-    expect(call[4]).toBeCloseTo(90, 6);
-    expect(call[5]).toBe(2);
+    expect(call.slice(3, 5)).toEqual([1.6, 3.0]);
+    expect(call[5]).toBeCloseTo(90, 6);
+    expect(call[6]).toBe(2);
     expect(clip.detectBeats).not.toHaveBeenCalled();
     fireEvent.keyDown(window, { key: 'Escape' });
 
