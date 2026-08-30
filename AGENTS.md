@@ -618,7 +618,9 @@ offset))`, offset in position units — so the knob's curve shapes the
   (0.04–2.5); `loadZoom` validates persisted zoom against them and
   `dotGridSize()` doubles the background lattice until dots are ≥12px
   apart so deep zoom-out does not moiré. Pinned by
-  `app/tests/AppShortcuts.test.tsx`.
+  `app/tests/AppShortcuts.test.tsx` — and, for the Decks tab's copy of the
+  same view (keys + wheel pan under `dj-decks-zoom`/`dj-decks-pan`), by
+  `app/tests/AppDecksRack.test.tsx`.
 - Rack geometry (frontend): module positions are UNZOOMED rack
   coordinates — any pointer math must divide screen deltas by the rack
   zoom (panel drags in `ModulePanel`, drops in `App.onRackDrop`). All
@@ -668,9 +670,17 @@ offset))`, offset in position units — so the knob's curve shapes the
   `.picker-body`, dialog lists).
   Keyboard scope: the rack stays MOUNTED (hidden) on other pages, so every
   rack window key listener gates on the active view — App's rack shortcut
-  effect checks `view !== 'rack'` directly, and QwertyPanel/MidiPanel read
-  `RackKeysContext` (`src/keyScope.ts`, provided around `.app-body`,
-  default true for headless unit tests). Going inactive must RELEASE held
+  effect checks the view directly (`rack` OR `decks`: the Decks tab shows
+  the same canvas, so it gets the same shortcuts), and QwertyPanel/MidiPanel
+  read `RackKeysContext` (`src/keyScope.ts`, provided around `.app-body`,
+  default true for headless unit tests). Inside that scope the EDIT
+  shortcuts (undo/redo, copy/paste, select-all, Backspace, cmd+M) stand
+  down for a focused form control (`isEditableTarget`), but the VIEW keys
+  (cmd/ctrl +, -, 0) deliberately do NOT: they move the camera, never text,
+  and the Decks chrome is made of form controls whose focus a press on the
+  canvas cannot take back (that mousedown preventDefaults, to keep the
+  marquee out of a text selection) — gating them there left the Decks tab
+  with dead zoom keys. Going inactive must RELEASE held
   gates/notes immediately (the keyup lands on the other page). ClipView
   follows the same pattern via its `active` prop (space + undo/redo keys,
   pauses playback on deactivate). Only Save/Open/New (fileShortcuts.ts)

@@ -1554,8 +1554,31 @@ export default function App() {
         return;
       }
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
+      // Zoom/reset-view first: these move the CAMERA, never text, so a
+      // focused form control does not swallow them (browser zoom works the
+      // same way). The Decks chrome is made of them — the tempo field and
+      // its slider — and a click on the rack background cannot take the
+      // focus back (that mousedown preventDefaults, to keep the marquee
+      // out of a text selection), so gating them like an edit shortcut
+      // left the Decks tab with dead zoom keys until something else was
+      // clicked.
+      if (key === '=' || key === '+') {
+        e.preventDefault();
+        changeZoom(1);
+        return;
+      }
+      if (key === '-' || key === '_') {
+        e.preventDefault();
+        changeZoom(-1);
+        return;
+      }
+      if (key === '0') {
+        e.preventDefault();
+        changeZoom(0);
+        return;
+      }
+      if (isEditableTarget(e.target)) return;
       if (key === 'z') {
         e.preventDefault();
         void (e.shiftKey ? engine.redo() : engine.undo()).then(refresh);
@@ -1582,15 +1605,6 @@ export default function App() {
       } else if (key === 'm') {
         e.preventDefault();
         setPickerOpen((open) => !open);
-      } else if (key === '=' || key === '+') {
-        e.preventDefault();
-        changeZoom(1);
-      } else if (key === '-' || key === '_') {
-        e.preventDefault();
-        changeZoom(-1);
-      } else if (key === '0') {
-        e.preventDefault();
-        changeZoom(0);
       }
     };
     window.addEventListener('keydown', onKey);

@@ -225,3 +225,54 @@ describe('the Decks tab wraps the real rack canvas', () => {
     );
   });
 });
+
+// The Decks tab drives the same canvas, so it gets the same view controls
+// — under the decks workspace's own zoom/pan keys.
+describe('the decks canvas pans and zooms like the rack', () => {
+  const transformOf = () => screen.getByTestId('rack').style.transform;
+
+  async function decksTab() {
+    render(<App />);
+    fireEvent.click(screen.getByTestId('tab-decks'));
+    await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
+  }
+
+  it('cmd/ctrl +/-/0 zoom, reset and persist under the decks keys', async () => {
+    await decksTab();
+    fireEvent.keyDown(window, { key: '=', ctrlKey: true });
+    expect(transformOf()).toBe('translate(0px, 0px) scale(1.2)');
+    expect(localStorage.getItem('dj-decks-zoom')).toBe('1.2');
+    // The Rack tab's remembered view is untouched: two racks, two views.
+    expect(localStorage.getItem('dj-rack-zoom')).toBeNull();
+
+    fireEvent.wheel(screen.getByTestId('rack-area'), { deltaX: 20, deltaY: 40 });
+    expect(transformOf()).toBe('translate(-20px, -40px) scale(1.2)');
+    expect(JSON.parse(localStorage.getItem('dj-decks-pan')!)).toEqual({ x: -20, y: -40 });
+
+    fireEvent.keyDown(window, { key: '0', metaKey: true });
+    expect(transformOf()).toBe('translate(0px, 0px) scale(1)');
+    expect(localStorage.getItem('dj-decks-zoom')).toBe('1');
+    expect(JSON.parse(localStorage.getItem('dj-decks-pan')!)).toEqual({ x: 0, y: 0 });
+    expect(localStorage.getItem('dj-rack-pan')).toBeNull();
+  });
+
+  it('the zoom keys still land while a deck control has the focus', async () => {
+    // The chrome is full of form controls (the tempo field and its
+    // slider), and pressing the canvas behind them does not blur — so
+    // moving the camera must not be gated like a text-editing shortcut.
+    await decksTab();
+    const tempo = screen.getByTestId('decks-bpm') as HTMLInputElement;
+    tempo.focus();
+    fireEvent.keyDown(tempo, { key: '=', ctrlKey: true });
+    expect(transformOf()).toBe('translate(0px, 0px) scale(1.2)');
+    fireEvent.keyDown(tempo, { key: '-', ctrlKey: true });
+    expect(transformOf()).toBe('translate(0px, 0px) scale(1)');
+
+    const slider = screen.getByTestId('decks-bpm-slider') as HTMLInputElement;
+    slider.focus();
+    fireEvent.keyDown(slider, { key: '-', metaKey: true });
+    expect(transformOf()).toBe(`translate(0px, 0px) scale(${1 / 1.2})`);
+    fireEvent.keyDown(slider, { key: '0', metaKey: true });
+    expect(transformOf()).toBe('translate(0px, 0px) scale(1)');
+  });
+});

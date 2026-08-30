@@ -127,6 +127,24 @@ describe('zoom shortcuts', () => {
     expect(scaleOf()).toBe(scaled(1));
   });
 
+  it('a focused form control swallows the edit shortcuts, never the zoom keys', async () => {
+    // Zoom moves the camera, never text — so unlike undo/copy it is not a
+    // shortcut a field can swallow (the Decks chrome is nothing but
+    // fields, and pressing the canvas behind them does not blur).
+    await renderApp();
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: '=', ctrlKey: true });
+    expect(scaleOf()).toBe(scaled(1.2));
+    fireEvent.keyDown(input, { key: '0', ctrlKey: true });
+    expect(scaleOf()).toBe(scaled(1));
+    fireEvent.keyDown(input, { key: 'z', ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fakeEngine.undo).not.toHaveBeenCalled();
+    input.remove();
+  });
+
   it('zoom is clamped to sane bounds', async () => {
     await renderApp();
     for (let i = 0; i < 20; i++) fireEvent.keyDown(window, { key: '+', metaKey: true });
@@ -323,16 +341,22 @@ describe('rack keyboard scope', () => {
     // Switching away releases the held gate...
     fireEvent.click(screen.getByTestId('tab-library'));
     await waitFor(() => expect(fakeEngine.qwertyKey).toHaveBeenLastCalledWith('kb1', 'q', false));
-    // ...and neither the QWERTY module nor the rack shortcuts hear keys.
+    // ...and neither the QWERTY module nor the rack shortcuts hear keys —
+    // the zoom keys included, though they are the one pair that fires over
+    // a focused form control while the canvas IS up.
     fireEvent.keyDown(window, { key: 'w' });
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
     fireEvent.keyDown(window, { key: 'Backspace' });
     fireEvent.keyDown(window, { key: 'm', metaKey: true });
+    fireEvent.keyDown(window, { key: '=', metaKey: true });
+    fireEvent.keyDown(window, { key: '0', metaKey: true });
     await new Promise((r) => setTimeout(r, 10));
     expect(fakeEngine.qwertyKey).toHaveBeenCalledTimes(2);
     expect(fakeEngine.undo).not.toHaveBeenCalled();
     expect(fakeEngine.removeModules).not.toHaveBeenCalled();
     expect(screen.queryByTestId('module-picker')).toBeNull();
+    expect(localStorage.getItem('dj-rack-zoom')).toBeNull();
+    expect(screen.getByTestId('rack').style.transform).toBe('translate(0px, 0px) scale(1)');
 
     // Back on the rack everything plays again.
     fireEvent.click(screen.getByTestId('tab-rack'));
