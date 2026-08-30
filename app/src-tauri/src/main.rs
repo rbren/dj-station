@@ -3099,6 +3099,7 @@ fn main() {
             clip::clip_render_preview,
             clip::clip_preview_audio,
             clip::clip_detect_beats,
+            clip::clip_tap_beats,
             clip::clip_save_beat_clip,
             clip::clip_stem_backend,
             clip::clip_stem_status,

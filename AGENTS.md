@@ -993,12 +993,19 @@ offset))`, offset in position units — so the knob's curve shapes the
   (identity outside them; the renderer stretches through Beatify's WSOLA
   `warp::render` as its LAST stage). BEAT TAPS: right-shift during
   playback marks beats at the live element position; when playback stops
-  ClipView turns them into a grid covering ONLY the tapped span
-  (`tapGrid` — average BPM, first and last tap pinned; the toolbar's +/−
+  the tapped span is MEASURED — `clip_tap_beats` runs the tracker over
+  it and the taps choose the seed AND metrical reading that fit them
+  best (`clip::beats_from_taps` → `grid::choose_tapped_fit`, the lenient
+  sibling of Beatify's `reconcile_taps`: no minimum count, no
+  self-consistency gate, same candidate scan), so the grid is the chosen
+  seed's beat times; a refusal comes back with empty `times` + a
+  `detail` line and the raw taps make the grid themselves. Either way
+  ClipView builds a grid covering ONLY the tapped span (`tapGrid` —
+  average BPM of the beat list, first and last pinned; the toolbar's +/−
   buttons extend/shrink it a beat at a time via `extendGrid`) and
   composes the warp into the program (`composeWarp` for re-taps). The
   stretch correction happens every `sectionBeats` beats (toolbar slider,
-  default 4): only every Nth tap is a warp anchor, and the beats between
+  default 4): only every Nth beat is a warp anchor, and the beats between
   keep their tapped feel — `ClipGrid.times` holds the ACTUAL beat
   positions (its twin `BeatGrid.times` in `dj_analysis::clip`), the
   toolbar shows max flam / max stretch (`TapStats`), and the waveform
@@ -1020,8 +1027,11 @@ offset))`, offset in position units — so the knob's curve shapes the
   without the memo, play after an edit stalls for exactly that long.
   SAVING makes a BEAT CLIP, not a library track: `clip_detect_beats`
   measures an untapped span with the Beatify tracker; `clip_save_beat_clip`
-  renders the selected span, pads it to whole beats (`pad_to_beats` fills
-  the fractional last beat with silence) and files it in
+  renders the selected span and cuts it to EXACTLY the beat count the
+  save row showed — the UI sends `beats` (from `beatSpan` against a
+  grid, ceil of span×bpm otherwise) and `pad_to_beats` fills a
+  fractional tail with silence or trims a flam/rounding overhang, so two
+  selected beats file as two — and files it in
   `dj_analysis::clip`'s store (`<data_dir>/beat-clips/`, `b<n>.flac` +
   `b<n>.json`, ignored by `custom/.gitignore` like `clips/`). Those clips
   reach the decks through the SAME doors Beatify clips use:

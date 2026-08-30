@@ -79,12 +79,22 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
     })),
     previewAudio: vi.fn(async () => new ArrayBuffer(44)),
     detectBeats: vi.fn(async () => ({ bpm: 120, beats: 20, tracker: 'dsp' })),
+    // The tracker refusing is the fallback path: the taps themselves
+    // become the grid. Tests about the measured grid override this.
+    tapBeats: vi.fn(async () => ({ times: [], bpm: 0, seed: '', tracker: '', detail: '' })),
     saveBeatClip: vi.fn(
-      async (_r: ClipRequest, title: string, startSecs: number, endSecs: number, bpm: number) => ({
+      async (
+        _r: ClipRequest,
+        title: string,
+        _startSecs: number,
+        _endSecs: number,
+        bpm: number,
+        beats: number,
+      ) => ({
         id: 'b1',
         name: title,
         bpm,
-        beats: Math.ceil(((endSecs - startSecs) * bpm) / 60 - 1e-6),
+        beats,
         file: 'b1.flac',
         stems: [],
       }),
@@ -630,12 +640,12 @@ describe('ClipView', () => {
       expect(screen.getByTestId('clip-status').textContent).toMatch(/20 beats at 120\.0 BPM/),
     );
 
-    const [request, title, start, end, bpm] = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock
-      .calls[0];
+    const [request, title, start, end, bpm, beats] = (clip.saveBeatClip as ReturnType<typeof vi.fn>)
+      .mock.calls[0];
     expect(request.sources).toEqual([{ track_id: 7, stems: [] }]);
     expect(request.program.regions).toHaveLength(1);
     expect(title).toBe('Basement Edit');
-    expect([start, end, bpm]).toEqual([0, 10, 120]);
+    expect([start, end, bpm, beats]).toEqual([0, 10, 120, 20]);
   });
 
   it('says when a fractional selection will be padded to whole beats', async () => {
@@ -655,11 +665,12 @@ describe('ClipView', () => {
     );
     await waitFor(() => expect(clip.detectBeats).toHaveBeenCalledWith(expect.anything(), 2, 5.75));
 
-    // The save covers the SELECTION at that tempo; the backend pads.
+    // The save covers the SELECTION at that tempo and sends the count
+    // the row showed; the backend pads to exactly that.
     fireEvent.click(screen.getByTestId('clip-save'));
     await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
     const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call.slice(2)).toEqual([2, 5.75, 120]);
+    expect(call.slice(2)).toEqual([2, 5.75, 120, 8]);
   });
 
   it('turns right-shift taps during playback into a beat grid over the tapped span', async () => {
@@ -676,12 +687,15 @@ describe('ClipView', () => {
     tapAt(3.0);
     expect(screen.getAllByTestId('clip-tap-line')).toHaveLength(4);
 
-    // Stopping playback commits them: markers become the grid, covering
-    // ONLY the tapped span — four beats, not the whole clip.
+    // Stopping playback commits them: the tracker is asked about the
+    // tapped span first (the mock refuses, so the taps themselves are
+    // the grid), covering ONLY that span — four beats, not the whole
+    // clip.
     fireEvent.click(screen.getByTestId('clip-stop'));
     await waitFor(() => expect(play.textContent).toBe('▶'));
     expect(screen.queryAllByTestId('clip-tap-line')).toHaveLength(0);
-    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4);
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4));
+    expect(clip.tapBeats).toHaveBeenCalledWith(expect.anything(), [1.0, 1.6, 2.2, 3.0]);
 
     // At the default correction length (every 4 beats) this run is one
     // section pinned at its ends — which define the 90 BPM average, so
@@ -699,6 +713,24 @@ describe('ClipView', () => {
       [3, 3],
     ]);
 
+    // A selection between the grid's ACTUAL beats counts ITS beats: 1.6
+    // to 3.0 s is two of them, even though 1.4 s at 90 BPM is 2.1 ideal
+    // periods — the count that used to grow a third beat of silence.
+    select(1.6, 3.0);
+    expect(screen.getByTestId('clip-save-meta').textContent).toBe('90.0 BPM · 2 beats');
+
+    // Saving needs no measuring pass — the grid's tempo is the clip's —
+    // and it sends exactly the count the row showed.
+    fireEvent.change(screen.getByTestId('clip-name'), { target: { value: 'Tapped' } });
+    fireEvent.click(screen.getByTestId('clip-save'));
+    await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
+    const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call.slice(2, 4)).toEqual([1.6, 3.0]);
+    expect(call[4]).toBeCloseTo(90, 6);
+    expect(call[5]).toBe(2);
+    expect(clip.detectBeats).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'Escape' });
+
     // Sliding the correction down to every beat pins each tap to the
     // ideal grid: no flam left, the stretch made visible per section.
     fireEvent.change(screen.getByTestId('clip-grid-section'), { target: { value: '1' } });
@@ -715,18 +747,45 @@ describe('ClipView', () => {
       '3.0000',
     ]);
 
-    // Saving needs no measuring pass — the grid's tempo is the clip's.
-    fireEvent.change(screen.getByTestId('clip-name'), { target: { value: 'Tapped' } });
-    fireEvent.click(screen.getByTestId('clip-save'));
-    await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
-    const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call[4]).toBeCloseTo(90, 6);
-    expect(clip.detectBeats).not.toHaveBeenCalled();
-
     // The whole session — taps AND the slider move — is one undo step.
     fireEvent.click(screen.getByTestId('clip-undo'));
     expect(screen.queryAllByTestId('clip-beat-line')).toHaveLength(0);
     expect(screen.queryByTestId('clip-grid-tools')).toBeNull();
+  });
+
+  it('builds the grid from the tracker beats the taps chose', async () => {
+    // The tapped span is MEASURED: clip_tap_beats runs the tracker over
+    // it and the taps pick a seed — the grid is the seed's beat times,
+    // not the sloppy taps.
+    const clip = clipMock({
+      tapBeats: vi.fn(async () => ({
+        times: [1.0, 1.5, 2.0, 2.5, 3.0],
+        bpm: 120,
+        seed: 'final0',
+        tracker: 'beat_this/final0',
+        detail: 'beat_this/final0 heard 5 beats at 120.0 BPM over the tapped span (seed final0)',
+      })),
+    });
+    await openTrack(clip);
+    fireEvent.click(screen.getByTestId('clip-play'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
+    tapAt(1.05);
+    tapAt(2.1);
+    tapAt(2.95);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+
+    // Five detected beats, not three tapped ones.
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(5));
+    expect(clip.tapBeats).toHaveBeenCalledWith(expect.anything(), [1.05, 2.1, 2.95]);
+    const p = await programNow(clip, (p) => (p.beat_grid?.times.length ?? 0) === 5);
+    expect(p.beat_grid?.times).toEqual([1.0, 1.5, 2.0, 2.5, 3.0]);
+    expect(p.beat_grid?.bpm).toBeCloseTo(120, 6);
+    expect(screen.getByTestId('clip-save-meta').textContent).toContain('120.0 BPM');
+    expect(screen.getByTestId('clip-status').textContent).toContain('heard 5 beats');
+
+    // Still one undo step: taps, measurement and all.
+    fireEvent.click(screen.getByTestId('clip-undo'));
+    expect(screen.queryAllByTestId('clip-beat-line')).toHaveLength(0);
   });
 
   it('extends the grid a beat at a time with the toolbar buttons', async () => {
@@ -739,7 +798,7 @@ describe('ClipView', () => {
     tapAt(3.0);
     fireEvent.click(screen.getByTestId('clip-stop'));
     await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('▶'));
-    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(2);
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(2));
 
     // Forward: beats at 5 and 7 s land; a step back would sit before 0,
     // so that button has nowhere to go.
@@ -769,6 +828,7 @@ describe('ClipView', () => {
     tapAt(3.0);
     fireEvent.click(screen.getByTestId('clip-stop'));
     await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('▶'));
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(2));
 
     // Beyond the covered span nothing snaps — the grid is not there.
     select(3.4, 4.2);
@@ -797,7 +857,7 @@ describe('ClipView', () => {
     tapAt(3.0);
     fireEvent.click(screen.getByTestId('clip-stop'));
     await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('▶'));
-    expect(screen.getAllByTestId('clip-beat-line').length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line').length).toBeGreaterThan(0));
 
     // The warp's anchors point at audio a cut moves: the grid goes with
     // it (undo brings both back together).

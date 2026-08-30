@@ -674,15 +674,97 @@ fn level_weight(ratio: f64) -> f64 {
     (-(octaves * octaves) / (2.0 * TAP_LEVEL_SIGMA * TAP_LEVEL_SIGMA)).exp()
 }
 
+/// One grid the taps were scored against: a seed's fit under one
+/// [`TAP_LEVELS`] reading (with the half-beat phase already decided by
+/// the measured lag).
+struct TapCandidate {
+    seed: String,
+    reading: Reading,
+    concentration: f64,
+    offset_secs: f64,
+    level_ratio: f64,
+}
+
+/// What one pass over every candidate found.
+struct TapScan {
+    /// The best scorer, with its score.
+    best: Option<(f64, TapCandidate)>,
+    /// Raw closest (concentration, ratio) — when nothing scores, the
+    /// argmax of a field of zeroes says nothing, and the candidate the
+    /// taps actually LAND on, at the wrong rate, is what explains why.
+    closest: Option<(f64, f64)>,
+}
+
+/// Score every (seed × level) candidate against `taps`.
+///
+/// The half-beat phase is decided by the measured lag — the one place
+/// the latency is USED rather than discarded, because a lag past a
+/// quarter period is not a late tap, it is a tap on the line in between.
+fn scan_candidates(runs: &[(String, Vec<f64>)], taps: &[f64], tap_period: f64) -> TapScan {
+    let mut best: Option<(f64, TapCandidate)> = None;
+    let mut closest: Option<(f64, f64)> = None;
+    for (seed, beats) in runs {
+        let Some(base) = fit_beats(beats) else {
+            continue;
+        };
+        for factor in TAP_LEVELS {
+            let level = apply_reading(
+                &base,
+                Reading {
+                    factor,
+                    half_shift: false,
+                },
+            );
+            let (period, phase) = (level.period, level.phase);
+            if !(period.is_finite() && period > 0.0) {
+                continue;
+            }
+            let on = tap_alignment(taps, period, phase);
+            // Half a period away is the offbeat, not a slow hand.
+            let half_shift = on.offset_secs.abs() > period / 4.0;
+            let offset = if half_shift {
+                let shifted = tap_alignment(taps, period, phase + period / 2.0);
+                shifted.offset_secs
+            } else {
+                on.offset_secs
+            };
+            let ratio = tap_period / period;
+            if closest.is_none_or(|(r, _)| on.concentration > r) {
+                closest = Some((on.concentration, ratio));
+            }
+            let score = on.concentration * level_weight(ratio);
+            // A tie is two candidates describing the SAME grid — a seed
+            // that heard the pulse, and another that heard half of it and
+            // is being doubled back. Prefer the one that needs no
+            // correction: it is the reading whose detections are really
+            // there, and the one whose ÷2/×2 buttons will then read as
+            // untouched.
+            if best.as_ref().is_some_and(|(b, c)| {
+                *b > score + 1e-9 || (*b >= score - 1e-9 && !corrected(&c.reading))
+            }) {
+                continue;
+            }
+            best = Some((
+                score,
+                TapCandidate {
+                    seed: seed.clone(),
+                    reading: Reading { factor, half_shift },
+                    concentration: on.concentration,
+                    offset_secs: offset,
+                    level_ratio: ratio,
+                },
+            ));
+        }
+    }
+    TapScan { best, closest }
+}
+
 /// Choose the grid the taps agree with, among every seed at every
 /// metrical level (§3.8a).
 ///
 /// Nothing here fits anything to the taps: `runs` are the detections, the
 /// candidates are their fits under each [`TAP_LEVELS`] reading, and the
-/// taps only say which one they land on. The half-beat phase is decided
-/// by the measured lag — the one place the latency is USED rather than
-/// discarded, because a lag past a quarter period is not a late tap, it
-/// is a tap on the line in between.
+/// taps only say which one they land on.
 pub fn reconcile_taps(runs: &[(String, Vec<f64>)], taps: &[f64]) -> TapVerdict {
     let mut taps: Vec<f64> = taps.iter().copied().filter(|t| t.is_finite()).collect();
     taps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -712,72 +794,8 @@ pub fn reconcile_taps(runs: &[(String, Vec<f64>)], taps: &[f64]) -> TapVerdict {
         );
     }
 
-    let mut best: Option<(f64, TapVerdict)> = None;
-    // Kept separately, on raw concentration alone: when nothing scores,
-    // the argmax of a field of zeroes says nothing, and the candidate the
-    // taps actually LAND on — at the wrong rate — is what explains why.
-    let mut closest: Option<(f64, f64)> = None;
-    for (seed, beats) in runs {
-        let Some(base) = fit_beats(beats) else {
-            continue;
-        };
-        for factor in TAP_LEVELS {
-            let level = apply_reading(
-                &base,
-                Reading {
-                    factor,
-                    half_shift: false,
-                },
-            );
-            let (period, phase) = (level.period, level.phase);
-            if !(period.is_finite() && period > 0.0) {
-                continue;
-            }
-            let on = tap_alignment(&taps, period, phase);
-            // Half a period away is the offbeat, not a slow hand.
-            let half_shift = on.offset_secs.abs() > period / 4.0;
-            let offset = if half_shift {
-                let shifted = tap_alignment(&taps, period, phase + period / 2.0);
-                shifted.offset_secs
-            } else {
-                on.offset_secs
-            };
-            let ratio = tap_period / period;
-            if closest.is_none_or(|(r, _)| on.concentration > r) {
-                closest = Some((on.concentration, ratio));
-            }
-            let score = on.concentration * level_weight(ratio);
-            // A tie is two candidates describing the SAME grid — a seed
-            // that heard the pulse, and another that heard half of it and
-            // is being doubled back. Prefer the one that needs no
-            // correction: it is the reading whose detections are really
-            // there, and the one whose ÷2/×2 buttons will then read as
-            // untouched.
-            if best
-                .as_ref()
-                .is_some_and(|(b, v)| *b > score + 1e-9 || (*b >= score - 1e-9 && !corrected(v)))
-            {
-                continue;
-            }
-            best = Some((
-                score,
-                TapVerdict {
-                    outcome: TapOutcome::Chose,
-                    taps: n,
-                    tap_bpm,
-                    self_concentration: self_r,
-                    seed: seed.clone(),
-                    reading: Reading { factor, half_shift },
-                    concentration: on.concentration,
-                    offset_secs: offset,
-                    level_ratio: ratio,
-                    detail: String::new(),
-                },
-            ));
-        }
-    }
-
-    let Some((score, mut verdict)) = best else {
+    let TapScan { best, closest } = scan_candidates(runs, &taps, tap_period);
+    let Some((score, c)) = best else {
         return TapVerdict::refused(
             TapOutcome::NoMatch,
             n,
@@ -790,19 +808,56 @@ pub fn reconcile_taps(runs: &[(String, Vec<f64>)], taps: &[f64]) -> TapVerdict {
         let mut refusal = TapVerdict::refused(TapOutcome::NoMatch, n, tap_bpm, self_r, "");
         // The ratio worth reporting belongs to the grid the taps LAND on,
         // not to whichever candidate won a contest between near-zeroes.
-        let (concentration, ratio) = closest.unwrap_or((0.0, verdict.level_ratio));
+        let (concentration, ratio) = closest.unwrap_or((0.0, c.level_ratio));
         refusal.concentration = concentration;
         refusal.level_ratio = ratio;
         refusal.detail = no_match_detail(concentration, ratio, tap_bpm);
         return refusal;
     }
+    let mut verdict = TapVerdict {
+        outcome: TapOutcome::Chose,
+        taps: n,
+        tap_bpm,
+        self_concentration: self_r,
+        seed: c.seed,
+        reading: c.reading,
+        concentration: c.concentration,
+        offset_secs: c.offset_secs,
+        level_ratio: c.level_ratio,
+        detail: String::new(),
+    };
     verdict.detail = chose_detail(&verdict);
     verdict
 }
 
-/// Did this candidate need a reading correction to fit the taps?
-fn corrected(v: &TapVerdict) -> bool {
-    (v.reading.factor - 1.0).abs() > 1e-9 || v.reading.half_shift
+/// The Clip page's chooser (PRD §9): the taps BOUND a detection region
+/// they were deliberately played over, so — unlike [`reconcile_taps`] —
+/// there is no minimum count and no self-consistency gate: even two taps
+/// choose whichever seed and reading they land closest to. Returns the
+/// chosen seed and its fit with the reading applied, or None when no
+/// seed produced a grid at all.
+pub fn choose_tapped_fit(runs: &[(String, Vec<f64>)], taps: &[f64]) -> Option<(String, Fit)> {
+    let mut taps: Vec<f64> = taps.iter().copied().filter(|t| t.is_finite()).collect();
+    taps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if taps.len() < 2 {
+        return None;
+    }
+    // Too few taps for a least-squares pulse still have a rate: the mean
+    // gap (which is all `tapGrid` averages on the other side).
+    let tap_period = tap_pulse(&taps)
+        .map(|(p, _)| p)
+        .unwrap_or((taps[taps.len() - 1] - taps[0]) / (taps.len() - 1) as f64);
+    if !(tap_period.is_finite() && tap_period > 0.0) {
+        return None;
+    }
+    let (_, c) = scan_candidates(runs, &taps, tap_period).best?;
+    let beats = &runs.iter().find(|(s, _)| *s == c.seed)?.1;
+    Some((c.seed, apply_reading(&fit_beats(beats)?, c.reading)))
+}
+
+/// Did this reading correct the fit to reach the taps?
+fn corrected(r: &Reading) -> bool {
+    (r.factor - 1.0).abs() > 1e-9 || r.half_shift
 }
 
 /// Why consistent taps matched nothing.

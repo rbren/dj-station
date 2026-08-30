@@ -315,9 +315,11 @@ export interface Tapped {
   stats: TapStats;
 }
 
-/** What a run of right-shift taps during playback builds. The grid's
- *  tempo is the AVERAGE between the first and last tap (both stay put, so
- *  the covered span keeps its length) and it covers ONLY the tapped span.
+/** What a beat list builds — the tracker's detected beats over the
+ *  tapped span (`clip_tap_beats`), or the raw right-shift taps when
+ *  nothing fit them. The grid's tempo is the AVERAGE between the first
+ *  and last beat (both stay put, so the covered span keeps its length)
+ *  and it covers ONLY that span.
  *
  *  `sectionBeats` is the length of the stretch correction: only every
  *  Nth tap is pinned to the ideal grid (a warp anchor). Within a section
@@ -862,6 +864,19 @@ export interface ClipBeats {
   tracker: string;
 }
 
+/** What the tracker heard over a tapped span (`clip_tap_beats`): the
+ *  seed the taps chose and its actual beat times, which the UI then
+ *  stretches by the same rules raw taps use. Empty `times` is the
+ *  graceful refusal — `detail` says why and the taps themselves become
+ *  the grid. */
+export interface ClipTapBeats {
+  times: number[];
+  bpm: number;
+  seed: string;
+  tracker: string;
+  detail: string;
+}
+
 /** What a beat-clip save filed: the record the decks' clip pickers list. */
 export interface SavedBeatClip {
   id: string;
@@ -883,14 +898,20 @@ export interface ClipClientApi {
    *  installed, the DSP tracker otherwise) — the save row's numbers when
    *  no beat grid was tapped. */
   detectBeats(request: ClipRequest, startSecs: number, endSecs: number): Promise<ClipBeats | null>;
-  /** Render a span as a beat clip, padded to whole beats at `bpm`. It
-   *  lands in the decks' clip pickers, like a Beatify clip. */
+  /** Run the tracker over the span a run of right-shift taps covered and
+   *  let the taps choose among its seeds — the measured beat times the
+   *  grid is built from (the taps themselves when nothing fits). */
+  tapBeats(request: ClipRequest, taps: number[]): Promise<ClipTapBeats | null>;
+  /** Render a span as a beat clip, cut to exactly `beats` whole beats at
+   *  `bpm` (the save row's numbers). It lands in the decks' clip
+   *  pickers, like a Beatify clip. */
   saveBeatClip(
     request: ClipRequest,
     title: string,
     startSecs: number,
     endSecs: number,
     bpm: number,
+    beats: number,
   ): Promise<SavedBeatClip | null>;
   /** Which separation backend is configured, and is it installed? */
   stemBackend(): Promise<ClipStemBackend | null>;
@@ -912,12 +933,16 @@ export class ClipClient extends IpcClient implements ClipClientApi {
   detectBeats(request: ClipRequest, startSecs: number, endSecs: number) {
     return this.call<ClipBeats>('clip_detect_beats', { request, startSecs, endSecs });
   }
+  tapBeats(request: ClipRequest, taps: number[]) {
+    return this.call<ClipTapBeats>('clip_tap_beats', { request, taps });
+  }
   saveBeatClip(
     request: ClipRequest,
     title: string,
     startSecs: number,
     endSecs: number,
     bpm: number,
+    beats: number,
   ) {
     return this.call<SavedBeatClip>('clip_save_beat_clip', {
       request,
@@ -925,6 +950,7 @@ export class ClipClient extends IpcClient implements ClipClientApi {
       startSecs,
       endSecs,
       bpm,
+      beats,
     });
   }
   stemBackend() {

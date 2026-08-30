@@ -29,11 +29,12 @@
 //! the first source's rate with the widest channel count, resampling other
 //! sources linearly and duplicating mono into every output channel.
 
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 use std::path::Path;
 
+use crate::beatify::{self, detect::BeatTracker, grid as beat_fit};
 use crate::decode::AudioData;
 
 /// Default equal-power join between adjacent regions (declick).
@@ -550,38 +551,127 @@ pub fn program_duration_secs(program: &ClipProgram) -> f64 {
     warp_time_secs(&program.warp, total)
 }
 
-/// How far a whole beat is allowed to miss by before it counts as the
-/// next one: a slice lands on sample boundaries, and a clip that IS four
-/// beats must not gain a fifth of pure silence over a rounding error.
-const BEAT_EPS: f64 = 1e-6;
-
-/// Round a rendered span up to a WHOLE number of beats at `bpm`, filling
-/// the remainder of the last beat with silence (a fractional beat count
-/// would put every later beat of a looping clip off the grid).
-pub fn pad_to_beats(audio: &AudioData, bpm: f64) -> Result<(AudioData, usize)> {
+/// Cut a rendered span to EXACTLY `beats` whole beats at `bpm`: a
+/// fractional tail is filled with silence, and an overhang (sample
+/// rounding, or the flam a tapped grid keeps between its anchors) is
+/// trimmed — the count is the caller's, decided where the selection was
+/// made, so the clip saved is the clip the save row showed. A count more
+/// than a beat away from the audio is a mismatched call, not a request.
+pub fn pad_to_beats(audio: &AudioData, bpm: f64, beats: usize) -> Result<AudioData> {
     ensure!(
         bpm.is_finite() && bpm > 0.0,
         "beat clip: a positive BPM is required"
     );
+    ensure!(beats > 0, "beat clip: at least one beat is required");
     ensure!(audio.frames() > 0, "beat clip: nothing to save there");
     let beats_f = audio.duration_secs() * bpm / 60.0;
-    let beats = ((beats_f - BEAT_EPS).ceil().max(1.0)) as usize;
+    ensure!(
+        (beats as f64 - beats_f).abs() < 1.0 + 1e-9,
+        "beat clip: {beats} beats asked of a span that is {beats_f:.2} beats at {bpm:.1} BPM"
+    );
     let target = (beats as f64 * 60.0 / bpm * audio.sample_rate as f64).round() as usize;
-    Ok((
-        AudioData {
-            channels: audio
-                .channels
-                .iter()
-                .map(|c| {
-                    let mut c = c.clone();
-                    c.resize(target, 0.0);
-                    c
-                })
-                .collect(),
-            sample_rate: audio.sample_rate,
-        },
-        beats,
-    ))
+    Ok(AudioData {
+        channels: audio
+            .channels
+            .iter()
+            .map(|c| {
+                let mut c = c.clone();
+                c.resize(target, 0.0);
+                c
+            })
+            .collect(),
+        sample_rate: audio.sample_rate,
+    })
+}
+
+/// What running the tracker over a tapped span heard: the beat times the
+/// Clip page stretches instead of the raw taps.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TappedBeats {
+    /// Checkpoint the taps chose ("final0"…, or "dsp" for the fallback).
+    pub seed: String,
+    /// Tempo of the chosen fit, reading applied.
+    pub bpm: f64,
+    /// The chosen seed's ACTUAL beat times over the tapped span, output
+    /// seconds — detections where it has them, the fitted line where a
+    /// beat went undetected.
+    pub times: Vec<f64>,
+    /// Which tracker produced the runs ("beat_this/…" or "dsp").
+    pub tracker: String,
+}
+
+/// The Clip page's beat grid, measured rather than averaged (PRD §9):
+/// run the tracker over the span the right-shift taps covered, let the
+/// taps choose among its seeds' readings
+/// ([`beat_fit::choose_tapped_fit`]), and hand back that seed's actual
+/// beat times over the span. Downstream those times go through the SAME
+/// stretch rules raw taps do — the taps only bound the region and pick
+/// the hearing.
+pub fn beats_from_taps(
+    audio: &AudioData,
+    tracker: &dyn BeatTracker,
+    taps: &[f64],
+) -> Result<TappedBeats> {
+    let mut taps: Vec<f64> = taps.iter().copied().filter(|t| t.is_finite()).collect();
+    taps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    ensure!(
+        taps.len() >= 2,
+        "beat taps: two taps are the least a span needs"
+    );
+    let (first, last) = (taps[0], taps[taps.len() - 1]);
+    ensure!(last > first, "beat taps: those taps cover no time");
+    // One tap-gap of margin each side: a beat under the first tap (taps
+    // run LATE by the hand's latency) must not fall off the region edge.
+    let gap = (last - first) / (taps.len() - 1) as f64;
+    let dur = audio.duration_secs();
+    let region = ((first - gap).max(0.0), (last + gap).min(dur));
+    let analysis = beatify::analyze(audio, tracker, Some(region), Default::default())
+        .map_err(|e| anyhow!("measuring the tapped span: {e}"))?;
+    let runs: Vec<(String, Vec<f64>)> = analysis
+        .runs
+        .iter()
+        .map(|r| (r.seed.clone(), r.beats.clone()))
+        .collect();
+    let (seed, fit) = beat_fit::choose_tapped_fit(&runs, &taps)
+        .ok_or_else(|| anyhow!("no seed produced a grid over the tapped span"))?;
+    let times = fit_beat_times(&fit, first, last, dur);
+    ensure!(
+        times.len() >= 2,
+        "the tapped span holds fewer than two detected beats"
+    );
+    Ok(TappedBeats {
+        seed,
+        bpm: fit.bpm(),
+        times,
+        tracker: analysis.tracker,
+    })
+}
+
+/// The fit's actual beat times covering `[from, to]`: one per whole grid
+/// index between the lines nearest each end — a detection's own time
+/// where the fit kept one, the fitted line where the beat went
+/// undetected (or was dropped by a half-time reading).
+fn fit_beat_times(fit: &beat_fit::Fit, from: f64, to: f64, dur: f64) -> Vec<f64> {
+    if !(fit.period.is_finite() && fit.period > 0.0) {
+        return Vec::new();
+    }
+    let n0 = ((from - fit.phase) / fit.period).round() as i64;
+    let n1 = ((to - fit.phase) / fit.period).round() as i64;
+    let mut out: Vec<f64> = Vec::new();
+    for n in n0..=n1 {
+        let t = fit
+            .beats
+            .iter()
+            .find(|b| (b.index - n as f64).abs() < 0.25)
+            .map(|b| b.time)
+            .unwrap_or_else(|| fit.line(n as f64));
+        let t = t.clamp(0.0, dur);
+        if out.last().is_none_or(|&prev| t > prev + 1e-6) {
+            out.push(t);
+        }
+    }
+    out
 }
 
 /// Waveform overview peaks (0..=1), `buckets` values — same law as the
@@ -736,18 +826,20 @@ pub fn load_beat_clip(data_dir: &Path, clip_id: &str) -> Result<(BeatClipMeta, A
     Ok((meta, audio))
 }
 
-/// File a rendered span as a beat clip: pad it to whole beats at `bpm`
-/// ([`pad_to_beats`]), mint the next `b<n>` id and write audio + meta.
+/// File a rendered span as a beat clip: cut it to exactly `beats` whole
+/// beats at `bpm` ([`pad_to_beats`]), mint the next `b<n>` id and write
+/// audio + meta.
 pub fn save_beat_clip(
     data_dir: &Path,
     name: &str,
     audio: &AudioData,
     bpm: f64,
+    beats: usize,
     stems: Vec<String>,
 ) -> Result<BeatClipMeta> {
     let name = name.trim();
     ensure!(!name.is_empty(), "beat clip: it needs a name");
-    let (padded, beats) = pad_to_beats(audio, bpm)?;
+    let padded = pad_to_beats(audio, bpm, beats)?;
     let dir = beat_clips_dir(data_dir);
     std::fs::create_dir_all(&dir)?;
     let next = read_beat_clips(data_dir)

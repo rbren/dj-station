@@ -452,6 +452,61 @@ pub fn clip_detect_beats(
     })
 }
 
+/// What the tracker heard over a tapped span (`clip_tap_beats`). Empty
+/// `times` is the graceful refusal: nothing fit, `detail` says why, and
+/// the UI falls back to the taps themselves.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipTapBeats {
+    /// The chosen seed's actual beat times over the tapped span.
+    pub times: Vec<f64>,
+    pub bpm: f64,
+    /// Which seed the taps chose.
+    pub seed: String,
+    /// Which tracker produced the runs.
+    pub tracker: String,
+    /// One line for the status row, either way.
+    pub detail: String,
+}
+
+/// The measured beat grid for a run of right-shift taps (PRD §9): the
+/// Beatify tracker runs over the span the taps covered, the taps choose
+/// the seed (and metrical reading) that best fits them, and the chosen
+/// seed's beat times come back for the UI to stretch by the same rules
+/// raw taps use. Refusals are an answer, not an error — the taps still
+/// make a grid on their own.
+#[tauri::command(async)]
+pub fn clip_tap_beats(
+    state: State<AppState>,
+    request: ClipRequest,
+    taps: Vec<f64>,
+) -> CmdResult<ClipTapBeats> {
+    let rendered = request.render(&state)?;
+    let tracker = dj_analysis::beatify::detect::default_tracker();
+    match clip::beats_from_taps(&rendered, tracker.as_ref(), &taps) {
+        Ok(heard) => Ok(ClipTapBeats {
+            detail: format!(
+                "{} heard {} beats at {:.1} BPM over the tapped span (seed {})",
+                heard.tracker,
+                heard.times.len(),
+                heard.bpm,
+                heard.seed,
+            ),
+            times: heard.times,
+            bpm: heard.bpm,
+            seed: heard.seed,
+            tracker: heard.tracker,
+        }),
+        Err(e) => Ok(ClipTapBeats {
+            times: Vec::new(),
+            bpm: 0.0,
+            seed: String::new(),
+            tracker: String::new(),
+            detail: e.to_string(),
+        }),
+    }
+}
+
 fn span_of(rendered: &AudioData, start_secs: f64, end_secs: f64) -> CmdResult<(f64, f64)> {
     let dur = rendered.duration_secs();
     let a = start_secs.max(0.0).min(dur);
@@ -462,10 +517,11 @@ fn span_of(rendered: &AudioData, start_secs: f64, end_secs: f64) -> CmdResult<(f
     Ok((a, b))
 }
 
-/// Render the selected span to `<data_dir>/beat-clips/`, padded to a
-/// whole number of beats at `bpm` — the tapped grid's tempo, or the
-/// measured one the save row showed. The saved clip loads into the decks
-/// exactly like a Beatify clip (see `beat_clip.rs`).
+/// Render the selected span to `<data_dir>/beat-clips/`, cut to exactly
+/// `beats` whole beats at `bpm` — the numbers the save row showed, so
+/// selecting two beats files two (a fractional tail is silence-filled,
+/// an overhang trimmed). The saved clip loads into the decks exactly
+/// like a Beatify clip (see `beat_clip.rs`).
 #[tauri::command(async)]
 pub fn clip_save_beat_clip(
     state: State<AppState>,
@@ -474,6 +530,7 @@ pub fn clip_save_beat_clip(
     start_secs: f64,
     end_secs: f64,
     bpm: f64,
+    beats: usize,
 ) -> CmdResult<clip::BeatClipMeta> {
     let rendered = request.render(&state)?;
     let (a, b) = span_of(&rendered, start_secs, end_secs)?;
@@ -489,6 +546,6 @@ pub fn clip_save_beat_clip(
             .collect::<CmdResult<Vec<_>>>()?,
     );
 
-    clip::save_beat_clip(state.library.data_dir(), &title, &span, bpm, stems)
+    clip::save_beat_clip(state.library.data_dir(), &title, &span, bpm, beats, stems)
         .map_err(|e| CmdError::invalid(format!("clip: {e}")))
 }

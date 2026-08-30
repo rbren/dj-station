@@ -7,10 +7,11 @@
 //! `tests/e2e/goldens/<case>.wav`. Regenerate intentional changes with
 //! `./scripts/regen-goldens.sh` and review the diff.
 
+use dj_analysis::beatify::detect::DspTracker;
 use dj_analysis::clip::{
-    clips_dir, load_beat_clip, pad_to_beats, peaks, program_duration_secs, read_beat_clips,
-    render_clip, save_beat_clip, warp_time_secs, wav16_bytes, write_clip, ClipEq, ClipEqBand,
-    ClipOverlay, ClipProgram, ClipRegion, LevelPoint,
+    beats_from_taps, clips_dir, load_beat_clip, pad_to_beats, peaks, program_duration_secs,
+    read_beat_clips, render_clip, save_beat_clip, warp_time_secs, wav16_bytes, write_clip, ClipEq,
+    ClipEqBand, ClipOverlay, ClipProgram, ClipRegion, LevelPoint,
 };
 use dj_analysis::AudioData;
 use std::path::{Path, PathBuf};
@@ -450,12 +451,11 @@ fn warp_time_maps_inside_the_anchors_and_is_identity_outside() {
 }
 
 #[test]
-fn pad_to_beats_fills_the_last_beat_with_silence() {
-    // 1.75 s at 120 BPM is 3.5 beats: the clip becomes 4 whole beats,
-    // the last half-beat of it silence.
+fn pad_to_beats_cuts_to_exactly_the_asked_count() {
+    // 1.75 s at 120 BPM is 3.5 beats: asked for 4, the clip becomes 4
+    // whole beats, the last half-beat of it silence.
     let src = tone(220.0, 1.75);
-    let (padded, beats) = pad_to_beats(&src, 120.0).unwrap();
-    assert_eq!(beats, 4);
+    let padded = pad_to_beats(&src, 120.0, 4).unwrap();
     assert_eq!(padded.frames(), 2 * SR as usize);
     let tail_start = (1.75 * SR as f64) as usize;
     assert!(padded.channels[0][tail_start..].iter().all(|&s| s == 0.0));
@@ -463,11 +463,89 @@ fn pad_to_beats_fills_the_last_beat_with_silence() {
 
     // A span that already IS whole beats gains nothing.
     let whole_src = tone(220.0, 2.0);
-    let (kept, beats) = pad_to_beats(&whole_src, 120.0).unwrap();
-    assert_eq!(beats, 4);
+    let kept = pad_to_beats(&whole_src, 120.0, 4).unwrap();
     assert_eq!(kept.frames(), whole_src.frames());
 
-    assert!(pad_to_beats(&src, 0.0).is_err());
+    // A hair of overhang — flam kept by the tapped grid, or sample
+    // rounding — is TRIMMED, never rounded up to a fifth beat of
+    // silence: two selected beats file as two.
+    let long = tone(220.0, 2.01);
+    let trimmed = pad_to_beats(&long, 120.0, 4).unwrap();
+    assert_eq!(trimmed.frames(), 2 * SR as usize);
+
+    // A count more than a beat away from the audio is a mismatched
+    // call, and so is no count at all.
+    assert!(pad_to_beats(&src, 120.0, 6).is_err());
+    assert!(pad_to_beats(&src, 120.0, 0).is_err());
+    assert!(pad_to_beats(&src, 0.0, 4).is_err());
+}
+
+/// A percussive burst on every beat over a quiet tonal bed — the same
+/// material the Beatify tests track (theirs at 44.1 kHz, this at SR).
+fn click_track(beats: &[f64], tail_secs: f64) -> AudioData {
+    let end = beats.last().copied().unwrap_or(0.0) + tail_secs;
+    let n = (end * SR as f64) as usize;
+    let mut left = vec![0.0f32; n];
+    for (i, sample) in left.iter_mut().enumerate() {
+        let t = i as f64 / SR as f64;
+        *sample = (2.0 * std::f64::consts::PI * 110.0 * t).sin() as f32 * 0.05;
+    }
+    for &b in beats {
+        let start = (b * SR as f64) as usize;
+        let len = (0.030 * SR as f64) as usize;
+        for j in 0..len {
+            if start + j >= n {
+                break;
+            }
+            let t = j as f64 / SR as f64;
+            let env = (-t / 0.006).exp();
+            let click = (2.0 * std::f64::consts::PI * 1400.0 * t).sin() * env * 0.8;
+            left[start + j] += click as f32;
+        }
+    }
+    let right = left.clone();
+    AudioData {
+        channels: vec![left, right],
+        sample_rate: SR,
+    }
+}
+
+#[test]
+fn taps_bound_the_span_and_the_trackers_beats_become_the_grid() {
+    // Clicks at 120 BPM from 0.5 s; the hand taps eight beats between
+    // 4.5 and 8 s, a constant 40 ms LATE (motor latency). The grid must
+    // be the DETECTED beats over that span — not the taps.
+    let clicks: Vec<f64> = (0..24).map(|i| 0.5 + i as f64 * 0.5).collect();
+    let audio = click_track(&clicks, 1.0);
+    let taps: Vec<f64> = (0..8).map(|i| 4.54 + i as f64 * 0.5).collect();
+
+    let heard = beats_from_taps(&audio, &DspTracker, &taps).unwrap();
+    assert_eq!(heard.seed, "dsp");
+    assert!((heard.bpm - 120.0).abs() < 2.0, "bpm {}", heard.bpm);
+    assert_eq!(heard.times.len(), 8, "times {:?}", heard.times);
+    for (t, want) in heard.times.iter().zip((0..8).map(|i| 4.5 + i as f64 * 0.5)) {
+        assert!((t - want).abs() < 0.05, "beat at {t}, wanted {want}");
+    }
+
+    // Fewer than two taps bound nothing.
+    assert!(beats_from_taps(&audio, &DspTracker, &[1.0]).is_err());
+}
+
+#[test]
+fn tapping_every_other_beat_chooses_the_half_time_reading() {
+    // Same 120 BPM clicks, but the taps run one per TWO beats: the taps
+    // choose the ÷2 reading, so the grid lands at 60 BPM on the beats
+    // the user was actually marking.
+    let clicks: Vec<f64> = (0..24).map(|i| 0.5 + i as f64 * 0.5).collect();
+    let audio = click_track(&clicks, 1.0);
+    let taps: Vec<f64> = (0..4).map(|i| 4.54 + i as f64).collect();
+
+    let heard = beats_from_taps(&audio, &DspTracker, &taps).unwrap();
+    assert!((heard.bpm - 60.0).abs() < 1.0, "bpm {}", heard.bpm);
+    assert_eq!(heard.times.len(), 4, "times {:?}", heard.times);
+    for (t, want) in heard.times.iter().zip((0..4).map(|i| 4.5 + i as f64)) {
+        assert!((t - want).abs() < 0.05, "beat at {t}, wanted {want}");
+    }
 }
 
 #[test]
@@ -484,13 +562,15 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
         "kick pattern",
         &tone(220.0, 1.75),
         120.0,
+        4,
         vec!["drums".into()],
     )
     .unwrap();
     assert_eq!((first.id.as_str(), first.beats), ("b1", 4));
-    let second = save_beat_clip(tmp.path(), "bass run", &tone(110.0, 2.0), 120.0, vec![]).unwrap();
+    let second =
+        save_beat_clip(tmp.path(), "bass run", &tone(110.0, 2.0), 120.0, 4, vec![]).unwrap();
     assert_eq!(second.id, "b2");
-    assert!(save_beat_clip(tmp.path(), "  ", &tone(220.0, 1.0), 120.0, vec![]).is_err());
+    assert!(save_beat_clip(tmp.path(), "  ", &tone(220.0, 1.0), 120.0, 2, vec![]).is_err());
 
     let clips = read_beat_clips(tmp.path());
     assert_eq!(

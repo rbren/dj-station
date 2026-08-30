@@ -10,10 +10,13 @@
 // shell (dj-analysis).
 //
 // BEATS ARE TAPPED: right-shift during playback drops a marker at the
-// playhead (drawn on the waveform), and when playback stops the taps
-// become the grid — the average BPM between first and last tap, covering
-// ONLY the tapped span (the grid toolbar's +/− buttons extend it a beat
-// at a time). The stretch correction happens every `sectionBeats` beats
+// playhead (drawn on the waveform), and when playback stops the tapped
+// span is MEASURED — the Beatify tracker runs over it and the taps pick
+// the seed (and metrical reading) that best fits them (clip_tap_beats),
+// so the grid is the chosen seed's beat times; when nothing fits, the
+// taps themselves are the grid at their average BPM. Either way it
+// covers ONLY the tapped span (the grid toolbar's +/− buttons extend it
+// a beat at a time). The stretch correction happens every `sectionBeats` beats
 // (the toolbar slider, default 4): section boundaries are warped onto
 // the ideal grid and the beats inside keep their tapped feel, so the
 // toolbar shows the max flam (uncorrected offset) and max stretch that
@@ -151,7 +154,9 @@ const MAX_SECTION_BEATS = 16;
 type TapSession = {
   /** The program the taps were made against (what undo restores). */
   base: ClipProgram;
-  /** The committed taps, on `base`'s output timeline. */
+  /** The beat times the session was built from, on `base`'s output
+   *  timeline: what the tracker heard over the tapped span, or the raw
+   *  taps when nothing fit them. */
   taps: number[];
   /** What the session last produced; controls only apply while this IS
    *  the present program (undo/redo walks in and out of the session). */
@@ -348,24 +353,44 @@ export function ClipView({
       render: (start, len) => live.current.clip.previewAudio(live.current.request, start, len),
       onStatus: (s) => {
         // Playback stopping is what turns the pass's taps into the beat
-        // grid: average BPM between first and last tap, covering only
-        // the tapped span, stretch-corrected every `sectionBeats` beats.
-        // One program edit (one undo step); a lone tap builds nothing
-        // and is simply cleared. All the setters used here are React's
-        // stable ones — this is an event callback, reading current state
-        // via `live`.
+        // grid — but the grid is MEASURED, not averaged: the tracker
+        // runs over the tapped span and the taps choose among its seeds
+        // (clip_tap_beats), falling back to the taps themselves when
+        // nothing fits. The chosen beat times go through the same rules
+        // either way: covering only the tapped span, stretch-corrected
+        // every `sectionBeats` beats, ONE program edit (one undo step);
+        // a lone tap builds nothing and is simply cleared. All the
+        // setters used here are React's stable ones — this is an event
+        // callback, reading current state via `live`.
         if (!s.playing && live.current.taps.length > 0) {
           const rawTaps = live.current.taps;
           setTaps([]);
           const prev = live.current.program;
-          const built = sessionProgram(prev, rawTaps, live.current.sectionBeats, 0, 0);
-          if (built) {
+          void (async () => {
+            let beats = rawTaps;
+            let note: string | null = null;
+            try {
+              const heard = await live.current.clip.tapBeats(live.current.request, rawTaps);
+              if (heard && heard.times.length >= 2) {
+                beats = heard.times;
+                note = heard.detail || null;
+              } else if (heard?.detail) {
+                note = `${heard.detail} — the grid is your taps as they were`;
+              }
+            } catch {
+              // The tracker not answering never loses the taps.
+            }
+            // An edit landing while the tracker measured would put the
+            // grid's anchors under different audio: drop the pass.
+            if (live.current.program !== prev) return;
+            const built = sessionProgram(prev, beats, live.current.sectionBeats, 0, 0);
+            if (!built) return;
             setPast((h) => [...h.slice(-HISTORY_DEPTH), prev]);
             setFuture([]);
             setProgram(built.program);
             setTapSession({
               base: prev,
-              taps: rawTaps,
+              taps: beats,
               program: built.program,
               stats: built.stats,
               extBack: 0,
@@ -375,7 +400,8 @@ export function ClipView({
             const grid = built.program.beat_grid;
             const dur = programDuration(built.program);
             setSelection((cur) => (cur && grid ? quantizeRange(grid, cur, dur) : cur));
-          }
+            if (note) setStatus(note);
+          })();
         }
         setPlaying(s.playing);
         setPlayhead(s.playhead);
@@ -919,17 +945,20 @@ export function ClipView({
 
   /** BPM + whole beats for the save row: the tapped grid's when there is
    *  one, the tracker's otherwise. `padded` says the span was fractional
-   *  and the last beat will be filled with silence. */
+   *  and the last beat will be filled with silence. Against a grid the
+   *  count comes from its ACTUAL beats (`beatSpan`) — a selection
+   *  quantized to two beats IS two, even where flam makes its seconds
+   *  run a hair long — and the save sends this count, so the clip filed
+   *  is the clip this row showed. */
   const tempo = useMemo(() => {
     const span = range.end - range.start;
     if (span <= 0) return null;
-    const of = (bpm: number) => {
-      const beatsF = (span * bpm) / 60;
+    const of = (bpm: number, beatsF: number) => {
       const beats = Math.max(1, Math.ceil(beatsF - 1e-6));
       return { bpm, beats, padded: beats - beatsF > 1e-6 };
     };
-    if (grid) return of(grid.bpm);
-    return measured ? of(measured.bpm) : null;
+    if (grid) return of(grid.bpm, beatSpan(grid, range.start, range.end));
+    return measured ? of(measured.bpm, (span * measured.bpm) / 60) : null;
   }, [grid, measured, range]);
 
   const save = useCallback(async () => {
@@ -938,7 +967,14 @@ export function ClipView({
     setError(null);
     setStatus(null);
     try {
-      const saved = await clip.saveBeatClip(request, name, range.start, range.end, tempo.bpm);
+      const saved = await clip.saveBeatClip(
+        request,
+        name,
+        range.start,
+        range.end,
+        tempo.bpm,
+        tempo.beats,
+      );
       if (saved) {
         setStatus(
           `Saved "${saved.name}" — ${saved.beats} ${saved.beats === 1 ? 'beat' : 'beats'} at ` +
