@@ -728,14 +728,14 @@ describe('the deck chrome is the bank, on jacks', () => {
       }
     }
     // Each socket is named once, by the arrow beside it: no "out"/"in"
-    // words on the sockets themselves. The only other word on the row is
-    // the wetness knob's.
+    // words on the sockets themselves, and no text on the wetness knob
+    // either (its dial is named by aria-label and the hover tooltip).
     const io = screen.getByTestId('decks-io-0');
     expect([...io.querySelectorAll('.decks-io-label')].map((el) => el.textContent)).toEqual([
       '↑',
       '↓',
-      'WET',
     ]);
+    expect(within(io).getByLabelText('1 WET')).toBeTruthy();
     expect(within(io).getByTestId('jack-output-d1_out').querySelector('.jack-name')).toBeNull();
     expect(within(io).getByTestId('jack-input-d1_in').querySelector('.jack-name')).toBeNull();
     // The bank's clock rides in the top bar, beside the tempo it counts.

@@ -6164,6 +6164,23 @@ body {
   margin-left: auto;
 }
 
+/* The knob carries no text label (the dial's aria-label and hover
+   tooltip name it), so it draws smaller than the panel knobs. */
+.decks-io-wet .knob {
+  width: 24px;
+  height: 24px;
+}
+
+.decks-io-wet .knob-dial {
+  width: 20px;
+  height: 20px;
+}
+
+.decks-io-wet .knob-pointer {
+  height: 6px;
+  transform-origin: 50% 6px;
+}
+
 /* The bank's clock, up in the bar with the beat it counts. */
 .decks-clock-jack {
   display: inline-flex;

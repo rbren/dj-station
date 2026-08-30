@@ -132,7 +132,6 @@ export function DecksSlot(props: DecksSlotProps) {
         </span>
         {jack(returnJack(slot.slot), 'input')}
         <span className="decks-io-wet">
-          <span className="decks-io-label">WET</span>
           <Knob
             label={`${n} WET`}
             config={WET_CONFIG}
