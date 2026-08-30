@@ -2,22 +2,35 @@
 //! clock, mixed down to a stereo pair — the engine behind the Decks tab.
 //!
 //! - Inputs: `bpm` (the bank's tempo; every slot is stretched to it),
-//!   `reset` (a rising edge parks the whole bank on beat 0) and a RETURN
-//!   pair per deck (`d1_in_l`…`d8_in_r`).
+//!   `reset` (a rising edge parks the whole bank on beat 0) and one MONO
+//!   return per deck (`d1_in`…`d8_in`).
 //! - Outputs: `audio_l`/`audio_r` (the live mix), `mon_l`/`mon_r` (the
 //!   decks switched to Monitor), `clock` (one pulse per bank beat), and
-//!   per deck a SEND pair (`d1_l`/`d1_r`) plus its three tone controls as
-//!   CV (`d1_high`/`d1_mid`/`d1_low`).
+//!   per deck a MONO send (`d1_out`) plus its three tone controls as CV
+//!   (`d1_high`/`d1_mid`/`d1_low`).
 //! - Params: `surface` (does this bank listen to the Launch Control XL).
 //!
-//! THE RACK IS THE BANK'S EFFECTS LOOP. A deck's send always carries its
-//! audio; wiring anything back into that deck's return makes the modules
-//! in between its INSERT — the deck's own path stops reaching the mix, so
-//! nothing is heard twice — and the fader, mute and monitor switch still
-//! belong to the deck. The three tone controls work the same way round:
-//! their CV outputs always carry the knob positions, and patching one
-//! takes that band OFF the deck's audio (it sits flat) because a knob
+//! THE RACK IS THE BANK'S EFFECTS LOOP, ONE CABLE EACH WAY. A deck's send
+//! always carries its audio summed to mono; wiring anything back into
+//! that deck's return makes the modules in between its INSERT, and what
+//! comes back is heard on both sides. The fader, mute and monitor switch
+//! still belong to the deck. The three tone controls work the same way
+//! round: their CV outputs always carry the knob positions, and patching
+//! one takes that band OFF the deck's audio (it sits flat) because a knob
 //! doing two jobs is a knob you cannot read.
+//!
+//! HOW MUCH OF THE INSERT IS HEARD IS A KNOB ([`DeckSlotState::wet`]),
+//! not a switch: at 0 the deck plays its own path and the rack is
+//! effectively bypassed, at 1 only what came back is heard, and between
+//! them the two are crossfaded. A deck with nothing in its return plays
+//! dry whatever the knob says — there is no answer to fade into.
+//!
+//! CUEING THE INSERT ([`DeckSlotState::insert_monitor`], the strip's
+//! small `M`) puts what came back on the MONITOR pair, so the rack's
+//! answer can be auditioned while the room keeps hearing the deck: a deck
+//! that is not itself cued carries on into the live mix as well, and a
+//! deck that IS cued gives the monitor the insert's signal in place of
+//! its own mix, so nothing is heard twice.
 //!
 //! MONITOR IS A CUE, NOT A SOLO: a deck switched to it leaves the live
 //! pair and comes out of the monitor pair instead, and every other deck
@@ -100,11 +113,11 @@ pub const SURFACE_PARAM: &str = "surface";
 
 pub(crate) const IN_BPM: usize = 0;
 pub(crate) const IN_RESET: usize = 1;
-/// First per-slot RETURN jack. Two (L/R) per slot: wire a deck's send
-/// through the rack and back in here and the modules become that deck's
-/// insert — what comes back is what the bank mixes.
+/// First per-slot RETURN jack. ONE per slot: wire a deck's send out to
+/// some modules and back in here and they become that deck's insert —
+/// what comes back is what the deck's wetness knob fades into.
 pub(crate) const IN_RETURN_BASE: usize = 2;
-pub const N_INPUTS: usize = IN_RETURN_BASE + SLOTS * 2;
+pub const N_INPUTS: usize = IN_RETURN_BASE + SLOTS;
 
 const OUT_AUDIO_L: usize = 0;
 const OUT_AUDIO_R: usize = 1;
@@ -114,29 +127,29 @@ const OUT_MON_L: usize = 2;
 const OUT_MON_R: usize = 3;
 /// One pulse per beat of the bank's own clock, for the rack.
 const OUT_CLOCK: usize = 4;
-/// First per-slot output. Five each: the send pair, then the three tone
+/// First per-slot output. Four each: the mono send, then the three tone
 /// controls as CV.
 pub(crate) const OUT_SLOT_BASE: usize = 5;
-pub(crate) const OUT_PER_SLOT: usize = 5;
+pub(crate) const OUT_PER_SLOT: usize = 4;
 pub const N_OUTPUTS: usize = OUT_SLOT_BASE + SLOTS * OUT_PER_SLOT;
 
 /// Tone controls, in the order their CV outputs (and the surface's three
 /// knob rows) sit: high, mid, low.
 pub const TONES: [SlotControl; 3] = [SlotControl::High, SlotControl::Mid, SlotControl::Low];
 
-/// A slot's return jack (`ch` 0 = L, 1 = R).
-pub fn return_jack(slot: usize, ch: usize) -> usize {
-    IN_RETURN_BASE + slot * 2 + ch
+/// A slot's return jack — one cable, mono.
+pub fn return_jack(slot: usize) -> usize {
+    IN_RETURN_BASE + slot
 }
 
-/// A slot's send jack (`ch` 0 = L, 1 = R).
-pub fn send_jack(slot: usize, ch: usize) -> usize {
-    OUT_SLOT_BASE + slot * OUT_PER_SLOT + ch
+/// A slot's send jack — one cable, the deck summed to mono.
+pub fn send_jack(slot: usize) -> usize {
+    OUT_SLOT_BASE + slot * OUT_PER_SLOT
 }
 
 /// A slot's tone-control CV output (`tone` indexes [`TONES`]).
 pub fn tone_jack(slot: usize, tone: usize) -> usize {
-    OUT_SLOT_BASE + slot * OUT_PER_SLOT + 2 + tone
+    OUT_SLOT_BASE + slot * OUT_PER_SLOT + 1 + tone
 }
 
 /// How long the clock output's pulse is held, in seconds (~1 ms, the
@@ -273,18 +286,17 @@ pub fn decks_manifest() -> Manifest {
             },
         ]
         .into_iter()
-        // A deck's RETURN: the far end of its insert. Plain wire jacks
-        // (no knob) — this is audio coming back, not a control.
-        .chain((0..SLOTS).flat_map(|slot| {
-            [("l", "L"), ("r", "R")].map(|(side, name)| JackDecl {
-                id: format!("d{}_in_{side}", slot + 1),
-                name: format!("Deck {} Return {name}", slot + 1),
-                default: 0.0,
-                audio: true,
-                capture: false,
-                knob: None,
-                display: None,
-            })
+        // A deck's RETURN: the far end of its insert, one mono cable. A
+        // plain wire jack (no knob) — this is audio coming back, not a
+        // control.
+        .chain((0..SLOTS).map(|slot| JackDecl {
+            id: format!("d{}_in", slot + 1),
+            name: format!("Deck {} Return", slot + 1),
+            default: 0.0,
+            audio: true,
+            capture: false,
+            knob: None,
+            display: None,
         }))
         .collect(),
         outputs: vec![
@@ -319,13 +331,8 @@ pub fn decks_manifest() -> Manifest {
             let n = slot + 1;
             [
                 OutputDecl {
-                    id: format!("d{n}_l"),
-                    name: format!("Deck {n} Send L"),
-                    display: None,
-                },
-                OutputDecl {
-                    id: format!("d{n}_r"),
-                    name: format!("Deck {n} Send R"),
+                    id: format!("d{n}_out"),
+                    name: format!("Deck {n} Send"),
                     display: None,
                 },
                 OutputDecl {
@@ -400,6 +407,16 @@ pub struct DeckSlotState {
     /// before it meant this.
     #[serde(default, alias = "solo")]
     pub monitor: bool,
+    /// How much of the INSERT is in the deck's output: 0 is the deck dry
+    /// (the rack effectively bypassed), 1 is only what came back. Full
+    /// wet by default, which is what an insert did before the knob
+    /// existed — a patch saved then sounds the same.
+    #[serde(default = "unity")]
+    pub wet: f32,
+    /// Cue the insert: what came back also goes to the monitor pair, so
+    /// the rack's answer can be heard while the room hears the deck.
+    #[serde(default)]
+    pub insert_monitor: bool,
 }
 
 fn default_bpm() -> f32 {
@@ -426,6 +443,8 @@ impl Default for DeckSlotState {
             high: 1.0,
             mute: true,
             monitor: false,
+            wet: 1.0,
+            insert_monitor: false,
         }
     }
 }
@@ -491,10 +510,11 @@ impl DecksState {
     }
 }
 
-/// Which control of a slot an edit addresses. The same six controls the
-/// Launch Control XL column carries.
+/// Which control of a slot an edit addresses: the six the Launch Control
+/// XL column carries, plus the two the strip's insert row owns (the
+/// wetness knob and its cue button, which no surface row drives).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum SlotControl {
     Level,
     High,
@@ -502,6 +522,8 @@ pub enum SlotControl {
     Low,
     Mute,
     Monitor,
+    Wet,
+    InsertMonitor,
 }
 
 impl SlotControl {
@@ -523,18 +545,25 @@ impl SlotControl {
     /// Is this a momentary button (toggles the state) rather than a
     /// continuous control (sets it)?
     pub fn is_button(self) -> bool {
-        matches!(self, SlotControl::Mute | SlotControl::Monitor)
+        matches!(
+            self,
+            SlotControl::Mute | SlotControl::Monitor | SlotControl::InsertMonitor
+        )
     }
 
     /// What `volts` off the surface means for this control: 0..10 V spans
-    /// a fader's 0..[`LEVEL_MAX`] and a tone control's 0..[`EQ_MAX`]. The
-    /// surface's fader is the strip's fader, so its middle is unity too.
+    /// a fader's 0..[`LEVEL_MAX`], a tone control's 0..[`EQ_MAX`] and the
+    /// wetness knob's 0..1. The surface's fader is the strip's fader, so
+    /// its middle is unity too.
     pub fn value_of_volts(self, volts: f32) -> f32 {
         let unit = (volts / 10.0).clamp(0.0, 1.0);
         match self {
             SlotControl::Level => unit * LEVEL_MAX,
             SlotControl::High | SlotControl::Mid | SlotControl::Low => unit * EQ_MAX,
-            SlotControl::Mute | SlotControl::Monitor => unit,
+            SlotControl::Wet
+            | SlotControl::Mute
+            | SlotControl::Monitor
+            | SlotControl::InsertMonitor => unit,
         }
     }
 }
@@ -662,6 +691,10 @@ pub enum DecksCmd {
         high: f32,
         mute: bool,
         monitor: bool,
+        /// How much of the insert is in the deck's output (0 = dry).
+        wet: f32,
+        /// Cue what came back into the monitor pair.
+        insert_monitor: bool,
     },
     Timing {
         slot: u8,
@@ -803,8 +836,13 @@ pub struct DeckSlotStatus {
     pub mute: bool,
     /// Cueing: this deck is on the monitor pair instead of the live mix.
     pub monitor: bool,
-    /// Whether this deck's return is wired — its send goes through the
-    /// rack and what comes back is what the bank mixes.
+    /// How much of the insert is heard: 0 is the deck dry, 1 is only what
+    /// came back.
+    pub wet: f32,
+    /// Whether what came back is also being cued into the monitor pair.
+    pub insert_monitor: bool,
+    /// Whether this deck's return is wired — its send goes out to some
+    /// modules and what comes back is what the wetness knob fades into.
     pub insert: bool,
     /// Which of the three tone controls have their CV output patched into
     /// the rack, in [`TONES`] order (high, mid, low). A patched one drives
@@ -879,6 +917,10 @@ struct RtSlot {
     high: f32,
     mute: bool,
     monitor: bool,
+    /// The insert's share of this deck's output, 0..1.
+    wet: f32,
+    /// Whether what came back is cued into the monitor pair as well.
+    insert_monitor: bool,
     /// Tone controls whose CV output is patched into the rack (high, mid,
     /// low): those bands stay flat here.
     tone_patched: [bool; 3],
@@ -912,6 +954,8 @@ impl RtSlot {
             high: 1.0,
             mute: true,
             monitor: false,
+            wet: 1.0,
+            insert_monitor: false,
             tone_patched: [false; 3],
             arm: DeckArm::None,
             arm_serial: 0,
@@ -1078,6 +1122,8 @@ impl DecksRtModule {
                 high,
                 mute,
                 monitor,
+                wet,
+                insert_monitor,
             } => {
                 let Some(s) = self.slots.get_mut(slot as usize) else {
                     return;
@@ -1088,6 +1134,8 @@ impl DecksRtModule {
                 s.high = high;
                 s.mute = mute;
                 s.monitor = monitor;
+                s.wet = wet.clamp(0.0, 1.0);
+                s.insert_monitor = insert_monitor;
             }
             DecksCmd::Timing { slot, tail, phase } => {
                 let Some(s) = self.slots.get_mut(slot as usize) else {
@@ -1197,11 +1245,10 @@ impl HostModule for DecksRtModule {
 
                 let target = slot.gain_target();
                 slot.gain += a_gain * (target - slot.gain);
-                // A wired return makes the rack this deck's insert: what
-                // comes back is what the bank mixes, in place of the
-                // deck's own path.
-                let insert =
-                    mask & (1 << return_jack(i, 0)) != 0 || mask & (1 << return_jack(i, 1)) != 0;
+                // A wired return makes those modules this deck's insert:
+                // what comes back is what the wetness knob fades the
+                // deck's own path into.
+                let insert = mask & (1 << return_jack(i)) != 0;
 
                 // The deck's own audio, which is also what its send
                 // carries — silent whenever there is nothing to read (no
@@ -1233,15 +1280,24 @@ impl HostModule for DecksRtModule {
                         sounding = true;
                     }
                 }
-                outputs[send_jack(i, 0)][s] = l * SIGNAL_MAX;
-                outputs[send_jack(i, 1)][s] = r * SIGNAL_MAX;
+                // ONE CABLE OUT: the deck's two channels summed, so what
+                // the rack is handed is what a mono insert can answer.
+                outputs[send_jack(i)][s] = 0.5 * (l + r) * SIGNAL_MAX;
 
-                if insert {
-                    // Back off the rack in engine units; the fader and the
-                    // mute still belong to the deck.
-                    l = inputs[return_jack(i, 0)][s] / SIGNAL_MAX;
-                    r = inputs[return_jack(i, 1)][s] / SIGNAL_MAX;
-                }
+                // Back off the rack in engine units, and heard on both
+                // sides — one cable came back. The wetness knob says how
+                // much of it replaces the deck's own path: at 0 the
+                // insert is not in the mix at all, at 1 it is all of it.
+                // Nothing wired is nothing to fade into, so the knob has
+                // no say there.
+                let wet_signal = if insert {
+                    inputs[return_jack(i)][s] / SIGNAL_MAX
+                } else {
+                    0.0
+                };
+                let wet = if insert { slot.wet } else { 0.0 };
+                l += wet * (wet_signal - l);
+                r += wet * (wet_signal - r);
                 // What this deck ACTUALLY put out, metered every sample:
                 // a silent slot is a run of zeros through the same
                 // average, which is what makes a mute or a silent beat
@@ -1254,14 +1310,29 @@ impl HostModule for DecksRtModule {
                 }
                 // Monitor takes the deck OFF the live pair and puts it on
                 // the monitor one — it is a cue, not a solo: nothing else
-                // changes.
-                let (bus_l, bus_r) = if slot.monitor {
-                    (&mut mon_l, &mut mon_r)
+                // changes. Cueing the INSERT sends what came back to the
+                // monitor too, so a deck that is not itself cued keeps
+                // playing into the room while the rack's answer is
+                // auditioned, and one that IS cued hears that answer in
+                // place of its own mix rather than twice.
+                let cued_insert = slot.insert_monitor && insert;
+                let cue = wet_signal * slot.gain;
+                if slot.monitor {
+                    let (l, r) = if cued_insert {
+                        (cue, cue)
+                    } else {
+                        (out_l, out_r)
+                    };
+                    mon_l += l;
+                    mon_r += r;
                 } else {
-                    (&mut mix_l, &mut mix_r)
-                };
-                *bus_l += out_l;
-                *bus_r += out_r;
+                    mix_l += out_l;
+                    mix_r += out_r;
+                    if cued_insert {
+                        mon_l += cue;
+                        mon_r += cue;
+                    }
+                }
             }
             // The two output faders, last of all and ramped like a slot's
             // own: they are the whole pair's level, so nothing on the way
@@ -1349,22 +1420,23 @@ mod tests {
     use crate::launch_control::{decode, jack_index};
 
     #[test]
-    fn manifest_is_one_clock_two_pairs_and_a_loop_per_deck() {
+    fn manifest_is_one_clock_two_pairs_and_a_mono_loop_per_deck() {
         let m = decks_manifest();
         assert_eq!(m.id, DECKS_ID);
         let ins: Vec<&str> = m.inputs.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ins.len(), N_INPUTS);
         assert_eq!(&ins[..2], ["bpm", "reset"]);
-        // The tempo and the reset first, then a return pair per deck.
-        assert_eq!(ins[return_jack(0, 0)], "d1_in_l");
-        assert_eq!(ins[return_jack(7, 1)], "d8_in_r");
+        // The tempo and the reset first, then ONE return per deck.
+        assert_eq!(ins[return_jack(0)], "d1_in");
+        assert_eq!(ins[return_jack(7)], "d8_in");
         let outs: Vec<&str> = m.outputs.iter().map(|o| o.id.as_str()).collect();
         assert_eq!(outs.len(), N_OUTPUTS);
         assert_eq!(
             &outs[..5],
             ["audio_l", "audio_r", "mon_l", "mon_r", "clock"]
         );
-        assert_eq!(outs[send_jack(0, 0)], "d1_l");
+        assert_eq!(outs[send_jack(0)], "d1_out");
+        assert_eq!(outs[send_jack(7)], "d8_out");
         assert_eq!(outs[tone_jack(0, 0)], "d1_high");
         assert_eq!(outs[tone_jack(0, 2)], "d1_low");
         assert_eq!(outs[tone_jack(7, 2)], "d8_low");
@@ -1392,6 +1464,11 @@ mod tests {
             "a clip starts at the clip's own volume, halfway up the fader"
         );
         assert_eq!(s.length_beats(), 0, "nothing loaded has no length");
+        assert_eq!(
+            (s.wet, s.insert_monitor),
+            (1.0, false),
+            "an insert is heard in full and cued by nobody until it is asked for"
+        );
         assert_eq!(DecksState::default().slots.len(), SLOTS);
     }
 
@@ -1402,6 +1479,10 @@ mod tests {
         // changed is only where those gains sit on the travel.
         let s: DeckSlotState = serde_json::from_str(r#"{"beats":4,"level":1.0}"#).unwrap();
         assert_eq!(s.level, LEVEL_UNITY, "a full old fader is still unity");
+        assert_eq!(
+            s.wet, 1.0,
+            "and a patch saved before the wetness knob keeps hearing its insert in full"
+        );
         let s: DeckSlotState = serde_json::from_str(r#"{"beats":4,"level":0.4}"#).unwrap();
         assert_eq!(s.level, 0.4, "a deck pulled down stays exactly there");
     }
@@ -1529,6 +1610,31 @@ mod tests {
             high: 1.0,
             mute,
             monitor,
+            wet: 1.0,
+            insert_monitor: false,
+        })
+        .unwrap();
+    }
+
+    /// A slot mixed like [`mix`], with the insert's two controls said out
+    /// loud: how much of what came back is heard, and whether it is cued.
+    fn mix_insert(
+        tx: &mut rtrb::Producer<DecksCmd>,
+        slot: u8,
+        monitor: bool,
+        wet: f32,
+        insert_monitor: bool,
+    ) {
+        tx.push(DecksCmd::Mix {
+            slot,
+            level: 1.0,
+            low: 1.0,
+            mid: 1.0,
+            high: 1.0,
+            mute: false,
+            monitor,
+            wet,
+            insert_monitor,
         })
         .unwrap();
     }
@@ -1612,9 +1718,9 @@ mod tests {
 
     #[test]
     fn a_wired_return_makes_the_rack_that_decks_insert() {
-        // Slot 1's return carries a constant; its own clip must not reach
-        // the mix as well, or the deck would be heard twice.
-        let mask = 1 << return_jack(0, 0) | 1 << return_jack(0, 1);
+        // Slot 1's return carries a constant; full wet, its own clip must
+        // not reach the mix as well, or the deck would be heard twice.
+        let mask = 1 << return_jack(0);
         let out = render_patched(
             |tx| {
                 load(tx, 0, 2, 0.5);
@@ -1624,15 +1730,113 @@ mod tests {
             mask,
             |_, _| 0.25 * SIGNAL_MAX,
         );
-        let live = &out[OUT_AUDIO_L][4700..];
-        assert!(
-            live.iter().all(|s| (*s - 0.25 * SIGNAL_MAX).abs() < 0.05),
-            "what comes back is what is mixed, at the deck's own fader"
-        );
-        let send = &out[send_jack(0, 0)][4700..];
+        for side in [OUT_AUDIO_L, OUT_AUDIO_R] {
+            let live = &out[side][4700..];
+            assert!(
+                live.iter().all(|s| (*s - 0.25 * SIGNAL_MAX).abs() < 0.05),
+                "one cable back is heard on both sides, at the deck's own fader"
+            );
+        }
+        let send = &out[send_jack(0)][4700..];
         assert!(
             send.iter().all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
-            "and the send still carries the deck's own audio, pre-fader"
+            "and the one send carries the deck's own audio summed, pre-fader"
+        );
+    }
+
+    #[test]
+    fn the_wetness_knob_fades_between_the_deck_and_its_insert() {
+        // Deck 0.5, insert 0.25: dry, halfway and wet are the three
+        // readings of the same crossfade.
+        let mask = 1 << return_jack(0);
+        let read = |wet: f32| {
+            let out = render_patched(
+                |tx| {
+                    load(tx, 0, 2, 0.5);
+                    mix_insert(tx, 0, false, wet, false);
+                },
+                4800,
+                mask,
+                |_, _| 0.25 * SIGNAL_MAX,
+            );
+            out[OUT_AUDIO_L][4799] / SIGNAL_MAX
+        };
+        assert!(
+            (read(0.0) - 0.5).abs() < 0.01,
+            "0 is the deck dry — the insert is effectively bypassed"
+        );
+        assert!(
+            (read(0.5) - 0.375).abs() < 0.01,
+            "halfway is half of each, got {}",
+            read(0.5)
+        );
+        assert!((read(1.0) - 0.25).abs() < 0.01, "and 1 is the insert alone");
+    }
+
+    #[test]
+    fn a_wetness_knob_with_nothing_wired_leaves_the_deck_playing() {
+        // No cable in the return: there is no answer to fade into, so the
+        // knob has no say and the deck is heard whatever it says.
+        let out = render_patched(
+            |tx| {
+                load(tx, 0, 2, 0.5);
+                mix_insert(tx, 0, false, 1.0, false);
+            },
+            4800,
+            0,
+            |_, _| 0.0,
+        );
+        let live = &out[OUT_AUDIO_L][4700..];
+        assert!(
+            live.iter().all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
+            "a deck with no insert plays its own audio, wet or not"
+        );
+    }
+
+    #[test]
+    fn cueing_the_insert_puts_it_in_the_headphones_and_leaves_the_room_alone() {
+        let mask = 1 << return_jack(0);
+        // Half wet, insert cued, the deck itself NOT cued: the room hears
+        // the deck's own mix and the headphones hear what came back.
+        let out = render_patched(
+            |tx| {
+                load(tx, 0, 2, 0.5);
+                mix_insert(tx, 0, false, 0.5, true);
+            },
+            4800,
+            mask,
+            |_, _| 0.25 * SIGNAL_MAX,
+        );
+        let live = out[OUT_AUDIO_L][4799] / SIGNAL_MAX;
+        let mon = out[OUT_MON_L][4799] / SIGNAL_MAX;
+        assert!(
+            (live - 0.375).abs() < 0.01,
+            "the room still hears the deck at its wetness, got {live}"
+        );
+        assert!(
+            (mon - 0.25).abs() < 0.01,
+            "and the monitor hears what the rack made of it, got {mon}"
+        );
+
+        // The same deck cued as well: it has left the live pair, and the
+        // monitor hears the insert INSTEAD of its mix, never twice.
+        let out = render_patched(
+            |tx| {
+                load(tx, 0, 2, 0.5);
+                mix_insert(tx, 0, true, 0.5, true);
+            },
+            4800,
+            mask,
+            |_, _| 0.25 * SIGNAL_MAX,
+        );
+        assert!(
+            out[OUT_AUDIO_L][4799].abs() < 1e-3,
+            "a cued deck is not in the room"
+        );
+        let mon = out[OUT_MON_L][4799] / SIGNAL_MAX;
+        assert!(
+            (mon - 0.25).abs() < 0.01,
+            "the monitor hears the insert alone, got {mon}"
         );
     }
 
@@ -1650,6 +1854,8 @@ mod tests {
                     high: 1.0,
                     mute: false,
                     monitor: false,
+                    wet: 1.0,
+                    insert_monitor: false,
                 })
                 .unwrap();
                 // Low is patched into the rack: it stops cutting the bass.

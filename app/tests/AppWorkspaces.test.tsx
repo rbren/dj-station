@@ -37,10 +37,10 @@ const BANK: Manifest = {
   name: 'Decks',
   version: '0.1.0',
   abi: 'builtin',
-  inputs: [{ id: 'd1_in_l', name: 'Deck 1 Return L' }],
+  inputs: [{ id: 'd1_in', name: 'Deck 1 Return' }],
   outputs: [
     { id: 'clock', name: 'Clock' },
-    { id: 'd1_l', name: 'Deck 1 Send L' },
+    { id: 'd1_out', name: 'Deck 1 Send' },
   ],
   params: [],
 };
@@ -126,6 +126,8 @@ const slots = Array.from({ length: 8 }, (_, i) => ({
   high: 1,
   mute: true,
   monitor: false,
+  wet: 1,
+  insert_monitor: false,
   insert: false,
   tone_patched: [false, false, false] as [boolean, boolean, boolean],
   duration_secs: 0,

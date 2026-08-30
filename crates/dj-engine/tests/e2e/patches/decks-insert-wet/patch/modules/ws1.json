@@ -1,0 +1,31 @@
+{
+  "ext": "com.dj.waveshaper",
+  "knobs": {
+    "bias": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "drive": {
+      "position": 0.4,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "level": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mode": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

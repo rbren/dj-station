@@ -52,6 +52,8 @@ impl Engine {
                 high: s.high,
                 mute: s.mute,
                 monitor: s.monitor,
+                wet: s.wet,
+                insert_monitor: s.insert_monitor,
             },
             DecksCmd::Timing {
                 slot: slot as u8,
@@ -119,14 +121,13 @@ impl Engine {
         out
     }
 
-    /// Whether a slot's return is wired — the rack is its insert.
+    /// Whether a slot's return is wired — the modules feeding it are the
+    /// deck's insert, and its wetness knob has something to fade into.
     fn insert_wired(&self, node: usize, slot: usize) -> bool {
-        (0..2).any(|ch| {
-            let jack = return_jack(slot, ch);
-            self.wires
-                .iter()
-                .any(|w| w.to_node == node && w.to_jack == jack)
-        })
+        let jack = return_jack(slot);
+        self.wires
+            .iter()
+            .any(|w| w.to_node == node && w.to_jack == jack)
     }
 
     /// Tell every bank which of its tone controls have left the deck for
@@ -371,9 +372,9 @@ impl Engine {
         self.push_slot(node, slot)
     }
 
-    /// Set one of a slot's six controls. Levels and tone controls take
-    /// their value; the two buttons take anything at or above the gate
-    /// threshold as "on".
+    /// Set one of a slot's controls. Levels, tone controls and the
+    /// wetness knob take their value; the buttons take anything at or
+    /// above the gate threshold as "on".
     ///
     /// THE MUTE BUTTON OVERRULES THE CLOCK: reaching for it drops whatever
     /// queue or drop was armed, because a mute you press is a mute you
@@ -393,6 +394,8 @@ impl Engine {
             SlotControl::Low => s.low = value.clamp(0.0, EQ_MAX),
             SlotControl::Mute => s.mute = value >= 1.0,
             SlotControl::Monitor => s.monitor = value >= 1.0,
+            SlotControl::Wet => s.wet = value.clamp(0.0, 1.0),
+            SlotControl::InsertMonitor => s.insert_monitor = value >= 1.0,
         })?;
         if control == SlotControl::Mute {
             self.push_arm(node, slot, DeckArm::None)?;
@@ -550,6 +553,8 @@ impl Engine {
                 high: s.high,
                 mute: s.mute,
                 monitor: s.monitor,
+                wet: s.wet,
+                insert_monitor: s.insert_monitor,
                 insert: self.insert_wired(node, i),
                 tone_patched: self.tone_patched(node, i),
                 duration_secs: ctl.tracks[i]

@@ -6102,12 +6102,22 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
-/* An arrow names each pair: up is the deck's audio leaving, down is the
+/* An arrow names each socket: up is the deck's audio leaving, down is the
    rack's answer coming back. */
 .decks-io-label {
   color: var(--ink-dim);
   font-size: var(--fs-xs);
   line-height: 1;
+}
+
+/* The insert's wetness knob and its cue button sit at the end of the
+   patch row, pushed away from the sockets they belong to so the two
+   cables and the two controls read as two things. */
+.decks-io-wet {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
 }
 
 /* The bank's clock, up in the bar with the beat it counts. */
@@ -6145,6 +6155,17 @@ body {
 .decks-btn {
   padding: 3px 6px;
   font-size: var(--fs-xs);
+}
+
+/* A one-letter switch: square, because it says one thing (M = cue this
+   deck's insert into the monitor) and has no room to say it twice. */
+.decks-btn-square {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 1;
+  text-align: center;
 }
 
 /* Mute + monitor on one row, queue + drop on the next: two pairs the

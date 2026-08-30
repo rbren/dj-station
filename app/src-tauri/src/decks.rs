@@ -130,9 +130,9 @@ pub fn decks_clear(state: State<AppState>, instance: String, slot: usize) -> Cmd
     engine.decks_clear(&instance, slot).map_err(err)
 }
 
-/// One of a slot's six controls — the same six the Launch Control XL
-/// column carries. Coalesced per control, so a fader drag is one undo
-/// step rather than a hundred.
+/// One of a slot's controls — the six the Launch Control XL column
+/// carries, plus the insert's wetness knob and its cue button. Coalesced
+/// per control, so a fader drag is one undo step rather than a hundred.
 #[tauri::command]
 pub fn decks_set_control(
     state: State<AppState>,
@@ -188,6 +188,8 @@ fn control_key(control: SlotControl) -> &'static str {
         SlotControl::Low => "low",
         SlotControl::Mute => "mute",
         SlotControl::Monitor => "monitor",
+        SlotControl::Wet => "wet",
+        SlotControl::InsertMonitor => "insert_monitor",
     }
 }
 

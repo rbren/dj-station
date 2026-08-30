@@ -16,8 +16,12 @@
 //
 // The strip is also the bank's PATCH BAY for this deck — chrome over the
 // rack canvas below it. At the top sit the deck's audio OUT (its send)
-// and IN (its return): wire the out through rack modules and back into
-// the in, and those modules become the deck's insert. Each tone knob
+// and IN (its return), one mono cable each: wire the out through rack
+// modules and back into the in, and those modules become the deck's
+// insert. The WET knob beside them is how much of that insert is heard —
+// 0 leaves the deck dry, which is a bypass in everything but name — and
+// the small M cues what came back into the monitor, so the rack's answer
+// can be auditioned while the room keeps the deck. Each tone knob
 // carries a CV jack too; wiring one takes the knob OFF the band (it sits
 // flat) and makes it drive the connected module instead, which the strip
 // says out loud rather than leaving the knob looking broken. The jacks
@@ -42,6 +46,7 @@ import {
   LEVEL_UNITY,
   TONES,
   TONES_ACROSS,
+  WET_MAX,
   type DeckArm,
   type DeckSlotStatus,
 } from '../decks';
@@ -49,6 +54,7 @@ import type { KnobConfig } from '../types';
 
 const FADER_CONFIG: KnobConfig = { style: 'continuous', min: 0, max: LEVEL_MAX, curve: 'linear' };
 const TONE_CONFIG: KnobConfig = { style: 'continuous', min: 0, max: EQ_MAX, curve: 'linear' };
+const WET_CONFIG: KnobConfig = { style: 'continuous', min: 0, max: WET_MAX, curve: 'linear' };
 
 export interface DecksSlotProps {
   slot: DeckSlotStatus;
@@ -56,8 +62,8 @@ export interface DecksSlotProps {
   instance: string;
   onLoad(): void;
   onClear(): void;
-  onControl(control: 'level' | 'high' | 'mid' | 'low', value: number): void;
-  onToggle(control: 'mute' | 'monitor'): void;
+  onControl(control: 'level' | 'high' | 'mid' | 'low' | 'wet', value: number): void;
+  onToggle(control: 'mute' | 'monitor' | 'insert_monitor'): void;
   /** Queue or drop this deck on the bank's grid; 'none' takes it back. */
   onArm(arm: DeckArm): void;
   onTail(tail: number): void;
@@ -112,23 +118,41 @@ export function DecksSlot(props: DecksSlotProps) {
     >
       {/* The deck's patch points, at the very top where the cables from
           the rack canvas arrive: OUT is the deck's audio (its send), IN
-          brings the rack's answer back and makes it the deck's insert. */}
+          brings the answer back and makes those modules the deck's
+          insert — one cable each way. Beside them the two controls that
+          say what happens to that answer: how much of it is heard, and
+          whether it is cued into the monitor. */}
       <div className="decks-slot-io" data-testid={`decks-io-${slot.slot}`}>
         <span className="decks-io-label" title={`Deck ${n} out`}>
           ↑
         </span>
-        {jack(sendJack(slot.slot, 'l'), 'output')}
-        {jack(sendJack(slot.slot, 'r'), 'output')}
+        {jack(sendJack(slot.slot), 'output')}
         <span className="decks-io-label" title={`Deck ${n} in`}>
           ↓
         </span>
-        {jack(returnJack(slot.slot, 'l'), 'input')}
-        {jack(returnJack(slot.slot, 'r'), 'input')}
-        {slot.insert && (
-          <span className="decks-slot-note" data-testid={`decks-insert-${slot.slot}`}>
-            through the rack
-          </span>
-        )}
+        {jack(returnJack(slot.slot), 'input')}
+        <span className="decks-io-wet">
+          <span className="decks-io-label">WET</span>
+          <Knob
+            label={`${n} WET`}
+            config={WET_CONFIG}
+            position={slot.wet / WET_MAX}
+            onPosition={(p) => props.onControl('wet', p * WET_MAX)}
+            onRelease={props.onRelease}
+          />
+        </span>
+        <button
+          className={`decks-btn decks-btn-square decks-btn-monitor${
+            slot.insert_monitor ? ' is-on' : ''
+          }`}
+          data-testid={`decks-insert-monitor-${slot.slot}`}
+          aria-pressed={slot.insert_monitor}
+          aria-label={`Cue deck ${n}'s insert into the monitor`}
+          title="Hear what comes back in the monitor; the deck keeps playing where it was"
+          onClick={() => props.onToggle('insert_monitor')}
+        >
+          M
+        </button>
       </div>
 
       {/* What is in the deck, and nothing else on the lines: the project

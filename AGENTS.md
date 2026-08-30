@@ -1481,14 +1481,17 @@ beatify::build`.
   round trip too); the sidecar
   carries the slot mix in a `deck_slots` section (a load resets a slot, so
   the case sets the mix after the audio).
-- Decks JACKS (`decks_manifest`): `bpm` and `reset` in, plus a RETURN
-  pair per deck (`d<N>_in_l/r`); `audio_l/r`, the monitor pair `mon_l/r`,
-  one `clock` gate (a pulse a beat) and per deck a SEND pair (`d<N>_l/r`)
-  and the three tone controls as CV (`d<N>_high/mid/low`) out. THE RACK
-  IS THE BANK'S EFFECTS LOOP: a deck's send always carries its audio; a
-  wired return makes the modules in between that deck's INSERT (its own
-  path leaves the mix — the insert is read off the block's input mask, so
-  the RT thread never walks the wire list) while fader/mute/monitor stay
+- Decks JACKS (`decks_manifest`): `bpm` and `reset` in, plus ONE RETURN
+  per deck (`d<N>_in`); `audio_l/r`, the monitor pair `mon_l/r`,
+  one `clock` gate (a pulse a beat) and per deck ONE SEND (`d<N>_out`)
+  and the three tone controls as CV (`d<N>_high/mid/low`) out. A DECK'S
+  LOOP IS MONO — one cable each way (the send is the deck's two channels
+  summed, what comes back is heard on both sides), because a stereo pair
+  of sockets per deck was four cables of chrome for a loop that is nearly
+  always one box. THE RACK IS THE BANK'S EFFECTS LOOP: a deck's send
+  always carries its audio; a wired return makes the modules in between
+  that deck's INSERT (read off the block's input mask, so the RT thread
+  never walks the wire list) while fader/mute/monitor stay
   the deck's; and a PATCHED tone CV takes that band off the deck (it
   sits flat — a knob doing two jobs is a knob you cannot read) and the
   knob drives the jack instead. `sync_decks_routing` pushes the patched
@@ -1497,8 +1500,25 @@ beatify::build`.
   per-slot jacks were built (f11c2a4), reverted (c82217c — the bespoke
   in-tab mini-rack around them "turned out horribly"), and REBUILT on an
   explicit second ask, this time with the real rack canvas (see the
-  Decks page section below). Golden: `decks-rack-insert` (a deck routed
-  out through two VCAs and back).
+  Decks page section below). Goldens: `decks-rack-insert` (a deck routed
+  out through a VCA and back, full wet) and `decks-insert-wet` (the same
+  loop half wet through a waveshaper, with the insert cued — the room's
+  side is unchanged by the cue).
+- HOW MUCH OF AN INSERT IS HEARD IS A KNOB, NOT A SWITCH
+  (`DeckSlotState::wet`, `SlotControl::Wet`, the strip's WET dial): the
+  deck's own path and what came back are crossfaded per sample, so 0 is
+  the deck dry — a bypass in everything but name, which is what the ask
+  started as — and 1 is only the rack's answer. A slot with nothing in
+  its return has nothing to fade into, so the knob has no say there. It
+  defaults to 1.0 and is `#[serde(default)]`, so patches saved before it
+  reload hearing their insert in full. CUEING AN INSERT
+  (`DeckSlotState::insert_monitor`, the small square M beside the
+  sockets) sends what came back to the MONITOR pair: a deck that is not
+  itself cued keeps playing into the room while the rack's answer is
+  auditioned in the headphones, and one that IS cued hears that answer in
+  place of its own mix rather than twice. Neither control is on the
+  Launch Control XL — the surface's six rows are still the six mix
+  controls.
 - Launch Control XL + decks (`launch_control.rs`, `decks_api.rs`,
   `app/src-tauri/src/launch_control.rs`): the surface drives a bank
   COLUMN-PER-SLOT (knobs high/mid/low, fader level, the two buttons TOGGLE

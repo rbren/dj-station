@@ -28,9 +28,15 @@ export const LEVEL_MAX = 2;
 export const MIN_BPM = 20;
 export const MAX_BPM = 300;
 
-/** One of a slot's six controls — the six a Launch Control XL column
- *  carries. */
-export type SlotControl = 'level' | 'high' | 'mid' | 'low' | 'mute' | 'monitor';
+/** One of a slot's controls: the six a Launch Control XL column carries,
+ *  plus the two on the strip's insert row — how much of the insert is
+ *  heard, and whether it is cued into the monitor. */
+export type SlotControl =
+  'level' | 'high' | 'mid' | 'low' | 'mute' | 'monitor' | 'wet' | 'insert_monitor';
+
+/** The insert's mix knob, 0..1: 0 is the deck dry (whatever is in its
+ *  loop effectively bypassed) and 1 is only what came back. */
+export const WET_MAX = 1;
 
 /** A quantized start or stop the bank's clock is still holding (mirrors
  *  `DeckArm` in crates/dj-engine/src/decks.rs): a queued deck comes in
@@ -39,8 +45,9 @@ export type SlotControl = 'level' | 'high' | 'mid' | 'low' | 'mute' | 'monitor';
 export type DeckArm = 'none' | 'queue' | 'drop';
 
 /** The bank's own jacks, by name (mirrors `decks_manifest`). A deck's
- *  SEND carries its audio out to the rack and its RETURN brings the
- *  rack's answer back; the three tone controls each have a CV out. */
+ *  SEND carries its audio out to the rack summed to mono and its RETURN
+ *  brings the rack's answer back — one cable each way; the three tone
+ *  controls each have a CV out. */
 export const CLOCK_JACK = 'clock';
 /** The bank's two output pairs: the room, and the headphones a deck's
  *  Monitor button cues into. Each carries a master fader. */
@@ -48,8 +55,8 @@ export const MASTER_BUSES = ['live', 'monitor'] as const;
 export type MasterBus = (typeof MASTER_BUSES)[number];
 export const outJack = (bus: MasterBus, side: 'l' | 'r') =>
   bus === 'live' ? `audio_${side}` : `mon_${side}`;
-export const sendJack = (slot: number, side: 'l' | 'r') => `d${slot + 1}_${side}`;
-export const returnJack = (slot: number, side: 'l' | 'r') => `d${slot + 1}_in_${side}`;
+export const sendJack = (slot: number) => `d${slot + 1}_out`;
+export const returnJack = (slot: number) => `d${slot + 1}_in`;
 /** The tone controls of a strip, top to bottom — the order the surface's
  *  three knob rows are in. */
 export const TONES = ['high', 'mid', 'low'] as const;
@@ -80,7 +87,13 @@ export interface DeckSlotStatus {
   mute: boolean;
   /** On the monitor pair instead of the live mix (the cue button). */
   monitor: boolean;
-  /** Whether the deck's return is wired — the rack is its insert. */
+  /** How much of the insert is heard: 0 is the deck dry, 1 only what
+   *  came back. */
+  wet: number;
+  /** Whether what came back is cued into the monitor pair as well. */
+  insert_monitor: boolean;
+  /** Whether the deck's return is wired — the modules feeding it are its
+   *  insert, and its wetness knob has something to fade into. */
   insert: boolean;
   /** Which tone controls have left the deck for the rack, in TONES
    *  order: a patched one is a CV source and stops cutting its band. */

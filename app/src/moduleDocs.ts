@@ -1432,21 +1432,23 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'of silence can be hung on the end of a clip and the whole clip ' +
       'shifted a beat at a time, both on that same grid. Load clips on the ' +
       'Decks tab; the bank is an ordinary module, so it keeps playing ' +
-      'wherever you are. The rack is the bank\u2019s effects loop: each ' +
-      'deck has a SEND pair that always carries its audio, a RETURN pair ' +
-      'that \u2014 once wired \u2014 makes whatever sits between them that ' +
-      'deck\u2019s insert (its own path leaves the mix, so nothing is ' +
-      'heard twice), and a CV output under each tone control. Patching a ' +
+      'wherever you are. The rack is the bank\u2019s effects loop, one ' +
+      'mono cable each way: each deck has a SEND that always carries its ' +
+      'audio, a RETURN that \u2014 once wired \u2014 makes whatever sits ' +
+      'between them that deck\u2019s insert, a WET knob saying how much ' +
+      'of that insert is heard (0 is the deck dry, so the loop is ' +
+      'effectively bypassed), an M button that cues what came back into ' +
+      'the monitor, and a CV output under each tone control. Patching a ' +
       'tone CV takes that band OFF the deck (it sits flat) and the knob ' +
       'drives the rack instead. On the Decks tab all of these sit on the ' +
       'deck strips themselves.',
     inputs: {
       bpm: 'Tempo of the whole bank \u2014 every slot is stretched to it.',
       reset: 'Park the bank on beat 0.',
-      'd#_in_l':
-        'Deck # return, left: wire the deck\u2019s send back in here and ' +
-        'the modules in between become its insert.',
-      'd#_in_r': 'Deck # return, right.',
+      'd#_in':
+        'Deck # return: wire the deck\u2019s send back in here and the ' +
+        'modules in between become its insert, heard on both sides at ' +
+        'whatever the deck\u2019s WET knob says.',
     },
     outputs: {
       audio_l: 'Left of the live bank mix, at the live master\u2019s level.',
@@ -1456,8 +1458,7 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
         'monitor master\u2019s level.',
       mon_r: 'Right of the cue mix \u2014 the decks switched to Monitor.',
       clock: 'One pulse per beat of the bank\u2019s own clock.',
-      'd#_l': 'Deck # send, left \u2014 always carries the deck\u2019s audio.',
-      'd#_r': 'Deck # send, right.',
+      'd#_out': 'Deck # send \u2014 always carries the deck\u2019s audio, summed ' + 'to mono.',
       'd#_high':
         'Deck #\u2019s HIGH knob as CV. Patched, the knob leaves the ' +
         'band (it sits flat) and drives the rack instead.',
@@ -1471,7 +1472,8 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
     },
     examples: [
       'audio_l/audio_r -> Audio Output: the eight decks as one mix.',
-      'd1_l/d1_r -> Resonator -> d1_in_l/d1_in_r: the resonator is deck 1\u2019s insert.',
+      'd1_out -> Resonator -> d1_in: the resonator is deck 1\u2019s insert, as ' +
+        'wet as its WET knob says.',
       'd1_low -> VCA cv: deck 1\u2019s LOW knob rides a rack level instead of its band.',
       'clock -> Step Sequencer clock: the rack runs on the bank\u2019s beat.',
       'Step Sequencer trigger -> reset: drop the whole bank back on cue.',

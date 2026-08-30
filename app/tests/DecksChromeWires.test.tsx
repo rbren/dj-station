@@ -29,6 +29,8 @@ function slotFixture(slot: number): DeckSlotStatus {
     high: 1,
     mute: true,
     monitor: false,
+    wet: 1,
+    insert_monitor: false,
     insert: false,
     tone_patched: [false, false, false],
     duration_secs: 0,
@@ -126,8 +128,8 @@ function mockChromeJack(key: string, x: number, y: number): HTMLElement {
   return el;
 }
 
-const WIRE = { from_instance: 'decks1', from_jack: 'd1_l', to_instance: 'vca1', to_jack: 'in' };
-const KEY = 'decks1:d1_l->vca1:in';
+const WIRE = { from_instance: 'decks1', from_jack: 'd1_out', to_instance: 'vca1', to_jack: 'in' };
+const KEY = 'decks1:d1_out->vca1:in';
 
 function show(overrides: Partial<Parameters<typeof DecksView>[0]> = {}) {
   return render(
@@ -151,7 +153,7 @@ describe('chrome-to-canvas cables', () => {
     // Deck 1's send jack sits in the bottom chrome at screen (120, 500);
     // the module's input reads at screen (600, 200) (a rect that already
     // includes whatever pan/zoom the canvas has).
-    mockChromeJack('decks1:output:d1_l', 120, 500);
+    mockChromeJack('decks1:output:d1_out', 120, 500);
     addModuleSocket('vca1:input:in', 600, 200);
     // Socket centers, relative to the container's (40, 60) origin:
     // chrome (120+9-40, 500+9-60) = (89, 449); module (569, 149).
@@ -167,7 +169,7 @@ describe('chrome-to-canvas cables', () => {
   it('a pan/zoom (overlayLayoutKey change) re-measures the module end; the chrome end stays put', async () => {
     const view = show();
     await screen.findByTestId('decks-io-0');
-    mockChromeJack('decks1:output:d1_l', 120, 500);
+    mockChromeJack('decks1:output:d1_out', 120, 500);
     const module = addModuleSocket('vca1:input:in', 600, 200);
     await waitFor(() => expect(screen.getByTestId(`cable-${KEY}`).getAttribute('x2')).toBe('569'));
 
@@ -207,7 +209,7 @@ describe('chrome-to-canvas cables', () => {
       ],
     });
     await screen.findByTestId('decks-io-0');
-    mockChromeJack('decks1:output:d1_l', 120, 500);
+    mockChromeJack('decks1:output:d1_out', 120, 500);
     addModuleSocket('vca1:input:in', 600, 200);
     addModuleSocket('lfo1:output:out', 300, 300);
     await waitFor(() => expect(screen.getByTestId(`cable-${KEY}`)).toBeTruthy());

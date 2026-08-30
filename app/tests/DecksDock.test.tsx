@@ -49,6 +49,8 @@ function slotFixture(slot: number): DeckSlotStatus {
     high: 1,
     mute: true,
     monitor: false,
+    wet: 1,
+    insert_monitor: false,
     insert: false,
     tone_patched: [false, false, false],
     duration_secs: 0,
@@ -135,8 +137,8 @@ afterEach(() => {
   localStorage.clear();
 });
 
-const WIRE = { from_instance: 'decks1', from_jack: 'd1_l', to_instance: 'vca1', to_jack: 'in' };
-const KEY = 'decks1:d1_l->vca1:in';
+const WIRE = { from_instance: 'decks1', from_jack: 'd1_out', to_instance: 'vca1', to_jack: 'in' };
+const KEY = 'decks1:d1_out->vca1:in';
 
 function show(overrides: Partial<Parameters<typeof DecksView>[0]> = {}) {
   return render(
@@ -270,7 +272,7 @@ describe('the chrome cables through a resize', () => {
   it('re-measures the chrome end as the handle is dragged, not only when it is let go', async () => {
     show();
     await screen.findByTestId('decks-io-0');
-    const send = mockChromeJack('decks1:output:d1_l', 120, 500);
+    const send = mockChromeJack('decks1:output:d1_out', 120, 500);
     addModuleSocket('vca1:input:in', 600, 200);
     // Container origin is (40, 60), socket centers add half of 18.
     await waitFor(() => {
@@ -305,7 +307,7 @@ describe('the chrome cables through a resize', () => {
       ],
     });
     await screen.findByTestId('decks-io-0');
-    mockChromeJack('decks1:output:d1_l', 120, 500);
+    mockChromeJack('decks1:output:d1_out', 120, 500);
     mockChromeJack('decks1:output:clock', 200, 80);
     addModuleSocket('vca1:input:in', 600, 200);
     addModuleSocket('lfo1:input:sync', 400, 240);
@@ -321,7 +323,7 @@ describe('the chrome cables through a resize', () => {
     // Reopening brings the strip cable back.
     fireEvent.click(screen.getByTestId('decks-dock-toggle'));
     await screen.findByTestId('decks-io-0');
-    mockChromeJack('decks1:output:d1_l', 120, 500);
+    mockChromeJack('decks1:output:d1_out', 120, 500);
     await waitFor(() => expect(screen.getByTestId(`cable-${KEY}`)).toBeTruthy());
   });
 });

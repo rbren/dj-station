@@ -3,7 +3,7 @@
     {
       "from_jack": "out",
       "to": "bank1",
-      "to_jack": "d1_in_l"
+      "to_jack": "d1_in"
     }
   ]
 }

@@ -655,6 +655,8 @@ function controlValue(slot: DeckSlotStatus | undefined, control: SlotControl): n
       return slot.mute ? 1 : 0;
     case 'monitor':
       return slot.monitor ? 1 : 0;
+    case 'insert_monitor':
+      return slot.insert_monitor ? 1 : 0;
     default:
       return slot[control];
   }
@@ -667,11 +669,22 @@ function withDrafts(
   drafts: Partial<Record<DraftKey, number>>,
 ): DeckSlotStatus {
   let out = slot;
-  for (const control of ['level', 'high', 'mid', 'low', 'mute', 'monitor'] as SlotControl[]) {
+  const controls: SlotControl[] = [
+    'level',
+    'high',
+    'mid',
+    'low',
+    'wet',
+    'mute',
+    'monitor',
+    'insert_monitor',
+  ];
+  for (const control of controls) {
     const draft = drafts[`${slot.slot}:${control}`];
     if (draft === undefined) continue;
     if (out === slot) out = { ...slot };
-    if (control === 'mute' || control === 'monitor') out[control] = draft >= 1;
+    if (control === 'mute' || control === 'monitor' || control === 'insert_monitor')
+      out[control] = draft >= 1;
     else out[control] = draft;
   }
   return out;

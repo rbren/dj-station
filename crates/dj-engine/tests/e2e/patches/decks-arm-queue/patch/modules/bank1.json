@@ -6,82 +6,42 @@
       "atten": 1.0,
       "offset": 0.0
     },
-    "d1_in_l": {
+    "d1_in": {
       "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "d1_in_r": {
+    "d2_in": {
       "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "d2_in_l": {
+    "d3_in": {
       "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "d2_in_r": {
+    "d4_in": {
       "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "d3_in_l": {
+    "d5_in": {
       "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "d3_in_r": {
+    "d6_in": {
       "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "d4_in_l": {
+    "d7_in": {
       "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "d4_in_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "d5_in_l": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "d5_in_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "d6_in_l": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "d6_in_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "d7_in_l": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "d7_in_r": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "d8_in_l": {
-      "position": 0.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "d8_in_r": {
+    "d8_in": {
       "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
@@ -107,7 +67,9 @@
         "mid": 1.0,
         "high": 1.0,
         "mute": true,
-        "monitor": false
+        "monitor": false,
+        "wet": 1.0,
+        "insert_monitor": false
       },
       {
         "beats": 0,
@@ -119,7 +81,9 @@
         "mid": 1.0,
         "high": 1.0,
         "mute": true,
-        "monitor": false
+        "monitor": false,
+        "wet": 1.0,
+        "insert_monitor": false
       },
       {
         "beats": 0,
@@ -131,7 +95,9 @@
         "mid": 1.0,
         "high": 1.0,
         "mute": true,
-        "monitor": false
+        "monitor": false,
+        "wet": 1.0,
+        "insert_monitor": false
       },
       {
         "beats": 0,
@@ -143,7 +109,9 @@
         "mid": 1.0,
         "high": 1.0,
         "mute": true,
-        "monitor": false
+        "monitor": false,
+        "wet": 1.0,
+        "insert_monitor": false
       },
       {
         "beats": 0,
@@ -155,7 +123,9 @@
         "mid": 1.0,
         "high": 1.0,
         "mute": true,
-        "monitor": false
+        "monitor": false,
+        "wet": 1.0,
+        "insert_monitor": false
       },
       {
         "beats": 0,
@@ -167,7 +137,9 @@
         "mid": 1.0,
         "high": 1.0,
         "mute": true,
-        "monitor": false
+        "monitor": false,
+        "wet": 1.0,
+        "insert_monitor": false
       },
       {
         "beats": 0,
@@ -179,7 +151,9 @@
         "mid": 1.0,
         "high": 1.0,
         "mute": true,
-        "monitor": false
+        "monitor": false,
+        "wet": 1.0,
+        "insert_monitor": false
       },
       {
         "beats": 0,
@@ -191,8 +165,12 @@
         "mid": 1.0,
         "high": 1.0,
         "mute": true,
-        "monitor": false
+        "monitor": false,
+        "wet": 1.0,
+        "insert_monitor": false
       }
-    ]
+    ],
+    "master_live": 1.0,
+    "master_monitor": 1.0
   }
 }

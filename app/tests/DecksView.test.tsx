@@ -36,6 +36,8 @@ function emptySlot(slot: number): DeckSlotStatus {
     high: 1,
     mute: true,
     monitor: false,
+    wet: 1,
+    insert_monitor: false,
     insert: false,
     tone_patched: [false, false, false],
     duration_secs: 0,
@@ -696,7 +698,8 @@ describe('a bank restored with the app', () => {
 
 // ---------------------------------------------------------------------
 // The deck chrome as a patch bay: the strips and the top bar carry the
-// BANK's own jacks (send/return pair per deck, a CV out per tone knob,
+// BANK's own jacks (a mono send and return per deck with the insert's
+// wetness knob and cue button beside them, a CV out per tone knob,
 // the clock in the bar), and clicking them goes through the Rack tab's
 // own jack grammar. The screen-space cable overlay's GEOMETRY is pinned
 // in DecksChromeWires.test.tsx.
@@ -712,23 +715,26 @@ describe('the deck chrome is the bank, on jacks', () => {
     const { container } = show(api);
     await screen.findByTestId('decks-io-0');
     for (const deck of [1, 8]) {
-      expect(jackSocket(container, `decks1:output:d${deck}_l`)).toBeTruthy();
-      expect(jackSocket(container, `decks1:output:d${deck}_r`)).toBeTruthy();
-      expect(jackSocket(container, `decks1:input:d${deck}_in_l`)).toBeTruthy();
-      expect(jackSocket(container, `decks1:input:d${deck}_in_r`)).toBeTruthy();
+      // One cable each way: the send and the return are mono.
+      expect(jackSocket(container, `decks1:output:d${deck}_out`)).toBeTruthy();
+      expect(jackSocket(container, `decks1:input:d${deck}_in`)).toBeTruthy();
+      expect(jackSocket(container, `decks1:output:d${deck}_l`)).toBeNull();
+      expect(jackSocket(container, `decks1:input:d${deck}_in_r`)).toBeNull();
       for (const tone of ['high', 'mid', 'low']) {
         expect(jackSocket(container, `decks1:output:d${deck}_${tone}`)).toBeTruthy();
       }
     }
-    // The pair is named once, by the arrow beside it: no "out"/"in" words
-    // and no L/R on the sockets themselves.
+    // Each socket is named once, by the arrow beside it: no "out"/"in"
+    // words on the sockets themselves. The only other word on the row is
+    // the wetness knob's.
     const io = screen.getByTestId('decks-io-0');
     expect([...io.querySelectorAll('.decks-io-label')].map((el) => el.textContent)).toEqual([
       '↑',
       '↓',
+      'WET',
     ]);
-    expect(within(io).getByTestId('jack-output-d1_l').querySelector('.jack-name')).toBeNull();
-    expect(within(io).getByTestId('jack-input-d1_in_r').querySelector('.jack-name')).toBeNull();
+    expect(within(io).getByTestId('jack-output-d1_out').querySelector('.jack-name')).toBeNull();
+    expect(within(io).getByTestId('jack-input-d1_in').querySelector('.jack-name')).toBeNull();
     // The bank's clock rides in the top bar, beside the tempo it counts,
     // and so do the two pairs the bank comes out of.
     const clock = screen.getByTestId('decks-clock-jack');
@@ -747,10 +753,10 @@ describe('the deck chrome is the bank, on jacks', () => {
     const onJackClick = vi.fn();
     render(<DecksView api={api} clips={makeClips()} pollMs={NO_POLL} onJackClick={onJackClick} />);
     const io = await screen.findByTestId('decks-io-0');
-    fireEvent.click(within(io).getByTestId('jack-output-d1_l'));
-    expect(onJackClick).toHaveBeenCalledWith('decks1', 'output', 'd1_l', false);
-    fireEvent.click(within(io).getByTestId('jack-input-d1_in_r'), { shiftKey: true });
-    expect(onJackClick).toHaveBeenCalledWith('decks1', 'input', 'd1_in_r', true);
+    fireEvent.click(within(io).getByTestId('jack-output-d1_out'));
+    expect(onJackClick).toHaveBeenCalledWith('decks1', 'output', 'd1_out', false);
+    fireEvent.click(within(io).getByTestId('jack-input-d1_in'), { shiftKey: true });
+    expect(onJackClick).toHaveBeenCalledWith('decks1', 'input', 'd1_in', true);
     fireEvent.click(screen.getByTestId('jack-output-clock'));
     expect(onJackClick).toHaveBeenCalledWith('decks1', 'output', 'clock', false);
     fireEvent.click(screen.getByTestId('jack-output-mon_l'), { shiftKey: true });
@@ -765,17 +771,17 @@ describe('the deck chrome is the bank, on jacks', () => {
         clips={makeClips()}
         pollMs={NO_POLL}
         wires={[
-          { from_instance: 'decks1', from_jack: 'd1_l', to_instance: 'vca1', to_jack: 'in' },
-          { from_instance: 'lfo1', from_jack: 'out', to_instance: 'decks1', to_jack: 'd2_in_l' },
+          { from_instance: 'decks1', from_jack: 'd1_out', to_instance: 'vca1', to_jack: 'in' },
+          { from_instance: 'lfo1', from_jack: 'out', to_instance: 'decks1', to_jack: 'd2_in' },
         ]}
         pending={{ instance: 'decks1', jack: 'clock', kind: 'output', color: 3 }}
       />,
     );
     const io0 = await screen.findByTestId('decks-io-0');
-    expect(within(io0).getByTestId('jack-output-d1_l').className).toContain('jack-wired');
-    expect(within(io0).getByTestId('jack-output-d1_r').className).not.toContain('jack-wired');
+    expect(within(io0).getByTestId('jack-output-d1_out').className).toContain('jack-wired');
+    expect(within(io0).getByTestId('jack-input-d1_in').className).not.toContain('jack-wired');
     const io1 = screen.getByTestId('decks-io-1');
-    expect(within(io1).getByTestId('jack-input-d2_in_l').className).toContain('jack-wired');
+    expect(within(io1).getByTestId('jack-input-d2_in').className).toContain('jack-wired');
     const clock = within(screen.getByTestId('decks-clock-jack')).getByTestId('jack-output-clock');
     expect(clock.className).toContain('jack-selected');
   });
@@ -795,13 +801,41 @@ describe('the deck chrome is the bank, on jacks', () => {
     expect(screen.getByTestId('decks-tone-jack-3-low').getAttribute('data-patched')).toBe('no');
   });
 
-  it('a deck with a wired return says its signal goes through the rack', async () => {
+  it('the insert row carries a wetness knob and the monitor button beside its sockets', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
-    slots[4] = { ...loadedSlot(4), insert: true };
+    slots[4] = { ...loadedSlot(4), insert: true, wet: 0.25, insert_monitor: true };
     const api = makeApi(makeStatus({ slots }));
     show(api);
     await screen.findByTestId('decks-io-0');
-    expect(screen.getByTestId('decks-insert-4')).toBeTruthy();
-    expect(screen.queryByTestId('decks-insert-0')).toBeNull();
+    // The knob is where the deck's own cables are, and it reads the
+    // engine's value: a quarter of the way round.
+    const io = screen.getByTestId('decks-io-4');
+    expect(within(io).getByLabelText('5 WET').getAttribute('aria-valuenow')).toBe('0.25');
+    const cue = screen.getByTestId('decks-insert-monitor-4');
+    expect(cue.textContent).toBe('M');
+    expect(cue.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('decks-insert-monitor-0').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('the wetness knob and the M button write the deck they sit on', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[2] = loadedSlot(2, { insert: true, wet: 1 });
+    const api = makeApi(makeStatus({ slots }));
+    show(api);
+    await screen.findByTestId('decks-io-2');
+
+    const dial = within(screen.getByTestId('decks-io-2')).getByLabelText('3 WET');
+    fireEvent.mouseDown(dial, { clientY: 100 });
+    fireEvent.mouseMove(window, { clientY: 175 }); // half the travel down
+    fireEvent.mouseUp(window);
+    await waitFor(() => {
+      const wet = vi.mocked(api.setControl).mock.calls.find((c) => c[2] === 'wet');
+      expect(wet?.[3]).toBeCloseTo(0.5, 5);
+    });
+
+    fireEvent.click(screen.getByTestId('decks-insert-monitor-2'));
+    await waitFor(() =>
+      expect(api.setControl).toHaveBeenCalledWith('decks1', 2, 'insert_monitor', 1),
+    );
   });
 });

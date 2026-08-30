@@ -30,15 +30,13 @@ const BANK: Manifest = {
   inputs: [
     { id: 'bpm', name: 'BPM' },
     { id: 'reset', name: 'Reset' },
-    { id: 'd1_in_l', name: 'Deck 1 Return L' },
-    { id: 'd1_in_r', name: 'Deck 1 Return R' },
+    { id: 'd1_in', name: 'Deck 1 Return' },
   ],
   outputs: [
     { id: 'audio_l', name: 'Audio L' },
     { id: 'audio_r', name: 'Audio R' },
     { id: 'clock', name: 'Clock' },
-    { id: 'd1_l', name: 'Deck 1 Send L' },
-    { id: 'd1_r', name: 'Deck 1 Send R' },
+    { id: 'd1_out', name: 'Deck 1 Send' },
   ],
   params: [],
 };
@@ -108,6 +106,8 @@ const slots = Array.from({ length: 8 }, (_, i) => ({
   high: 1,
   mute: true,
   monitor: false,
+  wet: 1,
+  insert_monitor: false,
   insert: false,
   tone_patched: [false, false, false] as [boolean, boolean, boolean],
   duration_secs: 0,
@@ -177,7 +177,7 @@ describe('the Decks tab wraps the real rack canvas', () => {
     // …but the bank has NO panel: the chrome is the bank, so each of its
     // jacks resolves to exactly one socket (the chrome one).
     expect(screen.queryByTestId('module-bank1')).toBeNull();
-    expect(document.querySelectorAll('[data-jack="bank1:output:d1_l"]').length).toBe(1);
+    expect(document.querySelectorAll('[data-jack="bank1:output:d1_out"]').length).toBe(1);
     // The chrome cable overlay is up.
     expect(screen.getByTestId('decks-chrome-overlay')).toBeTruthy();
 
@@ -197,13 +197,13 @@ describe('the Decks tab wraps the real rack canvas', () => {
 
     // Click the deck's OUT, then the module's IN — the Rack tab's own
     // grammar, arriving at the same connect_wire.
-    const out = io.querySelector('[data-testid="jack-output-d1_l"]') as HTMLElement;
+    const out = io.querySelector('[data-testid="jack-output-d1_out"]') as HTMLElement;
     fireEvent.click(out);
     expect(out.className).toContain('jack-selected');
     fireEvent.click(screen.getByTestId('jack-input-in'));
     await waitFor(() =>
       expect(fakeEngine.connectWire).toHaveBeenCalledWith(
-        { instance: 'bank1', jack: 'd1_l' },
+        { instance: 'bank1', jack: 'd1_out' },
         { instance: 'vca1', jack: 'in' },
       ),
     );

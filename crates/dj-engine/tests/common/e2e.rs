@@ -62,6 +62,12 @@ pub struct DecksSlotSpec {
     pub mute: Option<bool>,
     #[serde(default, alias = "solo", skip_serializing_if = "Option::is_none")]
     pub monitor: Option<bool>,
+    /// How much of the deck's insert is heard (0 = dry).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wet: Option<f32>,
+    /// Cue what came back from the insert into the monitor pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub insert_monitor: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -290,6 +296,12 @@ fn render_case(case: &str) -> PathBuf {
         }
         if let Some(v) = d.monitor {
             set(SlotControl::Monitor, if v { 10.0 } else { 0.0 });
+        }
+        if let Some(v) = d.wet {
+            set(SlotControl::Wet, v);
+        }
+        if let Some(v) = d.insert_monitor {
+            set(SlotControl::InsertMonitor, if v { 10.0 } else { 0.0 });
         }
         if let Some(v) = d.tail {
             engine.decks_set_tail(&d.instance, d.slot, v).unwrap();

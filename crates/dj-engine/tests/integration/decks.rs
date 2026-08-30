@@ -734,6 +734,80 @@ fn a_monitored_deck_leaves_the_live_mix_for_the_monitor_one() {
 }
 
 #[test]
+fn a_decks_insert_is_one_cable_each_way_and_its_wetness_says_how_much_is_heard() {
+    let mut e = bank();
+    // Deck 1 out to a VCA at half gain and back in: one send, one return.
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.connect("bank1", "d1_out", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "bank1", "d1_in").unwrap();
+    e.set_knob_value("vca1", "cv", 5.0).unwrap();
+    load(&mut e, 0, 2);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    assert!(
+        e.decks_status("bank1").unwrap().slots[0].insert,
+        "a wired return is an insert"
+    );
+
+    // In engine volts: the clip's 0.5 leaves the deck as 5 V, and the VCA
+    // at half gain hands back half of that.
+    let wet = peak(&e.render_offline(24_000).unwrap().remove(0)[4_800..]);
+    e.decks_set_control("bank1", 0, SlotControl::Wet, 0.0)
+        .unwrap();
+    let dry = peak(&e.render_offline(24_000).unwrap().remove(0)[4_800..]);
+    assert!(
+        (dry - 5.0).abs() < 0.05,
+        "wetness 0 is the deck's own audio — the insert is bypassed ({dry})"
+    );
+    assert!(
+        (wet - 2.5).abs() < 0.05,
+        "and full wet is what the rack handed back ({wet})"
+    );
+}
+
+#[test]
+fn cueing_a_decks_insert_auditions_it_while_the_room_keeps_the_deck() {
+    let mut e = bank();
+    e.add_module("mon1", MONITOR_OUT_ID).unwrap();
+    e.connect("bank1", "mon_l", "mon1", "l").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.connect("bank1", "d1_out", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "bank1", "d1_in").unwrap();
+    e.set_knob_value("vca1", "cv", 5.0).unwrap();
+    load(&mut e, 0, 2);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    // Dry in the room, and the insert cued into the headphones.
+    e.decks_set_control("bank1", 0, SlotControl::Wet, 0.0)
+        .unwrap();
+    e.decks_set_control("bank1", 0, SlotControl::InsertMonitor, 10.0)
+        .unwrap();
+
+    let live = peak(&e.render_offline(24_000).unwrap().remove(0)[4_800..]);
+    let cue = peak(&e.render_offline_monitor(24_000).unwrap().remove(0)[4_800..]);
+    assert!(
+        (live - 5.0).abs() < 0.05,
+        "the room carries on hearing the deck ({live})"
+    );
+    assert!(
+        (cue - 2.5).abs() < 0.05,
+        "and the monitor hears what the rack made of it ({cue})"
+    );
+
+    // Cue the deck itself as well: it leaves the room, and the monitor
+    // hears the insert instead of its mix rather than both.
+    e.decks_set_control("bank1", 0, SlotControl::Monitor, 10.0)
+        .unwrap();
+    let live = peak(&e.render_offline(24_000).unwrap().remove(0)[4_800..]);
+    let cue = peak(&e.render_offline_monitor(24_000).unwrap().remove(0)[4_800..]);
+    assert!(live < 1e-2, "a cued deck is not in the room ({live})");
+    assert!(
+        (cue - 2.5).abs() < 0.05,
+        "the monitor hears the insert alone ({cue})"
+    );
+}
+
+#[test]
 fn each_output_pair_has_a_master_of_its_own() {
     let mut e = bank();
     e.add_module("mon1", MONITOR_OUT_ID).unwrap();

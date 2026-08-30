@@ -11,13 +11,8 @@
       "to_jack": "r"
     },
     {
-      "from_jack": "d1_low",
-      "to": "vca1",
-      "to_jack": "cv"
-    },
-    {
       "from_jack": "d1_out",
-      "to": "vca1",
+      "to": "ws1",
       "to_jack": "in"
     }
   ]
