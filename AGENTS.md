@@ -1276,9 +1276,12 @@ beatify::build`.
   mute/monitor) are the mute taken on the bank's grid: the mute is
   written THEN AND THERE (queue unmutes, drop mutes — so the patch and
   every mirror already hold the destination) and the RT thread holds the
-  gain the old side until the beat: a queued deck comes in on the bank's
-  next beat (phase-aligned like every slot), a dropping one plays its
-  clip's last beat out (the tail does not stall it). An arm is TRANSPORT,
+  gain the old side until the beat: a queued deck comes in when its
+  clip's own FIRST beat next comes round (the loop seam — so it always
+  enters from the top of its loop, never mid-clip; it was "the bank's
+  next beat" for one commit, and the user asked for the seam), a
+  dropping one plays its clip's last beat out (the tail does not stall
+  it). An arm is TRANSPORT,
   not patch state — nothing serializes it, a load/clear/restore clears
   it, `DeckArm::None` cancels (putting the mute back), and the mute
   button overrules any pending arm. Serials on `DecksCmd::Arm` published

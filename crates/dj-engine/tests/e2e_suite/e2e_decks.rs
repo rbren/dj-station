@@ -100,6 +100,46 @@ fn slot_defaults() -> DecksSlotSpec {
     }
 }
 
+/// `decks-arm-queue`: a two-beat clip with a QUEUE armed before the
+/// render. A queue is a mute the bank's clock holds until the clip's own
+/// FIRST beat comes round — the loop seam, not just any beat — so the
+/// golden is one silent pass of the loop and then the clip from its top:
+/// beats one and two are empty, three and four sound.
+fn regen_decks_arm_queue() {
+    let dir = case_dir("decks-arm-queue");
+    write_case_tone(&dir.join("two-beat.wav"), 220.0, 1.0);
+
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
+    e.add_module("bank1", "builtin.decks").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.set_knob_value("bank1", "bpm", 120.0).unwrap();
+    e.connect("bank1", "audio_l", "out1", "l").unwrap();
+    e.connect("bank1", "audio_r", "out1", "r").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-decks-arm-queue")
+        .unwrap();
+    write_events(
+        &dir,
+        &EventsFile {
+            seconds: 2.0,
+            tracks: vec![TrackLoadSpec {
+                instance: "bank1".into(),
+                file: "two-beat.wav".into(),
+                bpm: Some(120.0),
+                slot: Some(0),
+            }],
+            deck_slots: vec![DecksSlotSpec {
+                instance: "bank1".into(),
+                slot: 0,
+                level: Some(0.8),
+                arm: Some(dj_engine::decks::DeckArm::Queue),
+                ..slot_defaults()
+            }],
+            ..EventsFile::default()
+        },
+    );
+}
+
 /// `decks-arm-drop`: a playing two-beat clip with a DROP armed before the
 /// render. The drop is a mute the bank's clock holds until the clip has
 /// played its last beat, so the golden is one full pass of the clip and
@@ -209,6 +249,14 @@ fn decks_rack_insert() {
         regen_decks_rack_insert();
     }
     check_case("decks-rack-insert");
+}
+
+#[test]
+fn decks_arm_queue() {
+    if regen() {
+        regen_decks_arm_queue();
+    }
+    check_case("decks-arm-queue");
 }
 
 #[test]

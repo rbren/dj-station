@@ -266,7 +266,7 @@ fn only_banks_following_the_surface_hear_the_device() {
 }
 
 #[test]
-fn a_queued_deck_comes_in_on_the_banks_next_beat_and_never_between_two() {
+fn a_queued_deck_comes_in_on_its_clips_first_beat_and_never_mid_clip() {
     let mut e = bank();
     load(&mut e, 0, 2);
     // Half a beat in at 120 BPM, still silent.
@@ -281,23 +281,25 @@ fn a_queued_deck_comes_in_on_the_banks_next_beat_and_never_between_two() {
         "the mute a patch keeps is already where the queue is going"
     );
 
-    // The rest of this beat is silence: a deck queued between two beats
-    // does not come in between them.
-    let out = e.render_offline(12_000).unwrap().remove(0);
+    // The rest of this beat AND the whole next one are silence: the
+    // bank's beat 1 is the middle of the two-beat clip, and a queue does
+    // not start a clip partway through.
+    let out = e.render_offline(36_000).unwrap().remove(0);
     assert!(
         out.iter().all(|s| s.abs() < 1e-6),
-        "a queued deck is held until the beat"
+        "a queued deck is held until ITS first beat, not just any beat"
     );
     assert_eq!(
         e.decks_status("bank1").unwrap().slots[0].arm,
         DeckArm::Queue
     );
 
-    // On the beat it plays, and the arm is spent.
+    // Beat 2 is the loop seam — the clip's first beat coming round —
+    // and there it plays, with the arm spent.
     let out = e.render_offline(12_000).unwrap().remove(0);
     assert!(
         out[out.len() - 100..].iter().any(|s| s.abs() > 0.1),
-        "the beat started it"
+        "its first beat started it"
     );
     let slot = &e.decks_status("bank1").unwrap().slots[0];
     assert_eq!(slot.arm, DeckArm::None);

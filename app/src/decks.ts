@@ -23,8 +23,9 @@ export const MAX_BPM = 300;
 export type SlotControl = 'level' | 'high' | 'mid' | 'low' | 'mute' | 'monitor';
 
 /** A quantized start or stop the bank's clock is still holding (mirrors
- *  `DeckArm` in crates/dj-engine/src/decks.rs): a queued deck comes in on
- *  the bank's next beat, a dropping one plays its clip out first. */
+ *  `DeckArm` in crates/dj-engine/src/decks.rs): a queued deck comes in
+ *  when its clip's own first beat next comes round, a dropping one plays
+ *  its clip out first. */
 export type DeckArm = 'none' | 'queue' | 'drop';
 
 /** The bank's own jacks, by name (mirrors `decks_manifest`). A deck's

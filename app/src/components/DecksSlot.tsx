@@ -229,15 +229,16 @@ export function DecksSlot(props: DecksSlotProps) {
             </button>
           </div>
           {/* Mute, on the bank's grid instead of under the finger: Queue
-              starts the deck on the bank's next beat, Drop lets it play
-              its clip out first. Either press again to take it back. */}
+              starts the deck the next time its clip's own first beat
+              comes round, Drop lets it play its clip out first. Either
+              press again to take it back. */}
           <div className="decks-btn-row">
             <button
               className={`decks-btn decks-btn-arm${slot.arm === 'queue' ? ' is-armed' : ''}`}
               data-testid={`decks-queue-${slot.slot}`}
               aria-pressed={slot.arm === 'queue'}
               disabled={empty || (slot.arm !== 'queue' && !slot.mute)}
-              title="Start this deck on the bank's next beat"
+              title="Start this deck the next time its first beat comes round"
               onClick={() => props.onArm(slot.arm === 'queue' ? 'none' : 'queue')}
             >
               {slot.arm === 'queue' ? 'Queued' : 'Queue'}

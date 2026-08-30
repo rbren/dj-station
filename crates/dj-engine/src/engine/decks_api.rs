@@ -385,9 +385,10 @@ impl Engine {
     /// QUEUE or DROP a deck: a mute that happens on the grid instead of
     /// under the finger. The mute is written HERE AND NOW — a queue
     /// unmutes, a drop mutes — and the RT thread holds it: a queued deck
-    /// stays silent until the bank's next beat (so it comes in on the
-    /// beat, phase-aligned like every other slot), a dropping one plays
-    /// on until its clip has run out (so it is never cut mid-phrase).
+    /// stays silent until its clip's own FIRST beat next comes round (so
+    /// it always enters from the top of its loop, in phase like every
+    /// other slot), a dropping one plays on until its clip has run out
+    /// (so it is never cut mid-phrase).
     /// Nothing extra is persisted: the patch already keeps the mute the
     /// arm is on its way to.
     ///

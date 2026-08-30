@@ -1277,8 +1277,10 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'monitored deck leaves the live mix for the monitor pair, which the ' +
       'app plays out of its own device: it is a cue, so nothing else ' +
       'changes. Queue and Drop are the mute taken on the grid: a queued ' +
-      'deck starts on the bank\u2019s next beat, a dropped one plays its ' +
-      'clip out first, and pressing again takes the arm back. Beats ' +
+      'deck starts the next time its clip\u2019s own first beat comes ' +
+      'round \u2014 always from the top of its loop \u2014 a dropped one ' +
+      'plays its clip out first, and pressing again takes the arm back. ' +
+      'Beats ' +
       'of silence can be hung on the end of a clip and the whole clip ' +
       'shifted a beat at a time, both on that same grid. Load clips on the ' +
       'Decks tab; the bank is an ordinary module, so it keeps playing ' +

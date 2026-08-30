@@ -47,10 +47,12 @@
 //!
 //! QUEUE AND DROP ARE THE MUTE, ON THE GRID ([`DeckArm`]). A queue unmutes
 //! the deck THEN AND THERE and the RT thread holds it silent until the
-//! bank's next beat; a drop mutes it and the RT thread holds it up until
-//! the clip has played its last beat. So the control side never has to be
-//! told what happened — the state a patch keeps is already the state the
-//! arm is on its way to — and the only thing living on the audio thread
+//! clip's own FIRST beat next comes round (its loop seam), so a queued
+//! clip always enters from its top; a drop mutes it and the RT thread
+//! holds it up until the clip has played its last beat. So the control
+//! side never has to be told what happened — the state a patch keeps is
+//! already the state the arm is on its way to — and the only thing
+//! living on the audio thread
 //! is the TIMING, which is the one thing the audio thread can get right.
 //! An arm is transport, not patch state: nothing serializes it, a load
 //! clears it, and a bank restored from a patch comes back unarmed.
@@ -497,7 +499,7 @@ pub enum DeckArm {
     /// The deck is where its mute says it is.
     #[default]
     None,
-    /// Unmuted, held silent until the bank's next beat.
+    /// Unmuted, held silent until the clip's first beat comes round.
     Queue,
     /// Muted, held audible until the clip's last beat has played.
     Drop,
@@ -871,6 +873,14 @@ impl RtSlot {
         }
     }
 
+    /// Has the loop just come round to the clip's first beat — the edge a
+    /// queue waits for? That is the loop seam, where every pass of the
+    /// clip starts. A slot holding nothing has no first beat to wait for,
+    /// so a queue on it fires straight away.
+    fn at_first_beat(&self, local: f64) -> bool {
+        self.length_beats() == 0 || local < self.last_local
+    }
+
     /// Has the loop just played past the clip's last beat — the edge a
     /// drop waits for? Either the playhead ran into the silent tail or the
     /// whole loop came round. A slot holding nothing has no last beat to
@@ -1053,13 +1063,6 @@ impl HostModule for DecksRtModule {
             if beat != self.last_beat {
                 self.last_beat = beat;
                 self.clock_left = self.clock_len;
-                // A queued deck was waiting for exactly this: it starts on
-                // the bank's beat, so it can never come in between two.
-                for slot in &mut self.slots {
-                    if slot.arm == DeckArm::Queue {
-                        slot.arm = DeckArm::None;
-                    }
-                }
             }
             outputs[OUT_CLOCK][s] = if self.clock_left > 0 {
                 self.clock_left -= 1;
@@ -1078,8 +1081,14 @@ impl HostModule for DecksRtModule {
                 } else {
                     0.0
                 };
-                // A dropping deck plays its clip out and stops on the edge
-                // where the loop comes round — never mid-clip.
+                // A queued deck waits for ITS OWN first beat to come
+                // round — the loop seam — so it enters in phase with its
+                // loop start, never partway through the clip. A dropping
+                // one plays its clip out and stops on the edge where the
+                // clip's last beat has played — never mid-clip.
+                if slot.arm == DeckArm::Queue && slot.at_first_beat(local) {
+                    slot.arm = DeckArm::None;
+                }
                 if slot.arm == DeckArm::Drop && slot.past_last_beat(local) {
                     slot.arm = DeckArm::None;
                 }
@@ -1715,7 +1724,7 @@ mod tests {
     const BEAT: usize = 24_000;
 
     #[test]
-    fn a_queued_deck_waits_for_the_banks_next_beat_and_then_plays() {
+    fn a_queued_deck_waits_for_its_clips_first_beat_and_then_plays() {
         let (mut tx, mut m, shared) = rt_bank();
         load(&mut tx, 0, 2, 0.5);
         mix(&mut tx, 0, 1.0, true, false);
@@ -1725,30 +1734,60 @@ mod tests {
         // Queue: the deck is unmuted THEN AND THERE, and the bank holds it.
         mix(&mut tx, 0, 1.0, false, false);
         arm(&mut tx, 0, DeckArm::Queue, 1);
-        let held = block(&mut m, BEAT / 2);
+        // This block crosses the bank's beat 1 — the MIDDLE of the
+        // two-beat clip. A queue is not a beat-boundary start: the deck
+        // waits for its clip's own first beat, so it stays silent here.
+        let held = block(&mut m, BEAT);
         assert!(
             held.iter().all(|s| s.abs() < 1e-6),
-            "an unmuted deck stays silent while its queue is held"
+            "an unmuted deck stays silent while its queue is held — even across a bank beat"
         );
         assert_eq!(shared.slot_arm(0), DeckArm::Queue);
         assert_eq!(shared.slot_arm_serial(0), 1);
 
-        // The next beat lands on this block's first sample.
-        let played = block(&mut m, BEAT / 2);
+        // Beat 2 is the loop seam — the clip's first beat coming round —
+        // and it lands halfway through this block.
+        let played = block(&mut m, BEAT);
         assert_eq!(
             shared.slot_arm(0),
             DeckArm::None,
-            "the beat fired the queue"
+            "the clip's first beat fired the queue"
+        );
+        assert!(
+            played[..BEAT / 2 - 100].iter().all(|s| s.abs() < 1e-6),
+            "silent up to the seam"
         );
         assert!(
             played[played.len() - 100..]
                 .iter()
                 .all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
-            "and the deck is playing at its fader"
+            "and past it the deck is playing at its fader"
         );
-        // On the beat means ON it: the ramp is the anti-click 10 ms, so
-        // the deck is already up a fifth of a beat in.
-        assert!(played[BEAT / 4] > 0.4 * SIGNAL_MAX);
+        // On the seam means ON it: the ramp is the anti-click 10 ms, so
+        // the deck is already up a fifth of a beat past it.
+        assert!(played[BEAT / 2 + BEAT / 4] > 0.4 * SIGNAL_MAX);
+    }
+
+    #[test]
+    fn a_shifted_clips_queue_fires_on_its_own_first_beat_not_the_banks_grid() {
+        let (mut tx, mut m, shared) = rt_bank();
+        load(&mut tx, 0, 2, 0.5);
+        // Shifted a beat: the clip's first beat plays on the bank's ODD
+        // beats, and that is where its queue must land.
+        tx.push(DecksCmd::Timing {
+            slot: 0,
+            tail: 0,
+            phase: 1,
+        })
+        .unwrap();
+        mix(&mut tx, 0, 1.0, false, false);
+        arm(&mut tx, 0, DeckArm::Queue, 1);
+
+        // Beat 0 and beat 1 pass; the seam for a shift of 1 is beat 1.
+        block(&mut m, BEAT / 2);
+        assert_eq!(shared.slot_arm(0), DeckArm::Queue, "beat 0 is mid-clip");
+        block(&mut m, BEAT);
+        assert_eq!(shared.slot_arm(0), DeckArm::None, "beat 1 is its seam");
     }
 
     #[test]
