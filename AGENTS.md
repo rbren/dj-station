@@ -1054,7 +1054,16 @@ offset))`, offset in position units — so the knob's curve shapes the
   taps make the grid themselves. EVERY seed's hearing rides back with the
   answer (`TappedSeed`/`ClipTapSeed`, best fit first) and the toolbar's
   seed picker re-derives the grid from another one without measuring
-  again — the taps AUTOSELECT, they do not decide. Either way
+  again — the taps AUTOSELECT, they do not decide. LEFT shift is the
+  ONE, and it is never a beat of its own: each left-shift tap is pulled
+  onto the RIGHT-shift tap nearest it (the beat the hand meant) and from
+  there onto the beat that tap landed on, so what is stored is a FLAG —
+  `ClipGrid.ones`/`BeatGrid.ones`, indices into `times`, absent when
+  nobody marked one and on every grid tapped before they existed. It
+  rides in the program like the rest of the grid (undo, and
+  `BeatClipMeta.edit` files it with the clip), moves with `extendGrid`'s
+  renumbering, and is drawn over its hairline in `--ok`
+  (`.clip-one-line`). Either way
   ClipView builds a grid covering ONLY the tapped span (`tapGrid` —
   average BPM of the beat list, first and last pinned; the toolbar's +/−
   buttons extend/shrink it a beat at a time via `extendGrid`) and

@@ -4139,6 +4139,14 @@ body {
   opacity: 0.6;
 }
 
+/* The ONE: a beat marked with left-shift, drawn over its hairline so the
+   downbeat reads at a glance (and while tapping, the pending mark). */
+.clip-one-line {
+  stroke: var(--ok);
+  stroke-width: 2;
+  opacity: 0.9;
+}
+
 /* Stretch-correction sections of the tapped grid, washed over the
    waveform: cue for slowed-down audio, brand for sped-up. The wash's
    opacity carries the magnitude (set inline from the stretch ratio). */

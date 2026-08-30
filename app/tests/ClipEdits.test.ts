@@ -18,6 +18,7 @@ import {
   fadeOut,
   gainRange,
   gridBeatTimes,
+  gridOneTimes,
   levelDbAt,
   moveRange,
   nearestBeat,
@@ -435,6 +436,19 @@ describe('beat taps', () => {
     expect(four.stats.maxMissSecs).toBe(0);
   });
 
+  it('flags the one on the beat its nearest tap made, adding no beat', () => {
+    // The tracker heard five beats at 120 BPM; the hand tapped three of
+    // them and marked a one 250 ms after the 2.1 s tap — nearer the
+    // 2.5 s beat than the 2.0 s one, but the TAP is what it belongs to.
+    const heard = tapGrid([1.0, 1.5, 2.0, 2.5, 3.0], 4, 0, [1.05, 2.1, 2.95], [2.35])!;
+    expect(heard.grid.times).toHaveLength(5);
+    expect(heard.grid.ones).toEqual([2]);
+    // Two ones on the same beat are one mark; a run with none says so by
+    // carrying no field at all (every grid tapped before ones existed).
+    expect(tapGrid([1.0, 1.5, 2.0], 4, 0, [1.0, 2.0], [1.02, 1.04])!.grid.ones).toEqual([0]);
+    expect(tapGrid([1.0, 1.5, 2.0], 4, 0, [1.0, 2.0])!.grid.ones).toBeUndefined();
+  });
+
   it('ignores key bounce and refuses to build a grid from one tap', () => {
     expect(tapGrid([2.0], 1)).toBeNull();
     expect(tapGrid([2.0, 2.01], 1)).toBeNull();
@@ -533,6 +547,24 @@ describe('the grid covers only what was tapped (or extended)', () => {
     expect(beatSpan(grid, 1, (1 + grid.times[1]) / 2)).toBeCloseTo(0.5, 9);
     // Beyond the coverage it counts at the ideal period.
     expect(beatSpan(grid, 3, 3 + 2 / 3)).toBeCloseTo(1, 9);
+  });
+
+  it('draws the ones over the covered span, unthinned', () => {
+    const marked = tapGrid([1.0, 1.6, 2.2, 3.0], 1, 0, [1.0, 1.6, 2.2, 3.0], [2.2])!.grid;
+    expect(gridOneTimes(marked, 0, 10)).toEqual([marked.times[2]]);
+    expect(gridOneTimes(marked, 0, 2)).toEqual([]);
+    expect(gridOneTimes(grid, 0, 10)).toEqual([]);
+  });
+
+  it('carries the ones through an extension, dropping one stepped over', () => {
+    const marked = tapGrid([1.0, 1.6, 2.2, 3.0], 1, 0, [1.0, 1.6, 2.2, 3.0], [1.0, 2.2])!.grid;
+    expect(marked.ones).toEqual([0, 2]);
+    // A beat added at the BACK renumbers every one of them…
+    expect(extendGrid(marked, 'back', 1, 10)!.ones).toEqual([1, 3]);
+    // …one added at the front leaves them alone…
+    expect(extendGrid(marked, 'fwd', 1, 10)!.ones).toEqual([0, 2]);
+    // …and a beat dropped from the back takes the mark on it with it.
+    expect(extendGrid(marked, 'back', -1, 10)!.ones).toEqual([1]);
   });
 
   it('extends and shrinks a beat at a time, clamped to the clip', () => {

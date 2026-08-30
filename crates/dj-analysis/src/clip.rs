@@ -171,6 +171,12 @@ pub struct BeatGrid {
     pub phase: f64,
     pub beats: usize,
     pub times: Vec<f64>,
+    /// Indices into `times` of beats marked as a "one" (the downbeat),
+    /// tapped with left shift. Empty — and absent on disk — for every
+    /// grid whose taps marked none, which is a normal state: a beat clip
+    /// need not know where its one is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ones: Vec<usize>,
 }
 
 impl Default for BeatGrid {
@@ -181,6 +187,7 @@ impl Default for BeatGrid {
             phase: 0.0,
             beats: 0,
             times: Vec::new(),
+            ones: Vec::new(),
         }
     }
 }

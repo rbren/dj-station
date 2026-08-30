@@ -63,6 +63,11 @@ export type WarpPoint = [number, number];
  *  clip. Twin: `BeatGrid` in `dj_analysis::clip`. */
 export interface ClipGrid extends Grid {
   times: number[];
+  /** Indices into `times` of beats marked as a "one" (the downbeat),
+   *  tapped with LEFT shift. Absent on every grid tapped before the
+   *  marker existed, and on any run where nobody marked one — a grid
+   *  without a one is a normal state, not a missing field. */
+  ones?: number[];
 }
 
 export interface ClipProgram {
@@ -383,6 +388,37 @@ export interface Tapped {
   stats: TapStats;
 }
 
+/** Which beats of a grid the left-shift taps marked as ones.
+ *
+ *  A one is never a beat of its own: the hand hits both shifts on the
+ *  same beat, so each left tap is first pulled onto the nearest RIGHT
+ *  tap (the beat it meant, whatever the two hands' skew), then carried
+ *  through the warp onto the nearest beat the grid actually has. With no
+ *  right taps at all — a grid measured from something else — the left
+ *  tap answers for itself. */
+function oneBeats(
+  times: number[],
+  warp: WarpPoint[],
+  smoothing: number,
+  handTaps: number[],
+  oneTaps: number[],
+): number[] {
+  if (times.length === 0) return [];
+  const marked = new Set<number>();
+  for (const t of oneTaps) {
+    const tap = handTaps.length
+      ? handTaps.reduce((best, h) => (Math.abs(h - t) < Math.abs(best - t) ? h : best))
+      : t;
+    const at = warpTime(warp, tap, smoothing);
+    let nearest = 0;
+    for (let i = 1; i < times.length; i += 1) {
+      if (Math.abs(times[i] - at) < Math.abs(times[nearest] - at)) nearest = i;
+    }
+    marked.add(nearest);
+  }
+  return [...marked].sort((a, b) => a - b);
+}
+
 /** What a beat list builds — the tracker's detected beats over the
  *  tapped span (`clip_tap_beats`), or the raw right-shift taps when
  *  nothing fit them. The grid's tempo is the AVERAGE between the first
@@ -402,12 +438,18 @@ export interface Tapped {
  *  `handTaps` are the right-shift taps themselves, kept apart from the
  *  beats because they are usually NOT the same list: they only measure
  *  the tap miss in `stats` (how far the hand was from the beat the grid
- *  landed on), which is what says whether a seed was worth choosing. */
+ *  landed on), which is what says whether a seed was worth choosing.
+ *
+ *  `oneTaps` are the LEFT-shift taps — the ones. They never add a beat:
+ *  each is carried to the right-shift tap nearest it and from there to
+ *  the beat that tap landed on, so what is kept is a FLAG on a beat the
+ *  grid already has (`ClipGrid.ones`). */
 export function tapGrid(
   beatTimes: number[],
   sectionBeats = 4,
   smoothing = 0,
   handTaps: number[] = [],
+  oneTaps: number[] = [],
 ): Tapped | null {
   const taps: number[] = [];
   for (const t of [...beatTimes].sort((a, b) => a - b)) {
@@ -423,7 +465,9 @@ export function tapGrid(
   for (let i = 0; i < last; i += step) warp.push([taps[i], first + i * period]);
   warp.push([taps[last], first + last * period]);
   const times = taps.map((t) => warpTime(warp, t, smoothing));
+  const ones = oneBeats(times, warp, smoothing, handTaps, oneTaps);
   const grid: ClipGrid = { bpm: 60 / period, period, phase: first, beats: taps.length, times };
+  if (ones.length) grid.ones = ones;
   let maxFlamSecs = 0;
   let sumFlam = 0;
   for (let i = 0; i <= last; i += 1) {
@@ -529,6 +573,19 @@ export function gridBeatTimes(grid: ClipGrid, from: number, to: number, cap = 24
   return out;
 }
 
+/** The times of the grid's ONE beats inside a view. There are only ever
+ *  a handful, so they are never thinned the way `gridBeatTimes` thins the
+ *  rest — a marked downbeat has to stay visible zoomed out. */
+export function gridOneTimes(grid: ClipGrid, from: number, to: number): number[] {
+  if (!grid.ones || to <= from) return [];
+  const out: number[] = [];
+  for (const i of grid.ones) {
+    const t = grid.times[i];
+    if (t !== undefined && t >= from && t <= to) out.push(t);
+  }
+  return out;
+}
+
 /** Fractional beat index of an output time against the grid's ACTUAL
  *  beats — piecewise linear between them, continuing at the ideal period
  *  outside the covered span (negative before it). */
@@ -573,19 +630,30 @@ export function extendGrid(
   const ts = grid.times;
   if (ts.length < 2 || grid.period <= 0) return null;
   let times: number[];
+  // A step at the BACK renumbers every beat, so the one markers move
+  // with it (one dropped off the edge stops being a beat at all).
+  let shift = 0;
   if (by === -1) {
     if (ts.length <= 2) return null;
     times = edge === 'back' ? ts.slice(1) : ts.slice(0, -1);
+    if (edge === 'back') shift = -1;
   } else if (edge === 'back') {
     const t = ts[0] - grid.period;
     if (t < -1e-9) return null;
     times = [Math.max(0, t), ...ts];
+    shift = 1;
   } else {
     const t = ts[ts.length - 1] + grid.period;
     if (t > duration + 1e-9) return null;
     times = [...ts, Math.min(duration, t)];
   }
-  return { ...grid, times, phase: times[0], beats: times.length };
+  const next: ClipGrid = { ...grid, times, phase: times[0], beats: times.length };
+  if (grid.ones) {
+    const ones = grid.ones.map((i) => i + shift).filter((i) => i >= 0 && i < times.length);
+    if (ones.length) next.ones = ones;
+    else delete next.ones;
+  }
+  return next;
 }
 
 /** A TIMELINE EDIT DROPS THE TAPPED GRID. The warp's anchors and the

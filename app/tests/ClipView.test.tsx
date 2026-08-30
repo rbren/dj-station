@@ -326,6 +326,13 @@ function tapAt(secs: number) {
   fireEvent.keyDown(window, { code: 'ShiftRight', key: 'Shift' });
 }
 
+/** Mark the one with left-shift, the same gesture with the other hand. */
+function oneAt(secs: number) {
+  const audio = screen.getByTestId('clip-audio') as HTMLAudioElement;
+  Object.defineProperty(audio, 'currentTime', { configurable: true, value: secs });
+  fireEvent.keyDown(window, { code: 'ShiftLeft', key: 'Shift' });
+}
+
 describe('ClipView', () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -884,6 +891,46 @@ describe('ClipView', () => {
     fireEvent.click(screen.getByTestId('clip-undo'));
     expect(screen.queryAllByTestId('clip-beat-line')).toHaveLength(0);
     expect(screen.queryByTestId('clip-grid-tools')).toBeNull();
+  });
+
+  it('marks the one with left shift without tapping an extra beat', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    const play = screen.getByTestId('clip-play');
+    fireEvent.click(play);
+    await waitFor(() => expect(play.textContent).toBe('❚❚'));
+
+    tapAt(1.0);
+    tapAt(1.6);
+    // The one, hit a shade after the beat it belongs to — and nearer the
+    // NEXT beat than the tap it came with, which is what it maps to.
+    tapAt(2.2);
+    oneAt(2.35);
+    tapAt(3.0);
+    expect(screen.getAllByTestId('clip-tap-line')).toHaveLength(4);
+    expect(screen.getAllByTestId('clip-one-tap-line')).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(play.textContent).toBe('▶'));
+    // Still four beats — the one is a FLAG on the beat its nearest tap
+    // made, so the tracker is only ever asked about the right-shift taps.
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4));
+    expect(clip.tapBeats).toHaveBeenCalledWith(expect.anything(), [1.0, 1.6, 2.2, 3.0]);
+    expect(screen.queryAllByTestId('clip-one-tap-line')).toHaveLength(0);
+    expect(screen.getAllByTestId('clip-one-line')).toHaveLength(1);
+
+    // It rides in the program (so it is filed with the clip and undone
+    // with the session) as an index into the grid's beats.
+    const p = await programNow(clip, (p) => p.beat_grid !== null);
+    expect(p.beat_grid?.times).toEqual([1.0, 1.6, 2.2, 3.0]);
+    expect(p.beat_grid?.ones).toEqual([2]);
+
+    // Re-deriving the session keeps it: the grid extended a beat back
+    // renumbers the beats, and the one moves with them.
+    fireEvent.click(screen.getByTestId('clip-grid-back-plus'));
+    const ext = await programNow(clip, (p) => (p.beat_grid?.times.length ?? 0) === 5);
+    expect(ext.beat_grid?.ones).toEqual([3]);
+    expect(screen.getAllByTestId('clip-one-line')).toHaveLength(1);
   });
 
   it('smooths the correction across each section without moving a beat', async () => {

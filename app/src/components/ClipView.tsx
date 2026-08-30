@@ -33,7 +33,11 @@
 // so the grid is the chosen seed's beat times; when nothing fits, the
 // taps themselves are the grid at their average BPM. Every OTHER seed's
 // hearing comes back too, so the toolbar's picker can overrule the
-// choice without measuring again. Either way the grid
+// choice without measuring again. LEFT shift marks a ONE (a downbeat)
+// rather than a beat: it adds nothing to the grid — the tap is carried
+// to the right-shift tap nearest it and flags the beat that one landed
+// on (`ClipGrid.ones`, drawn in its own colour and filed with the clip).
+// Either way the grid
 // covers ONLY the tapped span (the grid toolbar's +/− buttons extend it
 // a beat at a time). The stretch correction happens every `sectionBeats` beats
 // (the toolbar slider, default 4): section boundaries are warped onto
@@ -79,6 +83,7 @@ import {
   fadeOut,
   gainRange,
   gridBeatTimes,
+  gridOneTimes,
   levelDbAt,
   moveRange,
   nearestBeat,
@@ -199,6 +204,9 @@ type TapSession = {
   /** The right-shift taps themselves, on `base`'s output timeline: what
    *  bounded the span, and what the tap miss is measured against. */
   rawTaps: number[];
+  /** The left-shift taps of the same pass: the ones. They mark beats the
+   *  taps already made, so they are re-derived with everything else. */
+  oneTaps: number[];
   /** Every seed's hearing of the span, best fit first — empty when the
    *  tracker refused and the taps are the grid on their own. */
   seeds: ClipTapSeed[];
@@ -281,6 +289,7 @@ type TapSpec = {
   present: ClipProgram;
   beats: number[];
   rawTaps: number[];
+  oneTaps: number[];
   sectionBeats: number;
   smoothing: number;
   extBack: number;
@@ -294,8 +303,8 @@ type TapSpec = {
 function sessionProgram(
   spec: TapSpec,
 ): { program: ClipProgram; grid: ClipGrid; warp: WarpPoint[]; stats: TapStats } | null {
-  const { base, present, beats, rawTaps, sectionBeats, smoothing, extBack, extFwd } = spec;
-  const tapped = tapGrid(beats, sectionBeats, smoothing, rawTaps);
+  const { base, present, beats, rawTaps, oneTaps, sectionBeats, smoothing, extBack, extFwd } = spec;
+  const tapped = tapGrid(beats, sectionBeats, smoothing, rawTaps, oneTaps);
   if (!tapped) return null;
   const warp = base.warp.length
     ? composeWarp(base.warp, tapped.warp, base.warp_smoothing, smoothing)
@@ -376,6 +385,11 @@ export function ClipView({
    *  them arrives before React has re-rendered, so the pass reads this
    *  and empties it — the state copy is only what the waveform draws. */
   const tapRun = useRef<number[]>([]);
+  /** Left-shift taps of the same pass: the ones. They never become beats
+   *  of their own — each flags the beat the nearest right-shift tap made
+   *  — but they are drawn while the pass runs, like the taps. */
+  const [oneTaps, setOneTaps] = useState<number[]>([]);
+  const oneRun = useRef<number[]>([]);
   /** Stretch-correction length in beats — the grid toolbar's slider. */
   const [sectionBeats, setSectionBeats] = useState(DEFAULT_SECTION_BEATS);
   /** How much the correction eases across a section (0…1) — the grid
@@ -541,9 +555,17 @@ export function ClipView({
   // tracker runs and two undo steps for one pass.
   const commitTaps = useCallback(() => {
     const rawTaps = tapRun.current;
-    if (rawTaps.length === 0) return;
+    const oneTaps = oneRun.current;
+    if (rawTaps.length === 0) {
+      // Ones alone mark nothing: there is no grid for them to flag.
+      oneRun.current = [];
+      setOneTaps([]);
+      return;
+    }
     tapRun.current = [];
+    oneRun.current = [];
     setTaps([]);
+    setOneTaps([]);
     const prev = live.current.program;
     void (async () => {
       let beats = rawTaps;
@@ -571,6 +593,7 @@ export function ClipView({
         present: prev,
         beats,
         rawTaps,
+        oneTaps,
         sectionBeats: live.current.sectionBeats,
         smoothing: live.current.smoothing,
         extBack: 0,
@@ -583,6 +606,7 @@ export function ClipView({
       setTapSession({
         base: prev,
         rawTaps,
+        oneTaps,
         seeds,
         seed,
         beats,
@@ -771,6 +795,7 @@ export function ClipView({
         present: program,
         beats,
         rawTaps: session.rawTaps,
+        oneTaps: session.oneTaps,
         sectionBeats: tweak.sectionBeats ?? sectionBeats,
         smoothing: tweak.smoothing ?? smoothing,
         extBack,
@@ -1283,11 +1308,13 @@ export function ClipView({
         // Space would otherwise click a focused button / scroll the page.
         e.preventDefault();
         togglePlay();
-      } else if (e.code === 'ShiftRight' && !e.repeat) {
+      } else if ((e.code === 'ShiftRight' || e.code === 'ShiftLeft') && !e.repeat) {
         // A beat, tapped at the playhead — during playback only, and read
         // LIVE off the sounding source (whichever owns it): the status
         // playhead only advances on a tick, far too coarse for a tapped
-        // beat.
+        // beat. LEFT shift is the same gesture for a ONE: it is kept in
+        // its own list and never becomes a beat, since the beat it means
+        // is whichever right-shift tap it landed nearest.
         const player = liveRef.current;
         const transport = transportRef.current;
         const at =
@@ -1297,8 +1324,13 @@ export function ClipView({
               ? (transport.position() ?? transport.playhead)
               : null;
         if (at !== null) {
-          tapRun.current = [...tapRun.current, at];
-          setTaps(tapRun.current);
+          if (e.code === 'ShiftRight') {
+            tapRun.current = [...tapRun.current, at];
+            setTaps(tapRun.current);
+          } else {
+            oneRun.current = [...oneRun.current, at];
+            setOneTaps(oneRun.current);
+          }
         }
       } else if (!mod && e.key === 'Escape') {
         // Clicking no longer drops the selection, so this is the way out
@@ -1677,11 +1709,36 @@ export function ClipView({
                       y2={WAVE_H}
                     />
                   ))}
+                {grid &&
+                  gridOneTimes(grid, vpStart, vpEnd).map((t, i) => (
+                    <line
+                      key={`one${i}`}
+                      data-testid="clip-one-line"
+                      className="clip-one-line"
+                      x1={xOf(t)}
+                      x2={xOf(t)}
+                      y1={0}
+                      y2={WAVE_H}
+                    >
+                      <title>the one</title>
+                    </line>
+                  ))}
                 {taps.map((t, i) => (
                   <line
                     key={`tap${i}`}
                     data-testid="clip-tap-line"
                     className="clip-tap-line"
+                    x1={xOf(t)}
+                    x2={xOf(t)}
+                    y1={0}
+                    y2={WAVE_H}
+                  />
+                ))}
+                {oneTaps.map((t, i) => (
+                  <line
+                    key={`onetap${i}`}
+                    data-testid="clip-one-tap-line"
+                    className="clip-one-line"
                     x1={xOf(t)}
                     x2={xOf(t)}
                     y1={0}
