@@ -1,9 +1,9 @@
 {
   "wires": [
     {
-      "from_jack": "out_l",
+      "from_jack": "bi",
       "to": "mixout1",
-      "to_jack": "in3_l"
+      "to_jack": "lvl1"
     }
   ]
 }

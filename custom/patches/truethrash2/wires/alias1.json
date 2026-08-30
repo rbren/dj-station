@@ -1,0 +1,29 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "beatclip1",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "out",
+      "to": "beatclip2",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "out",
+      "to": "beatclip3",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "out",
+      "to": "beatclip7",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "out",
+      "to": "drumseq1",
+      "to_jack": "gridseq1_reset"
+    }
+  ]
+}

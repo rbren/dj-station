@@ -1,0 +1,29 @@
+{
+  "wires": [
+    {
+      "from_jack": "clock",
+      "to": "lfo1",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "d2_l",
+      "to": "eq1",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "d2_r",
+      "to": "eq1",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "mon_l",
+      "to": "monitor1",
+      "to_jack": "l"
+    },
+    {
+      "from_jack": "mon_r",
+      "to": "monitor1",
+      "to_jack": "r"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "wires": [
+    {
+      "from_jack": "bi",
+      "to": "beatclip1",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "bi",
+      "to": "beatclip2",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "bi",
+      "to": "beatclip3",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "bi",
+      "to": "beatclip5",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "bi",
+      "to": "beatclip6",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "bi",
+      "to": "lfo2",
+      "to_jack": "clock"
+    }
+  ]
+}

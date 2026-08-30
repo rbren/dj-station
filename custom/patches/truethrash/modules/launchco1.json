@@ -1,0 +1,7 @@
+{
+  "ext": "builtin.launchcontrol",
+  "knobs": {},
+  "params": {
+    "active": 1.0
+  }
+}

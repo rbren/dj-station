@@ -1,0 +1,21 @@
+{
+  "ext": "com.dj.spectral_noise",
+  "knobs": {
+    "curve": {
+      "position": 0.26666668,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pivot": {
+      "position": 0.72827214,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "tilt": {
+      "position": 0.21333334,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

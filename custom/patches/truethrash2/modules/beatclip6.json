@@ -1,0 +1,26 @@
+{
+  "ext": "builtin.beat_clip",
+  "knobs": {
+    "bpm": {
+      "position": 0.4285541,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "clock": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {},
+  "clip": {
+    "project": "p1",
+    "clip": "2",
+    "name": "intro 3"
+  }
+}

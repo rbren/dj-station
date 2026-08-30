@@ -595,17 +595,17 @@
             "offset": 0.0
           },
           "lvl1": {
-            "position": 0.8,
+            "position": 0.0,
             "atten": 1.0,
             "offset": 0.0
           },
           "lvl2": {
-            "position": 0.8,
+            "position": 0.87333333,
             "atten": 1.0,
             "offset": 0.0
           },
           "lvl3": {
-            "position": 0.8,
+            "position": 0.34666666,
             "atten": 1.0,
             "offset": 0.0
           },

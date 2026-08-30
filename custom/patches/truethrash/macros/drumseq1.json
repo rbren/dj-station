@@ -1276,7 +1276,7 @@
         "ext": "com.dj.grid_seq",
         "knobs": {
           "clock": {
-            "position": 0.0,
+            "position": 4.5474735e-13,
             "atten": 1.0,
             "offset": 0.0
           },

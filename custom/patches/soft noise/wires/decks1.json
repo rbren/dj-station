@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "mon_l",
+      "to": "monitor1",
+      "to_jack": "l"
+    },
+    {
+      "from_jack": "mon_r",
+      "to": "monitor1",
+      "to_jack": "r"
+    }
+  ]
+}

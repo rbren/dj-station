@@ -1,0 +1,34 @@
+{
+  "wires": [
+    {
+      "from_jack": "c1_fader",
+      "to": "mixout1",
+      "to_jack": "lvl1"
+    },
+    {
+      "from_jack": "c2_fader",
+      "to": "mixout1",
+      "to_jack": "lvl2"
+    },
+    {
+      "from_jack": "c3_fader",
+      "to": "mixout1",
+      "to_jack": "lvl3"
+    },
+    {
+      "from_jack": "c4_fader",
+      "to": "mixout1",
+      "to_jack": "lvl4"
+    },
+    {
+      "from_jack": "c5_fader",
+      "to": "mixout1",
+      "to_jack": "lvl5"
+    },
+    {
+      "from_jack": "c6_fader",
+      "to": "mixout1",
+      "to_jack": "lvl6"
+    }
+  ]
+}

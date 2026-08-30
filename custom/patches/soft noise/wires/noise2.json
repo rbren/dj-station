@@ -1,0 +1,19 @@
+{
+  "wires": [
+    {
+      "from_jack": "pink",
+      "to": "scope2",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "red",
+      "to": "scope3",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "white",
+      "to": "scope1",
+      "to_jack": "in"
+    }
+  ]
+}
