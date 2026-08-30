@@ -24,8 +24,10 @@ import { STEM_NAMES } from '../clip';
 
 /** The three-letter form for columns too narrow to spell them out (a
  *  deck strip). The full word is still the tooltip, and the tag's class
- *  and test id never change — only what is printed in the chip. */
-const SHORT: Record<string, string> = {
+ *  and test id never change — only what is printed in the chip.
+ *  Exported so the decks clip picker's stem filter speaks the same
+ *  vocabulary as the tags it filters on. */
+export const STEM_TAG_SHORT: Record<string, string> = {
   vocals: 'VOX',
   drums: 'DRM',
   bass: 'BAS',
@@ -57,7 +59,7 @@ export function StemTags({ stems, testId, short }: StemTagsProps) {
           data-testid={testId ? `${testId}-${name}` : undefined}
           title={whole ? `The whole mix: ${STEM_NAMES.join(', ')}` : `Contains the ${name}`}
         >
-          {short ? SHORT[name] : name}
+          {short ? STEM_TAG_SHORT[name] : name}
         </span>
       ))}
     </span>

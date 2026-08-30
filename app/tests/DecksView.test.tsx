@@ -585,6 +585,39 @@ describe('DecksView', () => {
     expect(within(dialog).getByTestId('decks-clip-stems-p1-c1-bass')).toBeTruthy();
   });
 
+  it('the picker’s stem tags filter the list to clips containing that part', async () => {
+    show(makeApi(makeStatus()));
+    await waitFor(() => expect(screen.getByTestId('decks-name-0')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('decks-name-0'));
+    const dialog = await screen.findByTestId('decks-clip-picker');
+
+    // Same vocabulary as the strips: the chips print the short form.
+    expect(within(dialog).getByTestId('decks-clip-filter-drums').textContent).toBe('DRM');
+    expect(within(dialog).getByTestId('decks-clip-filter-vocals').textContent).toBe('VOX');
+
+    // One tag narrows to clips that say they contain the part; a clip
+    // that makes no claim about its parts drops out.
+    fireEvent.click(within(dialog).getByTestId('decks-clip-filter-drums'));
+    expect(within(dialog).getByTestId('decks-clip-p1-c1')).toBeTruthy();
+    expect(within(dialog).queryByTestId('decks-clip-p1-c2')).toBeNull();
+
+    // Multi-select narrows further: every selected part must be present.
+    fireEvent.click(within(dialog).getByTestId('decks-clip-filter-vocals'));
+    expect(within(dialog).queryByTestId('decks-clip-p1-c1')).toBeNull();
+    expect(within(dialog).getByTestId('decks-no-clips').textContent).toContain('stems');
+
+    // Clicking a pressed tag releases it…
+    fireEvent.click(within(dialog).getByTestId('decks-clip-filter-vocals'));
+    expect(within(dialog).getByTestId('decks-clip-p1-c1')).toBeTruthy();
+
+    // …and ALL clears the lot.
+    fireEvent.click(within(dialog).getByTestId('decks-clip-filter-all'));
+    expect(within(dialog).getByTestId('decks-clip-p1-c2')).toBeTruthy();
+    expect(within(dialog).getByTestId('decks-clip-filter-all').getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+  });
+
   it('ejecting a deck clears it, from the row its stem tags are on', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[3] = loadedSlot(3);

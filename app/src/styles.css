@@ -6308,3 +6308,30 @@ body {
   min-height: 0;
   overflow-y: auto;
 }
+
+/* Stem tags as FILTERS: the same chips the rows wear (`.stem-tag`,
+   printed short — VOX/DRM/BAS/OTH), as toggles under the search box.
+   Each selected part narrows the list to clips containing it; ALL
+   clears the lot. A pressed chip borrows the active row's border. */
+.decks-clip-stem-filter {
+  align-items: center;
+  display: flex;
+  gap: 3px;
+}
+
+.stem-filter-tag {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.stem-filter-tag[aria-pressed='true'] {
+  border-color: var(--brand);
+  color: var(--ink);
+}

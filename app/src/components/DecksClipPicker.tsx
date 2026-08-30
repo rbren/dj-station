@@ -5,7 +5,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BeatClipEntry } from '../beatClip';
-import { StemTags } from './StemTags';
+import { STEM_NAMES, type StemName } from '../clip';
+import { StemTags, STEM_TAG_SHORT } from './StemTags';
 
 export interface DecksClipPickerProps {
   /** Which deck the clip is for (1-based, for the title). */
@@ -17,6 +18,10 @@ export interface DecksClipPickerProps {
 
 export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPickerProps) {
   const [query, setQuery] = useState('');
+  // Stem tags as filters: each selected part narrows the list to clips
+  // containing it (a mix clip names all four, so it always qualifies; a
+  // clip that says nothing about its parts makes no claim and drops out).
+  const [stemFilter, setStemFilter] = useState<StemName[]>([]);
   const [index, setIndex] = useState(0);
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -27,12 +32,21 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
 
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return clips;
     return clips.filter((c) => {
+      if (!stemFilter.every((s) => c.stems.includes(s))) return false;
+      if (words.length === 0) return true;
       const hay = `${c.name} ${c.projectName}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
-  }, [clips, query]);
+  }, [clips, query, stemFilter]);
+
+  // A filter change re-aims the cursor like typing does, and hands focus
+  // back to the search box so the type-↑/↓-Enter gesture keeps working.
+  const setFilter = (stems: StemName[]) => {
+    setStemFilter(stems);
+    setIndex(0);
+    search.current?.focus();
+  };
 
   // Typing re-aims at the first match; ↑/↓ walk from there, clamped.
   const active = Math.min(index, Math.max(shown.length - 1, 0));
@@ -83,6 +97,42 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
             }
           }}
         />
+        <div
+          className="decks-clip-stem-filter"
+          role="group"
+          aria-label="Filter by stem"
+          data-testid="decks-clip-stem-filter"
+        >
+          <button
+            type="button"
+            className="stem-filter-tag"
+            data-testid="decks-clip-filter-all"
+            aria-pressed={stemFilter.length === 0}
+            title="Show every clip"
+            onClick={() => setFilter([])}
+          >
+            ALL
+          </button>
+          {STEM_NAMES.map((name) => (
+            <button
+              key={name}
+              type="button"
+              className={`stem-filter-tag stem-filter-${name}`}
+              data-testid={`decks-clip-filter-${name}`}
+              aria-pressed={stemFilter.includes(name)}
+              title={`Only clips containing the ${name}`}
+              onClick={() =>
+                setFilter(
+                  stemFilter.includes(name)
+                    ? stemFilter.filter((s) => s !== name)
+                    : [...stemFilter, name],
+                )
+              }
+            >
+              {STEM_TAG_SHORT[name]}
+            </button>
+          ))}
+        </div>
         {shown.length > 0 ? (
           <ul ref={list} className="picker-clip-list" role="listbox" aria-label="Clips">
             {shown.map((c, i) => (
@@ -109,7 +159,9 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
           <p className="empty-state" data-testid="decks-no-clips">
             {clips.length === 0
               ? 'No clips yet. Cut one in the Beatify tab and it will show up here.'
-              : `No clips match “${query}”.`}
+              : query
+                ? `No clips match “${query}”.`
+                : 'No clips contain those stems.'}
           </p>
         )}
         <button className="file-dialog-cancel" data-testid="decks-clip-cancel" onClick={onClose}>
