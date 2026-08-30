@@ -417,6 +417,25 @@ fails if it's missing.
   before the fix). Bypass hands the clock input straight to `out`
   (`"bypass": { "out": "clock" }`) — the randomiser steps aside and the
   clock walks through. Golden: `seq-poisson-gamma`.
+- Sample & Hold (`extensions/sample_hold`, `com.dj.sample_hold`) ALREADY
+  EXISTS — read `ls extensions` before writing a "new" module; several of
+  the obvious utility names are taken. It is both classics in one panel:
+  `mode` picks sample & hold (capture `in` on each rising edge of `trig`)
+  or track & hold (follow while `trig` is high, freeze when it falls),
+  and `slew` is a one-pole glide in seconds (0 = instant steps) that
+  doubles as a lag processor in track mode. Its white noise is NORMALLED
+  to the signal input — nothing patched to `in` makes the module the
+  clocked random-voltage source, and patching `in` takes the noise off
+  the sampler while leaving it on its own `noise` jack (the normal is
+  `ProcessIo::connected_inputs`, which is how any module asks whether a
+  jack is wired rather than guessing from its value). The PRNG is a
+  fixed-seed xorshift32 stepped once per frame whatever the controls do,
+  so renders are reproducible, and `save_state`/`load_state` carry
+  (rng, target, level) across a graph edit. There is deliberately NO
+  internal clock: with `trig` unwired the output simply holds, because
+  the Clock Multiplier free-running is the rack's one clock source.
+  Tests: the `sample_hold_*` cases in
+  `tests/integration/modules_shaping.rs`; golden `mod-function-sh-voice`.
 - Module PRESETS are manifest DATA, not code, so any module can adopt
   them: `"presets": [{ "name": …, "values": { <input jack id>: value } }]`
   (`PresetDecl` in `manifest.rs`, values in the jack's own units, jacks
