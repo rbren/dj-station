@@ -66,6 +66,10 @@ pub struct DecksSlotSpec {
     pub tail: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<i32>,
+    /// A queue or drop armed before the render: the bank's clock decides
+    /// when the mute it stands for lands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arm: Option<dj_engine::decks::DeckArm>,
 }
 
 /// Deck DJ metadata applied after load. In the app this comes from the
@@ -292,6 +296,10 @@ fn render_case(case: &str) -> PathBuf {
         }
         if let Some(v) = d.phase {
             engine.decks_set_phase(&d.instance, d.slot, v).unwrap();
+        }
+        // After the mix, so the arm's own mute write is the last word.
+        if let Some(arm) = d.arm {
+            engine.decks_arm(&d.instance, d.slot, arm).unwrap();
         }
     }
     for ev in &events.midi {

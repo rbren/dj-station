@@ -45,6 +45,16 @@
 //! can never make a noise the user did not ask for, and the level, EQ and
 //! monitor switch they already set stay where they are.
 //!
+//! QUEUE AND DROP ARE THE MUTE, ON THE GRID ([`DeckArm`]). A queue unmutes
+//! the deck THEN AND THERE and the RT thread holds it silent until the
+//! bank's next beat; a drop mutes it and the RT thread holds it up until
+//! the clip has played its last beat. So the control side never has to be
+//! told what happened — the state a patch keeps is already the state the
+//! arm is on its way to — and the only thing living on the audio thread
+//! is the TIMING, which is the one thing the audio thread can get right.
+//! An arm is transport, not patch state: nothing serializes it, a load
+//! clears it, and a bank restored from a patch comes back unarmed.
+//!
 //! CONTROL STATE IS CANONICAL CONTROL-SIDE ([`DecksState`], persisted per
 //! instance in the patch like [`crate::choreo::ChoreoState`]) and mirrors
 //! to the RT thread over a lock-free SPSC ring; the audio behind a slot's
@@ -58,7 +68,7 @@
 //! shows the same state the strip does.
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::beat_clip::BeatClipRef;
@@ -477,6 +487,32 @@ impl SlotControl {
     }
 }
 
+/// A quantized transport arm on one slot — a mute the bank's clock is
+/// still holding. The slot's mix state is ALREADY the destination (a
+/// queue unmutes, a drop mutes); the arm is only the RT thread waiting
+/// for the beat to hand it over on, so nothing here is patch state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeckArm {
+    /// The deck is where its mute says it is.
+    #[default]
+    None,
+    /// Unmuted, held silent until the bank's next beat.
+    Queue,
+    /// Muted, held audible until the clip's last beat has played.
+    Drop,
+}
+
+impl DeckArm {
+    fn from_bits(bits: u8) -> Self {
+        match bits {
+            1 => DeckArm::Queue,
+            2 => DeckArm::Drop,
+            _ => DeckArm::None,
+        }
+    }
+}
+
 /// What the RT thread publishes for one slot each block.
 #[derive(Debug, Default)]
 pub struct SlotShared {
@@ -484,6 +520,12 @@ pub struct SlotShared {
     beat: AtomicI64,
     sounding: AtomicBool,
     playing: AtomicBool,
+    /// The arm the RT thread is still holding, as [`DeckArm`] bits — it
+    /// clears itself on the beat it fires — and the serial of the request
+    /// that put it there, so the control thread can tell "already fired"
+    /// from "not looked at yet" ([`DecksControl::live_arm`]).
+    arm: AtomicU8,
+    arm_serial: AtomicU64,
 }
 
 /// The bank's transport, published once per block (f64s ride as bit
@@ -517,6 +559,14 @@ impl DecksShared {
     }
     pub fn slot_playing(&self, slot: usize) -> bool {
         self.slots[slot].playing.load(Ordering::Relaxed)
+    }
+    /// The quantized start/stop this slot is still holding, and the
+    /// serial of the request it came from (0 = nothing asked for yet).
+    pub fn slot_arm(&self, slot: usize) -> DeckArm {
+        DeckArm::from_bits(self.slots[slot].arm.load(Ordering::Relaxed))
+    }
+    pub fn slot_arm_serial(&self, slot: usize) -> u64 {
+        self.slots[slot].arm_serial.load(Ordering::Relaxed)
     }
 }
 
@@ -552,6 +602,14 @@ pub enum DecksCmd {
         slot: u8,
         patched: [bool; 3],
     },
+    /// Hold this slot's freshly written mute until the beat it belongs on
+    /// ([`DeckArm`]). `serial` is the request's number, published back so
+    /// the control thread knows the arm has been seen.
+    Arm {
+        slot: u8,
+        arm: DeckArm,
+        serial: u64,
+    },
     /// Park the bank on beat 0.
     Reset,
 }
@@ -580,6 +638,12 @@ pub struct DecksControl {
     /// Channel nibble the device last spoke on — LED messages go back the
     /// way they came, because the surface changes channel per template.
     pub(crate) surface_channel: u8,
+    /// The arm each slot was last ASKED for and the serial that ask went
+    /// out under. The RT thread answers with both, which is how
+    /// [`DecksControl::live_arm`] tells an arm it has already fired from
+    /// one it has not looked at yet.
+    pub(crate) arm: [DeckArm; SLOTS],
+    pub(crate) arm_serial: [u64; SLOTS],
 }
 
 impl DecksControl {
@@ -598,6 +662,23 @@ impl DecksControl {
             button_down: [None; SLOTS * 2],
             leds_dirty: [true; SLOTS],
             surface_channel: DEFAULT_SURFACE_CHANNEL,
+            arm: [DeckArm::None; SLOTS],
+            arm_serial: [0; SLOTS],
+        }
+    }
+
+    /// What a slot is STILL waiting on. The RT thread's own answer once it
+    /// has seen the request (it clears the arm on the beat it fires), and
+    /// the request itself until then — a bank whose engine is not running
+    /// stays armed, because nothing has happened to fire it.
+    pub fn live_arm(&self, slot: usize) -> DeckArm {
+        if self.arm[slot] == DeckArm::None {
+            return DeckArm::None;
+        }
+        if self.shared.slot_arm_serial(slot) == self.arm_serial[slot] {
+            self.shared.slot_arm(slot)
+        } else {
+            self.arm[slot]
         }
     }
 }
@@ -659,6 +740,10 @@ pub struct DeckSlotStatus {
     /// Whether that beat is the clip's own audio rather than its tail.
     pub sounding: bool,
     pub playing: bool,
+    /// A quantized start or stop the bank's clock is still holding: the
+    /// mute above is where this deck is GOING, the arm is what it is
+    /// waiting for.
+    pub arm: DeckArm,
 }
 
 /// A bank, as a UI sees it.
@@ -712,6 +797,13 @@ struct RtSlot {
     /// Tone controls whose CV output is patched into the rack (high, mid,
     /// low): those bands stay flat here.
     tone_patched: [bool; 3],
+    /// A mute this slot is not obeying yet — see [`DeckArm`] — and the
+    /// serial of the request that armed it, published back untouched.
+    arm: DeckArm,
+    arm_serial: u64,
+    /// Where the slot's loop was on the previous sample, so the pass it
+    /// just finished can be seen (a drop fires on that edge).
+    last_local: f64,
     /// Smoothed level actually applied, so mute/monitor/fader moves ramp.
     gain: f32,
     grains: GrainStretch,
@@ -733,6 +825,9 @@ impl RtSlot {
             mute: true,
             monitor: false,
             tone_patched: [false; 3],
+            arm: DeckArm::None,
+            arm_serial: 0,
+            last_local: 0.0,
             gain: 0.0,
             grains: GrainStretch::new(engine_rate),
             eq: [BandSplit::default(); 2],
@@ -756,6 +851,36 @@ impl RtSlot {
         } else {
             self.beats + self.tail
         }
+    }
+
+    /// The gain this slot is heading for. An arm stands in for the mute
+    /// while the clock is still holding it: a queued deck is silent
+    /// though it is unmuted, a dropping one plays on though it is muted.
+    fn gain_target(&self) -> f32 {
+        let open = self.level.max(0.0);
+        match self.arm {
+            DeckArm::Queue => 0.0,
+            DeckArm::Drop => open,
+            DeckArm::None => {
+                if self.mute {
+                    0.0
+                } else {
+                    open
+                }
+            }
+        }
+    }
+
+    /// Has the loop just played past the clip's last beat — the edge a
+    /// drop waits for? Either the playhead ran into the silent tail or the
+    /// whole loop came round. A slot holding nothing has no last beat to
+    /// play, so it is always past it.
+    fn past_last_beat(&self, local: f64) -> bool {
+        if self.length_beats() == 0 {
+            return true;
+        }
+        let last = self.beats as f64;
+        local < self.last_local || (local >= last && self.last_local < last)
     }
 }
 
@@ -830,9 +955,13 @@ impl DecksRtModule {
                 }
                 s.beats = beats;
                 s.source_bpm = source_bpm.max(1.0);
-                // A new clip is a new timeline: no grain may cross into it.
+                // A new clip is a new timeline: no grain may cross into it,
+                // and no arm survives into it either — what was queued or
+                // dropping was the clip that just left.
                 s.grains.reset();
                 s.eq = [BandSplit::default(); 2];
+                s.arm = DeckArm::None;
+                s.last_local = 0.0;
             }
             DecksCmd::Mix {
                 slot,
@@ -865,6 +994,13 @@ impl DecksRtModule {
                     return;
                 };
                 s.tone_patched = patched;
+            }
+            DecksCmd::Arm { slot, arm, serial } => {
+                let Some(s) = self.slots.get_mut(slot as usize) else {
+                    return;
+                };
+                s.arm = arm;
+                s.arm_serial = serial;
             }
             DecksCmd::Reset => {
                 self.beat_pos = 0.0;
@@ -917,6 +1053,13 @@ impl HostModule for DecksRtModule {
             if beat != self.last_beat {
                 self.last_beat = beat;
                 self.clock_left = self.clock_len;
+                // A queued deck was waiting for exactly this: it starts on
+                // the bank's beat, so it can never come in between two.
+                for slot in &mut self.slots {
+                    if slot.arm == DeckArm::Queue {
+                        slot.arm = DeckArm::None;
+                    }
+                }
             }
             outputs[OUT_CLOCK][s] = if self.clock_left > 0 {
                 self.clock_left -= 1;
@@ -929,7 +1072,20 @@ impl HostModule for DecksRtModule {
             let (mut mix_l, mut mix_r) = (0.0f32, 0.0f32);
             let (mut mon_l, mut mon_r) = (0.0f32, 0.0f32);
             for (i, slot) in self.slots.iter_mut().enumerate() {
-                let target = if slot.mute { 0.0 } else { slot.level.max(0.0) };
+                let len = slot.length_beats();
+                let local = if len > 0 {
+                    (self.beat_pos - slot.phase as f64).rem_euclid(len as f64)
+                } else {
+                    0.0
+                };
+                // A dropping deck plays its clip out and stops on the edge
+                // where the loop comes round — never mid-clip.
+                if slot.arm == DeckArm::Drop && slot.past_last_beat(local) {
+                    slot.arm = DeckArm::None;
+                }
+                slot.last_local = local;
+
+                let target = slot.gain_target();
                 slot.gain += a_gain * (target - slot.gain);
                 // A wired return makes the rack this deck's insert: what
                 // comes back is what the bank mixes, in place of the
@@ -943,13 +1099,7 @@ impl HostModule for DecksRtModule {
                 let (mut l, mut r) = (0.0f32, 0.0f32);
                 let mut sounding = false;
                 if let Some(track) = &slot.track {
-                    let len = slot.length_beats();
                     let beat_frames = 60.0 / slot.source_bpm as f64 * track.sample_rate as f64;
-                    let local = if len > 0 {
-                        (self.beat_pos - slot.phase as f64).rem_euclid(len as f64)
-                    } else {
-                        0.0
-                    };
                     let pos = local * beat_frames;
                     if len > 0 && local < slot.beats as f64 && pos < track.frames() as f64 {
                         // Grains read at the clip's own rate while the
@@ -1031,6 +1181,10 @@ impl HostModule for DecksRtModule {
             pub_slot.beat.store(beat, Ordering::Relaxed);
             pub_slot.sounding.store(sounding, Ordering::Relaxed);
             pub_slot.playing.store(playing, Ordering::Relaxed);
+            pub_slot.arm.store(slot.arm as u8, Ordering::Relaxed);
+            pub_slot
+                .arm_serial
+                .store(slot.arm_serial, Ordering::Relaxed);
         }
     }
 
@@ -1530,6 +1684,150 @@ mod tests {
             (shared.beat() - 0.5).abs() < 1e-6,
             "the reset restarts the count, got {}",
             shared.beat()
+        );
+    }
+
+    /// A bank an arm test can drive block by block: the module, the
+    /// command ring and the atomics it publishes.
+    fn rt_bank() -> (rtrb::Producer<DecksCmd>, DecksRtModule, Arc<DecksShared>) {
+        let (tx, rx) = rtrb::RingBuffer::new(64);
+        let (garbage_tx, _g) = rtrb::RingBuffer::new(64);
+        let shared = Arc::new(DecksShared::default());
+        let m = DecksRtModule::new(rx, garbage_tx, 48_000.0, shared.clone());
+        (tx, m, shared)
+    }
+
+    fn arm(tx: &mut rtrb::Producer<DecksCmd>, slot: u8, arm: DeckArm, serial: u64) {
+        tx.push(DecksCmd::Arm { slot, arm, serial }).unwrap();
+    }
+
+    /// Render `frames` more of `m` at 120 BPM and hand back the live L
+    /// output, so a test can walk a bank beat by beat.
+    fn block(m: &mut DecksRtModule, frames: usize) -> Vec<f32> {
+        let mut inputs = vec![vec![0.0; frames]; N_INPUTS];
+        inputs[IN_BPM].fill(120.0);
+        let mut outputs = vec![vec![0.0; frames]; N_OUTPUTS];
+        m.process(&inputs, &mut outputs, 0, frames);
+        outputs.remove(OUT_AUDIO_L)
+    }
+
+    /// A beat at 120 BPM and 48 kHz.
+    const BEAT: usize = 24_000;
+
+    #[test]
+    fn a_queued_deck_waits_for_the_banks_next_beat_and_then_plays() {
+        let (mut tx, mut m, shared) = rt_bank();
+        load(&mut tx, 0, 2, 0.5);
+        mix(&mut tx, 0, 1.0, true, false);
+        // Half a beat in, muted and silent.
+        block(&mut m, BEAT / 2);
+
+        // Queue: the deck is unmuted THEN AND THERE, and the bank holds it.
+        mix(&mut tx, 0, 1.0, false, false);
+        arm(&mut tx, 0, DeckArm::Queue, 1);
+        let held = block(&mut m, BEAT / 2);
+        assert!(
+            held.iter().all(|s| s.abs() < 1e-6),
+            "an unmuted deck stays silent while its queue is held"
+        );
+        assert_eq!(shared.slot_arm(0), DeckArm::Queue);
+        assert_eq!(shared.slot_arm_serial(0), 1);
+
+        // The next beat lands on this block's first sample.
+        let played = block(&mut m, BEAT / 2);
+        assert_eq!(
+            shared.slot_arm(0),
+            DeckArm::None,
+            "the beat fired the queue"
+        );
+        assert!(
+            played[played.len() - 100..]
+                .iter()
+                .all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
+            "and the deck is playing at its fader"
+        );
+        // On the beat means ON it: the ramp is the anti-click 10 ms, so
+        // the deck is already up a fifth of a beat in.
+        assert!(played[BEAT / 4] > 0.4 * SIGNAL_MAX);
+    }
+
+    #[test]
+    fn a_dropped_deck_plays_its_clip_out_and_stops_on_the_seam() {
+        let (mut tx, mut m, shared) = rt_bank();
+        // Two beats of clip: the loop comes round every second.
+        load(&mut tx, 0, 2, 0.5);
+        mix(&mut tx, 0, 1.0, false, false);
+        block(&mut m, BEAT);
+
+        // Drop: muted THEN AND THERE, and the bank keeps it up anyway.
+        mix(&mut tx, 0, 1.0, true, false);
+        arm(&mut tx, 0, DeckArm::Drop, 1);
+        let rest_of_the_clip = block(&mut m, BEAT - 1_000);
+        assert!(
+            rest_of_the_clip[rest_of_the_clip.len() - 100..]
+                .iter()
+                .all(|s| (*s - 0.5 * SIGNAL_MAX).abs() < 0.05),
+            "a muted deck plays on until its clip runs out"
+        );
+        assert_eq!(shared.slot_arm(0), DeckArm::Drop);
+
+        // The clip's last beat ends 1000 samples into this block; the
+        // mute ramps out over the anti-click 10 ms from there.
+        let seam = block(&mut m, BEAT);
+        assert_eq!(shared.slot_arm(0), DeckArm::None, "the seam fired the drop");
+        assert!(
+            seam[8_000..].iter().all(|s| s.abs() < 1e-4),
+            "and past the seam the deck is gone, not playing the clip again"
+        );
+    }
+
+    #[test]
+    fn a_drop_stops_when_the_clip_runs_out_not_when_the_tail_does() {
+        let (mut tx, mut m, shared) = rt_bank();
+        // One beat of clip and one of silence hung on the end.
+        load(&mut tx, 0, 1, 0.5);
+        mix(&mut tx, 0, 1.0, false, false);
+        tx.push(DecksCmd::Timing {
+            slot: 0,
+            tail: 1,
+            phase: 0,
+        })
+        .unwrap();
+        block(&mut m, BEAT / 2);
+
+        mix(&mut tx, 0, 1.0, true, false);
+        arm(&mut tx, 0, DeckArm::Drop, 7);
+        block(&mut m, BEAT / 2 - 1_000);
+        assert_eq!(
+            shared.slot_arm(0),
+            DeckArm::Drop,
+            "the clip is still running"
+        );
+        assert_eq!(shared.slot_arm_serial(0), 7);
+
+        // Into the tail: the clip has played its last beat, so the drop is
+        // done — it does not wait for the whole loop to come round.
+        block(&mut m, 2_000);
+        assert_eq!(shared.slot_arm(0), DeckArm::None);
+    }
+
+    #[test]
+    fn loading_a_clip_clears_whatever_the_slot_was_armed_for() {
+        let (mut tx, mut m, shared) = rt_bank();
+        load(&mut tx, 0, 2, 0.5);
+        mix(&mut tx, 0, 1.0, false, false);
+        block(&mut m, BEAT / 2);
+        mix(&mut tx, 0, 1.0, true, false);
+        arm(&mut tx, 0, DeckArm::Drop, 1);
+        block(&mut m, 128);
+        assert_eq!(shared.slot_arm(0), DeckArm::Drop);
+
+        load(&mut tx, 0, 4, 0.25);
+        let out = block(&mut m, BEAT / 2);
+        assert_eq!(shared.slot_arm(0), DeckArm::None);
+        assert!(
+            out[out.len() - 100..].iter().all(|s| s.abs() < 1e-6),
+            "the new clip obeys the slot's own mute"
         );
     }
 }

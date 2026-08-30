@@ -1,7 +1,8 @@
 // One deck: a channel strip for a Beatify clip. Reading down, it is the
 // order a DJ's hand works in — what is loaded, what it costs to run it at
 // the bank's tempo, where it sits on the grid, then the three tone
-// controls, the fader, and mute/monitor at the bottom where the thumb is.
+// controls, the fader, and mute/monitor — with queue/drop, the same mute
+// taken on the bank's grid — at the bottom where the thumb is.
 //
 // The dial/fader controls ARE the rack's own Knob (same look, same drag
 // law, same tooltip): a bank's slot is a mixer channel, not a new kind of
@@ -31,6 +32,7 @@ import {
   toneJack,
   EQ_MAX,
   TONES,
+  type DeckArm,
   type DeckSlotStatus,
 } from '../decks';
 import type { KnobConfig } from '../types';
@@ -46,6 +48,8 @@ export interface DecksSlotProps {
   onClear(): void;
   onControl(control: 'level' | 'high' | 'mid' | 'low', value: number): void;
   onToggle(control: 'mute' | 'monitor'): void;
+  /** Queue or drop this deck on the bank's grid; 'none' takes it back. */
+  onArm(arm: DeckArm): void;
   onTail(tail: number): void;
   onPhase(phase: number): void;
   onRelease(): void;
@@ -219,23 +223,50 @@ export function DecksSlot(props: DecksSlotProps) {
           onRelease={props.onRelease}
         />
         <div className="decks-mix-side">
-          <button
-            className={`decks-btn${slot.mute ? ' is-on' : ''}`}
-            data-testid={`decks-mute-${slot.slot}`}
-            aria-pressed={slot.mute}
-            onClick={() => props.onToggle('mute')}
-          >
-            Mute
-          </button>
-          <button
-            className={`decks-btn decks-btn-monitor${slot.monitor ? ' is-on' : ''}`}
-            data-testid={`decks-monitor-${slot.slot}`}
-            aria-pressed={slot.monitor}
-            title="Play this deck through the monitor output instead of the live one"
-            onClick={() => props.onToggle('monitor')}
-          >
-            Monitor
-          </button>
+          <div className="decks-btn-row">
+            <button
+              className={`decks-btn${slot.mute ? ' is-on' : ''}`}
+              data-testid={`decks-mute-${slot.slot}`}
+              aria-pressed={slot.mute}
+              onClick={() => props.onToggle('mute')}
+            >
+              Mute
+            </button>
+            <button
+              className={`decks-btn decks-btn-monitor${slot.monitor ? ' is-on' : ''}`}
+              data-testid={`decks-monitor-${slot.slot}`}
+              aria-pressed={slot.monitor}
+              title="Play this deck through the monitor output instead of the live one"
+              onClick={() => props.onToggle('monitor')}
+            >
+              Monitor
+            </button>
+          </div>
+          {/* Mute, on the bank's grid instead of under the finger: Queue
+              starts the deck on the bank's next beat, Drop lets it play
+              its clip out first. Either press again to take it back. */}
+          <div className="decks-btn-row">
+            <button
+              className={`decks-btn decks-btn-arm${slot.arm === 'queue' ? ' is-armed' : ''}`}
+              data-testid={`decks-queue-${slot.slot}`}
+              aria-pressed={slot.arm === 'queue'}
+              disabled={empty || (slot.arm !== 'queue' && !slot.mute)}
+              title="Start this deck on the bank's next beat"
+              onClick={() => props.onArm(slot.arm === 'queue' ? 'none' : 'queue')}
+            >
+              {slot.arm === 'queue' ? 'Queued' : 'Queue'}
+            </button>
+            <button
+              className={`decks-btn decks-btn-arm${slot.arm === 'drop' ? ' is-armed' : ''}`}
+              data-testid={`decks-drop-${slot.slot}`}
+              aria-pressed={slot.arm === 'drop'}
+              disabled={empty || (slot.arm !== 'drop' && slot.mute)}
+              title="Stop this deck once its clip has played its last beat"
+              onClick={() => props.onArm(slot.arm === 'drop' ? 'none' : 'drop')}
+            >
+              {slot.arm === 'drop' ? 'Dropping' : 'Drop'}
+            </button>
+          </div>
           <div className="decks-step" data-testid={`decks-tail-${slot.slot}`}>
             <span className="decks-step-label">silence</span>
             <button

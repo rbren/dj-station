@@ -31,6 +31,7 @@ function emptySlot(slot: number): DeckSlotStatus {
     beat: -1,
     sounding: false,
     playing: false,
+    arm: 'none',
   };
 }
 
@@ -75,6 +76,7 @@ function makeApi(status: DecksStatus, over: Partial<DecksApi> = {}): DecksApi {
     load: vi.fn().mockResolvedValue(null),
     clear: vi.fn().mockResolvedValue(null),
     setControl: vi.fn().mockResolvedValue(null),
+    arm: vi.fn().mockResolvedValue(null),
     setTail: vi.fn().mockResolvedValue(null),
     setPhase: vi.fn().mockResolvedValue(null),
     setBpm: vi.fn().mockResolvedValue(null),
@@ -222,6 +224,50 @@ describe('DecksView', () => {
     await waitFor(() =>
       expect(screen.getByTestId('decks-mute-0').getAttribute('aria-pressed')).toBe('true'),
     );
+  });
+
+  it('queue starts a muted deck on the grid, and drop stops a playing one', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[2] = loadedSlot(2, { mute: true, playing: false });
+    slots[3] = loadedSlot(3);
+    const api = makeApi(makeStatus({ slots }));
+    show(api);
+    await waitFor(() => expect(screen.getByTestId('decks-queue-2')).toBeTruthy());
+
+    // A muted deck has nothing to drop, a playing one nothing to queue,
+    // and an empty slot has neither.
+    expect((screen.getByTestId('decks-drop-2') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('decks-queue-3') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('decks-queue-0') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('decks-drop-0') as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByTestId('decks-queue-2'));
+    await waitFor(() => expect(api.arm).toHaveBeenCalledWith('decks1', 2, 'queue'));
+    fireEvent.click(screen.getByTestId('decks-drop-3'));
+    await waitFor(() => expect(api.arm).toHaveBeenCalledWith('decks1', 3, 'drop'));
+  });
+
+  it('an armed deck says so, and pressing the button again takes the arm back', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    // A queued deck is already unmuted — the bank is holding it.
+    slots[2] = loadedSlot(2, { mute: false, arm: 'queue' });
+    slots[3] = loadedSlot(3, { mute: true, arm: 'drop' });
+    const api = makeApi(makeStatus({ slots }));
+    show(api);
+    await waitFor(() => expect(screen.getByTestId('decks-queue-2')).toBeTruthy());
+
+    const queue = screen.getByTestId('decks-queue-2');
+    expect(queue.textContent).toBe('Queued');
+    expect(queue.getAttribute('aria-pressed')).toBe('true');
+    expect(queue.className).toContain('is-armed');
+    const drop = screen.getByTestId('decks-drop-3');
+    expect(drop.textContent).toBe('Dropping');
+    expect(drop.className).toContain('is-armed');
+
+    fireEvent.click(queue);
+    await waitFor(() => expect(api.arm).toHaveBeenCalledWith('decks1', 2, 'none'));
+    fireEvent.click(drop);
+    await waitFor(() => expect(api.arm).toHaveBeenCalledWith('decks1', 3, 'none'));
   });
 
   it('silence and shift move a beat at a time, and cannot go below no silence at all', async () => {

@@ -133,6 +133,7 @@ const slots = Array.from({ length: 8 }, (_, i) => ({
   beat: -1,
   sounding: false,
   playing: false,
+  arm: 'none',
 }));
 
 vi.mock('../src/decks', async (importOriginal) => {
@@ -153,6 +154,7 @@ vi.mock('../src/decks', async (importOriginal) => {
       load: vi.fn(async () => null),
       clear: vi.fn(async () => null),
       setControl: vi.fn(async () => null),
+      arm: vi.fn(async () => null),
       setTail: vi.fn(async () => null),
       setPhase: vi.fn(async () => null),
       setBpm: vi.fn(async () => null),

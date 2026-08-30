@@ -15,7 +15,7 @@
 //! on the main thread and would freeze the window.
 
 use dj_engine::beat_clip::BeatClipRef;
-use dj_engine::decks::{DecksStatus, SlotControl, DECKS_ID, SURFACE_PARAM};
+use dj_engine::decks::{DeckArm, DecksStatus, SlotControl, DECKS_ID, SURFACE_PARAM};
 use dj_engine::playback::TrackData;
 use dj_engine::{Engine, Workspace};
 use tauri::State;
@@ -146,6 +146,20 @@ pub fn decks_set_control(
     engine
         .decks_set_control(&instance, slot, control, value)
         .map_err(err)
+}
+
+/// Queue or drop a deck — its mute, taken on the bank's grid instead of
+/// under the finger (`Engine::decks_arm`). The edit the patch keeps is the
+/// mute the arm is heading for, so it coalesces with the mute button's.
+#[tauri::command]
+pub fn decks_arm(
+    state: State<AppState>,
+    instance: String,
+    slot: usize,
+    arm: DeckArm,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DeckSlotControl(&instance, slot, "mute"))?;
+    engine.decks_arm(&instance, slot, arm).map_err(err)
 }
 
 fn control_key(control: SlotControl) -> &'static str {

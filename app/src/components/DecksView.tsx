@@ -516,6 +516,7 @@ export function DecksView(props: DecksViewProps) {
                 onClear={() => void write(() => api.clear(bank, slot.slot))}
                 onControl={(control, value) => setControl(slot.slot, control, value)}
                 onToggle={(control) => setControl(slot.slot, control, slot[control] ? 0 : 1)}
+                onArm={(arm) => void write(() => api.arm(bank, slot.slot, arm))}
                 onTail={(tail) => void write(() => api.setTail(bank, slot.slot, Math.max(0, tail)))}
                 onPhase={(phase) => void write(() => api.setPhase(bank, slot.slot, phase))}
                 onRelease={() => void api.endEdit()}

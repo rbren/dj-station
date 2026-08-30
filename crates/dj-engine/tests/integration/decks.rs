@@ -16,7 +16,8 @@
 use dj_engine::beat_clip::BeatClipRef;
 use dj_engine::builtin::MONITOR_OUT_ID;
 use dj_engine::decks::{
-    led, SlotControl, DECKS_ID, DEFAULT_SURFACE_CHANNEL, EQ_MAX, MOMENTARY_RELEASE_SECS, SLOTS,
+    led, DeckArm, SlotControl, DECKS_ID, DEFAULT_SURFACE_CHANNEL, EQ_MAX, MOMENTARY_RELEASE_SECS,
+    SLOTS,
 };
 use dj_engine::playback::TrackData;
 use dj_engine::{Engine, EngineConfig};
@@ -262,6 +263,129 @@ fn only_banks_following_the_surface_hear_the_device() {
     // Addressed directly, the same message lands anyway (the test seam).
     e.decks_inject("bank2", [0xB8, 77, 0]).unwrap();
     assert_eq!(e.decks_status("bank2").unwrap().slots[0].level, 0.0);
+}
+
+#[test]
+fn a_queued_deck_comes_in_on_the_banks_next_beat_and_never_between_two() {
+    let mut e = bank();
+    load(&mut e, 0, 2);
+    // Half a beat in at 120 BPM, still silent.
+    let out = e.render_offline(12_000).unwrap().remove(0);
+    assert!(out.iter().all(|s| *s == 0.0));
+
+    e.decks_arm("bank1", 0, DeckArm::Queue).unwrap();
+    let slot = &e.decks_status("bank1").unwrap().slots[0];
+    assert_eq!(slot.arm, DeckArm::Queue);
+    assert!(
+        !slot.mute,
+        "the mute a patch keeps is already where the queue is going"
+    );
+
+    // The rest of this beat is silence: a deck queued between two beats
+    // does not come in between them.
+    let out = e.render_offline(12_000).unwrap().remove(0);
+    assert!(
+        out.iter().all(|s| s.abs() < 1e-6),
+        "a queued deck is held until the beat"
+    );
+    assert_eq!(
+        e.decks_status("bank1").unwrap().slots[0].arm,
+        DeckArm::Queue
+    );
+
+    // On the beat it plays, and the arm is spent.
+    let out = e.render_offline(12_000).unwrap().remove(0);
+    assert!(
+        out[out.len() - 100..].iter().any(|s| s.abs() > 0.1),
+        "the beat started it"
+    );
+    let slot = &e.decks_status("bank1").unwrap().slots[0];
+    assert_eq!(slot.arm, DeckArm::None);
+    assert!(slot.playing);
+}
+
+#[test]
+fn a_dropped_deck_plays_its_last_beat_before_it_stops() {
+    let mut e = bank();
+    load(&mut e, 0, 2);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    // A beat in — halfway through a two-beat clip.
+    e.render_offline(24_000).unwrap();
+
+    e.decks_arm("bank1", 0, DeckArm::Drop).unwrap();
+    let slot = &e.decks_status("bank1").unwrap().slots[0];
+    assert_eq!(slot.arm, DeckArm::Drop);
+    assert!(
+        slot.mute,
+        "a drop is a mute, waiting for the end of the clip"
+    );
+
+    // The clip's second beat still sounds: the drop is not a cut.
+    let out = e.render_offline(23_000).unwrap().remove(0);
+    assert!(
+        out[out.len() - 100..].iter().any(|s| s.abs() > 0.1),
+        "a dropping deck plays its clip out"
+    );
+
+    // Past the seam it is gone, rather than round again.
+    let out = e.render_offline(24_000).unwrap().remove(0);
+    assert!(out[8_000..].iter().all(|s| s.abs() < 1e-4));
+    let slot = &e.decks_status("bank1").unwrap().slots[0];
+    assert_eq!(slot.arm, DeckArm::None);
+    assert!(!slot.playing);
+}
+
+#[test]
+fn an_arm_can_be_taken_back_and_the_mute_button_overrules_it() {
+    let mut e = bank();
+    load(&mut e, 0, 2);
+
+    // Queue, then think better of it: the deck is muted again, as it was.
+    e.decks_arm("bank1", 0, DeckArm::Queue).unwrap();
+    e.decks_arm("bank1", 0, DeckArm::None).unwrap();
+    let slot = &e.decks_status("bank1").unwrap().slots[0];
+    assert_eq!(slot.arm, DeckArm::None);
+    assert!(slot.mute);
+    let out = e.render_offline(48_000).unwrap().remove(0);
+    assert!(
+        out.iter().all(|s| s.abs() < 1e-6),
+        "a cancelled queue never starts"
+    );
+
+    // Arming with the deck running and then pressing MUTE: the button
+    // wins, and nothing is left waiting to undo it.
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    e.render_offline(4_096).unwrap();
+    e.decks_arm("bank1", 0, DeckArm::Drop).unwrap();
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 10.0)
+        .unwrap();
+    let slot = &e.decks_status("bank1").unwrap().slots[0];
+    assert_eq!(slot.arm, DeckArm::None);
+    assert!(slot.mute);
+    let out = e.render_offline(24_000).unwrap().remove(0);
+    assert!(
+        out[8_000..].iter().all(|s| s.abs() < 1e-4),
+        "a pressed mute is a mute now, not at the end of the clip"
+    );
+}
+
+#[test]
+fn an_arm_is_transport_not_patch_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = bank();
+    load(&mut e, 0, 4);
+    e.decks_arm("bank1", 0, DeckArm::Queue).unwrap();
+    e.save_patch(&dir.path().join("p"), "decks").unwrap();
+
+    let e2 = Engine::load_patch(&dir.path().join("p"), crate::common::registry()).unwrap();
+    let slot = &e2.decks_status("bank1").unwrap().slots[0];
+    assert_eq!(slot.arm, DeckArm::None, "a bank comes back unarmed");
+    assert!(
+        !slot.mute,
+        "what the patch kept is the mute the queue was on its way to"
+    );
 }
 
 #[test]

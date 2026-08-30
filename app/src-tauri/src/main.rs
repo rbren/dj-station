@@ -3101,6 +3101,7 @@ fn main() {
             decks::decks_load,
             decks::decks_clear,
             decks::decks_set_control,
+            decks::decks_arm,
             decks::decks_set_tail,
             decks::decks_set_phase,
             decks::decks_set_bpm,

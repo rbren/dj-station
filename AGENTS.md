@@ -1253,7 +1253,18 @@ beatify::build`.
   bypass; level/mute/monitor ramp per block rather than stepping. MONITOR
   (not solo) is per slot: it moves that deck from the bank's live pair to
   its `mon_l`/`mon_r` pair — a cue, so it changes nothing for the other
-  decks. Slot state round-trips in the patch `ModuleFile` (`decks` field);
+  decks. QUEUE/DROP (`DeckArm`, `Engine::decks_arm`, page buttons under
+  mute/monitor) are the mute taken on the bank's grid: the mute is
+  written THEN AND THERE (queue unmutes, drop mutes — so the patch and
+  every mirror already hold the destination) and the RT thread holds the
+  gain the old side until the beat: a queued deck comes in on the bank's
+  next beat (phase-aligned like every slot), a dropping one plays its
+  clip's last beat out (the tail does not stall it). An arm is TRANSPORT,
+  not patch state — nothing serializes it, a load/clear/restore clears
+  it, `DeckArm::None` cancels (putting the mute back), and the mute
+  button overrules any pending arm. Serials on `DecksCmd::Arm` published
+  back through `DecksShared` let `live_arm` tell "fired" from "not seen
+  yet". Slot state round-trips in the patch `ModuleFile` (`decks` field);
   the clips' AUDIO does not, so `decks_pending` reports what the app layer
   still owes and `decks::hydrate` re-assembles it beside
   `beat_clip::hydrate` — the Decks page also calls `decks_rehydrate` once

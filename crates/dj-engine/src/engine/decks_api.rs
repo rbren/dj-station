@@ -14,7 +14,7 @@
 
 use super::*;
 use crate::decks::{
-    cycle_beats, led_for, return_jack, tone_jack, DeckSlotState, DeckSlotStatus, DecksCmd,
+    cycle_beats, led_for, return_jack, tone_jack, DeckArm, DeckSlotState, DeckSlotStatus, DecksCmd,
     DecksState, DecksStatus, SlotControl, EQ_MAX, IN_BPM, MAX_TAIL_BEATS, MOMENTARY_RELEASE_SECS,
     SLOTS, SURFACE_PARAM,
 };
@@ -262,6 +262,9 @@ impl Engine {
         // Reclaim clips the RT thread replaced earlier.
         while ctl.garbage_rx.pop().is_ok() {}
         ctl.tracks[slot] = Some(audio.clone());
+        // The clip a queue or a drop was armed on is the one leaving, and
+        // the RT thread drops the arm with it.
+        ctl.arm[slot] = DeckArm::None;
         let s = &mut ctl.state.slots[slot];
         s.clip = clip;
         s.beats = beats;
@@ -314,6 +317,7 @@ impl Engine {
         let ctl = self.clip_decks.get_mut(&node).unwrap();
         while ctl.garbage_rx.pop().is_ok() {}
         ctl.tracks[slot] = None;
+        ctl.arm[slot] = DeckArm::None;
         let s = &mut ctl.state.slots[slot];
         s.clip = None;
         s.beats = 0;
@@ -334,6 +338,10 @@ impl Engine {
     /// Set one of a slot's six controls. Levels and tone controls take
     /// their value; the two buttons take anything at or above the gate
     /// threshold as "on".
+    ///
+    /// THE MUTE BUTTON OVERRULES THE CLOCK: reaching for it drops whatever
+    /// queue or drop was armed, because a mute you press is a mute you
+    /// want now.
     pub fn decks_set_control(
         &mut self,
         instance_id: &str,
@@ -349,7 +357,55 @@ impl Engine {
             SlotControl::Low => s.low = value.clamp(0.0, EQ_MAX),
             SlotControl::Mute => s.mute = value >= 1.0,
             SlotControl::Monitor => s.monitor = value >= 1.0,
-        })
+        })?;
+        if control == SlotControl::Mute {
+            self.push_arm(node, slot, DeckArm::None)?;
+        }
+        Ok(())
+    }
+
+    /// Hand one slot's arm to the RT thread — the clock is what decides
+    /// when the mute beside it takes effect. Every ask carries a serial,
+    /// which comes back on the shared block so the control thread can see
+    /// that this arm (rather than an older one) has been fired.
+    fn push_arm(&mut self, node: usize, slot: usize, arm: DeckArm) -> Result<()> {
+        let ctl = self.clip_decks.get_mut(&node).unwrap();
+        ctl.arm[slot] = arm;
+        ctl.arm_serial[slot] += 1;
+        let serial = ctl.arm_serial[slot];
+        ctl.tx
+            .push(DecksCmd::Arm {
+                slot: slot as u8,
+                arm,
+                serial,
+            })
+            .map_err(|_| anyhow!("too many pending deck edits"))
+    }
+
+    /// QUEUE or DROP a deck: a mute that happens on the grid instead of
+    /// under the finger. The mute is written HERE AND NOW — a queue
+    /// unmutes, a drop mutes — and the RT thread holds it: a queued deck
+    /// stays silent until the bank's next beat (so it comes in on the
+    /// beat, phase-aligned like every other slot), a dropping one plays
+    /// on until its clip has run out (so it is never cut mid-phrase).
+    /// Nothing extra is persisted: the patch already keeps the mute the
+    /// arm is on its way to.
+    ///
+    /// [`DeckArm::None`] CANCELS, which means putting the mute back the
+    /// side it came from — and an arm the bank has already fired is
+    /// nothing to cancel, so cancelling it is not an edit at all.
+    pub fn decks_arm(&mut self, instance_id: &str, slot: usize, arm: DeckArm) -> Result<()> {
+        Self::check_slot(slot)?;
+        let node = self.decks_node(instance_id)?;
+        let mute = match (arm, self.clip_decks[&node].live_arm(slot)) {
+            (DeckArm::Queue, _) => false,
+            (DeckArm::Drop, _) => true,
+            (DeckArm::None, DeckArm::Queue) => true,
+            (DeckArm::None, DeckArm::Drop) => false,
+            (DeckArm::None, DeckArm::None) => return Ok(()),
+        };
+        self.write_slot(node, slot, |s| s.mute = mute)?;
+        self.push_arm(node, slot, arm)
     }
 
     /// Beats of silence played after the clip before it comes round.
@@ -402,6 +458,9 @@ impl Engine {
         }
         for slot in 0..SLOTS {
             self.push_slot(node, slot)?;
+            // A restored bank comes back UNARMED: the mute in the patch is
+            // the whole truth about a slot, and no clock is owed anything.
+            self.push_arm(node, slot, DeckArm::None)?;
         }
         Ok(())
     }
@@ -463,6 +522,7 @@ impl Engine {
                 beat: ctl.shared.slot_beat(i),
                 sounding: ctl.shared.slot_sounding(i),
                 playing: ctl.shared.slot_playing(i),
+                arm: ctl.live_arm(i),
             })
             .collect();
         Ok(DecksStatus {
@@ -539,11 +599,16 @@ impl Engine {
                 ctl.button_down[button] = None;
                 return Ok(());
             }
-            return self.write_slot(node, slot, |s| match control {
+            self.write_slot(node, slot, |s| match control {
                 SlotControl::Mute => s.mute = !s.mute,
                 SlotControl::Monitor => s.monitor = !s.monitor,
                 _ => {}
-            });
+            })?;
+            if control == SlotControl::Mute {
+                // The hardware mute overrules the clock too.
+                self.push_arm(node, slot, DeckArm::None)?;
+            }
+            return Ok(());
         }
         let value = control.value_of_volts(volts);
         self.write_slot(node, slot, |s| match control {

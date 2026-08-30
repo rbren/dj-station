@@ -22,6 +22,11 @@ export const MAX_BPM = 300;
  *  carries. */
 export type SlotControl = 'level' | 'high' | 'mid' | 'low' | 'mute' | 'monitor';
 
+/** A quantized start or stop the bank's clock is still holding (mirrors
+ *  `DeckArm` in crates/dj-engine/src/decks.rs): a queued deck comes in on
+ *  the bank's next beat, a dropping one plays its clip out first. */
+export type DeckArm = 'none' | 'queue' | 'drop';
+
 /** The bank's own jacks, by name (mirrors `decks_manifest`). A deck's
  *  SEND carries its audio out to the rack and its RETURN brings the
  *  rack's answer back; the three tone controls each have a CV out. */
@@ -66,6 +71,9 @@ export interface DeckSlotStatus {
   /** Whether the playhead is inside the clip rather than its silence. */
   sounding: boolean;
   playing: boolean;
+  /** A queue or drop the bank's clock is still holding; the mute above is
+   *  already where the deck is going. */
+  arm: DeckArm;
 }
 
 export interface DecksStatus {
@@ -97,6 +105,8 @@ export interface DecksApi {
     control: SlotControl,
     value: number,
   ): Promise<void | null>;
+  /** Queue/drop a deck on the bank's grid; 'none' takes an arm back. */
+  arm(instance: string, slot: number, arm: DeckArm): Promise<void | null>;
   setTail(instance: string, slot: number, tail: number): Promise<void | null>;
   setPhase(instance: string, slot: number, phase: number): Promise<void | null>;
   setBpm(instance: string, bpm: number): Promise<void | null>;
@@ -128,6 +138,9 @@ export class DecksClient extends IpcClient implements DecksApi {
   }
   setControl(instance: string, slot: number, control: SlotControl, value: number) {
     return this.call<void>('decks_set_control', { instance, slot, control, value });
+  }
+  arm(instance: string, slot: number, arm: DeckArm) {
+    return this.call<void>('decks_arm', { instance, slot, arm });
   }
   setTail(instance: string, slot: number, tail: number) {
     return this.call<void>('decks_set_tail', { instance, slot, tail });

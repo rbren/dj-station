@@ -36,6 +36,7 @@ function slotFixture(slot: number): DeckSlotStatus {
     beat: -1,
     sounding: false,
     playing: false,
+    arm: 'none',
   };
 }
 
@@ -56,6 +57,7 @@ function makeApi(): DecksApi {
     load: vi.fn().mockResolvedValue(null),
     clear: vi.fn().mockResolvedValue(null),
     setControl: vi.fn().mockResolvedValue(null),
+    arm: vi.fn().mockResolvedValue(null),
     setTail: vi.fn().mockResolvedValue(null),
     setPhase: vi.fn().mockResolvedValue(null),
     setBpm: vi.fn().mockResolvedValue(null),

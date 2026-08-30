@@ -5970,6 +5970,39 @@ body {
   font-size: var(--fs-xs);
 }
 
+/* Mute + monitor on one row, queue + drop on the next: two pairs the
+   thumb reads as "now" and "on the beat". */
+.decks-btn-row {
+  display: flex;
+  gap: 4px;
+}
+
+.decks-btn-row .decks-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+/* An armed queue/drop is a promise the bank's clock is holding, so it
+   waits in the warning amber and breathes until the beat takes it. The
+   pulse is colour/opacity only; with motion off it rests as a steady
+   tint, which still says "armed". */
+.decks-btn-arm.is-armed {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 22%, var(--canvas));
+  border-color: color-mix(in srgb, var(--warn) 65%, var(--line-strong));
+  animation: decks-arm-pulse 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes decks-arm-pulse {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0.55;
+  }
+}
+
 /* Add/remove a beat: a label, two nudge buttons and the count between
    them, so the number the buttons change is the number you are reading. */
 .decks-step {

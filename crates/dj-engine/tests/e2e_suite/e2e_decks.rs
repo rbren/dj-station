@@ -96,7 +96,50 @@ fn slot_defaults() -> DecksSlotSpec {
         monitor: None,
         tail: None,
         phase: None,
+        arm: None,
     }
+}
+
+/// `decks-arm-drop`: a playing two-beat clip with a DROP armed before the
+/// render. The drop is a mute the bank's clock holds until the clip has
+/// played its last beat, so the golden is one full pass of the clip and
+/// then silence on the seam — beats three and four are empty. That pins
+/// the quantized-arm timing in audio bytes: the deck is never cut
+/// mid-clip, and it does not come round again.
+fn regen_decks_arm_drop() {
+    let dir = case_dir("decks-arm-drop");
+    write_case_tone(&dir.join("two-beat.wav"), 220.0, 1.0);
+
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
+    e.add_module("bank1", "builtin.decks").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.set_knob_value("bank1", "bpm", 120.0).unwrap();
+    e.connect("bank1", "audio_l", "out1", "l").unwrap();
+    e.connect("bank1", "audio_r", "out1", "r").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-decks-arm-drop")
+        .unwrap();
+    write_events(
+        &dir,
+        &EventsFile {
+            seconds: 2.0,
+            tracks: vec![TrackLoadSpec {
+                instance: "bank1".into(),
+                file: "two-beat.wav".into(),
+                bpm: Some(120.0),
+                slot: Some(0),
+            }],
+            deck_slots: vec![DecksSlotSpec {
+                instance: "bank1".into(),
+                slot: 0,
+                level: Some(0.8),
+                mute: Some(false),
+                arm: Some(dj_engine::decks::DeckArm::Drop),
+                ..slot_defaults()
+            }],
+            ..EventsFile::default()
+        },
+    );
 }
 
 /// `decks-rack-insert`: one deck routed OUT of the bank and back again.
@@ -166,4 +209,12 @@ fn decks_rack_insert() {
         regen_decks_rack_insert();
     }
     check_case("decks-rack-insert");
+}
+
+#[test]
+fn decks_arm_drop() {
+    if regen() {
+        regen_decks_arm_drop();
+    }
+    check_case("decks-arm-drop");
 }
