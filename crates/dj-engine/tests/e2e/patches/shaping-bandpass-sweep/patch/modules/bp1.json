@@ -1,0 +1,31 @@
+{
+  "ext": "com.dj.bandpass",
+  "knobs": {
+    "freq": {
+      "position": 0.6666667,
+      "atten": 0.5,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mix": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "q": {
+      "position": 0.6327183,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "slope": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

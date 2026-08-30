@@ -169,6 +169,26 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
+  'com.dj.bandpass': () => ({
+    groups: [
+      { title: 'audio', inputs: ['in'] },
+      { title: 'band', inputs: [{ jack: 'freq', label: 'center' }, 'q', 'slope'] },
+      { title: 'mix', inputs: ['mix'] },
+    ],
+  }),
+
+  'com.dj.comb': () => ({
+    groups: [
+      { title: 'audio', inputs: ['in'] },
+      { title: 'tune', inputs: ['tune'] },
+      {
+        title: 'comb',
+        inputs: [{ jack: 'feedback', label: 'fdbk' }, { jack: 'damping', label: 'damp' }, 'mode'],
+      },
+      { title: 'mix', inputs: ['mix'] },
+    ],
+  }),
+
   'com.dj.vca': () => ({
     groups: [{ inputs: ['in', 'cv'] }],
   }),

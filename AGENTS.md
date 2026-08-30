@@ -436,6 +436,38 @@ fails if it's missing.
   the Clock Multiplier free-running is the rack's one clock source.
   Tests: the `sample_hold_*` cases in
   `tests/integration/modules_shaping.rs`; golden `mod-function-sh-voice`.
+- Band Pass (`extensions/bandpass`, `com.dj.bandpass`) is the DEDICATED
+  band-pass, next to the Filter's `bp` tap rather than instead of it: its
+  band-pass sections are CONSTANT PEAK GAIN (the TPT/Cytomic SVF's `bp`
+  tap scaled by `1/Q`), so `q` — 0.5 to 40 — is width and never level,
+  which is what makes it a sweepable isolator instead of a volume pedal.
+  `slope` runs the same section twice for 24 dB/oct skirts (unity peak
+  either way, correspondingly tighter for the same `q`), `freq` is 1 V/oct
+  read PER SAMPLE so an audio-rate modulator sweeps rather than steps, and
+  `mix` blends the band back with the dry signal (0 = untouched,
+  bit-exact). Nothing in it saturates and it never self-oscillates — that
+  is `com.dj.filter`'s job, and the two are deliberately different
+  instruments. Tests: the `bandpass_*` cases in
+  `tests/integration/modules_shaping.rs`; golden `shaping-bandpass-sweep`.
+- Comb Filter (`extensions/comb`, `com.dj.comb`): a delay line short
+  enough to be a pitch, `tune`d in 1 V/oct like the Filter's cutoff, so
+  the delay is one cycle of the tuning and the teeth land on its
+  multiples. `feedback` is BIPOLAR (-0.98..0.98): positive peaks on
+  multiples of the tuning, negative moves them to odd multiples of half of
+  it (the hollow comb), and `mode` swaps the feedback (IIR, resonant
+  peaks) loop for a feedforward (FIR, flanger notches) one on the same
+  line. THE PEAK IS PINNED AT UNITY by trimming the INPUT (`1 - |fb|`,
+  or `1/(1 + |fb|)` feedforward) rather than turning the output down after
+  the comb: the loop then runs at signal level, so feedback is texture
+  and never loudness, and — the trap — what guards the line is a HARD
+  clamp, not a tanh: a soft saturator is already several percent down at
+  ±5 V, and giving that back every pass flattened the resonance to 0.7 of
+  where the maths said it should be. TUNING IS COMPENSATED, not
+  approximate: the `damping` one-pole's group delay AND the sample between
+  write head and read are taken off the requested distance, so darkening
+  the comb does not flatten its pitch. `mix` at 0 is the dry signal
+  bit-exact. Tests: the `comb_*` cases in
+  `tests/integration/modules_shaping.rs`; golden `shaping-comb-sweep`.
 - Module PRESETS are manifest DATA, not code, so any module can adopt
   them: `"presets": [{ "name": …, "values": { <input jack id>: value } }]`
   (`PresetDecl` in `manifest.rs`, values in the jack's own units, jacks

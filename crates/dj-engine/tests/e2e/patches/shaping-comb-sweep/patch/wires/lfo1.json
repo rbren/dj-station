@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "bi",
+      "to": "cmb",
+      "to_jack": "tune"
+    }
+  ]
+}

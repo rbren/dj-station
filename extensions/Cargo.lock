@@ -31,6 +31,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-bandpass"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-camera"
 version = "0.1.0"
 dependencies = [
@@ -39,6 +46,13 @@ dependencies = [
 
 [[package]]
 name = "dj-ext-clock-mult"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
+name = "dj-ext-comb"
 version = "0.1.0"
 dependencies = [
  "dj-module-sdk",

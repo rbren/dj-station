@@ -1,0 +1,33 @@
+{
+  "id": "com.dj.bandpass",
+  "name": "Band Pass",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Shaping",
+  "inputs": [
+    { "id": "in", "name": "In", "default": 0.0, "audio": true },
+    { "id": "freq", "name": "Center", "default": 1.0,
+      "knob": { "style": "continuous", "min": -6.0, "max": 6.0, "curve": "linear" },
+      "display": { "unit": "Hz", "map": { "kind": "volt_per_octave" } } },
+    { "id": "q", "name": "Q", "default": 2.0,
+      "knob": { "style": "continuous", "min": 0.5, "max": 40.0, "curve": "exp" },
+      "display": { "unit": "" } },
+    { "id": "slope", "name": "Slope", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 1.0, "curve": "linear", "steps": 2 },
+      "display": { "steps": ["12 dB", "24 dB"] } },
+    { "id": "mix", "name": "Mix", "default": 1.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" },
+      "display": { "unit": "" } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Out" }
+  ],
+  "bypass": { "out": "in" },
+  "presets": [
+    { "name": "Wide band", "values": { "q": 0.7, "slope": 0.0, "mix": 1.0 } },
+    { "name": "Telephone", "values": { "freq": 1.93, "q": 1.2, "slope": 1.0, "mix": 1.0 } },
+    { "name": "Isolator", "values": { "q": 3.0, "slope": 1.0, "mix": 1.0 } },
+    { "name": "Whistle", "values": { "q": 30.0, "slope": 0.0, "mix": 1.0 } }
+  ],
+  "latency_samples": 0
+}

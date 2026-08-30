@@ -1,6 +1,7 @@
 //! Behaviour tests for the Shaping / Modulation module batch
-//! (`com.dj.filter`, `com.dj.vca_dual`, `com.dj.waveshaper`, `com.dj.lfo`,
-//! `com.dj.function`, `com.dj.sample_hold`).
+//! (`com.dj.filter`, `com.dj.bandpass`, `com.dj.comb`, `com.dj.vca_dual`,
+//! `com.dj.waveshaper`, `com.dj.lfo`, `com.dj.function`,
+//! `com.dj.sample_hold`).
 //!
 //! Each test renders a tiny patch offline and asserts on the samples.
 
@@ -1093,4 +1094,316 @@ fn eq_stays_finite_with_all_bands_extreme() {
         .unwrap();
     assert!(out.iter().all(|v| v.is_finite()), "EQ output blew up");
     assert!(peak(&out) <= 15.0 + 1e-3, "EQ output exceeds clamp");
+}
+
+// ---------------------------------------------------------------------------
+// com.dj.bandpass
+// ---------------------------------------------------------------------------
+
+/// Sine at `pitch` -> band pass -> out, rendered for 0.4 s.
+fn render_bandpass(pitch: f32, freq: f32, q: f32, slope: f32, mix: f32) -> Vec<f32> {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("bp1", "com.dj.bandpass").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "bp1", "in").unwrap();
+    e.connect("bp1", "out", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "pitch", pitch).unwrap();
+    e.set_knob_value("bp1", "freq", freq).unwrap();
+    e.set_knob_value("bp1", "q", q).unwrap();
+    e.set_knob_value("bp1", "slope", slope).unwrap();
+    e.set_knob_value("bp1", "mix", mix).unwrap();
+    e.render_offline((0.4 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap()
+}
+
+/// The oscillator alone, for gain measurements.
+fn render_dry_sine(pitch: f32, frames: usize) -> Vec<f32> {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "pitch", pitch).unwrap();
+    e.render_offline(frames).unwrap().pop().unwrap()
+}
+
+/// Steady-state gain of a filtered tone against the same tone unfiltered.
+fn gain_vs_dry(filtered: &[f32], pitch: f32) -> f32 {
+    rms(tail(filtered)) / rms(tail(&render_dry_sine(pitch, filtered.len())))
+}
+
+#[test]
+fn bandpass_keeps_the_center_and_drops_what_is_octaves_away() {
+    let center = render_bandpass(0.0, 0.0, 4.0, 0.0, 1.0);
+    let at_center = gain_vs_dry(&center, 0.0);
+    assert!((at_center - 1.0).abs() < 0.05, "center gain {at_center}");
+    for away in [-3.0, 3.0] {
+        let g = gain_vs_dry(&render_bandpass(away, 0.0, 4.0, 0.0, 1.0), away);
+        assert!(g < 0.1, "{away} octaves away still reads {g}");
+    }
+}
+
+#[test]
+fn bandpass_peak_gain_is_unity_at_every_q() {
+    // The point of the dedicated module: Q is width, never level.
+    for q in [0.5, 2.0, 10.0, 40.0] {
+        let g = gain_vs_dry(&render_bandpass(0.0, 0.0, q, 0.0, 1.0), 0.0);
+        assert!((g - 1.0).abs() < 0.05, "Q {q} peaks at {g}, not unity");
+    }
+}
+
+#[test]
+fn bandpass_q_narrows_the_band() {
+    // One octave above the centre: a wide band still passes the tone, a
+    // narrow one has left it behind.
+    let wide = gain_vs_dry(&render_bandpass(1.0, 0.0, 0.5, 0.0, 1.0), 1.0);
+    let narrow = gain_vs_dry(&render_bandpass(1.0, 0.0, 20.0, 0.0, 1.0), 1.0);
+    assert!(wide > 0.5, "wide band should pass an octave up: {wide}");
+    assert!(narrow < 0.05, "narrow band should reject it: {narrow}");
+}
+
+#[test]
+fn bandpass_four_poles_are_steeper_than_two() {
+    let two = gain_vs_dry(&render_bandpass(2.0, 0.0, 2.0, 0.0, 1.0), 2.0);
+    let four = gain_vs_dry(&render_bandpass(2.0, 0.0, 2.0, 1.0, 1.0), 2.0);
+    // Cascading the same section squares the response: 12 dB/oct becomes
+    // 24, so two octaves out the rejection doubles in dB.
+    assert!(
+        four < two * two * 1.3 && four > two * two * 0.7,
+        "24 dB/oct slope reads {four}, 12 dB/oct {two}"
+    );
+}
+
+#[test]
+fn bandpass_mix_at_zero_is_the_dry_signal_exactly() {
+    let wet_none = render_bandpass(0.0, 3.0, 8.0, 1.0, 0.0);
+    assert_eq!(
+        wet_none,
+        render_dry_sine(0.0, wet_none.len()),
+        "mix 0 must not touch the signal"
+    );
+}
+
+#[test]
+fn bandpass_stays_finite_under_extreme_modulation() {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("bp1", "com.dj.bandpass").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "bp1", "in").unwrap();
+    e.connect("lfo1", "bi", "bp1", "freq").unwrap();
+    e.connect("bp1", "out", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "waveform", 1.0).unwrap(); // saw
+    e.set_knob_value("lfo1", "rate", 400.0).unwrap(); // audio-rate sweep
+    e.set_knob_atten_offset("bp1", "freq", 1.0, 0.0).unwrap();
+    e.set_knob_value("bp1", "q", 40.0).unwrap();
+    e.set_knob_value("bp1", "slope", 1.0).unwrap();
+    let out = e
+        .render_offline((0.4 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert!(out.iter().all(|v| v.is_finite()), "band pass blew up");
+    assert!(peak(&out) <= 15.0 + 1e-3, "band pass exceeds its clamp");
+}
+
+// ---------------------------------------------------------------------------
+// com.dj.comb
+// ---------------------------------------------------------------------------
+
+/// Sine at `pitch` -> comb (tuned to `tune`) -> out, rendered for `secs`.
+fn render_comb(pitch: f32, tune: f32, feedback: f32, feedforward: bool, secs: f32) -> Vec<f32> {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("cmb", "com.dj.comb").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "cmb", "in").unwrap();
+    e.connect("cmb", "out", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "pitch", pitch).unwrap();
+    e.set_knob_value("cmb", "tune", tune).unwrap();
+    e.set_knob_value("cmb", "feedback", feedback).unwrap();
+    e.set_knob_value("cmb", "mode", if feedforward { 1.0 } else { 0.0 })
+        .unwrap();
+    e.render_offline((secs * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap()
+}
+
+/// Last third of a render — a comb at high feedback takes many delay
+/// periods to settle.
+fn settled(x: &[f32]) -> &[f32] {
+    &x[x.len() * 2 / 3..]
+}
+
+/// Steady-state gain of a combed tone against the same tone uncombed.
+fn comb_gain(out: &[f32], pitch: f32) -> f32 {
+    rms(settled(out)) / rms(settled(&render_dry_sine(pitch, out.len())))
+}
+
+/// 1.5x the tuning: exactly between two teeth, where both combs have a
+/// null.
+fn between_teeth() -> f32 {
+    1.5f32.log2()
+}
+
+/// 1.25x the tuning: a quarter turn of the comb's phase, where the two
+/// modes disagree most — the FIR is barely down, the IIR has thrown it out.
+fn quarter_turn() -> f32 {
+    1.25f32.log2()
+}
+
+#[test]
+fn comb_teeth_land_on_multiples_of_its_tuning() {
+    let on = comb_gain(&render_comb(0.0, 0.0, 0.9, false, 1.0), 0.0);
+    let between = comb_gain(
+        &render_comb(between_teeth(), 0.0, 0.9, false, 1.0),
+        between_teeth(),
+    );
+    assert!((on - 1.0).abs() < 0.15, "tooth reads {on}");
+    assert!(between < 0.15, "trough reads {between}");
+}
+
+#[test]
+fn comb_negative_feedback_moves_the_teeth_to_odd_multiples_of_half_the_tuning() {
+    // The hollow, square-wave-ish comb: what was a peak at the tuning is
+    // a trough, and half the tuning is a peak.
+    let at_tuning = comb_gain(&render_comb(0.0, 0.0, -0.9, false, 1.0), 0.0);
+    let octave_down = comb_gain(&render_comb(-1.0, 0.0, -0.9, false, 1.0), -1.0);
+    assert!(
+        at_tuning < 0.15,
+        "the tuning should be a trough: {at_tuning}"
+    );
+    assert!(
+        (octave_down - 1.0).abs() < 0.15,
+        "half the tuning should peak: {octave_down}"
+    );
+}
+
+#[test]
+fn comb_peaks_stay_at_unity_however_hard_it_is_fed_back() {
+    // The input is trimmed going in rather than the output turned down
+    // after, so raising feedback sharpens the teeth, not the level.
+    for fb in [0.0, 0.5, 0.9, 0.98] {
+        let g = comb_gain(&render_comb(0.0, 0.0, fb, false, 1.5), 0.0);
+        assert!((g - 1.0).abs() < 0.15, "feedback {fb} peaks at {g}");
+    }
+}
+
+#[test]
+fn comb_feedforward_keeps_everything_but_its_notches() {
+    // Same teeth, opposite shape: a quarter turn off a tooth the FIR comb
+    // still passes most of the tone where the resonant one has thrown it
+    // away.
+    let pitch = quarter_turn();
+    let fir = comb_gain(&render_comb(pitch, 0.0, 0.9, true, 1.0), pitch);
+    let iir = comb_gain(&render_comb(pitch, 0.0, 0.9, false, 1.0), pitch);
+    assert!(fir > 0.4, "feedforward comb swallowed the tone: {fir}");
+    assert!(iir < 0.15, "feedback comb should reject it: {iir}");
+
+    // Its notches are where the feedback comb's troughs are deepest: odd
+    // multiples of half the tuning.
+    let notch = comb_gain(&render_comb(-1.0, 0.0, 0.9, true, 1.0), -1.0);
+    assert!(notch < 0.15, "feedforward notch reads {notch}");
+}
+
+#[test]
+fn comb_mix_at_zero_is_the_dry_signal_exactly() {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("cmb", "com.dj.comb").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "cmb", "in").unwrap();
+    e.connect("cmb", "out", "out1", "l").unwrap();
+    e.set_knob_value("cmb", "feedback", 0.95).unwrap();
+    e.set_knob_value("cmb", "mix", 0.0).unwrap();
+    let frames = (0.2 * SR) as usize;
+    let out = e.render_offline(frames).unwrap().pop().unwrap();
+    assert_eq!(
+        out,
+        render_dry_sine(0.0, frames),
+        "mix 0 must not touch the signal"
+    );
+}
+
+#[test]
+fn comb_tracks_pitch_cv_on_its_tune_input() {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("cmb", "com.dj.comb").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "cmb", "in").unwrap();
+    e.connect("cmb", "out", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "pitch", 1.0).unwrap(); // C5
+    e.set_knob_value("cmb", "feedback", 0.9).unwrap();
+    e.set_knob_value("cmb", "tune", 1.0).unwrap(); // tuned to the tone
+    let on = e.render_offline(SR as usize).unwrap().pop().unwrap();
+    let on = comb_gain(&on, 1.0);
+    assert!((on - 1.0).abs() < 0.15, "tuned to the tone it reads {on}");
+
+    // Detune the comb so the tone falls between two teeth.
+    e.set_knob_value("cmb", "tune", 1.0 - between_teeth())
+        .unwrap();
+    let off = e.render_offline(SR as usize).unwrap().pop().unwrap();
+    let off = comb_gain(&off, 1.0);
+    assert!(off < 0.15, "detuned it still reads {off}");
+}
+
+#[test]
+fn comb_stays_finite_under_extreme_modulation() {
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("cmb", "com.dj.comb").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "cmb", "in").unwrap();
+    e.connect("lfo1", "bi", "cmb", "tune").unwrap();
+    e.connect("cmb", "out", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "waveform", 1.0).unwrap(); // saw
+    e.set_knob_value("lfo1", "rate", 300.0).unwrap();
+    e.set_knob_atten_offset("cmb", "tune", 1.0, 0.0).unwrap();
+    e.set_knob_value("cmb", "feedback", 0.98).unwrap();
+    let out = e
+        .render_offline((0.4 * SR) as usize)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert!(out.iter().all(|v| v.is_finite()), "comb blew up");
+    assert!(peak(&out) <= 15.0 + 1e-3, "comb exceeds its clamp");
+}
+
+#[test]
+fn comb_and_bandpass_state_round_trips_through_a_saved_patch() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("cmb", "com.dj.comb").unwrap();
+    e.add_module("bp1", "com.dj.bandpass").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("osc1", "audio", "cmb", "in").unwrap();
+    e.connect("cmb", "out", "bp1", "in").unwrap();
+    e.connect("bp1", "out", "out1", "l").unwrap();
+    e.set_knob_value("osc1", "waveform", 1.0).unwrap();
+    e.set_knob_value("cmb", "tune", -1.0).unwrap();
+    e.set_knob_value("cmb", "feedback", -0.75).unwrap();
+    e.set_knob_value("cmb", "damping", 3000.0).unwrap();
+    e.set_knob_value("cmb", "mode", 1.0).unwrap();
+    e.set_knob_value("cmb", "mix", 0.6).unwrap();
+    e.set_knob_value("bp1", "freq", 2.0).unwrap();
+    e.set_knob_value("bp1", "q", 9.0).unwrap();
+    e.set_knob_value("bp1", "slope", 1.0).unwrap();
+    e.set_bypass("bp1", true).unwrap();
+    e.save_patch(dir.path(), "comb-bandpass").unwrap();
+
+    let mut loaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+    assert!(loaded.is_bypassed("bp1").unwrap());
+    let frames = (0.2 * SR) as usize;
+    assert_eq!(
+        loaded.render_offline(frames).unwrap(),
+        e.render_offline(frames).unwrap(),
+        "a reloaded patch must sound identical"
+    );
 }

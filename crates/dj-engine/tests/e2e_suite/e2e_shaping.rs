@@ -1,5 +1,5 @@
 //! E2E golden audio cases for the Shaping / Modulation module batch
-//! (PRD §10.1). The harness lives in `tests/common/e2e.rs`; these two cases
+//! (PRD §10.1). The harness lives in `tests/common/e2e.rs`; these cases
 //! belong to this file and are regenerated only from here.
 
 use crate::common::e2e::{check_case, regen, write_events, EventsFile};
@@ -141,6 +141,65 @@ fn regen_eq_carve() {
     write_events(&dir, &EventsFile::seconds(0.5));
 }
 
+/// A saw drone through the comb filter, its tuning swept by an LFO: the
+/// resonant (feedback) mode at high feedback, so the teeth are audible as
+/// pitch rather than as colour.
+fn regen_comb_sweep() {
+    let dir = crate::common::e2e::case_dir("shaping-comb-sweep");
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("cmb", "com.dj.comb").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    e.set_knob_value("osc1", "waveform", 1.0).unwrap(); // saw
+    e.set_knob_value("osc1", "pitch", -2.0).unwrap(); // C2
+
+    e.connect("osc1", "audio", "cmb", "in").unwrap();
+    e.connect("lfo1", "bi", "cmb", "tune").unwrap();
+    e.set_knob_value("lfo1", "rate", 1.5).unwrap();
+    e.set_knob_atten_offset("cmb", "tune", 0.35, 0.0).unwrap();
+    e.set_knob_value("cmb", "tune", 1.0).unwrap();
+    e.set_knob_value("cmb", "feedback", 0.85).unwrap();
+    e.set_knob_value("cmb", "damping", 4000.0).unwrap();
+    e.set_knob_value("cmb", "mix", 0.9).unwrap();
+
+    e.connect("cmb", "out", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-shaping-comb-sweep")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(0.75));
+}
+
+/// The band pass isolating a swept band out of a saw, four poles deep, so
+/// the golden pins the cascade and the unity-peak law together.
+fn regen_bandpass_sweep() {
+    let dir = crate::common::e2e::case_dir("shaping-bandpass-sweep");
+    let mut e = mono_engine();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("lfo1", "com.dj.lfo").unwrap();
+    e.add_module("bp1", "com.dj.bandpass").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    e.set_knob_value("osc1", "waveform", 1.0).unwrap(); // saw
+    e.set_knob_value("osc1", "pitch", -1.0).unwrap(); // C3
+
+    e.connect("osc1", "audio", "bp1", "in").unwrap();
+    e.connect("lfo1", "bi", "bp1", "freq").unwrap();
+    e.set_knob_value("lfo1", "rate", 2.0).unwrap();
+    e.set_knob_atten_offset("bp1", "freq", 0.5, 0.0).unwrap();
+    e.set_knob_value("bp1", "freq", 2.0).unwrap();
+    e.set_knob_value("bp1", "q", 8.0).unwrap();
+    e.set_knob_value("bp1", "slope", 1.0).unwrap(); // 24 dB/oct
+    e.set_knob_value("bp1", "mix", 1.0).unwrap();
+
+    e.connect("bp1", "out", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-shaping-bandpass-sweep")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(0.6));
+}
+
 #[test]
 fn e2e_shaping_fold_ladder() {
     if regen() {
@@ -163,4 +222,20 @@ fn e2e_mod_function_sh_voice() {
         regen_modulation_voice();
     }
     check_case("mod-function-sh-voice");
+}
+
+#[test]
+fn e2e_shaping_comb_sweep() {
+    if regen() {
+        regen_comb_sweep();
+    }
+    check_case("shaping-comb-sweep");
+}
+
+#[test]
+fn e2e_shaping_bandpass_sweep() {
+    if regen() {
+        regen_bandpass_sweep();
+    }
+    check_case("shaping-bandpass-sweep");
 }

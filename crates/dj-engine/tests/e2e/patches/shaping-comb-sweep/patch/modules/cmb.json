@@ -1,0 +1,36 @@
+{
+  "ext": "com.dj.comb",
+  "knobs": {
+    "damping": {
+      "position": 0.66574645,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "feedback": {
+      "position": 0.9336735,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mix": {
+      "position": 0.9,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mode": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "tune": {
+      "position": 0.5833333,
+      "atten": 0.35,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

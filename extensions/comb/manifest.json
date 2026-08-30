@@ -1,0 +1,40 @@
+{
+  "id": "com.dj.comb",
+  "name": "Comb Filter",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Shaping",
+  "inputs": [
+    { "id": "in", "name": "In", "default": 0.0, "audio": true },
+    { "id": "tune", "name": "Tune", "default": 0.0,
+      "knob": { "style": "continuous", "min": -6.0, "max": 6.0, "curve": "linear" },
+      "display": { "unit": "Hz", "map": { "kind": "volt_per_octave" } } },
+    { "id": "feedback", "name": "Feedback", "default": 0.6,
+      "knob": { "style": "continuous", "min": -0.98, "max": 0.98, "curve": "linear" },
+      "display": { "unit": "" } },
+    { "id": "damping", "name": "Damping", "default": 6000.0,
+      "knob": { "style": "continuous", "min": 200.0, "max": 18000.0, "curve": "exp" },
+      "display": { "unit": "Hz" } },
+    { "id": "mode", "name": "Mode", "default": 0.0,
+      "knob": { "style": "stepped", "min": 0.0, "max": 1.0, "curve": "linear", "steps": 2 },
+      "display": { "steps": ["feedback", "feedforward"] } },
+    { "id": "mix", "name": "Mix", "default": 1.0,
+      "knob": { "style": "continuous", "min": 0.0, "max": 1.0, "curve": "linear" },
+      "display": { "unit": "" } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Out" }
+  ],
+  "bypass": { "out": "in" },
+  "presets": [
+    { "name": "Tuned resonator",
+      "values": { "feedback": 0.92, "damping": 9000.0, "mode": 0.0, "mix": 1.0 } },
+    { "name": "Hollow (odd harmonics)",
+      "values": { "feedback": -0.9, "damping": 6000.0, "mode": 0.0, "mix": 1.0 } },
+    { "name": "Flanger notches",
+      "values": { "tune": 4.0, "feedback": -0.85, "damping": 18000.0, "mode": 1.0, "mix": 0.5 } },
+    { "name": "Slapback comb",
+      "values": { "tune": -5.0, "feedback": 0.6, "damping": 4000.0, "mode": 0.0, "mix": 0.5 } }
+  ],
+  "latency_samples": 0
+}

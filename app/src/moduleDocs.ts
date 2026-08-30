@@ -256,6 +256,60 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'High res + LFO -> cutoff, tap lp for acid lines.',
     ],
   },
+  'com.dj.bandpass': {
+    summary:
+      'Dedicated band-pass filter: one band, at constant level. Q sets ' +
+      'how wide a band survives \u2014 from nearly two octaves down to a ' +
+      'whistle \u2014 and never how loud it is, so a sweep is a change of ' +
+      'tone, not of volume. Pick 12 or 24 dB/oct skirts. Use it as a ' +
+      'sweepable isolator on a whole mix, a formant on a voice, or a ' +
+      'telephone/radio effect; the Filter module is where self-oscillating ' +
+      'resonance and simultaneous LP/HP outputs live.',
+    inputs: {
+      in: 'The sound to filter \u2014 a voice, a drum bus or a whole mix.',
+      freq:
+        'Centre of the band as 1 V/oct pitch CV (0 V = C4). Sweep it with ' +
+        'an LFO or envelope \u2014 this is the knob you play.',
+      q:
+        'Resonance / bandwidth, 0.5..40: the ratio of centre frequency to ' +
+        'the width of the band. Higher = narrower and more vocal.',
+      slope: 'Skirt steepness: 12 dB/oct (one section) or 24 dB/oct (two).',
+      mix: 'Dry/wet blend: 1 is a band-pass, part way is a resonant emphasis, 0 is untouched.',
+    },
+    outputs: { out: 'The band (blended with the dry signal by mix).' },
+    examples: [
+      'Mixer out -> in with an LFO on freq for a sweeping isolator.',
+      'Noise -> in at Q 30 for a tuned whistle, freq played from a sequencer.',
+    ],
+  },
+  'com.dj.comb': {
+    summary:
+      'Comb filter: a delay line short enough to be a pitch, tuned in ' +
+      '1 V/oct. Positive feedback rings on every multiple of the tuning ' +
+      '(metallic, tuned resonance \u2014 flick it with a click and it ' +
+      'sings), negative feedback moves the teeth to odd multiples of half ' +
+      'of it for a hollow, square-ish tone, and feedforward mode is the ' +
+      'flanger comb: the same teeth as notches. The peak stays at unity ' +
+      'however hard you feed it back, so feedback is texture, not level.',
+    inputs: {
+      in: 'The sound to comb \u2014 noise and percussion bring the teeth out best.',
+      tune:
+        'The comb\u2019s fundamental as 1 V/oct pitch CV (0 V = C4): the ' +
+        'delay is one cycle of it. Patch a sequencer here to play it.',
+      feedback:
+        'How much comes back round, -0.98..0.98. Positive peaks on ' +
+        'multiples of the tuning, negative on odd multiples of half of it; ' +
+        '0 is a pass-through.',
+      damping: 'Lowpass in the delay path: lower = duller, shorter-ringing teeth.',
+      mode: 'Feedback (resonant peaks) or feedforward (flanger notches).',
+      mix: 'Dry/wet blend; 0 leaves the input untouched.',
+    },
+    outputs: { out: 'The combed signal (blended with the dry one by mix).' },
+    examples: [
+      'Noise burst -> in, feedback 0.95, sequencer -> tune for a Karplus-Strong string.',
+      'Drum bus -> in in feedforward mode with an LFO on tune for a flanger.',
+    ],
+  },
   'com.dj.vca': {
     summary:
       'Voltage-controlled amplifier: multiplies the input by the CV. ' +
