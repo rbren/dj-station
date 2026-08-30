@@ -909,6 +909,20 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     outputGroups: [{ title: 'tracks', outputs: seqIds('t', 0, 63), columns: 8 }],
   }),
 
+  // Math: one input (the expression's `x`) and the eight results, whose
+  // jack labels are the `i` each one is evaluated with.
+  'builtin.math': () => ({
+    groups: [{ inputs: ['x'] }],
+    outputGroups: [
+      {
+        title: 'results',
+        outputs: seqIds('out', 0, 7),
+        labels: Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7].map((i) => [`out${i}`, String(i)])),
+        columns: 8,
+      },
+    ],
+  }),
+
   // The computer keyboard as a gate source: one output jack per key,
   // arranged like the physical QWERTY rows (staggered via indent).
   'builtin.qwerty': () => ({

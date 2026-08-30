@@ -32,6 +32,7 @@ pub enum BuiltinKind {
     Deck,
     Decks,
     Crossfader,
+    Math,
 }
 
 impl BuiltinKind {
@@ -50,6 +51,7 @@ impl BuiltinKind {
             crate::deck::DECK_ID => Some(BuiltinKind::Deck),
             crate::decks::DECKS_ID => Some(BuiltinKind::Decks),
             crate::mixer::CROSSFADER_ID => Some(BuiltinKind::Crossfader),
+            crate::math::MATH_ID => Some(BuiltinKind::Math),
             _ => None,
         }
     }
@@ -78,6 +80,7 @@ impl BuiltinKind {
             BuiltinKind::Deck => crate::deck::DECK_ID,
             BuiltinKind::Decks => crate::decks::DECKS_ID,
             BuiltinKind::Crossfader => crate::mixer::CROSSFADER_ID,
+            BuiltinKind::Math => crate::math::MATH_ID,
         }
     }
 
@@ -96,6 +99,7 @@ impl BuiltinKind {
             BuiltinKind::Deck => crate::deck::deck_manifest(),
             BuiltinKind::Decks => crate::decks::decks_manifest(),
             BuiltinKind::Crossfader => crate::mixer::crossfader_manifest(),
+            BuiltinKind::Math => crate::math::math_manifest(),
         }
     }
 }

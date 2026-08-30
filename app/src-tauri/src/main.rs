@@ -168,6 +168,9 @@ enum EditKey<'a> {
     ChoreoTrackSettings(&'a str, usize),
     /// Cell/value edits coalesce per track (drag paints stream updates).
     ChoreoData(&'a str, usize),
+    /// A Math module's expression; keyed per instance so a burst of
+    /// typing collapses into one undo step.
+    MathExpr(&'a str),
     Knob(&'a str, &'a str),
     KnobConfig(&'a str, &'a str),
     KnobReset(&'a str, &'a str),
@@ -219,6 +222,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::ChoreoTrackMove(i) => write!(f, "choreo-move:{i}"),
             EditKey::ChoreoTrackSettings(i, t) => write!(f, "choreo-settings:{i}:{t}"),
             EditKey::ChoreoData(i, t) => write!(f, "choreo-data:{i}:{t}"),
+            EditKey::MathExpr(i) => write!(f, "math-expr:{i}"),
             EditKey::Knob(i, j) => write!(f, "knob:{i}:{j}"),
             EditKey::KnobConfig(i, j) => write!(f, "knobcfg:{i}:{j}"),
             EditKey::KnobReset(i, j) => write!(f, "knobreset:{i}:{j}"),
@@ -1223,6 +1227,34 @@ fn choreo_set_note_settings(
     engine
         .choreo_set_note_settings(&instance, track, octaves, &scale, base_note)
         .map_err(err)
+}
+
+/// The Math panel's whole state: the expression as typed and why it is
+/// not running, if it is not.
+#[derive(serde::Serialize)]
+struct MathStatus {
+    expr: String,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn math_status(state: State<AppState>, instance: String) -> CmdResult<MathStatus> {
+    let engine = engine_lock(&state)?;
+    Ok(MathStatus {
+        expr: engine.math(&instance).map_err(err)?.expr.clone(),
+        error: engine.math_error(&instance).map_err(err)?,
+    })
+}
+
+/// Set the expression. A text that does not compile is still the module's
+/// state (it is what the user typed and it round-trips through the patch);
+/// the message comes back for the panel to show while the last expression
+/// that DID compile keeps running.
+#[tauri::command]
+fn math_set_expr(state: State<AppState>, instance: String, expr: String) -> CmdResult<MathStatus> {
+    let mut engine = patch_edit(&state, EditKey::MathExpr(&instance))?;
+    let error = engine.math_set_expr(&instance, &expr).map_err(err)?;
+    Ok(MathStatus { expr, error })
 }
 
 /// One tracked camera frame into a Hands node (the camera panel calls
@@ -3013,6 +3045,8 @@ fn main() {
             choreo_set_values,
             choreo_set_note,
             choreo_set_note_settings,
+            math_status,
+            math_set_expr,
             hands_feed,
             undo,
             redo,

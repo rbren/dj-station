@@ -35,6 +35,7 @@ mod launch_control;
 mod live_edit;
 mod macro_store;
 mod macros;
+mod math;
 mod midi_led;
 mod midi_poly;
 mod modules_effects;

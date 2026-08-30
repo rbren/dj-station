@@ -1243,6 +1243,34 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'q -> sequencer reset: tap to restart the pattern on the downbeat.',
     ],
   },
+  'builtin.math': {
+    summary:
+      'Eight outputs, one expression. The panel holds a line of ' +
+      'Rust-flavoured arithmetic evaluated per sample for every output ' +
+      'jack, where `x` is this module\u2019s input (knob or CV, ' +
+      '\u221210..+10 V) and `i` is the jack\u2019s own index (0\u20137) ' +
+      '\u2014 so `(3 * (x + i)).pow(2)` gives eight related curves off ' +
+      'one dial. It understands `+ - * / %`, parentheses, methods and ' +
+      'free functions (`x.sin()`, `x.pow(i)`, `x.clamp(-1.0, 1.0)`, ' +
+      '`min`, `max`, `sqrt`, `abs`, `floor`, `ln`, `atan2`\u2026), casts ' +
+      '(`i as f32`) and the constants `pi`, `tau`, `e` plus `n` (the ' +
+      'output count, 8). Results are held to \u00b110 V, and a division ' +
+      'by zero or other non-number reads as 0 V. A text that does not ' +
+      'parse shows its error under the box and changes nothing: the last ' +
+      'expression that compiled keeps running, so a half-typed edit never ' +
+      'glitches the patch. The expression is saved with the patch.',
+    inputs: {
+      x: 'The expression\u2019s `x`: a \u221210..+10 V knob, wireable like any other input.',
+    },
+    outputs: {
+      'out#': 'The expression evaluated with `i` = this jack\u2019s index (0\u20137).',
+    },
+    examples: [
+      'x -> a wide dial, out0..out7 -> eight VCA levels for one-knob crossfades.',
+      '`i as f32 * 0.0833` -> oscillator pitches: eight voices a semitone apart.',
+      '`(x + i as f32).sin() * 5.0` -> shimmering CV for filter cutoffs.',
+    ],
+  },
   'builtin.choreo': {
     summary:
       'A beat-indexed multi-track timeline for choreographing a whole ' +

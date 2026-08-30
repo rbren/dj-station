@@ -145,6 +145,14 @@ export interface ChoreoStatus {
   playhead: number;
 }
 
+/** The Math module's panel state: the expression as typed, plus why it is
+ *  not running when it does not compile (the last one that did keeps
+ *  playing). */
+export interface MathStatus {
+  expr: string;
+  error: string | null;
+}
+
 export interface MacroInfo {
   id: string;
   name: string;
@@ -489,6 +497,15 @@ export class EngineClient extends IpcClient {
       scale,
       baseNote,
     });
+  }
+  /** Read once when the Math panel mounts; quiet because a read racing
+   *  the module's removal is expected, not an error. */
+  mathStatus(instance: string) {
+    return this.call<MathStatus>('math_status', { instance }, { quiet: true });
+  }
+  /** Set the expression; the reply carries the compile error, if any. */
+  mathSetExpr(instance: string, expr: string) {
+    return this.call<MathStatus>('math_set_expr', { instance, expr });
   }
   undo() {
     return this.call<boolean>('undo');

@@ -24,6 +24,7 @@ use crate::decks::DecksState;
 use crate::engine::{Engine, EngineConfig, MidiMappingInfo, Workspace};
 use crate::knob::KnobState;
 use crate::macros::{MacroDef, MacroInstance, MacroLibrary};
+use crate::math::MathState;
 use crate::registry::ExtensionRegistry;
 
 pub const PATCH_FORMAT: &str = "djpatch-1";
@@ -62,6 +63,11 @@ pub struct ModuleFile {
     /// save/load, jack slots included so wires stay valid).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choreo: Option<ChoreoState>,
+    /// A Math node's expression, exactly as typed. Whether it COMPILES is
+    /// derived, never saved: a patch holding a broken expression loads
+    /// with a warning and the module silent until it is fixed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub math: Option<MathState>,
     /// A Decks bank's eight slots: which clip each plays, its level, tone
     /// controls, mute/solo and its place on the bank's grid. Like a Beat
     /// Clip's binding, the clips' AUDIO is not here — the app layer
@@ -445,6 +451,7 @@ impl Engine {
                     midi_mappings: Vec::new(),
                     midi_led_mappings: Vec::new(),
                     choreo: None,
+                    math: None,
                     decks: None,
                     track: None,
                     clip: None,
@@ -511,6 +518,7 @@ impl Engine {
             midi_mappings: info.midi_mappings.clone(),
             midi_led_mappings: info.midi_led_mappings.clone(),
             choreo: info.choreo.clone(),
+            math: info.math.clone(),
             decks: self.decks_state(&info.instance_id).ok(),
             track: info.track_path.clone(),
             clip: info.clip.clone(),
@@ -848,6 +856,15 @@ impl Engine {
         if let Some(c) = &mf.choreo {
             self.choreo_set_state(instance_id, c.clone())?;
         }
+        if let Some(m) = &mf.math {
+            // A saved expression that no longer parses (hand-edited, or
+            // written against a newer build) leaves the module silent and
+            // warns — never a failed load.
+            if let Some(e) = self.math_set_state(instance_id, m.clone())? {
+                self.load_warnings
+                    .push(format!("{instance_id}: expression not compiled ({e})"));
+            }
+        }
         if let Some(d) = &mf.decks {
             self.decks_set_state(instance_id, d.clone())?;
         }
@@ -1100,6 +1117,14 @@ impl Engine {
                 let node = self.node_idx(instance_id)?;
                 if self.nodes[node].choreo.as_ref() != Some(c) {
                     self.choreo_set_state(instance_id, c.clone())?;
+                }
+            }
+
+            // Math expression (an undo/redo of typing lands here).
+            if let Some(m) = &mf.math {
+                let node = self.node_idx(instance_id)?;
+                if self.nodes[node].math.as_ref() != Some(m) {
+                    self.math_set_state(instance_id, m.clone())?;
                 }
             }
 

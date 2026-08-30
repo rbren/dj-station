@@ -43,6 +43,7 @@ mod launch_control_api;
 mod lifecycle;
 pub use lifecycle::{audio_output_devices, AudioDeviceStatus, AudioOutputs};
 mod macros_api;
+mod math_api;
 mod midi;
 mod qwerty_api;
 mod rename;
@@ -197,6 +198,9 @@ pub struct NodeInfo {
     /// Canonical timeline state for a Choreography node (persisted in the
     /// patch; the RT side plays a compiled copy).
     pub choreo: Option<crate::choreo::ChoreoState>,
+    /// The expression a Math node evaluates, exactly as typed (persisted
+    /// in the patch; the RT side runs a compiled copy).
+    pub math: Option<crate::math::MathState>,
     /// Path of the track loaded into a Playback/Deck node (persisted in the
     /// patch).
     pub track_path: Option<String>,
@@ -448,6 +452,8 @@ pub struct Engine {
     launch_control_connected: bool,
     /// Compiled-program handoff + playhead per Choreography node.
     choreos: HashMap<usize, crate::choreo::ChoreoControl>,
+    /// Compiled-expression handoff + last compile error per Math node.
+    maths: HashMap<usize, crate::math::MathControl>,
     /// LED feedback messages coming back from the RT thread, per MIDI node.
     midi_out_consumers: HashMap<usize, rtrb::Consumer<MidiOutEvent>>,
     /// Registered macro definitions (engine-side view of the library store).
@@ -514,6 +520,9 @@ const LAUNCH_CONTROL_QUEUE_CAP: usize = 4096;
 /// Pending compiled choreography programs per Choreo node (drained at the
 /// next block; edits are UI-rate).
 const CHOREO_QUEUE_CAP: usize = 64;
+/// Pending compiled expressions per Math node (same rationale as
+/// choreography programs: edits are UI-rate).
+const MATH_QUEUE_CAP: usize = 64;
 /// Pending track loads per Playback node (drained at the next block).
 const PLAYBACK_QUEUE_CAP: usize = 64;
 /// Pending control commands per Deck node (drained at the next block).
@@ -584,6 +593,7 @@ impl Engine {
             launch_control_producers: HashMap::new(),
             launch_control_connected: false,
             choreos: HashMap::new(),
+            maths: HashMap::new(),
             midi_out_consumers: HashMap::new(),
             macros: MacroLibrary::default(),
             macro_instances: BTreeMap::new(),
@@ -913,7 +923,8 @@ impl Engine {
                 | BuiltinKind::Audio
                 | BuiltinKind::BeatClip
                 | BuiltinKind::Decks
-                | BuiltinKind::Deck,
+                | BuiltinKind::Deck
+                | BuiltinKind::Math,
             ) => Err(anyhow!("{ext_id} modules are created via add_module")),
             None => {
                 let ext = self
@@ -984,6 +995,7 @@ impl Engine {
         let mut qwerty_plumbing = None;
         let mut launch_control_plumbing = None;
         let mut choreo_ctl = None;
+        let mut math_ctl = None;
         let mut playback_plumbing = None;
         let mut audio_ctl = None;
         let mut beat_clip_ctl = None;
@@ -1031,6 +1043,19 @@ impl Engine {
                     shared,
                     self.config.sample_rate,
                 ))
+            }
+            Some(BuiltinKind::Math) => {
+                let (tx, rx) = rtrb::RingBuffer::new(MATH_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(MATH_QUEUE_CAP);
+                math_ctl = Some(crate::math::MathControl::new(tx, garbage_rx));
+                // A fresh module already computes: its default expression
+                // is compiled here and handed over at construction, so the
+                // first block is the one the panel shows.
+                let program = crate::math::MathState::default()
+                    .compile()
+                    .ok()
+                    .map(std::sync::Arc::new);
+                Box::new(crate::math::MathRtModule::new(rx, garbage_tx, program))
             }
             Some(BuiltinKind::Playback) => {
                 let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
@@ -1175,6 +1200,11 @@ impl Engine {
             } else {
                 None
             },
+            math: if BuiltinKind::from_ext_id(ext_id) == Some(BuiltinKind::Math) {
+                Some(crate::math::MathState::default())
+            } else {
+                None
+            },
             track_path: None,
             clip: None,
             bypassed: false,
@@ -1253,6 +1283,9 @@ impl Engine {
         }
         if let Some(ctl) = choreo_ctl {
             self.choreos.insert(idx, ctl);
+        }
+        if let Some(ctl) = math_ctl {
+            self.maths.insert(idx, ctl);
         }
         if let Some((tx, garbage_rx)) = playback_plumbing {
             self.playback_producers.insert(idx, tx);
@@ -1343,6 +1376,7 @@ impl Engine {
         self.qwerty_producers.remove(&slot);
         self.launch_control_producers.remove(&slot);
         self.choreos.remove(&slot);
+        self.maths.remove(&slot);
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);
         self.audios.remove(&slot);

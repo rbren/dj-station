@@ -1,0 +1,14 @@
+{
+  "ext": "builtin.math",
+  "knobs": {
+    "x": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {},
+  "math": {
+    "expr": "(x * 0.3).sin() + i as f32 * 0.25"
+  }
+}

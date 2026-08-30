@@ -232,6 +232,40 @@ fails if it's missing.
   `app/src/components/ChoreoPanel.tsx` — and `ChoreoPanel.test.tsx`
   parses the Rust source to pin them equal. The Tauri commands are
   `choreo_*` with per-concern `EditKey` variants for undo coalescing.
+- Math module (`builtin.math`, `crates/dj-engine/src/math.rs` +
+  `engine/math_api.rs`): EIGHT OUTPUTS, ONE EXPRESSION — a line of
+  Rust-flavoured arithmetic over `x` (the module's -10..+10 V input knob,
+  wireable like any other) and `i` (the output jack's own index 0..7),
+  evaluated per sample per jack. Rust is NOT compiled and never could be
+  on the audio thread: the text is parsed CONTROL-side into a
+  `MathProgram` (flat postfix `Vec<Op>` over a fixed 32-deep stack, depth
+  and op count proven at compile time) and shipped as an `Arc` over an
+  SPSC ring with a garbage ring for the off-RT drop — the choreography
+  handoff, so `eval` allocates nothing, locks nothing and cannot panic.
+  The accepted grammar is a SUBSET of Rust: `+ - * / %`, unary minus,
+  parens, literals with `_`/exponent/`f32` suffixes, method calls
+  (`x.sin()`, `x.pow(i)`, `x.clamp(a, b)`) and the same names as free
+  functions, casts (`i as f32` is a no-op, `as i32` truncates, unsigned
+  saturates at 0 like Rust), the variables `x`/`i` and the constants
+  `pi`/`tau`/`e` plus `n` (= `MATH_OUTPUTS`). Results are clamped to the
+  ±10 V rails and a non-finite value reads as 0 V — a wild expression
+  must not blast or NaN what it is patched into. TWO VERBS, and the
+  difference is what a broken text leaves running: `math_set_expr` is
+  TYPING (state keeps the text, the error goes back for the panel, the
+  last program that compiled plays on — a half-typed edit never glitches
+  audio) and `math_set_state` is INSTALLING a saved state (patch load,
+  undo/redo, macro adopt), which pushes `MathProgram::silent()` instead,
+  because a module must not compute something nobody wrote; a patch
+  holding an unparseable expression LOADS, silent, with a
+  `load_warnings` entry. The expression is per-instance state in the
+  patch (`ModuleFile.math`, skipped when absent so other goldens keep
+  their bytes); the compile error is DERIVED and never persisted. Tauri:
+  `math_status` (`engine_lock`, quiet) and `math_set_expr` under
+  `EditKey::MathExpr(instance)`, so a burst of typing coalesces into one
+  undo step — the panel (`MathPanel.tsx`) debounces keystrokes into one
+  IPC and commits + `end_edit`s on blur. Pinned by `math.rs`'s unit
+  tests (grammar/rails), `tests/integration/math.rs` and the
+  `utilities-math-intervals` golden.
 - Camera module (`extensions/camera`, `com.dj.camera`): the live webcam
   feed is pure app-layer — `ui-src/CameraUI.tsx` runs `getUserMedia` and
   renders a `<video>`; the DSP side is a buffered `in -> thru`

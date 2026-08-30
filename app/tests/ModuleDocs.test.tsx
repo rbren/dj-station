@@ -29,6 +29,7 @@ const BUILTIN_IDS = [
   'builtin.launchcontrol',
   'builtin.qwerty',
   'builtin.hands',
+  'builtin.math',
   'builtin.deck',
   'builtin.playback',
   'builtin.audio',

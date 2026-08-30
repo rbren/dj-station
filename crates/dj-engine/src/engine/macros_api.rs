@@ -243,6 +243,9 @@ impl Engine {
             for m in &mf.midi_led_mappings {
                 self.add_midi_led_mapping(&full, m.kind, m.num, &m.name)?;
             }
+            if let Some(m) = &mf.math {
+                self.math_set_state(&full, m.clone())?;
+            }
             if let Some(c) = &mf.choreo {
                 self.choreo_set_state(&full, c.clone())?;
             }
@@ -544,6 +547,7 @@ impl Engine {
                 midi_mappings: Vec::new(),
                 midi_led_mappings: Vec::new(),
                 choreo: None,
+                math: None,
                 decks: None,
                 track: None,
                 clip: None,

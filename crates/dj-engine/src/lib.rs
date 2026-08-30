@@ -25,6 +25,7 @@ pub mod launch_control;
 pub mod macro_store;
 pub mod macros;
 pub mod manifest;
+pub mod math;
 pub mod mixer;
 pub mod module_host;
 pub mod native_host;
@@ -51,6 +52,7 @@ pub use launch_control::LAUNCH_CONTROL_ID;
 pub use macro_store::{MacroImport, MacroStore, MACROS_DIR_NAME};
 pub use macros::{MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroParam, MacroPreviewNode};
 pub use manifest::Manifest;
+pub use math::{MathState, MATH_ID, MATH_OUTPUTS};
 /// Re-exported so the shell can hold a hardware MIDI connection alive
 /// (`Engine::connect_launchcontrol_hardware`) without depending on midir.
 #[cfg(feature = "midi-hw")]

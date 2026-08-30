@@ -2742,6 +2742,51 @@ body {
   font-style: italic;
 }
 
+/* --- Math module: the expression box and what it has to say ---------- */
+
+.math-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.math-expr {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+/* An expression that does not compile: the box says so and keeps the
+   text, because the last one that DID compile is still playing. */
+.math-expr-bad {
+  border-color: var(--fault);
+}
+
+.math-error,
+.math-hint {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.3;
+}
+
+.math-error {
+  color: var(--fault);
+}
+
+.math-hint {
+  color: var(--ink-dim);
+}
+
 /* --- QWERTY module: hint line above the keyboard-row jacks ----------- */
 
 .qwerty-panel {

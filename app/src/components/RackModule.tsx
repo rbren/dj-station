@@ -14,6 +14,7 @@ import { ChoreoPanel } from './ChoreoPanel';
 import { CUSTOM_UIS } from './customUIs';
 import { ErrorBoundary } from './ErrorBoundary';
 import { LaunchControlPanel } from './LaunchControlPanel';
+import { MathPanel } from './MathPanel';
 import { MidiPanel } from './MidiPanel';
 import { ModulePanel } from './ModulePanel';
 import { QwertyPanel } from './QwertyPanel';
@@ -159,6 +160,15 @@ export const RackModule = memo(function RackModule(props: RackModuleProps) {
                 endEdit: () => engine.endEdit(),
               }}
               onChanged={() => void refresh()}
+            />
+          ) : node.type_id === 'builtin.math' ? (
+            <MathPanel
+              instance={instanceId}
+              api={{
+                status: (i) => engine.mathStatus(i),
+                setExpr: (i, expr) => engine.mathSetExpr(i, expr),
+                endEdit: () => engine.endEdit(),
+              }}
             />
           ) : node.type_id === 'builtin.launchcontrol' ? (
             <LaunchControlPanel
