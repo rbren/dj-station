@@ -516,6 +516,35 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'Drop one unpatched at 4x for an 8 Hz trigger source with no master clock.',
     ],
   },
+  'com.dj.poisson': {
+    summary:
+      'Poisson Clock: triggers whose spacing is drawn from a gamma ' +
+      'distribution \u2014 a clock with a mean rate but no grid. Rate sets ' +
+      'the average events per second; density (k) sets how regular they ' +
+      'are: k = 1 is an exact Poisson process (memoryless, exponential ' +
+      'gaps), k above 1 tightens toward a steady clock (spread = 1/\u221ak) ' +
+      'and k below 1 goes clumpy \u2014 bursts separated by long silences. ' +
+      'Patch a clock in and the mean rate follows its tempo, so a whole ' +
+      'rack can drift around one pulse.',
+    inputs: {
+      rate: 'Mean events per second when free-running (0.05..50 Hz).',
+      density:
+        'Gamma shape k: 1 = Poisson, higher tightens toward a regular ' +
+        'clock, lower clumps events into bursts.',
+      clock:
+        'Clock to take the mean rate from \u2014 one event per incoming ' +
+        'pulse on average, measured between its last two rising edges. ' +
+        'Wired, it replaces the rate knob.',
+    },
+    outputs: {
+      out: 'Trigger per event (5 ms, shortened so fast events stay separate).',
+    },
+    examples: [
+      'Poisson Clock -> Drum trigger for hand-percussion fills that never repeat.',
+      'Clock mul4 -> its clock in, density high -> a hi-hat that breathes instead of marching.',
+      'Density low into a Random CV clock for clumped, gestural modulation.',
+    ],
+  },
   'com.dj.step_seq': {
     summary:
       '16-step CV/gate sequencer: per-step CV, gate on/off and ratchet ' +

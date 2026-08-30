@@ -368,6 +368,30 @@ fails if it's missing.
   rate, so the knob still applies (1x ⇒ 2 Hz out) and the next edge
   re-phases the grid. Its output jack is `out`, not `clock`: no other
   manifest reuses one id across both directions, so don't start.
+- Poisson Clock (`extensions/poisson`, `com.dj.poisson`): a GAMMA RENEWAL
+  process, not a per-tick coin flip — every inter-event interval is a draw
+  from `Gamma(shape = k, mean = 1/rate)`, so the `density` knob `k` is the
+  one dial that walks from clumpy through exact Poisson to nearly regular
+  (`k = 1` exponential gaps, `CV = 1/sqrt(k)` either side of it) WITHOUT
+  moving the mean rate — density is texture, never tempo, and the tests
+  pin that at every `k`. It runs on a phase accumulator measured in
+  EVENTS (`phase += rate/sr`; an event when it passes a dimensionless
+  `Gamma(k, 1/k)` draw), so a rate change stretches the interval in
+  flight instead of being ignored until the next event. A wire into
+  `clock` makes the incoming clock's measured rate the mean rate (one
+  event per pulse) and parks the `rate` knob, the LFO's clock-sync
+  arrangement; sub-multiples are a Clock Multiplier away, like every
+  other clock consumer here. Draws are Marsaglia–Tsang gammas on a
+  fixed-seed xorshift32 (reproducible renders; the rejection loop is
+  capped so the RT thread can never spin), and the pulse carries one
+  guaranteed LOW sample after it — at low `k` the process draws gaps
+  shorter than a sample often enough to matter, and an event landing
+  inside the pulse in flight WAITS, keeping its phase debt, instead of
+  fusing into one long gate. That waiting is what keeps the measured rate
+  honest: a merged burst would silently delete events (it read 20 % slow
+  before the fix). Bypass hands the clock input straight to `out`
+  (`"bypass": { "out": "clock" }`) — the randomiser steps aside and the
+  clock walks through. Golden: `seq-poisson-gamma`.
 - Module PRESETS are manifest DATA, not code, so any module can adopt
   them: `"presets": [{ "name": …, "values": { <input jack id>: value } }]`
   (`PresetDecl` in `manifest.rs`, values in the jack's own units, jacks

@@ -350,6 +350,144 @@ fn clock_mult_falls_back_to_free_running_when_the_clock_stops() {
 }
 
 // ---------------------------------------------------------------------------
+// Poisson clock
+// ---------------------------------------------------------------------------
+
+/// Mean inter-event interval (seconds) and its coefficient of variation —
+/// the two numbers a gamma renewal process is defined by.
+fn interval_stats(edges: &[usize]) -> (f32, f32) {
+    assert!(
+        edges.len() > 30,
+        "too few events to measure: {}",
+        edges.len()
+    );
+    let gaps: Vec<f32> = edges
+        .windows(2)
+        .map(|w| (w[1] - w[0]) as f32 / SR)
+        .collect();
+    let mean = gaps.iter().sum::<f32>() / gaps.len() as f32;
+    let var = gaps.iter().map(|g| (g - mean) * (g - mean)).sum::<f32>() / gaps.len() as f32;
+    (mean, var.sqrt() / mean)
+}
+
+/// A Poisson Clock probed on master L, at `rate` Hz and density `k`.
+fn poisson_patch(rate: f32, k: f32) -> Engine {
+    let mut e = probe_engine();
+    e.add_module("pz", "com.dj.poisson").unwrap();
+    e.set_knob_value("pz", "rate", rate).unwrap();
+    e.set_knob_value("pz", "density", k).unwrap();
+    probe(&mut e, 0, "pz", "out");
+    e
+}
+
+#[test]
+fn poisson_clock_at_k_one_has_exponential_intervals() {
+    let mut e = poisson_patch(20.0, 1.0);
+    let out = e.render_offline((30.0 * SR) as usize).unwrap();
+    let (mean, cv) = interval_stats(&rising_edges(&out[0]));
+
+    // k = 1 is the exponential/Poisson case: mean interval 1/rate and a
+    // coefficient of variation of exactly 1.
+    assert!((mean - 0.05).abs() < 0.005, "mean interval {mean} s");
+    assert!((cv - 1.0).abs() < 0.15, "CV {cv}, expected ~1");
+}
+
+#[test]
+fn poisson_density_sets_the_spread_and_leaves_the_rate_alone() {
+    // CV = 1/sqrt(k): clumpy below 1, tightening toward a regular clock
+    // above it, with the mean rate untouched throughout.
+    for k in [0.25f32, 1.0, 4.0, 16.0] {
+        let mut e = poisson_patch(20.0, k);
+        let out = e.render_offline((30.0 * SR) as usize).unwrap();
+        let (mean, cv) = interval_stats(&rising_edges(&out[0]));
+        let want = 1.0 / k.sqrt();
+        assert!(
+            (mean - 0.05).abs() < 0.008,
+            "k {k}: mean interval {mean} s, expected ~0.05"
+        );
+        assert!(
+            (cv - want).abs() < 0.25 * want,
+            "k {k}: CV {cv}, expected ~{want}"
+        );
+    }
+}
+
+#[test]
+fn poisson_pulses_stay_separate_triggers_even_when_clumped() {
+    // k = 1/16 draws gaps far shorter than a sample often enough that a
+    // naive gate would fuse whole bursts into one long high — and lose
+    // every event inside them. The run is long (10 000 events) because a
+    // CV of 4 makes a short one say very little about the mean.
+    let mut e = poisson_patch(50.0, 0.0625);
+    let out = e.render_offline((200.0 * SR) as usize).unwrap();
+    let nominal = (0.005 * SR) as usize;
+
+    for &run in &high_runs(&out[0]) {
+        assert!(run >= 1 && run <= nominal, "pulse width {run} samples");
+    }
+    let (mean, _) = interval_stats(&rising_edges(&out[0]));
+    assert!(
+        (mean - 0.02).abs() < 0.003,
+        "clumped mean interval {mean} s, expected ~0.02 (no events lost)"
+    );
+}
+
+#[test]
+fn poisson_clock_takes_its_mean_rate_from_a_wired_clock() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("pz", "com.dj.poisson").unwrap();
+    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 4 Hz
+    e.set_knob_value("pz", "rate", 0.05).unwrap(); // far off the clock's
+    e.connect("clk", "clock", "pz", "clock").unwrap();
+    probe(&mut e, 0, "pz", "out");
+
+    let out = e.render_offline((30.0 * SR) as usize).unwrap();
+    let (mean, cv) = interval_stats(&rising_edges(&out[0]));
+    assert!(
+        (mean - 0.25).abs() < 0.025,
+        "mean interval {mean} s, expected ~0.25 (one event per clock pulse)"
+    );
+    // Still a Poisson process, just one whose rate the clock sets.
+    assert!((cv - 1.0).abs() < 0.15, "CV {cv}, expected ~1");
+}
+
+#[test]
+fn poisson_clock_renders_identically_every_time() {
+    let a = poisson_patch(20.0, 1.0)
+        .render_offline((2.0 * SR) as usize)
+        .unwrap();
+    let b = poisson_patch(20.0, 1.0)
+        .render_offline((2.0 * SR) as usize)
+        .unwrap();
+    assert_eq!(a[0], b[0], "fixed-seed randomness must be reproducible");
+}
+
+#[test]
+fn poisson_clock_bypassed_hands_the_clock_straight_through() {
+    let mut e = probe_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("pz", "com.dj.poisson").unwrap();
+    e.set_knob_value("clk", "bpm", 240.0).unwrap();
+    e.connect("clk", "clock", "pz", "clock").unwrap();
+    probe(&mut e, 0, "pz", "out");
+    probe(&mut e, 1, "clk", "clock");
+    e.set_bypass("pz", true).unwrap();
+
+    let out = e.render_offline((1.05 * SR) as usize).unwrap();
+    assert_eq!(
+        out[0], out[1],
+        "bypassed module must pass the clock through"
+    );
+    assert_edges_near(
+        &rising_edges(&out[0]),
+        &[0.0, 0.25, 0.5, 0.75, 1.0],
+        1,
+        "bypassed clock",
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Step sequencer
 // ---------------------------------------------------------------------------
 

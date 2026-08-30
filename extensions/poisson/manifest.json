@@ -1,0 +1,29 @@
+{
+  "id": "com.dj.poisson",
+  "name": "Poisson Clock",
+  "version": "0.1.0",
+  "abi": "wasm-1",
+  "category": "Clock & Sequencing",
+  "inputs": [
+    { "id": "rate", "name": "Rate", "default": 2.0,
+      "knob": { "style": "continuous", "min": 0.05, "max": 50.0, "curve": "exp" },
+      "display": { "unit": "Hz" } },
+    { "id": "density", "name": "Density (k)", "default": 1.0,
+      "knob": { "style": "continuous", "min": 0.0625, "max": 16.0, "curve": "exp" },
+      "display": { "unit": "" } },
+    { "id": "clock", "name": "Clock", "default": 0.0,
+      "knob": { "style": "button", "min": 0.0, "max": 10.0, "curve": "linear" } }
+  ],
+  "outputs": [
+    { "id": "out", "name": "Trigger" }
+  ],
+  "bypass": { "out": "clock" },
+  "presets": [
+    { "name": "Clumpy (k 1/16)", "values": { "density": 0.0625 } },
+    { "name": "Bursty (k 1/4)", "values": { "density": 0.25 } },
+    { "name": "Poisson (k 1)", "values": { "density": 1.0 } },
+    { "name": "Tightened (k 4)", "values": { "density": 4.0 } },
+    { "name": "Nearly regular (k 16)", "values": { "density": 16.0 } }
+  ],
+  "latency_samples": 0
+}

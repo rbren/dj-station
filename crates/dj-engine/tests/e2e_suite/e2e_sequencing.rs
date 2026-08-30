@@ -282,6 +282,65 @@ fn regen_clock_mult() {
     write_events(&dir, &EventsFile::seconds(1.5));
 }
 
+/// Two Poisson Clocks: one slaved to the master clock's x4 stream at
+/// k = 1 (an exact Poisson process at the clock's rate), one free-running
+/// on its knob at k = 16 (nearly regular), each gating its own voice.
+fn regen_poisson() {
+    let dir = crate::common::e2e::case_dir("seq-poisson-gamma");
+    let mut e = mono_engine();
+    e.add_module("clk", "com.dj.clock").unwrap();
+    e.add_module("pz1", "com.dj.poisson").unwrap();
+    e.add_module("pz2", "com.dj.poisson").unwrap();
+    e.add_module("osc1", "com.dj.oscillator").unwrap();
+    e.add_module("adsr1", "com.dj.adsr").unwrap();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    e.add_module("osc2", "com.dj.oscillator").unwrap();
+    e.add_module("adsr2", "com.dj.adsr").unwrap();
+    e.add_module("vca2", "com.dj.vca").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+
+    // Lead: 240 BPM x4 = 16 pulses per second, so the clocked Poisson
+    // scatters ~16 events per second around that grid without landing on
+    // it. Its own rate knob is parked low to prove the clock wins.
+    e.set_knob_value("clk", "bpm", 240.0).unwrap();
+    e.connect("clk", "mul4", "pz1", "clock").unwrap();
+    e.set_knob_value("pz1", "rate", 0.5).unwrap();
+    e.set_knob_value("pz1", "density", 1.0).unwrap();
+    e.connect("pz1", "out", "adsr1", "gate").unwrap();
+    set_stepped(&mut e, "osc1", "waveform", 3.0); // triangle
+    e.set_knob_value("adsr1", "attack", 0.003).unwrap();
+    e.set_knob_value("adsr1", "decay", 0.04).unwrap();
+    e.set_knob_value("adsr1", "sustain", 0.2).unwrap();
+    e.set_knob_value("adsr1", "release", 0.03).unwrap();
+    e.connect("osc1", "audio", "vca1", "in").unwrap();
+    e.connect("adsr1", "env", "vca1", "cv").unwrap();
+    // Wired inputs add to the knob baseline; close the gain knob so the
+    // envelope alone opens the VCA.
+    e.set_knob_value("vca1", "cv", 0.0).unwrap();
+    e.connect("vca1", "out", "out1", "l").unwrap();
+
+    // Bass: nothing in pz2's clock jack, so it free-runs on its rate knob
+    // at 6 Hz, and k = 16 tightens the intervals to a CV of 0.25 — a
+    // clock that breathes rather than one that swings.
+    e.set_knob_value("pz2", "rate", 6.0).unwrap();
+    e.set_knob_value("pz2", "density", 16.0).unwrap();
+    e.connect("pz2", "out", "adsr2", "gate").unwrap();
+    set_stepped(&mut e, "osc2", "waveform", 2.0); // square
+    e.set_knob_value("osc2", "pitch", -2.0).unwrap();
+    e.set_knob_value("adsr2", "attack", 0.002).unwrap();
+    e.set_knob_value("adsr2", "decay", 0.1).unwrap();
+    e.set_knob_value("adsr2", "sustain", 0.0).unwrap();
+    e.set_knob_value("adsr2", "release", 0.02).unwrap();
+    e.connect("osc2", "audio", "vca2", "in").unwrap();
+    e.connect("adsr2", "env", "vca2", "cv").unwrap();
+    e.set_knob_value("vca2", "cv", 0.0).unwrap();
+    e.connect("vca2", "out", "out1", "l").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-seq-poisson-gamma")
+        .unwrap();
+    write_events(&dir, &EventsFile::seconds(1.5));
+}
+
 #[test]
 fn e2e_seq_clock_step() {
     if regen() {
@@ -312,4 +371,12 @@ fn e2e_seq_clock_mult() {
         regen_clock_mult();
     }
     check_case("seq-clock-mult");
+}
+
+#[test]
+fn e2e_seq_poisson_gamma() {
+    if regen() {
+        regen_poisson();
+    }
+    check_case("seq-poisson-gamma");
 }

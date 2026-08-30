@@ -1,0 +1,9 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "adsr2",
+      "to_jack": "gate"
+    }
+  ]
+}

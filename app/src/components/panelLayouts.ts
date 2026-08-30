@@ -282,6 +282,21 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
+  // Poisson clock: the two statistics of the process on one row, with the
+  // clock that can take the rate over sitting next to the rate it replaces.
+  'com.dj.poisson': () => ({
+    groups: [
+      {
+        kind: 'row',
+        inputs: [
+          { jack: 'rate', label: 'rate' },
+          { jack: 'clock', label: 'clock' },
+          { jack: 'density', label: 'density' },
+        ],
+      },
+    ],
+  }),
+
   // Clock multiplier: two controls (clock in, ratio) on one row, so the
   // panel is as small as the module's job.
   'com.dj.clock_mult': () => ({

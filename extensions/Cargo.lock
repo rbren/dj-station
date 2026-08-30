@@ -164,6 +164,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dj-ext-poisson"
+version = "0.1.0"
+dependencies = [
+ "dj-module-sdk",
+]
+
+[[package]]
 name = "dj-ext-quantizer"
 version = "0.1.0"
 dependencies = [

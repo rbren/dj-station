@@ -119,6 +119,25 @@ fn an_unknown_preset_is_refused() {
 }
 
 #[test]
+fn a_second_module_ships_its_own_presets_the_poisson_densities() {
+    // Presets are data, so nothing about them is spectral-noise-shaped:
+    // the Poisson Clock offers its gamma shapes by name, and recalling one
+    // lands the exact k the manifest names — both ends of the knob's
+    // exponential range included.
+    let mut e = crate::common::default_engine();
+    e.add_module("pz", "com.dj.poisson").unwrap();
+    for (name, k) in [
+        ("Clumpy (k 1/16)", 0.0625f32),
+        ("Poisson (k 1)", 1.0),
+        ("Nearly regular (k 16)", 16.0),
+    ] {
+        e.apply_preset("pz", name).unwrap();
+        let got = knob_value(&e, "pz", "density");
+        assert!((got - k).abs() < 1e-3, "preset {name}: density {got}");
+    }
+}
+
+#[test]
 fn preset_values_are_ordinary_knob_state_and_survive_a_save() {
     let dir = tempfile::tempdir().unwrap();
     let mut e = spectral_noise();
