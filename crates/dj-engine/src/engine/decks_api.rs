@@ -55,8 +55,13 @@ impl Engine {
                 wet: s.wet,
                 insert_monitor: s.insert_monitor,
             },
+            // The GRID, not the raw clip: a deck's ratio is applied here,
+            // once, so the RT thread only ever sees beats of the bank's
+            // own grid and the tempo they are read at.
             DecksCmd::Timing {
                 slot: slot as u8,
+                beats: s.grid_beats(),
+                source_bpm: s.grid_bpm(),
                 tail: s.tail,
                 phase: s.phase,
             },
@@ -310,6 +315,9 @@ impl Engine {
         if fresh {
             s.tail = 0;
             s.phase = 0;
+            // On the bank's own grid: a ratio belonged to the clip that
+            // just left, like the shift and the silence after it.
+            s.ratio = 1.0;
             // A fresh clip lands cued: audible in the monitor, out of the
             // live mix, so a load never makes an unasked-for noise in the
             // room.
@@ -320,8 +328,6 @@ impl Engine {
             .push(DecksCmd::Load {
                 slot: slot as u8,
                 track: Some(audio),
-                beats,
-                source_bpm,
             })
             .map_err(|_| anyhow!("too many pending clip loads"))?;
         self.push_slot(node, slot)
@@ -369,13 +375,12 @@ impl Engine {
         s.beats = 0;
         s.tail = 0;
         s.phase = 0;
+        s.ratio = 1.0;
         s.mute = true;
         ctl.tx
             .push(DecksCmd::Load {
                 slot: slot as u8,
                 track: None,
-                beats: 0,
-                source_bpm: s.source_bpm,
             })
             .map_err(|_| anyhow!("too many pending clip loads"))?;
         self.push_slot(node, slot)
@@ -463,6 +468,25 @@ impl Engine {
         self.write_slot(node, slot, |s| s.tail = tail.min(MAX_TAIL_BEATS))
     }
 
+    /// Run this deck at a RATIO of the bank's grid: 2 is double time, 1/2
+    /// half time, 1 the clip on the grid as it was cut. It is the deck's
+    /// baseline tempo that moves — the clip's grid is read at
+    /// `source_bpm / ratio` — so the bank's one clock still drives it and
+    /// the pitch does not move; what changes is that its beats (and its
+    /// whole loop) come round `ratio` times as often as everyone else's.
+    ///
+    /// The loop it sits in just got shorter or longer, so the slot's
+    /// shift is folded back inside it, exactly as [`Engine::decks_set_phase`]
+    /// keeps it.
+    pub fn decks_set_ratio(&mut self, instance_id: &str, slot: usize, ratio: f32) -> Result<()> {
+        let node = self.decks_node(instance_id)?;
+        self.write_slot(node, slot, |s| {
+            s.ratio = crate::decks::clamp_ratio(ratio);
+            let len = s.length_beats() as i32;
+            s.phase = if len > 0 { s.phase.rem_euclid(len) } else { 0 };
+        })
+    }
+
     /// Shift the whole slot along the bank's grid, in whole beats. The
     /// shift is kept inside one loop length, so "shift right" on the last
     /// beat comes back to zero instead of counting off to infinity.
@@ -497,8 +521,6 @@ impl Engine {
                         .push(DecksCmd::Load {
                             slot: slot as u8,
                             track: None,
-                            beats: 0,
-                            source_bpm: s.source_bpm,
                         })
                         .map_err(|_| anyhow!("too many pending clip loads"))?;
                 }
@@ -551,11 +573,15 @@ impl Engine {
                 slot: i,
                 clip: s.clip.clone(),
                 loaded: ctl.tracks[i].is_some(),
-                beats: s.beats,
+                // The clip AS THE BANK COUNTS IT: a deck at a ratio takes
+                // that share of the grid, and its stretch is against the
+                // baseline the ratio put it on.
+                beats: s.grid_beats(),
                 tail: s.tail,
                 phase: s.phase,
                 source_bpm: s.source_bpm,
-                stretch: bank_bpm / s.source_bpm.max(1.0) as f64,
+                ratio: s.ratio,
+                stretch: bank_bpm / s.grid_bpm() as f64,
                 level: s.level,
                 low: s.low,
                 mid: s.mid,

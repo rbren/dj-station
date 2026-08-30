@@ -80,12 +80,18 @@ export interface DeckSlotStatus {
   clip: BeatClipRef | null;
   /** Whether the audio behind the binding is in hand yet. */
   loaded: boolean;
+  /** The clip's length in the BANK's beats — its own beats over the
+   *  deck's ratio, so a double-time deck's 8-beat clip is 4. */
   beats: number;
   tail: number;
   phase: number;
   /** The tempo the clip was rendered at. */
   source_bpm: number;
-  /** Bank tempo over source tempo; 1 plays the clip as rendered. */
+  /** How fast this deck runs against the rest of the bank: 1 is the clip
+   *  on the bank's grid, 2 double time, 0.5 half time. */
+  ratio: number;
+  /** How fast the audio is actually read, the ratio included: bank tempo
+   *  over the deck's baseline; 1 plays the clip as rendered. */
   stretch: number;
   /** Gain: `LEVEL_UNITY` is the clip as imported, `LEVEL_MAX` boosted. */
   level: number;
@@ -165,6 +171,8 @@ export interface DecksApi {
   arm(instance: string, slot: number, arm: DeckArm): Promise<void | null>;
   setTail(instance: string, slot: number, tail: number): Promise<void | null>;
   setPhase(instance: string, slot: number, phase: number): Promise<void | null>;
+  /** Run a deck at a ratio of the bank's grid (2 = double time). */
+  setRatio(instance: string, slot: number, ratio: number): Promise<void | null>;
   setBpm(instance: string, bpm: number): Promise<void | null>;
   setSurface(instance: string, follow: boolean): Promise<void | null>;
   /** The transport: start the bank's clock, or stop it and park it back
@@ -209,6 +217,9 @@ export class DecksClient extends IpcClient implements DecksApi {
   setPhase(instance: string, slot: number, phase: number) {
     return this.call<void>('decks_set_phase', { instance, slot, phase });
   }
+  setRatio(instance: string, slot: number, ratio: number) {
+    return this.call<void>('decks_set_ratio', { instance, slot, ratio });
+  }
   setBpm(instance: string, bpm: number) {
     return this.call<void>('decks_set_bpm', { instance, bpm });
   }
@@ -238,11 +249,49 @@ export function stretchLabel(stretch: number): string {
   return `${pct > 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}%`;
 }
 
-/** What a clip costs at the bank's tempo, on one line: the tempo it was
- *  cut at, then the stretch to get it here. The tempo drops a trailing
- *  `.0` — a clip cut at 140 reads "140 bpm". */
-export function tempoLabel(sourceBpm: number, stretch: number): string {
-  return `${Number(sourceBpm.toFixed(1))} bpm ${stretchLabel(stretch)}`;
+/** The ratios a deck can be run at, fastest first — the BPM label's menu.
+ *  A ratio is how often this deck's beats come round against everyone
+ *  else's: 2 is double time, 1/2 half time, and 1 puts it back on the
+ *  bank's own grid. Mirrors what `Engine::decks_set_ratio` accepts. */
+export const DECK_RATIOS: readonly { value: number; label: string; hint: string }[] = [
+  { value: 3, label: '3', hint: 'three times as fast' },
+  { value: 2, label: '2', hint: 'double time' },
+  { value: 1, label: '1', hint: "the bank's own grid" },
+  { value: 2 / 3, label: '2/3', hint: 'two thirds as fast' },
+  { value: 1 / 2, label: '1/2', hint: 'half time' },
+  { value: 1 / 3, label: '1/3', hint: 'a third as fast' },
+];
+
+/** A deck's ratio as the menu spells it ('2', '1/2', …); an unlisted one
+ *  (an older patch, a hand-edited file) falls back to a decimal. */
+export function ratioLabel(ratio: number): string {
+  const known = DECK_RATIOS.find((r) => Math.abs(r.value - ratio) < 1e-4);
+  return known ? known.label : `${Number(ratio.toFixed(3))}`;
+}
+
+/** Whether a deck is on the bank's own grid — nothing to say about it. */
+export function isNormalRatio(ratio: number): boolean {
+  return !Number.isFinite(ratio) || Math.abs(ratio - 1) < 1e-4;
+}
+
+/** The deck's BASELINE tempo: the tempo its grid is read at, which is
+ *  the clip's own over its ratio (double time takes a 140 bpm clip as
+ *  70, so the bank's beat is worth two of the clip's). The stretch is
+ *  measured against this, so baseline × stretch is always the tempo the
+ *  clip's beats actually come out at. */
+export function baselineBpm(sourceBpm: number, ratio: number): number {
+  return isNormalRatio(ratio) ? sourceBpm : sourceBpm / ratio;
+}
+
+/** The BPM half of a strip's tempo line — the part it makes clickable,
+ *  the stretch beside it coming from `stretchLabel`. It is the BASELINE
+ *  the deck reads its grid at, with the ratio that put it there when
+ *  that is not 1, and it drops a trailing `.0`: a clip cut at 140 on the
+ *  bank's grid reads "140 bpm", the same clip in double time "70 bpm
+ *  ×2". */
+export function bpmLabel(sourceBpm: number, ratio = 1): string {
+  const bpm = Number(baselineBpm(sourceBpm, ratio).toFixed(1));
+  return isNormalRatio(ratio) ? `${bpm} bpm` : `${bpm} bpm ×${ratioLabel(ratio)}`;
 }
 
 /** The two halves a deck names its clip by, kept apart so a strip can

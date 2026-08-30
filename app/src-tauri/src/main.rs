@@ -3163,6 +3163,7 @@ fn main() {
             decks::decks_arm,
             decks::decks_set_tail,
             decks::decks_set_phase,
+            decks::decks_set_ratio,
             decks::decks_set_bpm,
             decks::decks_set_surface,
             decks::decks_set_running,

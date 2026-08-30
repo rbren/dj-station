@@ -625,6 +625,7 @@ export function DecksView(props: DecksViewProps) {
                 onTail={(tail) => void write(() => api.setTail(bank, slot.slot, Math.max(0, tail)))}
                 onPhase={(phase) => void write(() => api.setPhase(bank, slot.slot, phase))}
                 beatNow={beatNow}
+                onRatio={(ratio) => void write(() => api.setRatio(bank, slot.slot, ratio))}
                 onRelease={() => void api.endEdit()}
                 onJack={onJack}
                 isArmed={isArmed}

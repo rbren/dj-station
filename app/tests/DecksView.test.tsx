@@ -10,7 +10,7 @@ import {
   clipParts,
   clipTitle,
   stretchLabel,
-  tempoLabel,
+  bpmLabel,
   DECK_GLOW_FULL,
   LEVEL_MAX,
   LEVEL_UNITY,
@@ -29,6 +29,7 @@ function emptySlot(slot: number): DeckSlotStatus {
     tail: 0,
     phase: 0,
     source_bpm: 120,
+    ratio: 1,
     stretch: 1,
     level: 0.8,
     low: 1,
@@ -98,6 +99,7 @@ function makeApi(status: DecksStatus, over: Partial<DecksApi> = {}): DecksApi {
     arm: vi.fn().mockResolvedValue(null),
     setTail: vi.fn().mockResolvedValue(null),
     setPhase: vi.fn().mockResolvedValue(null),
+    setRatio: vi.fn().mockResolvedValue(null),
     setBpm: vi.fn().mockResolvedValue(null),
     setSurface: vi.fn().mockResolvedValue(null),
     setRunning: vi.fn().mockResolvedValue(null),
@@ -193,6 +195,35 @@ describe('DecksView', () => {
     expect(dots.filter((d) => d.className.includes('on')).length).toBe(1);
     expect(dots[2].className).toContain('on');
     expect(dots[8].className).toContain('decks-beat-tail');
+  });
+
+  it('the BPM label runs a deck at a ratio of the bank grid', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[0] = loadedSlot(0);
+    const setRatio = vi.fn().mockResolvedValue(null);
+    show(makeApi(makeStatus({ slots }), { setRatio }));
+    await waitFor(() => expect(screen.getByTestId('decks-bpm-0')).toBeTruthy());
+    // Nothing opens until the label is clicked, and the choice closes it.
+    expect(screen.queryByTestId('decks-ratio-menu-0')).toBeNull();
+    fireEvent.click(screen.getByTestId('decks-bpm-0'));
+    expect(screen.getByTestId('decks-ratio-0-1').getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByTestId('decks-ratio-0-2'));
+    await waitFor(() => expect(setRatio).toHaveBeenCalledWith('decks1', 0, 2));
+    expect(screen.queryByTestId('decks-ratio-menu-0')).toBeNull();
+  });
+
+  it('a deck off the bank grid reads as the baseline the ratio put it on', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    // A 140 bpm clip in double time: the deck reads its grid as 70, so
+    // the bank's 128 drives the audio at +82.9% — the stretch is the
+    // truth about what is being played, ratio included.
+    slots[0] = loadedSlot(0, { source_bpm: 140, ratio: 2, stretch: 128 / 70, beats: 4 });
+    show(makeApi(makeStatus({ slots })));
+    await waitFor(() =>
+      expect(screen.getByTestId('decks-tempo-0').textContent).toBe('70 bpm ×2 +82.9%'),
+    );
+    // Four lamps, not eight: the clip's beats come round twice as often.
+    expect(screen.getByTestId('decks-dots-0').children.length).toBe(4);
   });
 
   it('draws a lamp for every beat of the loop, however long, silence included', async () => {
@@ -759,9 +790,13 @@ describe('decks readouts', () => {
     expect(stretchLabel(0.94)).toBe('−6.0%');
   });
 
-  it('puts the clip tempo and the stretch on one line, without a trailing .0', () => {
-    expect(tempoLabel(140, 1.093)).toBe('140 bpm +9.3%');
-    expect(tempoLabel(128.5, 1)).toBe('128.5 bpm ±0.0%');
+  it('names the tempo a deck reads its grid at, without a trailing .0', () => {
+    expect(bpmLabel(140)).toBe('140 bpm');
+    expect(bpmLabel(128.5, 1)).toBe('128.5 bpm');
+    // Off the grid, the baseline the ratio put it on and the ratio that
+    // did it — "70 bpm ×2" is the same clip, twice as often.
+    expect(bpmLabel(140, 2)).toBe('70 bpm ×2');
+    expect(bpmLabel(140, 1 / 3)).toBe('420 bpm ×1/3');
   });
 
   it('keeps the two halves of a clip name apart, one line each', () => {

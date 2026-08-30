@@ -1625,6 +1625,32 @@ beatify::build`.
   round trip too); the sidecar
   carries the slot mix in a `deck_slots` section (a load resets a slot, so
   the case sets the mix after the audio).
+- A DECK CAN RUN AT A RATIO OF THE BANK'S GRID (`DeckSlotState::ratio`,
+  `Engine::decks_set_ratio`, the strip's clickable BPM label): ×2 is
+  double time, ×1/2 half time, ×1 back on the grid — the page offers 3,
+  2, 1, 2/3, 1/2, 1/3 (`DECK_RATIOS` in `app/src/decks.ts`). The whole
+  of it is ONE DIVISION on the control side: the deck's BASELINE tempo
+  becomes `source_bpm / ratio` (`grid_bpm`) and its clip takes
+  `beats / ratio` of the bank's beats (`grid_beats`, rounded — a clip
+  whose beat count does not divide leaves a sliver of silence at the
+  seam), so the same clock, the same phase alignment and the same
+  granular stretch play it faster or slower without moving its pitch.
+  THE RT THREAD KNOWS NOTHING ABOUT RATIOS: `DecksCmd::Timing` carries
+  the already-divided grid (that is why `beats`/`source_bpm` moved off
+  `DecksCmd::Load`, which now only hands over audio), and
+  `DeckSlotStatus.beats`/`stretch` are the divided ones too — the lamp
+  row is the loop as the bank counts it and the stretch is what the
+  audio is really doing. It is patch state (`#[serde(default)]`, skipped
+  at 1 so old patches keep their bytes) and grid state like the tail and
+  the shift: `decks_load`/`decks_clear` put a deck back on the grid,
+  `decks_supply` does not, and the edit coalesces under
+  `EditKey::DeckSlot`. The strip's label says the baseline and the ratio
+  that put it there (`70 bpm ×2 +82.9%` for a 140 BPM clip in double
+  time), and its menu is a PORTAL because the strip row scrolls. Pinned
+  by `integration decks` (`a_deck_can_run_at_a_ratio_of_the_banks_grid`,
+  the patch round trip), `DecksView.test.tsx` and the
+  `decks-ratio-double` golden (two decks on one clip, one of them
+  double time with a beat of rest, so both still come round together).
 - THE BANK HAS A TRANSPORT AND STARTS STOPPED (`DecksCmd::Transport`,
   `Engine::decks_set_running`, `DecksStatus.running`, the page's
   Start/Stop pair): a bank is created — and restored from a patch —

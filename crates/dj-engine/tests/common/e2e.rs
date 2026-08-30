@@ -73,6 +73,11 @@ pub struct DecksSlotSpec {
     pub tail: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<i32>,
+    /// Run this deck at a ratio of the bank's grid (2 = double time).
+    /// It goes in the sidecar rather than the patch because a load puts a
+    /// deck back on the bank's grid, and the sidecar is what loads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ratio: Option<f32>,
     /// A queue or drop armed before the render: the bank's clock decides
     /// when the mute it stands for lands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -303,6 +308,9 @@ fn render_case(case: &str) -> PathBuf {
         }
         if let Some(v) = d.insert_monitor {
             set(SlotControl::InsertMonitor, if v { 10.0 } else { 0.0 });
+        }
+        if let Some(v) = d.ratio {
+            engine.decks_set_ratio(&d.instance, d.slot, v).unwrap();
         }
         if let Some(v) = d.tail {
             engine.decks_set_tail(&d.instance, d.slot, v).unwrap();

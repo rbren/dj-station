@@ -66,6 +66,18 @@
 //! one clip beat means is the slot's `source_bpm`, written by the loader
 //! from the Beatify project the clip was cut in.
 //!
+//! A DECK CAN RUN AT A RATIO OF THE BANK'S GRID
+//! ([`DeckSlotState::ratio`], the page's BPM label): a deck at 2 is in
+//! double time — its clip's beats come round twice as often as everyone
+//! else's — and one at 1/2 is half time. The whole of it is a division:
+//! the clip's grid is READ at `source_bpm / ratio`
+//! ([`DeckSlotState::grid_bpm`]), which is the baseline the stretch is
+//! measured against, so the loop takes `beats / ratio` of the bank's
+//! beats and the same granular stretch runs it faster or slower without
+//! moving its pitch. Nothing on the RT thread knows about ratios — it is
+//! handed the divided grid — and the ratio is patch state, so a bank
+//! comes back in double time where it was left.
+//!
 //! Slots load MUTED and un-shifted: dropping a clip into a running bank
 //! can never make a noise the user did not ask for, and the level, EQ and
 //! monitor switch they already set stay where they are.
@@ -395,6 +407,12 @@ pub struct DeckSlotState {
     /// The tempo the clip's audio was rendered at (its project's).
     #[serde(default = "default_bpm")]
     pub source_bpm: f32,
+    /// How fast this deck runs against the rest of the bank: 1 is the
+    /// clip on the bank's own grid, 2 is double time, 1/2 half time (see
+    /// [`DeckSlotState::grid_bpm`]). Skipped when it is 1, so a patch
+    /// written before decks could be put in double time keeps its bytes.
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    pub ratio: f32,
     /// Extra beats of silence played after the clip, before it wraps.
     #[serde(default)]
     pub tail: u32,
@@ -442,8 +460,26 @@ fn default_bpm() -> f32 {
 fn unity() -> f32 {
     1.0
 }
+fn is_unity(v: &f32) -> bool {
+    *v == 1.0
+}
 fn yes() -> bool {
     true
+}
+
+/// How far a deck may be taken off the bank's grid ([`DeckSlotState::ratio`]).
+/// The page offers 3, 2, 1, 2/3, 1/2 and 1/3; the engine only insists the
+/// ratio is a sane, finite multiple.
+pub const MIN_RATIO: f32 = 1.0 / 8.0;
+pub const MAX_RATIO: f32 = 8.0;
+
+/// A tempo ratio the bank will accept. Nonsense (a NaN, a zero) is 1 —
+/// the deck simply stays on the bank's grid.
+pub fn clamp_ratio(ratio: f32) -> f32 {
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return 1.0;
+    }
+    ratio.clamp(MIN_RATIO, MAX_RATIO)
 }
 
 impl Default for DeckSlotState {
@@ -452,6 +488,7 @@ impl Default for DeckSlotState {
             clip: None,
             beats: 0,
             source_bpm: DEFAULT_BPM,
+            ratio: 1.0,
             tail: 0,
             phase: 0,
             level: LEVEL_UNITY,
@@ -467,13 +504,38 @@ impl Default for DeckSlotState {
 }
 
 impl DeckSlotState {
+    /// The tempo this deck's grid is READ at — the clip's own tempo over
+    /// its ratio. That single division is the whole of the ratio: a deck
+    /// at 2 has its 140 BPM clip taken as 70, so the bank's beat is worth
+    /// two of the clip's and the stretch drives it twice as fast, while
+    /// the pitch stays where the clip put it (the grains still read at
+    /// the rate the audio was rendered at).
+    pub fn grid_bpm(&self) -> f32 {
+        self.source_bpm.max(1.0) / clamp_ratio(self.ratio)
+    }
+
+    /// The clip's own length in BANK beats: a double-time deck gets
+    /// through an eight-beat clip in four of them. Rounded, because a
+    /// clip whose beat count does not divide by the ratio has to land on
+    /// the grid somewhere; the remainder is heard as a sliver of silence
+    /// at the seam.
+    pub fn grid_beats(&self) -> u32 {
+        if self.beats == 0 {
+            return 0;
+        }
+        ((self.beats as f32 / clamp_ratio(self.ratio)).round() as u32).max(1)
+    }
+
     /// The slot's loop length: the clip plus whatever silence was hung on
     /// the end of it (never zero — an empty slot has no length at all).
+    /// The silence is in the BANK's beats, so a tail is the same rest
+    /// however fast the deck is running.
     pub fn length_beats(&self) -> u32 {
-        if self.beats == 0 {
+        let beats = self.grid_beats();
+        if beats == 0 {
             0
         } else {
-            self.beats + self.tail
+            beats + self.tail
         }
     }
 }
@@ -695,11 +757,12 @@ impl DecksShared {
 /// own clone alive, and what the RT thread replaces leaves on the garbage
 /// ring).
 pub enum DecksCmd {
+    /// New audio for a slot — a new timeline, so no grain crosses into
+    /// it. How long it is and what a beat of it means arrive with the
+    /// [`DecksCmd::Timing`] that follows every load.
     Load {
         slot: u8,
         track: Option<Arc<TrackData>>,
-        beats: u32,
-        source_bpm: f32,
     },
     Mix {
         slot: u8,
@@ -714,35 +777,30 @@ pub enum DecksCmd {
         /// Cue what came back into the monitor pair.
         insert_monitor: bool,
     },
+    /// Where this slot sits on the bank's grid and how much of that grid
+    /// it takes: the clip's length and the tempo it is read at are the
+    /// slot's own, DIVIDED BY ITS RATIO (see [`DeckSlotState::grid_bpm`]),
+    /// so a deck in double time is one whose beats are half as long — the
+    /// RT thread knows nothing about ratios.
     Timing {
         slot: u8,
+        beats: u32,
+        source_bpm: f32,
         tail: u32,
         phase: i32,
     },
     /// Which of a slot's three tone controls have their CV output patched
     /// into the rack — those stop touching the audio (see
     /// [`DecksRtModule::process`]).
-    Tone {
-        slot: u8,
-        patched: [bool; 3],
-    },
+    Tone { slot: u8, patched: [bool; 3] },
     /// Hold this slot's freshly written mute until the beat it belongs on
     /// ([`DeckArm`]). `serial` is the request's number, published back so
     /// the control thread knows the arm has been seen.
-    Arm {
-        slot: u8,
-        arm: DeckArm,
-        serial: u64,
-    },
+    Arm { slot: u8, arm: DeckArm, serial: u64 },
     /// The faders on the two output pairs, after the slot mix.
-    Master {
-        live: f32,
-        monitor: f32,
-    },
+    Master { live: f32, monitor: f32 },
     /// Run the bank's clock, or stop it and park it on beat 0.
-    Transport {
-        running: bool,
-    },
+    Transport { running: bool },
 }
 
 /// Control-side state per Decks node: the command ring, the garbage
@@ -847,12 +905,19 @@ pub struct DeckSlotStatus {
     pub clip: Option<BeatClipRef>,
     /// Whether the audio behind the binding is actually in hand.
     pub loaded: bool,
+    /// The clip's length in the BANK's beats — its own beats over the
+    /// deck's ratio, so a double-time deck's eight-beat clip is four.
     pub beats: u32,
     pub tail: u32,
     pub phase: i32,
     /// The tempo the clip was rendered at.
     pub source_bpm: f32,
-    /// Bank tempo over source tempo: 1.0 plays the clip as rendered.
+    /// How fast this deck runs against the rest of the bank: 1 is the
+    /// clip on the bank's grid, 2 is double time ([`DeckSlotState::ratio`]).
+    pub ratio: f32,
+    /// How fast the audio is actually being read, ratio included: bank
+    /// tempo over the tempo the deck's grid is read at
+    /// ([`DeckSlotState::grid_bpm`]). 1.0 plays the clip as rendered.
     pub stretch: f64,
     pub level: f32,
     pub low: f32,
@@ -1128,12 +1193,7 @@ impl DecksRtModule {
 
     fn apply(&mut self, cmd: DecksCmd) {
         match cmd {
-            DecksCmd::Load {
-                slot,
-                track,
-                beats,
-                source_bpm,
-            } => {
+            DecksCmd::Load { slot, track } => {
                 let Some(s) = self.slots.get_mut(slot as usize) else {
                     return;
                 };
@@ -1141,8 +1201,6 @@ impl DecksRtModule {
                 if let Some(old) = old {
                     let _ = self.garbage_tx.push(old);
                 }
-                s.beats = beats;
-                s.source_bpm = source_bpm.max(1.0);
                 // A new clip is a new timeline: no grain may cross into it,
                 // and no arm survives into it either — what was queued or
                 // dropping was the clip that just left.
@@ -1174,10 +1232,18 @@ impl DecksRtModule {
                 s.wet = wet.clamp(0.0, 1.0);
                 s.insert_monitor = insert_monitor;
             }
-            DecksCmd::Timing { slot, tail, phase } => {
+            DecksCmd::Timing {
+                slot,
+                beats,
+                source_bpm,
+                tail,
+                phase,
+            } => {
                 let Some(s) = self.slots.get_mut(slot as usize) else {
                     return;
                 };
+                s.beats = beats;
+                s.source_bpm = source_bpm.max(1.0);
                 s.tail = tail;
                 s.phase = phase;
             }
@@ -1657,12 +1723,27 @@ mod tests {
         })
     }
 
+    /// Hand a slot audio and the grid it is read on — the pair the
+    /// control thread always sends together (see `Engine::push_slot`).
     fn load(tx: &mut rtrb::Producer<DecksCmd>, slot: u8, beats: u32, value: f32) {
         tx.push(DecksCmd::Load {
             slot,
             track: Some(flat_clip(value, beats as usize)),
+        })
+        .unwrap();
+        timing(tx, slot, beats, 0, 0);
+    }
+
+    /// The grid a slot sits on: its length, the tempo it is read at (the
+    /// clip's own over the deck's ratio, applied control-side), the
+    /// silence after it and its shift.
+    fn timing(tx: &mut rtrb::Producer<DecksCmd>, slot: u8, beats: u32, tail: u32, phase: i32) {
+        tx.push(DecksCmd::Timing {
+            slot,
             beats,
             source_bpm: 120.0,
+            tail,
+            phase,
         })
         .unwrap();
     }
@@ -1983,12 +2064,7 @@ mod tests {
             |tx| {
                 load(tx, 0, 1, 0.5);
                 mix(tx, 0, 1.0, false, false);
-                tx.push(DecksCmd::Timing {
-                    slot: 0,
-                    tail: 1,
-                    phase: 0,
-                })
-                .unwrap();
+                timing(tx, 0, 1, 1, 0);
             },
             48_000,
             120.0,
@@ -2008,12 +2084,7 @@ mod tests {
             |tx| {
                 load(tx, 0, 2, 0.5);
                 mix(tx, 0, 1.0, false, false);
-                tx.push(DecksCmd::Timing {
-                    slot: 0,
-                    tail: 0,
-                    phase: 1,
-                })
-                .unwrap();
+                timing(tx, 0, 2, 0, 1);
             },
             128,
             120.0,
@@ -2222,12 +2293,7 @@ mod tests {
         load(&mut tx, 0, 2, 0.5);
         // Shifted a beat: the clip's first beat plays on the bank's ODD
         // beats, and that is where its queue must land.
-        tx.push(DecksCmd::Timing {
-            slot: 0,
-            tail: 0,
-            phase: 1,
-        })
-        .unwrap();
+        timing(&mut tx, 0, 2, 0, 1);
         mix(&mut tx, 0, 1.0, false, false);
         arm(&mut tx, 0, DeckArm::Queue, 1);
 
@@ -2274,12 +2340,7 @@ mod tests {
         // One beat of clip and one of silence hung on the end.
         load(&mut tx, 0, 1, 0.5);
         mix(&mut tx, 0, 1.0, false, false);
-        tx.push(DecksCmd::Timing {
-            slot: 0,
-            tail: 1,
-            phase: 0,
-        })
-        .unwrap();
+        timing(&mut tx, 0, 1, 1, 0);
         block(&mut m, BEAT / 2);
 
         mix(&mut tx, 0, 1.0, true, false);
@@ -2361,12 +2422,7 @@ mod tests {
         // One beat of clip, one of silence hung on the end.
         load(&mut tx, 0, 1, 0.5);
         mix(&mut tx, 0, 1.0, false, false);
-        tx.push(DecksCmd::Timing {
-            slot: 0,
-            tail: 1,
-            phase: 0,
-        })
-        .unwrap();
+        timing(&mut tx, 0, 1, 1, 0);
         // Settle into the loop — six beats leaves the playhead on the
         // seam — then read the two beats of one pass, one at a time.
         for _ in 0..6 {

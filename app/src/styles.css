@@ -6180,6 +6180,71 @@ body {
   font-size: var(--fs-xs);
 }
 
+/* The BPM half of that line is a button — it sets the deck's ratio to
+   the bank's grid — so it reads as the text it replaced until it is
+   hovered, and wears the brand ink while the deck is off that grid. */
+.decks-slot-bpm {
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.decks-slot-bpm:hover:not(:disabled) {
+  border: 0;
+  background: none;
+  color: var(--ink);
+}
+
+.decks-slot-bpm.is-ratioed {
+  color: var(--brand);
+}
+
+/* The ratio menu itself: a portal (the strip row scrolls), so it carries
+   its own surface rather than inheriting the strip's. */
+.decks-ratio-menu {
+  position: fixed;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.decks-ratio-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-muted);
+  font-size: var(--fs-nano);
+  text-align: left;
+}
+
+.decks-ratio-item:hover:not(:disabled) {
+  border: 0;
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+
+.decks-ratio-item.is-on {
+  color: var(--brand);
+}
+
+.decks-ratio-hint {
+  color: var(--ink-dim);
+}
+
 .decks-slot-note {
   margin: 0;
   color: var(--ink-dim);

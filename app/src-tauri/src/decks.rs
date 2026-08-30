@@ -205,6 +205,21 @@ pub fn decks_set_tail(
     engine.decks_set_tail(&instance, slot, tail).map_err(err)
 }
 
+/// Run a deck at a ratio of the bank's grid — the strip's BPM label. It
+/// moves the deck's baseline tempo (`Engine::decks_set_ratio`), so it is
+/// grid state like the tail and the shift and rides in the patch beside
+/// them.
+#[tauri::command]
+pub fn decks_set_ratio(
+    state: State<AppState>,
+    instance: String,
+    slot: usize,
+    ratio: f32,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DeckSlot(&instance, slot))?;
+    engine.decks_set_ratio(&instance, slot, ratio).map_err(err)
+}
+
 #[tauri::command]
 pub fn decks_set_phase(
     state: State<AppState>,

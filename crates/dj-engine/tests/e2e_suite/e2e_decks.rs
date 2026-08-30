@@ -99,10 +99,81 @@ fn slot_defaults() -> DecksSlotSpec {
         monitor: None,
         wet: None,
         insert_monitor: None,
+        ratio: None,
         tail: None,
         phase: None,
         arm: None,
     }
+}
+
+/// `decks-ratio-double`: two decks playing the SAME two-beat clip on one
+/// 120 BPM bank, one of them in DOUBLE TIME. The ratio moves a deck's
+/// baseline tempo — its grid is read at half the clip's, so the bank
+/// drives it twice as fast — and the golden pins both halves of that at
+/// once: deck two gets through the clip in one of the bank's beats and
+/// then rests (a beat of silence hung on its end, so the loop is two
+/// beats either way), while deck one plays the same audio across two. So
+/// the render is the two decks together for the first beat, deck one
+/// alone for the second, and the whole thing comes round on the bank's
+/// grid — which is what "twice as often as the other decks" means.
+fn regen_decks_ratio_double() {
+    let dir = case_dir("decks-ratio-double");
+    // One second = two beats at 120 BPM.
+    write_case_tone(&dir.join("two-beat.wav"), 220.0, 1.0);
+
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
+    e.add_module("bank1", "builtin.decks").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.set_knob_value("bank1", "bpm", 120.0).unwrap();
+    e.connect("bank1", "audio_l", "out1", "l").unwrap();
+    e.connect("bank1", "audio_r", "out1", "r").unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-decks-ratio-double")
+        .unwrap();
+    write_events(
+        &dir,
+        &EventsFile {
+            seconds: 2.0,
+            tracks: vec![
+                TrackLoadSpec {
+                    instance: "bank1".into(),
+                    file: "two-beat.wav".into(),
+                    bpm: Some(120.0),
+                    slot: Some(0),
+                },
+                TrackLoadSpec {
+                    instance: "bank1".into(),
+                    file: "two-beat.wav".into(),
+                    bpm: Some(120.0),
+                    slot: Some(1),
+                },
+            ],
+            deck_slots: vec![
+                DecksSlotSpec {
+                    instance: "bank1".into(),
+                    slot: 0,
+                    level: Some(0.8),
+                    mute: Some(false),
+                    // A fresh load lands cued; the golden is the live mix.
+                    monitor: Some(false),
+                    ..slot_defaults()
+                },
+                DecksSlotSpec {
+                    instance: "bank1".into(),
+                    slot: 1,
+                    level: Some(0.8),
+                    mute: Some(false),
+                    monitor: Some(false),
+                    // Double time: the clip in one beat, then one of rest,
+                    // so both decks still come round together.
+                    ratio: Some(2.0),
+                    tail: Some(1),
+                    ..slot_defaults()
+                },
+            ],
+            ..EventsFile::default()
+        },
+    );
 }
 
 /// `decks-arm-queue`: a two-beat clip with a QUEUE armed before the
@@ -377,6 +448,14 @@ fn decks_bank_two_clips() {
         regen_decks_bank_two_clips();
     }
     check_case("decks-bank-two-clips");
+}
+
+#[test]
+fn decks_ratio_double() {
+    if regen() {
+        regen_decks_ratio_double();
+    }
+    check_case("decks-ratio-double");
 }
 
 #[test]

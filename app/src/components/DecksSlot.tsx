@@ -6,6 +6,13 @@
 // row is a mixer's EQ column laid on its side, so it reads RIGHT TO LEFT
 // (low, mid, high from the left); the surface's rows stay high on top.
 //
+// THE BPM IS A BUTTON: clicking it runs this deck at a RATIO of the
+// bank's grid (×2 double time, ×1/2 half time, ×1 back to normal). The
+// ratio moves the deck's BASELINE tempo — the label shows the tempo its
+// grid is read at, so a 140 bpm clip in double time reads "70 bpm ×2"
+// and the stretch beside it is what the audio is really doing — and it
+// is engine state, so it rides in the patch with the rest of the deck.
+//
 // The dial/fader controls ARE the rack's own Knob (same look, same drag
 // law, same tooltip): a bank's slot is a mixer channel, not a new kind of
 // widget. Their values are engine units — 0..LEVEL_MAX for the fader,
@@ -28,20 +35,26 @@
 // are the REAL bank jacks (`data-jack` on the bank instance) — the same
 // wire overlay and click-to-wire grammar the Rack tab uses.
 
-import type { CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { Knob } from './Knob';
 import { LiveJack } from './Jack';
 import { StemTags } from './StemTags';
 import {
+  baselineBpm,
+  bpmLabel,
   clipParts,
   clipTitle,
   deckGlow,
+  isNormalRatio,
   loopBeats,
   phaseForBeat,
+  ratioLabel,
   returnJack,
   sendJack,
-  tempoLabel,
+  stretchLabel,
   toneJack,
+  DECK_RATIOS,
   EQ_MAX,
   LEVEL_MAX,
   LEVEL_UNITY,
@@ -74,6 +87,8 @@ export interface DecksSlotProps {
    *  press means "now" and a reading can be a poll old. Clicking SFT
    *  turns it into a shift. */
   beatNow(): number;
+  /** Run this deck at a ratio of the bank's grid (2 = double time). */
+  onRatio(ratio: number): void;
   onRelease(): void;
   /** Arm/complete/unplug a wire at one of this deck's jacks (the Rack
    *  tab's own jack-click grammar; shift unplugs). */
@@ -92,6 +107,12 @@ export function DecksSlot(props: DecksSlotProps) {
   const empty = slot.beats === 0;
   const loop = loopBeats(slot);
   const parts = clipParts(slot.clip);
+  // The ratio menu, the strip's one piece of local state: which deck is
+  // in double time is the engine's, whether its menu is open is not. The
+  // corner is taken off the label when it is clicked — the menu is a
+  // portal, so it needs a place on the page rather than in the strip.
+  const [ratioAt, setRatioAt] = useState<{ left: number; top: number } | null>(null);
+  const ratioed = !isNormalRatio(slot.ratio);
   // The strip lights up with what this deck is putting out. The reading
   // is the ENGINE's — the deck's own peak over roughly the last second,
   // decaying — so the tint jumps with the music and falls back to the
@@ -208,12 +229,54 @@ export function DecksSlot(props: DecksSlotProps) {
         </div>
       )}
 
-      {/* What the clip costs at the bank's tempo: the tempo it was cut at
-          and the stretch to get here, one line. The length is the lamp
-          row below — counting it twice said nothing new. */}
+      {/* What the clip costs at the bank's tempo: the baseline this deck
+          reads its grid at and the stretch to get here, one line. The
+          length is the lamp row below — counting it twice said nothing
+          new. The BPM half is a button: clicking it runs the deck at a
+          ratio of the bank's grid (double time and friends), which is
+          the same number said differently — a deck at ×2 reads a 140 bpm
+          clip as 70, so its beats come round twice as often. */}
       <p className="decks-slot-tempo mono" data-testid={`decks-tempo-${slot.slot}`}>
-        {empty ? '—' : tempoLabel(slot.source_bpm, slot.stretch)}
+        {empty ? (
+          '—'
+        ) : (
+          <>
+            <button
+              className={`decks-slot-bpm${ratioed ? ' is-ratioed' : ''}`}
+              data-testid={`decks-bpm-${slot.slot}`}
+              aria-haspopup="menu"
+              aria-expanded={ratioAt !== null}
+              title={
+                ratioed
+                  ? `Cut at ${Number(slot.source_bpm.toFixed(1))} bpm, run at ×${ratioLabel(
+                      slot.ratio,
+                    )} — its grid reads as ${Number(
+                      baselineBpm(slot.source_bpm, slot.ratio).toFixed(1),
+                    )} bpm, so its beats come round ×${ratioLabel(
+                      slot.ratio,
+                    )} as often as the other decks'`
+                  : "Run this deck at a ratio of the bank's grid"
+              }
+              onClick={(e) => {
+                const box = e.currentTarget.getBoundingClientRect();
+                setRatioAt((open) => (open ? null : { left: box.left, top: box.bottom }));
+              }}
+            >
+              {bpmLabel(slot.source_bpm, slot.ratio)}
+            </button>{' '}
+            {stretchLabel(slot.stretch)}
+          </>
+        )}
       </p>
+      {ratioAt && !empty && (
+        <RatioMenu
+          deck={n}
+          at={ratioAt}
+          ratio={slot.ratio}
+          onPick={props.onRatio}
+          onClose={() => setRatioAt(null)}
+        />
+      )}
 
       {!empty && !slot.loaded && (
         <p
@@ -390,5 +453,77 @@ export function DecksSlot(props: DecksSlotProps) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** The BPM label's menu: the ratios a deck can run at against the bank's
+ *  grid, with the one it is on ticked. Rendered in a PORTAL at the
+ *  label's own corner, because the strip row scrolls (`overflow: auto`)
+ *  and an in-flow menu would be cut off at the dock's edge — the same
+ *  reason the knob's config menu is a portal. Closes on Escape, on an
+ *  outside press, and on a choice. */
+function RatioMenu({
+  deck,
+  at,
+  ratio,
+  onPick,
+  onClose,
+}: {
+  deck: number;
+  /** The corner of the label the menu hangs under, in page coordinates. */
+  at: { left: number; top: number };
+  ratio: number;
+  onPick(ratio: number): void;
+  onClose(): void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const close = useCallback(() => onClose(), [onClose]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [close]);
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="decks-ratio-menu"
+      role="menu"
+      aria-label={`Tempo ratio for deck ${deck}`}
+      data-testid={`decks-ratio-menu-${deck - 1}`}
+      style={{ left: at.left, top: at.top }}
+    >
+      {DECK_RATIOS.map((option) => {
+        const on = Math.abs(option.value - ratio) < 1e-4;
+        return (
+          <button
+            key={option.label}
+            role="menuitemradio"
+            aria-checked={on}
+            className={`decks-ratio-item${on ? ' is-on' : ''}`}
+            data-testid={`decks-ratio-${deck - 1}-${option.label}`}
+            title={`Deck ${deck}: ${option.hint}`}
+            onClick={() => {
+              onPick(option.value);
+              close();
+            }}
+          >
+            <span className="mono">×{option.label}</span>
+            <span className="decks-ratio-hint">{option.hint}</span>
+          </button>
+        );
+      })}
+    </div>,
+    document.body,
   );
 }

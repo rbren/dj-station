@@ -315,6 +315,82 @@ fn silence_on_the_end_lengthens_the_loop_and_a_shift_moves_it() {
 }
 
 #[test]
+fn a_deck_can_run_at_a_ratio_of_the_banks_grid() {
+    let mut e = bank(); // 120 BPM bank, 120 BPM clips
+    load(&mut e, 0, 4);
+    assert_eq!(
+        e.decks_status("bank1").unwrap().slots[0].beats,
+        4,
+        "as cut, four clip beats fill four of the bank's"
+    );
+
+    e.decks_set_ratio("bank1", 0, 2.0).unwrap();
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!(st.slots[0].ratio, 2.0);
+    assert_eq!(
+        st.slots[0].beats, 2,
+        "double time gets through the same clip in two of the bank's beats"
+    );
+    assert!(
+        (st.slots[0].stretch - 2.0).abs() < 1e-9,
+        "and the audio is read twice as fast: {}",
+        st.slots[0].stretch
+    );
+    assert_eq!(
+        st.cycle_beats, 2,
+        "so the whole loop comes round twice as often"
+    );
+
+    // And it is HEARD there: two beats of clip, then the silence hung on
+    // the end — where the same clip on the bank's grid would still have
+    // been playing. 120 BPM is 24_000 frames a beat.
+    e.decks_set_tail("bank1", 0, 2).unwrap();
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    let out = e.render_offline(96_000).unwrap().remove(0);
+    assert!(
+        out[20_000].abs() > 0.1,
+        "the clip plays over the bank's first two beats"
+    );
+    assert!(
+        out[60_000..90_000].iter().all(|s| s.abs() < 1e-4),
+        "and the rest of the loop is the tail's silence"
+    );
+
+    // The other way round, a deck at half time takes twice the grid.
+    e.decks_set_ratio("bank1", 0, 0.5).unwrap();
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!(st.slots[0].beats, 8);
+    assert!((st.slots[0].stretch - 0.5).abs() < 1e-9);
+}
+
+#[test]
+fn a_decks_ratio_rides_in_the_patch_and_a_fresh_clip_lands_on_the_grid() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = bank();
+    load(&mut e, 0, 4);
+    e.decks_set_ratio("bank1", 0, 1.0 / 3.0).unwrap();
+    e.save_patch(&dir.path().join("p"), "decks").unwrap();
+
+    let mut e2 = Engine::load_patch(&dir.path().join("p"), crate::common::registry()).unwrap();
+    let st = e2.decks_status("bank1").unwrap();
+    assert!(
+        (st.slots[0].ratio - 1.0 / 3.0).abs() < 1e-6,
+        "a bank comes back running the deck where it was left"
+    );
+    assert_eq!(
+        st.slots[0].beats, 12,
+        "four clip beats over a third of the speed"
+    );
+
+    // A new clip is a new timeline: it arrives on the bank's own grid,
+    // like the shift and the silence the load clears.
+    load(&mut e2, 0, 4);
+    let st = e2.decks_status("bank1").unwrap();
+    assert_eq!((st.slots[0].ratio, st.slots[0].beats), (1.0, 4));
+}
+
+#[test]
 fn a_deck_plays_as_imported_at_mid_fader_and_boosts_above_it() {
     let mut e = bank();
     load(&mut e, 0, 4); // a constant 0.5, so the gain reads off the render
