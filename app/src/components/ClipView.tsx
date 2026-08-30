@@ -126,7 +126,15 @@ import {
   STEM_NAMES,
 } from '../clip';
 import { ClipTransport, type TransportHost } from '../clipTransport';
-import { ClipLivePlayer, liveAudioAvailable, tonePeaks, type LiveHost } from '../clipLive';
+import {
+  bleedWindows,
+  ClipLivePlayer,
+  liveAudioAvailable,
+  tonePeaks,
+  type BleedWindow,
+  type LiveBleedAudio,
+  type LiveHost,
+} from '../clipLive';
 import { logError } from '../errors';
 import { isEditableTarget } from '../fileShortcuts';
 import { fixed } from '../format';
@@ -163,6 +171,9 @@ const LOOP_TICK_MS = 50;
 /** Buckets for the selection pane's waveform: it is one pane wide, and
  *  the peaks are computed in the webview, so this is cheap. */
 const SEL_BUCKETS = 2000;
+/** Fewest buckets a bleed region is drawn with: a bookend is a fraction
+ *  of the loop's width, and a handful of columns still reads as audio. */
+const MIN_BLEED_BUCKETS = 8;
 /** Debounce before re-drawing the selection's waveform after a tone edit.
  *  The AUDIO is already live; this is only the picture catching up, and
  *  redrawing it per mousemove is what would cost. */
@@ -191,6 +202,14 @@ function levelDbFromY(y: number): number {
 }
 
 type Range = { start: number; end: number };
+
+/** The pictures the selection pane draws: the loop and the two bookends
+ *  either side of it, each its own region of the waveform. */
+interface PiecePeaks {
+  loop: number[];
+  left: number[];
+  right: number[];
+}
 
 /** Default stretch-correction length, in beats (the grid slider). */
 const DEFAULT_SECTION_BEATS = 4;
@@ -506,10 +525,15 @@ export function ClipView({
   /** The decoded selection, when the live player has one: what the
    *  selection pane's waveform is drawn from. */
   const [selBuffer, setSelBuffer] = useState<AudioBuffer | null>(null);
+  /** The decoded BOOKENDS beside it — the bleed either side of the span.
+   *  Kept apart from the loop because they are drawn apart from it: what
+   *  overlays them is playback, not the picture. */
+  const [bleedBuffers, setBleedBuffers] = useState<LiveBleedAudio>({ left: null, right: null });
   /** Peaks of the selection WITH the tone on it, computed off the decoded
    *  buffer; null until the first pass (the pane draws the dry material
-   *  meanwhile). */
-  const [selPeaks, setSelPeaks] = useState<number[] | null>(null);
+   *  meanwhile). Each piece is levelled where its material sits on the
+   *  timeline, so the three pictures agree with the three voices. */
+  const [selPeaks, setSelPeaks] = useState<PiecePeaks | null>(null);
   /** The live player is fetching material (a stem swap, a timeline edit).
    *  What is already loaded keeps playing until it lands. */
   const [selLoading, setSelLoading] = useState(false);
@@ -520,6 +544,29 @@ export function ClipView({
    *  runtime with no Web Audio has no graph at all — both fall back to
    *  the transport, where tone still costs a render. */
   const liveOn = sel !== null && sel.end - sel.start <= PLAY_WINDOW_SECS && liveAudioAvailable();
+
+  /** WHERE the bleed comes from: the windows either side of the span, in
+   *  output-timeline seconds, clamped to what the edit actually has.
+   *  Asked of the live player's own function, so the regions drawn (and
+   *  the times the level lane writes over them) are exactly the windows
+   *  that get fetched and heard. */
+  const bleedWin = useMemo(
+    () =>
+      sel
+        ? bleedWindows(sel, { leftMs: bleed.left, rightMs: bleed.right }, duration)
+        : { left: null, right: null },
+    [sel, bleed, duration],
+  );
+  const bleedLeftSecs = bleedWin.left?.len ?? 0;
+  const bleedRightSecs = bleedWin.right?.len ?? 0;
+  /** The pane's x-axis: the loop WITH its bookends. The level lane shares
+   *  it, so a point dropped over a bookend is written at the time that
+   *  bookend's material has on the timeline — which is what makes the
+   *  three envelopes independent where the audio overlaps. */
+  const laneRange = useMemo(
+    () => (sel ? { start: sel.start - bleedLeftSecs, end: sel.end + bleedRightSecs } : null),
+    [sel, bleedLeftSecs, bleedRightSecs],
+  );
 
   /** Move the playhead — on whichever owner has it. Declared here beside
    *  the owners because the editing gestures below seek too. */
@@ -685,7 +732,10 @@ export function ClipView({
       // The DRY span: this graph applies the tone itself.
       render: (start, len) => live.current.clip.previewAudio(live.current.dryRequest, start, len),
       duration: () => live.current.duration,
-      onBuffer: (buffer) => setSelBuffer(buffer),
+      onBuffer: (buffer, bleedAudio) => {
+        setSelBuffer(buffer);
+        setBleedBuffers(bleedAudio);
+      },
       onStatus: (s) => {
         if (!s.playing) commitTaps();
         if (!live.current.liveOn) return;
@@ -1047,11 +1097,11 @@ export function ClipView({
 
   const laneTimeAt = useCallback(
     (clientX: number, rect: DOMRect | null) => {
-      if (!rect || rect.width <= 0 || !sel) return 0;
+      if (!rect || rect.width <= 0 || !laneRange) return 0;
       const frac = (clientX - rect.left) / rect.width;
-      return sel.start + Math.min(1, Math.max(0, frac)) * (sel.end - sel.start);
+      return laneRange.start + Math.min(1, Math.max(0, frac)) * (laneRange.end - laneRange.start);
     },
-    [sel],
+    [laneRange],
   );
 
   const addLevelPoint = useCallback(
@@ -1281,23 +1331,33 @@ export function ClipView({
     let cancelled = false;
     const timer = setTimeout(() => {
       void (async () => {
-        const toned = await tonePeaks(
-          selBuffer,
-          program.eq.bands,
-          program.level,
-          sel.start,
-          SEL_BUCKETS,
-        );
+        // Every piece is drawn from ITS OWN place on the timeline: the
+        // loop from the span's start, each bookend from where its
+        // material was cut. A bookend's level is therefore its own, and
+        // the picture says so before the ear does.
+        const buckets = (secs: number) =>
+          Math.max(MIN_BLEED_BUCKETS, Math.round((SEL_BUCKETS * secs) / (sel.end - sel.start)));
+        const piece = (buffer: AudioBuffer | null, window: BleedWindow | null) =>
+          buffer && window
+            ? tonePeaks(buffer, program.eq.bands, program.level, window.start, buckets(window.len))
+            : Promise.resolve(null);
+        const [loop, left, right] = await Promise.all([
+          tonePeaks(selBuffer, program.eq.bands, program.level, sel.start, SEL_BUCKETS),
+          piece(bleedBuffers.left, bleedWin.left),
+          piece(bleedBuffers.right, bleedWin.right),
+        ]);
         // Null where the runtime has no OfflineAudioContext: the pane
         // keeps drawing the dry material, which is better than nothing.
-        if (!cancelled && toned) setSelPeaks(toned);
+        if (!cancelled && loop) {
+          setSelPeaks({ loop, left: left ?? [], right: right ?? [] });
+        }
       })();
     }, SEL_PEAKS_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [liveOn, selBuffer, program.eq, program.level, sel]);
+  }, [liveOn, selBuffer, bleedBuffers, program.eq, program.level, sel, bleedWin]);
 
   // An edit makes the fetched audio stale. What that costs playback
   // depends on WHAT changed:
@@ -1526,21 +1586,39 @@ export function ClipView({
   const stemsReady = picked?.state === 'ready';
   const noSelection = disabled || sel === null;
 
-  /** The selection pane's x-mapping: the span fills the pane, so the
-   *  level lane under it lines up beat for beat with the waveform. */
+  /** The selection pane's x-mapping: the span AND its bookends fill the
+   *  pane, so the level lane under it lines up with the waveform piece
+   *  for piece — including over the bleed, which is the only way a point
+   *  can be dropped on a bookend and mean that bookend. */
   const laneXOf = (secs: number) =>
-    sel && sel.end > sel.start ? ((secs - sel.start) / (sel.end - sel.start)) * W : 0;
+    laneRange && laneRange.end > laneRange.start
+      ? ((secs - laneRange.start) / (laneRange.end - laneRange.start)) * W
+      : 0;
+
+  /** Source-track peaks over an output-timeline window: the picture the
+   *  pane falls back to until the live graph has drawn its own. */
+  const windowPeaks = useCallback(
+    (from: number, to: number) => {
+      if (duration <= 0 || peaks.length === 0 || to <= from) return [];
+      const a = Math.max(0, Math.floor((from / duration) * peaks.length));
+      const b = Math.min(peaks.length, Math.ceil((to / duration) * peaks.length));
+      return peaks.slice(a, Math.max(a + 1, b));
+    },
+    [duration, peaks],
+  );
 
   /** What the selection pane draws: the toned peaks when the live graph
-   *  has computed them, the source track's own peaks over that span
+   *  has computed them, the source track's own peaks over each piece
    *  until it has (a picture arriving a moment late beats an empty one). */
-  const selPeaksShown = useMemo(() => {
+  const selPeaksShown = useMemo<PiecePeaks>(() => {
     if (liveOn && selPeaks) return selPeaks;
-    if (!sel || duration <= 0 || peaks.length === 0) return [];
-    const from = Math.max(0, Math.floor((sel.start / duration) * peaks.length));
-    const to = Math.min(peaks.length, Math.ceil((sel.end / duration) * peaks.length));
-    return peaks.slice(from, Math.max(from + 1, to));
-  }, [liveOn, selPeaks, sel, duration, peaks]);
+    if (!sel) return { loop: [], left: [], right: [] };
+    return {
+      loop: windowPeaks(sel.start, sel.end),
+      left: bleedWin.left ? windowPeaks(bleedWin.left.start, sel.start) : [],
+      right: bleedWin.right ? windowPeaks(sel.end, bleedWin.right.start + bleedWin.right.len) : [],
+    };
+  }, [liveOn, selPeaks, sel, bleedWin, windowPeaks]);
 
   /** One BOOKEND of the selection: how many milliseconds of the material
    *  beyond that edge ride with the clip as bleed. Not an edit — nothing
@@ -1569,10 +1647,14 @@ export function ClipView({
     </label>
   );
 
-  /** Level automation, drawn against the SELECTION. Points outside it are
-   *  still in the program (and still heard) — they simply belong to a
-   *  stretch of the edit this pane is not showing. */
-  const levelLane = sel ? (
+  /** Level automation, drawn against the SELECTION AND ITS BOOKENDS —
+   *  the same three pieces the waveform above shows, so one point-and-
+   *  click lane levels the bleed start, the loop and the bleed end
+   *  independently: they are different stretches of the timeline, and a
+   *  breakpoint belongs to whichever it lands in, however they overlap
+   *  when played. Points beyond all three are still in the program (and
+   *  still heard) — they belong to a stretch this pane is not showing. */
+  const levelLane = laneRange ? (
     <svg
       ref={laneRef}
       data-testid="clip-level-lane"
@@ -1581,19 +1663,35 @@ export function ClipView({
       preserveAspectRatio="none"
       onMouseDown={addLevelPoint}
     >
+      {/* Where the loop begins and ends, so it is plain which piece a
+          point is being dropped on. */}
+      {sel && (bleedLeftSecs > 0 || bleedRightSecs > 0)
+        ? [sel.start, sel.end].map((t, i) => (
+            <line
+              key={i}
+              className="clip-sel-seam"
+              x1={laneXOf(t)}
+              x2={laneXOf(t)}
+              y1={0}
+              y2={LEVEL_H}
+            />
+          ))
+        : null}
       <polyline
         className="clip-level-line"
         data-testid="clip-level-line"
         points={[
-          sel.start,
-          ...program.level.map((p) => p.time_secs).filter((t) => t > sel.start && t < sel.end),
-          sel.end,
+          laneRange.start,
+          ...program.level
+            .map((p) => p.time_secs)
+            .filter((t) => t > laneRange.start && t < laneRange.end),
+          laneRange.end,
         ]
           .map((t) => `${laneXOf(t)},${levelY(levelDbAt(program.level, t))}`)
           .join(' ')}
       />
       {program.level.map((p, i) =>
-        p.time_secs >= sel.start - 1e-6 && p.time_secs <= sel.end + 1e-6 ? (
+        p.time_secs >= laneRange.start - 1e-6 && p.time_secs <= laneRange.end + 1e-6 ? (
           <circle
             key={`${p.time_secs}:${i}`}
             data-testid={`clip-level-point-${i}`}
@@ -1956,7 +2054,15 @@ export function ClipView({
           {sel ? (
             <ClipSelectionPane
               span={sel}
-              peaks={selPeaksShown}
+              peaks={selPeaksShown.loop}
+              bleed={
+                bleedLeftSecs > 0 || bleedRightSecs > 0
+                  ? {
+                      left: { secs: bleedLeftSecs, peaks: selPeaksShown.left },
+                      right: { secs: bleedRightSecs, peaks: selPeaksShown.right },
+                    }
+                  : undefined
+              }
               waveHeight={SEL_WAVE_H}
               playing={playing}
               playhead={playhead}

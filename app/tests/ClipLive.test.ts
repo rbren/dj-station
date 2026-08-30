@@ -12,6 +12,7 @@ import {
   levelGainAt,
   levelSchedule,
   mixInto,
+  type LiveBleedAudio,
   type LiveHost,
 } from '../src/clipLive';
 import { closeAudio } from '../src/clipAudio';
@@ -154,7 +155,8 @@ describe('the live loop plays its bleed', () => {
 
   class FakeParam {
     value = 0;
-    setValueAtTime() {
+    setValueAtTime(value: number) {
+      this.value = value;
       return this;
     }
     linearRampToValueAtTime() {
@@ -168,8 +170,22 @@ describe('the live loop plays its bleed', () => {
     }
   }
 
-  /** Enough Web Audio for the player to fetch, mix and install a loop. */
-  function installAudio() {
+  interface FakeGain {
+    gain: FakeParam;
+  }
+
+  interface FakeSource {
+    buffer: AudioBuffer | null;
+    started: boolean;
+    /** The nodes it plays into: its OWN level gain first. */
+    out: FakeGain[];
+  }
+
+  /** Enough Web Audio for the player to fetch, lay out and play a loop —
+   *  and to say afterwards which buffer each voice got and what its own
+   *  level gain was set to. */
+  function installAudio(): FakeSource[] {
+    const sources: FakeSource[] = [];
     class FakeContext {
       state = 'running';
       currentTime = 0;
@@ -195,46 +211,70 @@ describe('the live loop plays its bleed', () => {
         };
       }
       createBufferSource() {
-        return {
+        const src = {
           buffer: null,
           loop: false,
           loopStart: 0,
           loopEnd: 0,
           onended: null,
-          connect() {},
+          started: false,
+          out: [] as FakeGain[],
+          connect(node: FakeGain) {
+            src.out.push(node);
+          },
           disconnect() {},
-          start() {},
+          start() {
+            src.started = true;
+          },
           stop() {},
         };
+        sources.push(src as unknown as FakeSource);
+        return src;
       }
       async resume() {}
       async close() {}
     }
     (window as unknown as { AudioContext: unknown }).AudioContext = FakeContext;
+    return sources;
+  }
+
+  interface Published {
+    loop: AudioBuffer | null;
+    left: AudioBuffer | null;
+    right: AudioBuffer | null;
   }
 
   /** A 10 s edit whose every second reads back as its own level, so a
    *  window says where it came from: the loop at 1, the material after
    *  it at 0.25, the material before it at 0.5. */
-  function fakeHost(): LiveHost & { published: AudioBuffer[] } {
+  function fakeHost(): LiveHost & { published: Published[] } {
     const level = new Map([
       [2, 1],
       [6, 0.25],
       [1.9, 0.5],
     ]);
-    const published: AudioBuffer[] = [];
+    const published: Published[] = [];
     return {
       render: vi.fn(async (start: number, len: number) => {
         const value = level.get(Number(start.toFixed(3))) ?? 0;
         return new Float32Array(Math.round(len * RATE)).fill(value).buffer;
       }),
       duration: () => 10,
-      onBuffer: (buf: AudioBuffer | null) => {
-        if (buf) published.push(buf);
+      onBuffer: (loop: AudioBuffer | null, bleed: LiveBleedAudio) => {
+        published.push({ loop, left: bleed.left, right: bleed.right });
       },
       onStatus: () => {},
       published,
     };
+  }
+
+  /** The voices of the pass in the air, loop first. */
+  function voicesOf(sources: FakeSource[]): FakeSource[] {
+    return sources.filter((s) => s.started && s.buffer);
+  }
+
+  function heardBy(voice: FakeSource): Float32Array {
+    return voice.buffer!.getChannelData(0);
   }
 
   afterEach(() => {
@@ -242,7 +282,7 @@ describe('the live loop plays its bleed', () => {
     delete (window as unknown as { AudioContext?: unknown }).AudioContext;
   });
 
-  it('lays the right bleed over the head of the loop and the left over its tail', async () => {
+  it('hands the loop over BARE, with its bookends beside it', async () => {
     installAudio();
     const host = fakeHost();
     const player = new ClipLivePlayer(host, { fetchDelayMs: 0 });
@@ -250,39 +290,99 @@ describe('the live loop plays its bleed', () => {
     player.setBleed(100, 100);
 
     await vi.waitFor(() => expect(host.published.length).toBeGreaterThan(0));
-    const heard = host.published[host.published.length - 1].getChannelData(0);
+    const { loop, left, right } = host.published[host.published.length - 1];
 
-    // The loop is still four seconds long: the bleed lies OVER the seam,
-    // it does not lengthen the loop or edit it.
-    expect(heard).toHaveLength(4 * RATE);
-    // Its head carries the material that FOLLOWED the selection…
-    expect(heard[0]).toBeCloseTo(1.25, 6);
-    expect(heard[99]).toBeCloseTo(1.25, 6);
-    // …for exactly the 100 ms asked for, and no further.
-    expect(heard[100]).toBeCloseTo(1, 6);
-    expect(heard[2000]).toBeCloseTo(1, 6);
-    // Its tail leans into the pass to come with the material from BEFORE
-    // the selection.
-    expect(heard[4 * RATE - 101]).toBeCloseTo(1, 6);
-    expect(heard[4 * RATE - 100]).toBeCloseTo(1.5, 6);
-    expect(heard[4 * RATE - 1]).toBeCloseTo(1.5, 6);
+    // The loop is four seconds of the selection and nothing else: the
+    // bleed plays OVER it, it is never written into it — which is what
+    // lets the pane draw the bookends as regions of their own.
+    expect(loop?.length).toBe(4 * RATE);
+    expect(loop?.getChannelData(0)[0]).toBeCloseTo(1, 6);
+    expect(loop?.getChannelData(0)[4 * RATE - 1]).toBeCloseTo(1, 6);
+    // The bookends arrive as themselves: 100 ms of the material at each
+    // side of the span.
+    expect(right?.length).toBe(100);
+    expect(right?.getChannelData(0)[0]).toBeCloseTo(0.25, 6);
+    expect(left?.length).toBe(100);
+    expect(left?.getChannelData(0)[0]).toBeCloseTo(0.5, 6);
+
+    player.dispose();
+  });
+
+  it('gives each bookend a voice of its own, laid at the seam it belongs to', async () => {
+    const sources = installAudio();
+    const host = fakeHost();
+    const player = new ClipLivePlayer(host, { fetchDelayMs: 0 });
+    player.setSpan(2, 6);
+    player.setBleed(100, 100);
+    await vi.waitFor(() => expect(host.published.length).toBeGreaterThan(0));
+    player.play();
+
+    // Three voices, each one loop long, so they wrap together for as
+    // long as they run: the mix happens HERE, in the graph, on playback.
+    const voices = voicesOf(sources);
+    expect(voices).toHaveLength(3);
+    const [loop, right, left] = voices.map(heardBy);
+    for (const data of [loop, right, left]) expect(data).toHaveLength(4 * RATE);
+
+    expect(loop[0]).toBeCloseTo(1, 6);
+    expect(loop[4 * RATE - 1]).toBeCloseTo(1, 6);
+    // The RIGHT bleed — the audio that FOLLOWED the selection — carries
+    // the last pass's tail over the head of this one, for exactly the
+    // 100 ms asked for and no further.
+    expect(right[0]).toBeCloseTo(0.25, 6);
+    expect(right[99]).toBeCloseTo(0.25, 6);
+    expect(right[100]).toBe(0);
+    // The LEFT bleed leans into the pass to come, at the tail.
+    expect(left[4 * RATE - 1]).toBeCloseTo(0.5, 6);
+    expect(left[4 * RATE - 100]).toBeCloseTo(0.5, 6);
+    expect(left[4 * RATE - 101]).toBe(0);
+
+    player.dispose();
+  });
+
+  it('levels each piece where its material came from, not where it lands', async () => {
+    const sources = installAudio();
+    const host = fakeHost();
+    const player = new ClipLivePlayer(host, { fetchDelayMs: 0 });
+    player.setSpan(2, 6);
+    player.setBleed(100, 100);
+    // A fade drawn over the RIGHT bookend's own stretch of the timeline
+    // — it was cut from 6 s on — leaving the loop at unity.
+    player.setLevel([
+      { time_secs: 2, gain_db: 0 },
+      { time_secs: 5.999, gain_db: 0 },
+      { time_secs: 6, gain_db: -12 },
+    ]);
+    await vi.waitFor(() => expect(host.published.length).toBeGreaterThan(0));
+    player.play();
+
+    const [loop, right] = voicesOf(sources);
+    // One instant, two gains: the bookend is heard OVER the head of the
+    // loop, but it is levelled from where it was CUT, so pulling the
+    // bleed down leaves the loop under it exactly where it was.
+    expect(loop.out[0].gain.value).toBeCloseTo(1, 6);
+    expect(right.out[0].gain.value).toBeCloseTo(10 ** (-12 / 20), 6);
 
     player.dispose();
   });
 
   it('asks for no bookend and hands over the bare loop with no bleed set', async () => {
-    installAudio();
+    const sources = installAudio();
     const host = fakeHost();
     const player = new ClipLivePlayer(host, { fetchDelayMs: 0 });
     player.setSpan(2, 6);
 
     await vi.waitFor(() => expect(host.published.length).toBeGreaterThan(0));
-    const heard = host.published[host.published.length - 1].getChannelData(0);
-    expect(heard[0]).toBeCloseTo(1, 6);
-    expect(heard[4 * RATE - 1]).toBeCloseTo(1, 6);
+    const { loop, left, right } = host.published[host.published.length - 1];
+    expect(loop?.getChannelData(0)[0]).toBeCloseTo(1, 6);
+    expect(left).toBeNull();
+    expect(right).toBeNull();
     // One render, for the span itself: a clip with no bleed costs the
     // backend exactly what it did before there was such a thing.
     expect((host.render as ReturnType<typeof vi.fn>).mock.calls).toEqual([[2, 4]]);
+    // And one voice: no silent bookends idling in the graph.
+    player.play();
+    expect(voicesOf(sources)).toHaveLength(1);
 
     player.dispose();
   });

@@ -18,29 +18,41 @@
 //
 // The graph:
 //
-//     voice(AudioBufferSourceNode, loop) -> voiceGain ┐
-//     voice' (during a crossfade)        -> voiceGain'┤
-//                                                     ├─> [peaking bells]
-//                                                     │      -> levelGain
-//                                                     │      -> destination
+//     loop        (AudioBufferSourceNode) -> levelGain  -> fade  ┐
+//     right bleed (AudioBufferSourceNode) -> levelGain' -> fade' ┤
+//     left bleed  (AudioBufferSourceNode) -> levelGain" -> fade" ┤
+//     (the same three again during a crossfade)                  ┤
+//                                                                ├─>
+//                                              [peaking bells] -> master
+//                                                  -> destination
 //
-// One voice sounds at a time except during a ~20 ms crossfade, which is
-// what makes a stem swap (or any material change) seamless: the running
-// loop keeps playing until the new audio is decoded, then the two are
-// faded across at the SAME phase. Nothing ever stops for an edit.
+// A voice is the three pieces of ONE pass, started together and levelled
+// apart (see below). One voice sounds at a time except during a ~20 ms
+// crossfade, which is what makes a stem swap (or any material change)
+// seamless: the running loop keeps playing until the new audio is
+// decoded, then the two are faded across at the SAME phase. Nothing ever
+// stops for an edit.
 //
 // Level automation is scheduled, not sampled: `levelSchedule` lays the
 // breakpoints of the next lookahead onto the gain param as ramps and
 // re-runs every 100 ms, wrapping where the loop wraps. Sampling the
 // envelope from a timer would smear a hard cut over the tick.
 //
-// The BLEED is fetched with the loop, not made from it: the two bookend
-// windows are renders of the edit either side of the span, summed over
-// the head and tail of a COPY of the loop before it is installed. The
-// selection loops for as long as it is auditioned, so the pass it plays
-// is a MIDDLE one — both bookends over the seam, which is the join they
-// exist to smooth. Which passes go bare is a matter for the players that
-// have a first and a last one (decks.rs, beat_clip.rs).
+// The BLEED is fetched with the loop and never mixed into it. The two
+// bookend windows are renders of the edit either side of the span, and
+// they play as their OWN looping voices, started with the loop and in
+// step with it: the right bleed's material at the head of the pass, the
+// left's at its tail, silence in between. Summing is the GRAPH's job, at
+// playback, which is also what lets each piece carry its own automation
+// — a voice is levelled from where its material sits on the TIMELINE
+// (the loop at the span's start, the right bleed at the span's end, the
+// left bleed one loop-length before its start), so a fade drawn over a
+// bookend moves that bookend and nothing else, even though the bookend
+// is heard on top of the loop. The selection loops for as long as it is
+// auditioned, so the pass it plays is a MIDDLE one — both bookends over
+// the seam, which is the join they exist to smooth. Which passes go bare
+// is a matter for the players that have a first and a last one
+// (decks.rs, beat_clip.rs).
 //
 // The preview is a very close TWIN of the saved render, not a bit-exact
 // copy: Web Audio's peaking biquads are the same RBJ cookbook filters as
@@ -72,8 +84,10 @@ export interface LiveHost {
    *  OUTSIDE the span, so they have to be clamped to what exists. */
   duration(): number;
   /** New material decoded (or lost): what the selection's waveform is
-   *  drawn from. */
-  onBuffer(buffer: AudioBuffer | null): void;
+   *  drawn from. The loop is handed over BARE, with the bookends beside
+   *  it rather than over it — they are drawn as their own regions, and
+   *  mixed only where they are heard (the graph). */
+  onBuffer(buffer: AudioBuffer | null, bleed: LiveBleedAudio): void;
   onStatus(status: LiveStatus): void;
 }
 
@@ -107,6 +121,14 @@ export interface LiveRange {
 export interface LiveBleed {
   leftMs: number;
   rightMs: number;
+}
+
+/** The decoded bookends: the material either side of the span, kept
+ *  apart from the loop because it is drawn apart from it and levelled
+ *  apart from it. Either side is null when it asks for nothing. */
+export interface LiveBleedAudio {
+  left: AudioBuffer | null;
+  right: AudioBuffer | null;
 }
 
 /** A window of the edit to fetch, in output-timeline seconds. */
@@ -334,33 +356,53 @@ function bookendChannel(buffer: AudioBuffer, channel: number): Float32Array {
   return buffer.getChannelData(Math.min(channel, buffer.numberOfChannels - 1));
 }
 
-/** The loop as it SOUNDS with its bookends over it: the right bleed
- *  summed at the head, the left at the tail, in a copy of the same
- *  length — the bleed lies over the seam, it never lengthens the loop
- *  or edits it. */
-function withBleed(
+/** A bookend as a VOICE of its own: the material at the place in the
+ *  pass where it is heard — the right bleed at the head, carrying the
+ *  last pass's tail over the seam, the left at the tail, leaning into
+ *  the pass to come — and silence everywhere else, in a buffer the
+ *  length of the loop so it wraps in step with it. Never a copy of the
+ *  loop: the two are summed where they are heard, not before. */
+function bleedVoiceBuffer(
   ctx: AudioContext,
   loop: AudioBuffer,
-  left: AudioBuffer | null,
-  right: AudioBuffer | null,
+  bookend: AudioBuffer,
+  side: 'left' | 'right',
 ): AudioBuffer {
   const out = ctx.createBuffer(loop.numberOfChannels, loop.length, loop.sampleRate);
+  const at = side === 'right' ? 0 : loop.length - bookend.length;
   for (let c = 0; c < loop.numberOfChannels; c++) {
-    const dst = out.getChannelData(c);
-    dst.set(loop.getChannelData(c));
-    if (right) mixInto(dst, bookendChannel(right, c), 0);
-    if (left) mixInto(dst, bookendChannel(left, c), loop.length - left.length);
+    mixInto(out.getChannelData(c), bookendChannel(bookend, c), at);
   }
   return out;
 }
 
-/** One voice: a looping buffer source and the gain it fades in on. */
-interface Voice {
+/** One PIECE of what is sounding: a looping buffer, the gain its own
+ *  level automation moves, and the gain it fades in on. */
+interface VoicePart {
   src: AudioBufferSourceNode;
-  gain: GainNode;
-  /** Context time the node started. */
+  level: GainNode;
+  fade: GainNode;
+  /** Where this piece's material begins on the OUTPUT timeline. Its
+   *  level is read from THERE — the loop from the span's start, the
+   *  right bleed from the span's end, the left bleed from one loop
+   *  before the span's start — which is what keeps the three envelopes
+   *  independent of one another where the audio overlaps. */
+  levelStart: number;
+}
+
+function disconnectPart(part: VoicePart): void {
+  part.src.disconnect();
+  part.level.disconnect();
+  part.fade.disconnect();
+}
+
+/** What is sounding: the loop and its bookends, started together and so
+ *  in phase for as long as they run. */
+interface Voice {
+  parts: VoicePart[];
+  /** Context time the nodes started. */
   startedAt: number;
-  /** Phase it started at. */
+  /** Phase they started at. */
   offset: number;
   duration: number;
 }
@@ -384,9 +426,16 @@ export class ClipLivePlayer {
 
   private ctx: AudioContext | null = null;
   private filters: BiquadFilterNode[] = [];
-  private levelGain: GainNode | null = null;
+  /** The tail of the shared tone chain. Level is NOT here: it belongs to
+   *  each piece (see `VoicePart`), since the loop and its bookends carry
+   *  their own. */
+  private master: GainNode | null = null;
   private voice: Voice | null = null;
   private buffer: AudioBuffer | null = null;
+  /** The bookends laid out for playback: loop-length, silent but for the
+   *  stretch where each is heard. (What the PANE draws is the decoded
+   *  material itself, handed straight to the host.) */
+  private bleedVoices: LiveBleedAudio = { left: null, right: null };
 
   private span: LiveRange = { start: 0, end: 0 };
   private bleed: LiveBleed = { leftMs: 0, rightMs: 0 };
@@ -531,9 +580,10 @@ export class ClipLivePlayer {
     this.pendingFetch = null;
     for (const f of this.filters) f.disconnect();
     this.filters = [];
-    this.levelGain?.disconnect();
-    this.levelGain = null;
+    this.master?.disconnect();
+    this.master = null;
     this.buffer = null;
+    this.bleedVoices = { left: null, right: null };
   }
 
   // --- material ----------------------------------------------------------
@@ -566,6 +616,8 @@ export class ClipLivePlayer {
     ]);
     if (this.stale(epoch)) return;
     let buffer: AudioBuffer | null = null;
+    let bleed: LiveBleedAudio = { left: null, right: null };
+    let voices: LiveBleedAudio = { left: null, right: null };
     const ctx = this.context();
     if (bytes && ctx) {
       const [loop, left, right] = await Promise.all([
@@ -573,11 +625,18 @@ export class ClipLivePlayer {
         decode(ctx, leftBytes),
         decode(ctx, rightBytes),
       ]);
+      buffer = loop;
+      bleed = { left, right };
       // What the page auditions is a MIDDLE pass — both bookends over
       // the seam — because that is the join the bleed exists to smooth.
-      // The bare loop is untouched underneath: the bleed only ever goes
-      // over a copy, exactly as it does on the decks.
-      buffer = loop && (left || right) ? withBleed(ctx, loop, left, right) : loop;
+      // They are laid out to wrap with the loop, and summed with it in
+      // the graph: the loop's own audio is never written to.
+      if (loop) {
+        voices = {
+          left: left && bleedVoiceBuffer(ctx, loop, left, 'left'),
+          right: right && bleedVoiceBuffer(ctx, loop, right, 'right'),
+        };
+      }
     }
     // NOTHING SOUNDS BEFORE THIS CHECK: decoding is side-effect free, so
     // a superseded fetch simply drops the buffer it decoded.
@@ -585,7 +644,8 @@ export class ClipLivePlayer {
     this.loadingNow = false;
     const phase = keepPhase && this.buffer ? this.phase() : 0;
     this.buffer = buffer;
-    this.host.onBuffer(buffer);
+    this.bleedVoices = voices;
+    this.host.onBuffer(buffer, bleed);
     if (!buffer) {
       this.silence();
       this.notify();
@@ -609,29 +669,32 @@ export class ClipLivePlayer {
     return this.ctx;
   }
 
-  /** Peaking bells in series into the level gain. Rebuilt only when the
-   *  BAND COUNT changes; an ordinary tone edit just moves params. */
+  /** Peaking bells in series into the master. Rebuilt only when the
+   *  BAND COUNT changes; an ordinary tone edit just moves params. EQ is
+   *  the clip's tone, so every piece plays through it — what each piece
+   *  keeps to itself is its level. */
   private buildChain(): void {
     const ctx = this.ctx;
     if (!ctx) return;
-    if (!this.levelGain) {
-      this.levelGain = ctx.createGain();
-      this.levelGain.connect(ctx.destination);
+    if (!this.master) {
+      this.master = ctx.createGain();
+      this.master.connect(ctx.destination);
     }
     if (this.filters.length !== this.bands.length) {
       for (const f of this.filters) f.disconnect();
       this.filters = this.bands.map(() => ctx.createBiquadFilter());
       this.filters.forEach((f, i) => {
-        const next = this.filters[i + 1] ?? this.levelGain;
+        const next = this.filters[i + 1] ?? this.master;
         if (next) f.connect(next);
       });
       // A voice mid-pass is playing into the old head: move it over
       // rather than dropping the pass on the floor.
-      const voice = this.voice;
       const head = this.chainHead();
-      if (voice && head) {
-        voice.gain.disconnect();
-        voice.gain.connect(head);
+      if (head) {
+        for (const part of this.voice?.parts ?? []) {
+          part.fade.disconnect();
+          part.fade.connect(head);
+        }
       }
     }
     const when = ctx.currentTime;
@@ -639,36 +702,58 @@ export class ClipLivePlayer {
   }
 
   private chainHead(): AudioNode | null {
-    return this.filters[0] ?? this.levelGain;
+    return this.filters[0] ?? this.master;
+  }
+
+  /** The pieces a pass is made of, each with the place on the timeline
+   *  its level is read from. The loop is the span itself; the RIGHT
+   *  bleed is the audio the span was followed by, so it is levelled from
+   *  the span's end; the LEFT bleed ran INTO the span, and lands at the
+   *  tail of the pass, so a loop before its start. */
+  private pieces(len: number): { buffer: AudioBuffer; levelStart: number }[] {
+    const out: { buffer: AudioBuffer; levelStart: number }[] = [];
+    if (this.buffer) out.push({ buffer: this.buffer, levelStart: this.span.start });
+    const { left, right } = this.bleedVoices;
+    if (right) out.push({ buffer: right, levelStart: this.span.end });
+    if (left) out.push({ buffer: left, levelStart: this.span.start - len });
+    return out;
   }
 
   /** Start a voice at `offset`, cross-fading off whatever was sounding.
-   *  Synchronous start to finish, so nothing can supersede it midway. */
+   *  Synchronous start to finish, so nothing can supersede it midway —
+   *  and every piece is started in the same breath, which is what keeps
+   *  the bookends in phase with the loop they lie over. */
   private startVoice(offset: number, crossfade: boolean): void {
     const ctx = this.context();
     const buffer = this.buffer;
     const head = this.chainHead();
     if (!ctx || !buffer || !head || buffer.duration <= 0) return;
     const now = ctx.currentTime;
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.loop = true;
-    src.loopStart = 0;
-    src.loopEnd = buffer.duration;
-    const gain = ctx.createGain();
-    src.connect(gain);
-    gain.connect(head);
+    const len = buffer.duration;
+    const at = Math.max(0, offset % len);
     const prev = this.voice;
     const fade = crossfade && prev ? this.fadeSecs : 0;
-    if (fade > 0) {
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(1, now + fade);
-    } else {
-      gain.gain.setValueAtTime(1, now);
-    }
-    const at = Math.max(0, offset % buffer.duration);
-    src.start(0, at);
-    this.voice = { src, gain, startedAt: now, offset: at, duration: buffer.duration };
+    const parts = this.pieces(len).map(({ buffer: material, levelStart }) => {
+      const src = ctx.createBufferSource();
+      src.buffer = material;
+      src.loop = true;
+      src.loopStart = 0;
+      src.loopEnd = len;
+      const level = ctx.createGain();
+      const fadeGain = ctx.createGain();
+      src.connect(level);
+      level.connect(fadeGain);
+      fadeGain.connect(head);
+      if (fade > 0) {
+        fadeGain.gain.setValueAtTime(0, now);
+        fadeGain.gain.linearRampToValueAtTime(1, now + fade);
+      } else {
+        fadeGain.gain.setValueAtTime(1, now);
+      }
+      src.start(0, at);
+      return { src, level, fade: fadeGain, levelStart };
+    });
+    this.voice = { parts, startedAt: now, offset: at, duration: len };
     this.retire(prev, fade);
     // Autoplay policies suspend a fresh context until a gesture; play is
     // always reached from a click or a key, so resuming here is safe.
@@ -680,21 +765,20 @@ export class ClipLivePlayer {
   private retire(voice: Voice | null, fade: number): void {
     if (!voice || !this.ctx) return;
     const now = this.ctx.currentTime;
-    try {
-      if (fade > 0) {
-        voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
-        voice.gain.gain.linearRampToValueAtTime(0, now + fade);
-        voice.src.stop(now + fade);
-      } else {
-        voice.src.stop();
+    for (const part of voice.parts) {
+      try {
+        if (fade > 0) {
+          part.fade.gain.setValueAtTime(part.fade.gain.value, now);
+          part.fade.gain.linearRampToValueAtTime(0, now + fade);
+          part.src.stop(now + fade);
+        } else {
+          part.src.stop();
+        }
+      } catch {
+        // Already finished; the disconnect below is all that is left.
       }
-    } catch {
-      // Already finished; the disconnect below is all that is left.
+      part.src.onended = () => disconnectPart(part);
     }
-    voice.src.onended = () => {
-      voice.src.disconnect();
-      voice.gain.disconnect();
-    };
   }
 
   /** Stop anything sounding right now (no fade: this is a command). */
@@ -703,31 +787,41 @@ export class ClipLivePlayer {
     this.voice = null;
     this.stopTimers();
     if (!voice) return;
-    try {
-      voice.src.stop();
-    } catch {
-      // Already stopped.
+    for (const part of voice.parts) {
+      try {
+        part.src.stop();
+      } catch {
+        // Already stopped.
+      }
+      disconnectPart(part);
     }
-    voice.src.disconnect();
-    voice.gain.disconnect();
   }
 
   // --- level automation ---------------------------------------------------
 
+  /** Lay the next stretch of automation onto EVERY piece — each read
+   *  from its own place on the timeline, so the fade over a bookend and
+   *  the fade over the loop it lands on are two different curves. */
   private scheduleLevel(): void {
     const ctx = this.ctx;
-    const gain = this.levelGain;
-    if (!ctx || !gain) return;
+    const voice = this.voice;
+    if (!ctx || !voice) return;
     const now = ctx.currentTime;
-    const param = gain.gain;
-    param.cancelScheduledValues?.(now);
     const phase = this.phase();
-    param.setValueAtTime(levelGainAt(this.level, this.span.start + phase), now);
-    if (!this.voice) return;
-    const len = this.buffer?.duration ?? this.span.end - this.span.start;
-    for (const e of levelSchedule(this.level, this.span.start, len, phase, this.lookahead)) {
-      if (e.jump) param.setValueAtTime(e.gain, now + e.at);
-      else param.linearRampToValueAtTime(e.gain, now + e.at);
+    for (const part of voice.parts) {
+      const param = part.level.gain;
+      param.cancelScheduledValues?.(now);
+      param.setValueAtTime(levelGainAt(this.level, part.levelStart + phase), now);
+      for (const e of levelSchedule(
+        this.level,
+        part.levelStart,
+        voice.duration,
+        phase,
+        this.lookahead,
+      )) {
+        if (e.jump) param.setValueAtTime(e.gain, now + e.at);
+        else param.linearRampToValueAtTime(e.gain, now + e.at);
+      }
     }
   }
 

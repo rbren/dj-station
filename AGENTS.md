@@ -1178,7 +1178,8 @@ offset))`, offset in position units — so the knob's curve shapes the
   what makes it something to cut against. Under it, the SELECTION PANE
   (`ClipSelectionPane.tsx`) shows the selected span as it actually
   sounds, with the level automation lane beneath it (the lane's x-axis is
-  the SELECTION's, though the breakpoints it writes are still absolute
+  the SELECTION's — plus its bleed bookends where it has them, see LOOP
+  BLEED below — though the breakpoints it writes are still absolute
   output-timeline times), and it LOOPS. Clearing the selection (Escape)
   takes the pane away and hands playback back to the source track.
   Playback therefore has two owners, never both at once: a selection is
@@ -1412,7 +1413,23 @@ offset))`, offset in position units — so the knob's curve shapes the
   default 0, drawn flanking the selection waveform through
   `ClipSelectionPane`'s `bookends`, so each control sits at the edge its
   material comes from — and `clip_save_beat_clip` cuts them out of the
-  same render, clamped to what the edit can give. Whoever PLAYS the clip
+  same render, clamped to what the edit can give.
+  THE PANE DRAWS THREE PIECES, NOT A SUM: the bleed EXTENDS the selection
+  waveform either side of the loop (`ClipSelectionPane`'s `bleed`, a
+  region apiece with a seam line at each loop edge), because the pane is
+  where the level is drawn and a picture of the overlay would hide which
+  piece a move is about to change. The pane's x-axis is therefore the
+  loop PLUS its bookends, and the level lane under it shares that axis
+  (ClipView's `laneRange`, from `bleedWindows` — the drawn regions are
+  exactly the windows that get fetched, so picture and audio cannot
+  drift). That one point-and-click lane levels all three pieces
+  INDEPENDENTLY for free: they are disjoint stretches of one timeline
+  (`[start-L, start)`, `[start, end)`, `[end, end+R)`), automation is
+  absolute-time, so a breakpoint belongs to whichever piece it lands in
+  however they overlap when played. Saving needs nothing extra for that —
+  `clip_save_beat_clip` slices the bleed out of the FULLY RENDERED edit,
+  at its own place on the timeline, so each bookend's own level is
+  already baked into the FLAC a deck loads. Whoever PLAYS the clip
   lays them over the seam (`playback::ClipBleed::tap`, read by the same
   grains as the loop so a bleed stretches with it): the RIGHT bleed (the
   audio that followed the clip) over the loop's START, the LEFT (the audio
@@ -1428,13 +1445,23 @@ offset))`, offset in position units — so the knob's curve shapes the
   third such player, so a bleed is set by ear rather than by saving one
   and loading a deck: `ClipLivePlayer` fetches the two bookend windows
   (`bleedWindows`, clamped to what the edit has — an empty window is an
-  error at the other end, not silence) alongside the span itself and sums
-  them into a COPY of the loop (`mixInto`: the same plain overlay, and
-  the same alignment, as `ClipBleed::tap`) before it installs the buffer.
-  Pre-mixing what the engine does per grain is honest here because an
-  auditioned selection loops for as long as it is watched — every pass it
-  plays is a MIDDLE one, both bookends over the seam — and the bare loop
-  underneath is still never edited. Pinned by `clip_edit.rs`'s
+  error at the other end, not silence) alongside the span itself. THE MIX
+  IS THE GRAPH'S, ON PLAYBACK: each bookend gets a VOICE of its own
+  (`bleedVoiceBuffer` lays it in a loop-length buffer at the place in the
+  pass where it is heard — the right at the head, the left at the tail —
+  and all three sources are started in one breath by `startVoice`, so
+  they wrap in step). The loop buffer is handed to the host BARE, with
+  the decoded bookends beside it (`onBuffer(loop, bleed)`), which is what
+  the pane draws its three regions from. Each part carries its OWN level
+  gain, scheduled from where its material sits on the timeline
+  (`VoicePart.levelStart`: the loop at `span.start`, the right bleed at
+  `span.end`, the left bleed at `span.start - len`, all through the same
+  `levelSchedule`) — that, and nothing else, is what makes a fade over a
+  bookend leave the loop it lands on alone. EQ stays shared (it is the
+  clip's tone); the old single `levelGain` in the chain tail is now a
+  unity `master`. Every pass an auditioned selection plays is a MIDDLE
+  one — both bookends over the seam — since it loops for as long as it is
+  watched. Pinned by `clip_edit.rs`'s
   `a_clips_bleed_is_filed_beside_its_loop_never_inside_it`, decks.rs's
   `the_bleed_skips_the_pass_a_deck_comes_in_on_and_the_pass_a_drop_ends`,
   the `beat_clip` integration suite, `ClipLive.test.ts`'s "the live loop

@@ -199,13 +199,14 @@ interface FakeAudio {
   starts: FakeLoop[];
   /** The live tone chain's peaking bells, in order. */
   filters: FakeFilter[];
-  /** Every gain node built (the level gain is the first). */
+  /** Every gain node built: the chain's master first, then each voice's
+   *  own level gain and the gain it fades in on. */
   gains: FakeGain[];
 }
 
 /** A minimal AudioBuffer at 48 kHz. It carries channel data as well as a
- *  duration because the live player mixes a bleed into a COPY of the
- *  loop; what those samples hold is pinned in ClipLive.test.ts. */
+ *  duration because the live player lays each bleed out in a buffer of
+ *  its own; what those samples hold is pinned in ClipLive.test.ts. */
 function fakeBuffer(length: number): AudioBuffer {
   const data = new Float32Array(length);
   return {
@@ -1472,10 +1473,12 @@ describe('ClipView', () => {
       expect(level[0].time_secs).toBeCloseTo(4, 5);
       expect(level[0].gain_db).toBeLessThan(0);
 
-      // …and it is heard: the level gain follows the envelope live.
+      // …and it is heard: the playing loop's OWN level gain (the master
+      // is built first, the voice's pair after it) follows the envelope
+      // live, without a re-render.
       fireEvent.click(screen.getByTestId('clip-sel-play'));
-      await waitFor(() => expect(gains.length).toBeGreaterThan(0));
-      await waitFor(() => expect(gains[0].gain.value).toBeGreaterThan(0));
+      await waitFor(() => expect(gains.length).toBeGreaterThan(1));
+      await waitFor(() => expect(gains[1].gain.value).toBeGreaterThan(0));
     });
 
     it('auditions the bleed a bookend asks for, without stopping the loop', async () => {
@@ -1502,9 +1505,39 @@ describe('ClipView', () => {
       );
 
       // A bleed is material, so it costs a fetch — but the pass in the
-      // air carries on into it: one source, still sounding.
-      await waitFor(() => expect(starts.filter((x) => !x.stopped)).toHaveLength(1));
+      // air carries on into it, now as three voices in step: the loop
+      // and a bookend either side of it, summed on playback and never
+      // into the loop.
+      await waitFor(() => expect(starts.filter((x) => !x.stopped)).toHaveLength(3));
       expect(screen.getByTestId('clip-sel-play').textContent).toBe('❚❚');
+    });
+
+    it('draws the bleed beside the loop and levels it there too', async () => {
+      installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+
+      // With no bleed the pane is the loop and nothing else.
+      expect(screen.queryByTestId('clip-sel-bleed-right')).toBeNull();
+      fireEvent.change(screen.getByTestId('clip-bleed-left'), { target: { value: '500' } });
+      fireEvent.change(screen.getByTestId('clip-bleed-right'), { target: { value: '500' } });
+
+      // Now the waveform runs 1.5–6.5 s: the loop with a region either
+      // side of it, drawn BESIDE it rather than over it.
+      await screen.findByTestId('clip-sel-bleed-left');
+      await screen.findByTestId('clip-sel-bleed-right');
+      expect(screen.getByTestId('clip-sel-loop')).toBeTruthy();
+
+      // The level lane shares that x-axis, so a point dropped over the
+      // right-hand bookend is written at the time THAT material has on
+      // the timeline (6–6.5 s) — the loop's own automation, which the
+      // bookend is heard on top of, is left alone.
+      const lane = sizeTimeline('clip-level-lane');
+      fireEvent.mouseDown(lane, { clientX: 950, clientY: 85 });
+      const level = (await savedProgram(clip)).level;
+      expect(level).toHaveLength(1);
+      expect(level[0].time_secs).toBeCloseTo(6.25, 5);
     });
 
     it('swaps stems under the loop without stopping it', async () => {

@@ -14,11 +14,25 @@
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { peaksPath, WAVEFORM_VIEW_W as W } from './WaveformView';
 
+/** One BLEED region: the material just outside the span, and how much of
+ *  it there is. Drawn BESIDE the loop, never over it — the overlaying is
+ *  what playback does, and a picture of the sum would hide which piece
+ *  a level move is about to change. */
+export interface ClipSelectionBleed {
+  secs: number;
+  peaks: number[];
+}
+
 export interface ClipSelectionPaneProps {
   /** The selected span, in OUTPUT-timeline seconds. */
   span: { start: number; end: number };
   /** Peak per bucket over the span, tone included. */
   peaks: number[];
+  /** The span's bookends, if it has any: the audio BEFORE it (left) and
+   *  AFTER it (right), which play over the loop's seam. They extend the
+   *  waveform either side of the loop, so the x-axis of this pane — and
+   *  of the level lane under it — covers all three pieces. */
+  bleed?: { left: ClipSelectionBleed; right: ClipSelectionBleed };
   waveHeight: number;
   playing: boolean;
   /** Playhead, in output-timeline seconds (drawn only inside the span). */
@@ -49,6 +63,7 @@ export interface ClipSelectionPaneProps {
 export function ClipSelectionPane({
   span,
   peaks,
+  bleed,
   waveHeight: H,
   playing,
   playhead,
@@ -62,14 +77,43 @@ export function ClipSelectionPane({
   readoutExtra,
 }: ClipSelectionPaneProps) {
   const len = Math.max(0, span.end - span.start);
-  const xOf = (secs: number) => (len > 0 ? ((secs - span.start) / len) * W : 0);
+  // The drawn window is the LOOP PLUS ITS BOOKENDS. All three pieces are
+  // stretches of one timeline, laid out end to end in the order they were
+  // cut from it, so x means the same thing for the waveform, the level
+  // lane and the times the lane writes.
+  const leftSecs = bleed?.left.secs ?? 0;
+  const rightSecs = bleed?.right.secs ?? 0;
+  const from = span.start - leftSecs;
+  const total = leftSecs + len + rightSecs;
+  const xOf = (secs: number) => (total > 0 ? ((secs - from) / total) * W : 0);
+  const loopX0 = xOf(span.start);
+  const loopX1 = xOf(span.end);
   const inside = playhead >= span.start - 1e-6 && playhead <= span.end + 1e-6;
+
+  /** A piece drawn into its own stretch of the x-axis: `peaksPath` fills
+   *  the whole viewBox, so each region is scaled into the width it owns
+   *  rather than redrawn against a different span. */
+  const region = (name: string, regionPeaks: number[], x0: number, x1: number) =>
+    x1 - x0 > 0.01 ? (
+      <g
+        data-testid={`clip-sel-${name}`}
+        transform={`translate(${x0} 0) scale(${(x1 - x0) / W} 1)`}
+      >
+        <path
+          className={`waveform-peaks clip-sel-peaks clip-sel-peaks-${name}`}
+          d={peaksPath(regionPeaks, 0, 1, H)}
+        />
+      </g>
+    ) : null;
 
   const seekAt = (e: ReactMouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    if (rect.width <= 0 || len <= 0) return;
+    if (rect.width <= 0 || total <= 0 || len <= 0) return;
     const frac = (e.clientX - rect.left) / rect.width;
-    onSeek(span.start + Math.min(1, Math.max(0, frac)) * len);
+    // Only the loop has a playhead: a click on a bookend asks for the
+    // nearest edge of the loop it leans on.
+    const at = from + Math.min(1, Math.max(0, frac)) * total;
+    onSeek(Math.min(span.end, Math.max(span.start, at)));
   };
 
   return (
@@ -111,7 +155,24 @@ export function ClipSelectionPane({
             preserveAspectRatio="none"
             onMouseDown={seekAt}
           >
-            <path className="waveform-peaks clip-sel-peaks" d={peaksPath(peaks, 0, 1, H)} />
+            {bleed && region('bleed-left', bleed.left.peaks, 0, loopX0)}
+            {region('loop', peaks, loopX0, loopX1)}
+            {bleed && region('bleed-right', bleed.right.peaks, loopX1, W)}
+            {/* Where the loop ends and its bleed begins: the seams the
+                bookends are there to smooth. */}
+            {[loopX0, loopX1].map((x, i) =>
+              x > 0.01 && x < W - 0.01 ? (
+                <line
+                  key={i}
+                  className="clip-sel-seam"
+                  data-testid={`clip-sel-seam-${i === 0 ? 'left' : 'right'}`}
+                  x1={x}
+                  x2={x}
+                  y1={0}
+                  y2={H}
+                />
+              ) : null,
+            )}
             {inside && (
               <line
                 data-testid="clip-sel-playhead"
