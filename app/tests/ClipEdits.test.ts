@@ -7,11 +7,13 @@ import { describe, expect, it } from 'vitest';
 import {
   addOverlay,
   appendSource,
+  beatSpan,
   composeWarp,
   cutRange,
   dropGrid,
   duplicateRange,
   emptyProgram,
+  extendGrid,
   fadeIn,
   fadeOut,
   gainRange,
@@ -29,6 +31,7 @@ import {
   selectionEdgeAt,
   setLevelPoint,
   SILENCE_DB,
+  stretchBands,
   tapGrid,
   trimTo,
   warpSource,
@@ -295,40 +298,79 @@ describe('ruler ticks', () => {
 });
 
 describe('beat taps', () => {
-  it('builds the average grid and the warp that evens the beats out', () => {
-    // 1→3 s in 3 uneven gaps: average period 2/3 s → 90 BPM. The first
-    // and last taps stay put; the middle ones move onto the even grid.
-    const tapped = tapGrid([1.0, 1.6, 2.2, 3.0]);
+  // Taps at 1→3 s in three uneven gaps: average period 2/3 s → 90 BPM,
+  // ideal beats at 1, 5/3, 7/3, 3.
+  const TAPS = [1.0, 1.6, 2.2, 3.0];
+
+  it('corrects every beat when the section length is 1', () => {
+    const tapped = tapGrid(TAPS, 1);
     expect(tapped).not.toBeNull();
-    const { warp, grid } = tapped!;
+    const { warp, grid, stats } = tapped!;
     expect(grid.bpm).toBeCloseTo(90, 9);
     expect(grid.phase).toBe(1);
     expect(grid.beats).toBe(4);
-    expect(warp.map(([from]) => from)).toEqual([1.0, 1.6, 2.2, 3.0]);
+    // Every tap is a warp anchor pinned to the ideal grid…
+    expect(warp.map(([from]) => from)).toEqual(TAPS);
     expect(warp[1][1]).toBeCloseTo(1 + 2 / 3, 9);
     expect(warp[2][1]).toBeCloseTo(1 + 4 / 3, 9);
+    // …so the actual beats ARE the ideal ones: zero flam, and the
+    // stretch is per-gap (the 0.8 s gap squeezed to 2/3 s is the worst).
+    grid.times.forEach((t, i) => expect(t).toBeCloseTo(1 + (i * 2) / 3, 9));
+    expect(stats.maxFlamSecs).toBeCloseTo(0, 9);
+    expect(stats.maxStretch).toBeCloseTo(Math.abs(2 / 3 / 0.8 - 1), 9);
 
     // The warp map is identity outside the tapped span and piecewise
     // linear inside; the inverse takes it back.
     expect(warpTime(warp, 0.5)).toBe(0.5);
     expect(warpTime(warp, 9)).toBeCloseTo(9, 9);
     expect(warpTime(warp, 1.6)).toBeCloseTo(1 + 2 / 3, 9);
-    expect(warpTime(warp, 1.3)).toBeCloseTo(1 + 1 / 3, 9);
     expect(warpSource(warp, warpTime(warp, 1.9))).toBeCloseTo(1.9, 9);
   });
 
+  it('keeps the tapped feel inside a longer correction section', () => {
+    // At the default section length the whole run is ONE section: only
+    // the first and last taps are pinned — and those two DEFINE the
+    // average, so nothing stretches at all. The beats between keep their
+    // tapped positions; their offset from the ideal grid is the flam.
+    const tapped = tapGrid(TAPS)!;
+    expect(tapped.warp).toEqual([
+      [1, 1],
+      [3, 3],
+    ]);
+    expect(tapped.grid.times).toEqual(TAPS);
+    expect(tapped.stats.maxStretch).toBeCloseTo(0, 9);
+    expect(tapped.stats.maxFlamSecs).toBeCloseTo(Math.abs(2.2 - (1 + 4 / 3)), 9);
+  });
+
+  it('pins every Nth beat and adjusts the ones between', () => {
+    // Section length 2 on taps 1, 1.5, 2.2, 3: anchors at taps 0, 2, 3.
+    const tapped = tapGrid([1, 1.5, 2.2, 3], 2)!;
+    expect(tapped.warp.map(([from]) => from)).toEqual([1, 2.2, 3]);
+    expect(tapped.warp[1][1]).toBeCloseTo(1 + 4 / 3, 9);
+    // The unpinned second tap moves WITH its section's stretch — to
+    // 1.5556 s, not to its ideal 1.6667 s slot: 0.111 s of flam kept.
+    expect(tapped.grid.times[1]).toBeCloseTo(1 + 0.5 * (4 / 3 / 1.2), 9);
+    expect(tapped.stats.maxFlamSecs).toBeCloseTo(1 + 2 / 3 - 1.5555555555555556, 6);
+    // Section stretches: 1.2 s → 4/3 s, then 0.8 s → 2/3 s.
+    const bands = stretchBands(tapped.warp);
+    expect(bands).toHaveLength(2);
+    expect(bands[0].ratio).toBeCloseTo(4 / 3 / 1.2, 9);
+    expect(bands[1].ratio).toBeCloseTo(2 / 3 / 0.8, 9);
+    expect(tapped.stats.maxStretch).toBeCloseTo(Math.abs(2 / 3 / 0.8 - 1), 9);
+  });
+
   it('ignores key bounce and refuses to build a grid from one tap', () => {
-    expect(tapGrid([2.0])).toBeNull();
-    expect(tapGrid([2.0, 2.01])).toBeNull();
+    expect(tapGrid([2.0], 1)).toBeNull();
+    expect(tapGrid([2.0, 2.01], 1)).toBeNull();
     // The bounced repeat collapses; the honest taps still count.
-    const tapped = tapGrid([1.0, 1.001, 2.0, 3.0]);
+    const tapped = tapGrid([1.0, 1.001, 2.0, 3.0], 1);
     expect(tapped!.grid.beats).toBe(3);
     expect(tapped!.grid.bpm).toBeCloseTo(60, 9);
   });
 
   it('composes a re-tap over an existing warp exactly', () => {
-    const first = tapGrid([1.0, 1.5, 3.0])!.warp;
-    const second = tapGrid([4.0, 4.5, 6.0])!.warp;
+    const first = tapGrid([1.0, 1.5, 3.0], 1)!.warp;
+    const second = tapGrid([4.0, 4.5, 6.0], 1)!.warp;
     const both = composeWarp(first, second);
     for (const t of [0.5, 1.25, 2.0, 3.5, 4.2, 5.0, 7.0]) {
       expect(warpTime(both, t)).toBeCloseTo(warpTime(second, warpTime(first, t)), 9);
@@ -352,25 +394,6 @@ describe('beat taps', () => {
     expect(programDuration(withWarp)).toBe(11);
   });
 
-  it('quantizes selections outward to whole beats, clamped to the clip', () => {
-    const grid = { bpm: 60, period: 1, phase: 0.5, beats: 4 };
-    expect(quantizeRange(grid, { start: 1.7, end: 3.2 }, 10)).toEqual({ start: 1.5, end: 3.5 });
-    // A sliver still becomes one whole beat…
-    expect(quantizeRange(grid, { start: 2.6, end: 2.9 }, 10)).toEqual({ start: 2.5, end: 3.5 });
-    // …and the grid extends across the clip but never past its ends.
-    expect(quantizeRange(grid, { start: 0.1, end: 9.9 }, 10)).toEqual({ start: 0, end: 10 });
-    expect(nearestBeat(grid, 2.4)).toBe(2.5);
-  });
-
-  it('draws grid beats across the view, thinning as the view widens', () => {
-    const grid = { bpm: 120, period: 0.5, phase: 1, beats: 4 };
-    expect(gridBeatTimes(grid, 0, 2.4)).toEqual([0, 0.5, 1, 1.5, 2]);
-    // Far zoomed out, only every 2^n-th beat is drawn.
-    const sparse = gridBeatTimes(grid, 0, 1000, 100);
-    expect(sparse.length).toBeLessThanOrEqual(100);
-    expect(sparse.length).toBeGreaterThan(50);
-  });
-
   it('dropGrid clears the warp and grid and is a no-op without one', () => {
     const p = base();
     expect(dropGrid(p)).toBe(p);
@@ -380,12 +403,77 @@ describe('beat taps', () => {
         [1, 1],
         [2, 2.1],
       ],
-      beat_grid: { bpm: 60, period: 1, phase: 1, beats: 2 },
+      beat_grid: { bpm: 60, period: 1, phase: 1, beats: 2, times: [1, 2.1] },
     };
     const dropped = dropGrid(tapped);
     expect(dropped.warp).toEqual([]);
     expect(dropped.beat_grid).toBeNull();
     // The rest of the edit is untouched.
     expect(dropped.regions).toBe(tapped.regions);
+  });
+});
+
+describe('the grid covers only what was tapped (or extended)', () => {
+  // The perfect grid of the taps above: beats at 1, 5/3, 7/3, 3.
+  const grid = tapGrid([1.0, 1.6, 2.2, 3.0], 1)!.grid;
+
+  it('draws beats inside the covered span only, thinned when dense', () => {
+    expect(gridBeatTimes(grid, 0, 10)).toHaveLength(4);
+    expect(gridBeatTimes(grid, 0, 2)).toEqual([1, grid.times[1]]);
+    const dense = tapGrid(
+      Array.from({ length: 100 }, (_, i) => i * 0.5),
+      1,
+    )!.grid;
+    expect(gridBeatTimes(dense, 0, 60, 30).length).toBeLessThanOrEqual(30);
+  });
+
+  it('quantizes ends inside the coverage outward, and frees ends beyond it', () => {
+    expect(quantizeRange(grid, { start: 1.7, end: 2.2 }, 10)).toEqual({
+      start: grid.times[1],
+      end: grid.times[2],
+    });
+    // The end past the last beat stays where the hand put it…
+    const half = quantizeRange(grid, { start: 2.5, end: 5 }, 10);
+    expect(half.start).toBeCloseTo(grid.times[2], 9);
+    expect(half.end).toBe(5);
+    // …and a selection entirely outside the grid is untouched.
+    expect(quantizeRange(grid, { start: 4, end: 6 }, 10)).toEqual({ start: 4, end: 6 });
+    // A click-sized sweep inside still selects one whole beat.
+    const beat = quantizeRange(grid, { start: 2.0, end: 2.0 }, 10);
+    expect(beat.start).toBeCloseTo(grid.times[1], 9);
+    expect(beat.end).toBeCloseTo(grid.times[2], 9);
+  });
+
+  it('snaps to the nearest beat inside, and to nothing outside', () => {
+    expect(nearestBeat(grid, 1.7)).toBeCloseTo(grid.times[1], 9);
+    expect(nearestBeat(grid, 0.9)).toBe(1);
+    expect(nearestBeat(grid, 5)).toBe(5);
+    expect(nearestBeat(grid, 0.2)).toBe(0.2);
+  });
+
+  it('counts the beats a selection covers, fractionally off the grid', () => {
+    expect(beatSpan(grid, 1, 3)).toBeCloseTo(3, 9);
+    expect(beatSpan(grid, grid.times[1], 3)).toBeCloseTo(2, 9);
+    expect(beatSpan(grid, 1, (1 + grid.times[1]) / 2)).toBeCloseTo(0.5, 9);
+    // Beyond the coverage it counts at the ideal period.
+    expect(beatSpan(grid, 3, 3 + 2 / 3)).toBeCloseTo(1, 9);
+  });
+
+  it('extends and shrinks a beat at a time, clamped to the clip', () => {
+    const fwd = extendGrid(grid, 'fwd', 1, 10)!;
+    expect(fwd.times[fwd.times.length - 1]).toBeCloseTo(3 + 2 / 3, 9);
+    expect(fwd.beats).toBe(5);
+    const back = extendGrid(grid, 'back', 1, 10)!;
+    expect(back.times[0]).toBeCloseTo(1 / 3, 9);
+    expect(back.phase).toBeCloseTo(1 / 3, 9);
+    // A second step back would land before 0: nowhere to go.
+    expect(extendGrid(back, 'back', 1, 10)).toBeNull();
+    // Forward past the clip's end: nowhere to go either.
+    expect(extendGrid(grid, 'fwd', 1, 3.2)).toBeNull();
+    // Shrinking drops the outermost beat, but never below two.
+    const shrunk = extendGrid(grid, 'fwd', -1, 10)!;
+    expect(shrunk.times).toHaveLength(3);
+    const two = extendGrid(shrunk, 'back', -1, 10)!;
+    expect(extendGrid(two, 'fwd', -1, 10)).toBeNull();
   });
 });

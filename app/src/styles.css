@@ -3968,6 +3968,50 @@ body {
   opacity: 0.6;
 }
 
+/* Stretch-correction sections of the tapped grid, washed over the
+   waveform: cue for slowed-down audio, brand for sped-up. The wash's
+   opacity carries the magnitude (set inline from the stretch ratio). */
+.clip-stretch-slower {
+  fill: var(--cue);
+}
+
+.clip-stretch-faster {
+  fill: var(--brand);
+}
+
+/* The grid toolbar: +/− span extensions, the correction-length slider
+   and the flam/stretch it leaves. */
+.clip-grid-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: var(--fs-s);
+}
+
+.clip-grid-label {
+  color: var(--ink-muted);
+}
+
+.clip-grid-extend {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.clip-grid-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clip-grid-section input[type='range'] {
+  width: 120px;
+}
+
+.clip-grid-stats {
+  color: var(--ink-dim);
+}
+
 .clip-selection {
   fill: color-mix(in srgb, var(--brand) 22%, transparent);
   stroke: var(--brand);

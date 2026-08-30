@@ -925,14 +925,32 @@ offset))`, offset in position units — so the knob's curve shapes the
   (identity outside them; the renderer stretches through Beatify's WSOLA
   `warp::render` as its LAST stage). BEAT TAPS: right-shift during
   playback marks beats at the live element position; when playback stops
-  ClipView turns them into an even grid (`tapGrid` — average BPM, first
-  and last tap pinned) and composes the warp into the program
-  (`composeWarp` for re-taps), ONE undo step. Selections then quantize
-  outward to that grid through AudioTimeline's `snap` hooks (⌘ frees the
-  gesture); a TIMELINE edit (cut/trim/move/splice/gain — anything through
-  ClipView's `applyTimeline`) maps its times back through the warp and
-  DROPS grid+warp (`dropGrid`), since the anchors would point at moved
-  audio. SAVING makes a BEAT CLIP, not a library track: `clip_detect_beats`
+  ClipView turns them into a grid covering ONLY the tapped span
+  (`tapGrid` — average BPM, first and last tap pinned; the toolbar's +/−
+  buttons extend/shrink it a beat at a time via `extendGrid`) and
+  composes the warp into the program (`composeWarp` for re-taps). The
+  stretch correction happens every `sectionBeats` beats (toolbar slider,
+  default 4): only every Nth tap is a warp anchor, and the beats between
+  keep their tapped feel — `ClipGrid.times` holds the ACTUAL beat
+  positions (its twin `BeatGrid.times` in `dj_analysis::clip`), the
+  toolbar shows max flam / max stretch (`TapStats`), and the waveform
+  washes each correction section by its stretch ratio (`stretchBands`,
+  `.clip-stretch-slower/-faster`). The WHOLE session — taps, slider
+  moves, extensions — is ONE undo step: ClipView's `tapSession` re-derives
+  the program from the same taps and REPLACES the present (no history
+  push); its controls only apply while the present IS the session's
+  program. Selections then quantize outward to the grid's actual beats
+  through AudioTimeline's `snap` hooks — nothing snaps beyond the covered
+  span, ⌘ frees the gesture, and the readout counts the beats selected
+  (`beatSpan`); a TIMELINE edit (cut/trim/move/splice/gain — anything
+  through ClipView's `applyTimeline`) maps its times back through the
+  warp and DROPS grid+warp (`dropGrid`), since the anchors would point at
+  moved audio. RENDERS ARE MEMOIZED in the shell (`ClipCache.rendered` +
+  a render gate in `app/src-tauri/src/clip.rs`, keyed by the request sans
+  `beat_grid`): preview windows, waveform peaks, detection and the save
+  all render the same program, and a warped render is seconds of WSOLA —
+  without the memo, play after an edit stalls for exactly that long.
+  SAVING makes a BEAT CLIP, not a library track: `clip_detect_beats`
   measures an untapped span with the Beatify tracker; `clip_save_beat_clip`
   renders the selected span, pads it to whole beats (`pad_to_beats` fills
   the fractional last beat with silence) and files it in

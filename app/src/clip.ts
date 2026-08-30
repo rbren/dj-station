@@ -52,8 +52,18 @@ export interface LevelPoint {
 }
 
 /** One tap-warp anchor: output time `[from, to]` — where the audio was,
- *  and where the even grid puts it. */
+ *  and where the corrected grid puts it. */
 export type WarpPoint = [number, number];
+
+/** The tapped beat grid. `period`/`phase` are the IDEAL grid the taps
+ *  averaged to; `times` are where the beats actually sound — inside a
+ *  stretch-correction section the beats keep their tapped feel (flam)
+ *  rather than being warped onto the ideal grid, and the grid covers
+ *  only the tapped (plus explicitly extended) span, never the whole
+ *  clip. Twin: `BeatGrid` in `dj_analysis::clip`. */
+export interface ClipGrid extends Grid {
+  times: number[];
+}
 
 export interface ClipProgram {
   regions: ClipRegion[];
@@ -66,7 +76,7 @@ export interface ClipProgram {
   warp: WarpPoint[];
   /** The beat grid the taps built — rides with the warp through undo,
    *  and is what selections quantize against. */
-  beat_grid: Grid | null;
+  beat_grid: ClipGrid | null;
 }
 
 /** One thing the editor cuts from: a library track, or a chosen set of
@@ -288,23 +298,81 @@ export function warpSource(warp: WarpPoint[], secs: number): number {
   return piecewise(guarded(warp), secs, 1, 0);
 }
 
-/** What a run of right-shift taps during playback builds: the average
- *  BPM between the first and last tap, warp anchors that stretch the
- *  audio between them onto a perfectly even grid (the endpoints stay
- *  put — the average preserves the covered span), and that grid. */
-export function tapGrid(rawTaps: number[]): { warp: WarpPoint[]; grid: Grid } | null {
+/** How much the correction moved and stretched things: what the grid
+ *  controls display so the section length can be chosen by ear AND eye. */
+export interface TapStats {
+  /** Largest distance an actual beat sits from its ideal grid slot — the
+   *  timing kept as feel instead of corrected away. */
+  maxFlamSecs: number;
+  /** Largest stretch any correction section applies, as |ratio − 1|
+   *  (0.02 = 2% faster or slower). */
+  maxStretch: number;
+}
+
+export interface Tapped {
+  warp: WarpPoint[];
+  grid: ClipGrid;
+  stats: TapStats;
+}
+
+/** What a run of right-shift taps during playback builds. The grid's
+ *  tempo is the AVERAGE between the first and last tap (both stay put, so
+ *  the covered span keeps its length) and it covers ONLY the tapped span.
+ *
+ *  `sectionBeats` is the length of the stretch correction: only every
+ *  Nth tap is pinned to the ideal grid (a warp anchor). Within a section
+ *  the audio moves as one piece and the beats between anchors keep their
+ *  tapped positions — adjusted by the section's uniform stretch, not
+ *  forced even (their remaining offset is the flam in `stats`). At 1,
+ *  every beat is pinned: a perfect grid. */
+export function tapGrid(rawTaps: number[], sectionBeats = 4): Tapped | null {
   const taps: number[] = [];
   for (const t of [...rawTaps].sort((a, b) => a - b)) {
     if (taps.length === 0 || t - taps[taps.length - 1] >= TAP_MIN_GAP_SECS) taps.push(t);
   }
   if (taps.length < 2) return null;
   const first = taps[0];
-  const period = (taps[taps.length - 1] - first) / (taps.length - 1);
+  const last = taps.length - 1;
+  const period = (taps[last] - first) / last;
   if (period <= 0) return null;
+  const step = Math.max(1, Math.round(sectionBeats));
+  const warp: WarpPoint[] = [];
+  for (let i = 0; i < last; i += step) warp.push([taps[i], first + i * period]);
+  warp.push([taps[last], first + last * period]);
+  const times = taps.map((t) => warpTime(warp, t));
+  let maxFlamSecs = 0;
+  for (let i = 0; i <= last; i += 1) {
+    maxFlamSecs = Math.max(maxFlamSecs, Math.abs(times[i] - (first + i * period)));
+  }
+  let maxStretch = 0;
+  for (const band of stretchBands(warp)) {
+    maxStretch = Math.max(maxStretch, Math.abs(band.ratio - 1));
+  }
   return {
-    warp: taps.map((t, i) => [t, first + i * period]),
-    grid: { bpm: 60 / period, period, phase: first, beats: taps.length },
+    warp,
+    grid: { bpm: 60 / period, period, phase: first, beats: taps.length, times },
+    stats: { maxFlamSecs, maxStretch },
   };
+}
+
+/** One stretch-correction section of the warp, on the OUTPUT (post-warp)
+ *  timeline, with the stretch it applies: `ratio` > 1 slowed the audio
+ *  down (made it longer), < 1 sped it up. What the waveform colors. */
+export interface StretchBand {
+  start: number;
+  end: number;
+  ratio: number;
+}
+
+export function stretchBands(warp: WarpPoint[]): StretchBand[] {
+  const out: StretchBand[] = [];
+  for (let i = 0; i + 1 < warp.length; i += 1) {
+    const src = warp[i + 1][0] - warp[i][0];
+    const dst = warp[i + 1][1] - warp[i][1];
+    if (src > 1e-9 && dst > 1e-9)
+      out.push({ start: warp[i][1], end: warp[i + 1][1], ratio: dst / src });
+  }
+  return out;
 }
 
 /** Compose two warps: `next` was tapped against the OUTPUT of `prev`, so
@@ -325,25 +393,78 @@ export function composeWarp(prev: WarpPoint[], next: WarpPoint[]): WarpPoint[] {
   return out;
 }
 
-/** Beat times of the (unclamped) grid across a view, thinned to at most
- *  `cap` lines so zooming out cannot fill the waveform with hairlines. */
-export function gridBeatTimes(grid: Grid, from: number, to: number, cap = 240): number[] {
-  if (grid.period <= 0 || to <= from) return [];
+/** The grid's beats inside a view, thinned to at most `cap` lines so
+ *  zooming out cannot fill the waveform with hairlines. Only the covered
+ *  span has beats — the grid does not continue across the clip. */
+export function gridBeatTimes(grid: ClipGrid, from: number, to: number, cap = 240): number[] {
+  const ts = grid.times;
+  if (ts.length === 0 || to <= from) return [];
   let step = 1;
-  while ((to - from) / (grid.period * step) > cap) step *= 2;
+  while (ts.length / step > cap) step *= 2;
   const out: number[] = [];
-  const first = Math.ceil((from - grid.phase) / (grid.period * step));
-  for (let n = first; grid.phase + n * step * grid.period <= to; n += 1) {
-    out.push(grid.phase + n * step * grid.period);
+  for (let i = 0; i < ts.length; i += step) {
+    if (ts[i] >= from && ts[i] <= to) out.push(ts[i]);
   }
   return out;
 }
 
-/** The nearest beat of the grid, unclamped: unlike Beatify's track view
- *  the tapped grid extends across the whole clip at its period. */
-export function nearestBeat(grid: Grid, secs: number): number {
-  if (grid.period <= 0) return secs;
-  return grid.phase + Math.round((secs - grid.phase) / grid.period) * grid.period;
+/** Fractional beat index of an output time against the grid's ACTUAL
+ *  beats — piecewise linear between them, continuing at the ideal period
+ *  outside the covered span (negative before it). */
+export function beatIndexAt(grid: ClipGrid, secs: number): number {
+  const ts = grid.times;
+  if (ts.length < 2 || grid.period <= 0) return 0;
+  const last = ts.length - 1;
+  if (secs <= ts[0]) return (secs - ts[0]) / grid.period;
+  if (secs >= ts[last]) return last + (secs - ts[last]) / grid.period;
+  let i = 0;
+  while (secs >= ts[i + 1]) i += 1;
+  const span = ts[i + 1] - ts[i];
+  return span > 0 ? i + (secs - ts[i]) / span : i;
+}
+
+/** Beats a selection covers, fractional against the grid (whole numbers
+ *  when both ends sit on beats): what the readout counts. */
+export function beatSpan(grid: ClipGrid, start: number, end: number): number {
+  return Math.abs(beatIndexAt(grid, end) - beatIndexAt(grid, start));
+}
+
+/** The nearest beat of the grid, or the time itself when it falls
+ *  outside the covered span — the grid only exists where it was tapped
+ *  (or extended), so beyond it nothing snaps. */
+export function nearestBeat(grid: ClipGrid, secs: number): number {
+  const ts = grid.times;
+  if (ts.length === 0) return secs;
+  const i = Math.round(beatIndexAt(grid, secs));
+  return i >= 0 && i < ts.length ? ts[i] : secs;
+}
+
+/** Grow or shrink the covered span by one beat: `by = 1` adds a beat at
+ *  the ideal period beyond that edge, `-1` drops the outermost beat.
+ *  Null when the step has nowhere to go (before 0, past the clip's end,
+ *  or below the two beats a grid needs). */
+export function extendGrid(
+  grid: ClipGrid,
+  edge: 'back' | 'fwd',
+  by: 1 | -1,
+  duration: number,
+): ClipGrid | null {
+  const ts = grid.times;
+  if (ts.length < 2 || grid.period <= 0) return null;
+  let times: number[];
+  if (by === -1) {
+    if (ts.length <= 2) return null;
+    times = edge === 'back' ? ts.slice(1) : ts.slice(0, -1);
+  } else if (edge === 'back') {
+    const t = ts[0] - grid.period;
+    if (t < -1e-9) return null;
+    times = [Math.max(0, t), ...ts];
+  } else {
+    const t = ts[ts.length - 1] + grid.period;
+    if (t > duration + 1e-9) return null;
+    times = [...ts, Math.min(duration, t)];
+  }
+  return { ...grid, times, phase: times[0], beats: times.length };
 }
 
 /** A TIMELINE EDIT DROPS THE TAPPED GRID. The warp's anchors and the
@@ -358,16 +479,29 @@ export function dropGrid(program: ClipProgram): ClipProgram {
 }
 
 /** Selections quantize OUTWARD to whole beats of the tapped grid, capped
- *  into the clip. ⌘ frees the gesture (AudioTimeline reads the modifier
- *  live), which is how a window off the grid is chosen. */
-export function quantizeRange(grid: Grid, range: TimeRange, duration: number): TimeRange {
-  if (grid.period <= 0) return range;
+ *  into the clip. An end that falls OUTSIDE the covered span stays where
+ *  the hand put it — the grid does not reach there. ⌘ frees the whole
+ *  gesture (AudioTimeline reads the modifier live), which is how a
+ *  window off the grid is chosen. */
+export function quantizeRange(grid: ClipGrid, range: TimeRange, duration: number): TimeRange {
+  const ts = grid.times;
+  if (ts.length < 2 || grid.period <= 0) return range;
   const lo = Math.min(range.start, range.end);
   const hi = Math.max(range.start, range.end);
-  const startBeat = Math.floor((lo - grid.phase) / grid.period + 1e-6);
-  const endBeat = Math.max(Math.ceil((hi - grid.phase) / grid.period - 1e-6), startBeat + 1);
-  const start = Math.max(0, grid.phase + startBeat * grid.period);
-  const end = Math.min(duration, grid.phase + endBeat * grid.period);
+  const last = ts.length - 1;
+  const iLo = beatIndexAt(grid, lo);
+  const iHi = beatIndexAt(grid, hi);
+  const covered = (i: number) => i > -1e-6 && i < last + 1e-6;
+  let start = covered(iLo) ? ts[Math.max(0, Math.floor(iLo + 1e-6))] : lo;
+  let end = covered(iHi) ? ts[Math.min(last, Math.ceil(iHi - 1e-6))] : hi;
+  if (end - start < 1e-9 && covered(iLo)) {
+    // A click-sized sweep inside the grid still selects one whole beat.
+    const i = Math.max(0, Math.min(last - 1, Math.floor(iLo + 1e-6)));
+    start = ts[i];
+    end = ts[i + 1];
+  }
+  start = Math.max(0, start);
+  end = Math.min(duration, end);
   return end > start ? { start, end } : range;
 }
 

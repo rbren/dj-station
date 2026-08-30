@@ -147,15 +147,20 @@ pub struct ClipProgram {
     pub beat_grid: Option<BeatGrid>,
 }
 
-/// A tapped-out beat grid on the output timeline: beat `n` sounds at
-/// `phase + n * period`. Mirrors the frontend's `Grid`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// A tapped-out beat grid on the output timeline. `period`/`phase` are
+/// the IDEAL grid the taps averaged to; `times` are where the beats
+/// actually sound — inside a stretch-correction section the beats keep
+/// their tapped feel (flam) instead of being warped onto the ideal grid,
+/// and the grid covers only the tapped (plus explicitly extended) span.
+/// Mirrors the frontend's `ClipGrid`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BeatGrid {
     pub bpm: f64,
     pub period: f64,
     pub phase: f64,
     pub beats: usize,
+    pub times: Vec<f64>,
 }
 
 impl Default for BeatGrid {
@@ -165,6 +170,7 @@ impl Default for BeatGrid {
             period: 0.0,
             phase: 0.0,
             beats: 0,
+            times: Vec::new(),
         }
     }
 }

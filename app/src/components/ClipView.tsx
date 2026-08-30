@@ -11,12 +11,18 @@
 //
 // BEATS ARE TAPPED: right-shift during playback drops a marker at the
 // playhead (drawn on the waveform), and when playback stops the taps
-// become the grid — the average BPM between first and last tap, with the
-// audio between taps stretched onto perfectly even beats (a warp in the
-// program, so it previews, saves and undoes like any other edit).
-// Selections then quantize to that grid; ⌘-drag frees them. A selection
-// that was never tapped is measured by the Beatify tracker (beat_this
-// when installed) the moment the save row needs numbers to show.
+// become the grid — the average BPM between first and last tap, covering
+// ONLY the tapped span (the grid toolbar's +/− buttons extend it a beat
+// at a time). The stretch correction happens every `sectionBeats` beats
+// (the toolbar slider, default 4): section boundaries are warped onto
+// the ideal grid and the beats inside keep their tapped feel, so the
+// toolbar shows the max flam (uncorrected offset) and max stretch that
+// choice leaves. The whole tap session — grid, warp, extensions, slider
+// moves — is ONE undo step (`tapSession` regenerates in place).
+// Selections then quantize to the grid's actual beats; ⌘-drag frees
+// them. A selection that was never tapped is measured by the Beatify
+// tracker (beat_this when installed) the moment the save row needs
+// numbers to show.
 //
 // The component stays MOUNTED when another page is showing (App hides it
 // with display: none) so the edit survives tab switches; `active` gates
@@ -35,12 +41,14 @@ import type { MouseEvent as ReactMouseEvent, Ref } from 'react';
 import {
   addOverlay,
   appendSource,
+  beatSpan,
   clearLevel,
   composeWarp,
   cutRange,
   dropGrid,
   duplicateRange,
   emptyProgram,
+  extendGrid,
   fadeIn,
   fadeOut,
   gainRange,
@@ -60,17 +68,20 @@ import {
   stemLabel,
   stemSet,
   stemWait,
+  stretchBands,
   tapGrid,
   trimTo,
   warpSource,
   type ClipBeats,
   type ClipClientApi,
+  type ClipGrid,
   type ClipProgram,
   type ClipRender,
   type ClipRequest,
   type ClipSource,
   type ClipStemBackend,
   type ClipStemStatus,
+  type TapStats,
   SILENCE_DB,
   STEM_NAMES,
 } from '../clip';
@@ -129,6 +140,79 @@ function levelDbFromY(y: number): number {
 
 type Range = { start: number; end: number };
 
+/** Default stretch-correction length, in beats (the grid slider). */
+const DEFAULT_SECTION_BEATS = 4;
+const MAX_SECTION_BEATS = 16;
+
+/** The tap commit, kept regenerable: the slider and the +/− extensions
+ *  re-derive grid and warp from the SAME taps against the SAME base
+ *  program, replacing the present in place — the whole session is one
+ *  undo step, however much the correction is tuned. */
+type TapSession = {
+  /** The program the taps were made against (what undo restores). */
+  base: ClipProgram;
+  /** The committed taps, on `base`'s output timeline. */
+  taps: number[];
+  /** What the session last produced; controls only apply while this IS
+   *  the present program (undo/redo walks in and out of the session). */
+  program: ClipProgram;
+  stats: TapStats;
+  /** Whole beats added (+) or dropped (−) at each edge of the grid. */
+  extBack: number;
+  extFwd: number;
+};
+
+/** Wash opacity for a stretch-correction section: faintly there from the
+ *  first fraction of a percent (the section boundaries ARE the grid's
+ *  structure), growing with the stretch, capped under the waveform. */
+function stretchOpacity(ratio: number): number {
+  return Math.min(0.4, 0.06 + 2 * Math.abs(Math.log2(ratio)));
+}
+
+function stretchTitle(ratio: number): string {
+  const pct = (ratio - 1) * 100;
+  return `stretched ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+}
+
+/** "4 beats selected", fractional (to one decimal) when an end sits off
+ *  the grid. */
+function beatsLabel(grid: ClipGrid, sel: Range): string {
+  const b = beatSpan(grid, sel.start, sel.end);
+  const whole = Math.abs(b - Math.round(b)) < 0.01;
+  const shown = whole ? String(Math.round(b)) : b.toFixed(1);
+  return `${shown} ${shown === '1' ? 'beat' : 'beats'} selected`;
+}
+
+/** Build a tap session's program: grid + warp from the taps at the given
+ *  correction length, the +/− edge extensions re-applied a beat at a
+ *  time (an extension with nowhere to go simply stops). */
+function sessionProgram(
+  base: ClipProgram,
+  taps: number[],
+  sectionBeats: number,
+  extBack: number,
+  extFwd: number,
+): { program: ClipProgram; stats: TapStats } | null {
+  const tapped = tapGrid(taps, sectionBeats);
+  if (!tapped) return null;
+  const warp = base.warp.length ? composeWarp(base.warp, tapped.warp) : tapped.warp;
+  let program: ClipProgram = { ...base, warp, beat_grid: tapped.grid };
+  const dur = programDuration(program);
+  let grid = tapped.grid;
+  for (const [edge, n] of [
+    ['back', extBack],
+    ['fwd', extFwd],
+  ] as const) {
+    for (let k = 0; k < Math.abs(n); k += 1) {
+      const next = extendGrid(grid, edge, n > 0 ? 1 : -1, dur);
+      if (!next) break;
+      grid = next;
+    }
+  }
+  if (grid !== tapped.grid) program = { ...program, beat_grid: grid };
+  return { program, stats: tapped.stats };
+}
+
 export interface ClipViewProps {
   clip: ClipClientApi;
   library: LibraryClientApi;
@@ -179,6 +263,10 @@ export function ClipView({
   /** Right-shift taps of the current playback pass, output seconds. They
    *  become the beat grid the moment playback stops. */
   const [taps, setTaps] = useState<number[]>([]);
+  /** Stretch-correction length in beats — the grid toolbar's slider. */
+  const [sectionBeats, setSectionBeats] = useState(DEFAULT_SECTION_BEATS);
+  /** The last tap commit, regenerable (see TapSession). */
+  const [tapSession, setTapSession] = useState<TapSession | null>(null);
   /** The measured tempo of an untapped span, keyed by what it measured
    *  so a new selection or edit simply outdates it. */
   const [detected, setDetected] = useState<{
@@ -240,9 +328,9 @@ export function ClipView({
   // dispatch the next click — so pressing play in that gap read the
   // previous render's duration, computed an empty window, and silently
   // played nothing.
-  const live = useRef({ clip, request, duration, taps, program });
+  const live = useRef({ clip, request, duration, taps, program, sectionBeats });
   useLayoutEffect(() => {
-    live.current = { clip, request, duration, taps, program };
+    live.current = { clip, request, duration, taps, program, sectionBeats };
   });
 
   // One effect creates the transport and one effect destroys it, so React
@@ -260,27 +348,33 @@ export function ClipView({
       render: (start, len) => live.current.clip.previewAudio(live.current.request, start, len),
       onStatus: (s) => {
         // Playback stopping is what turns the pass's taps into the beat
-        // grid: average BPM between first and last tap, the audio
-        // between taps stretched onto perfectly even beats. One program
-        // edit (one undo step); a lone tap builds nothing and is simply
-        // cleared. All the setters used here are React's stable ones —
-        // this is an event callback, reading current state via `live`.
+        // grid: average BPM between first and last tap, covering only
+        // the tapped span, stretch-corrected every `sectionBeats` beats.
+        // One program edit (one undo step); a lone tap builds nothing
+        // and is simply cleared. All the setters used here are React's
+        // stable ones — this is an event callback, reading current state
+        // via `live`.
         if (!s.playing && live.current.taps.length > 0) {
-          const tapped = tapGrid(live.current.taps);
+          const rawTaps = live.current.taps;
           setTaps([]);
-          if (tapped) {
-            const prev = live.current.program;
-            const next: ClipProgram = {
-              ...prev,
-              warp: prev.warp.length ? composeWarp(prev.warp, tapped.warp) : tapped.warp,
-              beat_grid: tapped.grid,
-            };
+          const prev = live.current.program;
+          const built = sessionProgram(prev, rawTaps, live.current.sectionBeats, 0, 0);
+          if (built) {
             setPast((h) => [...h.slice(-HISTORY_DEPTH), prev]);
             setFuture([]);
-            setProgram(next);
+            setProgram(built.program);
+            setTapSession({
+              base: prev,
+              taps: rawTaps,
+              program: built.program,
+              stats: built.stats,
+              extBack: 0,
+              extFwd: 0,
+            });
             // The selection in hand is quantized to the new grid at once.
-            const dur = programDuration(next);
-            setSelection((cur) => (cur ? quantizeRange(tapped.grid, cur, dur) : cur));
+            const grid = built.program.beat_grid;
+            const dur = programDuration(built.program);
+            setSelection((cur) => (cur && grid ? quantizeRange(grid, cur, dur) : cur));
           }
         }
         setPlaying(s.playing);
@@ -387,6 +481,48 @@ export function ClipView({
     setSelection(null);
   }, [future, program]);
 
+  // --- the grid toolbar: regenerating the tap session in place ----------
+  //
+  // The slider and the +/− extensions re-derive the grid and warp from
+  // the session's taps and REPLACE the present program (no history push):
+  // however much the correction is tuned, one undo removes the whole
+  // session. They only apply while the present IS the session's program —
+  // undo/redo walks in and out of that state.
+  const tunable = tapSession !== null && tapSession.program === program;
+
+  const regenerate = useCallback(
+    (session: TapSession, beats: number, extBack: number, extFwd: number) => {
+      const built = sessionProgram(session.base, session.taps, beats, extBack, extFwd);
+      if (!built) return;
+      setProgram(built.program);
+      setTapSession({ ...session, program: built.program, stats: built.stats, extBack, extFwd });
+    },
+    [],
+  );
+
+  const retime = useCallback(
+    (beats: number) => {
+      setSectionBeats(beats);
+      if (tapSession && tapSession.program === program) {
+        regenerate(tapSession, beats, tapSession.extBack, tapSession.extFwd);
+      }
+    },
+    [program, regenerate, tapSession],
+  );
+
+  const extend = useCallback(
+    (edge: 'back' | 'fwd', by: 1 | -1) => {
+      if (!tapSession || tapSession.program !== program) return;
+      regenerate(
+        tapSession,
+        sectionBeats,
+        tapSession.extBack + (edge === 'back' ? by : 0),
+        tapSession.extFwd + (edge === 'fwd' ? by : 0),
+      );
+    },
+    [program, regenerate, sectionBeats, tapSession],
+  );
+
   const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
 
   const loadTrack = useCallback(
@@ -428,6 +564,7 @@ export function ClipView({
           setPast([]);
           setFuture([]);
           setSelection(null);
+          setTapSession(null);
           setVp(null);
           // A different program entirely: stop, don't play the old render.
           transportRef.current?.stop(0);
@@ -680,8 +817,12 @@ export function ClipView({
       prev.program.overlays !== request.program.overlays ||
       prev.program.crossfade_ms !== request.program.crossfade_ms ||
       prev.program.warp !== request.program.warp;
+    const toneChanged =
+      prev.program.eq !== request.program.eq || prev.program.level !== request.program.level;
     if (timelineChanged) transportRef.current?.invalidate();
-    else transportRef.current?.refreshTone();
+    else if (toneChanged) transportRef.current?.refreshTone();
+    // Only the beat grid moved (a +/− extension, say): no audio changed,
+    // so playback carries on with the window it has.
   }, [request]);
 
   // Keep playback in step with the selection, so a loop follows its edges
@@ -996,6 +1137,25 @@ export function ClipView({
                   />
                 ))}
                 {grid &&
+                  stretchBands(program.warp).map((b, i) => (
+                    <rect
+                      key={`stretch${i}`}
+                      data-testid={`clip-stretch-${i}`}
+                      className={
+                        b.ratio >= 1
+                          ? 'clip-stretch clip-stretch-slower'
+                          : 'clip-stretch clip-stretch-faster'
+                      }
+                      x={xOf(b.start)}
+                      y={0}
+                      width={Math.max(0, xOf(b.end) - xOf(b.start))}
+                      height={WAVE_H}
+                      style={{ opacity: stretchOpacity(b.ratio) }}
+                    >
+                      <title>{stretchTitle(b.ratio)}</title>
+                    </rect>
+                  ))}
+                {grid &&
                   gridBeatTimes(grid, vpStart, vpEnd).map((t, i) => (
                     <line
                       key={`beat${i}`}
@@ -1034,7 +1194,8 @@ export function ClipView({
               ))
             }
             readoutExtra={
-              preview ? ` · ${preview.channels}ch ${preview.sample_rate} Hz` : ' · rendering…'
+              (grid && sel ? ` · ${beatsLabel(grid, sel)}` : '') +
+              (preview ? ` · ${preview.channels}ch ${preview.sample_rate} Hz` : ' · rendering…')
             }
             belowWave={
               <svg
@@ -1079,6 +1240,74 @@ export function ClipView({
               </svg>
             }
           />
+
+          {grid && (
+            <div className="clip-grid-tools" data-testid="clip-grid-tools">
+              <span className="clip-grid-label">Beat grid</span>
+              <span
+                className="clip-grid-extend"
+                role="group"
+                aria-label="Extend or shrink the grid"
+                title={tunable ? undefined : 'Tap the beats again to retune this grid'}
+              >
+                <button
+                  data-testid="clip-grid-back-plus"
+                  disabled={!tunable || extendGrid(grid, 'back', 1, duration) === null}
+                  title="Extend the grid one beat earlier"
+                  onClick={() => extend('back', 1)}
+                >
+                  +◀
+                </button>
+                <button
+                  data-testid="clip-grid-back-minus"
+                  disabled={!tunable || extendGrid(grid, 'back', -1, duration) === null}
+                  title="Drop the grid's first beat"
+                  onClick={() => extend('back', -1)}
+                >
+                  −◀
+                </button>
+                <button
+                  data-testid="clip-grid-fwd-minus"
+                  disabled={!tunable || extendGrid(grid, 'fwd', -1, duration) === null}
+                  title="Drop the grid's last beat"
+                  onClick={() => extend('fwd', -1)}
+                >
+                  ▶−
+                </button>
+                <button
+                  data-testid="clip-grid-fwd-plus"
+                  disabled={!tunable || extendGrid(grid, 'fwd', 1, duration) === null}
+                  title="Extend the grid one beat later"
+                  onClick={() => extend('fwd', 1)}
+                >
+                  ▶+
+                </button>
+              </span>
+              <label className="clip-grid-section">
+                <span>Correct every</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={MAX_SECTION_BEATS}
+                  step={1}
+                  data-testid="clip-grid-section"
+                  disabled={!tunable}
+                  value={sectionBeats}
+                  onChange={(e) => retime(Number(e.target.value))}
+                  title="How long each stretch-correction section is: between corrections the beats keep their tapped feel"
+                />
+                <span data-testid="clip-grid-section-readout">
+                  {sectionBeats === 1 ? 'every beat' : `${sectionBeats} beats`}
+                </span>
+              </label>
+              {tunable && tapSession && (
+                <span className="clip-grid-stats" data-testid="clip-grid-stats">
+                  max flam {Math.round(tapSession.stats.maxFlamSecs * 1000)} ms · max stretch{' '}
+                  {(tapSession.stats.maxStretch * 100).toFixed(1)}%
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="clip-tools">
             <button

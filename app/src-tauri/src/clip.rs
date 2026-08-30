@@ -82,9 +82,21 @@ impl ClipSourceRef {
 
 /// Decoded sources for the Clip page, keyed by [`ClipSourceRef`]. Bounded
 /// so a long editing session can't pin every track ever opened in memory.
+///
+/// Beside the decodes it memoizes ONE rendered program: preview windows,
+/// the waveform peaks, tempo detection and the save all render the SAME
+/// edit, and once the program carries a tap warp each render is seconds
+/// of WSOLA — re-doing it per playback window is exactly the "press play,
+/// wait two seconds" jam.
 #[derive(Default)]
 pub struct ClipCache {
     entries: Mutex<Vec<(ClipSourceRef, Arc<AudioData>)>>,
+    /// The last render, keyed by the request (sans `beat_grid`, which
+    /// never touches the audio).
+    rendered: Mutex<Option<(String, Arc<AudioData>)>>,
+    /// Held across a render so a concurrent command WAITS for the render
+    /// in flight and then reuses it, instead of duplicating the work.
+    render_gate: Mutex<()>,
 }
 
 const MAX_CACHED_SOURCES: usize = 4;
@@ -100,10 +112,13 @@ impl ClipCache {
 
     /// Drop every decode of a track. SQLite hands the next import the
     /// rowid a delete freed, so a kept entry would answer for a different
-    /// track's audio.
+    /// track's audio. The render memo goes too: its key names track ids.
     pub(crate) fn forget(&self, track_id: i64) {
         if let Ok(mut entries) = self.entries.lock() {
             entries.retain(|(k, _)| k.track_id != track_id);
+        }
+        if let Ok(mut rendered) = self.rendered.lock() {
+            *rendered = None;
         }
     }
 
@@ -113,6 +128,20 @@ impl ClipCache {
             entries.push((key, audio));
             let overflow = entries.len().saturating_sub(MAX_CACHED_SOURCES);
             entries.drain(..overflow);
+        }
+    }
+
+    fn render_hit(&self, key: &str) -> Option<Arc<AudioData>> {
+        let rendered = self.rendered.lock().ok()?;
+        rendered
+            .as_ref()
+            .filter(|(k, _)| k == key)
+            .map(|(_, a)| Arc::clone(a))
+    }
+
+    fn keep_render(&self, key: String, audio: Arc<AudioData>) {
+        if let Ok(mut rendered) = self.rendered.lock() {
+            *rendered = Some((key, audio));
         }
     }
 }
@@ -176,10 +205,35 @@ impl ClipRequest {
             .collect()
     }
 
-    fn render(&self, state: &AppState) -> CmdResult<AudioData> {
+    /// What identifies a render: the sources and the program, minus the
+    /// beat grid — the grid never touches the audio, so extending it (or
+    /// moving its beats) must not throw the memoized render away.
+    fn render_key(&self) -> CmdResult<String> {
+        let mut program = self.program.clone();
+        program.beat_grid = None;
+        serde_json::to_string(&(&self.sources, &program))
+            .map_err(|e| err(format!("clip: {e}")))
+    }
+
+    /// Render the edit, through the [`ClipCache`] memo. The gate makes a
+    /// concurrent identical request (preview window during detection,
+    /// say) wait and reuse instead of rendering twice.
+    fn render(&self, state: &AppState) -> CmdResult<Arc<AudioData>> {
+        let key = self.render_key()?;
+        if let Some(hit) = state.clips.render_hit(&key) {
+            return Ok(hit);
+        }
+        let _gate = state.clips.render_gate.lock();
+        if let Some(hit) = state.clips.render_hit(&key) {
+            return Ok(hit);
+        }
         let sources = self.decode(state)?;
         let refs: Vec<&AudioData> = sources.iter().map(|a| a.as_ref()).collect();
-        clip::render_clip(&refs, &self.program).map_err(|e| CmdError::invalid(e.to_string()))
+        let out = clip::render_clip(&refs, &self.program)
+            .map(Arc::new)
+            .map_err(|e| CmdError::invalid(e.to_string()))?;
+        state.clips.keep_render(key, Arc::clone(&out));
+        Ok(out)
     }
 }
 

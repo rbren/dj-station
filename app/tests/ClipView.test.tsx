@@ -662,7 +662,7 @@ describe('ClipView', () => {
     expect(call.slice(2)).toEqual([2, 5.75, 120]);
   });
 
-  it('turns right-shift taps during playback into an even beat grid', async () => {
+  it('turns right-shift taps during playback into a beat grid over the tapped span', async () => {
     const clip = clipMock();
     await openTrack(clip);
     const play = screen.getByTestId('clip-play');
@@ -676,19 +676,44 @@ describe('ClipView', () => {
     tapAt(3.0);
     expect(screen.getAllByTestId('clip-tap-line')).toHaveLength(4);
 
-    // Stopping playback commits them: markers become the even grid…
+    // Stopping playback commits them: markers become the grid, covering
+    // ONLY the tapped span — four beats, not the whole clip.
     fireEvent.click(screen.getByTestId('clip-stop'));
     await waitFor(() => expect(play.textContent).toBe('▶'));
     expect(screen.queryAllByTestId('clip-tap-line')).toHaveLength(0);
-    expect(screen.getAllByTestId('clip-beat-line').length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4);
 
-    // …at the average tempo: 2 s / 3 beats → 90 BPM, and the audio
-    // between the taps is warped onto perfectly even beats.
+    // At the default correction length (every 4 beats) this run is one
+    // section pinned at its ends — which define the 90 BPM average, so
+    // nothing stretches and the inner beats keep their tapped feel.
     expect(screen.getByTestId('clip-save-meta').textContent).toBe('90.0 BPM · 15 beats');
-    const p = await programNow(clip, (p) => p.warp.length === 4);
+    expect(screen.getByTestId('clip-grid-section-readout').textContent).toBe('4 beats');
+    expect(screen.getByTestId('clip-grid-stats').textContent).toBe(
+      'max flam 133 ms · max stretch 0.0%',
+    );
+    const p = await programNow(clip, (p) => p.warp.length === 2);
     expect(p.beat_grid?.bpm).toBeCloseTo(90, 6);
-    expect(p.warp.map(([from]) => from)).toEqual([1.0, 1.6, 2.2, 3.0]);
-    expect(p.warp.map(([, to]) => to.toFixed(4))).toEqual(['1.0000', '1.6667', '2.3333', '3.0000']);
+    expect(p.beat_grid?.times).toEqual([1.0, 1.6, 2.2, 3.0]);
+    expect(p.warp).toEqual([
+      [1, 1],
+      [3, 3],
+    ]);
+
+    // Sliding the correction down to every beat pins each tap to the
+    // ideal grid: no flam left, the stretch made visible per section.
+    fireEvent.change(screen.getByTestId('clip-grid-section'), { target: { value: '1' } });
+    expect(screen.getByTestId('clip-grid-section-readout').textContent).toBe('every beat');
+    expect(screen.getByTestId('clip-grid-stats').textContent).toBe(
+      'max flam 0 ms · max stretch 16.7%',
+    );
+    expect(screen.getAllByTestId(/^clip-stretch-/)).toHaveLength(3);
+    const p1 = await programNow(clip, (p) => p.warp.length === 4);
+    expect(p1.warp.map(([, to]) => to.toFixed(4))).toEqual([
+      '1.0000',
+      '1.6667',
+      '2.3333',
+      '3.0000',
+    ]);
 
     // Saving needs no measuring pass — the grid's tempo is the clip's.
     fireEvent.change(screen.getByTestId('clip-name'), { target: { value: 'Tapped' } });
@@ -698,27 +723,66 @@ describe('ClipView', () => {
     expect(call[4]).toBeCloseTo(90, 6);
     expect(clip.detectBeats).not.toHaveBeenCalled();
 
-    // The grid is one undo step, like any other edit.
+    // The whole session — taps AND the slider move — is one undo step.
     fireEvent.click(screen.getByTestId('clip-undo'));
     expect(screen.queryAllByTestId('clip-beat-line')).toHaveLength(0);
+    expect(screen.queryByTestId('clip-grid-tools')).toBeNull();
   });
 
-  it('quantizes selections to the tapped grid unless ⌘ frees them', async () => {
+  it('extends the grid a beat at a time with the toolbar buttons', async () => {
     const clip = clipMock();
     await openTrack(clip);
     fireEvent.click(screen.getByTestId('clip-play'));
     await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
-    // Taps at 1 and 3 s: a 30 BPM grid phased at 1 s (beats 1, 3, 5…).
+    // Taps at 1 and 3 s: 30 BPM, two beats, covering 1–3 s only.
+    tapAt(1.0);
+    tapAt(3.0);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('▶'));
+    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(2);
+
+    // Forward: beats at 5 and 7 s land; a step back would sit before 0,
+    // so that button has nowhere to go.
+    fireEvent.click(screen.getByTestId('clip-grid-fwd-plus'));
+    fireEvent.click(screen.getByTestId('clip-grid-fwd-plus'));
+    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4);
+    expect(screen.getByTestId('clip-grid-back-plus')).toHaveProperty('disabled', true);
+
+    // − retracts what + added…
+    fireEvent.click(screen.getByTestId('clip-grid-fwd-minus'));
+    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(3);
+
+    // …and the whole grown grid is still ONE undo step.
+    fireEvent.click(screen.getByTestId('clip-undo'));
+    expect(screen.queryAllByTestId('clip-beat-line')).toHaveLength(0);
+    fireEvent.click(screen.getByTestId('clip-redo'));
+    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(3);
+  });
+
+  it('quantizes selections to the covered beats unless ⌘ frees them', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    fireEvent.click(screen.getByTestId('clip-play'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
+    // Taps at 1 and 3 s: a 30 BPM grid covering 1–3 s.
     tapAt(1.0);
     tapAt(3.0);
     fireEvent.click(screen.getByTestId('clip-stop'));
     await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('▶'));
 
-    // A sweep quantizes OUTWARD to whole beats…
+    // Beyond the covered span nothing snaps — the grid is not there.
+    select(3.4, 4.2);
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:03.40–0:04.20');
+
+    // Extend the grid over that area and the same sweep quantizes
+    // OUTWARD to whole beats, and the readout counts them.
+    fireEvent.click(screen.getByTestId('clip-grid-fwd-plus'));
+    fireEvent.keyDown(window, { key: 'Escape' });
     select(3.4, 4.2);
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:03.00–0:05.00');
-    // …and ⌘ keeps the window exactly where the hand put it. (A press
-    // inside the old selection would slide it, so let that one go first.)
+    expect(screen.getByTestId('clip-readout').textContent).toContain('1 beat selected');
+    // ⌘ keeps the window exactly where the hand put it. (A press inside
+    // the old selection would slide it, so let that one go first.)
     fireEvent.keyDown(window, { key: 'Escape' });
     select(3.4, 4.2, { metaKey: true });
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:03.40–0:04.20');
