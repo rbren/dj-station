@@ -7,10 +7,13 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, expect, it, vi } from 'vitest';
 import { DecksView } from '../src/components/DecksView';
 import {
+  beatGridLayout,
   clipParts,
   clipTitle,
   stretchLabel,
   bpmLabel,
+  BEAT_FIELD_HEIGHT,
+  BEAT_FIELD_WIDTH,
   DECK_GLOW_FULL,
   LEVEL_MAX,
   LEVEL_UNITY,
@@ -237,6 +240,45 @@ describe('DecksView', () => {
     expect(dots.filter((d) => d.className.includes('on')).length).toBe(1);
     expect(dots[33].className).toContain('on');
     expect(dots[33].className).toContain('decks-beat-tail');
+  });
+
+  it('lays the lamps out in rows of a power of two, in a field of one size', () => {
+    // Short loops are drawn generously — one fat row — and every layout
+    // is at least as wide as 4:1, up to the longest worth reading: 1024
+    // beats as 64 x 16 lamps of 2 px with nothing between them, exactly
+    // filling the 128 x 32 field the others sit in.
+    expect(beatGridLayout(8)).toEqual({ cols: 8, rows: 1, cell: 9, gap: 3 });
+    expect(beatGridLayout(16)).toEqual({ cols: 8, rows: 2, cell: 9, gap: 3 });
+    expect(beatGridLayout(64)).toEqual({ cols: 16, rows: 4, cell: 6, gap: 2 });
+    expect(beatGridLayout(256)).toEqual({ cols: 32, rows: 8, cell: 3, gap: 1 });
+    expect(beatGridLayout(1024)).toEqual({ cols: 64, rows: 16, cell: 2, gap: 0 });
+    for (const beats of [0, 1, 5, 33, 100, 300, 999, 1024, 2048]) {
+      const { cols, rows, cell, gap } = beatGridLayout(beats);
+      expect(Math.log2(cols) % 1).toBe(0);
+      expect(cols * (cell + gap) - gap).toBeLessThanOrEqual(BEAT_FIELD_WIDTH);
+      expect(rows * (cell + gap) - gap).toBeLessThanOrEqual(BEAT_FIELD_HEIGHT);
+    }
+  });
+
+  it('gives every strip the same beat field, however long the clip', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[0] = loadedSlot(0, { beats: 16, tail: 0 });
+    slots[1] = loadedSlot(1, { beats: 1024, tail: 0 });
+    show(makeApi(makeStatus({ slots })));
+    await waitFor(() => expect(screen.getByTestId('decks-dots-1').children.length).toBe(1024));
+    const short = screen.getByTestId('decks-dots-0');
+    const long = screen.getByTestId('decks-dots-1');
+    // Same space, different lamps: 8 across at 9 px against 64 at 2 px.
+    for (const field of [short, long]) {
+      expect(field.style.getPropertyValue('--beat-field-w')).toBe(`${BEAT_FIELD_WIDTH}px`);
+      expect(field.style.getPropertyValue('--beat-field-h')).toBe(`${BEAT_FIELD_HEIGHT}px`);
+    }
+    expect(short.style.getPropertyValue('--beat-cols')).toBe('8');
+    expect(short.style.getPropertyValue('--beat-cell')).toBe('9px');
+    expect(short.style.getPropertyValue('--beat-gap')).toBe('3px');
+    expect(long.style.getPropertyValue('--beat-cols')).toBe('64');
+    expect(long.style.getPropertyValue('--beat-cell')).toBe('2px');
+    expect(long.style.getPropertyValue('--beat-gap')).toBe('0px');
   });
 
   it('a deck names the Beatify project its clip was cut in, on a line above the clip', async () => {

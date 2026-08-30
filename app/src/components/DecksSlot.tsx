@@ -42,6 +42,7 @@ import { LiveJack } from './Jack';
 import { StemTags } from './StemTags';
 import {
   baselineBpm,
+  beatGridLayout,
   bpmLabel,
   clipParts,
   clipTitle,
@@ -54,6 +55,8 @@ import {
   sendJack,
   stretchLabel,
   toneJack,
+  BEAT_FIELD_HEIGHT,
+  BEAT_FIELD_WIDTH,
   DECK_RATIOS,
   EQ_MAX,
   LEVEL_MAX,
@@ -106,6 +109,7 @@ export function DecksSlot(props: DecksSlotProps) {
   const n = slot.slot + 1;
   const empty = slot.beats === 0;
   const loop = loopBeats(slot);
+  const grid = beatGridLayout(loop);
   const parts = clipParts(slot.clip);
   // The ratio menu, the strip's one piece of local state: which deck is
   // in double time is the engine's, whether its menu is open is not. The
@@ -288,11 +292,23 @@ export function DecksSlot(props: DecksSlotProps) {
       )}
 
       {/* Every beat of the loop, silence included: a lamp row that stopped
-          at sixteen lied about where a long clip was. */}
+          at sixteen lied about where a long clip was. The lamps fill a
+          FIELD of fixed size — rows of a power of two, lamps grown or
+          shrunk to fit it — so a 4-beat clip and a 1024-beat one take the
+          same space and nothing below moves when one replaces the other. */}
       <div
         className="decks-beats"
         data-testid={`decks-dots-${slot.slot}`}
         aria-label={empty ? 'no clip' : `beat ${slot.beat + 1} of ${loop}`}
+        style={
+          {
+            '--beat-field-w': `${BEAT_FIELD_WIDTH}px`,
+            '--beat-field-h': `${BEAT_FIELD_HEIGHT}px`,
+            '--beat-cols': grid.cols,
+            '--beat-cell': `${grid.cell}px`,
+            '--beat-gap': `${grid.gap}px`,
+          } as CSSProperties
+        }
       >
         {Array.from({ length: loop }, (_, i) => (
           <span

@@ -2424,6 +2424,16 @@ of the page.
   colour only (the transition dies in the `prefers-reduced-motion`
   block) and the background keeps a small share of `--ok`, because the
   strip's `--ink-dim` text has to stay readable on it.
+- THE BEAT LAMPS FILL A FIXED FIELD, so a clip's length never moves the
+  controls under it: `.decks-beats` is 128 x 32 px (4:1) whatever the
+  loop, and `beatGridLayout` in `decks.ts` decides what goes in it —
+  columns are a power of two, the first that keeps the block at least
+  4:1 wide (`cols² = 4n`, so only the WIDTH ever binds), and the lamp
+  size and the gap fall out of the field's width, capped so short loops
+  are drawn generously (8 beats = one row of 9 px lamps, 1024 = 64 x 16
+  of 2 px with no gap). The numbers reach CSS as `--beat-*` custom
+  properties on the div — decks.ts is the one source for the geometry,
+  the stylesheet only spends it. Pinned by `DecksView.test.tsx`.
 - SFT IS ALSO A TAP: a strip's shift label is a button, and pressing it
   puts that deck's FIRST BEAT on the beat nearest the press
   (`phaseForBeat` in `decks.ts` — the slot's playhead is `beat - phase`,

@@ -441,6 +441,23 @@ instead. Colour only, and the transition dies in the
 `prefers-reduced-motion` block — with no motion at all the tint is
 still the reading.
 
+**D19 — The beat lamps are a field, not a row (post-overhaul).** The
+lamps were 8 px squares wrapped by the flex box, so the row a strip gave
+them was as tall as the clip was long: a 4-beat clip drew one line and a
+long one pushed the tone knobs, the fader and the transport buttons down
+the column — the eight strips stopped agreeing with each other as clips
+came and went. They now fill a FIXED FIELD of 128 x 32 px (4:1, wide, the
+shape a bar of beats wants), and the LAMPS change size instead of the
+box: rows of a power of two, chosen as the first that keeps the block at
+least 4:1 wide (`cols² = 4n`), with the lamp and the space beside it
+scaled to the field's width and capped so a short loop is drawn
+generously — 8 beats as one row of 9 px lamps, 1024 as 64 x 16 of 2 px
+with nothing between them, which is the longest loop the field is meant
+to read. The math is `beatGridLayout` in `decks.ts` and reaches the CSS
+as custom properties, so there is one source for the geometry; the tail
+lamps' outline thins with them, keeping silence the quieter mark at
+every size.
+
 ---
 
 ## G. Still open after this pass

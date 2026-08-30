@@ -6264,25 +6264,36 @@ body {
   color: var(--fault);
 }
 
+/* The beat lamps live in a FIELD of fixed size (4:1): how many across,
+   how big and how far apart are `beatGridLayout` in decks.ts, handed down
+   as the custom properties below, so a clip of any length costs the strip
+   the same height and nothing under the grid moves when one clip replaces
+   another. The lamps start at the strip's left edge like the lines above
+   them and sit in the middle of the field's height. */
 .decks-beats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  min-height: 8px;
+  display: grid;
+  grid-template-columns: repeat(var(--beat-cols, 1), var(--beat-cell, 0));
+  gap: var(--beat-gap, 0);
+  align-content: center;
+  justify-content: start;
+  width: var(--beat-field-w);
+  max-width: 100%;
+  height: var(--beat-field-h);
 }
 
 .decks-beat-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
+  width: var(--beat-cell);
+  height: var(--beat-cell);
+  border-radius: clamp(0px, calc(var(--beat-cell) / 4), 2px);
   background: var(--line);
 }
 
 /* Silence hung on the end is still part of the loop, so it is drawn —
-   as an outline, because nothing sounds there. */
+   as an outline, because nothing sounds there. The ring thins with the
+   lamp, so a 2 px one keeps a hole and stays the quieter of the two. */
 .decks-beat-tail {
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+  box-shadow: inset 0 0 0 min(1px, calc(var(--beat-cell) / 3)) var(--line-strong);
 }
 
 .decks-beat-dot.on {

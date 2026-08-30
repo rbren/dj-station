@@ -318,6 +318,52 @@ export function loopBeats(slot: DeckSlotStatus): number {
   return slot.beats === 0 ? 0 : slot.beats + slot.tail;
 }
 
+/** The FIELD the beat lamps are drawn in: the space a strip gives them
+ *  whatever the clip's length, so nothing below the grid moves as clips
+ *  come and go. 4:1, and sized so the longest loop worth reading —
+ *  1024 beats — lands as 64 x 16 lamps of 2 px with nothing between
+ *  them. */
+export const BEAT_FIELD_WIDTH = 128;
+export const BEAT_FIELD_HEIGHT = 32;
+
+/** The most a lamp and its share of the spacing may grow to. Short loops
+ *  are drawn generously, but a four-beat clip is not four big buttons:
+ *  past this the field simply has room to spare. The spacing is a quarter
+ *  of that pitch, up to this much — and nil below a 4 px pitch, where the
+ *  lamps are 2 px and a gap would cost more than it tells. */
+const BEAT_PITCH_MAX = 12;
+const BEAT_GAP_MAX = 3;
+
+export interface BeatGridLayout {
+  /** Lamps across — always a power of two. */
+  cols: number;
+  rows: number;
+  /** Side of one (square) lamp, in px. */
+  cell: number;
+  /** Space between lamps, in px; 0 once they are down to 2 px. */
+  gap: number;
+}
+
+/** How a loop's beats are laid out in the field above: rows of a power of
+ *  two, the first one that makes the block AT LEAST as wide as 4:1
+ *  (`cols = 4 * rows` means `cols² = 4n`), with the lamps and the spacing
+ *  between them grown or shrunk to fit — 8 beats read as one fat row,
+ *  1024 as 64 x 16 of 2 px with nothing between them. Both take the SAME
+ *  field, so the strip below never shifts.
+ *
+ *  Only the WIDTH ever binds: rounding the columns UP to a power of two
+ *  keeps `rows <= cols / 4`, so a row of lamps a quarter of the field
+ *  wide always leaves the field's height to spare. */
+export function beatGridLayout(beats: number): BeatGridLayout {
+  const n = Math.max(0, Math.floor(beats));
+  // An empty deck still owns the field; there is simply nothing in it.
+  if (n === 0) return { cols: 1, rows: 0, cell: 0, gap: 0 };
+  const cols = 2 ** Math.ceil(Math.log2(2 * Math.sqrt(n)));
+  const pitch = Math.min(BEAT_FIELD_WIDTH / cols, BEAT_PITCH_MAX);
+  const gap = Math.min(BEAT_GAP_MAX, Math.floor(pitch / 4));
+  return { cols, rows: Math.ceil(n / cols), cell: pitch - gap, gap };
+}
+
 /** The shift that lands a slot's FIRST beat on the beat NEAREST a moment
  *  on the bank's grid — what clicking a strip's SFT label sets, from
  *  where the bank's beat counter stood at the click. A slot's playhead is
