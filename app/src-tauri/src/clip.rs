@@ -480,6 +480,9 @@ pub struct ClipTapBeats {
     pub tracker: String,
     /// One line for the status row, either way.
     pub detail: String,
+    /// Every seed's hearing of the span, best fit first — the toolbar's
+    /// seed picker, so overruling the choice needs no second measurement.
+    pub seeds: Vec<clip::TappedSeed>,
 }
 
 /// The measured beat grid for a run of right-shift taps (PRD §9): the
@@ -499,16 +502,18 @@ pub fn clip_tap_beats(
     match clip::beats_from_taps(&rendered, tracker.as_ref(), &taps) {
         Ok(heard) => Ok(ClipTapBeats {
             detail: format!(
-                "{} heard {} beats at {:.1} BPM over the tapped span (seed {})",
+                "{} heard {} beats at {:.1} BPM over the tapped span (seed {} of {})",
                 heard.tracker,
                 heard.times.len(),
                 heard.bpm,
                 heard.seed,
+                heard.seeds.len(),
             ),
             times: heard.times,
             bpm: heard.bpm,
             seed: heard.seed,
             tracker: heard.tracker,
+            seeds: heard.seeds,
         }),
         Err(e) => Ok(ClipTapBeats {
             times: Vec::new(),
@@ -516,6 +521,7 @@ pub fn clip_tap_beats(
             seed: String::new(),
             tracker: String::new(),
             detail: e.to_string(),
+            seeds: Vec::new(),
         }),
     }
 }

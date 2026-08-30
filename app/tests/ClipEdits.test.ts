@@ -408,6 +408,33 @@ describe('beat taps', () => {
     expect(stretchBands(eased.warp)).toEqual(stretchBands(hard.warp));
   });
 
+  it('reports averages beside the maxima, and the hand against the grid', () => {
+    // Flam and stretch both read max/average: one bad section and a
+    // uniformly bad grid look the same otherwise.
+    const one = tapGrid(TAPS, 1)!;
+    expect(one.stats.avgFlamSecs).toBeCloseTo(0, 9);
+    const ratios = [2 / 3 / 0.6, 2 / 3 / 0.6, 2 / 3 / 0.8];
+    expect(one.stats.avgStretch).toBeCloseTo(
+      ratios.reduce((a, r) => a + Math.abs(r - 1), 0) / 3,
+      9,
+    );
+    const four = tapGrid(TAPS)!;
+    // One section: the two inner taps carry all the flam, over 4 beats.
+    expect(four.stats.avgFlamSecs).toBeCloseTo(
+      (Math.abs(1.6 - (1 + 2 / 3)) + Math.abs(2.2 - (1 + 4 / 3))) / 4,
+      9,
+    );
+
+    // TAP MISS is the third figure: the grid is the tracker's five beats
+    // at 120 BPM, and the hand hit three of them up to 100 ms out. It is
+    // zero when the taps ARE the grid (nothing measured them).
+    const heard = tapGrid([1.0, 1.5, 2.0, 2.5, 3.0], 4, 0, [1.05, 2.1, 2.95])!;
+    expect(heard.stats.maxMissSecs).toBeCloseTo(0.1, 9);
+    expect(heard.stats.avgMissSecs).toBeCloseTo((0.05 + 0.1 + 0.05) / 3, 9);
+    expect([heard.stats.beats, heard.stats.taps]).toEqual([5, 3]);
+    expect(four.stats.maxMissSecs).toBe(0);
+  });
+
   it('ignores key bounce and refuses to build a grid from one tap', () => {
     expect(tapGrid([2.0], 1)).toBeNull();
     expect(tapGrid([2.0, 2.01], 1)).toBeNull();

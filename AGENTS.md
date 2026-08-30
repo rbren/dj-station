@@ -1017,11 +1017,15 @@ offset))`, offset in position units — so the knob's curve shapes the
   playback marks beats at the live element position; when playback stops
   the tapped span is MEASURED — `clip_tap_beats` runs the tracker over
   it and the taps choose the seed AND metrical reading that fit them
-  best (`clip::beats_from_taps` → `grid::choose_tapped_fit`, the lenient
+  best (`clip::beats_from_taps` → `grid::tapped_fits`, the lenient
   sibling of Beatify's `reconcile_taps`: no minimum count, no
-  self-consistency gate, same candidate scan), so the grid is the chosen
-  seed's beat times; a refusal comes back with empty `times` + a
-  `detail` line and the raw taps make the grid themselves. Either way
+  self-consistency gate, same candidate scan; `choose_tapped_fit` is that
+  ranked list's head), so the grid is the chosen seed's beat times; a
+  refusal comes back with empty `times` + a `detail` line and the raw
+  taps make the grid themselves. EVERY seed's hearing rides back with the
+  answer (`TappedSeed`/`ClipTapSeed`, best fit first) and the toolbar's
+  seed picker re-derives the grid from another one without measuring
+  again — the taps AUTOSELECT, they do not decide. Either way
   ClipView builds a grid covering ONLY the tapped span (`tapGrid` —
   average BPM of the beat list, first and last pinned; the toolbar's +/−
   buttons extend/shrink it a beat at a time via `extendGrid`) and
@@ -1030,9 +1034,13 @@ offset))`, offset in position units — so the knob's curve shapes the
   default 4): only every Nth beat is a warp anchor, and the beats between
   keep their tapped feel — `ClipGrid.times` holds the ACTUAL beat
   positions (its twin `BeatGrid.times` in `dj_analysis::clip`), the
-  toolbar shows max flam / max stretch (`TapStats`), and the waveform
+  toolbar shows max/average flam, stretch and TAP MISS (`TapStats` —
+  the miss is the hand against the beats the chosen seed heard, which is
+  what says whether another seed is worth trying), and the waveform
   washes each correction section by its stretch ratio (`stretchBands`,
-  `.clip-stretch-slower/-faster`, the section AVERAGE). A section's rate
+  `.clip-stretch-slower/-faster`, the section AVERAGE, drawn from the
+  SESSION's own warp so a re-tap's washes replace the last one's rather
+  than piling up on the composed program warp). A section's rate
   would otherwise be rectangular and STEP at each anchor, which clicks:
   `warp_smoothing` (program field, 0…1, second toolbar slider
   `clip-grid-smooth`, default `DEFAULT_WARP_SMOOTHING` = 0.3, 0 = the old
@@ -1045,11 +1053,17 @@ offset))`, offset in position units — so the knob's curve shapes the
   a wild one) densify the anchors inside `warp_map` and
   `warpTime`/`warpSource`, so the anchor list stays the beat structure
   the wash, `composeWarp` and the timeline edits read. The WHOLE session
-  — taps, slider moves, extensions — is ONE undo step: ClipView's
-  `tapSession` re-derives
+  — taps, slider moves, seed picks, extensions — is ONE undo step:
+  ClipView's `tapSession` re-derives
   the program from the same taps and REPLACES the present (no history
-  push); its controls only apply while the present IS the session's
-  program. Selections then quantize outward to the grid's actual beats
+  push). Its controls are live while the GRID IT MADE is still the
+  program's (`program.beat_grid === tapSession.grid`), NOT while the
+  whole program object matches: tone edits (EQ, level automation) keep
+  the grid and must keep the controls, and the timeline edits that would
+  invalidate it drop it anyway. Taps are collected in a REF as well as
+  state (`tapRun`) because stopping fires two status callbacks — a state
+  mirror still holds the taps on the second and measures the span twice.
+  Selections then quantize outward to the grid's actual beats
   through AudioTimeline's `snap` hooks — nothing snaps beyond the covered
   span, ⌘ frees the gesture, and the readout counts the beats selected
   (`beatSpan`); a TIMELINE edit (cut/trim/move/splice/gain — anything

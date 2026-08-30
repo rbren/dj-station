@@ -652,6 +652,23 @@ pub fn pad_to_beats(audio: &AudioData, bpm: f64, beats: usize) -> Result<AudioDa
     })
 }
 
+/// One seed's hearing of a tapped span: what the Clip page's seed picker
+/// lists, and what it builds the grid from when a seed is chosen by hand.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TappedSeed {
+    /// Checkpoint ("final0"…, or "dsp" for the fallback tracker).
+    pub seed: String,
+    /// Tempo of this seed's fit, reading applied.
+    pub bpm: f64,
+    /// Its ACTUAL beat times over the tapped span, output seconds —
+    /// detections where it has them, the fitted line where a beat went
+    /// undetected.
+    pub times: Vec<f64>,
+    /// How well the taps land on it (0..=1) — the ranking, best first.
+    pub fit: f64,
+}
+
 /// What running the tracker over a tapped span heard: the beat times the
 /// Clip page stretches instead of the raw taps.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -667,6 +684,10 @@ pub struct TappedBeats {
     pub times: Vec<f64>,
     /// Which tracker produced the runs ("beat_this/…" or "dsp").
     pub tracker: String,
+    /// Every seed that heard two beats or more over the span, best fit
+    /// first — the chosen one (above) is the head. The taps AUTOSELECT,
+    /// they do not decide: the Clip page lets another be picked.
+    pub seeds: Vec<TappedSeed>,
 }
 
 /// The Clip page's beat grid, measured rather than averaged (PRD §9):
@@ -701,18 +722,35 @@ pub fn beats_from_taps(
         .iter()
         .map(|r| (r.seed.clone(), r.beats.clone()))
         .collect();
-    let (seed, fit) = beat_fit::choose_tapped_fit(&runs, &taps)
-        .ok_or_else(|| anyhow!("no seed produced a grid over the tapped span"))?;
-    let times = fit_beat_times(&fit, first, last, dur);
+    let fits = beat_fit::tapped_fits(&runs, &taps);
     ensure!(
-        times.len() >= 2,
-        "the tapped span holds fewer than two detected beats"
+        !fits.is_empty(),
+        "no seed produced a grid over the tapped span"
     );
+    // Every seed's hearing travels, so overruling the choice costs no
+    // second measurement — a seed with fewer than two beats over the span
+    // is no grid at all and never appears.
+    let seeds: Vec<TappedSeed> = fits
+        .into_iter()
+        .filter_map(|f| {
+            let times = fit_beat_times(&f.fit, first, last, dur);
+            (times.len() >= 2).then(|| TappedSeed {
+                seed: f.seed,
+                bpm: f.fit.bpm(),
+                times,
+                fit: f.score,
+            })
+        })
+        .collect();
+    let chosen = seeds
+        .first()
+        .ok_or_else(|| anyhow!("the tapped span holds fewer than two detected beats"))?;
     Ok(TappedBeats {
-        seed,
-        bpm: fit.bpm(),
-        times,
+        seed: chosen.seed.clone(),
+        bpm: chosen.bpm,
+        times: chosen.times.clone(),
         tracker: analysis.tracker,
+        seeds,
     })
 }
 

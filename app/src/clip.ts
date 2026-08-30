@@ -353,15 +353,28 @@ export function warpSource(warp: WarpPoint[], secs: number, smoothing = 0): numb
   return piecewise(guarded(smoothWarp(warp, smoothing)), secs, 1, 0);
 }
 
-/** How much the correction moved and stretched things: what the grid
- *  controls display so the section length can be chosen by ear AND eye. */
+/** How much the correction moved and stretched things, and how far the
+ *  hand was from what the tracker heard: what the grid toolbar displays,
+ *  so the section length, the seed and the taps themselves can all be
+ *  judged by eye as well as by ear. Every figure is max AND average —
+ *  one bad section and a consistently bad grid read the same otherwise. */
 export interface TapStats {
-  /** Largest distance an actual beat sits from its ideal grid slot — the
-   *  timing kept as feel instead of corrected away. */
+  /** Distance an actual beat sits from its ideal grid slot — the timing
+   *  kept as feel instead of corrected away. */
   maxFlamSecs: number;
-  /** Largest stretch any correction section applies, as |ratio − 1|
-   *  (0.02 = 2% faster or slower). */
+  avgFlamSecs: number;
+  /** Stretch a correction section applies, as |ratio − 1| (0.02 = 2%
+   *  faster or slower). */
   maxStretch: number;
+  avgStretch: number;
+  /** How far each right-shift tap landed from the beat the grid put
+   *  nearest it — the hand's own error, once the tracker has spoken.
+   *  Zero throughout when the taps ARE the grid (nothing fit them). */
+  maxMissSecs: number;
+  avgMissSecs: number;
+  /** Beats the grid covers, and taps the miss was measured over. */
+  beats: number;
+  taps: number;
 }
 
 export interface Tapped {
@@ -384,10 +397,20 @@ export interface Tapped {
  *  pinned: a perfect grid.
  *
  *  `smoothing` eases that stretch inside each section (`smoothWarp`), so
- *  the beats between anchors land where the eased rate puts them. */
-export function tapGrid(rawTaps: number[], sectionBeats = 4, smoothing = 0): Tapped | null {
+ *  the beats between anchors land where the eased rate puts them.
+ *
+ *  `handTaps` are the right-shift taps themselves, kept apart from the
+ *  beats because they are usually NOT the same list: they only measure
+ *  the tap miss in `stats` (how far the hand was from the beat the grid
+ *  landed on), which is what says whether a seed was worth choosing. */
+export function tapGrid(
+  beatTimes: number[],
+  sectionBeats = 4,
+  smoothing = 0,
+  handTaps: number[] = [],
+): Tapped | null {
   const taps: number[] = [];
-  for (const t of [...rawTaps].sort((a, b) => a - b)) {
+  for (const t of [...beatTimes].sort((a, b) => a - b)) {
     if (taps.length === 0 || t - taps[taps.length - 1] >= TAP_MIN_GAP_SECS) taps.push(t);
   }
   if (taps.length < 2) return null;
@@ -400,18 +423,46 @@ export function tapGrid(rawTaps: number[], sectionBeats = 4, smoothing = 0): Tap
   for (let i = 0; i < last; i += step) warp.push([taps[i], first + i * period]);
   warp.push([taps[last], first + last * period]);
   const times = taps.map((t) => warpTime(warp, t, smoothing));
+  const grid: ClipGrid = { bpm: 60 / period, period, phase: first, beats: taps.length, times };
   let maxFlamSecs = 0;
+  let sumFlam = 0;
   for (let i = 0; i <= last; i += 1) {
-    maxFlamSecs = Math.max(maxFlamSecs, Math.abs(times[i] - (first + i * period)));
+    const flam = Math.abs(times[i] - (first + i * period));
+    maxFlamSecs = Math.max(maxFlamSecs, flam);
+    sumFlam += flam;
   }
   let maxStretch = 0;
-  for (const band of stretchBands(warp)) {
+  let sumStretch = 0;
+  const bands = stretchBands(warp);
+  for (const band of bands) {
     maxStretch = Math.max(maxStretch, Math.abs(band.ratio - 1));
+    sumStretch += Math.abs(band.ratio - 1);
+  }
+  // The hand tapped the OLD timeline; the grid lives on the warped one,
+  // so a tap has to be carried through the warp before it is compared.
+  // The distance is to the nearest beat the grid actually HAS — a tap
+  // past either end missed by the whole way to the last one.
+  let maxMissSecs = 0;
+  let sumMiss = 0;
+  for (const t of handTaps) {
+    const at = warpTime(warp, t, smoothing);
+    const miss = times.reduce((best, b) => Math.min(best, Math.abs(b - at)), Infinity);
+    maxMissSecs = Math.max(maxMissSecs, miss);
+    sumMiss += miss;
   }
   return {
     warp,
-    grid: { bpm: 60 / period, period, phase: first, beats: taps.length, times },
-    stats: { maxFlamSecs, maxStretch },
+    grid,
+    stats: {
+      maxFlamSecs,
+      avgFlamSecs: sumFlam / (last + 1),
+      maxStretch,
+      avgStretch: bands.length ? sumStretch / bands.length : 0,
+      maxMissSecs,
+      avgMissSecs: handTaps.length ? sumMiss / handTaps.length : 0,
+      beats: taps.length,
+      taps: handTaps.length,
+    },
   };
 }
 
@@ -943,6 +994,19 @@ export interface ClipTapBeats {
   seed: string;
   tracker: string;
   detail: string;
+  /** Every seed's hearing of the span, best fit first (the head is the
+   *  one the taps chose) — the toolbar's seed picker, so overruling the
+   *  choice costs no second measurement. */
+  seeds: ClipTapSeed[];
+}
+
+/** One seed's hearing of a tapped span: a row of the seed picker. */
+export interface ClipTapSeed {
+  seed: string;
+  bpm: number;
+  times: number[];
+  /** How well the taps land on it, 0..1 — what ranked the list. */
+  fit: number;
 }
 
 /** What a beat-clip save filed: the record the decks' clip pickers list. */

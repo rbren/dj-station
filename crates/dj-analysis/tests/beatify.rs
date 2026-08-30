@@ -340,6 +340,30 @@ fn taps_choose_the_seed_that_heard_the_same_pulse() {
 }
 
 #[test]
+fn every_seed_is_offered_with_the_chosen_one_first() {
+    // The Clip page autoselects but does not decide: `tapped_fits` ranks
+    // EVERY seed's best reading, so a hearing can be overruled by ear
+    // without measuring the span again.
+    let truth = drifting_beats(120.0, 120.0, 40, 0.25);
+    let half = drifting_beats(60.0, 60.0, 20, 0.25);
+    let runs = vec![
+        ("final0".to_string(), half),
+        ("final1".to_string(), truth.clone()),
+    ];
+    let fits = grid::tapped_fits(&runs, &tapped(&truth[..16], 0.045, 0.012));
+    let seeds: Vec<&str> = fits.iter().map(|f| f.seed.as_str()).collect();
+    assert_eq!(seeds, ["final1", "final0"]);
+    assert!(fits[0].score >= fits[1].score);
+    // Its head is exactly what the single-answer chooser returns.
+    let (seed, fit) = grid::choose_tapped_fit(&runs, &tapped(&truth[..16], 0.045, 0.012)).unwrap();
+    assert_eq!(seed, "final1");
+    assert!((fit.bpm() - fits[0].fit.bpm()).abs() < 1e-9);
+    // Even two taps are enough to rank them; none at all is no list.
+    assert_eq!(grid::tapped_fits(&runs, &truth[..2]).len(), 2);
+    assert!(grid::tapped_fits(&runs, &truth[..1]).is_empty());
+}
+
+#[test]
 fn taps_fix_a_half_time_reading_without_touching_the_tempo() {
     // One seed, read half-time. The taps cannot change its period —
     // only which multiple of it is called a beat.

@@ -14,17 +14,20 @@
 // span is MEASURED — the Beatify tracker runs over it and the taps pick
 // the seed (and metrical reading) that best fits them (clip_tap_beats),
 // so the grid is the chosen seed's beat times; when nothing fits, the
-// taps themselves are the grid at their average BPM. Either way it
+// taps themselves are the grid at their average BPM. Every OTHER seed's
+// hearing comes back too, so the toolbar's picker can overrule the
+// choice without measuring again. Either way the grid
 // covers ONLY the tapped span (the grid toolbar's +/− buttons extend it
 // a beat at a time). The stretch correction happens every `sectionBeats` beats
 // (the toolbar slider, default 4): section boundaries are warped onto
 // the ideal grid and the beats inside keep their tapped feel, so the
-// toolbar shows the max flam (uncorrected offset) and max stretch that
-// choice leaves. A second slider SMOOTHS that stretch (`warp_smoothing`,
-// 0…1): the correction eases in and out across each section instead of
-// switching rate at its boundary, which is what the boundary clicked
-// with. The whole tap session — grid, warp, extensions, slider
-// moves — is ONE undo step (`tapSession` regenerates in place).
+// toolbar reads out what that costs — flam (uncorrected offset), stretch
+// and the miss between the hand and the grid, max and average each. A
+// second slider SMOOTHS that stretch (`warp_smoothing`, 0…1): the
+// correction eases in and out across each section instead of switching
+// rate at its boundary, which is what the boundary clicked with. The
+// whole tap session — grid, warp, extensions, slider moves, seed picks —
+// is ONE undo step (`tapSession` regenerates in place).
 // Selections then quantize to the grid's actual beats; ⌘-drag frees
 // them. A selection that was never tapped is measured by the Beatify
 // tracker (beat_this when installed) the moment the save row needs
@@ -87,7 +90,9 @@ import {
   type ClipSource,
   type ClipStemBackend,
   type ClipStemStatus,
+  type ClipTapSeed,
   type TapStats,
+  type WarpPoint,
   DEFAULT_WARP_SMOOTHING,
   SILENCE_DB,
   STEM_NAMES,
@@ -154,20 +159,35 @@ const MAX_SECTION_BEATS = 16;
  *  1 = all of the stretch in the middle of the section). */
 const SMOOTHING_STEP = 0.05;
 
-/** The tap commit, kept regenerable: the slider and the +/− extensions
- *  re-derive grid and warp from the SAME taps against the SAME base
- *  program, replacing the present in place — the whole session is one
- *  undo step, however much the correction is tuned. */
+/** The tap commit, kept regenerable: the slider, the seed picker and the
+ *  +/− extensions re-derive grid and warp from the SAME taps against the
+ *  SAME base program, replacing the present in place — the whole session
+ *  is one undo step, however much the correction is tuned. */
 type TapSession = {
-  /** The program the taps were made against (what undo restores). */
+  /** The program the taps were made against (what undo restores, and
+   *  whose warp this session composes onto). */
   base: ClipProgram;
-  /** The beat times the session was built from, on `base`'s output
-   *  timeline: what the tracker heard over the tapped span, or the raw
-   *  taps when nothing fit them. */
-  taps: number[];
-  /** What the session last produced; controls only apply while this IS
-   *  the present program (undo/redo walks in and out of the session). */
-  program: ClipProgram;
+  /** The right-shift taps themselves, on `base`'s output timeline: what
+   *  bounded the span, and what the tap miss is measured against. */
+  rawTaps: number[];
+  /** Every seed's hearing of the span, best fit first — empty when the
+   *  tracker refused and the taps are the grid on their own. */
+  seeds: ClipTapSeed[];
+  /** Which seed's beats the grid is built from; null is "the taps
+   *  themselves". Autoselected (the best fit), overridable. */
+  seed: string | null;
+  /** The beat times the grid was built from: the chosen seed's, or the
+   *  raw taps when nothing fit them. */
+  beats: number[];
+  /** What the session put ON the program. The grid is the session's
+   *  IDENTITY: its controls apply as long as the present program still
+   *  carries it — a tone edit (EQ, automation) keeps the grid and must
+   *  not silently end the session, while any timeline edit drops it. */
+  grid: ClipGrid;
+  /** The session's OWN warp, before composition with `base.warp`: the
+   *  stretch sections belong to this session, so a re-tap replaces the
+   *  washes on the waveform instead of leaving the old ones behind. */
+  warp: WarpPoint[];
   stats: TapStats;
   /** Whole beats added (+) or dropped (−) at each edge of the grid. */
   extBack: number;
@@ -186,6 +206,23 @@ function stretchTitle(ratio: number): string {
   return `stretched ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
 }
 
+/** What the tracker's grid cost and how well it was tapped, max/average
+ *  throughout: the toolbar's debug line. Flam and stretch are the two
+ *  halves of the correction (what it left, what it moved), tap miss is
+ *  the hand against the beats the chosen seed heard — a big miss with a
+ *  small flam means the seed disagrees with the tapping, not the tapping
+ *  with itself, which is exactly when another seed is worth a try. */
+function statsLine(s: TapStats): string {
+  const ms = (secs: number) => Math.round(secs * 1000);
+  const pct = (r: number) => (r * 100).toFixed(1);
+  return (
+    `flam ${ms(s.maxFlamSecs)}/${ms(s.avgFlamSecs)} ms · ` +
+    `stretch ${pct(s.maxStretch)}/${pct(s.avgStretch)}% · ` +
+    `tap miss ${ms(s.maxMissSecs)}/${ms(s.avgMissSecs)} ms · ` +
+    `${s.beats} beats from ${s.taps} taps`
+  );
+}
+
 /** "4 beats selected", fractional (to one decimal) when an end sits off
  *  the grid. */
 function beatsLabel(grid: ClipGrid, sel: Range): string {
@@ -195,24 +232,47 @@ function beatsLabel(grid: ClipGrid, sel: Range): string {
   return `${shown} ${shown === '1' ? 'beat' : 'beats'} selected`;
 }
 
-/** Build a tap session's program: grid + warp from the taps at the given
- *  correction length and smoothing, the +/− edge extensions re-applied a
- *  beat at a time (an extension with nowhere to go simply stops). */
+/** What one grid control changed about the session (everything else is
+ *  re-derived from the session as it stands). */
+type TapTweak = {
+  seed?: string;
+  beats?: number[];
+  sectionBeats?: number;
+  smoothing?: number;
+  extBack?: number;
+  extFwd?: number;
+};
+
+/** What a tap session is re-derived from: the taps, the seed chosen among
+ *  what the tracker heard, and the toolbar settings. */
+type TapSpec = {
+  base: ClipProgram;
+  /** The program the result REPLACES — everything the session does not
+   *  own (tone edits made since the taps) is carried over from it. */
+  present: ClipProgram;
+  beats: number[];
+  rawTaps: number[];
+  sectionBeats: number;
+  smoothing: number;
+  extBack: number;
+  extFwd: number;
+};
+
+/** Build a tap session's program: grid + warp from the beats at the given
+ *  correction length and smoothing, composed onto the base program's warp,
+ *  the +/− edge extensions re-applied a beat at a time (an extension with
+ *  nowhere to go simply stops). */
 function sessionProgram(
-  base: ClipProgram,
-  taps: number[],
-  sectionBeats: number,
-  smoothing: number,
-  extBack: number,
-  extFwd: number,
-): { program: ClipProgram; stats: TapStats } | null {
-  const tapped = tapGrid(taps, sectionBeats, smoothing);
+  spec: TapSpec,
+): { program: ClipProgram; grid: ClipGrid; warp: WarpPoint[]; stats: TapStats } | null {
+  const { base, present, beats, rawTaps, sectionBeats, smoothing, extBack, extFwd } = spec;
+  const tapped = tapGrid(beats, sectionBeats, smoothing, rawTaps);
   if (!tapped) return null;
   const warp = base.warp.length
     ? composeWarp(base.warp, tapped.warp, base.warp_smoothing, smoothing)
     : tapped.warp;
   let program: ClipProgram = {
-    ...base,
+    ...present,
     warp,
     warp_smoothing: smoothing,
     beat_grid: tapped.grid,
@@ -230,7 +290,7 @@ function sessionProgram(
     }
   }
   if (grid !== tapped.grid) program = { ...program, beat_grid: grid };
-  return { program, stats: tapped.stats };
+  return { program, grid, warp: tapped.warp, stats: tapped.stats };
 }
 
 export interface ClipViewProps {
@@ -287,6 +347,10 @@ export function ClipView({
   /** Right-shift taps of the current playback pass, output seconds. They
    *  become the beat grid the moment playback stops. */
   const [taps, setTaps] = useState<number[]>([]);
+  /** The same list, written as the taps happen: the stop that commits
+   *  them arrives before React has re-rendered, so the pass reads this
+   *  and empties it — the state copy is only what the waveform draws. */
+  const tapRun = useRef<number[]>([]);
   /** Stretch-correction length in beats — the grid toolbar's slider. */
   const [sectionBeats, setSectionBeats] = useState(DEFAULT_SECTION_BEATS);
   /** How much the correction eases across a section (0…1) — the grid
@@ -355,9 +419,9 @@ export function ClipView({
   // dispatch the next click — so pressing play in that gap read the
   // previous render's duration, computed an empty window, and silently
   // played nothing.
-  const live = useRef({ clip, request, duration, taps, program, sectionBeats, smoothing });
+  const live = useRef({ clip, request, duration, program, sectionBeats, smoothing });
   useLayoutEffect(() => {
-    live.current = { clip, request, duration, taps, program, sectionBeats, smoothing };
+    live.current = { clip, request, duration, program, sectionBeats, smoothing };
   });
 
   // One effect creates the transport and one effect destroys it, so React
@@ -384,17 +448,27 @@ export function ClipView({
         // a lone tap builds nothing and is simply cleared. All the
         // setters used here are React's stable ones — this is an event
         // callback, reading current state via `live`.
-        if (!s.playing && live.current.taps.length > 0) {
-          const rawTaps = live.current.taps;
+        //
+        // The taps are taken from a REF, not from `live`: stopping
+        // notifies twice (playing, then where the playhead parked) and a
+        // mirror that only refreshes on render still held them the second
+        // time — two tracker runs and two undo steps for one pass.
+        const rawTaps = tapRun.current;
+        if (!s.playing && rawTaps.length > 0) {
+          tapRun.current = [];
           setTaps([]);
           const prev = live.current.program;
           void (async () => {
             let beats = rawTaps;
+            let seeds: ClipTapSeed[] = [];
+            let seed: string | null = null;
             let note: string | null = null;
             try {
               const heard = await live.current.clip.tapBeats(live.current.request, rawTaps);
               if (heard && heard.times.length >= 2) {
                 beats = heard.times;
+                seeds = heard.seeds ?? [];
+                seed = heard.seed || null;
                 note = heard.detail || null;
               } else if (heard?.detail) {
                 note = `${heard.detail} — the grid is your taps as they were`;
@@ -405,30 +479,35 @@ export function ClipView({
             // An edit landing while the tracker measured would put the
             // grid's anchors under different audio: drop the pass.
             if (live.current.program !== prev) return;
-            const built = sessionProgram(
-              prev,
+            const built = sessionProgram({
+              base: prev,
+              present: prev,
               beats,
-              live.current.sectionBeats,
-              live.current.smoothing,
-              0,
-              0,
-            );
+              rawTaps,
+              sectionBeats: live.current.sectionBeats,
+              smoothing: live.current.smoothing,
+              extBack: 0,
+              extFwd: 0,
+            });
             if (!built) return;
             setPast((h) => [...h.slice(-HISTORY_DEPTH), prev]);
             setFuture([]);
             setProgram(built.program);
             setTapSession({
               base: prev,
-              taps: beats,
-              program: built.program,
+              rawTaps,
+              seeds,
+              seed,
+              beats,
+              grid: built.grid,
+              warp: built.warp,
               stats: built.stats,
               extBack: 0,
               extFwd: 0,
             });
             // The selection in hand is quantized to the new grid at once.
-            const grid = built.program.beat_grid;
             const dur = programDuration(built.program);
-            setSelection((cur) => (cur && grid ? quantizeRange(grid, cur, dur) : cur));
+            setSelection((cur) => (cur ? quantizeRange(built.grid, cur, dur) : cur));
             if (note) setStatus(note);
           })();
         }
@@ -538,55 +617,91 @@ export function ClipView({
 
   // --- the grid toolbar: regenerating the tap session in place ----------
   //
-  // The slider and the +/− extensions re-derive the grid and warp from
-  // the session's taps and REPLACE the present program (no history push):
-  // however much the correction is tuned, one undo removes the whole
-  // session. They only apply while the present IS the session's program —
-  // undo/redo walks in and out of that state.
-  const tunable = tapSession !== null && tapSession.program === program;
+  // The slider, the seed picker and the +/− extensions re-derive the grid
+  // and warp from the session's taps and REPLACE the present program (no
+  // history push): however much the correction is tuned, one undo removes
+  // the whole session.
+  //
+  // A session is live while the GRID IT MADE is the one on the program.
+  // Whole-program identity used to gate this, which quietly ended the
+  // session at the first tone edit: a stray click in the automation lane
+  // or a nudge of an EQ band left the grid drawn and every one of its
+  // controls dead until the next tapping pass. Tone edits do not touch
+  // the grid, and the timeline edits that would invalidate it drop it
+  // (`dropGrid`), so the grid IS the session's lifetime.
+  const tunable = tapSession !== null && program.beat_grid === tapSession.grid;
 
   const regenerate = useCallback(
-    (session: TapSession, beats: number, ease: number, extBack: number, extFwd: number) => {
-      const built = sessionProgram(session.base, session.taps, beats, ease, extBack, extFwd);
+    (session: TapSession, tweak: TapTweak) => {
+      const beats = tweak.beats ?? session.beats;
+      const extBack = tweak.extBack ?? session.extBack;
+      const extFwd = tweak.extFwd ?? session.extFwd;
+      // Re-derived against the PRESENT program, so tone edits made since
+      // the taps survive a tune of the correction.
+      const built = sessionProgram({
+        base: session.base,
+        present: program,
+        beats,
+        rawTaps: session.rawTaps,
+        sectionBeats: tweak.sectionBeats ?? sectionBeats,
+        smoothing: tweak.smoothing ?? smoothing,
+        extBack,
+        extFwd,
+      });
       if (!built) return;
       setProgram(built.program);
-      setTapSession({ ...session, program: built.program, stats: built.stats, extBack, extFwd });
+      setTapSession({
+        ...session,
+        seed: tweak.seed ?? session.seed,
+        beats,
+        extBack,
+        extFwd,
+        grid: built.grid,
+        warp: built.warp,
+        stats: built.stats,
+      });
     },
-    [],
+    [program, sectionBeats, smoothing],
   );
 
   const retime = useCallback(
     (beats: number) => {
       setSectionBeats(beats);
-      if (tapSession && tapSession.program === program) {
-        regenerate(tapSession, beats, smoothing, tapSession.extBack, tapSession.extFwd);
-      }
+      if (tunable && tapSession) regenerate(tapSession, { sectionBeats: beats });
     },
-    [program, regenerate, smoothing, tapSession],
+    [regenerate, tapSession, tunable],
   );
 
   const smooth = useCallback(
     (ease: number) => {
       setSmoothing(ease);
-      if (tapSession && tapSession.program === program) {
-        regenerate(tapSession, sectionBeats, ease, tapSession.extBack, tapSession.extFwd);
-      }
+      if (tunable && tapSession) regenerate(tapSession, { smoothing: ease });
     },
-    [program, regenerate, sectionBeats, tapSession],
+    [regenerate, tapSession, tunable],
   );
 
   const extend = useCallback(
     (edge: 'back' | 'fwd', by: 1 | -1) => {
-      if (!tapSession || tapSession.program !== program) return;
-      regenerate(
-        tapSession,
-        sectionBeats,
-        smoothing,
-        tapSession.extBack + (edge === 'back' ? by : 0),
-        tapSession.extFwd + (edge === 'fwd' ? by : 0),
-      );
+      if (!tunable || !tapSession) return;
+      regenerate(tapSession, {
+        extBack: tapSession.extBack + (edge === 'back' ? by : 0),
+        extFwd: tapSession.extFwd + (edge === 'fwd' ? by : 0),
+      });
     },
-    [program, regenerate, sectionBeats, smoothing, tapSession],
+    [regenerate, tapSession, tunable],
+  );
+
+  /** Overrule the seed the taps chose: the same span, heard by another
+   *  checkpoint. Every hearing came back with the measurement, so this
+   *  costs no second tracker run — and it stays ONE undo step. */
+  const pickSeed = useCallback(
+    (seed: string) => {
+      if (!tunable || !tapSession) return;
+      const heard = tapSession.seeds.find((s) => s.seed === seed);
+      if (!heard) return;
+      regenerate(tapSession, { seed, beats: heard.times });
+    },
+    [regenerate, tapSession, tunable],
   );
 
   const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
@@ -928,7 +1043,8 @@ export function ClipView({
         const transport = transportRef.current;
         if (transport?.playing) {
           const at = transport.position() ?? transport.playhead;
-          setTaps((prev) => [...prev, at]);
+          tapRun.current = [...tapRun.current, at];
+          setTaps(tapRun.current);
         }
       } else if (!mod && e.key === 'Escape') {
         // Clicking no longer drops the selection, so this is the way out
@@ -1215,8 +1331,9 @@ export function ClipView({
                     y2={WAVE_H}
                   />
                 ))}
-                {grid &&
-                  stretchBands(program.warp).map((b, i) => (
+                {tunable &&
+                  tapSession &&
+                  stretchBands(tapSession.warp).map((b, i) => (
                     <rect
                       key={`stretch${i}`}
                       data-testid={`clip-stretch-${i}`}
@@ -1396,10 +1513,30 @@ export function ClipView({
                   {smoothing <= 0 ? 'hard' : `${Math.round(smoothing * 100)}%`}
                 </span>
               </label>
+              {tunable && tapSession && tapSession.seeds.length > 0 && (
+                <label className="clip-grid-seed">
+                  <span>Seed</span>
+                  <select
+                    data-testid="clip-grid-seed"
+                    value={tapSession.seed ?? ''}
+                    onChange={(e) => pickSeed(e.target.value)}
+                    title="Which of the tracker's hearings the grid is built from — the one your taps fit best is chosen for you"
+                  >
+                    {tapSession.seeds.map((s) => (
+                      <option key={s.seed} value={s.seed}>
+                        {s.seed} · {fixed(s.bpm, 1)} BPM · fit {Math.round(s.fit * 100)}%
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {tunable && tapSession && (
-                <span className="clip-grid-stats" data-testid="clip-grid-stats">
-                  max flam {Math.round(tapSession.stats.maxFlamSecs * 1000)} ms · max stretch{' '}
-                  {(tapSession.stats.maxStretch * 100).toFixed(1)}%
+                <span
+                  className="clip-grid-stats"
+                  data-testid="clip-grid-stats"
+                  title="max/average, over the tapped span: flam is how far a beat sits from its ideal slot, stretch how much a correction section moves the audio, tap miss how far your taps landed from the beats the grid chose"
+                >
+                  {statsLine(tapSession.stats)}
                 </span>
               )}
             </div>

@@ -4099,6 +4099,12 @@ body {
   width: 120px;
 }
 
+.clip-grid-seed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .clip-grid-stats {
   color: var(--ink-dim);
 }

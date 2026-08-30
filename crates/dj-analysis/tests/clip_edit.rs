@@ -605,6 +605,14 @@ fn taps_bound_the_span_and_the_trackers_beats_become_the_grid() {
         assert!((t - want).abs() < 0.05, "beat at {t}, wanted {want}");
     }
 
+    // Every seed's hearing travels with the answer, best fit first, so
+    // the Clip page can offer the choice without measuring again — the
+    // DSP fallback runs one seed, so here that list is the chosen one.
+    let seeds: Vec<&str> = heard.seeds.iter().map(|s| s.seed.as_str()).collect();
+    assert_eq!(seeds, ["dsp"]);
+    assert_eq!(heard.seeds[0].times, heard.times);
+    assert!(heard.seeds[0].fit > 0.5, "fit {}", heard.seeds[0].fit);
+
     // Fewer than two taps bound nothing.
     assert!(beats_from_taps(&audio, &DspTracker, &[1.0]).is_err());
 }
