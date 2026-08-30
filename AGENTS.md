@@ -954,7 +954,12 @@ offset))`, offset in position units — so the knob's curve shapes the
   a Tauri command thread: sync commands run on the main thread and would
   freeze the window. `search_provider` is `#[tauri::command(async)]` for
   the same reason (yt-dlp search is a subprocess). Library-view engine
-  mocks need `startDownload`/`downloadJobs`.
+  mocks need `startDownload`/`downloadJobs`. The Library page RENDERS only
+  a slice of that list: `visibleJobs()` in `LibraryView.tsx` shows the
+  `RECENT_DOWNLOADS_SHOWN` (3) newest finished jobs plus EVERY in-flight
+  one (queued jobs are `running` with `stage == "queued"`); polling,
+  announcements and per-result matching still use the full list. Pinned by
+  `app/tests/LibraryView.test.tsx`.
 - The YouTube provider is keyless and shells out to `yt-dlp` (OPTIONAL
   runtime dep, `DJ_YTDLP_BIN` overrides the binary, `DJ_YTDLP_ARGS` adds
   flags — e.g. `--cookies-from-browser` for YouTube's bot check): search is
