@@ -3,7 +3,9 @@
 // panel rendered zoomed out. Click an entry to drop it at the center of the
 // current view, or drag it onto the canvas (the modal hides itself during
 // the drag so the rack underneath can take the drop). Includes a category
-// filter, a "Deprecated" tag and a search box.
+// filter, a "Deprecated" tag and a search box — which holds the focus for
+// the whole modal, so both halves can be worked from the keyboard alone:
+// type to filter, ↑/↓ to walk what is listed, Enter to take it.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BEAT_CLIP_TYPE, type BeatClipEntry } from '../beatClip';
@@ -276,7 +278,7 @@ function MacroPreview({ m }: { m: Manifest }) {
   );
 }
 
-function PickerEntry({ m, onAdd, onDragging, onMacroMenu }: PickerEntryProps) {
+function PickerEntry({ m, active, onAdd, onDragging, onMacroMenu }: PickerEntryProps) {
   // WebKit (the Tauri webview) follows `contextmenu` with a `click` on the
   // same target — Chrome/Firefox fire `auxclick` instead — so without a
   // guard a right-click falls through to the add-on-click handler and the
@@ -287,8 +289,9 @@ function PickerEntry({ m, onAdd, onDragging, onMacroMenu }: PickerEntryProps) {
   const menuGesture = useRef(false);
   return (
     <div
-      className="picker-entry"
+      className={`picker-entry${active ? ' active' : ''}`}
       data-testid={`library-add-${m.id}`}
+      data-active={active ? 'true' : undefined}
       data-tip={m.id}
       role="button"
       tabIndex={0}
@@ -363,6 +366,8 @@ function PickerEntry({ m, onAdd, onDragging, onMacroMenu }: PickerEntryProps) {
 
 interface PickerEntryProps {
   m: Manifest;
+  /** The entry Enter would add (keyboard cursor), highlighted. */
+  active: boolean;
   onAdd(typeId: string): void;
   /** Entry drag started/ended — the modal hides itself while true so the
    *  canvas underneath can receive the drop. */
@@ -430,10 +435,12 @@ export function ModulePicker({
   const [tab, setTab] = useState<PickerTab>(loadTab);
   const [category, setCategory] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  // Keyboard cursor in the clips list: the row Enter drops on the rack.
-  const [cursor, setCursor] = useState({ query: '', index: 0 });
+  // Keyboard cursor: the entry Enter drops on the rack, in whichever half
+  // is showing. Held against the LIST IT POINTS INTO (`key` below), so it
+  // is never a stale index into a list that has since been re-filtered.
+  const [cursor, setCursor] = useState({ key: '', index: 0 });
   const searchRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   // Right-clicked macro entry: menu position + which dialog is up.
   const [macroMenu, setMacroMenu] = useState<null | { m: Manifest; x: number; y: number }>(null);
   const [renaming, setRenaming] = useState<null | { m: Manifest; name: string }>(null);
@@ -456,18 +463,34 @@ export function ModulePicker({
     [moduleTypes, query, category],
   );
   const shownClips = useMemo(() => filterClips(clips ?? [], query), [clips, query]);
-  // The cursor is remembered PER QUERY, so typing re-aims it at the best
-  // match (the first row) by derivation rather than by an effect.
-  const activeIndex = cursor.query === query ? Math.min(cursor.index, shownClips.length - 1) : 0;
+  // The gallery read as ONE sequence: the groups in display order, each
+  // group's entries in theirs. ↑/↓ walk that, so the cursor crosses a
+  // category heading the way the eye does rather than stopping at it.
+  const shownModules = useMemo(() => shown.flatMap(([, entries]) => entries), [shown]);
+  const listedCount = clipsTab ? shownClips.length : shownModules.length;
+  // Which list the cursor's index counts into. Anything that re-filters —
+  // typing, a pill, the tab — makes a new key and so re-aims the cursor at
+  // the best match (the first entry) by derivation rather than an effect.
+  const cursorKey = `${tab}\u0000${category ?? ''}\u0000${query}`;
+  const activeIndex = cursor.key === cursorKey ? Math.min(cursor.index, listedCount - 1) : 0;
+  const activeModuleId = clipsTab ? undefined : shownModules[activeIndex]?.id;
   useEffect(() => {
     // jsdom has no scrollIntoView; the optional call keeps tests honest.
-    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView?.({ block: 'nearest' });
-  }, [activeIndex]);
+    bodyRef.current?.querySelector('[data-active="true"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex, cursorKey]);
 
   const openTab = (next: PickerTab) => {
     setTab(next);
     saveJson(PICKER_TAB_KEY, next);
     // Both tabs are searched from the same box: keep typing.
+    searchRef.current?.focus();
+  };
+
+  // Clicking a pill (again to clear it) hands the focus back to the search
+  // box for the same reason: the keys that walk the gallery are read from
+  // there, and a pill that kept the focus would eat the next Enter.
+  const pickCategory = (next: string | null) => {
+    setCategory((prev) => (prev === next ? null : next));
     searchRef.current?.focus();
   };
 
@@ -486,26 +509,43 @@ export function ModulePicker({
         }
         return;
       }
-      // The clips list is driven from the search box: arrows walk it,
-      // Enter drops the row under the cursor on the rack.
-      if (!clipsTab || dialogUp || shownClips.length === 0) return;
+      // BOTH halves are driven from the search box, which never gives up
+      // the focus: arrows walk what is listed, Enter takes the entry under
+      // the cursor — so cmd+M, type, Enter is the whole gesture, with the
+      // arrows there for the times the best match isn't the first one.
+      if (dialogUp || listedCount === 0) return;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
+        e.stopPropagation();
         const step = e.key === 'ArrowDown' ? 1 : -1;
         // Clamped, not wrapping: the ends of the list stay put under a
         // held arrow key.
-        const next = Math.max(0, Math.min(activeIndex + step, shownClips.length - 1));
-        setCursor({ query, index: next });
+        const next = Math.max(0, Math.min(activeIndex + step, listedCount - 1));
+        setCursor({ key: cursorKey, index: next });
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        onAddClip?.(shownClips[activeIndex]);
+        e.stopPropagation();
+        if (clipsTab) onAddClip?.(shownClips[activeIndex]);
+        else onAdd(shownModules[activeIndex].id);
       }
     };
     // Capture phase so the app's global Escape handler (clear selection /
-    // pending wire) doesn't also fire while the picker is up.
+    // pending wire) doesn't also fire while the picker is up; the keys the
+    // picker consumes stop there for the same reason.
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, dialogUp, clipsTab, shownClips, activeIndex, query, onAddClip]);
+  }, [
+    onClose,
+    dialogUp,
+    clipsTab,
+    shownClips,
+    shownModules,
+    listedCount,
+    activeIndex,
+    cursorKey,
+    onAdd,
+    onAddClip,
+  ]);
 
   return (
     <div
@@ -560,7 +600,7 @@ export function ModulePicker({
             <button
               className={`picker-category${category === null ? ' active' : ''}`}
               data-testid="picker-category-all"
-              onClick={() => setCategory(null)}
+              onClick={() => pickCategory(null)}
             >
               All
             </button>
@@ -569,7 +609,7 @@ export function ModulePicker({
                 key={c}
                 className={`picker-category${category === c ? ' active' : ''}`}
                 data-testid={`picker-category-${c}`}
-                onClick={() => setCategory((prev) => (prev === c ? null : c))}
+                onClick={() => pickCategory(c)}
               >
                 {c}
               </button>
@@ -578,19 +618,16 @@ export function ModulePicker({
               <button
                 className={`picker-category picker-tag${category === DEPRECATED_TAG ? ' active' : ''}`}
                 data-testid={`picker-category-${DEPRECATED_TAG}`}
-                onClick={() =>
-                  setCategory((prev) => (prev === DEPRECATED_TAG ? null : DEPRECATED_TAG))
-                }
+                onClick={() => pickCategory(DEPRECATED_TAG)}
               >
                 {DEPRECATED_TAG}
               </button>
             )}
           </div>
         )}
-        <div className="picker-body">
+        <div className="picker-body" ref={bodyRef}>
           {clipsTab && shownClips.length > 0 && (
             <ul
-              ref={listRef}
               className="picker-clip-list"
               data-testid="picker-clip-list"
               role="listbox"
@@ -601,7 +638,7 @@ export function ModulePicker({
                   key={`${c.projectId}/${c.clipId}`}
                   clip={c}
                   active={i === activeIndex}
-                  onHover={() => setCursor({ query, index: i })}
+                  onHover={() => setCursor({ key: cursorKey, index: i })}
                   onAdd={(clip) => onAddClip?.(clip)}
                 />
               ))}
@@ -623,6 +660,7 @@ export function ModulePicker({
                     <PickerEntry
                       key={m.id}
                       m={m}
+                      active={m.id === activeModuleId}
                       onAdd={onAdd}
                       onDragging={setDragging}
                       onMacroMenu={

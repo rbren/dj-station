@@ -1451,7 +1451,19 @@ beatify::build`.
   + length/tempo), driven entirely from the always-focused search box:
   the first match is selected as you type, ↑/↓ walk the rows (clamped at
   the ends), Enter drops the selected clip on the rack — so cmd+M, type,
-  Enter is the whole gesture. Picking one adds the module
+  Enter is the whole gesture. BOTH tabs work that way: one cursor
+  (`cursor`/`activeIndex` in `ModulePicker.tsx`) serves the clip rows and
+  the gallery, which ↑/↓ read as ONE row-major sequence flattened across
+  the category headings (`shownModules`) — Enter adds the highlighted
+  module type, and the highlight is a `.picker-entry.active` tile plus a
+  `scrollIntoView` on the picker body. The cursor is held against the list
+  it points into (tab + pill + query, `cursorKey`), so typing, a pill or a
+  tab switch re-aims it at the best match BY DERIVATION rather than by an
+  effect, and the focus never leaves the search box (pills hand it back).
+  The keys the picker consumes stop at its capture-phase window listener,
+  like Escape, so nothing reaches the rack behind it. Pinned by the
+  "keyboard navigation" cases in `app/tests/ModulePicker.test.tsx`.
+  Picking a clip adds the module
   and calls `beat_clip_load` (undoable under `EditKey::Track`, `async`
   because assembling decodes audio — assemble BEFORE taking the engine
   lock). That command also NAMES the module after the clip ("chorus stack",

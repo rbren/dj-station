@@ -286,6 +286,129 @@ describe('ModulePicker', () => {
   });
 });
 
+// cmd+M, type, Enter: the search box holds the focus and the gallery is
+// walked from it, so the whole modal works without the mouse.
+describe('ModulePicker keyboard navigation', () => {
+  // Display order across the category headings: Sources, Shaping,
+  // Analysis & I/O.
+  const ORDER = ['com.dj.oscillator', 'com.dj.filter', 'builtin.audio_out'];
+  const active = () => document.querySelectorAll('.picker-entry[data-active="true"]');
+  /** The single entry under the cursor, by module id (its `data-tip`). */
+  const activeId = () => {
+    const on = active();
+    expect(on.length).toBeLessThan(2);
+    return (on[0] as HTMLElement | undefined)?.dataset.tip;
+  };
+
+  it('highlights the best match on open, and Enter adds it', () => {
+    const { onAdd } = renderPicker();
+    expect(document.activeElement).toBe(screen.getByTestId('library-search'));
+    expect(activeId()).toBe(ORDER[0]);
+
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(onAdd).toHaveBeenCalledWith(ORDER[0]);
+  });
+
+  it('arrows walk the gallery straight across the category headings', () => {
+    const { onAdd } = renderPicker();
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(activeId()).toBe(ORDER[1]);
+    // The next section is simply the next entry: a heading is not a stop.
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(activeId()).toBe(ORDER[2]);
+    // The ends hold: no wrapping past the last or before the first.
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(activeId()).toBe(ORDER[2]);
+    fireEvent.keyDown(window, { key: 'ArrowUp' });
+    fireEvent.keyDown(window, { key: 'ArrowUp' });
+    fireEvent.keyDown(window, { key: 'ArrowUp' });
+    expect(activeId()).toBe(ORDER[0]);
+
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(onAdd).toHaveBeenCalledWith(ORDER[1]);
+  });
+
+  it('the focus never leaves the search box, so typing keeps working', () => {
+    renderPicker();
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(screen.getByTestId('library-search'));
+  });
+
+  it('a search re-aims the highlight at its best match', () => {
+    const { onAdd } = renderPicker();
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(activeId()).toBe(ORDER[1]);
+
+    fireEvent.change(screen.getByTestId('library-search'), { target: { value: 'o' } });
+    expect(activeId()).toBe(ORDER[0]);
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(onAdd).toHaveBeenCalledWith(ORDER[0]);
+  });
+
+  it('a category pill re-aims it too, and hands the keys back to the search box', () => {
+    const { onAdd } = renderPicker();
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    fireEvent.click(screen.getByTestId('picker-category-Shaping'));
+    expect(document.activeElement).toBe(screen.getByTestId('library-search'));
+    expect(activeId()).toBe('com.dj.filter');
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(onAdd).toHaveBeenCalledWith('com.dj.filter');
+  });
+
+  it('nothing matching means nothing highlighted and Enter adds nothing', () => {
+    const { onAdd } = renderPicker();
+    fireEvent.change(screen.getByTestId('library-search'), { target: { value: 'zzz' } });
+    expect(active().length).toBe(0);
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('the keys stop at the picker rather than reaching the rack behind it', () => {
+    // The rack's shortcuts listen on the window as the events bubble up
+    // from whatever has the focus — here, the picker's search box.
+    const rack = vi.fn();
+    window.addEventListener('keydown', rack);
+    try {
+      renderPicker();
+      const search = screen.getByTestId('library-search');
+      fireEvent.keyDown(search, { key: 'ArrowDown' });
+      fireEvent.keyDown(search, { key: 'Enter' });
+      expect(rack).not.toHaveBeenCalled();
+      // Keys the picker has no use for still travel.
+      fireEvent.keyDown(search, { key: 'x' });
+      expect(rack).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('keydown', rack);
+    }
+  });
+
+  it('walks the retired modules under the Deprecated tag as well', () => {
+    const oldFilter: Manifest = {
+      id: 'com.dj.filter_v1',
+      name: 'Filter (old)',
+      version: '0.1.0',
+      abi: 'wasm-1',
+      category: 'Shaping',
+      deprecated: true,
+      inputs: [{ id: 'in', name: 'In' }],
+      outputs: [{ id: 'out', name: 'Out' }],
+      params: [],
+    };
+    const oldReverb: Manifest = { ...oldFilter, id: 'com.dj.reverb_v1', name: 'Reverb (old)' };
+    const onAdd = vi.fn();
+    render(
+      <ModulePicker modules={[...MODULES, oldFilter, oldReverb]} onAdd={onAdd} onClose={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByTestId('picker-category-Deprecated'));
+    expect(activeId()).toBe('com.dj.filter_v1');
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(onAdd).toHaveBeenCalledWith('com.dj.reverb_v1');
+  });
+});
+
 // A module whose manifest sets `deprecated` is kept for the patches that
 // still use it, but stays out of the search everyone else does: only the
 // Deprecated tag lists it.
@@ -619,11 +742,20 @@ describe('ModulePicker clips tab', () => {
     expect(onAddClip).not.toHaveBeenCalled();
   });
 
-  it('the arrow keys leave the module gallery alone', () => {
-    const { onAddClip } = renderClips();
+  it('the arrow keys walk whichever tab is open, and never the other one', () => {
+    const { onAdd, onAddClip } = renderClips();
+    // Modules tab: the same keys add a module type, not a clip.
     fireEvent.keyDown(window, { key: 'ArrowDown' });
     fireEvent.keyDown(window, { key: 'Enter' });
     expect(onAddClip).not.toHaveBeenCalled();
+    expect(onAdd).toHaveBeenCalledWith('com.dj.filter');
+
+    // Switching tabs re-aims the cursor at the first row of the new list.
+    fireEvent.click(screen.getByTestId('picker-tab-clips'));
+    expect(screen.getByTestId('picker-clip-p1-1').dataset.active).toBe('true');
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(onAddClip).toHaveBeenCalledWith(CLIPS[0]);
+    expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
   it('the Beat Clip module type itself is not in the module gallery', () => {

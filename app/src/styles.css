@@ -2355,6 +2355,15 @@ body {
   border-color: var(--brand);
 }
 
+/* Where the keyboard is in the gallery: the entry ↑/↓ walked to and Enter
+   would add. The search box holds the real focus for the whole modal, so
+   this stands in for a focus ring — and reads louder than hover, which is
+   the same brand border without the tint. */
+.picker-entry.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface));
+}
+
 /* Fixed-height window on to the scaled-down panel: the panel keeps its
    natural size and is scaled from the top-left, so the window crops tall
    panels rather than squashing them. */
