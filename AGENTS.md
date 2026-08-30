@@ -30,8 +30,23 @@ command (cold and warm) are in `reports/TIMINGS_REPORT.md`.
   `crate::common::...` and carry no `mod common;` of their own.
 - The `rt_safety` stress test honors `STRESS_SECONDS`; use
   `STRESS_SECONDS=10` locally. CI runs the full 600 s version.
-- Stick to one build profile (`--release`) for test runs so the `target/`
-  cache stays warm; don't alternate debug/release.
+- ONE CARGO PROFILE PER TICKET, and it is `--release`. The debug and release
+  trees are disjoint: a ticket that mixes `cargo check` (debug) with
+  `cargo test --release` builds every dependency TWICE from scratch in a fresh
+  worktree. Measured across 17 worker conversations: 77 `--release` invocations
+  against 30 debug ones, i.e. most tickets paid for a second full artifact set
+  they never used. Put `--release` on every cargo command you run — check,
+  clippy, build, test — and if you catch yourself having run a debug one,
+  switch back and stay there rather than alternating.
+- ONLY BUILD `app/src-tauri` WHEN YOU EDITED IT. It is a separate workspace
+  with its own dependency set (Tauri, webkit), so its first build in a fresh
+  worktree is cold no matter what the engine workspace has already compiled:
+  22 such runs cost 78 min = 40 % of all tool time in the same sample, the
+  worst single cold `cargo check --release` there taking 50 minutes. Frontend
+  (`app/src/**`) or engine-crate work does NOT need it — the shell only
+  re-checks if you touched `app/src-tauri/**`. When you did touch it, `cargo
+  check --manifest-path app/src-tauri/Cargo.toml` is enough; leave the full
+  build to CI, which builds `app/dist` first for `generate_context!`.
 - Run `cargo fmt` and scoped clippy (`cargo clippy -p <crate> --all-targets`)
   as you go; save workspace-wide clippy for the end.
 - CI's toolchain is UNPINNED latest stable (`dtolnay/rust-toolchain@stable`),
@@ -49,6 +64,44 @@ command (cold and warm) are in `reports/TIMINGS_REPORT.md`.
   workspace clippy / `npm test` sweep is justified only for a change that
   is genuinely workspace-wide (a cross-crate refactor, a toolchain or
   dependency bump), not for ordinary feature work.
+
+## Build cache — share the artifacts, don't recompile them
+
+FIRST COMMAND IN A FRESH WORKTREE: `scripts/use-shared-target.sh`. It points
+the three `target/` dirs (workspace, `app/src-tauri`, `extensions`) at the
+machine-wide build directory `/var/cache/dj-cargo-target`, where the ~370
+dependencies are already compiled. Measured in a fresh worktree on this box,
+cold `cargo check -p dj-engine --release`: **1:06 with a private empty
+`target/`, 0:05 linked at the shared one**; cold `cargo build --workspace
+--release`: **16:00 -> 0:34**. Dependency artifacts do not depend on the
+worktree path, which is what makes this work at all.
+
+- They are symlinks, not `CARGO_TARGET_DIR`, so the hardcoded `./target/…`
+  paths in `run.sh`, the extension scripts and the CI recipe keep working.
+- Cargo takes an exclusive lock on a build directory, so two concurrent BUILDS
+  serialize (measured: seconds each, since only the workspace crates rebuild —
+  the deps are already there). Test EXECUTION does not serialize: cargo drops
+  the lock before it runs the binaries.
+- What is shared is also shared with the other five workers: workspace-crate
+  artifacts are keyed by crate name, not by worktree, so a concurrent build can
+  replace yours and your next build redoes it (seconds). `./target/release/…`
+  binaries are whoever built last — rebuild right before you run one, or drop
+  the symlink for that experiment (`rm target && mkdir target`).
+- sccache was measured here and NOT adopted: keyed per compilation, it reuses
+  almost nothing across worktrees for this dependency graph (2 hits out of 222
+  compilations in a fresh worktree, ~1 %, because cache keys pick up the
+  worktree path) while adding 35–50 % to a cold build. Don't set
+  `RUSTC_WRAPPER` expecting it to help.
+- Linking is NOT the bottleneck on this toolchain: rustc already uses its
+  bundled LLD on x86_64-linux, and relinking dj-cli (wasmtime and all) costs
+  ~1.3 s with it or with mold. `.cargo/config.toml` offers mold a `-B` prefix
+  for the targets where rustc does not pick the linker itself, and is a no-op
+  on a machine without mold. `scripts/setup-build-cache.sh` provisions a box:
+  mold, the shared build directory and the GC cron.
+- Old worktrees are garbage collected: `scripts/gc-worktree-targets.sh` (cron,
+  every 6 h) deletes `target/` trees nobody has touched for 12 h and skips any
+  worktree with a live process in it. Run it with `--apply` if the disk is
+  tight; it only ever removes build output.
 
 ## Build ordering
 
@@ -2218,3 +2271,14 @@ of the page.
   `ClipOverlay`/`addOverlay`/`removeOverlay`/`apply_overlay` and the
   now-unused `sameSource`, their tests, the `.clip-overlay-span` rule and
   the golden case (regenerated as `clip-cut-splice-eq-level`).
+- 2026-08-30 — "worker builds are slow because every ticket pays a cold Rust
+  compile": share artifacts across worktrees, install a fast linker, two new
+  AGENTS.md rules (only build `app/src-tauri` when you edited it, one profile
+  per ticket), garbage-collect old worktree `target/` dirs. Measured both
+  sharing options before choosing (see the new section in
+  `reports/TIMINGS_REPORT.md`): sccache reused 0.9 % across worktrees and made
+  cold builds slower, so the machine-wide build directory won —
+  `scripts/use-shared-target.sh`, cold `cargo check -p dj-engine --release`
+  1:06 -> 0:05. mold is wired in through `.cargo/config.toml` in a way that is
+  a no-op without it, and `scripts/gc-worktree-targets.sh` (cron, every 6 h)
+  reclaimed 106 GiB.

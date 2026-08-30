@@ -96,3 +96,63 @@ totals roughly 8–10 minutes; from a cold checkout budget ~45 minutes.
 Keep the release `target/` warm by never alternating profiles
 mid-iteration — the debug and release trees are disjoint and each costs
 minutes to refill.
+
+## Sharing the build cache between worktrees (2026-08-30)
+
+Every worker runs in its own `/tmp/conversation-worktrees/<id>/dj-station`
+with an empty `target/`, so the numbers above were being paid again on every
+ticket (79 % of all tool time across 17 conversations was cargo). Two ways to
+stop that were measured on the same box; the winner is wired up by
+`scripts/use-shared-target.sh` and described in AGENTS.md.
+
+| Command (fresh worktree, nothing built) | Build dir | Wall time |
+|---|---|---|
+| `cargo check -p dj-engine --release` | private, empty | **1:00.9** idle host / 1:06, 1:25 under load |
+| `cargo check -p dj-engine --release` | shared cache | **0:05.5**, 0:04.8 |
+| `cargo build --workspace --release` | private, empty | 16:00 (table above) |
+| `cargo build --workspace --release` | shared cache | **0:34** |
+| `cargo build --workspace --release` | shared cache, every crate invalidated | 3:14 |
+
+Only the workspace crates are recompiled in the shared case — the ~370
+dependencies do not depend on the worktree path, so they are reused verbatim.
+Two identical worktrees can even skip that (0:00.2 when the crate content
+matched what another worktree had just built).
+
+**Why not sccache** (the first choice, being lock-free): its cache keys pick up
+the worktree path, so across worktrees it reuses almost nothing here.
+Populating from one fresh worktree and then building another gave **2 cache
+hits out of 222 compilations (0.9 %)** — with both the distro 0.7.7 and
+upstream 0.10.0 — while the cache-write overhead made the cold check *slower*:
+1:22–1:31 populating, against 1:00.9 without it. Only leaf crates hit: as soon
+as a compilation has `--extern` inputs from the local target dir it keys
+differently, and 28 of the 132 dependency artifacts (the cranelift/wasmtime
+family) are not even bitwise reproducible between two worktrees.
+
+**The shared directory's cost is cargo's exclusive lock.** Measured: two
+concurrent builds serialize (seconds each, since only the workspace crates
+rebuild), but test *execution* does not — cargo drops the build lock before
+running test binaries, so a 20 s test run did not delay another worktree's
+`cargo check` at all. The other cost is that workspace-crate artifacts are
+keyed by crate name, not by worktree, so a concurrent worker's build replaces
+yours and your next build redoes it — seconds, against the minutes saved.
+
+**A fast linker turned out to be already installed.** rustc drives its own
+bundled LLD on x86_64-unknown-linux-gnu — `readelf -p .comment` on
+`target/release/dj-cli` prints `Linker: LLD 22.1.8` — and it selects that
+linker itself, so a `-fuse-ld`/`-B` preference from cargo config is only
+consulted on targets where it does not. Relinking dj-cli (which statically
+links wasmtime) took **1.25 s and 1.27 s with the default against 1.14 s and
+1.35 s forced onto mold**, measured with `cargo rustc -p dj-cli --release --
+-Clink-arg=-fuse-ld=mold` so that only the final crate's flags changed. mold
+is installed and `.cargo/config.toml` hands it to cc as a `-B` prefix (a no-op
+where the directory or mold is missing), but nothing here justifies forcing it
+machine-wide: rustflags are part of cargo's fingerprint, so that would
+invalidate every warm `target/` on the box for no measurable gain. Earlier
+whole-workspace rebuild comparisons (3:47 vs 2:45, 3:02 vs 2:31) look like a
+mold win but are just host load — each of those runs recompiled ~370 crates
+while other workers were building.
+
+**Disk.** 60 worktrees held 133 GB of `target/` when this landed (one was
+15 GB, the disk was at 74 %). `scripts/gc-worktree-targets.sh` reclaimed
+106 GiB of it and now runs from cron every 6 h; worktrees linked at the shared
+cache add nothing to that in the first place.

@@ -1,0 +1,33 @@
+# Applies to every workspace in the checkout — this one, `extensions/` and the
+# Tauri shell's in `app/src-tauri/` — because cargo walks up to this file from
+# all of them.
+#
+# LINK WITH MOLD WHEN THE MACHINE HAS IT. `-B<dir>` tells cc to look for `ld`
+# in <dir> first, and `scripts/setup-build-cache.sh` puts a symlink to mold
+# there. cc ignores a `-B` directory that does not exist, so a checkout on a
+# machine without mold links exactly as before — that is the whole reason this
+# is a `-B` prefix and not `-fuse-ld=mold`, which is a hard error when mold is
+# missing.
+#
+# Expect little from it on x86_64-unknown-linux-gnu with a current toolchain:
+# rustc already drives its own bundled LLD there (`readelf -p .comment` on a
+# built binary says so) and picks the linker itself, so this prefix is only
+# consulted where it does not — other targets, older toolchains, a rustc built
+# without the self-contained linker. Measured on this box, relinking dj-cli
+# (which statically links wasmtime) took 1.25 s / 1.27 s with the default and
+# 1.14 s / 1.35 s forced onto mold: the same. Forcing mold globally would have
+# meant changing every worktree's rustflags, which invalidates every warm
+# `target/` on the machine, for no measurable gain.
+#
+# The value is deliberately a fixed STRING and not a path into the checkout.
+# `-C linker=`/`build.rustc-wrapper` pointing at a wrapper script inside the
+# worktree (what a shell-level "use mold if present" fallback would need) lands
+# in cargo's fingerprint, so every worktree would compute a different one and
+# none of them could reuse a shared build directory — the far bigger win here,
+# see `scripts/use-shared-target.sh`.
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-Clink-arg=-B/usr/local/lib/dj-linker"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-Clink-arg=-B/usr/local/lib/dj-linker"]
