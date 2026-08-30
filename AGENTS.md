@@ -2510,3 +2510,8 @@ of the page.
   discipline — be tactical": match verification to the size of the change,
   no test run for trivial edits, only tests that could feasibly have
   changed behaviour.
+- 2026-08-30 — "analyze recent conversations. what is taking the agents so
+  long? build time? test time? LLM time? too much verification?". Measured
+  the event timelines of the most recent worker conversations (tool wall
+  time vs. LLM think time, broken down by command type) and reported the
+  breakdown in chat; no code changes.
