@@ -1001,14 +1001,37 @@ offset))`, offset in position units — so the knob's curve shapes the
   carries an `Edit` button (`onEditClip`, absent when the host wires
   none) that opens it back on the Clip page; it is DISABLED on a clip
   filed before edits were kept (`BeatClipEntry.editable`), which is the
-  one thing the store can say about a clip it cannot take apart. Both clip filters run CLIENT-side over the list
-  already in hand: the search box over the names a row shows, and the
-  source picked by a Sources row's clip count. That count
-  (`track-clip-count`) matches on `content_hash`, so it follows a rename,
-  and clicking it opens the Beat Clips tab filtered to that one track
-  (`clip-source-filter`, cleared by its own button or by clicking the tab
-  itself, which always means "all of them"). The tab needs a `clips`
-  prop; without one there is no tab and no count column.
+  one thing the store can say about a clip it cannot take apart. Every
+  clip filter runs CLIENT-side over the list already in hand
+  (`filterClips`/`sortClips` in `beatClip.ts`): the search box over the
+  names a row shows, the stem chips, and the one FIELD filter a click
+  sets — a Sources row's clip count, or a track/artist cell in a clip
+  row. That count (`track-clip-count`) matches on `content_hash`, so it
+  follows a rename, and clicking it opens the Beat Clips tab filtered to
+  that one track (`clip-source-filter`, cleared by its own button or by
+  clicking the tab itself, which always means "all of them"). The tab
+  needs a `clips` prop; without one there is no tab and no count column.
+- ONE TABLE LISTS THE SAVED CLIPS, in both places they are offered:
+  `BeatClipTable` (`app/src/components/BeatClipTable.tsx`) draws the
+  Library page's Beat Clips tab and the deck bank's load dialog
+  (`DecksClipPicker`, which is that table in a `file-dialog` wide enough
+  for it), so a column added on one is a column on both. The columns are
+  name, TRACK and ARTIST apart (a clip can name several sources; each
+  cell is one row of names), BPM, beats and stems as `StemTags` chips.
+  Clicking a column title sorts by it — ascending, descending, then OFF,
+  because `beat_clip_list` answers oldest first and that order is worth
+  getting back — and the host owns the sort state, since the picker's
+  ↑/↓ walk the same array the table draws. What a surface LETS YOU DO
+  with a row is a prop that is simply absent where it does not belong:
+  `onEdit`/`onDelete` (Library only — side by side in one
+  `.row-actions` cell), `onFilterTrack`/`onFilterArtist` (Library only:
+  in the picker a click already means "load this"), `onActivate` +
+  `selectedClipId` (the picker's pick and keyboard cursor). Test ids
+  come off one `testId` root: `<root>-row`, `<root>-<clipId>` (the name
+  cell), `<root>-sort-<field>`, `<root>-stems-<clipId>`,
+  `<root>-edit`/`-delete`, and the stem chips of `ClipStemFilter`
+  (`<root>-filter-<part>`, `-filter-all`). Pinned by
+  `app/tests/BeatClipTable.test.tsx` plus the two hosts' suites.
 - The YouTube provider is keyless and shells out to `yt-dlp` (OPTIONAL
   runtime dep, `DJ_YTDLP_BIN` overrides the binary, `DJ_YTDLP_ARGS` adds
   flags — e.g. `--cookies-from-browser` for YouTube's bot check): search is

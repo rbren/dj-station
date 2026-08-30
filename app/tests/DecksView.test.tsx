@@ -805,6 +805,36 @@ describe('DecksView', () => {
     );
   });
 
+  it('the picker is the library’s clip table, minus the verbs a deck has no use for', async () => {
+    show(makeApi(makeStatus()));
+    await waitFor(() => expect(screen.getByTestId('decks-name-0')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('decks-name-0'));
+    const dialog = await screen.findByTestId('decks-clip-picker');
+
+    // Same columns as the Beat Clips tab: track and artist apart.
+    const row = within(dialog).getAllByTestId('decks-clip-row')[0];
+    expect([...row.children].map((c) => c.textContent)).toEqual([
+      'intro loop',
+      'Basement Loop',
+      'Me',
+      '120.0',
+      '8',
+      'drumsbass',
+    ]);
+    // Editing and deleting a clip belong to the Library page; a deck
+    // only loads one, so the dialog is handed neither verb.
+    expect(within(dialog).queryByTestId('decks-clip-edit')).toBeNull();
+    expect(within(dialog).queryByTestId('decks-clip-delete')).toBeNull();
+
+    // Clicking a column title sorts the dialog's rows too.
+    fireEvent.click(within(dialog).getByTestId('decks-clip-sort-beats'));
+    expect(
+      within(dialog)
+        .getAllByTestId('decks-clip-row')
+        .map((r) => r.children[0].textContent),
+    ).toEqual(['hat stab', 'intro loop']);
+  });
+
   it('ejecting a deck clears it, from the row its stem tags are on', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[3] = loadedSlot(3);

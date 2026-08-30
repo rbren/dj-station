@@ -6,9 +6,17 @@
 // see the job poll below), DeepLink providers open the store page.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { BeatClipApi, BeatClipEntry, BeatClipSourceInfo } from '../beatClip';
+import {
+  filterClips,
+  sortClips,
+  type BeatClipApi,
+  type BeatClipEntry,
+  type ClipSort,
+} from '../beatClip';
+import type { StemName } from '../clip';
 import { errorMessage, logError } from '../errors';
 import { fixed } from '../format';
+import { BeatClipTable, ClipStemFilter } from './BeatClipTable';
 import type {
   AnalysisQueue,
   DownloadJob,
@@ -132,46 +140,6 @@ function EditableName({
   );
 }
 
-// Where a beat clip came from, as its row can show it. A clip points at
-// its sources by the hash of their audio, so the title is whatever that
-// hash is called NOW — and a source that was never recorded (clips cut
-// before the pointer existed) or has since been deleted is a normal
-// state, said plainly rather than hidden.
-function ClipSources({ sources }: { sources: BeatClipSourceInfo[] }) {
-  if (sources.length === 0) {
-    return (
-      <span
-        className="clip-source-none"
-        data-testid="clip-source-none"
-        data-tip="this clip was cut before clips recorded where they came from"
-      >
-        not recorded
-      </span>
-    );
-  }
-  return (
-    <>
-      {sources.map((s) =>
-        s.title === null ? (
-          <span
-            key={s.trackHash}
-            className="tag tag-source clip-source-missing"
-            data-testid="clip-source-missing"
-            data-tip={`no track with audio ${s.trackHash.slice(0, 8)}… in the library`}
-          >
-            source deleted
-          </span>
-        ) : (
-          <span key={s.trackHash} className="clip-source" data-testid="clip-source">
-            {s.title}
-            {s.artist ? <span className="clip-source-artist"> — {s.artist}</span> : null}
-          </span>
-        ),
-      )}
-    </>
-  );
-}
-
 // How many beat clips were cut from a source track, and the way to
 // them: the count opens the Beat Clips tab filtered to this track. A
 // track nothing was cut from has nowhere to go, so it stays plain text.
@@ -218,6 +186,13 @@ const SOURCES_TAB = 'sources';
 /** Every saved beat clip. */
 const CLIPS_TAB = 'beat-clips';
 
+/** The Beat Clips tab narrowed to ONE field's value: the track a Sources
+ *  row's clip count points at, or the artist a clip row's cell was
+ *  clicked on. One at a time — it is a "show me just these", not a query
+ *  builder — and the search box and stem chips narrow further. */
+type ClipFieldFilter =
+  { field: 'track'; hash: string; label: string } | { field: 'artist'; artist: string };
+
 export interface LibraryViewProps {
   client: LibraryClientApi;
   /** Open a track in the Clip editor. Absent means no Clip column. */
@@ -249,9 +224,13 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
   const [pendingDelete, setPendingDelete] = useState<Track | null>(null);
   const [beatClips, setBeatClips] = useState<BeatClipEntry[]>([]);
   const [pendingClipDelete, setPendingClipDelete] = useState<BeatClipEntry | null>(null);
-  // Set by the clip count in a Sources row: the Beat Clips tab then
-  // shows only what was cut from that one track.
-  const [sourceFilter, setSourceFilter] = useState<Track | null>(null);
+  // Set by the clip count in a Sources row, or by clicking a track or
+  // artist in a clip row: the Beat Clips tab then shows only those.
+  const [clipFilter, setClipFilter] = useState<ClipFieldFilter | null>(null);
+  const [clipStems, setClipStems] = useState<StemName[]>([]);
+  // Which column the clips are ordered by; null is the store's own order
+  // (oldest first).
+  const [clipSort, setClipSort] = useState<ClipSort | null>(null);
 
   const refreshTracks = useCallback(
     async (text: string) => {
@@ -372,25 +351,23 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
 
   // Jump to the clips of one source track, the way a row's count offers.
   const showClipsOf = useCallback((t: Track) => {
-    setSourceFilter(t);
+    setClipFilter({ field: 'track', hash: t.content_hash, label: t.title });
     setQuery('');
     setTab(CLIPS_TAB);
   }, []);
 
-  // The clip list is already in hand, so both filters are applied here
-  // rather than asked of the backend: the source a row's count picked,
-  // then the search box over the names a row shows — its own and the
-  // ones its sources answer to today.
-  const needle = query.trim().toLowerCase();
-  const shownClips = beatClips
-    .filter(
-      (c) => !sourceFilter || c.sources.some((s) => s.trackHash === sourceFilter.content_hash),
-    )
-    .filter(
-      (c) =>
-        !needle ||
-        [c.name, ...c.sources.map((s) => s.title ?? '')].join(' ').toLowerCase().includes(needle),
-    );
+  // The clip list is already in hand, so every filter runs here rather
+  // than being asked of the backend: the field a click picked, the stem
+  // chips, and the search box over the names a row shows.
+  const shownClips = sortClips(
+    filterClips(beatClips, {
+      query,
+      stems: clipStems,
+      trackHash: clipFilter?.field === 'track' ? clipFilter.hash : undefined,
+      artist: clipFilter?.field === 'artist' ? clipFilter.artist : undefined,
+    }),
+    clipSort,
+  );
 
   const pending = queue ? queue.queued.length + (queue.current !== null ? 1 : 0) : 0;
   const analyzed = queue?.counts['done'] ?? 0;
@@ -522,8 +499,9 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
             data-testid="store-tab-beat-clips"
             onClick={() => {
               // The tab itself always means "all of them": a filter is
-              // only ever set by clicking a source row's count.
-              setSourceFilter(null);
+              // only ever set by clicking a value in a row.
+              setClipFilter(null);
+              setClipStems([]);
               setTab(CLIPS_TAB);
             }}
           >
@@ -689,16 +667,20 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
       )}
 
       {tab === CLIPS_TAB && (
-        <div className="library-tracks library-clips">
+        <div className="library-clips">
           <h2>Beat clips</h2>
-          {sourceFilter && (
-            <p className="clip-source-filter" data-testid="clip-source-filter">
-              Cut from “{sourceFilter.title}”
-              <button data-testid="clip-source-filter-clear" onClick={() => setSourceFilter(null)}>
-                show all
-              </button>
-            </p>
-          )}
+          <ClipStemFilter testId="beat-clip" selected={clipStems} onChange={setClipStems}>
+            {clipFilter && (
+              <p className="clip-source-filter" data-testid="clip-source-filter">
+                {clipFilter.field === 'track'
+                  ? `Cut from “${clipFilter.label}”`
+                  : `By “${clipFilter.artist}”`}
+                <button data-testid="clip-source-filter-clear" onClick={() => setClipFilter(null)}>
+                  show all
+                </button>
+              </p>
+            )}
+          </ClipStemFilter>
           {shownClips.length === 0 ? (
             <p className="library-empty" data-testid="beat-clips-empty">
               {beatClips.length === 0
@@ -706,55 +688,19 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
                 : 'No beat clip matches that.'}
             </p>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Cut from</th>
-                  <th>BPM</th>
-                  <th>Beats</th>
-                  <th>Parts</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {shownClips.map((c) => (
-                  <tr key={c.clipId} data-testid="beat-clip-row">
-                    <td data-testid="beat-clip-name">{c.name}</td>
-                    <td>
-                      <ClipSources sources={c.sources} />
-                    </td>
-                    <td>{fixed(c.bpm, 1)}</td>
-                    <td>{c.beats}</td>
-                    <td>{c.stems.length > 0 ? c.stems.join(' + ') : '—'}</td>
-                    <td>
-                      {onEditClip && (
-                        <button
-                          data-testid="beat-clip-edit"
-                          disabled={!c.editable}
-                          data-tip={
-                            c.editable
-                              ? 'open this clip in the Clip page'
-                              : 'this clip was cut before clips recorded how, so it cannot be reopened'
-                          }
-                          onClick={() => onEditClip(c)}
-                        >
-                          Edit
-                        </button>
-                      )}
-                      <button
-                        className="is-danger"
-                        data-testid="beat-clip-delete"
-                        data-tip="delete this beat clip"
-                        onClick={() => setPendingClipDelete(c)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <BeatClipTable
+              clips={shownClips}
+              sort={clipSort}
+              onSortChange={setClipSort}
+              testId="beat-clip"
+              label="Beat clips"
+              onFilterTrack={(s) =>
+                setClipFilter({ field: 'track', hash: s.trackHash, label: s.title ?? '' })
+              }
+              onFilterArtist={(artist) => setClipFilter({ field: 'artist', artist })}
+              onEdit={onEditClip}
+              onDelete={setPendingClipDelete}
+            />
           )}
         </div>
       )}

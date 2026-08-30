@@ -873,6 +873,52 @@ describe('LibraryView', () => {
     expect(screen.queryByTestId('clip-source-filter')).toBeNull();
   });
 
+  it('filters the clips by the track or artist whose name was clicked', async () => {
+    render(<LibraryView client={mockClient()} clips={mockClips()} />);
+    await openClipsTab();
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+
+    // A clip row names its source in two columns now, and each one is a
+    // way to "show me just these".
+    fireEvent.click(screen.getByTestId('clip-source'));
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(1));
+    expect(screen.getByTestId('clip-source-filter').textContent).toContain('Basement Loop');
+
+    fireEvent.click(screen.getByTestId('clip-source-filter-clear'));
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+
+    fireEvent.click(screen.getByTestId('clip-artist'));
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(1));
+    expect(screen.getByTestId('clip-source-filter').textContent).toContain('By “Me”');
+    expect(screen.getByTestId('beat-clip-row').textContent).toContain('main drums');
+
+    // The stem chips narrow the same list, exactly as they do in the
+    // deck dialog: nothing here contains the vocals.
+    fireEvent.click(screen.getByTestId('clip-source-filter-clear'));
+    fireEvent.click(screen.getByTestId('beat-clip-filter-vocals'));
+    await waitFor(() => expect(screen.getByTestId('beat-clips-empty')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('beat-clip-filter-all'));
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+  });
+
+  it('orders the clips by the column title that was clicked', async () => {
+    render(<LibraryView client={mockClient()} clips={mockClips()} />);
+    await openClipsTab();
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+    const names = () =>
+      screen.getAllByTestId('beat-clip-row').map((r) => r.children[0].textContent);
+    // Until a title is clicked the rows stand in the store's order.
+    expect(names()).toEqual(['main drums', 'chorus stack', 'old bass run']);
+
+    fireEvent.click(screen.getByTestId('beat-clip-sort-bpm'));
+    expect(names()).toEqual(['old bass run', 'main drums', 'chorus stack']);
+    fireEvent.click(screen.getByTestId('beat-clip-sort-bpm'));
+    expect(names()).toEqual(['chorus stack', 'main drums', 'old bass run']);
+    // A third click gives the store's order back.
+    fireEvent.click(screen.getByTestId('beat-clip-sort-bpm'));
+    expect(names()).toEqual(['main drums', 'chorus stack', 'old bass run']);
+  });
+
   it('opens the Beat Clips tab on everything, however it was last filtered', async () => {
     render(<LibraryView client={mockClient()} clips={mockClips()} />);
     await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));

@@ -1,12 +1,13 @@
-// Choosing a clip for a deck: the module picker's Clips tab, in a dialog.
-// Same rows, same classes, same gesture — type, ↑/↓, Enter — because it
-// is the same act, and a second way of listing clips would be a second
-// thing to learn.
+// Choosing a clip for a deck: the Library page's clip table, in a dialog.
+// Same columns, same sort, same stem filters — because it is the same
+// list — plus the gesture a dialog owes: type, ↑/↓, Enter. What it does
+// NOT offer is editing or deleting a clip (`onEdit`/`onDelete` absent):
+// loading one is the only thing a deck asked for.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { clipSourceLabel, type BeatClipEntry } from '../beatClip';
-import { STEM_NAMES, type StemName } from '../clip';
-import { StemTags, STEM_TAG_SHORT } from './StemTags';
+import { filterClips, sortClips, type BeatClipEntry, type ClipSort } from '../beatClip';
+import { type StemName } from '../clip';
+import { BeatClipTable, ClipStemFilter } from './BeatClipTable';
 
 export interface DecksClipPickerProps {
   /** Which deck the clip is for (1-based, for the title). */
@@ -22,23 +23,19 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
   // containing it (a mix clip names all four, so it always qualifies; a
   // clip that says nothing about its parts makes no claim and drops out).
   const [stemFilter, setStemFilter] = useState<StemName[]>([]);
+  const [sort, setSort] = useState<ClipSort | null>(null);
   const [index, setIndex] = useState(0);
   const search = useRef<HTMLInputElement>(null);
-  const list = useRef<HTMLUListElement>(null);
+  const rows = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     search.current?.focus();
   }, []);
 
-  const shown = useMemo(() => {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return clips.filter((c) => {
-      if (!stemFilter.every((s) => c.stems.includes(s))) return false;
-      if (words.length === 0) return true;
-      const hay = `${c.name} ${clipSourceLabel(c)}`.toLowerCase();
-      return words.every((w) => hay.includes(w));
-    });
-  }, [clips, query, stemFilter]);
+  const shown = useMemo(
+    () => sortClips(filterClips(clips, { query, stems: stemFilter }), sort),
+    [clips, query, stemFilter, sort],
+  );
 
   // A filter change re-aims the cursor like typing does, and hands focus
   // back to the search box so the type-↑/↓-Enter gesture keeps working.
@@ -53,7 +50,7 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
 
   useEffect(() => {
     // jsdom has no scrollIntoView; the optional call keeps tests honest.
-    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
+    rows.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
   }, [active]);
 
   return (
@@ -97,64 +94,20 @@ export function DecksClipPicker({ deck, clips, onPick, onClose }: DecksClipPicke
             }
           }}
         />
-        <div
-          className="decks-clip-stem-filter"
-          role="group"
-          aria-label="Filter by stem"
-          data-testid="decks-clip-stem-filter"
-        >
-          <button
-            type="button"
-            className="stem-filter-tag"
-            data-testid="decks-clip-filter-all"
-            aria-pressed={stemFilter.length === 0}
-            title="Show every clip"
-            onClick={() => setFilter([])}
-          >
-            ALL
-          </button>
-          {STEM_NAMES.map((name) => (
-            <button
-              key={name}
-              type="button"
-              className={`stem-filter-tag stem-filter-${name}`}
-              data-testid={`decks-clip-filter-${name}`}
-              aria-pressed={stemFilter.includes(name)}
-              title={`Only clips containing the ${name}`}
-              onClick={() =>
-                setFilter(
-                  stemFilter.includes(name)
-                    ? stemFilter.filter((s) => s !== name)
-                    : [...stemFilter, name],
-                )
-              }
-            >
-              {STEM_TAG_SHORT[name]}
-            </button>
-          ))}
-        </div>
+        <ClipStemFilter testId="decks-clip" selected={stemFilter} onChange={setFilter} />
         {shown.length > 0 ? (
-          <ul ref={list} className="picker-clip-list" role="listbox" aria-label="Clips">
-            {shown.map((c, i) => (
-              <li
-                key={c.clipId}
-                className={`picker-clip-row${i === active ? ' active' : ''}`}
-                data-testid={`decks-clip-${c.clipId}`}
-                role="option"
-                aria-selected={i === active}
-                onMouseEnter={() => setIndex(i)}
-                onClick={() => onPick(c)}
-              >
-                <span className="picker-clip-name">{c.name}</span>
-                <span className="picker-clip-project">{clipSourceLabel(c)}</span>
-                <StemTags stems={c.stems} testId={`decks-clip-stems-${c.clipId}`} />
-                <span className="picker-clip-beats">{c.beats} beats</span>
-                <span className="picker-clip-bpm">
-                  {c.bpm > 0 ? `${c.bpm.toFixed(1)} BPM` : '—'}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="decks-clip-rows" ref={rows}>
+            <BeatClipTable
+              clips={shown}
+              sort={sort}
+              onSortChange={setSort}
+              testId="decks-clip"
+              label="Clips"
+              selectedClipId={shown[active]?.clipId ?? null}
+              onSelect={(c) => setIndex(shown.indexOf(c))}
+              onActivate={onPick}
+            />
+          </div>
         ) : (
           <p className="empty-state" data-testid="decks-no-clips">
             {clips.length === 0
