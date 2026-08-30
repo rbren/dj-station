@@ -28,6 +28,7 @@ const CLIP: BeatClipEntry = {
   bpm: 92.5,
   beats: 4,
   stems: ['drums', 'bass'],
+  sources: [{ trackHash: 'abc123', title: 'Sunroom Take', artist: 'Me' }],
 };
 
 const state = { nodes: [] as unknown[] };

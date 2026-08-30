@@ -2347,6 +2347,7 @@ export default function App() {
       {view === 'library' && (
         <LibraryView
           client={library}
+          clips={beatClip}
           onEdit={(t) => {
             clipView.current?.open(t.id);
             setView('clip');

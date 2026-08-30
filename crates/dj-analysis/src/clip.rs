@@ -877,19 +877,49 @@ pub fn write_clip(path: &Path, audio: &AudioData) -> Result<()> {
 // one meta JSON per clip under `<data_dir>/beat-clips/`, ids minted
 // `b<n>` — a sibling of `clips/` and the Beatify store.
 
+/// A library track a beat clip was cut from, named by the ONE id of a
+/// track that nothing can change: the hash of its audio
+/// (`dj_library::content_hash`, the same handle a Beatify seed keeps).
+/// A row id is re-assigned on re-import and a title/artist is the user's
+/// to edit — a clip that stored either would go stale the moment it did.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatClipSource {
+    /// Content hash of the source track's audio.
+    pub track_hash: String,
+    /// Which parts of it ([`crate::STEM_NAMES`] order); empty = the whole
+    /// mix.
+    #[serde(default)]
+    pub stems: Vec<String>,
+}
+
+/// How a beat clip was cut: everything needed to open it in the Clip
+/// page again. The `program`'s regions carry the SOURCE TIMESTAMPS (in
+/// and out of each source), the beat grid its beat positions and the
+/// warp its stretching; `sources` says which library track each region
+/// index means.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatClipEdit {
+    /// Indexed by [`ClipRegion::source`].
+    pub sources: Vec<BeatClipSource>,
+    pub program: ClipProgram,
+    /// The span of the rendered program that was filed, in output
+    /// seconds.
+    pub start_secs: f64,
+    pub end_secs: f64,
+}
+
 /// One saved beat clip, as filed beside its audio. camelCase on disk,
 /// like Beatify's records — one convention per feature family.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BeatClipMeta {
     pub id: String,
+    /// A beat clip wears ONE label. Anything else it used to carry (the
+    /// source track's title) was folded in here by
+    /// [`migrate_beat_clips`].
     pub name: String,
-    /// The track the span was cut from, by title — the second name the
-    /// decks show beside the clip's own, where a Beatify clip carries
-    /// its project name. Edited at save time; empty for clips saved
-    /// before it existed.
-    #[serde(default)]
-    pub source_title: String,
     /// Tempo of the (perfectly even) beat grid the audio was cut on.
     pub bpm: f64,
     /// Whole beats the clip holds — the last one silence-padded when the
@@ -901,6 +931,34 @@ pub struct BeatClipMeta {
     /// order) — the tags the pickers show.
     #[serde(default)]
     pub stems: Vec<String>,
+    /// The edit behind the audio. `None` for clips filed before it was
+    /// kept: a beat clip whose sources are unknown is a normal state,
+    /// not a broken record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit: Option<BeatClipEdit>,
+    /// LEGACY: the source track's title, filed as a second label beside
+    /// the clip's own name. Read so it can be folded into `name`, never
+    /// written.
+    #[serde(default, rename = "sourceTitle", skip_serializing)]
+    pub legacy_source_title: String,
+}
+
+impl BeatClipMeta {
+    /// Fold a legacy second label into the one name a clip has now.
+    /// Returns whether anything moved.
+    fn adopt_legacy_name(&mut self) -> bool {
+        let extra = std::mem::take(&mut self.legacy_source_title);
+        let extra = extra.trim();
+        if extra.is_empty() {
+            return false;
+        }
+        self.name = if self.name.trim().is_empty() {
+            extra.to_string()
+        } else {
+            format!("{} · {extra}", self.name)
+        };
+        true
+    }
 }
 
 /// Where beat clips land: `<data_dir>/beat-clips/`.
@@ -908,22 +966,58 @@ pub fn beat_clips_dir(data_dir: &Path) -> std::path::PathBuf {
     data_dir.join("beat-clips")
 }
 
-/// Every saved beat clip, oldest first (by minted id number). A store
-/// that does not exist yet is simply empty.
-pub fn read_beat_clips(data_dir: &Path) -> Vec<BeatClipMeta> {
+/// Every record file in the store, with the path it was read from.
+fn beat_clip_files(data_dir: &Path) -> Vec<(std::path::PathBuf, BeatClipMeta)> {
     let Ok(entries) = std::fs::read_dir(beat_clips_dir(data_dir)) else {
         return Vec::new();
     };
-    let mut out: Vec<BeatClipMeta> = entries
+    let mut out: Vec<(std::path::PathBuf, BeatClipMeta)> = entries
         .flatten()
-        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
-        .filter_map(|e| {
-            let text = std::fs::read_to_string(e.path()).ok()?;
-            serde_json::from_str(&text).ok()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .filter_map(|path| {
+            let text = std::fs::read_to_string(&path).ok()?;
+            let meta: BeatClipMeta = serde_json::from_str(&text).ok()?;
+            Some((path, meta))
         })
         .collect();
-    out.sort_by_key(|c| c.id.trim_start_matches('b').parse::<u64>().unwrap_or(0));
+    out.sort_by_key(|(_, c)| c.id.trim_start_matches('b').parse::<u64>().unwrap_or(0));
     out
+}
+
+/// Every saved beat clip, oldest first (by minted id number). A store
+/// that does not exist yet is simply empty. A record still carrying the
+/// legacy second label reads back with it folded into its name, whether
+/// or not [`migrate_beat_clips`] has rewritten it yet.
+pub fn read_beat_clips(data_dir: &Path) -> Vec<BeatClipMeta> {
+    beat_clip_files(data_dir)
+        .into_iter()
+        .map(|(_, mut meta)| {
+            meta.adopt_legacy_name();
+            meta
+        })
+        .collect()
+}
+
+/// Fold every legacy second label into its clip's name, on disk. Runs
+/// once at startup; a clip already migrated (or filed since) is left
+/// alone, so it is idempotent and cheap. Returns how many were rewritten.
+pub fn migrate_beat_clips(data_dir: &Path) -> usize {
+    let mut migrated = 0;
+    for (path, mut meta) in beat_clip_files(data_dir) {
+        if !meta.adopt_legacy_name() {
+            continue;
+        }
+        let Ok(json) = serde_json::to_string_pretty(&meta) else {
+            continue;
+        };
+        // Best effort: a store that cannot be written still READS
+        // migrated (see `read_beat_clips`), so nothing is lost either way.
+        if std::fs::write(&path, json).is_ok() {
+            migrated += 1;
+        }
+    }
+    migrated
 }
 
 /// A beat clip's record and audio, for whatever is about to play it.
@@ -941,14 +1035,17 @@ pub fn load_beat_clip(data_dir: &Path, clip_id: &str) -> Result<(BeatClipMeta, A
 /// File a rendered span as a beat clip: cut it to exactly `beats` whole
 /// beats at `bpm` ([`pad_to_beats`]), mint the next `b<n>` id and write
 /// audio + meta.
+/// `edit` is how it was cut ([`BeatClipEdit`]) — kept so the clip can be
+/// opened again, and so it points at its sources by id rather than by a
+/// copy of their titles.
 pub fn save_beat_clip(
     data_dir: &Path,
     name: &str,
-    source_title: &str,
     audio: &AudioData,
     bpm: f64,
     beats: usize,
     stems: Vec<String>,
+    edit: Option<BeatClipEdit>,
 ) -> Result<BeatClipMeta> {
     let name = name.trim();
     ensure!(!name.is_empty(), "beat clip: it needs a name");
@@ -964,16 +1061,37 @@ pub fn save_beat_clip(
     let meta = BeatClipMeta {
         id: format!("b{next}"),
         name: name.to_string(),
-        source_title: source_title.trim().to_string(),
         bpm,
         beats,
         file: format!("b{next}.flac"),
         stems,
+        edit,
+        legacy_source_title: String::new(),
     };
     write_clip(&dir.join(&meta.file), &padded)?;
     std::fs::write(
         dir.join(format!("b{next}.json")),
         serde_json::to_string_pretty(&meta)?,
     )?;
+    Ok(meta)
+}
+
+/// Delete a beat clip: its record and its audio. Unknown ids are an
+/// error — the caller is acting on a list, and a row that is not there
+/// means the list is stale.
+pub fn delete_beat_clip(data_dir: &Path, clip_id: &str) -> Result<BeatClipMeta> {
+    let (path, meta) = beat_clip_files(data_dir)
+        .into_iter()
+        .find(|(_, c)| c.id == clip_id)
+        .ok_or_else(|| anyhow!("no saved beat clip {clip_id}"))?;
+    // The audio first: a record with no file left is a clip that plays
+    // nothing, where a file with no record is simply unreachable.
+    if let Some(dir) = path.parent() {
+        let audio = dir.join(&meta.file);
+        if audio.is_file() {
+            std::fs::remove_file(&audio)?;
+        }
+    }
+    std::fs::remove_file(&path)?;
     Ok(meta)
 }

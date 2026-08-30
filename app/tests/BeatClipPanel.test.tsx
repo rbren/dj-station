@@ -25,6 +25,7 @@ function makeApi(status: BeatClipStatus): BeatClipApi {
     list: vi.fn().mockResolvedValue([]),
     load: vi.fn().mockResolvedValue(null),
     status: vi.fn().mockResolvedValue(status),
+    delete: vi.fn().mockResolvedValue([]),
   };
 }
 

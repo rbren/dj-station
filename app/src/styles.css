@@ -3299,6 +3299,42 @@ body {
   cursor: pointer;
 }
 
+/* Library › Beat Clips: the saved clips, and the way from a source row
+   to the ones cut from it. */
+
+.track-clip-count {
+  text-align: right;
+}
+
+.link-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--brand);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.clip-source-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-muted);
+}
+
+.clip-source-artist {
+  color: var(--ink-muted);
+}
+
+/* A pointer that no longer resolves, or was never recorded: said in the
+   row rather than left blank, since the clip itself is still good. */
+.clip-source-missing,
+.clip-source-none {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
 /* Collapse-to-macro (M4, PRD §6) */
 
 /* Selected modules get a bright, unmissable border (multi-select for

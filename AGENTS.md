@@ -991,6 +991,21 @@ offset))`, offset in position units — so the knob's curve shapes the
   one (queued jobs are `running` with `stage == "queued"`); polling,
   announcements and per-result matching still use the full list. Pinned by
   `app/tests/LibraryView.test.tsx`.
+- The Library page's tabs are SOURCES (the local tracks — everything a
+  clip can be cut from; its per-row button says `Clip`, since that is
+  what it makes), BEAT CLIPS, then one per enabled store provider. The
+  Beat Clips tab lists what `beat_clip_list` answers — Beatify's clips
+  and the Clip page's alike, one list, no second path — and deletes
+  through `beat_clip_delete`, which routes by project id and answers with
+  the list as it now stands (always confirmed: `beat-clip-delete-dialog`,
+  like the track delete). Both clip filters run CLIENT-side over the list
+  already in hand: the search box over the names a row shows, and the
+  source picked by a Sources row's clip count. That count
+  (`track-clip-count`) matches on `content_hash`, so it follows a rename,
+  and clicking it opens the Beat Clips tab filtered to that one track
+  (`clip-source-filter`, cleared by its own button or by clicking the tab
+  itself, which always means "all of them"). The tab needs a `clips`
+  prop; without one there is no tab and no count column.
 - The YouTube provider is keyless and shells out to `yt-dlp` (OPTIONAL
   runtime dep, `DJ_YTDLP_BIN` overrides the binary, `DJ_YTDLP_ARGS` adds
   flags — e.g. `--cookies-from-browser` for YouTube's bot check): search is
@@ -1096,14 +1111,25 @@ offset))`, offset in position units — so the knob's curve shapes the
   fractional tail with silence or trims a flam/rounding overhang, so two
   selected beats file as two — and files it in
   `dj_analysis::clip`'s store (`<data_dir>/beat-clips/`, `b<n>.flac` +
-  `b<n>.json`, ignored by `custom/.gitignore` like `clips/`). A save
-  files TWO titles: the clip's own name and the SOURCE TRACK's
-  (`BeatClipMeta.source_title`, `sourceTitle` on disk) — the beat-clip
-  twin of a Beatify clip's project name, so a deck shows both. The save
-  row prefills it from the opened track and it is editable there
-  (`clip-source-title`); `clip::beat_clip_source_name` is the one place
-  the display falls back to `BEAT_CLIPS_PROJECT_NAME` ("Clip tab") for
-  clips saved before the field existed. Those clips
+  `b<n>.json`, ignored by `custom/.gitignore` like `clips/`). A beat clip
+  wears ONE label, its own name; where it came from is a POINTER, not a
+  copied title. `BeatClipMeta.edit` (`BeatClipEdit`) files the whole edit
+  — the program (so each region's source timestamps, beat grid and warp
+  survive), the filed span, and `sources: [{trackHash, stems}]` — so a
+  clip could be reopened in the Clip page, and so a renamed track keeps
+  its clips. The pointer is `dj_library::content_hash` (SHA-256 of the
+  audio file), the SAME immutable handle a Beatify seed keeps: a row id
+  is re-assigned on re-import, a title/artist is the user's to edit.
+  `beat_clip::source_info` resolves it through `Library::track_by_hash`
+  and answers `title: None` when nothing matches — a source that was
+  never recorded or has since been deleted is a normal state the UI says
+  out loud, never a reason to hide the clip. `BeatClipMeta` still READS
+  the legacy `sourceTitle` (`legacy_source_title`, never serialized):
+  `adopt_legacy_name` folds it into the one name (`"clip · source"`) on
+  every read, and `migrate_beat_clips` (called once at startup from
+  `main`) rewrites the records in place. `BEAT_CLIPS_PROJECT_NAME`
+  ("Clip tab") now names the STORE a clip came from, where a Beatify clip
+  names its project. Those clips
   reach the decks through the SAME doors Beatify clips use:
   `beat_clip_list` appends them under the reserved project id
   `clip::BEAT_CLIPS_PROJECT` ("beat-clips" — Beatify mints `p<n>`, no
@@ -1198,7 +1224,7 @@ offset))`, offset in position units — so the knob's curve shapes the
   transient. Timing marks come from `rulerTicks` (pure, in `clip.ts`) and
   render as HTML over the stretched SVG, whose `preserveAspectRatio="none"`
   would squash text.
-  A track also opens straight from the Library page: its Edit button calls
+  A track also opens straight from the Library page: its `Clip` button calls
   `open(trackId)` on ClipView's imperative handle (`ClipViewHandle`) and
   switches tabs. It is a handle rather than a prop because opening is an
   ACTION, not a state — a prop would need a nonce to fire twice for the

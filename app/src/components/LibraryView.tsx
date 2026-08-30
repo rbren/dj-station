@@ -1,10 +1,12 @@
-// Library view (M1, PRD §9): local library + per-store search tabs.
-// Each enabled provider gets its own tab with store-specific filters;
-// results are tagged by source and license. Download providers pull
-// straight into the library (in the background — see the job poll below),
-// DeepLink providers open the store page.
+// Library view (M1, PRD §9): the Sources tab (tracks on this machine),
+// the Beat Clips tab (everything cut from them, whichever store it lives
+// in) and per-store search tabs. Each enabled provider gets its own tab
+// with store-specific filters; results are tagged by source and license.
+// Download providers pull straight into the library (in the background —
+// see the job poll below), DeepLink providers open the store page.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { BeatClipApi, BeatClipEntry, BeatClipSourceInfo } from '../beatClip';
 import { errorMessage, logError } from '../errors';
 import { fixed } from '../format';
 import type {
@@ -130,6 +132,71 @@ function EditableName({
   );
 }
 
+// Where a beat clip came from, as its row can show it. A clip points at
+// its sources by the hash of their audio, so the title is whatever that
+// hash is called NOW — and a source that was never recorded (clips cut
+// before the pointer existed) or has since been deleted is a normal
+// state, said plainly rather than hidden.
+function ClipSources({ sources }: { sources: BeatClipSourceInfo[] }) {
+  if (sources.length === 0) {
+    return (
+      <span
+        className="clip-source-none"
+        data-testid="clip-source-none"
+        data-tip="this clip was cut before clips recorded where they came from"
+      >
+        not recorded
+      </span>
+    );
+  }
+  return (
+    <>
+      {sources.map((s) =>
+        s.title === null ? (
+          <span
+            key={s.trackHash}
+            className="tag tag-source clip-source-missing"
+            data-testid="clip-source-missing"
+            data-tip={`no track with audio ${s.trackHash.slice(0, 8)}… in the library`}
+          >
+            source deleted
+          </span>
+        ) : (
+          <span key={s.trackHash} className="clip-source" data-testid="clip-source">
+            {s.title}
+            {s.artist ? <span className="clip-source-artist"> — {s.artist}</span> : null}
+          </span>
+        ),
+      )}
+    </>
+  );
+}
+
+// How many beat clips were cut from a source track, and the way to
+// them: the count opens the Beat Clips tab filtered to this track. A
+// track nothing was cut from has nowhere to go, so it stays plain text.
+function ClipCount({ count, onOpen }: { count: number; onOpen: () => void }) {
+  if (count === 0) {
+    return (
+      <td className="track-clip-count" data-testid="track-clip-count">
+        —
+      </td>
+    );
+  }
+  return (
+    <td className="track-clip-count" data-testid="track-clip-count">
+      <button
+        className="link-button"
+        data-testid="track-clip-count-link"
+        data-tip={`show the ${count} beat clip${count === 1 ? '' : 's'} cut from this track`}
+        onClick={onOpen}
+      >
+        {count}
+      </button>
+    </td>
+  );
+}
+
 function LicenseTag({ kind }: { kind: string }) {
   return (
     <span className={`tag tag-license tag-license-${kind}`} data-testid="license-tag">
@@ -146,17 +213,24 @@ function SourceTag({ source }: { source: string }) {
   );
 }
 
+/** The tracks on this machine — everything a clip can be cut from. */
+const SOURCES_TAB = 'sources';
+/** Every saved beat clip, whichever store it lives in. */
+const CLIPS_TAB = 'beat-clips';
+
 export interface LibraryViewProps {
   client: LibraryClientApi;
-  /** Open a track in the Clip editor. Absent means no Edit column. */
+  /** Open a track in the Clip editor. Absent means no Clip column. */
   onEdit?: (track: Track) => void;
+  /** Saved beat clips. Absent means no Beat Clips tab. */
+  clips?: BeatClipApi;
 }
 
-export function LibraryView({ client, onEdit }: LibraryViewProps) {
+export function LibraryView({ client, onEdit, clips }: LibraryViewProps) {
   const [query, setQuery] = useState('');
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  // Active tab: 'local' or a provider id.
-  const [tab, setTab] = useState('local');
+  // Active tab: SOURCES_TAB, CLIPS_TAB or a provider id.
+  const [tab, setTab] = useState(SOURCES_TAB);
   // Filter selections per provider, keyed "providerId:filterId".
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -170,6 +244,11 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
   // The track a Delete button is asking about. Deleting is destructive
   // and unattended (there is no library undo), so it is always confirmed.
   const [pendingDelete, setPendingDelete] = useState<Track | null>(null);
+  const [beatClips, setBeatClips] = useState<BeatClipEntry[]>([]);
+  const [pendingClipDelete, setPendingClipDelete] = useState<BeatClipEntry | null>(null);
+  // Set by the clip count in a Sources row: the Beat Clips tab then
+  // shows only what was cut from that one track.
+  const [sourceFilter, setSourceFilter] = useState<Track | null>(null);
 
   const refreshTracks = useCallback(
     async (text: string) => {
@@ -252,6 +331,68 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
     },
     [client, query, refreshTracks],
   );
+
+  // Saved clips live in two stores (Beatify's projects and the Clip
+  // page's), and the backend answers for both as one list. Re-read it
+  // whenever either tab is opened: the Clip page and Beatify file clips
+  // while this page is off screen, and the Sources tab counts them per
+  // track.
+  useEffect(() => {
+    if (!clips || (tab !== CLIPS_TAB && tab !== SOURCES_TAB)) return;
+    let live = true;
+    void clips.list().then((list) => {
+      if (live && list) setBeatClips(list);
+    });
+    return () => {
+      live = false;
+    };
+  }, [clips, tab]);
+
+  // Delete the confirmed clip. The backend answers with the list as it
+  // now stands, so nothing has to guess what else the delete touched.
+  const removeClip = useCallback(
+    async (entry: BeatClipEntry) => {
+      setPendingClipDelete(null);
+      if (!clips) return;
+      const list = await clips.delete(entry.projectId, entry.clipId);
+      if (!list) return;
+      setBeatClips(list);
+      setStatus(`Deleted the beat clip “${entry.name}”`);
+    },
+    [clips],
+  );
+
+  // How many saved clips were cut from a track. The match is on the
+  // audio's hash, so a renamed (or re-imported) track keeps its clips.
+  const clipsOf = useCallback(
+    (t: Track) => beatClips.filter((c) => c.sources.some((s) => s.trackHash === t.content_hash)),
+    [beatClips],
+  );
+
+  // Jump to the clips of one source track, the way a row's count offers.
+  const showClipsOf = useCallback((t: Track) => {
+    setSourceFilter(t);
+    setQuery('');
+    setTab(CLIPS_TAB);
+  }, []);
+
+  // The clip list is already in hand, so both filters are applied here
+  // rather than asked of the backend: the source a row's count picked,
+  // then the search box over the names a row shows — its own and the
+  // ones its sources answer to today.
+  const needle = query.trim().toLowerCase();
+  const shownClips = beatClips
+    .filter(
+      (c) => !sourceFilter || c.sources.some((s) => s.trackHash === sourceFilter.content_hash),
+    )
+    .filter(
+      (c) =>
+        !needle ||
+        [c.name, c.projectName, ...c.sources.map((s) => s.title ?? '')]
+          .join(' ')
+          .toLowerCase()
+          .includes(needle),
+    );
 
   const pending = queue ? queue.queued.length + (queue.current !== null ? 1 : 0) : 0;
   const analyzed = queue?.counts['done'] ?? 0;
@@ -371,12 +512,26 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
     <section className="library" data-testid="library-view">
       <nav className="store-tabs" data-testid="store-tabs">
         <button
-          className={tab === 'local' ? 'store-tab active' : 'store-tab'}
-          data-testid="store-tab-local"
-          onClick={() => setTab('local')}
+          className={tab === SOURCES_TAB ? 'store-tab active' : 'store-tab'}
+          data-testid="store-tab-sources"
+          onClick={() => setTab(SOURCES_TAB)}
         >
-          Local
+          Sources
         </button>
+        {clips && (
+          <button
+            className={tab === CLIPS_TAB ? 'store-tab active' : 'store-tab'}
+            data-testid="store-tab-beat-clips"
+            onClick={() => {
+              // The tab itself always means "all of them": a filter is
+              // only ever set by clicking a source row's count.
+              setSourceFilter(null);
+              setTab(CLIPS_TAB);
+            }}
+          >
+            Beat Clips
+          </button>
+        )}
         {providers.map((p) => (
           <button
             key={p.id}
@@ -402,7 +557,13 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
       >
         <input
           type="search"
-          placeholder={active ? `Search ${active.name}…` : 'Search local library…'}
+          placeholder={
+            active
+              ? `Search ${active.name}…`
+              : tab === CLIPS_TAB
+                ? 'Filter beat clips…'
+                : 'Search local library…'
+          }
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           data-testid="library-search-input"
@@ -529,7 +690,68 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
         </div>
       )}
 
-      {tab === 'local' && (
+      {tab === CLIPS_TAB && (
+        <div className="library-tracks library-clips">
+          <h2>Beat clips</h2>
+          {sourceFilter && (
+            <p className="clip-source-filter" data-testid="clip-source-filter">
+              Cut from “{sourceFilter.title}”
+              <button data-testid="clip-source-filter-clear" onClick={() => setSourceFilter(null)}>
+                show all
+              </button>
+            </p>
+          )}
+          {shownClips.length === 0 ? (
+            <p className="library-empty" data-testid="beat-clips-empty">
+              {beatClips.length === 0
+                ? 'No beat clips yet — cut one on the Clip page, or build one in Beatify.'
+                : 'No beat clip matches that.'}
+            </p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Cut from</th>
+                  <th>Made in</th>
+                  <th>BPM</th>
+                  <th>Beats</th>
+                  <th>Parts</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {shownClips.map((c) => (
+                  <tr key={`${c.projectId}:${c.clipId}`} data-testid="beat-clip-row">
+                    <td data-testid="beat-clip-name">{c.name}</td>
+                    <td>
+                      <ClipSources sources={c.sources} />
+                    </td>
+                    <td>
+                      <SourceTag source={c.projectName} />
+                    </td>
+                    <td>{fixed(c.bpm, 1)}</td>
+                    <td>{c.beats}</td>
+                    <td>{c.stems.length > 0 ? c.stems.join(' + ') : '—'}</td>
+                    <td>
+                      <button
+                        className="is-danger"
+                        data-testid="beat-clip-delete"
+                        data-tip="delete this beat clip"
+                        onClick={() => setPendingClipDelete(c)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {tab === SOURCES_TAB && (
         <div className="library-tracks">
           <h2>Library</h2>
           {pending > 0 && (
@@ -553,6 +775,7 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
                   <th>Key</th>
                   <th>Source</th>
                   <th>License</th>
+                  {clips && <th>Clips</th>}
                   <th>Analysis</th>
                   {onEdit && <th />}
                   <th />
@@ -586,6 +809,7 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
                     <td>
                       <LicenseTag kind={t.license.kind} />
                     </td>
+                    {clips && <ClipCount count={clipsOf(t).length} onOpen={() => showClipsOf(t)} />}
                     <td>
                       <span
                         className={`tag tag-analysis tag-analysis-${t.analysis_status}`}
@@ -608,10 +832,10 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
                       <td>
                         <button
                           data-testid="library-edit"
-                          data-tip="edit a copy in the Clip page"
+                          data-tip="cut a beat clip from this track in the Clip page"
                           onClick={() => onEdit(t)}
                         >
-                          Edit
+                          Clip
                         </button>
                       </td>
                     )}
@@ -662,6 +886,37 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
               className="file-dialog-cancel"
               data-testid="library-delete-cancel"
               onClick={() => setPendingDelete(null)}
+            >
+              Keep It
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pendingClipDelete && (
+        <div
+          className="file-dialog-backdrop"
+          data-testid="beat-clip-delete-dialog"
+          onClick={() => setPendingClipDelete(null)}
+        >
+          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete the beat clip “{pendingClipDelete.name}”?</h3>
+            <p className="file-dialog-empty">
+              The clip and its rendered audio go; the track it was cut from stays exactly as it is.
+              Racks already playing it keep the sound they loaded, but nothing can load it again,
+              and this cannot be undone.
+            </p>
+            <button
+              className="is-danger"
+              data-testid="beat-clip-delete-confirm"
+              onClick={() => void removeClip(pendingClipDelete)}
+            >
+              Delete Clip
+            </button>
+            <button
+              className="file-dialog-cancel"
+              data-testid="beat-clip-delete-cancel"
+              onClick={() => setPendingClipDelete(null)}
             >
               Keep It
             </button>

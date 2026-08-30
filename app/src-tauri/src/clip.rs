@@ -226,8 +226,7 @@ impl ClipRequest {
     fn render_key(&self) -> CmdResult<String> {
         let mut program = self.program.clone();
         program.beat_grid = None;
-        serde_json::to_string(&(&self.sources, &program))
-            .map_err(|e| err(format!("clip: {e}")))
+        serde_json::to_string(&(&self.sources, &program)).map_err(|e| err(format!("clip: {e}")))
     }
 
     /// Render the edit, through the [`ClipCache`] memo. The gate makes a
@@ -348,7 +347,10 @@ pub fn clip_stem_backend(state: State<AppState>) -> ClipStemBackend {
         backend: status.backend,
         available: status.detail.is_none(),
         detail: status.detail,
-        stems: dj_analysis::STEM_NAMES.iter().map(|s| s.to_string()).collect(),
+        stems: dj_analysis::STEM_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
     }
 }
 
@@ -429,21 +431,11 @@ pub fn clip_preview_audio(
 /// project ids as `p<n>` (legacy: source-hash directory names), so this
 /// can never collide with a real project.
 pub const BEAT_CLIPS_PROJECT: &str = "beat-clips";
-/// Where the pickers say a beat clip came from when it does not say
-/// itself — clips saved before they carried a source-track title.
+/// Where the pickers say a beat clip came from: the store, in the place a
+/// Beatify clip names its project. The TRACK it was cut from is not a
+/// label any more — it is a pointer (`BeatClipEdit.sources`), resolved
+/// against the library when something wants to show it.
 pub const BEAT_CLIPS_PROJECT_NAME: &str = "Clip tab";
-
-/// The title a beat clip shows where a Beatify clip shows its project
-/// name: the source track it was cut from, as saved (and edited) on the
-/// Clip page, falling back to [`BEAT_CLIPS_PROJECT_NAME`] for clips
-/// saved before the field existed.
-pub fn beat_clip_source_name(meta: &clip::BeatClipMeta) -> String {
-    if meta.source_title.is_empty() {
-        BEAT_CLIPS_PROJECT_NAME.into()
-    } else {
-        meta.source_title.clone()
-    }
-}
 
 /// Tempo of a span of the edit, measured: what the save row shows when
 /// the selection was never tapped. Runs the Beatify tracker (`beat_this`
@@ -469,9 +461,13 @@ pub fn clip_detect_beats(
     let rendered = request.render(&state)?;
     let (a, b) = span_of(&rendered, start_secs, end_secs)?;
     let tracker = dj_analysis::beatify::detect::default_tracker();
-    let analysis =
-        dj_analysis::beatify::analyze(&rendered, tracker.as_ref(), Some((a, b)), Default::default())
-            .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+    let analysis = dj_analysis::beatify::analyze(
+        &rendered,
+        tracker.as_ref(),
+        Some((a, b)),
+        Default::default(),
+    )
+    .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
     let bpm = analysis.grid.bpm;
     Ok(ClipBeats {
         bpm,
@@ -555,10 +551,12 @@ fn span_of(rendered: &AudioData, start_secs: f64, end_secs: f64) -> CmdResult<(f
 /// `beats` whole beats at `bpm` — the numbers the save row showed, so
 /// selecting two beats files two (a fractional tail is silence-filled,
 /// an overhang trimmed). The saved clip loads into the decks exactly
-/// like a Beatify clip (see `beat_clip.rs`). `source_title` is the
-/// second name filed with it — the track it was cut from, as shown (and
-/// edited) in the save row — which the decks display where a Beatify
-/// clip shows its project name.
+/// like a Beatify clip (see `beat_clip.rs`).
+///
+/// The EDIT is filed with it: the sources by the hash of their audio
+/// (never by title — that is the user's to change, and a row id is
+/// re-assigned on re-import) and the whole program, beat grid and warp
+/// included, so the clip could be opened here again.
 #[tauri::command(async)]
 // The arguments ARE the IPC surface: each one is a field the save row
 // sends by name, so bundling them into a struct would only move the list.
@@ -567,7 +565,6 @@ pub fn clip_save_beat_clip(
     state: State<AppState>,
     request: ClipRequest,
     title: String,
-    source_title: String,
     start_secs: f64,
     end_secs: f64,
     bpm: f64,
@@ -577,24 +574,43 @@ pub fn clip_save_beat_clip(
     let (a, b) = span_of(&rendered, start_secs, end_secs)?;
     let span = clip::slice(&rendered, a, b - a);
 
+    let sources = request
+        .sources
+        .iter()
+        .map(|s| s.normalized())
+        .collect::<CmdResult<Vec<_>>>()?;
     // What the clip is made of, for the tags every picker shows. An
     // empty stem set is the whole mix, so it folds to all four.
-    let stems = dj_analysis::stem_union(
-        &request
-            .sources
-            .iter()
-            .map(|s| s.normalized().map(|s| s.stems))
-            .collect::<CmdResult<Vec<_>>>()?,
-    );
+    let stems =
+        dj_analysis::stem_union(&sources.iter().map(|s| s.stems.clone()).collect::<Vec<_>>());
+    // The pointer is the AUDIO's hash, not the row id the editor happens
+    // to be holding: re-importing the same file mints a new id and the
+    // clip must still find its source.
+    let pointers = sources
+        .iter()
+        .map(|s| {
+            let track = state.library.track(s.track_id).map_err(err)?;
+            Ok(clip::BeatClipSource {
+                track_hash: track.content_hash,
+                stems: s.stems.clone(),
+            })
+        })
+        .collect::<CmdResult<Vec<_>>>()?;
+    let edit = clip::BeatClipEdit {
+        sources: pointers,
+        program: request.program.clone(),
+        start_secs: a,
+        end_secs: b,
+    };
 
     clip::save_beat_clip(
         state.library.data_dir(),
         &title,
-        &source_title,
         &span,
         bpm,
         beats,
         stems,
+        Some(edit),
     )
     .map_err(|e| CmdError::invalid(format!("clip: {e}")))
 }

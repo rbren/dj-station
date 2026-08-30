@@ -5,6 +5,7 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
 import { LibraryView } from '../src/components/LibraryView';
 import type {
   DownloadJob,
@@ -214,6 +215,65 @@ function mockClientWithJob(job: DownloadJob) {
   });
 }
 
+// Two saved clips, one from each store: the Clip page's own (which
+// points at its source by the hash of that track's audio) and a Beatify
+// project's (which points at its seed's).
+const CLIP_TAB_CLIP: BeatClipEntry = {
+  projectId: 'beat-clips',
+  projectName: 'Clip tab',
+  clipId: 'b1',
+  name: 'main drums',
+  bpm: 120,
+  beats: 4,
+  stems: ['drums'],
+  sources: [{ trackHash: 'abc', title: 'Basement Loop', artist: 'Me' }],
+};
+
+// Its source is gone from the library — deleted, or never tracked at all
+// when the clip was cut.
+const ORPHAN_CLIP: BeatClipEntry = {
+  projectId: 'p1',
+  projectName: 'Live Set A',
+  clipId: '1',
+  name: 'chorus stack',
+  bpm: 174,
+  beats: 8,
+  stems: [],
+  sources: [{ trackHash: 'deadbeefcafe', title: null, artist: null }],
+};
+
+// Cut before clips recorded where they came from.
+const UNTRACKED_CLIP: BeatClipEntry = {
+  projectId: 'beat-clips',
+  projectName: 'Clip tab',
+  clipId: 'b2',
+  name: 'old bass run',
+  bpm: 90,
+  beats: 2,
+  stems: [],
+  sources: [],
+};
+
+function mockClips(entries: BeatClipEntry[] = [CLIP_TAB_CLIP, ORPHAN_CLIP, UNTRACKED_CLIP]) {
+  const list = [...entries];
+  return {
+    list: vi.fn().mockImplementation(() => Promise.resolve([...list])),
+    load: vi.fn().mockResolvedValue('beatclip1'),
+    status: vi.fn().mockResolvedValue(null),
+    delete: vi.fn().mockImplementation((projectId: string, clipId: string) => {
+      const at = list.findIndex((c) => c.projectId === projectId && c.clipId === clipId);
+      if (at >= 0) list.splice(at, 1);
+      return Promise.resolve([...list]);
+    }),
+  } satisfies BeatClipApi;
+}
+
+async function openClipsTab() {
+  await waitFor(() => expect(screen.getByTestId('store-tab-beat-clips')).toBeTruthy());
+  fireEvent.click(screen.getByTestId('store-tab-beat-clips'));
+  await waitFor(() => expect(screen.queryByTestId('library-track')).toBeNull());
+}
+
 function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi {
   return {
     tracks: vi.fn().mockResolvedValue([LOCAL_TRACK]),
@@ -270,6 +330,8 @@ describe('LibraryView', () => {
     const onEdit = vi.fn();
     const { unmount } = render(<LibraryView client={mockClient()} onEdit={onEdit} />);
     await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
+    // The button says what it makes: a clip, cut in the Clip page.
+    expect(screen.getByTestId('library-edit').textContent).toBe('Clip');
     fireEvent.click(screen.getByTestId('library-edit'));
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
 
@@ -327,11 +389,11 @@ describe('LibraryView', () => {
     expect(screen.getByTestId('track-title').textContent).toBe('Basement Loop');
   });
 
-  it('renders one tab per enabled provider plus Local', async () => {
+  it('renders one tab per enabled provider plus Sources', async () => {
     render(<LibraryView client={mockClient()} />);
     await waitFor(() => expect(screen.getByTestId('store-tab-internet_archive')).toBeTruthy());
     const tabs = screen.getByTestId('store-tabs');
-    expect(tabs.textContent).toContain('Local');
+    expect(tabs.textContent).toContain('Sources');
     expect(tabs.textContent).toContain('iTunes Store');
     expect(tabs.textContent).toContain('Freesound');
     expect(tabs.textContent).toContain('Internet Archive');
@@ -724,5 +786,102 @@ describe('LibraryView', () => {
 
     fireEvent.click(screen.getByTestId('store-tab-itunes'));
     expect(screen.getByTestId('library-fair-use')).toBeTruthy();
+  });
+
+  it('lists every saved beat clip, whichever store it came from', async () => {
+    const clips = mockClips();
+    render(<LibraryView client={mockClient()} clips={clips} />);
+    await openClipsTab();
+
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+    const rows = screen.getAllByTestId('beat-clip-row');
+    // A clip wears ONE name, and its source is looked up by pointer: the
+    // title shown is whatever that hash answers to now.
+    expect(rows[0].textContent).toContain('main drums');
+    expect(rows[0].querySelector('[data-testid="clip-source"]')?.textContent).toContain(
+      'Basement Loop',
+    );
+    expect(rows[0].textContent).toContain('Clip tab');
+    // A Beatify clip lists the same way, under its project.
+    expect(rows[1].textContent).toContain('chorus stack');
+    expect(rows[1].textContent).toContain('Live Set A');
+  });
+
+  it('says so when a clip has no source to show, and never hides the clip', async () => {
+    render(<LibraryView client={mockClient()} clips={mockClips()} />);
+    await openClipsTab();
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+    const rows = screen.getAllByTestId('beat-clip-row');
+
+    // Deleted source: the pointer no longer resolves.
+    expect(rows[1].querySelector('[data-testid="clip-source-missing"]')?.textContent).toBe(
+      'source deleted',
+    );
+    // Never recorded: a clip cut before clips carried a pointer at all.
+    expect(rows[2].querySelector('[data-testid="clip-source-none"]')?.textContent).toBe(
+      'not recorded',
+    );
+  });
+
+  it('deletes a beat clip once it is confirmed', async () => {
+    const clips = mockClips();
+    render(<LibraryView client={mockClient()} clips={clips} />);
+    await openClipsTab();
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+
+    // Asking is not doing: cancelling leaves the clip where it is.
+    fireEvent.click(screen.getAllByTestId('beat-clip-delete')[0]);
+    fireEvent.click(screen.getByTestId('beat-clip-delete-cancel'));
+    expect(clips.delete).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByTestId('beat-clip-delete')[0]);
+    fireEvent.click(screen.getByTestId('beat-clip-delete-confirm'));
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(2));
+    expect(clips.delete).toHaveBeenCalledWith('beat-clips', 'b1');
+    expect(screen.getByTestId('library-status').textContent).toContain('main drums');
+  });
+
+  it('counts the clips cut from each source and jumps to just those', async () => {
+    // A second track nothing was cut from: its count is a dash, not a
+    // link to an empty list.
+    const other: Track = { ...LOCAL_TRACK, id: 2, title: 'Rooftop Take', content_hash: 'zzz' };
+    const client = mockClient({ tracks: vi.fn().mockResolvedValue([LOCAL_TRACK, other]) });
+    render(<LibraryView client={client} clips={mockClips()} />);
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(2));
+
+    // The count is per source track, matched on the hash of its audio.
+    await waitFor(() => expect(screen.getAllByTestId('track-clip-count')[0].textContent).toBe('1'));
+    expect(screen.getAllByTestId('track-clip-count')[1].textContent).toBe('—');
+    expect(screen.getAllByTestId('track-clip-count-link')).toHaveLength(1);
+
+    // Clicking it opens the Beat Clips tab showing only that track's.
+    fireEvent.click(screen.getByTestId('track-clip-count-link'));
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(1));
+    expect(screen.getByTestId('beat-clip-row').textContent).toContain('main drums');
+    expect(screen.getByTestId('clip-source-filter').textContent).toContain('Basement Loop');
+
+    // And the filter can be dropped without leaving the tab.
+    fireEvent.click(screen.getByTestId('clip-source-filter-clear'));
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+    expect(screen.queryByTestId('clip-source-filter')).toBeNull();
+  });
+
+  it('opens the Beat Clips tab on everything, however it was last filtered', async () => {
+    render(<LibraryView client={mockClient()} clips={mockClips()} />);
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId('track-clip-count-link')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('track-clip-count-link'));
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(1));
+
+    // The tab itself means all of them.
+    fireEvent.click(screen.getByTestId('store-tab-sources'));
+    fireEvent.click(screen.getByTestId('store-tab-beat-clips'));
+    await waitFor(() => expect(screen.getAllByTestId('beat-clip-row')).toHaveLength(3));
+  });
+
+  it('has no Beat Clips tab without a clip client', async () => {
+    render(<LibraryView client={mockClient()} />);
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
+    expect(screen.queryByTestId('store-tab-beat-clips')).toBeNull();
   });
 });

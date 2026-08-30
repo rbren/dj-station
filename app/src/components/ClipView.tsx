@@ -363,10 +363,6 @@ export function ClipView({
   const [selection, setSelection] = useState<Range | null>(null);
   const [previewState, setPreview] = useState<ClipRender | null>(null);
   const [name, setName] = useState('');
-  /** The source track's title, filed with the clip — the beat-clip twin
-   *  of a Beatify clip's project name (the decks show both). Prefilled
-   *  from the opened track, editable in the save row. */
-  const [sourceTitle, setSourceTitle] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -882,7 +878,6 @@ export function ClipView({
           setName(
             stems.length ? `${source.title} (${stemLabel(stems)})` : `${source.title} (clip)`,
           );
-          setSourceTitle(source.title);
           return;
         }
         const index = existing >= 0 ? existing : sources.length;
@@ -1387,7 +1382,6 @@ export function ClipView({
       const saved = await clip.saveBeatClip(
         request,
         name,
-        sourceTitle,
         range.start,
         range.end,
         tempo.bpm,
@@ -1402,7 +1396,7 @@ export function ClipView({
     } finally {
       setBusy(false);
     }
-  }, [clip, name, range, request, sourceTitle, tempo]);
+  }, [clip, name, range, request, tempo]);
 
   // Selections quantize to the tapped grid; AudioTimeline reads ⌘ live
   // and skips these, which is how the window is dragged off the beat.
@@ -1941,14 +1935,6 @@ export function ClipView({
                 data-testid="clip-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <label title="The track this clip is cut from — shown above the clip's name in the decks, like a Beatify clip's project">
-              <span>Source</span>
-              <input
-                data-testid="clip-source-title"
-                value={sourceTitle}
-                onChange={(e) => setSourceTitle(e.target.value)}
               />
             </label>
             <span className="clip-save-meta" data-testid="clip-save-meta">

@@ -9,6 +9,16 @@ import { IpcClient } from './ipc';
 /** The rack module a clip is imported as. */
 export const BEAT_CLIP_TYPE = 'builtin.beat_clip';
 
+/** A library track a clip was cut from: the pointer — the hash of the
+ *  track's audio, which nothing can change — and the names it answers to
+ *  today. `title === null` means the source is gone (never recorded, or
+ *  since deleted), which rows must handle. */
+export interface BeatClipSourceInfo {
+  trackHash: string;
+  title: string | null;
+  artist: string | null;
+}
+
 /** One clip a Beat Clip module can be built from. */
 export interface BeatClipEntry {
   projectId: string;
@@ -22,6 +32,9 @@ export interface BeatClipEntry {
   /** Which parts of a track it is made of, `STEM_NAMES` order — the tags
    *  the row shows. All four means it was cut from whole mixes. */
   stems: string[];
+  /** The tracks it points at, resolved against the library as it now
+   *  stands. Empty when the clip records no source at all. */
+  sources: BeatClipSourceInfo[];
 }
 
 /** Which clip a module is bound to. The patch persists this, never the
@@ -62,6 +75,9 @@ export interface BeatClipApi {
    *  the clip ("chorus stack"), so the caller can re-key its layout. */
   load(instance: string, projectId: string, clipId: string): Promise<string | null>;
   status(instance: string): Promise<BeatClipStatus | null>;
+  /** Delete a saved clip from whichever store holds it. Resolves to the
+   *  list as it now stands. */
+  delete(projectId: string, clipId: string): Promise<BeatClipEntry[] | null>;
 }
 
 export class BeatClipClient extends IpcClient implements BeatClipApi {
@@ -73,6 +89,9 @@ export class BeatClipClient extends IpcClient implements BeatClipApi {
   }
   status(instance: string) {
     return this.call<BeatClipStatus>('beat_clip_status', { instance });
+  }
+  delete(projectId: string, clipId: string) {
+    return this.call<BeatClipEntry[]>('beat_clip_delete', { projectId, clipId });
   }
 }
 

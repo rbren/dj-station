@@ -13,9 +13,9 @@ mod launch_control;
 
 use dj_engine::{
     AudioFocus, AudioOutputs, Backend, CaptureWindow, Engine, EngineConfig, ExtensionRegistry,
-    JackTelemetry,
-    KnobConfig, KnobStyle, MacroDef, MacroInterface, MacroJack, MacroLibrary, MacroStore, Manifest,
-    MidiMapKind, PatchDoc, UndoHistory, WireStyle, Workspace, MACROS_DIR_NAME,
+    JackTelemetry, KnobConfig, KnobStyle, MacroDef, MacroInterface, MacroJack, MacroLibrary,
+    MacroStore, Manifest, MidiMapKind, PatchDoc, UndoHistory, WireStyle, Workspace,
+    MACROS_DIR_NAME,
 };
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
@@ -2794,6 +2794,9 @@ fn main() {
     // data dir across (see dj_library::paths).
     let data_dir = dj_library::init_data_dir().expect("data dir setup failed");
     let library = Arc::new(Library::open(&data_dir).expect("library open failed"));
+    // A beat clip wears one name: fold the second label older records
+    // carried into it, in place, before anything lists them.
+    dj_analysis::clip::migrate_beat_clips(&data_dir);
     // Published macros are instantiable from the start (PRD §6).
     migrate_macros_to_store(&library);
     for def in store_macro_library().defs.into_values() {
@@ -3147,6 +3150,7 @@ fn main() {
             beatify_clip::beatify_clip_save,
             beatify_clip::beatify_clip_delete,
             beat_clip::beat_clip_list,
+            beat_clip::beat_clip_delete,
             beat_clip::beat_clip_load,
             beat_clip::beat_clip_status,
             decks::decks_banks,

@@ -9,9 +9,10 @@
 
 use dj_analysis::beatify::detect::DspTracker;
 use dj_analysis::clip::{
-    beats_from_taps, clips_dir, load_beat_clip, pad_to_beats, peaks, program_duration_secs,
-    read_beat_clips, render_clip, save_beat_clip, warp_time_secs, wav16_bytes, write_clip, ClipEq,
-    ClipEqBand, ClipOverlay, ClipProgram, ClipRegion, LevelPoint,
+    beats_from_taps, clips_dir, delete_beat_clip, load_beat_clip, migrate_beat_clips, pad_to_beats,
+    peaks, program_duration_secs, read_beat_clips, render_clip, save_beat_clip, warp_time_secs,
+    wav16_bytes, write_clip, BeatClipEdit, BeatClipSource, ClipEq, ClipEqBand, ClipOverlay,
+    ClipProgram, ClipRegion, LevelPoint,
 };
 use dj_analysis::AudioData;
 use std::path::{Path, PathBuf};
@@ -642,32 +643,41 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
     assert!(read_beat_clips(tmp.path()).is_empty());
     assert!(load_beat_clip(tmp.path(), "b1").is_err());
 
-    // 1.75 s at 120 BPM: filed as 4 whole beats (2.0 s). Both titles
-    // travel with it — the clip's own and the source track's.
+    // 1.75 s at 120 BPM: filed as 4 whole beats (2.0 s). The EDIT travels
+    // with it — the sources by the hash of their audio, and the program
+    // the span was cut out of.
+    let edit = BeatClipEdit {
+        sources: vec![BeatClipSource {
+            track_hash: "a1b2c3".into(),
+            stems: vec!["drums".into()],
+        }],
+        program: hard_cuts(vec![span(0, 0.5, 2.25)]),
+        start_secs: 0.0,
+        end_secs: 1.75,
+    };
     let first = save_beat_clip(
         tmp.path(),
         "kick pattern",
-        " Basement Loop ",
         &tone(220.0, 1.75),
         120.0,
         4,
         vec!["drums".into()],
+        Some(edit.clone()),
     )
     .unwrap();
     assert_eq!((first.id.as_str(), first.beats), ("b1", 4));
-    assert_eq!(first.source_title, "Basement Loop");
     let second = save_beat_clip(
         tmp.path(),
         "bass run",
-        "",
         &tone(110.0, 2.0),
         120.0,
         4,
         vec![],
+        None,
     )
     .unwrap();
     assert_eq!(second.id, "b2");
-    assert!(save_beat_clip(tmp.path(), "  ", "", &tone(220.0, 1.0), 120.0, 2, vec![]).is_err());
+    assert!(save_beat_clip(tmp.path(), "  ", &tone(220.0, 1.0), 120.0, 2, vec![], None).is_err());
 
     let clips = read_beat_clips(tmp.path());
     assert_eq!(
@@ -680,23 +690,103 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
     let (meta, audio) = load_beat_clip(tmp.path(), "b1").unwrap();
     assert_eq!(meta.bpm, 120.0);
     assert_eq!(meta.stems, ["drums"]);
-    assert_eq!(meta.source_title, "Basement Loop");
     assert_eq!(audio.frames(), 2 * SR as usize);
     let tail = (1.75 * SR as f64) as usize;
     assert!(audio.channels[0][tail + 16..].iter().all(|&s| s == 0.0));
 
-    // A record filed before clips carried a source title still parses:
-    // the field defaults to empty (displays fall back downstream).
-    std::fs::write(
-        tmp.path().join("beat-clips/b3.json"),
-        r#"{"id":"b3","name":"old","bpm":120.0,"beats":2,"file":"b3.flac"}"#,
+    // The edit round-trips through the store: the clip points at its
+    // source by the hash of that track's audio — not by a row id, which a
+    // re-import re-assigns, nor by a title, which is the user's to change
+    // — and holds the timestamps and beat structure the Clip page would
+    // need to reopen it.
+    assert_eq!(meta.edit.as_ref(), Some(&edit));
+    let source = &meta.edit.as_ref().unwrap().sources[0];
+    assert_eq!(source.track_hash, "a1b2c3");
+    assert_eq!(source.stems, ["drums"]);
+    assert_eq!(
+        meta.edit.as_ref().unwrap().program.regions[0].start_secs,
+        0.5
+    );
+    // A clip cut before edits were kept simply has none.
+    let no_edit = read_beat_clips(tmp.path())
+        .into_iter()
+        .find(|c| c.id == "b2")
+        .unwrap();
+    assert_eq!(no_edit.edit, None);
+}
+
+#[test]
+fn a_legacy_source_title_is_folded_into_the_clips_one_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("beat-clips")).unwrap();
+    let record = |id: &str, json: &str| {
+        std::fs::write(tmp.path().join(format!("beat-clips/{id}.json")), json).unwrap();
+    };
+    // Two labels, as clips were filed before a beat clip wore one name…
+    record(
+        "b1",
+        r#"{"id":"b1","name":"main drums","sourceTitle":"Boys","bpm":120.0,"beats":4,"file":"b1.flac"}"#,
+    );
+    // …and one that never carried the second label at all.
+    record(
+        "b2",
+        r#"{"id":"b2","name":"old","bpm":120.0,"beats":2,"file":"b2.flac"}"#,
+    );
+
+    // Reading folds it in whether or not the store has been rewritten.
+    let names: Vec<String> = read_beat_clips(tmp.path())
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    assert_eq!(names, ["main drums · Boys", "old"]);
+
+    // Migrating rewrites the one record that carries it, and is a no-op
+    // the second time round.
+    assert_eq!(migrate_beat_clips(tmp.path()), 1);
+    assert_eq!(migrate_beat_clips(tmp.path()), 0);
+    let on_disk = std::fs::read_to_string(tmp.path().join("beat-clips/b1.json")).unwrap();
+    assert!(on_disk.contains("main drums · Boys"), "{on_disk}");
+    assert!(!on_disk.contains("sourceTitle"), "{on_disk}");
+}
+
+#[test]
+fn deleting_a_beat_clip_takes_its_audio_with_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    save_beat_clip(
+        tmp.path(),
+        "kick",
+        &tone(220.0, 2.0),
+        120.0,
+        4,
+        vec![],
+        None,
     )
     .unwrap();
-    let old = read_beat_clips(tmp.path())
-        .into_iter()
-        .find(|c| c.id == "b3")
-        .unwrap();
-    assert_eq!(old.source_title, "");
+    save_beat_clip(
+        tmp.path(),
+        "snare",
+        &tone(330.0, 2.0),
+        120.0,
+        4,
+        vec![],
+        None,
+    )
+    .unwrap();
+
+    let gone = delete_beat_clip(tmp.path(), "b1").unwrap();
+    assert_eq!(gone.name, "kick");
+    assert!(!tmp.path().join("beat-clips/b1.flac").exists());
+    assert!(!tmp.path().join("beat-clips/b1.json").exists());
+    assert_eq!(
+        read_beat_clips(tmp.path())
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect::<Vec<_>>(),
+        ["b2"]
+    );
+    assert!(load_beat_clip(tmp.path(), "b1").is_err());
+    // A row that is not there means the caller's list is stale.
+    assert!(delete_beat_clip(tmp.path(), "b1").is_err());
 }
 
 #[test]

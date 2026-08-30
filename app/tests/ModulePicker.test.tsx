@@ -610,6 +610,7 @@ describe('ModulePicker clips tab', () => {
       bpm: 128,
       beats: 8,
       stems: ['vocals', 'drums', 'bass', 'other'],
+      sources: [{ trackHash: 'abc123', title: 'Night Bus Take', artist: 'Me' }],
     },
     {
       projectId: 'p2',
@@ -619,6 +620,7 @@ describe('ModulePicker clips tab', () => {
       bpm: 92.5,
       beats: 4,
       stems: ['drums', 'bass'],
+      sources: [],
     },
   ];
 

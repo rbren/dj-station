@@ -59,8 +59,12 @@ pub enum ClipSourceRef {
     },
     /// A stem as its own entry — the shape clips were saved in before
     /// stems became a switch on their seed. Read, never written.
-    Stem { name: String },
-    Clip { id: String },
+    Stem {
+        name: String,
+    },
+    Clip {
+        id: String,
+    },
 }
 
 impl ClipSourceRef {
@@ -119,7 +123,9 @@ pub struct ClipPlacement {
 impl ClipPlacement {
     /// Beats of audio this run lays down.
     fn take_beats(&self) -> f64 {
-        self.audio_beats.unwrap_or(self.beats as f64).clamp(0.0, self.beats as f64)
+        self.audio_beats
+            .unwrap_or(self.beats as f64)
+            .clamp(0.0, self.beats as f64)
     }
 }
 
@@ -665,6 +671,48 @@ pub fn project_clips(state: &AppState, project_id: &str) -> CmdResult<Vec<SavedC
     read_clips(state, project_id)
 }
 
+/// Which seeds a clip's runs were cut from, in the order they are first
+/// used — a run taken from another clip contributes whatever THAT clip
+/// was cut from. The pointer to a library row is the seed's, and it is
+/// by hash and id, never by title.
+pub fn clip_seeds<'a>(
+    clip: &SavedClip,
+    all: &'a [SavedClip],
+    project: &'a store::Project,
+    depth: usize,
+) -> Vec<&'a store::Seed> {
+    let first = project
+        .seeds
+        .first()
+        .map(|s| s.id.clone())
+        .unwrap_or_default();
+    let mut out: Vec<&store::Seed> = Vec::new();
+    let mut push = |seed: &'a store::Seed| {
+        if !out.iter().any(|s| s.id == seed.id) {
+            out.push(seed);
+        }
+    };
+    for placement in &clip.placements {
+        match placement.source.resolved(&first) {
+            ClipSourceRef::Seed { id, .. } => {
+                if let Some(seed) = project.seeds.iter().find(|s| s.id == id) {
+                    push(seed);
+                }
+            }
+            ClipSourceRef::Clip { id } if depth < MAX_DEPTH => {
+                let Some(inner) = all.iter().find(|c| c.id == id) else {
+                    continue;
+                };
+                for seed in clip_seeds(inner, all, project, depth + 1) {
+                    push(seed);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Assemble a saved clip. Same path the builder's preview takes, so the
 /// module in the rack sounds like the clip in the editor.
 ///
@@ -679,9 +727,10 @@ pub fn render_clip(state: &AppState, project_id: &str, clip_id: &str) -> CmdResu
         return Ok(RenderedClip {
             audio,
             bpm: meta.bpm,
-            // The source track it was cut from — what a deck shows
-            // where a Beatify clip shows its project name.
-            project_name: crate::clip::beat_clip_source_name(&meta),
+            // Which store it came from, where a Beatify clip names its
+            // project: the track it was cut from is a POINTER now
+            // (`BeatClipMeta.edit`), not a label copied at save time.
+            project_name: crate::clip::BEAT_CLIPS_PROJECT_NAME.into(),
             name: meta.name,
             stems: meta.stems,
         });
@@ -720,10 +769,7 @@ pub fn render_clip(state: &AppState, project_id: &str, clip_id: &str) -> CmdResu
 /// What this project can be cut up into (BC-1): every seed, the stems
 /// each of them can be broken into, and the clips built so far.
 #[tauri::command(async)]
-pub fn beatify_clip_sources(
-    state: State<AppState>,
-    project_id: String,
-) -> CmdResult<ClipSources> {
+pub fn beatify_clip_sources(state: State<AppState>, project_id: String) -> CmdResult<ClipSources> {
     let resolver = Resolver::new(&state, &project_id)?;
     let grid = resolver.grid();
     let sources = resolver
@@ -864,9 +910,15 @@ pub fn beatify_clip_delete(
     project_id: String,
     id: String,
 ) -> CmdResult<Vec<SavedClip>> {
-    let mut clips = read_clips(&state, &project_id)?;
+    delete_clip(&state, &project_id, &id)
+}
+
+/// Drop a saved clip from its project. The builder's own delete and the
+/// Library page's Beat Clips tab are the same act, so they are one path.
+pub fn delete_clip(state: &AppState, project_id: &str, id: &str) -> CmdResult<Vec<SavedClip>> {
+    let mut clips = read_clips(state, project_id)?;
     clips.retain(|c| c.id != id);
-    write_clips(&state, &project_id, &clips)?;
+    write_clips(state, project_id, &clips)?;
     Ok(clips)
 }
 
