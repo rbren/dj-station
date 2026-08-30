@@ -1465,7 +1465,9 @@ beatify::build`.
   (clip beats + silent `tail`, minus its whole-beat `phase`), which is
   what makes a 2-beat clip and an 8-beat clip start together with no
   re-triggering; `cycle_beats` is the lcm of the loaded loops (how often
-  the whole bank comes round). A freshly loaded clip is MUTED, un-shifted
+  the whole bank comes round). A freshly loaded clip arrives CUED (un-muted
+  with monitor on, so it is audible in the headphones but not the live
+  pair — see `hand_slot_clip`'s `fresh` path), un-shifted
   and tail-free — `decks_load` resets those, `decks_supply` deliberately
   does NOT (it is the app layer handing over audio for a binding that
   already exists, after a patch load or undo). The three tone controls are
