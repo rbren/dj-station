@@ -2196,21 +2196,26 @@ of the page.
   chrome overlay's `layoutKey` — that is what re-measures the cables
   frame by frame during a drag. Collapsed, the strips leave the DOM and
   their cables simply stop resolving (the same rule as the bpm/reset
-  inputs, which have no socket at all); the top bar's clock and output
-  jacks stay wired.
-- The chrome IS the bank: on this tab App renders no panel for
-  `DECKS_TYPE` modules, and the strips/top bar carry the bank's real
-  jacks (`data-jack` on the bank instance) — send/return at the top of
-  each strip, a CV jack under each tone knob (with `is-patched` state
-  from `tone_patched`), and in the top bar the clock beside the tempo
-  plus BOTH OUTPUT PAIRS. Jack clicks go through App's `onJackClick`
-  (one grammar, one color set).
+  inputs, which have no socket at all); the top bar's clock jack stays
+  wired.
+- The chrome IS the bank: on this tab App renders no panel for any
+  `DECKS_HIDDEN_TYPES` module (the bank, `builtin.audio_out`,
+  `builtin.monitor_out` — the outputs `decks_ensure` wires are IMPLIED
+  furniture; they stay in the patch and keep playing, they just draw no
+  box), and the strips/top bar carry the bank's real jacks (`data-jack`
+  on the bank instance) — send/return at the top of each strip, a CV
+  jack under each tone knob (with `is-patched` state from
+  `tone_patched`), and in the top bar the clock beside the tempo. The
+  OUTPUT PAIRS have NO chrome jacks: where the bank comes out is
+  implied, so `audio_l/r` and `mon_l/r` are unreachable from this tab
+  and their cables to the hidden outputs resolve at neither end. Jack
+  clicks go through App's `onJackClick` (one grammar, one color set).
 - The top bar reads left to right as one thought: the tempo is ONE
   control in ONE unit, so the number and its slider stack under a single
   `BPM` label (`.decks-tempo-stack`) with the clock jack — the tempo made
   audible — right beside them; then the beat readout; then where the bank
   COMES OUT, `.decks-outs`, a row per pair (live over monitor, keyed by
-  `data-bus`) carrying that pair's L/R jacks and its master fader. The
+  `data-bus`) carrying just that pair's master fader — no L/R jacks. The
   masters are engine state, not chrome: `decks_set_master` ->
   `Engine::decks_set_master`, drafted while dragged exactly like the
   tempo, and `end_edit` on release closes the undo window
@@ -2226,8 +2231,9 @@ of the page.
   lamps, pills — is ignored like telemetry). The pending preview moves to
   the chrome overlay on this tab so it is never clipped at the
   `.rack-area` edge; a bank jack with no chrome socket (the `bpm` and
-  `reset` inputs, which the bar drives as a number and a slider) resolves
-  nowhere and its cable simply is not drawn here.
+  `reset` inputs, which the bar drives as a number and a slider, and the
+  two output pairs, whose destination is implied) resolves nowhere and
+  its cable simply is not drawn here.
   Endpoint GEOMETRY is pinned by `app/tests/DecksChromeWires.test.tsx` —
   keep pinning numbers, not just "a wire exists".
 - A strip is LIT BY ITS OWN OUTPUT: `DecksSlot` maps `output_level` (the

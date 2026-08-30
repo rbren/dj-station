@@ -4,9 +4,10 @@
 // visible on this tab, and this component renders the deck furniture
 // around it: the tempo bar above — the BPM (number and slider, one
 // control in one unit), the clock beside it, and where the bank comes
-// out: the live pair over the monitor pair, each on its own jacks with
-// the master fader for everything that pair carries — and the eight
-// strips (each with its send/return and tone-CV jacks) below.
+// out: a master fader for the live pair over one for the monitor pair.
+// The pairs themselves carry no chrome jacks — where they go is implied
+// (decks_ensure keeps them wired to outputs) — and the eight strips
+// (each with its send/return and tone-CV jacks) sit below.
 //
 // The page is a big panel for a single rack module (`builtin.decks`) — the
 // bank is in the patch and keeps RUNNING when the tab is not looking (it
@@ -48,7 +49,6 @@ import {
   MASTER_BUSES,
   MAX_BPM,
   MIN_BPM,
-  outJack,
   type DecksApi,
   type DecksStatus,
   type DeckSlotStatus,
@@ -262,8 +262,8 @@ export function DecksView(props: DecksViewProps) {
   // free); a bank wire's chrome end sits still while the canvas moves, so
   // these are measured in screen coordinates and re-measured on pan/zoom
   // (overlayLayoutKey). A bank jack with no chrome socket (the tempo and
-  // reset inputs) simply does not resolve, and its cable is not drawn
-  // here.
+  // reset inputs, the two output pairs) simply does not resolve, and its
+  // cable is not drawn here.
   const chromeWires = useMemo(
     () => (wires ?? []).filter((w) => w.from_instance === bank || w.to_instance === bank),
     [wires, bank],
@@ -461,28 +461,13 @@ export function DecksView(props: DecksViewProps) {
           )}
         </div>
         {/* Where the bank comes out, one row per pair: the room above the
-            headphones, each with its stereo jacks and the fader on
-            everything that pair carries. */}
+            headphones, each just its fader — the pairs themselves carry
+            no chrome jacks, because where they go is implied
+            (decks_ensure keeps them wired to outputs). */}
         <div className="decks-outs" data-testid="decks-outs">
           {MASTER_BUSES.map((bus) => (
             <div className="decks-out" data-bus={bus} data-testid={`decks-out-${bus}`} key={bus}>
               <span className="decks-out-label">{bus}</span>
-              {(['l', 'r'] as const).map((side) => {
-                const id = outJack(bus, side);
-                return (
-                  <LiveJack
-                    key={id}
-                    instance={bank}
-                    id={id}
-                    kind="output"
-                    label={side.toUpperCase()}
-                    wired={isWired(id, 'output')}
-                    selected={isArmed(id, 'output')}
-                    selectedColor={armedColor}
-                    onClick={(shift) => onJack(id, 'output', shift)}
-                  />
-                );
-              })}
               <input
                 className="decks-master"
                 data-testid={`decks-master-${bus}`}

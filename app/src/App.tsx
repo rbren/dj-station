@@ -36,7 +36,7 @@ import { beatClip, type BeatClipEntry, BEAT_CLIP_TYPE } from './beatClip';
 import { beatifyClipClient } from './beatifyClip';
 import { BeatifyView } from './components/BeatifyView';
 import { DecksView } from './components/DecksView';
-import { DECKS_TYPE } from './decks';
+import { DECKS_HIDDEN_TYPES } from './decks';
 import { clipClient } from './clip';
 import { beatifyClient } from './beatify';
 import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
@@ -2459,9 +2459,12 @@ export default function App() {
                     {/* On the Decks tab the bank has no panel in the grid:
                         the deck chrome IS the bank, so its jacks resolve
                         to exactly one socket (the chrome one) and the
-                        cables that touch it are the chrome overlay's. */}
+                        cables that touch it are the chrome overlay's. The
+                        output modules its pairs are wired to are implied
+                        by the top bar's faders, so they draw no panel
+                        here either. */}
                     {nodes.map((node, i) =>
-                      view === 'decks' && node.type_id === DECKS_TYPE ? null : (
+                      view === 'decks' && DECKS_HIDDEN_TYPES.has(node.type_id) ? null : (
                         <RackModule
                           key={node.instance_id}
                           instanceId={node.instance_id}

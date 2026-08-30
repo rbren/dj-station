@@ -21,6 +21,22 @@ const VCA: Manifest = {
   params: [],
 };
 
+// The output module decks_ensure wires the live pair to: it stays in the
+// patch (and keeps playing), but the Decks tab draws no panel for it —
+// where the bank comes out is implied.
+const OUT: Manifest = {
+  id: 'builtin.audio_out',
+  name: 'Audio Output',
+  version: '0.1.0',
+  abi: 'builtin',
+  inputs: [
+    { id: 'l', name: 'L' },
+    { id: 'r', name: 'R' },
+  ],
+  outputs: [],
+  params: [],
+};
+
 // The bank's manifest, trimmed to the jacks this test touches.
 const BANK: Manifest = {
   id: 'builtin.decks',
@@ -57,7 +73,7 @@ function node(instance: string, manifest: Manifest) {
 }
 
 const state = {
-  nodes: [node('bank1', BANK), node('vca1', VCA)],
+  nodes: [node('bank1', BANK), node('vca1', VCA), node('out1', OUT)],
   wires: [] as unknown[],
 };
 
@@ -178,6 +194,9 @@ describe('the Decks tab wraps the real rack canvas', () => {
     // jacks resolves to exactly one socket (the chrome one).
     expect(screen.queryByTestId('module-bank1')).toBeNull();
     expect(document.querySelectorAll('[data-jack="bank1:output:d1_out"]').length).toBe(1);
+    // The output module the bank plays through has no panel either —
+    // where the bank comes out is implied by the top bar's faders.
+    expect(screen.queryByTestId('module-out1')).toBeNull();
     // The chrome cable overlay is up.
     expect(screen.getByTestId('decks-chrome-overlay')).toBeTruthy();
 

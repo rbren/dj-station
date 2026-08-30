@@ -216,31 +216,28 @@ describe('chrome-to-canvas cables', () => {
     expect(screen.queryByTestId('cable-lfo1:out->decks1:bpm')).toBeNull();
   });
 
-  it('the live and monitor pairs are chrome sockets of their own', async () => {
+  it('the live and monitor pairs have no chrome sockets: their cables are not drawn', async () => {
+    // The wires to the implied output modules exist in the patch, but the
+    // top bar carries no L/R jacks for the pairs, so — like the tempo
+    // input — they resolve to nothing here and no cable is invented.
     show({
       wires: [
+        WIRE,
         { from_instance: 'decks1', from_jack: 'audio_l', to_instance: 'out1', to_jack: 'in_l' },
         { from_instance: 'decks1', from_jack: 'mon_r', to_instance: 'mon1', to_jack: 'in_r' },
       ],
     });
     await screen.findByTestId('decks-outs');
-    mockChromeJack('decks1:output:audio_l', 300, 80);
-    mockChromeJack('decks1:output:mon_r', 340, 100);
-    addModuleSocket('out1:input:in_l', 600, 200);
-    addModuleSocket('mon1:input:in_r', 640, 240);
-    await waitFor(() => {
-      // Container origin (40, 60), socket centers 9px in.
-      const live = screen.getByTestId('cable-decks1:audio_l->out1:in_l');
-      expect(live.getAttribute('x1')).toBe('269');
-      expect(live.getAttribute('y1')).toBe('29');
-      expect(live.getAttribute('x2')).toBe('569');
-      expect(live.getAttribute('y2')).toBe('149');
-      const cue = screen.getByTestId('cable-decks1:mon_r->mon1:in_r');
-      expect(cue.getAttribute('x1')).toBe('309');
-      expect(cue.getAttribute('y1')).toBe('49');
-      expect(cue.getAttribute('x2')).toBe('609');
-      expect(cue.getAttribute('y2')).toBe('189');
-    });
+    await screen.findByTestId('decks-io-0');
+    expect(body.querySelector('[data-jack="decks1:output:audio_l"]')).toBeNull();
+    expect(body.querySelector('[data-jack="decks1:output:mon_r"]')).toBeNull();
+    mockChromeJack('decks1:output:d1_out', 120, 500);
+    addModuleSocket('vca1:input:in', 600, 200);
+    addModuleSocket('out1:input:in_l', 600, 240);
+    addModuleSocket('mon1:input:in_r', 640, 280);
+    await waitFor(() => expect(screen.getByTestId(`cable-${KEY}`)).toBeTruthy());
+    expect(screen.queryByTestId('cable-decks1:audio_l->out1:in_l')).toBeNull();
+    expect(screen.queryByTestId('cable-decks1:mon_r->mon1:in_r')).toBeNull();
   });
 
   it('the armed preview starts at the chrome jack it was armed on', async () => {

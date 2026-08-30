@@ -9,6 +9,14 @@ import type { BeatClipRef } from './beatClip';
 /** The rack module a bank IS. */
 export const DECKS_TYPE = 'builtin.decks';
 
+/** Module types the Decks tab draws NO PANEL for: the bank (the chrome
+ *  IS the bank) and the two output modules `decks_ensure` keeps its
+ *  pairs wired to — where the bank comes out is implied, so an Audio
+ *  Output or Monitor Output box in the decks rack is furniture. The
+ *  modules stay in the patch and keep playing; only their panels are
+ *  skipped. */
+export const DECKS_HIDDEN_TYPES = new Set([DECKS_TYPE, 'builtin.audio_out', 'builtin.monitor_out']);
+
 export const DECK_SLOTS = 8;
 
 /** Full scale of a tone control: 0 kills the band, 1 is flat, 2 is +6 dB
@@ -50,11 +58,11 @@ export type DeckArm = 'none' | 'queue' | 'drop';
  *  controls each have a CV out. */
 export const CLOCK_JACK = 'clock';
 /** The bank's two output pairs: the room, and the headphones a deck's
- *  Monitor button cues into. Each carries a master fader. */
+ *  Monitor button cues into. Each carries a master fader; neither has a
+ *  chrome jack (`audio_l/r` and `mon_l/r` stay wired to the implied
+ *  output modules by `decks_ensure`). */
 export const MASTER_BUSES = ['live', 'monitor'] as const;
 export type MasterBus = (typeof MASTER_BUSES)[number];
-export const outJack = (bus: MasterBus, side: 'l' | 'r') =>
-  bus === 'live' ? `audio_${side}` : `mon_${side}`;
 export const sendJack = (slot: number) => `d${slot + 1}_out`;
 export const returnJack = (slot: number) => `d${slot + 1}_in`;
 /** The tone controls of a strip, top to bottom — the order the surface's

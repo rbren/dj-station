@@ -505,7 +505,7 @@ describe('DecksView', () => {
     expect(tempoGroup?.contains(screen.getByTestId('decks-bpm'))).toBe(true);
   });
 
-  it('the two output pairs are stacked, each with its jacks and its master fader', async () => {
+  it('the two output pairs are stacked, each just its master fader — no L/R jacks', async () => {
     const api = makeApi(makeStatus({ master_live: 0.8, master_monitor: 0.4 }));
     const { container } = show(api);
     const outs = await screen.findByTestId('decks-outs');
@@ -513,9 +513,12 @@ describe('DecksView', () => {
     const rows = Array.from(outs.children).map((row) => row.getAttribute('data-bus'));
     expect(rows).toEqual(['live', 'monitor']);
 
+    // Where the pairs go is implied (decks_ensure keeps them wired to
+    // outputs), so the rows carry no jack sockets at all.
     for (const jack of ['audio_l', 'audio_r', 'mon_l', 'mon_r']) {
-      expect(container.querySelector(`[data-jack="decks1:output:${jack}"]`)).toBeTruthy();
+      expect(container.querySelector(`[data-jack="decks1:output:${jack}"]`)).toBeNull();
     }
+    expect(outs.querySelector('[data-jack]')).toBeNull();
 
     const live = screen.getByTestId<HTMLInputElement>('decks-master-live');
     const monitor = screen.getByTestId<HTMLInputElement>('decks-master-monitor');
@@ -735,17 +738,16 @@ describe('the deck chrome is the bank, on jacks', () => {
     ]);
     expect(within(io).getByTestId('jack-output-d1_out').querySelector('.jack-name')).toBeNull();
     expect(within(io).getByTestId('jack-input-d1_in').querySelector('.jack-name')).toBeNull();
-    // The bank's clock rides in the top bar, beside the tempo it counts,
-    // and so do the two pairs the bank comes out of.
+    // The bank's clock rides in the top bar, beside the tempo it counts.
     const clock = screen.getByTestId('decks-clock-jack');
     expect(within(clock).getByTestId('jack-output-clock')).toBeTruthy();
     expect(jackSocket(container, 'decks1:output:clock')).toBeTruthy();
-    const live = screen.getByTestId('decks-out-live');
-    expect(within(live).getByTestId('jack-output-audio_l')).toBeTruthy();
-    expect(within(live).getByTestId('jack-output-audio_r')).toBeTruthy();
-    const cue = screen.getByTestId('decks-out-monitor');
-    expect(within(cue).getByTestId('jack-output-mon_l')).toBeTruthy();
-    expect(within(cue).getByTestId('jack-output-mon_r')).toBeTruthy();
+    // The two output pairs have NO chrome jacks: where the bank comes
+    // out is implied (decks_ensure keeps the pairs wired to outputs), so
+    // the rows carry only their master faders.
+    for (const jack of ['audio_l', 'audio_r', 'mon_l', 'mon_r']) {
+      expect(jackSocket(container, `decks1:output:${jack}`)).toBeNull();
+    }
   });
 
   it('clicking a chrome jack goes through the rack grammar, bank instance first', async () => {
@@ -759,8 +761,6 @@ describe('the deck chrome is the bank, on jacks', () => {
     expect(onJackClick).toHaveBeenCalledWith('decks1', 'input', 'd1_in', true);
     fireEvent.click(screen.getByTestId('jack-output-clock'));
     expect(onJackClick).toHaveBeenCalledWith('decks1', 'output', 'clock', false);
-    fireEvent.click(screen.getByTestId('jack-output-mon_l'), { shiftKey: true });
-    expect(onJackClick).toHaveBeenCalledWith('decks1', 'output', 'mon_l', true);
   });
 
   it('a wired chrome jack shows its cable, and the armed one lights in the pending color', async () => {
