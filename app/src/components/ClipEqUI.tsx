@@ -15,7 +15,7 @@
 // `onChange` streams the live band values.
 
 import { useCallback, useEffect, useRef, type CSSProperties } from 'react';
-import { EQ_MAX_Q, EQ_MIN_Q, type ClipEqBand } from '../clip';
+import { defaultEqBands, EQ_MAX_Q, EQ_MIN_Q, type ClipEqBand } from '../clip';
 
 const W = 340;
 const H = 150;
@@ -269,8 +269,26 @@ export function ClipEqUI({ bands, onBegin, onChange }: ClipEqUIProps) {
     return () => el.removeEventListener('wheel', onWheel);
   }, [apply, onBegin]);
 
+  const defaults = defaultEqBands();
+  const neutral = bands.every(
+    (b, i) => b.gain_db === 0 && b.q === 1 && b.freq_hz === defaults[i]?.freq_hz,
+  );
+
   return (
     <div className="eq-ui clip-eq-ui" data-testid="clip-eq" ref={rootRef}>
+      <button
+        type="button"
+        className="clip-eq-reset"
+        data-testid="clip-eq-reset"
+        title="Reset all bands to their defaults"
+        disabled={neutral}
+        onClick={() => {
+          onBegin();
+          onChange(defaultEqBands());
+        }}
+      >
+        Reset
+      </button>
       <svg
         width={W}
         height={H}

@@ -707,6 +707,36 @@ describe('ClipView', () => {
     expect(screen.getByTestId('clip-eq-readout').textContent).toContain('Q1.0');
   });
 
+  it('resets the EQ to its defaults', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+
+    // Nothing to reset while the EQ is flat.
+    const reset = screen.getByTestId('clip-eq-reset') as HTMLButtonElement;
+    expect(reset.disabled).toBe(true);
+
+    // Shape band 1, then reset: every band back to neutral in one step.
+    fireEvent.mouseDown(screen.getByTestId('clip-eq-handle-1'), {
+      clientX: 50,
+      clientY: 80,
+      button: 0,
+    });
+    fireEvent.mouseMove(window, { clientX: 50, clientY: 39 });
+    fireEvent.mouseUp(window);
+    expect(screen.getByTestId('clip-eq-readout').textContent).toContain('+9.9dB');
+    expect(reset.disabled).toBe(false);
+
+    fireEvent.click(reset);
+    expect(screen.getByTestId('clip-eq-readout').textContent).toContain('+0.0dB');
+    expect(reset.disabled).toBe(true);
+    const bands = (await savedProgram(clip)).eq.bands;
+    expect(bands.every((b) => b.gain_db === 0 && b.q === 1)).toBe(true);
+
+    // The reset is one undo step: undo brings the shaped band back.
+    fireEvent.click(screen.getByTestId('clip-undo'));
+    expect(screen.getByTestId('clip-eq-readout').textContent).toContain('+9.9dB');
+  });
+
   it('measures an untapped selection and saves it as a beat clip', async () => {
     const clip = clipMock();
     render(<ClipView clip={clip} library={libraryMock()} detectDelayMs={0} />);

@@ -4429,11 +4429,22 @@ body {
    in a captioned card so plot, knobs and readout read as one instrument
    instead of loose parts floating on the page. */
 .clip-eq-ui {
+  position: relative;
   align-self: flex-start;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 12px 8px;
+}
+
+/* A quiet escape hatch in the card's caption row: back to flat. */
+.clip-eq-reset {
+  position: absolute;
+  top: 7px;
+  right: 10px;
+  padding: 1px 8px;
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
 }
 
 .clip-eq-ui::before {
