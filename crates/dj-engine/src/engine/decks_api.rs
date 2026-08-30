@@ -560,6 +560,7 @@ impl Engine {
                 beat: ctl.shared.slot_beat(i),
                 sounding: ctl.shared.slot_sounding(i),
                 playing: ctl.shared.slot_playing(i),
+                output_level: ctl.shared.slot_output_level(i),
                 arm: ctl.live_arm(i),
             })
             .collect();

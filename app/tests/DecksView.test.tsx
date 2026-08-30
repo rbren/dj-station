@@ -10,6 +10,7 @@ import {
   clipTitle,
   stretchLabel,
   tempoLabel,
+  DECK_GLOW_FULL,
   LEVEL_MAX,
   LEVEL_UNITY,
   type DecksApi,
@@ -41,6 +42,7 @@ function emptySlot(slot: number): DeckSlotStatus {
     beat: -1,
     sounding: false,
     playing: false,
+    output_level: 0,
     arm: 'none',
   };
 }
@@ -134,6 +136,12 @@ const NO_POLL = 100000;
 
 function show(api: DecksApi, clips: BeatClipApi = makeClips()) {
   return render(<DecksView api={api} clips={clips} pollMs={NO_POLL} />);
+}
+
+/** How lit a strip is: the --deck-level the tint is mixed from. */
+function deckLevel(slot: number): number {
+  const strip = screen.getByTestId(`decks-slot-${slot}`) as HTMLElement;
+  return Number(strip.style.getPropertyValue('--deck-level'));
 }
 
 describe('DecksView', () => {
@@ -262,6 +270,42 @@ describe('DecksView', () => {
     // Both steppers are laid out on the same columns, so their buttons
     // line up down the strip.
     expect(rule(/\.decks-step/)).toContain('grid-template-columns:');
+  });
+
+  it('lights a strip with what its deck is putting out, and leaves a silent one black', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[0] = loadedSlot(0, { output_level: DECK_GLOW_FULL });
+    slots[1] = loadedSlot(1, { output_level: DECK_GLOW_FULL / 2 });
+    // A deck the engine says put out nothing — muted, dropped, or on a
+    // silent beat — and one running past the top of the scale.
+    slots[2] = loadedSlot(2, { mute: true, playing: false, output_level: 0 });
+    slots[3] = loadedSlot(3, { output_level: DECK_GLOW_FULL * 4 });
+    show(makeApi(makeStatus({ slots })));
+    await waitFor(() => expect(deckLevel(0)).toBe(1));
+    expect(deckLevel(1)).toBeCloseTo(0.5, 3);
+    // Exactly the strip's own background: no floor under the tint.
+    expect(deckLevel(2)).toBe(0);
+    // And a loud deck stops at the top rather than swamping the others.
+    expect(deckLevel(3)).toBe(1);
+    expect(deckLevel(7)).toBe(0);
+  });
+
+  it('follows the engine down as a stopped deck fades, instead of snapping to black', async () => {
+    const lit = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    lit[0] = loadedSlot(0, { output_level: DECK_GLOW_FULL });
+    // The same deck a moment after its mute: the engine's own second-long
+    // average is still coming down, and the strip shows where it IS.
+    const fading = [...lit];
+    fading[0] = loadedSlot(0, { mute: true, output_level: DECK_GLOW_FULL * 0.2 });
+    let muted = false;
+    const api = makeApi(makeStatus({ slots: lit }), {
+      status: vi.fn(async () => makeStatus({ slots: muted ? fading : lit })),
+    });
+    render(<DecksView api={api} clips={makeClips()} pollMs={5} />);
+    await waitFor(() => expect(deckLevel(0)).toBe(1));
+    muted = true;
+    await waitFor(() => expect(deckLevel(0)).toBeCloseTo(0.2, 3));
+    expect(screen.getByTestId('decks-mute-0').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('the level fader, the tone knobs and mute/monitor all write the slot', async () => {

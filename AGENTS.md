@@ -1348,7 +1348,12 @@ beatify::build`.
   identically; all that moved is where those gains sit on the travel (a
   saved 1.0 is now mid-fader, not the top). Double-clicking the fader
   (Knob's `onReset`) puts a deck back to unity; a load still leaves the
-  level the user set alone. MONITOR
+  level the user set alone. Each deck's OUTPUT LEVEL is metered on the
+  RT thread — an exponentially weighted average of what that deck
+  actually put on its bus over `METER_WINDOW_SECS` (1 s), published as
+  `DecksShared::slot_output_level` / `DeckSlotStatus.output_level` — so
+  the page tints a strip with the reading instead of point-sampling it
+  at 100 ms (`--deck-level`, see the Decks page section). MONITOR
   (not solo) is per slot: it moves that deck from the bank's live pair to
   its `mon_l`/`mon_r` pair — a cue, so it changes nothing for the other
   decks. QUEUE/DROP (`DeckArm`, `Engine::decks_arm`, page buttons under
@@ -2093,6 +2098,16 @@ of the page.
   nowhere and its cable simply is not drawn here.
   Endpoint GEOMETRY is pinned by `app/tests/DecksChromeWires.test.tsx` —
   keep pinning numbers, not just "a wire exists".
+- A strip is LIT BY ITS OWN OUTPUT: `DecksSlot` maps `output_level` (the
+  engine's 1 s weighted average, above) through `deckGlow`/
+  `DECK_GLOW_FULL` in `decks.ts` to a `--deck-level` custom property on
+  the section, and `.decks-slot` mixes that share of `--ok` into its
+  background, border and inner glow. The fade is the ENGINE's average —
+  a mute, a drop, a silent beat or a stopped deck all decay to black on
+  their own, so the page never decides when the green ends. The tint is
+  colour only (the transition dies in the `prefers-reduced-motion`
+  block) and the background keeps a small share of `--ok`, because the
+  strip's `--ink-dim` text has to stay readable on it.
 - State ownership: `decks_status` is the single poll (the engine owns
   phase, stretch, `insert` and `tone_patched` — never recompute them in
   the page), and the only local state is a DRAFT of the control being

@@ -5863,21 +5863,39 @@ body {
   min-height: 0;
 }
 
+/* A deck's OUTPUT, as light: --deck-level (0..1, set by DecksSlot from
+   the engine's exponentially weighted second of what this deck put out)
+   greens the strip up while it plays and lets it fade back to its own
+   black when the deck is muted, dropped or on a silent beat. The
+   BACKGROUND takes only a small share of --ok, because the strip's
+   dimmest ink has to stay readable on it; the border and the inner glow
+   carry the loud end. Colour only — the transition is answered by the
+   prefers-reduced-motion block at the top of this file, and the reading
+   itself is data, so it survives with no motion at all. */
 .decks-slot {
+  --deck-level: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 8px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ok) calc(var(--deck-level) * 12%), var(--surface));
+  border: 1px solid color-mix(in srgb, var(--ok) calc(var(--deck-level) * 55%), var(--line));
   border-radius: var(--radius);
-  box-shadow: var(--shadow-panel);
+  box-shadow:
+    var(--shadow-panel),
+    inset 0 0 calc(var(--deck-level) * 20px)
+      color-mix(in srgb, var(--ok) calc(var(--deck-level) * 20%), transparent);
+  transition:
+    background-color var(--dur-slow) var(--ease),
+    border-color var(--dur-slow) var(--ease),
+    box-shadow var(--dur-slow) var(--ease);
 }
 
 /* An empty deck stays a deck — same box, quieter ink — so the bank does
-   not change shape as clips come and go. */
+   not change shape as clips come and go. It can still be lit: a wired
+   return makes even an empty slot a channel for the rack. */
 .decks-slot-empty {
-  background: var(--surface-sunken);
+  background: color-mix(in srgb, var(--ok) calc(var(--deck-level) * 12%), var(--surface-sunken));
 }
 
 .decks-slot-head {

@@ -36,6 +36,7 @@ function slotFixture(slot: number): DeckSlotStatus {
     beat: -1,
     sounding: false,
     playing: false,
+    output_level: 0,
     arm: 'none',
   };
 }

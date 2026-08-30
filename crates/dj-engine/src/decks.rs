@@ -78,7 +78,7 @@
 //! shows the same state the strip does.
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::beat_clip::BeatClipRef;
@@ -176,6 +176,17 @@ const EQ_HIGH_HZ: f32 = 2000.0;
 /// Level/mute/solo changes reach the audio over this long, so a mute is a
 /// mute and not a click.
 const GAIN_SMOOTH_SECS: f32 = 0.010;
+
+/// Time constant of a deck's OUTPUT METER
+/// ([`DecksShared::slot_output_level`]): the level it publishes follows
+/// the deck over roughly the last second, exponentially weighted, so the
+/// beat that just played counts most and a deck that stops — muted,
+/// dropped, or on a silent beat — fades out instead of latching. The
+/// average runs over the SQUARE of the signal, so the coefficient is cut
+/// in half to leave the LEVEL with this constant. It is integrated
+/// sample by sample on the RT thread because the UI's 100 ms poll would
+/// alias a transient away.
+const METER_WINDOW_SECS: f32 = 1.0;
 
 /// Beats a bank's cycle is reported up to; beyond it the clips are not
 /// meaningfully coming round together anyway.
@@ -578,6 +589,9 @@ pub struct SlotShared {
     /// from "not looked at yet" ([`DecksControl::live_arm`]).
     arm: AtomicU8,
     arm_serial: AtomicU64,
+    /// RMS of what this deck put on its bus, smoothed over
+    /// [`METER_WINDOW_SECS`] (f32 bit pattern).
+    out_level: AtomicU32,
 }
 
 /// The bank's transport, published once per block (f64s ride as bit
@@ -619,6 +633,13 @@ impl DecksShared {
     }
     pub fn slot_arm_serial(&self, slot: usize) -> u64 {
         self.slots[slot].arm_serial.load(Ordering::Relaxed)
+    }
+    /// How loud this deck's OUTPUT has been over roughly the last second
+    /// ([`METER_WINDOW_SECS`]): the RMS of what it actually put on its
+    /// bus — post insert, post tone, post fader and post mute — so a deck
+    /// that is muted, dropped or on a silent beat decays to 0.
+    pub fn slot_output_level(&self, slot: usize) -> f32 {
+        f32::from_bits(self.slots[slot].out_level.load(Ordering::Relaxed))
     }
 }
 
@@ -797,6 +818,10 @@ pub struct DeckSlotStatus {
     /// Whether that beat is the clip's own audio rather than its tail.
     pub sounding: bool,
     pub playing: bool,
+    /// How loud this deck's output has been over roughly the last second
+    /// ([`DecksShared::slot_output_level`]) — an RMS in engine units, 0
+    /// once it is muted, dropped or on a silent beat.
+    pub output_level: f32,
     /// A quantized start or stop the bank's clock is still holding: the
     /// mute above is where this deck is GOING, the arm is what it is
     /// waiting for.
@@ -866,6 +891,9 @@ struct RtSlot {
     last_local: f64,
     /// Smoothed level actually applied, so mute/monitor/fader moves ramp.
     gain: f32,
+    /// Exponentially weighted mean square of this deck's output over
+    /// [`METER_WINDOW_SECS`] — the meter the page tints a strip from.
+    meter: f32,
     grains: GrainStretch,
     eq: [BandSplit; 2],
 }
@@ -889,6 +917,7 @@ impl RtSlot {
             arm_serial: 0,
             last_local: 0.0,
             gain: 0.0,
+            meter: 0.0,
             grains: GrainStretch::new(engine_rate),
             eq: [BandSplit::default(); 2],
         }
@@ -972,6 +1001,8 @@ pub struct DecksRtModule {
     a_low: f32,
     a_high: f32,
     a_gain: f32,
+    /// One-pole coefficient of the per-deck output meter.
+    a_meter: f32,
     /// Samples of the clock output's pulse still to go, and the beat the
     /// last one was fired on.
     clock_left: u32,
@@ -1005,6 +1036,7 @@ impl DecksRtModule {
             a_low: one_pole(EQ_LOW_HZ, rate),
             a_high: one_pole(EQ_HIGH_HZ, rate),
             a_gain: 1.0 - (-1.0 / (GAIN_SMOOTH_SECS * rate)).exp(),
+            a_meter: 1.0 - (-2.0 / (METER_WINDOW_SECS * rate)).exp(),
             clock_left: 0,
             clock_len: ((rate * CLOCK_PULSE_SECS) as u32).max(1),
             // Beat 0 has not happened yet: the first sample fires it.
@@ -1113,7 +1145,7 @@ impl HostModule for DecksRtModule {
 
         let bpm = &inputs[IN_BPM];
         let reset = &inputs[IN_RESET];
-        let (a_low, a_high, a_gain) = (self.a_low, self.a_high, self.a_gain);
+        let (a_low, a_high, a_gain, a_meter) = (self.a_low, self.a_high, self.a_gain, self.a_meter);
         let master = self.master;
         let engine_rate = self.engine_rate;
         for s in 0..frames {
@@ -1209,7 +1241,15 @@ impl HostModule for DecksRtModule {
                     // mute still belong to the deck.
                     l = inputs[return_jack(i, 0)][s] / SIGNAL_MAX;
                     r = inputs[return_jack(i, 1)][s] / SIGNAL_MAX;
-                } else if !sounding {
+                }
+                // What this deck ACTUALLY put out, metered every sample:
+                // a silent slot is a run of zeros through the same
+                // average, which is what makes a mute or a silent beat
+                // fade rather than latch. (`l`/`r` are still zero unless
+                // the slot is sounding or has an insert.)
+                let (out_l, out_r) = (l * slot.gain, r * slot.gain);
+                slot.meter += a_meter * (0.5 * (out_l * out_l + out_r * out_r) - slot.meter);
+                if !insert && !sounding {
                     continue;
                 }
                 // Monitor takes the deck OFF the live pair and puts it on
@@ -1220,8 +1260,8 @@ impl HostModule for DecksRtModule {
                 } else {
                     (&mut mix_l, &mut mix_r)
                 };
-                *bus_l += l * slot.gain;
-                *bus_r += r * slot.gain;
+                *bus_l += out_l;
+                *bus_r += out_r;
             }
             // The two output faders, last of all and ramped like a slot's
             // own: they are the whole pair's level, so nothing on the way
@@ -1269,6 +1309,9 @@ impl HostModule for DecksRtModule {
             pub_slot
                 .arm_serial
                 .store(slot.arm_serial, Ordering::Relaxed);
+            pub_slot
+                .out_level
+                .store(slot.meter.max(0.0).sqrt().to_bits(), Ordering::Relaxed);
         }
     }
 
@@ -1963,6 +2006,75 @@ mod tests {
         assert!(
             out[out.len() - 100..].iter().all(|s| s.abs() < 1e-6),
             "the new clip obeys the slot's own mute"
+        );
+    }
+
+    #[test]
+    fn the_output_meter_averages_a_decks_own_output_and_fades_to_nothing_when_it_stops() {
+        let (mut tx, mut m, shared) = rt_bank();
+        load(&mut tx, 0, 2, 0.5);
+        mix(&mut tx, 0, 1.0, false, false);
+        // Two seconds — two of the meter's time constants, so it has
+        // all but caught up with the deck.
+        for _ in 0..4 {
+            block(&mut m, BEAT);
+        }
+        let playing = shared.slot_output_level(0);
+        assert!(
+            (0.45..=0.5).contains(&playing),
+            "a deck putting out 0.5 reads its RMS, got {playing}"
+        );
+        assert_eq!(
+            shared.slot_output_level(1),
+            0.0,
+            "a deck holding nothing puts out nothing"
+        );
+
+        // A mute is not a jump to black: the same average carries the
+        // tint down, most of the way inside its window.
+        mix(&mut tx, 0, 1.0, true, false);
+        block(&mut m, BEAT * 2);
+        let muted = shared.slot_output_level(0);
+        assert!(
+            muted < playing * 0.5 && muted > 0.0,
+            "a second of mute fades the meter rather than dropping it ({playing} -> {muted})"
+        );
+        for _ in 0..10 {
+            block(&mut m, BEAT);
+        }
+        let gone = shared.slot_output_level(0);
+        assert!(gone < 0.01, "and it gets all the way to black, got {gone}");
+    }
+
+    #[test]
+    fn a_silent_beat_dims_the_output_meter_and_the_next_one_brings_it_back() {
+        let (mut tx, mut m, shared) = rt_bank();
+        // One beat of clip, one of silence hung on the end.
+        load(&mut tx, 0, 1, 0.5);
+        mix(&mut tx, 0, 1.0, false, false);
+        tx.push(DecksCmd::Timing {
+            slot: 0,
+            tail: 1,
+            phase: 0,
+        })
+        .unwrap();
+        // Settle into the loop — six beats leaves the playhead on the
+        // seam — then read the two beats of one pass, one at a time.
+        for _ in 0..6 {
+            block(&mut m, BEAT);
+        }
+        let before = shared.slot_output_level(0);
+        block(&mut m, BEAT);
+        let sounded = shared.slot_output_level(0);
+        block(&mut m, BEAT);
+        let silent = shared.slot_output_level(0);
+        assert!(
+            sounded > before,
+            "the clip's own beat brings the deck up ({before} -> {sounded})"
+        );
+        assert!(
+            silent < sounded * 0.75,
+            "and the silent one dims it ({sounded} -> {silent})"
         );
     }
 }

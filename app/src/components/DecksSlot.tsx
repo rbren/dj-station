@@ -24,12 +24,14 @@
 // are the REAL bank jacks (`data-jack` on the bank instance) — the same
 // wire overlay and click-to-wire grammar the Rack tab uses.
 
+import type { CSSProperties } from 'react';
 import { Knob } from './Knob';
 import { LiveJack } from './Jack';
 import { StemTags } from './StemTags';
 import {
   clipParts,
   clipTitle,
+  deckGlow,
   loopBeats,
   returnJack,
   sendJack,
@@ -78,6 +80,12 @@ export function DecksSlot(props: DecksSlotProps) {
   const empty = slot.beats === 0;
   const loop = loopBeats(slot);
   const parts = clipParts(slot.clip);
+  // The strip lights up with what this deck is putting out. The reading
+  // is the ENGINE's — an exponentially weighted second of the deck's own
+  // output — so the tint rises with the music and falls back to the
+  // strip's black on its own when the deck is muted, drops, or plays a
+  // silent beat: nothing here has to decide when the green ends.
+  const glow = deckGlow(slot.output_level);
 
   // A jack with no label of its own is a bare socket: the send/return
   // pair is named once by the arrow beside it, not four times over.
@@ -100,6 +108,7 @@ export function DecksSlot(props: DecksSlotProps) {
       className={`decks-slot${empty ? ' decks-slot-empty' : ''}`}
       data-testid={`decks-slot-${slot.slot}`}
       aria-label={`Deck ${n}`}
+      style={{ '--deck-level': glow.toFixed(3) } as CSSProperties}
     >
       {/* The deck's patch points, at the very top where the cables from
           the rack canvas arrive: OUT is the deck's audio (its send), IN

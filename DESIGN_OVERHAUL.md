@@ -418,6 +418,21 @@ smallest move on the strip. Below, `silence`/`shift` became `SIL`/`SFT`
 with the word in a `title`, and the two steppers moved onto shared grid
 columns so their buttons stand in one pair of lines.
 
+**D18 — A deck strip is lit by its own output (post-overhaul).** Eight
+identical dark columns said nothing about which of them the room was
+hearing; the mute button and the beat lamps say what was ASKED for, not
+what came out. The strip now carries a `--ok` tint scaled by the bank's
+own second-long weighted average of that deck's output
+(`--deck-level`), so a deck fades up as it comes in and back to the
+strip's black when it is muted, dropped, or sitting on a silent beat —
+no separate meter widget, because the channel itself is the meter. The
+BACKGROUND takes only a small share of the green: the strip's dimmest
+ink (`--ink-dim` notes and legends) has to keep its contrast at full
+level, so the loud end is carried by the border and an inner glow
+instead. Colour only, and the transition dies in the
+`prefers-reduced-motion` block — with no motion at all the tint is
+still the reading.
+
 ---
 
 ## G. Still open after this pass
