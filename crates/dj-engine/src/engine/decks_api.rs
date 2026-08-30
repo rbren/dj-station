@@ -17,7 +17,7 @@
 use super::*;
 use crate::decks::{
     cycle_beats, led_for, return_jack, tone_jack, DeckArm, DeckSlotState, DeckSlotStatus, DecksCmd,
-    DecksState, DecksStatus, MasterBus, SlotControl, EQ_MAX, IN_BPM, MAX_TAIL_BEATS,
+    DecksState, DecksStatus, MasterBus, SlotControl, EQ_MAX, IN_BPM, LEVEL_MAX, MAX_TAIL_BEATS,
     MOMENTARY_RELEASE_SECS, SLOTS, SURFACE_PARAM,
 };
 use crate::launch_control::{jack_index, row, BUTTON_GATE_VOLTS};
@@ -387,7 +387,7 @@ impl Engine {
     ) -> Result<()> {
         let node = self.decks_node(instance_id)?;
         self.write_slot(node, slot, |s| match control {
-            SlotControl::Level => s.level = value.clamp(0.0, 1.0),
+            SlotControl::Level => s.level = value.clamp(0.0, LEVEL_MAX),
             SlotControl::High => s.high = value.clamp(0.0, EQ_MAX),
             SlotControl::Mid => s.mid = value.clamp(0.0, EQ_MAX),
             SlotControl::Low => s.low = value.clamp(0.0, EQ_MAX),

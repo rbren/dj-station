@@ -8,10 +8,11 @@
 //
 // The dial/fader controls ARE the rack's own Knob (same look, same drag
 // law, same tooltip): a bank's slot is a mixer channel, not a new kind of
-// widget. Their values are engine units — 0..1 for the fader, 0..EQ_MAX
-// for a tone control, flat at 1 — and the knob positions are the linear
-// mapping of those, so a Launch Control XL knob at 12 o'clock and a dial
-// pointing up mean the same thing.
+// widget. Their values are engine units — 0..LEVEL_MAX for the fader,
+// 0..EQ_MAX for a tone control, and BOTH are unity/flat at 1, halfway
+// along the travel — and the knob positions are the linear mapping of
+// those, so a Launch Control XL fader at its midpoint, a dial pointing up
+// and a cap halfway up all mean the same thing.
 //
 // The strip is also the bank's PATCH BAY for this deck — chrome over the
 // rack canvas below it. At the top sit the deck's audio OUT (its send)
@@ -35,6 +36,8 @@ import {
   tempoLabel,
   toneJack,
   EQ_MAX,
+  LEVEL_MAX,
+  LEVEL_UNITY,
   TONES,
   TONES_ACROSS,
   type DeckArm,
@@ -42,7 +45,7 @@ import {
 } from '../decks';
 import type { KnobConfig } from '../types';
 
-const FADER_CONFIG: KnobConfig = { style: 'continuous', min: 0, max: 1, curve: 'linear' };
+const FADER_CONFIG: KnobConfig = { style: 'continuous', min: 0, max: LEVEL_MAX, curve: 'linear' };
 const TONE_CONFIG: KnobConfig = { style: 'continuous', min: 0, max: EQ_MAX, curve: 'linear' };
 
 export interface DecksSlotProps {
@@ -231,12 +234,17 @@ export function DecksSlot(props: DecksSlotProps) {
       </div>
 
       <div className="decks-mix">
+        {/* Unity is MID-TRAVEL: halfway up is the clip exactly as it was
+            imported and the half above it is boost, so a clip cut quiet
+            can be lifted instead of only cut. Double-click comes back to
+            unity. */}
         <Knob
           label={`${n} LEVEL`}
           config={FADER_CONFIG}
           appearance="fader"
-          position={slot.level}
-          onPosition={(p) => props.onControl('level', p)}
+          position={slot.level / LEVEL_MAX}
+          onPosition={(p) => props.onControl('level', p * LEVEL_MAX)}
+          onReset={() => props.onControl('level', LEVEL_UNITY)}
           onRelease={props.onRelease}
         />
         <div className="decks-mix-side">

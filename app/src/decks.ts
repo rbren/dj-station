@@ -15,6 +15,16 @@ export const DECK_SLOTS = 8;
  *  (mirrors `EQ_MAX` in crates/dj-engine/src/decks.rs). */
 export const EQ_MAX = 2;
 
+/** A slot's level, in gain: 1 is the clip exactly as imported and sits at
+ *  the MIDDLE of the fader (like a tone control's flat), so the top half
+ *  is up to +6 dB for a clip cut quiet. Double-clicking the fader comes
+ *  back here. Mirrors `LEVEL_UNITY`/`LEVEL_MAX` in
+ *  crates/dj-engine/src/decks.rs; a level saved before the travel opened
+ *  up is the same multiplier and plays the same, its fader just sits
+ *  lower. */
+export const LEVEL_UNITY = 1;
+export const LEVEL_MAX = 2;
+
 export const MIN_BPM = 20;
 export const MAX_BPM = 300;
 
@@ -62,6 +72,7 @@ export interface DeckSlotStatus {
   source_bpm: number;
   /** Bank tempo over source tempo; 1 plays the clip as rendered. */
   stretch: number;
+  /** Gain: `LEVEL_UNITY` is the clip as imported, `LEVEL_MAX` boosted. */
   level: number;
   low: number;
   mid: number;

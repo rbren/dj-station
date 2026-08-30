@@ -17,8 +17,8 @@
 use dj_engine::beat_clip::BeatClipRef;
 use dj_engine::builtin::MONITOR_OUT_ID;
 use dj_engine::decks::{
-    led, DeckArm, MasterBus, SlotControl, DECKS_ID, DEFAULT_SURFACE_CHANNEL, EQ_MAX,
-    MOMENTARY_RELEASE_SECS, SLOTS,
+    led, DeckArm, MasterBus, SlotControl, DECKS_ID, DEFAULT_SURFACE_CHANNEL, EQ_MAX, LEVEL_MAX,
+    LEVEL_UNITY, MOMENTARY_RELEASE_SECS, SLOTS,
 };
 use dj_engine::playback::TrackData;
 use dj_engine::{Engine, EngineConfig};
@@ -209,14 +209,58 @@ fn silence_on_the_end_lengthens_the_loop_and_a_shift_moves_it() {
 }
 
 #[test]
+fn a_deck_plays_as_imported_at_mid_fader_and_boosts_above_it() {
+    let mut e = bank();
+    load(&mut e, 0, 4); // a constant 0.5, so the gain reads off the render
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+
+    // A slot starts at unity — halfway up its fader — so a clip plays at
+    // exactly the volume it was imported at (a 0.5 sample is 5 V out).
+    assert_eq!(e.decks_status("bank1").unwrap().slots[0].level, LEVEL_UNITY);
+    let unity = settled_peak(&mut e);
+    assert!(
+        (unity - 5.0).abs() < 1e-2,
+        "unity is the clip itself: {unity}"
+    );
+
+    // The half above unity is what the travel is for, and it stops at
+    // +6 dB however hard the caller pushes.
+    e.decks_set_control("bank1", 0, SlotControl::Level, 4.0)
+        .unwrap();
+    assert_eq!(e.decks_status("bank1").unwrap().slots[0].level, LEVEL_MAX);
+    let loud = settled_peak(&mut e);
+    assert!(
+        (loud - 2.0 * unity).abs() < 1e-2,
+        "the top is +6 dB: {loud}"
+    );
+
+    // Below unity is the cut it always was.
+    e.decks_set_control("bank1", 0, SlotControl::Level, 0.5)
+        .unwrap();
+    let quiet = settled_peak(&mut e);
+    assert!((quiet - unity / 2.0).abs() < 1e-2, "half unity: {quiet}");
+}
+
+/// Loudest sample of the second half of half a second of render — past
+/// the block the mix ramp lands in.
+fn settled_peak(e: &mut Engine) -> f32 {
+    peak(&e.render_offline(24_000).unwrap().remove(0)[12_000..])
+}
+
+#[test]
 fn a_surface_column_drives_its_slot() {
     let mut e = bank();
     load(&mut e, 2, 4);
 
-    // Column 3's fader (CC 79) is slot 3's level.
+    // Column 3's fader (CC 79) is slot 3's level, and the fader's MIDDLE
+    // is the clip as imported: halfway up is unity, the top half boost.
     e.decks_inject("bank1", [0xB8, 79, 64]).unwrap();
     let st = e.decks_status("bank1").unwrap();
-    assert!((st.slots[2].level - 64.0 / 127.0).abs() < 1e-6);
+    assert!((st.slots[2].level - 64.0 / 127.0 * LEVEL_MAX).abs() < 1e-6);
+    e.decks_inject("bank1", [0xB8, 79, 127]).unwrap();
+    assert_eq!(e.decks_status("bank1").unwrap().slots[2].level, LEVEL_MAX);
+    e.decks_inject("bank1", [0xB8, 79, 64]).unwrap();
 
     // Its three knobs are high/mid/low, flat at 12 o'clock.
     e.decks_inject("bank1", [0xB8, 15, 127]).unwrap(); // send A, col 3
@@ -240,8 +284,8 @@ fn a_surface_column_drives_its_slot() {
     // A column with nothing in it still moves its own slot, and no other.
     e.decks_inject("bank1", [0xB8, 84, 127]).unwrap();
     let st = e.decks_status("bank1").unwrap();
-    assert_eq!(st.slots[7].level, 1.0);
-    assert!((st.slots[2].level - 64.0 / 127.0).abs() < 1e-6);
+    assert_eq!(st.slots[7].level, LEVEL_MAX);
+    assert!((st.slots[2].level - 64.0 / 127.0 * LEVEL_MAX).abs() < 1e-6);
 }
 
 #[test]
@@ -251,16 +295,15 @@ fn only_banks_following_the_surface_hear_the_device() {
     e.set_param("bank2", "surface", 0.0).unwrap();
 
     e.decks_feed([0xB8, 77, 127]).unwrap();
-    assert_eq!(e.decks_status("bank1").unwrap().slots[0].level, 1.0);
+    assert_eq!(e.decks_status("bank1").unwrap().slots[0].level, LEVEL_MAX);
     assert_eq!(
         e.decks_status("bank2").unwrap().slots[0].level,
-        1.0,
+        LEVEL_UNITY,
         "a bank switched off the surface must not move"
     );
-    // The fader was already at 1.0, so prove it the other way round.
     e.decks_feed([0xB8, 77, 0]).unwrap();
     assert_eq!(e.decks_status("bank1").unwrap().slots[0].level, 0.0);
-    assert_eq!(e.decks_status("bank2").unwrap().slots[0].level, 1.0);
+    assert_eq!(e.decks_status("bank2").unwrap().slots[0].level, LEVEL_UNITY);
     // Addressed directly, the same message lands anyway (the test seam).
     e.decks_inject("bank2", [0xB8, 77, 0]).unwrap();
     assert_eq!(e.decks_status("bank2").unwrap().slots[0].level, 0.0);

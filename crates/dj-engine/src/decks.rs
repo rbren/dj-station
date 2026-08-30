@@ -48,6 +48,11 @@
 //! can never make a noise the user did not ask for, and the level, EQ and
 //! monitor switch they already set stay where they are.
 //!
+//! A SLOT'S LEVEL IS UNITY AT MID-TRAVEL ([`LEVEL_UNITY`], [`LEVEL_MAX`]),
+//! the way a tone control is flat at 12 o'clock: a fresh slot plays its
+//! clip exactly as imported with the fader halfway up, and the half above
+//! is there to lift a clip that was cut quiet.
+//!
 //! QUEUE AND DROP ARE THE MUTE, ON THE GRID ([`DeckArm`]). A queue unmutes
 //! the deck THEN AND THERE and the RT thread holds it silent until the
 //! clip's own FIRST beat next comes round (its loop seam), so a queued
@@ -151,6 +156,16 @@ pub const MAX_BPM: f32 = 300.0;
 /// Full-scale value of a tone control: 0 kills the band, 1 is flat, 2 is
 /// +6 dB — so the surface's knob at 12 o'clock (5 V) is exactly flat.
 pub const EQ_MAX: f32 = 2.0;
+
+/// The gain a slot plays its clip AS IMPORTED at, and the full scale of
+/// its level fader — [`LEVEL_UNITY`] sits at the MIDDLE of the travel
+/// (like a tone control's flat), so the top half is up to +6 dB of boost
+/// for a clip that was cut quiet. A level has always been a plain gain
+/// MULTIPLIER, and it still is: a patch saved when the fader stopped at
+/// unity holds exactly the gains it holds now and plays back identically
+/// — the only thing that moved is where those gains sit on the fader.
+pub const LEVEL_UNITY: f32 = 1.0;
+pub const LEVEL_MAX: f32 = 2.0;
 
 /// Band split of the three tone controls. First-order crossovers, and the
 /// mid band is the REMAINDER of the other two, so flat is bit-exact
@@ -354,6 +369,10 @@ pub struct DeckSlotState {
     /// Whole-beat shift of this slot against the bank's grid.
     #[serde(default)]
     pub phase: i32,
+    /// Playback gain: [`LEVEL_UNITY`] is the clip as imported (the fader
+    /// halfway up), [`LEVEL_MAX`] is it boosted. A patch written before
+    /// the fader could go past unity holds the same multipliers, so it
+    /// still sounds the same — its faders just sit lower on the travel.
     #[serde(default = "unity")]
     pub level: f32,
     #[serde(default = "unity")]
@@ -390,7 +409,7 @@ impl Default for DeckSlotState {
             source_bpm: DEFAULT_BPM,
             tail: 0,
             phase: 0,
-            level: 1.0,
+            level: LEVEL_UNITY,
             low: 1.0,
             mid: 1.0,
             high: 1.0,
@@ -497,11 +516,12 @@ impl SlotControl {
     }
 
     /// What `volts` off the surface means for this control: 0..10 V spans
-    /// a fader's 0..1 and a tone control's 0..[`EQ_MAX`].
+    /// a fader's 0..[`LEVEL_MAX`] and a tone control's 0..[`EQ_MAX`]. The
+    /// surface's fader is the strip's fader, so its middle is unity too.
     pub fn value_of_volts(self, volts: f32) -> f32 {
         let unit = (volts / 10.0).clamp(0.0, 1.0);
         match self {
-            SlotControl::Level => unit,
+            SlotControl::Level => unit * LEVEL_MAX,
             SlotControl::High | SlotControl::Mid | SlotControl::Low => unit * EQ_MAX,
             SlotControl::Mute | SlotControl::Monitor => unit,
         }
@@ -1319,9 +1339,28 @@ mod tests {
     fn a_fresh_slot_is_muted_flat_and_empty() {
         let s = DeckSlotState::default();
         assert!(s.mute, "a slot must never arrive making noise");
-        assert_eq!((s.level, s.low, s.mid, s.high), (1.0, 1.0, 1.0, 1.0));
+        assert_eq!(
+            (s.level, s.low, s.mid, s.high),
+            (LEVEL_UNITY, 1.0, 1.0, 1.0)
+        );
+        assert_eq!(
+            s.level,
+            LEVEL_MAX / 2.0,
+            "a clip starts at the clip's own volume, halfway up the fader"
+        );
         assert_eq!(s.length_beats(), 0, "nothing loaded has no length");
         assert_eq!(DecksState::default().slots.len(), SLOTS);
+    }
+
+    #[test]
+    fn a_level_saved_before_the_fader_could_boost_means_the_same_gain() {
+        // A level is a gain multiplier and always was, so a patch written
+        // when the fader stopped at unity plays back untouched: what
+        // changed is only where those gains sit on the travel.
+        let s: DeckSlotState = serde_json::from_str(r#"{"beats":4,"level":1.0}"#).unwrap();
+        assert_eq!(s.level, LEVEL_UNITY, "a full old fader is still unity");
+        let s: DeckSlotState = serde_json::from_str(r#"{"beats":4,"level":0.4}"#).unwrap();
+        assert_eq!(s.level, 0.4, "a deck pulled down stays exactly there");
     }
 
     #[test]
@@ -1364,8 +1403,10 @@ mod tests {
         // And the device map is the Launch Control's own: fader 3 is CC 79.
         let (jack, volts) = decode([0xB8, 79, 127]).unwrap();
         assert_eq!(surface_target(jack), Some((2, SlotControl::Level)));
-        assert_eq!(SlotControl::Level.value_of_volts(volts), 1.0);
-        // A knob at 12 o'clock is flat.
+        // A fader all the way up is the clip boosted; halfway up is the
+        // clip as imported, the same way a knob at 12 o'clock is flat.
+        assert_eq!(SlotControl::Level.value_of_volts(volts), LEVEL_MAX);
+        assert_eq!(SlotControl::Level.value_of_volts(5.0), LEVEL_UNITY);
         assert_eq!(SlotControl::Mid.value_of_volts(5.0), 1.0);
         assert_eq!(SlotControl::High.value_of_volts(10.0), EQ_MAX);
         assert!(SlotControl::Mute.is_button() && !SlotControl::Level.is_button());

@@ -1319,7 +1319,18 @@ beatify::build`.
   already exists, after a patch load or undo). The three tone controls are
   first-order crossovers where the mid band is the REMAINDER of low and
   high, so flat (1.0 = the surface knob at 12 o'clock) is bit-exact
-  bypass; level/mute/monitor ramp per block rather than stepping. MONITOR
+  bypass; level/mute/monitor ramp per block rather than stepping. A
+  SLOT'S LEVEL IS UNITY AT MID-TRAVEL, like a tone knob's flat
+  (`LEVEL_UNITY` = 1, `LEVEL_MAX` = 2 in decks.rs, mirrored in
+  `app/src/decks.ts`): a clip plays exactly as imported with the fader
+  halfway up and the half above is up to +6 dB for a clip cut quiet — on
+  the strip AND on the Launch Control XL fader, which spans the same
+  0..`LEVEL_MAX`. The stored level is a plain GAIN MULTIPLIER and always
+  was, so a patch saved when the fader stopped at unity plays back
+  identically; all that moved is where those gains sit on the travel (a
+  saved 1.0 is now mid-fader, not the top). Double-clicking the fader
+  (Knob's `onReset`) puts a deck back to unity; a load still leaves the
+  level the user set alone. MONITOR
   (not solo) is per slot: it moves that deck from the bank's live pair to
   its `mon_l`/`mon_r` pair — a cue, so it changes nothing for the other
   decks. QUEUE/DROP (`DeckArm`, `Engine::decks_arm`, page buttons under

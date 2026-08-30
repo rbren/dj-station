@@ -10,6 +10,8 @@ import {
   clipTitle,
   stretchLabel,
   tempoLabel,
+  LEVEL_MAX,
+  LEVEL_UNITY,
   type DecksApi,
   type DecksStatus,
   type DeckSlotStatus,
@@ -281,6 +283,37 @@ describe('DecksView', () => {
       Array.from(tone.querySelectorAll('.knob')).map((k) => k.getAttribute('data-testid')),
     ).toEqual(['knob-3 LOW', 'knob-3 MID', 'knob-3 HIGH']);
     expect(screen.getByTestId('knob-3 LEVEL')).toBeTruthy();
+  });
+
+  it('the level fader is unity halfway up, and a double-click comes back to it', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[2] = loadedSlot(2, { level: LEVEL_UNITY });
+    const api = makeApi(makeStatus({ slots }));
+    show(api);
+    await waitFor(() => expect(screen.getByTestId('knob-3 LEVEL')).toBeTruthy());
+
+    // The clip as imported sits in the MIDDLE of the travel, so the half
+    // above it is boost the deck can reach for.
+    const box = screen.getByTestId('knob-3 LEVEL');
+    const fader = box.querySelector('.fader') as HTMLElement;
+    expect(fader.getAttribute('aria-valuenow')).toBe(String(LEVEL_UNITY));
+    expect(fader.getAttribute('aria-valuemax')).toBe(String(LEVEL_MAX));
+    expect((box.querySelector('.fader-cap') as HTMLElement).style.bottom).toBe('50%');
+
+    // Dragged to the top it asks for the boost, in gain.
+    fireEvent.mouseDown(fader, { clientX: 0, clientY: 100 });
+    fireEvent.mouseMove(window, { clientX: 0, clientY: 25 });
+    await waitFor(() =>
+      expect(api.setControl).toHaveBeenCalledWith('decks1', 2, 'level', LEVEL_MAX),
+    );
+    fireEvent.mouseUp(window);
+
+    // And a double-click puts the deck back at the clip's own volume.
+    fireEvent.doubleClick(fader);
+    await waitFor(() =>
+      expect(api.setControl).toHaveBeenLastCalledWith('decks1', 2, 'level', LEVEL_UNITY),
+    );
+    expect(api.endEdit).toHaveBeenCalled();
   });
 
   it('a mute the user just pressed stays pressed until the engine agrees', async () => {

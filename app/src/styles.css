@@ -6005,6 +6005,19 @@ body {
   gap: 8px;
 }
 
+/* Unity on a deck's level fader is the MIDDLE of its travel (above it is
+   boost), so the track carries a mark there — the same thing a dial says
+   by pointing straight up. */
+.decks-mix .fader-v .fader-track::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -5px;
+  right: -5px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
 .decks-mix-side {
   display: flex;
   flex: 1;
