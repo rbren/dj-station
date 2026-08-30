@@ -633,4 +633,18 @@ describe('LibraryView', () => {
     await waitFor(() => expect(idle.analysisStatus).toHaveBeenCalled());
     expect(screen.queryAllByTestId('analysis-progress')).toHaveLength(1); // only the busy one
   });
+
+  it('carries a fair-use note on every tab', async () => {
+    const client = mockClient();
+    render(<LibraryView client={client} />);
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
+    const note = screen.getByTestId('library-fair-use');
+    expect(note.textContent).toContain('If you’re mixing someone else’s music, mix it good.');
+    expect(note.textContent).toContain(
+      'Use short samples and recontextualize, or make sure it’s public domain.',
+    );
+
+    fireEvent.click(screen.getByTestId('store-tab-itunes'));
+    expect(screen.getByTestId('library-fair-use')).toBeTruthy();
+  });
 });

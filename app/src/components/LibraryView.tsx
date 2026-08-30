@@ -536,6 +536,11 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
         </div>
       )}
 
+      <p className="library-fair-use" data-testid="library-fair-use">
+        If you’re mixing someone else’s music, mix it good. Use short samples and recontextualize,
+        or make sure it’s public domain.
+      </p>
+
       {pendingDelete && (
         <div
           className="file-dialog-backdrop"

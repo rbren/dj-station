@@ -1924,6 +1924,17 @@ body {
   font-size: var(--fs-md);
 }
 
+/* Fair-use note: a footnote under the page, never a banner. */
+.library-fair-use {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  max-width: 60ch;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin: 0;
+}
+
 /* In-flight search indicator (provider searches shell out to yt-dlp and
    can take seconds). */
 .search-loading {
