@@ -256,6 +256,49 @@ fn stale_jacks_from_older_module_versions_load_with_warnings() {
     assert!(clean_reload.load_warnings.is_empty());
 }
 
+/// A patch that names a module type this build doesn't have — an extension
+/// that was retired (the old Clock), or one this machine hasn't installed —
+/// loads without it instead of failing: the instance is skipped, its wires
+/// are dropped, and every other module still plays.
+#[test]
+fn a_patch_naming_a_module_this_build_lacks_loads_without_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut engine = crate::common::default_engine();
+    crate::common::build_demo_patch(&mut engine);
+    engine.save_patch(dir.path(), "test").unwrap();
+
+    // Rewrite osc1 as a module type that no longer exists, keeping the
+    // wires that reference it (osc1 -> vca1).
+    let module = dir.path().join("modules").join("osc1.json");
+    let mut mf: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&module).unwrap()).unwrap();
+    mf["ext"] = serde_json::json!("com.dj.retired");
+    std::fs::write(&module, serde_json::to_string_pretty(&mf).unwrap()).unwrap();
+
+    let reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+    assert!(
+        reloaded.nodes.iter().all(|n| n.instance_id != "osc1"),
+        "the unknown module was instantiated anyway"
+    );
+    assert!(
+        reloaded.nodes.iter().any(|n| n.instance_id == "vca1"),
+        "the rest of the patch must survive"
+    );
+    assert!(
+        reloaded
+            .load_warnings
+            .iter()
+            .any(|w| w.contains("osc1") && w.contains("com.dj.retired")),
+        "warnings: {:?}",
+        reloaded.load_warnings
+    );
+    // Its wires went with it, and every wire that is left resolves.
+    assert!(reloaded
+        .wire_specs()
+        .iter()
+        .all(|w| reloaded.nodes[w.from_node].instance_id != "osc1"));
+}
+
 /// The Override wire style round-trips through patch save/load, and the
 /// default CV style is omitted from the saved JSON entirely — patches
 /// written before the field existed and patches that never use Override

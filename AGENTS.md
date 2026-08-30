@@ -355,19 +355,44 @@ fails if it's missing.
   `waveforms-fm-sync` golden (that case now sets `fm_index`; every other
   golden is byte-identical because index 0 leaves the frequency exactly
   `pitch_to_hz(pitch)`).
-- Clock Multiplier (`extensions/clock_mult`, `com.dj.clock_mult`): the
-  ratio is a knob-backed `mult` INPUT (10 detents
-  `/8 /4 /3 /2 1x 2x 3x 4x 6x 8x`, 1x default, exact rationals in
-  `RATIOS` so `/3` can't drift), never a param. The input rate comes from
-  the last two rising edges like every other clock consumer; multiplied
-  pulses are predicted from that interval (the phase is capped just short
-  of the next input period so a late edge can't manufacture one), while
+- Clock Multiplier (`extensions/clock_mult`, `com.dj.clock_mult`) is the
+  rack's ONLY clock source, and its ratio is a knob-backed `mult` INPUT
+  (never a param): a CONTINUOUS -64..+64, 1.0 default, whose value IS the
+  ratio (output pulses per input pulse — `0.5` halves, `2.5` is five
+  pulses every two). It is CV-able like any other input and read once per
+  block. `0` freezes the grid; a NEGATIVE ratio walks it backwards at
+  `|mult|` times the input rate, so the knob is symmetric about its
+  centre. `ratio_of` resolves the value to an exact `(num, den)` and the
+  pulse count is `floor(pos * num / den)`, firing on a crossing in EITHER
+  direction, which keeps divisions phase-locked instead of drifting.
+  Decimal thirds SNAP: a fractional part within `THIRD_SNAP_EPS`
+  (0.002) of 1/3 or 2/3 becomes the exact rational (`0.333` ⇒ 1/3,
+  `4.667` ⇒ 14/3), because a literal `0.333` slips a pulse every few
+  hundred beats. The readout mirrors that law in `formatClockRatio`
+  (`app/src/display.ts`, reached by `"map": { "kind": "clock_ratio" }` —
+  `DisplayMap::ClockRatio` in `manifest.rs`) and shows `4x`, `2.50x`,
+  `1/3`; `app/tests/Display.test.ts` greps the DSP constant so the two
+  epsilons can't drift apart. The input rate comes from the last two
+  rising edges like every other clock consumer; multiplied pulses are
+  predicted from that interval (the phase is capped just short of the
+  next input period so a late edge can't manufacture one), while
   divisions land on the clock's own edges. With nothing wired, before the
   first edge, or after the clock has been silent for 4 measured periods,
   it FREE-RUNS as if fed a 2 Hz clock — the fallback is an assumed input
-  rate, so the knob still applies (1x ⇒ 2 Hz out) and the next edge
-  re-phases the grid. Its output jack is `out`, not `clock`: no other
-  manifest reuses one id across both directions, so don't start.
+  rate, so the knob still applies and a continuous ratio makes one on its
+  own a clock at ANY tempo (`FREE_RUN_HZ * mult`: `2` ⇒ 4 Hz/240 BPM),
+  and the next edge re-phases the grid. Tests and goldens build clocks
+  that way: `add_clock(&mut e, "clk", hz)` in
+  `crates/dj-engine/tests/common/mod.rs` adds one and sets
+  `mult = hz / 2.0`; chain a second at `0.25` for a bar reset. Its output
+  jack is `out`, not `clock`: no other manifest reuses one id across both
+  directions, so don't start.
+- There is NO dedicated Clock module: `com.dj.clock` (BPM/swing/bar with
+  div/mul outputs) was deleted, and the Clock Multiplier free-running or
+  chained covers what it did. A patch that still names it — or any module
+  this build lacks — loads WITHOUT that instance and its wires, with a
+  `load_warnings` entry, rather than failing (`patch.rs`, pinned by
+  `persistence::a_patch_naming_a_module_this_build_lacks_loads_without_it`).
 - Poisson Clock (`extensions/poisson`, `com.dj.poisson`): a GAMMA RENEWAL
   process, not a per-tick coin flip — every inter-event interval is a draw
   from `Gamma(shape = k, mean = 1/rate)`, so the `density` knob `k` is the

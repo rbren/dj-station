@@ -2,8 +2,8 @@
   "wires": [
     {
       "from_jack": "out",
-      "to": "pz1",
-      "to_jack": "clock"
+      "to": "seq",
+      "to_jack": "reset"
     }
   ]
 }

@@ -26,7 +26,7 @@ export interface KnobState {
 
 /** Display transform from raw engine value to human-readable number
  *  (mirrors `DisplayMap` in crates/dj-engine/src/manifest.rs). */
-export type DisplayMap = { kind: 'volt_per_octave'; base?: number };
+export type DisplayMap = { kind: 'volt_per_octave'; base?: number } | { kind: 'clock_ratio' };
 
 /** How a jack's value reads to a human: unit suffix, optional transform,
  *  optional per-step labels for stepped inputs. Absent = raw Volts.

@@ -4,6 +4,7 @@
 //! and a euclidean/turing/trigger-sequencer rhythm patch. See
 //! `tests/common/e2e.rs` for the harness and the regeneration flow.
 
+use crate::common::add_clock;
 use crate::common::e2e::{check_case, regen, write_events, EventsFile};
 use dj_engine::{Engine, EngineConfig};
 
@@ -39,16 +40,19 @@ fn mono_engine() -> Engine {
 fn regen_clock_step_seq() {
     let dir = crate::common::e2e::case_dir("seq-clock-step");
     let mut e = mono_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", 4.0); // 4 steps per second
+    e.add_module("bar", "com.dj.clock_mult").unwrap();
     e.add_module("seq", "com.dj.step_seq").unwrap();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("adsr1", "com.dj.adsr").unwrap();
     e.add_module("vca1", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
 
-    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 4 steps per second
-    e.connect("clk", "clock", "seq", "clock").unwrap();
-    e.connect("clk", "bar", "seq", "reset").unwrap();
+    // A second multiplier divides the clock by 4 for the bar reset.
+    e.connect("clk", "out", "bar", "clock").unwrap();
+    e.set_knob_value("bar", "mult", 0.25).unwrap();
+    e.connect("clk", "out", "seq", "clock").unwrap();
+    e.connect("bar", "out", "seq", "reset").unwrap();
 
     set_stepped(&mut e, "seq", "length", 4.0);
     for (i, v) in [0.0f32, 0.25, 0.5833, 0.4167].iter().enumerate() {
@@ -81,7 +85,8 @@ fn regen_clock_step_seq() {
 fn regen_euclid_turing() {
     let dir = crate::common::e2e::case_dir("seq-euclid-turing");
     let mut e = mono_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", 10.0);
+    e.add_module("bar", "com.dj.clock_mult").unwrap();
     e.add_module("euc", "com.dj.euclid").unwrap();
     e.add_module("trn", "com.dj.turing").unwrap();
     e.add_module("trg", "com.dj.trig_seq").unwrap();
@@ -93,13 +98,15 @@ fn regen_euclid_turing() {
     e.add_module("vca2", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
 
-    // 150 BPM x4 = one step every 0.1 s, shared by all three sequencers.
-    e.set_knob_value("clk", "bpm", 150.0).unwrap();
-    e.connect("clk", "mul4", "euc", "clock").unwrap();
-    e.connect("clk", "mul4", "trn", "clock").unwrap();
-    e.connect("clk", "mul4", "trg", "clock").unwrap();
-    e.connect("clk", "bar", "euc", "reset").unwrap();
-    e.connect("clk", "bar", "trg", "reset").unwrap();
+    // 10 Hz = one step every 0.1 s, shared by all three sequencers, and a
+    // /16 divider off the same clock for the 1.6 s bar reset.
+    e.connect("clk", "out", "euc", "clock").unwrap();
+    e.connect("clk", "out", "trn", "clock").unwrap();
+    e.connect("clk", "out", "trg", "clock").unwrap();
+    e.connect("clk", "out", "bar", "clock").unwrap();
+    e.set_knob_value("bar", "mult", 1.0 / 16.0).unwrap();
+    e.connect("bar", "out", "euc", "reset").unwrap();
+    e.connect("bar", "out", "trg", "reset").unwrap();
 
     // Lead: E(5,8) gates an ADSR, pitch from the quantized shift register.
     set_stepped(&mut e, "euc", "steps1", 8.0);
@@ -153,7 +160,8 @@ fn regen_euclid_turing() {
 fn regen_grid_seq() {
     let dir = crate::common::e2e::case_dir("seq-grid-cvgate");
     let mut e = mono_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", 4.0);
+    e.add_module("bar", "com.dj.clock_mult").unwrap();
     e.add_module("grid", "com.dj.grid_seq").unwrap();
     e.add_module("gridm", "com.dj.grid_seq").unwrap();
     e.add_module("seq", "com.dj.step_seq").unwrap();
@@ -164,11 +172,13 @@ fn regen_grid_seq() {
     e.add_module("vca2", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
 
-    // 240 BPM = 4 columns per second, shared by all three sequencers.
-    e.set_knob_value("clk", "bpm", 240.0).unwrap();
+    // 4 Hz = 4 columns per second, shared by all three sequencers, with a
+    // /4 divider off the same clock for the one-second bar reset.
+    e.connect("clk", "out", "bar", "clock").unwrap();
+    e.set_knob_value("bar", "mult", 0.25).unwrap();
     for m in ["grid", "gridm", "seq"] {
-        e.connect("clk", "clock", m, "clock").unwrap();
-        e.connect("clk", "bar", m, "reset").unwrap();
+        e.connect("clk", "out", m, "clock").unwrap();
+        e.connect("bar", "out", m, "reset").unwrap();
     }
 
     // Gate-mode grid: row 1 every 4th column at a 7 V level -> ADSR gate,
@@ -228,13 +238,13 @@ fn regen_grid_seq() {
     write_events(&dir, &EventsFile::seconds(1.5));
 }
 
-/// Two clock multipliers: one at x3 tracking the master clock, one with
-/// nothing patched into its clock input (free-running at 2 Hz), each
-/// gating its own voice.
+/// Two clock multipliers on a continuous ratio: one at x3 tracking the
+/// master clock, one with nothing patched into its clock input (free-running
+/// at 2 Hz) set to an exact two thirds, each gating its own voice.
 fn regen_clock_mult() {
     let dir = crate::common::e2e::case_dir("seq-clock-mult");
     let mut e = mono_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", 2.0);
     e.add_module("cm1", "com.dj.clock_mult").unwrap();
     e.add_module("cm2", "com.dj.clock_mult").unwrap();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
@@ -245,11 +255,10 @@ fn regen_clock_mult() {
     e.add_module("vca2", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
 
-    // Lead: 120 BPM (a beat every 0.5 s) times 3 = a triplet grid, with
-    // the two extra pulses per beat predicted between the clock's edges.
-    e.set_knob_value("clk", "bpm", 120.0).unwrap();
-    e.connect("clk", "clock", "cm1", "clock").unwrap();
-    set_stepped(&mut e, "cm1", "mult", 6.0); // detent 6 = x3
+    // Lead: 2 Hz (a beat every 0.5 s) times 3 = a triplet grid, with the
+    // two extra pulses per beat predicted between the clock's edges.
+    e.connect("clk", "out", "cm1", "clock").unwrap();
+    e.set_knob_value("cm1", "mult", 3.0).unwrap();
     e.connect("cm1", "out", "adsr1", "gate").unwrap();
     set_stepped(&mut e, "osc1", "waveform", 3.0); // triangle
     e.set_knob_value("adsr1", "attack", 0.004).unwrap();
@@ -264,7 +273,9 @@ fn regen_clock_mult() {
     e.connect("vca1", "out", "out1", "l").unwrap();
 
     // Bass: cm2's clock jack stays unpatched, so it free-runs at 2 Hz on
-    // its own and needs no master clock wire.
+    // its own, and 0.667 on the knob is snapped to an exact two thirds --
+    // 4 pulses every 3 s, in step with the lead's triplets.
+    e.set_knob_value("cm2", "mult", 0.667).unwrap();
     e.connect("cm2", "out", "adsr2", "gate").unwrap();
     set_stepped(&mut e, "osc2", "waveform", 2.0); // square
     e.set_knob_value("osc2", "pitch", -2.0).unwrap();
@@ -282,13 +293,13 @@ fn regen_clock_mult() {
     write_events(&dir, &EventsFile::seconds(1.5));
 }
 
-/// Two Poisson Clocks: one slaved to the master clock's x4 stream at
+/// Two Poisson Clocks: one slaved to a 16 Hz master clock at
 /// k = 1 (an exact Poisson process at the clock's rate), one free-running
 /// on its knob at k = 16 (nearly regular), each gating its own voice.
 fn regen_poisson() {
     let dir = crate::common::e2e::case_dir("seq-poisson-gamma");
     let mut e = mono_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", 16.0);
     e.add_module("pz1", "com.dj.poisson").unwrap();
     e.add_module("pz2", "com.dj.poisson").unwrap();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
@@ -299,11 +310,10 @@ fn regen_poisson() {
     e.add_module("vca2", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
 
-    // Lead: 240 BPM x4 = 16 pulses per second, so the clocked Poisson
-    // scatters ~16 events per second around that grid without landing on
-    // it. Its own rate knob is parked low to prove the clock wins.
-    e.set_knob_value("clk", "bpm", 240.0).unwrap();
-    e.connect("clk", "mul4", "pz1", "clock").unwrap();
+    // Lead: 16 pulses per second, so the clocked Poisson scatters ~16
+    // events per second around that grid without landing on it. Its own
+    // rate knob is parked low to prove the clock wins.
+    e.connect("clk", "out", "pz1", "clock").unwrap();
     e.set_knob_value("pz1", "rate", 0.5).unwrap();
     e.set_knob_value("pz1", "density", 1.0).unwrap();
     e.connect("pz1", "out", "adsr1", "gate").unwrap();

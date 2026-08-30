@@ -1,28 +1,13 @@
 {
-  "ext": "com.dj.clock",
+  "ext": "com.dj.clock_mult",
   "knobs": {
-    "beats": {
-      "position": 0.16666666,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "bpm": {
-      "position": 1.0,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "reset": {
-      "position": 4.5474735e-13,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "run": {
-      "position": 0.5,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "swing": {
+    "clock": {
       "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mult": {
+      "position": 0.53125,
       "atten": 1.0,
       "offset": 0.0
     }

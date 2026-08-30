@@ -94,16 +94,16 @@ describe('resolveLayout', () => {
     expect(new Set(all).size).toBe(all.length);
   });
 
-  it('groups outputs with titles (clock module)', () => {
+  it('groups outputs with titles (mult module)', () => {
     const m = manifest(
-      'com.dj.clock',
-      ['bpm'],
-      ['clock', 'div2', 'div4', 'div8', 'div16', 'mul2', 'mul3', 'mul4', 'bar'],
+      'com.dj.mult',
+      ['a_in', 'b_in'],
+      ['a1', 'a2', 'a3', 'a4', 'b1', 'b2', 'b3', 'b4', 'merge', 's1', 's2', 's3', 's4'],
     );
     const layout = resolveLayout(m);
-    expect(layout.outputGroups.map((g) => g.title)).toEqual(['clock', 'div', 'mul']);
+    expect(layout.outputGroups.map((g) => g.title)).toEqual(['a', 'b', 'merge', 'split']);
     const all = layout.outputGroups.flatMap((g) => g.outputs);
-    expect(all).toHaveLength(9);
+    expect(all).toHaveLength(13);
   });
 });
 
@@ -215,12 +215,12 @@ describe('ModulePanel with layouts', () => {
 
   it('output jacks stay clickable and unique under grouped layouts', () => {
     const m = manifest(
-      'com.dj.clock',
-      ['bpm'],
-      ['clock', 'div2', 'div4', 'div8', 'div16', 'mul2', 'mul3', 'mul4', 'bar'],
+      'com.dj.mult',
+      ['a_in', 'b_in'],
+      ['a1', 'a2', 'a3', 'a4', 'b1', 'b2', 'b3', 'b4', 'merge', 's1', 's2', 's3', 's4'],
     );
-    render(<ModulePanel {...baseProps} instanceId="clk1" manifest={m} />);
-    for (const id of ['clock', 'div2', 'mul4', 'bar']) {
+    render(<ModulePanel {...baseProps} instanceId="mult1" manifest={m} />);
+    for (const id of ['a1', 'b4', 'merge', 's3']) {
       expect(screen.getByTestId(`jack-output-${id}`)).toBeTruthy();
     }
   });

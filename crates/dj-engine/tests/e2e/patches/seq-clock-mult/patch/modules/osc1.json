@@ -6,13 +6,18 @@
       "atten": 1.0,
       "offset": 0.0
     },
+    "fm_index": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
     "pitch": {
       "position": 0.5,
       "atten": 1.0,
       "offset": 0.0
     },
     "sync": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },

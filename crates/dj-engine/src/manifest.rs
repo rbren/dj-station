@@ -141,6 +141,10 @@ pub enum DisplayMap {
         #[serde(default = "default_pitch_base")]
         base: f32,
     },
+    /// The value is a clock ratio (output pulses per input pulse) and reads
+    /// as one: "4x", "1/3", "-2x". The displayed NUMBER is the raw value;
+    /// only its spelling changes, in `app/src/display.ts`.
+    ClockRatio,
 }
 
 /// Middle C (C4) — `dj_module_sdk::pitch_to_hz(0.0)`.

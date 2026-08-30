@@ -822,6 +822,18 @@ impl Engine {
             // A macro instance expands from its own copy, never from the
             // base of the same id.
             Some(file) => self.adopt_macro(instance_id, file)?,
+            // A module type this build does not have — an extension that was
+            // retired, or one this machine hasn't installed — must not brick
+            // the whole patch: leave the instance out and warn. Its wires
+            // drop with warnings of their own, and everything else in the
+            // patch still loads and plays.
+            None if self.registry.manifest(&mf.ext).is_none()
+                && self.macros.get(&mf.ext).is_none() =>
+            {
+                self.load_warnings
+                    .push(format!("{instance_id}: unknown module {:?}", mf.ext));
+                return Ok(());
+            }
             None => self.add_module(instance_id, &mf.ext)?,
         }
         if mf.name.is_some() {
@@ -950,7 +962,11 @@ impl Engine {
                     doc.macros.get(instance_id),
                     &mut deferred_syncs,
                 )?;
-                created.push(instance_id.clone());
+                // An unknown module type is skipped with a warning rather
+                // than added, so only report what really came back.
+                if self.has_instance(instance_id) {
+                    created.push(instance_id.clone());
+                }
             } else {
                 self.diff_module_in_place(instance_id, mf, &mut deferred_syncs)?;
             }

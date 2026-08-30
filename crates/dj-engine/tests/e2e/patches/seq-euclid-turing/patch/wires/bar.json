@@ -2,13 +2,13 @@
   "wires": [
     {
       "from_jack": "out",
-      "to": "bar",
-      "to_jack": "clock"
+      "to": "euc",
+      "to_jack": "reset"
     },
     {
       "from_jack": "out",
-      "to": "seq",
-      "to_jack": "clock"
+      "to": "trg",
+      "to_jack": "reset"
     }
   ]
 }

@@ -1,6 +1,7 @@
 //! E2E golden audio case for the Choreography module: all three track
 //! kinds drive a clocked two-voice patch from one serialized timeline.
 
+use crate::common::add_clock;
 use crate::common::e2e::{check_case, regen, write_events, EventsFile};
 use dj_engine::choreo::NoteStep;
 use dj_engine::{Engine, EngineConfig};
@@ -32,7 +33,7 @@ fn regen_choreo_song() {
         crate::common::registry(),
     )
     .unwrap();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", 8.0); // 8 beats per second
     e.add_module("ch", "builtin.choreo").unwrap();
     e.add_module("osc1", "com.dj.oscillator").unwrap();
     e.add_module("vca1", "com.dj.vca").unwrap();
@@ -41,8 +42,7 @@ fn regen_choreo_song() {
     e.add_module("vca2", "com.dj.vca").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
 
-    e.set_knob_value("clk", "bpm", 480.0).unwrap(); // 8 beats per second
-    e.connect("clk", "clock", "ch", "clock").unwrap();
+    e.connect("clk", "out", "ch", "clock").unwrap();
 
     e.choreo_set_beats("ch", 8).unwrap();
     e.choreo_add_track("ch", "lead", "note").unwrap();

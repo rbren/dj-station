@@ -12,7 +12,7 @@ import type { NodeSnapshot, WireSnapshot } from '../engine';
 import type { JackTelemetry, Manifest } from '../types';
 
 import adsr from '../../../extensions/adsr/manifest.json';
-import clock from '../../../extensions/clock/manifest.json';
+import clockMult from '../../../extensions/clock_mult/manifest.json';
 import delay from '../../../extensions/delay/manifest.json';
 import euclid from '../../../extensions/euclid/manifest.json';
 import filter from '../../../extensions/filter/manifest.json';
@@ -36,7 +36,7 @@ const MANIFESTS = [
   vca,
   adsr,
   lfo,
-  clock,
+  clockMult,
   noise,
   quantizer,
   waveshaper,

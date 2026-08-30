@@ -54,6 +54,20 @@ pub fn default_engine() -> Engine {
     Engine::new(EngineConfig::default(), registry()).unwrap()
 }
 
+/// Rate a Clock Multiplier free-runs at with nothing in its clock jack.
+pub const CLOCK_FREE_RUN_HZ: f32 = 2.0;
+
+/// Add a clock source pulsing at `hz`. There is no dedicated Clock module:
+/// a Clock Multiplier with nothing patched into its `clock` jack free-runs
+/// at `CLOCK_FREE_RUN_HZ * mult`, so it is a clock at any rate, and its
+/// `out` is the pulse stream everything else follows.
+pub fn add_clock(engine: &mut Engine, id: &str, hz: f32) {
+    engine.add_module(id, "com.dj.clock_mult").unwrap();
+    engine
+        .set_knob_value(id, "mult", hz / CLOCK_FREE_RUN_HZ)
+        .unwrap();
+}
+
 /// Build the canonical M0 demo patch:
 /// MIDI -> ADSR(gate) -> VCA(cv), Osc -> VCA -> Audio Out (ch1+ch2).
 pub fn build_demo_patch(engine: &mut Engine) {

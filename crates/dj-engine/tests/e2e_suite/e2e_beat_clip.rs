@@ -12,6 +12,7 @@
 //! Regenerate with `REGEN_GOLDENS=1 cargo test -p dj-engine --release
 //! --test e2e_suite beat_clip` (or `./scripts/regen-goldens.sh`).
 
+use crate::common::add_clock;
 use crate::common::e2e::{
     case_dir, check_case, regen, write_case_tone, write_events, EventsFile, TrackLoadSpec,
 };
@@ -23,13 +24,12 @@ fn regen_beat_clip_double_time() {
     write_case_tone(&dir.join("clip.wav"), 330.0, 1.0);
 
     let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", 4.0); // 240 BPM: double the clip's tempo
     e.add_module("bc1", "builtin.beat_clip").unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap();
-    e.connect("clk", "clock", "bc1", "clock").unwrap();
+    e.connect("clk", "out", "bc1", "clock").unwrap();
     e.connect("bc1", "audio_l", "out1", "l").unwrap();
-    e.connect("clk", "clock", "out1", "r").unwrap();
+    e.connect("clk", "out", "out1", "r").unwrap();
 
     e.save_patch(&dir.join("patch"), "e2e-beat-clip-double-time")
         .unwrap();

@@ -80,7 +80,17 @@ fn display_specs_parse_from_manifests() {
             // Default base = middle C, dj_module_sdk::pitch_to_hz(0.0).
             assert!((base - 261.626).abs() < 1e-3);
         }
+        other => panic!("pitch mapped as {other:?}"),
     }
+
+    // The clock ratio map carries no numbers of its own: the raw value IS
+    // the ratio, and only its spelling ("1/3", "4x") is app-side.
+    let cm = manifest("com.dj.clock_mult");
+    let mult = cm.inputs.iter().find(|j| j.id == "mult").unwrap();
+    let d = mult.display.as_ref().expect("mult declares display");
+    assert_eq!(d.map.as_ref(), Some(&DisplayMap::ClockRatio));
+    assert_eq!(d.unit.as_deref(), Some(""));
+    assert!(d.steps.is_none(), "a continuous ratio has no step labels");
 
     // Volts is the default: undeclared jacks carry no display spec.
     let att = manifest("com.dj.attenuverter");

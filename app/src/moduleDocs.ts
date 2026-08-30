@@ -465,55 +465,28 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
   },
 
   // ---------------------------------------------------- Clock & Sequencing
-  'com.dj.clock': {
-    summary:
-      'Master clock: BPM with run/reset, swing and a bar-length setting. ' +
-      'Emits the base clock plus divided (/2../16) and multiplied (x2..x4) ' +
-      'triggers and a once-per-bar pulse. The heartbeat of any rhythmic ' +
-      'patch: it keeps sequencers, LFOs and delays locked to one tempo, ' +
-      'and its divisions layer half-time and double-time parts that ' +
-      'stay in step.',
-    inputs: {
-      bpm: 'Tempo, beats per minute.',
-      run: 'Run switch: clock emits pulses while high.',
-      reset: 'Trigger: restarts the bar/beat counters.',
-      swing: 'Swing amount, 0..1: delays every second pulse.',
-      beats: 'Beats per bar, 1..16.',
-    },
-    outputs: {
-      clock: 'One trigger per beat at the set BPM \u2014 the master pulse for sequencers.',
-      div2: 'Every 2nd beat (half-time feels).',
-      div4: 'Every 4th beat \u2014 once per bar in 4/4.',
-      div8: 'Every 8th beat \u2014 two-bar phrases.',
-      div16: 'Every 16th beat \u2014 slow chord or scene changes.',
-      mul2: '2 pulses per beat (8th notes).',
-      mul3: '3 pulses per beat (triplets).',
-      mul4: '4 pulses per beat (16th notes) \u2014 hi-hat territory.',
-      bar: 'One trigger per bar.',
-    },
-    examples: [
-      'clock -> Step Sequencer clock, bar -> its reset for locked phrases.',
-      'mul2 -> Trigger Sequencer clock for 8th-note drum patterns.',
-    ],
-  },
   'com.dj.clock_mult': {
     summary:
-      'Clock multiplier/divider: follows an incoming clock and re-times it ' +
-      'by a detented ratio \u2014 /8 /4 /3 /2 1x 2x 3x 4x 6x 8x, 1x by ' +
-      'default. Multiplications are predicted from the last two clock ' +
-      'edges, divisions land on the clock\u2019s own edges. With nothing ' +
-      'patched in (or before the first edge arrives) it free-runs as if ' +
-      'fed a 2 Hz clock, so it doubles as a standalone clock source.',
+      'Clock multiplier/divider and the rack\u2019s clock source: follows an ' +
+      'incoming clock and re-times it by a continuous ratio, -64 to +64 ' +
+      'output pulses per input pulse (1x by default). Multiplications are ' +
+      'predicted from the last two clock edges, divisions land on the ' +
+      'clock\u2019s own edges. With nothing patched in (or before the first ' +
+      'edge arrives) it free-runs as if fed a 2 Hz clock, so one on its own ' +
+      'is a clock at any tempo.',
     inputs: {
       clock: 'Clock to follow; its rate is measured between the last two rising edges.',
       mult:
-        'Ratio selector: /8 /4 /3 /2 1x 2x 3x 4x 6x 8x output pulses per ' +
-        'input pulse (1x by default).',
+        'Ratio: output pulses per input pulse, -64..+64 with any fraction ' +
+        'in between (0.5 = every other pulse, 2.5 = five pulses every two). ' +
+        'Decimal thirds snap to exact ones and read as 1/3 and 2/3. A ' +
+        'negative ratio runs the grid backwards at the same rate; 0 stops it.',
     },
     outputs: { out: 'Trigger stream at the input rate times the selected ratio.' },
     examples: [
-      'Clock -> Clock Multiplier at x3 -> Trigger Sequencer for triplet hats.',
-      'Drop one unpatched at 4x for an 8 Hz trigger source with no master clock.',
+      'Clock Multiplier at 3x -> Trigger Sequencer for triplet hats.',
+      'Drop one unpatched at 2x for a 4 Hz (240 BPM) clock with no master clock.',
+      'Chain a second one at 0.25 off the first for a bar reset.',
     ],
   },
   'com.dj.poisson': {

@@ -5,6 +5,9 @@
 // tables (QuantizerUI / LfoUI), so there is one source of names.
 
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import clockMultJson from '../../extensions/clock_mult/manifest.json';
 import lfoJson from '../../extensions/lfo/manifest.json';
 import { SHAPES } from '../../extensions/lfo/ui-src/LfoUI';
 import oscJson from '../../extensions/oscillator/manifest.json';
@@ -12,11 +15,18 @@ import quantizerJson from '../../extensions/quantizer/manifest.json';
 import { NOTE_NAMES, SCALE_NAMES } from '../../extensions/quantizer/ui-src/QuantizerUI';
 import turingJson from '../../extensions/turing/manifest.json';
 import { mapPosition } from '../src/components/Knob';
-import { displayNumber, formatDisplay, stepLabel, V_OCT_BASE } from '../src/display';
+import {
+  displayNumber,
+  formatDisplay,
+  stepLabel,
+  THIRD_SNAP_EPS,
+  V_OCT_BASE,
+} from '../src/display';
 import type { DisplaySpec, JackDecl, KnobConfig, Manifest } from '../src/types';
 
 // JSON imports infer literal-ish structural types; go through the real
 // Manifest type so the specs are exercised as the app sees them.
+const CLOCK_MULT = clockMultJson as unknown as Manifest;
 const LFO = lfoJson as unknown as Manifest;
 const OSC = oscJson as unknown as Manifest;
 const QUANTIZER = quantizerJson as unknown as Manifest;
@@ -58,6 +68,34 @@ describe('formatDisplay', () => {
     expect(formatDisplay(spec, -1)).toBe('131 Hz');
     // explicit base (e.g. A440 tuning)
     expect(displayNumber({ unit: 'Hz', map: { kind: 'volt_per_octave', base: 440 } }, 1)).toBe(880);
+  });
+
+  it('clock_ratio reads as a multiplier, with exact thirds as fractions', () => {
+    const mult = input(CLOCK_MULT, 'mult');
+    const spec = mult.display!;
+    expect(spec.map?.kind).toBe('clock_ratio');
+    expect(formatDisplay(spec, 1)).toBe('1x');
+    expect(formatDisplay(spec, 4)).toBe('4x');
+    expect(formatDisplay(spec, -2)).toBe('-2x');
+    expect(formatDisplay(spec, 2.5)).toBe('2.50x');
+    // The knob's decimal thirds ARE exact thirds in the DSP, so they read
+    // as fractions rather than as 0.33x.
+    expect(formatDisplay(spec, 0.333)).toBe('1/3');
+    expect(formatDisplay(spec, 0.667)).toBe('2/3');
+    expect(formatDisplay(spec, 0.666)).toBe('2/3');
+    expect(formatDisplay(spec, -0.333)).toBe('-1/3');
+    expect(formatDisplay(spec, 4.667)).toBe('14/3');
+    // Just outside the snap window it is an ordinary decimal ratio.
+    expect(formatDisplay(spec, 0.34)).toBe('0.34x');
+  });
+
+  it('the third-snap window matches the Clock Multiplier DSP', () => {
+    // A readout that disagreed with the grid the module runs would be
+    // worse than none: both sides use the same epsilon.
+    const dsp = readFileSync(join(__dirname, '../../extensions/clock_mult/src/lib.rs'), 'utf8');
+    const eps = dsp.match(/const THIRD_SNAP_EPS: f32 = ([\d.]+);/);
+    expect(eps).toBeTruthy();
+    expect(Number(eps![1])).toBe(THIRD_SNAP_EPS);
   });
 
   it('stepped inputs with labels show the step name, via the knob range', () => {

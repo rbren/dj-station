@@ -83,7 +83,7 @@ describe('module docs completeness', () => {
   });
 
   it('every documented input on a sampled module has prose', () => {
-    for (const id of ['com.dj.oscillator', 'com.dj.adsr', 'com.dj.clock', 'com.dj.step_seq']) {
+    for (const id of ['com.dj.oscillator', 'com.dj.adsr', 'com.dj.clock_mult', 'com.dj.step_seq']) {
       const m = byId(id);
       const doc = MODULE_DOCS[id];
       for (const input of m.inputs) {
@@ -123,11 +123,11 @@ describe('DocsPanel rendering', () => {
     expect(screen.queryByTestId('docs-row-cv3')).toBeNull();
   });
 
-  it('keeps individually-documented numbered jacks separate (clock divisions)', () => {
-    const m = byId('com.dj.clock');
+  it('keeps individually-documented numbered jacks separate (turing bits)', () => {
+    const m = byId('com.dj.turing');
     render(<DocsPanel typeId={m.id} manifest={m} onClose={() => {}} />);
-    expect(screen.getByTestId('docs-row-div2').textContent).toContain('Every 2nd beat');
-    expect(screen.getByTestId('docs-row-div16').textContent).toContain('Every 16th beat');
+    expect(screen.getByTestId('docs-row-bit1').textContent).toContain('One register bit');
+    expect(screen.getByTestId('docs-row-bit2').textContent).toContain('different rhythm');
   });
 
   it('renders builtin deck docs including params (from the live manifest)', () => {

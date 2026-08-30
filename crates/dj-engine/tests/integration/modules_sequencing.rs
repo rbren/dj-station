@@ -4,6 +4,7 @@
 //! module outputs under test are wired straight into the two master
 //! channels, so `render_offline` hands back their raw signals.
 
+use crate::common::add_clock;
 use dj_engine::{Engine, EngineConfig};
 
 const SR: f32 = 48_000.0;
@@ -97,152 +98,56 @@ fn assert_edges_near(edges: &[usize], expected_secs: &[f32], tol: usize, what: &
 }
 
 // ---------------------------------------------------------------------------
-// Clock
+// Clock source
 // ---------------------------------------------------------------------------
 
 #[test]
-fn clock_beat_and_multiplication_are_phase_locked() {
+fn free_running_clock_pulses_at_the_dialled_rate() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
-    e.set_knob_value("clk", "bpm", 120.0).unwrap(); // 0.5 s per beat
-    probe(&mut e, 0, "clk", "clock");
-    probe(&mut e, 1, "clk", "mul4");
+    add_clock(&mut e, "clk", 4.0);
+    probe(&mut e, 0, "clk", "out");
+    let out = e.render_offline((1.05 * SR) as usize).unwrap();
+    assert_edges_near(
+        &rising_edges(&out[0]),
+        &[0.0, 0.25, 0.5, 0.75, 1.0],
+        1,
+        "4 Hz clock",
+    );
+}
+
+#[test]
+fn two_free_running_clocks_share_one_grid() {
+    // Both start from the same phase origin and advance by the same
+    // increment, so the slow one lands on the fast one's edges: that is
+    // what makes a second free-running multiplier a usable bar/reset
+    // source next to the master clock.
+    let mut e = probe_engine();
+    add_clock(&mut e, "clk", 4.0);
+    add_clock(&mut e, "bar", 1.0);
+    probe(&mut e, 0, "clk", "out");
+    probe(&mut e, 1, "bar", "out");
     let out = e.render_offline((2.05 * SR) as usize).unwrap();
-
-    assert_edges_near(
-        &rising_edges(&out[0]),
-        &[0.0, 0.5, 1.0, 1.5, 2.0],
-        1,
-        "clock",
-    );
-    let quarters: Vec<f32> = (0..17).map(|i| i as f32 * 0.125).collect();
-    assert_edges_near(&rising_edges(&out[1]), &quarters, 1, "mul4");
-}
-
-#[test]
-fn clock_divisions_and_bar_track_the_beat() {
-    let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 0.25 s per beat
-    set_stepped(&mut e, "clk", "beats", 3.0);
-    probe(&mut e, 0, "clk", "div4");
-    probe(&mut e, 1, "clk", "bar");
-    let out = e.render_offline((2.1 * SR) as usize).unwrap();
-
-    // /4 fires every 4 beats = 1 s; the bar output every 3 beats = 0.75 s.
-    assert_edges_near(&rising_edges(&out[0]), &[0.0, 1.0, 2.0], 1, "div4");
-    assert_edges_near(
-        &rising_edges(&out[1]),
-        &[0.0, 0.75, 1.5],
-        1,
-        "bar (3 beats)",
-    );
-}
-
-#[test]
-fn clock_swing_delays_binary_offbeats_only() {
-    let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
-    e.set_knob_value("clk", "bpm", 120.0).unwrap();
-    e.set_knob_value("clk", "swing", 1.0).unwrap(); // maximum shuffle: 75 %
-    probe(&mut e, 0, "clk", "mul2");
-    probe(&mut e, 1, "clk", "clock");
-    let out = e.render_offline((1.1 * SR) as usize).unwrap();
-
-    // Off-beats land at 75 % of each beat pair instead of 50 %.
-    assert_edges_near(
-        &rising_edges(&out[0]),
-        &[0.0, 0.375, 0.5, 0.875, 1.0],
-        1,
-        "mul2 swung",
-    );
-    // The beat itself stays on the grid.
-    assert_edges_near(&rising_edges(&out[1]), &[0.0, 0.5, 1.0], 1, "clock");
-}
-
-#[test]
-fn clock_pulse_width_is_five_ms_and_clamped_when_fast() {
-    let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
-    e.set_knob_value("clk", "bpm", 120.0).unwrap();
-    probe(&mut e, 0, "clk", "clock");
-    probe(&mut e, 1, "clk", "mul4");
-    let out = e.render_offline((1.0 * SR) as usize).unwrap();
-    let nominal = (0.005 * SR) as usize;
-    for &run in &high_runs(&out[0]) {
-        assert_eq!(run, nominal, "clock pulse width");
+    assert_edges_near(&rising_edges(&out[1]), &[0.0, 1.0, 2.0], 1, "1 Hz divider");
+    let beats = rising_edges(&out[0]);
+    for edge in rising_edges(&out[1]) {
+        assert!(
+            beats.contains(&edge),
+            "bar pulse at frame {edge} missed the clock's own grid"
+        );
     }
-
-    // At 300 BPM the x4 interval is 50 ms, so 5 ms still fits; at 2400 BPM
-    // (bpm knob reconfigured past its stock 300 max, as the config menu
-    // allows) the pulse must clamp to 45 % of the 6.25 ms interval.
-    let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
-    e.set_knob_config(
-        "clk",
-        "bpm",
-        Some(dj_engine::KnobConfig {
-            min: 20.0,
-            max: 3000.0,
-            ..Default::default()
-        }),
-    )
-    .unwrap();
-    e.set_knob_value("clk", "bpm", 2400.0).unwrap();
-    probe(&mut e, 0, "clk", "mul4");
-    let out = e.render_offline((0.5 * SR) as usize).unwrap();
-    let interval = 60.0 / 2400.0 / 4.0 * SR;
-    let expect = (0.45 * interval) as usize;
-    for &run in &high_runs(&out[0]) {
-        assert_eq!(run, expect, "clamped x4 pulse width");
-    }
-}
-
-#[test]
-fn clock_run_gate_stops_and_reset_rephases() {
-    let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
-    e.set_knob_value("clk", "bpm", 120.0).unwrap();
-    e.set_knob_position("clk", "run", 0.0).unwrap();
-    probe(&mut e, 0, "clk", "clock");
-    let stopped = e.render_offline((1.0 * SR) as usize).unwrap();
-    assert!(
-        stopped[0].iter().all(|&x| x == 0.0),
-        "stopped clock emitted pulses"
-    );
-
-    // Start it: the first pulse lands immediately, then every 0.5 s.
-    e.set_knob_position("clk", "run", 1.0).unwrap();
-    let run = e.render_offline((0.7 * SR) as usize).unwrap();
-    assert_edges_near(&rising_edges(&run[0]), &[0.0, 0.5], 1, "clock after run");
-
-    // A reset re-phases: a pulse right away, and the grid restarts there.
-    e.set_knob_position("clk", "reset", 1.0).unwrap();
-    let a = e.render_offline(64).unwrap();
-    e.set_knob_position("clk", "reset", 0.0).unwrap();
-    let b = e.render_offline((0.6 * SR) as usize).unwrap();
-    let mut sig = a[0].clone();
-    sig.extend_from_slice(&b[0]);
-    assert_edges_near(&rising_edges(&sig), &[0.0, 0.5], 1, "clock after reset");
 }
 
 // ---------------------------------------------------------------------------
 // Clock multiplier
 // ---------------------------------------------------------------------------
 
-/// `mult` detent indices, in manifest order: /8 /4 /3 /2 1x 2x 3x 4x 6x 8x.
-const MULT_DIV3: f32 = 2.0;
-const MULT_DIV2: f32 = 3.0;
-const MULT_X4: f32 = 7.0;
-
-/// A 240 BPM master clock (4 Hz, one edge every 0.25 s) feeding a
-/// multiplier whose output is probed on master L.
+/// A 4 Hz master clock (one edge every 0.25 s) feeding a multiplier whose
+/// output is probed on master L.
 fn clock_mult_patch() -> Engine {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", 4.0);
     e.add_module("cm", "com.dj.clock_mult").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap();
-    e.connect("clk", "clock", "cm", "clock").unwrap();
+    e.connect("clk", "out", "cm", "clock").unwrap();
     probe(&mut e, 0, "cm", "out");
     e
 }
@@ -272,12 +177,12 @@ fn clock_mult_free_runs_at_two_hz_without_an_input_clock() {
 fn clock_mult_free_run_rate_follows_the_multiplier() {
     let mut e = probe_engine();
     e.add_module("cm", "com.dj.clock_mult").unwrap();
-    set_stepped(&mut e, "cm", "mult", MULT_DIV2);
+    e.set_knob_value("cm", "mult", 0.5).unwrap();
     probe(&mut e, 0, "cm", "out");
     let out = e.render_offline((2.05 * SR) as usize).unwrap();
 
     // The 2 Hz fallback is an assumed INPUT rate, so the knob still
-    // multiplies it: /2 of 2 Hz is one pulse per second.
+    // multiplies it: half of 2 Hz is one pulse per second.
     assert_edges_near(
         &rising_edges(&out[0]),
         &[0.0, 1.0, 2.0],
@@ -298,7 +203,7 @@ fn clock_mult_passes_the_clock_through_at_the_default_1x() {
 #[test]
 fn clock_mult_fills_in_pulses_between_clock_edges() {
     let mut e = clock_mult_patch();
-    set_stepped(&mut e, "cm", "mult", MULT_X4);
+    e.set_knob_value("cm", "mult", 4.0).unwrap();
     let out = e.render_offline((1.01 * SR) as usize).unwrap();
 
     // The interval is unknown until the second edge, so the first beat
@@ -315,38 +220,115 @@ fn clock_mult_fills_in_pulses_between_clock_edges() {
 #[test]
 fn clock_mult_divides_in_step_with_the_clock() {
     let mut e = clock_mult_patch();
-    set_stepped(&mut e, "cm", "mult", MULT_DIV2);
+    e.set_knob_value("cm", "mult", 0.5).unwrap();
     let out = e.render_offline((1.55 * SR) as usize).unwrap();
     assert_edges_near(&rising_edges(&out[0]), &[0.0, 0.5, 1.0, 1.5], 1, "/2");
 
-    // Odd divisions stay exact (no float drift off the third edge).
+    // A third dialled in as the decimal 0.333 IS an exact third: the snap
+    // keeps the division on the clock's own edges. Taken literally it
+    // would fire 3 ms late on the very first division and slip from there.
     let mut e = clock_mult_patch();
-    set_stepped(&mut e, "cm", "mult", MULT_DIV3);
+    e.set_knob_value("cm", "mult", 0.333).unwrap();
+    let out = e.render_offline((3.05 * SR) as usize).unwrap();
+    assert_edges_near(
+        &rising_edges(&out[0]),
+        &[0.0, 0.75, 1.5, 2.25, 3.0],
+        1,
+        "1/3",
+    );
+}
+
+#[test]
+fn clock_mult_ratio_is_continuous_between_the_whole_numbers() {
+    // 2/3: two pulses for every three input beats, the second predicted
+    // mid-beat and the third landing back on an edge (0.75 s = beat 3).
+    let mut e = clock_mult_patch();
+    e.set_knob_value("cm", "mult", 0.667).unwrap();
     let out = e.render_offline((1.55 * SR) as usize).unwrap();
-    assert_edges_near(&rising_edges(&out[0]), &[0.0, 0.75, 1.5], 1, "/3");
+    assert_edges_near(
+        &rising_edges(&out[0]),
+        &[0.0, 0.375, 0.75, 1.125, 1.5],
+        4,
+        "2/3",
+    );
+
+    // 2.5x: five pulses every two beats, i.e. one every 0.1 s.
+    let mut e = clock_mult_patch();
+    e.set_knob_value("cm", "mult", 2.5).unwrap();
+    let out = e.render_offline((1.01 * SR) as usize).unwrap();
+    let grid: Vec<f32> = (0..8).map(|i| 0.3 + i as f32 * 0.1).collect();
+    let edges = rising_edges(&out[0]);
+    assert_edges_near(&edges[edges.len() - 8..], &grid, 4, "2.5x");
+}
+
+#[test]
+fn clock_mult_negative_ratios_mirror_their_rate() {
+    // A clock has no negative rate: the sign runs the multiplied grid
+    // backwards, so -3 pulses exactly as often as 3.
+    let forward = {
+        let mut e = clock_mult_patch();
+        e.set_knob_value("cm", "mult", 3.0).unwrap();
+        rising_edges(&e.render_offline((1.05 * SR) as usize).unwrap()[0]).len()
+    };
+    let mut e = clock_mult_patch();
+    e.set_knob_value("cm", "mult", -3.0).unwrap();
+    let out = e.render_offline((1.05 * SR) as usize).unwrap();
+    assert_eq!(rising_edges(&out[0]).len(), forward, "-3 vs 3 pulse count");
+
+    // Zero is a stopped grid: the pulse at the origin, then nothing.
+    let mut e = clock_mult_patch();
+    e.set_knob_value("cm", "mult", 0.0).unwrap();
+    let out = e.render_offline((1.05 * SR) as usize).unwrap();
+    assert_edges_near(&rising_edges(&out[0]), &[0.0], 1, "stopped");
+}
+
+#[test]
+fn clock_mult_pulse_width_clamps_at_fast_ratios() {
+    // x64 of the 4 Hz clock is 256 Hz: the 5 ms nominal pulse no longer
+    // fits in the 3.9 ms interval and clamps to 45 % of it.
+    let mut e = clock_mult_patch();
+    e.set_knob_value("cm", "mult", 64.0).unwrap();
+    let out = e.render_offline((1.0 * SR) as usize).unwrap();
+    let expect = (0.45 * SR / 256.0) as usize;
+    let runs = high_runs(&out[0]);
+    // Skip the first beat, whose grid still runs on the 2 Hz estimate, and
+    // the last pulse, which the end of the render cuts short.
+    for &run in &runs[64..runs.len() - 1] {
+        assert!(
+            run.abs_diff(expect) <= 1,
+            "pulse width {run}, expected ~{expect}"
+        );
+    }
 }
 
 #[test]
 fn clock_mult_falls_back_to_free_running_when_the_clock_stops() {
     let mut e = clock_mult_patch();
-    let running = e.render_offline((1.0 * SR) as usize).unwrap();
+    // Render past the fifth pulse so the split doesn't cut a pulse in half
+    // (a buffer that starts high reads as an edge).
+    let running = e.render_offline((1.01 * SR) as usize).unwrap();
     assert_edges_near(
         &rising_edges(&running[0]),
-        &[0.0, 0.25, 0.5, 0.75],
+        &[0.0, 0.25, 0.5, 0.75, 1.0],
         1,
         "clocked",
     );
 
-    // Stop the master clock: after four missed intervals (1 s here) the
-    // multiplier decides the clock is gone and free-runs at 2 Hz again.
-    e.set_knob_position("clk", "run", 0.0).unwrap();
-    let out = e.render_offline((2.0 * SR) as usize).unwrap();
-    assert_edges_near(
-        &rising_edges(&out[0]),
-        &[0.75, 1.25, 1.75],
-        100,
-        "free-running after the clock stopped",
+    // Pull the clock wire: four missed intervals (1 s here) after the last
+    // edge the multiplier decides the clock is gone, and runs as its own
+    // 2 Hz clock from there.
+    e.disconnect("clk", "out", "cm", "clock").unwrap();
+    let out = e.render_offline((3.0 * SR) as usize).unwrap();
+    let edges = rising_edges(&out[0]);
+    let resumed = edges[0] as f32 / SR;
+    assert!(
+        (resumed - 1.0).abs() < 0.05,
+        "free-run resumed {resumed} s after the clock stopped, expected ~1"
     );
+    for w in edges.windows(2) {
+        let gap = (w[1] - w[0]) as f32 / SR;
+        assert!((gap - 0.5).abs() < 0.01, "free-running gap {gap} s");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -435,11 +417,10 @@ fn poisson_pulses_stay_separate_triggers_even_when_clumped() {
 #[test]
 fn poisson_clock_takes_its_mean_rate_from_a_wired_clock() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("pz", "com.dj.poisson").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 4 Hz
+    add_clock(&mut e, "clk", 4.0);
     e.set_knob_value("pz", "rate", 0.05).unwrap(); // far off the clock's
-    e.connect("clk", "clock", "pz", "clock").unwrap();
+    e.connect("clk", "out", "pz", "clock").unwrap();
     probe(&mut e, 0, "pz", "out");
 
     let out = e.render_offline((30.0 * SR) as usize).unwrap();
@@ -466,12 +447,11 @@ fn poisson_clock_renders_identically_every_time() {
 #[test]
 fn poisson_clock_bypassed_hands_the_clock_straight_through() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("pz", "com.dj.poisson").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap();
-    e.connect("clk", "clock", "pz", "clock").unwrap();
+    add_clock(&mut e, "clk", 4.0);
+    e.connect("clk", "out", "pz", "clock").unwrap();
     probe(&mut e, 0, "pz", "out");
-    probe(&mut e, 1, "clk", "clock");
+    probe(&mut e, 1, "clk", "out");
     e.set_bypass("pz", true).unwrap();
 
     let out = e.render_offline((1.05 * SR) as usize).unwrap();
@@ -492,12 +472,11 @@ fn poisson_clock_bypassed_hands_the_clock_straight_through() {
 // ---------------------------------------------------------------------------
 
 /// Clock + step sequencer, `cv` on master L and `gate` on master R.
-fn step_seq_patch(bpm: f32, length: f32, dir: f32) -> Engine {
+fn step_seq_patch(hz: f32, length: f32, dir: f32) -> Engine {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", hz);
     e.add_module("seq", "com.dj.step_seq").unwrap();
-    e.set_knob_value("clk", "bpm", bpm).unwrap();
-    e.connect("clk", "clock", "seq", "clock").unwrap();
+    e.connect("clk", "out", "seq", "clock").unwrap();
     set_stepped(&mut e, "seq", "length", length);
     set_stepped(&mut e, "seq", "dir", dir);
     for (i, v) in [1.0f32, 2.0, 3.0, 4.0].iter().enumerate() {
@@ -516,8 +495,8 @@ fn cv_at_edges(cv: &[f32], edges: &[usize]) -> Vec<f32> {
 
 #[test]
 fn step_seq_walks_forward_with_gates_on_every_clock() {
-    // 240 BPM: one step every 0.25 s.
-    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    // 4 Hz: one step every 0.25 s.
+    let mut e = step_seq_patch(4.0, 4.0, 0.0);
     let out = e.render_offline((1.1 * SR) as usize).unwrap();
     let edges = rising_edges(&out[1]);
     assert_edges_near(&edges, &[0.0, 0.25, 0.5, 0.75, 1.0], 2, "seq gate");
@@ -538,7 +517,7 @@ fn step_seq_walks_forward_with_gates_on_every_clock() {
 
 #[test]
 fn step_seq_direction_modes_change_the_step_order() {
-    let mut rev = step_seq_patch(240.0, 4.0, 1.0);
+    let mut rev = step_seq_patch(4.0, 4.0, 1.0);
     let out = rev.render_offline((1.1 * SR) as usize).unwrap();
     let cvs = cv_at_edges(&out[0], &rising_edges(&out[1]));
     let want = [4.0f32, 3.0, 2.0, 1.0, 4.0];
@@ -546,7 +525,7 @@ fn step_seq_direction_modes_change_the_step_order() {
         assert!((got - w).abs() < 1e-3, "reverse step {i}: {got} != {w}");
     }
 
-    let mut pp = step_seq_patch(240.0, 4.0, 2.0);
+    let mut pp = step_seq_patch(4.0, 4.0, 2.0);
     let out = pp.render_offline((1.7 * SR) as usize).unwrap();
     let cvs = cv_at_edges(&out[0], &rising_edges(&out[1]));
     let want = [1.0f32, 2.0, 3.0, 4.0, 3.0, 2.0, 1.0];
@@ -555,10 +534,10 @@ fn step_seq_direction_modes_change_the_step_order() {
     }
 
     // Random: deterministic (fixed seed) but not the forward order.
-    let mut rnd = step_seq_patch(240.0, 4.0, 3.0);
+    let mut rnd = step_seq_patch(4.0, 4.0, 3.0);
     let a = rnd.render_offline((2.1 * SR) as usize).unwrap();
     let a_cvs = cv_at_edges(&a[0], &rising_edges(&a[1]));
-    let mut rnd2 = step_seq_patch(240.0, 4.0, 3.0);
+    let mut rnd2 = step_seq_patch(4.0, 4.0, 3.0);
     let b = rnd2.render_offline((2.1 * SR) as usize).unwrap();
     let b_cvs = cv_at_edges(&b[0], &rising_edges(&b[1]));
     assert_eq!(a_cvs, b_cvs, "random mode is not deterministic");
@@ -574,7 +553,7 @@ fn step_seq_direction_modes_change_the_step_order() {
 
 #[test]
 fn step_seq_gate_off_and_ratchets_shape_the_gate_stream() {
-    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    let mut e = step_seq_patch(4.0, 4.0, 0.0);
     e.set_knob_position("seq", "gate2", 0.0).unwrap(); // step 2 silent
     set_stepped(&mut e, "seq", "ratchet3", 4.0); // step 3 ratcheted x4
     let out = e.render_offline((1.05 * SR) as usize).unwrap();
@@ -594,10 +573,9 @@ fn step_seq_gate_off_and_ratchets_shape_the_gate_stream() {
 #[test]
 fn step_seq_end_of_sequence_fires_once_per_lap() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("seq", "com.dj.step_seq").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap();
-    e.connect("clk", "clock", "seq", "clock").unwrap();
+    add_clock(&mut e, "clk", 4.0);
+    e.connect("clk", "out", "seq", "clock").unwrap();
     set_stepped(&mut e, "seq", "length", 4.0);
     probe(&mut e, 0, "seq", "eos");
     probe(&mut e, 1, "seq", "gate");
@@ -608,7 +586,7 @@ fn step_seq_end_of_sequence_fires_once_per_lap() {
 
 #[test]
 fn step_seq_state_survives_a_hot_reload() {
-    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    let mut e = step_seq_patch(4.0, 4.0, 0.0);
     // Stop 2 ms into the 4th clock pulse, i.e. mid gate and mid clock high.
     let a = e.render_offline((0.752 * SR) as usize).unwrap();
     assert_eq!(e.reload_extension("com.dj.step_seq").unwrap(), 1);
@@ -644,10 +622,10 @@ fn removing_an_unrelated_module_does_not_reset_the_sequencer() {
     // step_seq patch plus free-running bystanders (LFO phase, turing
     // register) whose state must also survive the edit.
     let build = || {
-        let mut e = step_seq_patch(240.0, 4.0, 0.0);
+        let mut e = step_seq_patch(4.0, 4.0, 0.0);
         e.add_module("lfo1", "com.dj.lfo").unwrap();
         e.add_module("turing1", "com.dj.turing").unwrap();
-        e.connect("clk", "clock", "turing1", "clock").unwrap();
+        e.connect("clk", "out", "turing1", "clock").unwrap();
         e
     };
     let pre = (0.752 * SR) as usize; // 2 ms into the 4th clock pulse
@@ -703,7 +681,7 @@ fn removing_an_unrelated_module_does_not_reset_the_sequencer() {
 /// untouched nodes keep their analyzers; nothing resets.
 #[test]
 fn telemetry_survives_a_remove_module_edit_like_dsp_state_does() {
-    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    let mut e = step_seq_patch(4.0, 4.0, 0.0);
     // Mid-step so the 100 ms telemetry window sits fully inside step 4.
     e.render_offline((0.87 * SR) as usize).unwrap();
     let before = e.tap_out("seq", "step").unwrap().display;
@@ -727,7 +705,7 @@ fn telemetry_survives_a_remove_module_edit_like_dsp_state_does() {
 
 #[test]
 fn step_seq_glide_slews_the_cv_between_steps() {
-    let mut e = step_seq_patch(120.0, 2.0, 0.0); // 0.5 s per step, cv 1 -> 2
+    let mut e = step_seq_patch(2.0, 2.0, 0.0); // 0.5 s per step, cv 1 -> 2
     e.set_knob_value("seq", "glide", 0.25).unwrap();
     let out = e.render_offline((1.2 * SR) as usize).unwrap();
     let cv = &out[0];
@@ -746,9 +724,9 @@ fn step_seq_glide_slews_the_cv_between_steps() {
 /// clock) — the panel's playhead source.
 #[test]
 fn step_seq_step_output_follows_the_playhead() {
-    // 240 BPM: one step every 0.25 s, 4-step loop. Swap the gate probe on
+    // 4 Hz: one step every 0.25 s, 4-step loop. Swap the gate probe on
     // master R for the step output (wires to one input sum).
-    let mut e = step_seq_patch(240.0, 4.0, 0.0);
+    let mut e = step_seq_patch(4.0, 4.0, 0.0);
     e.disconnect("seq", "gate", "probe", "r").unwrap();
     e.connect("seq", "step", "probe", "r").unwrap();
     let out = e.render_offline((1.35 * SR) as usize).unwrap();
@@ -772,10 +750,9 @@ fn step_seq_step_output_follows_the_playhead() {
 #[test]
 fn trig_seq_reads_the_pattern_bitmask_lsb_first() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("trg", "com.dj.trig_seq").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 0.25 s per step
-    e.connect("clk", "clock", "trg", "clock").unwrap();
+    add_clock(&mut e, "clk", 4.0);
+    e.connect("clk", "out", "trg", "clock").unwrap();
     set_stepped(&mut e, "trg", "len1", 4.0);
     e.set_knob_value("trg", "pat1", 9.0).unwrap(); // steps 1 and 4
     probe(&mut e, 0, "trg", "trig1");
@@ -791,11 +768,10 @@ fn trig_seq_reads_the_pattern_bitmask_lsb_first() {
 #[test]
 fn trig_seq_tracks_run_at_independent_lengths() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("trg", "com.dj.trig_seq").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap();
-    // x2 of 240 BPM = one step every 0.125 s.
-    e.connect("clk", "mul2", "trg", "clock").unwrap();
+    add_clock(&mut e, "clk", 8.0);
+    // 8 Hz = one step every 0.125 s.
+    e.connect("clk", "out", "trg", "clock").unwrap();
     // Both tracks fire on their own step 1 only, but wrap at 4 and 3 steps.
     e.set_knob_value("trg", "pat1", 1.0).unwrap();
     set_stepped(&mut e, "trg", "len1", 4.0);
@@ -818,10 +794,9 @@ fn trig_seq_tracks_run_at_independent_lengths() {
 #[test]
 fn trig_seq_pos_output_counts_clocks() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("trg", "com.dj.trig_seq").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 0.25 s per step
-    e.connect("clk", "clock", "trg", "clock").unwrap();
+    add_clock(&mut e, "clk", 4.0);
+    e.connect("clk", "out", "trg", "clock").unwrap();
     probe(&mut e, 0, "trg", "pos");
     let out = e.render_offline((1.1 * SR) as usize).unwrap();
     // First clock is at t=0, so pos starts at 0 and increments every 0.25 s.
@@ -835,19 +810,18 @@ fn trig_seq_pos_output_counts_clocks() {
 // Grid sequencer
 // ---------------------------------------------------------------------------
 
-fn grid_engine(bpm: f32) -> Engine {
+fn grid_engine(hz: f32) -> Engine {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
+    add_clock(&mut e, "clk", hz);
     e.add_module("grid", "com.dj.grid_seq").unwrap();
-    e.set_knob_value("clk", "bpm", bpm).unwrap();
-    e.connect("clk", "clock", "grid", "clock").unwrap();
+    e.connect("clk", "out", "grid", "clock").unwrap();
     e
 }
 
 #[test]
 fn grid_seq_rows_gate_on_their_columns_at_10v() {
-    let mut e = grid_engine(240.0); // 0.25 s per column
-                                    // Row 1 on columns 1 and 3; row 2 on column 2 (bit 0 = column 1).
+    let mut e = grid_engine(4.0); // 0.25 s per column
+                                  // Row 1 on columns 1 and 3; row 2 on column 2 (bit 0 = column 1).
     e.set_knob_value("grid", "row1", 0b101 as f32).unwrap();
     e.set_knob_value("grid", "row2", 0b010 as f32).unwrap();
     probe(&mut e, 0, "grid", "out1");
@@ -862,7 +836,7 @@ fn grid_seq_rows_gate_on_their_columns_at_10v() {
 
 #[test]
 fn grid_seq_level_sets_the_gate_voltage() {
-    let mut e = grid_engine(240.0);
+    let mut e = grid_engine(4.0);
     e.set_knob_value("grid", "row1", 1.0).unwrap();
     e.set_knob_value("grid", "level", 6.0).unwrap();
     probe(&mut e, 0, "grid", "out1");
@@ -875,7 +849,7 @@ fn grid_seq_level_sets_the_gate_voltage() {
 
 #[test]
 fn grid_seq_scale_mode_emits_c_major_pitches() {
-    let mut e = grid_engine(240.0);
+    let mut e = grid_engine(4.0);
     set_stepped(&mut e, "grid", "mode", 1.0); // scale
                                               // Rows 1 (root C), 3 (E) and 8 (octave C) on column 1.
     e.set_knob_value("grid", "row1", 1.0).unwrap();
@@ -894,10 +868,8 @@ fn grid_seq_scale_mode_emits_c_major_pitches() {
 
 #[test]
 fn grid_seq_wraps_at_16_and_reset_rephases() {
-    // 240 BPM x4 = 0.0625 s per column: 1 s per 16-column lap.
-    let mut e = grid_engine(240.0);
-    e.disconnect("clk", "clock", "grid", "clock").unwrap();
-    e.connect("clk", "mul4", "grid", "clock").unwrap();
+    // 16 Hz = 0.0625 s per column: 1 s per 16-column lap.
+    let mut e = grid_engine(16.0);
     e.set_knob_value("grid", "row1", 1.0).unwrap(); // column 1 only
     probe(&mut e, 0, "grid", "pos");
     probe(&mut e, 1, "grid", "out1");
@@ -922,7 +894,7 @@ fn grid_seq_ratchet_bitplanes_retrigger_within_the_column() {
     // 1 + A + 2B = 4: four pulses spread over the column, each high for
     // half its sub-division. Row 2's plain cell keeps the single
     // half-interval gate.
-    let mut e = grid_engine(240.0);
+    let mut e = grid_engine(4.0);
     e.set_knob_value("grid", "row1", 1.0).unwrap();
     e.set_knob_value("grid", "rata1", 1.0).unwrap();
     e.set_knob_value("grid", "ratb1", 1.0).unwrap();
@@ -965,10 +937,9 @@ fn grid_seq_ratchet_bitplanes_retrigger_within_the_column() {
 #[test]
 fn step_seq_cvgate_is_cv_anded_with_the_gate() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("seq", "com.dj.step_seq").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 0.25 s per step
-    e.connect("clk", "clock", "seq", "clock").unwrap();
+    add_clock(&mut e, "clk", 4.0);
+    e.connect("clk", "out", "seq", "clock").unwrap();
     set_stepped(&mut e, "seq", "length", 4.0);
     // Steps: cv 2/3/4/5 with gates on/off/on/off.
     for (i, cv) in [2.0f32, 3.0, 4.0, 5.0].iter().enumerate() {
@@ -1002,10 +973,9 @@ fn step_seq_cvgate_is_cv_anded_with_the_gate() {
 #[test]
 fn euclid_step_outputs_track_each_channel() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("euc", "com.dj.euclid").unwrap();
-    e.set_knob_value("clk", "bpm", 240.0).unwrap(); // 0.25 s per step
-    e.connect("clk", "clock", "euc", "clock").unwrap();
+    add_clock(&mut e, "clk", 4.0);
+    e.connect("clk", "out", "euc", "clock").unwrap();
     set_stepped(&mut e, "euc", "steps1", 4.0);
     set_stepped(&mut e, "euc", "steps2", 3.0);
     probe(&mut e, 0, "euc", "step1");
@@ -1025,11 +995,10 @@ fn euclid_step_outputs_track_each_channel() {
 #[test]
 fn euclid_generates_bjorklund_patterns_with_rotation() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("euc", "com.dj.euclid").unwrap();
-    e.set_knob_value("clk", "bpm", 150.0).unwrap();
-    // x4 of 150 BPM = one step every 0.1 s.
-    e.connect("clk", "mul4", "euc", "clock").unwrap();
+    add_clock(&mut e, "clk", 10.0);
+    // 10 Hz = one step every 0.1 s.
+    e.connect("clk", "out", "euc", "clock").unwrap();
     // E(3,8) = x..x..x. on channel 1; the same rotated left by 1 on ch 2.
     set_stepped(&mut e, "euc", "steps1", 8.0);
     set_stepped(&mut e, "euc", "fill1", 3.0);
@@ -1056,10 +1025,9 @@ fn euclid_generates_bjorklund_patterns_with_rotation() {
 #[test]
 fn euclid_or_output_merges_the_channels() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("euc", "com.dj.euclid").unwrap();
-    e.set_knob_value("clk", "bpm", 150.0).unwrap();
-    e.connect("clk", "mul4", "euc", "clock").unwrap();
+    add_clock(&mut e, "clk", 10.0);
+    e.connect("clk", "out", "euc", "clock").unwrap();
     for (ch, (steps, fill)) in [(4.0f32, 1.0f32), (4.0, 2.0)].iter().enumerate() {
         set_stepped(&mut e, "euc", &format!("steps{}", ch + 1), *steps);
         set_stepped(&mut e, "euc", &format!("fill{}", ch + 1), *fill);
@@ -1093,11 +1061,10 @@ fn sample_per_step(cv: &[f32], step_secs: f32, count: usize) -> Vec<f32> {
 
 fn turing_engine(prob_pos: f32, length: f32) -> Engine {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("trn", "com.dj.turing").unwrap();
-    e.set_knob_value("clk", "bpm", 150.0).unwrap();
-    // x4 of 150 BPM = one clock every 0.1 s.
-    e.connect("clk", "mul4", "trn", "clock").unwrap();
+    add_clock(&mut e, "clk", 10.0);
+    // 10 Hz = one clock every 0.1 s.
+    e.connect("clk", "out", "trn", "clock").unwrap();
     e.set_knob_position("trn", "prob", prob_pos).unwrap();
     set_stepped(&mut e, "trn", "length", length);
     probe(&mut e, 0, "trn", "cv");
@@ -1227,10 +1194,9 @@ fn turing_quantizer_snaps_to_the_selected_scale() {
 #[test]
 fn turing_bit_outputs_follow_the_register() {
     let mut e = probe_engine();
-    e.add_module("clk", "com.dj.clock").unwrap();
     e.add_module("trn", "com.dj.turing").unwrap();
-    e.set_knob_value("clk", "bpm", 150.0).unwrap();
-    e.connect("clk", "mul4", "trn", "clock").unwrap();
+    add_clock(&mut e, "clk", 10.0);
+    e.connect("clk", "out", "trn", "clock").unwrap();
     e.set_knob_position("trn", "prob", 0.5).unwrap();
     set_stepped(&mut e, "trn", "length", 4.0);
     probe(&mut e, 0, "trn", "bit1");

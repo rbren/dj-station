@@ -1,7 +1,7 @@
 {
   "wires": [
     {
-      "from_jack": "clock",
+      "from_jack": "out",
       "to": "cm1",
       "to_jack": "clock"
     }

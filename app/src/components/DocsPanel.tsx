@@ -33,7 +33,7 @@ function controlLabel(knob: KnobConfig | null | undefined): string {
 /** Collapse numbered jack families (cv1..cv16 -> one "cv1 .. cv16" row) so
  *  large manifests stay readable. A family is only collapsed when its docs
  *  come from a shared `#` entry (or it has no docs at all) — jacks with
- *  their own exact doc entry (clock's div2/div4/...) keep their own row.
+ *  their own exact doc entry (turing's bit1/bit2) keep their own row.
  *  Declaration order is preserved. */
 interface JackRow {
   id: string;

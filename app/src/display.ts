@@ -34,6 +34,31 @@ export function displayToRaw(display: DisplaySpec | null | undefined, shown: num
   return shown;
 }
 
+/** Window around a third in which a clock ratio snaps to an exact one.
+ *  The Clock Multiplier DSP's `THIRD_SNAP_EPS`
+ *  (extensions/clock_mult/src/lib.rs); the two are pinned equal by
+ *  app/tests/Display.test.ts, because a readout that disagreed with the
+ *  grid the module actually runs would be worse than no readout. */
+export const THIRD_SNAP_EPS = 0.002;
+
+/** A clock ratio (output pulses per input pulse) as a human reads it:
+ *  "4x", "1/3", "2.50x", "-2x". Mirrors `ratio_of` in the Clock Multiplier
+ *  DSP: a value a third away from whole IS an exact third there, so it
+ *  spells itself as one here. */
+export function formatClockRatio(value: number): string {
+  const magnitude = Math.abs(value);
+  const whole = Math.floor(magnitude);
+  const frac = magnitude - whole;
+  const sign = value < 0 ? -1 : 1;
+  for (const [numerator, third] of [
+    [1, 1 / 3],
+    [2, 2 / 3],
+  ]) {
+    if (Math.abs(frac - third) <= THIRD_SNAP_EPS) return `${sign * (3 * whole + numerator)}/3`;
+  }
+  return Number.isInteger(value) ? `${value}x` : `${fixed(value, 2)}x`;
+}
+
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 /** Equal-tempered note table for Hz-displaying knobs' note picker:
@@ -87,6 +112,7 @@ export function formatDisplay(
   const label = stepLabel(display, value, config);
   if (label !== null) return label;
   if (typeof value !== 'number' || !Number.isFinite(value)) return fixed(value);
+  if (display?.map?.kind === 'clock_ratio') return formatClockRatio(value);
   const v = displayNumber(display, value);
   const unit = display?.unit ?? DEFAULT_UNIT;
   const num = fixed(v, digitsFor(v));

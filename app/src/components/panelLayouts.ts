@@ -270,18 +270,6 @@ const LAYOUTS: Record<string, LayoutFactory> = {
     ],
   }),
 
-  'com.dj.clock': () => ({
-    groups: [
-      { title: 'tempo', inputs: ['bpm', 'swing', 'beats'] },
-      { title: 'transport', inputs: ['run', 'reset'] },
-    ],
-    outputGroups: [
-      { title: 'clock', outputs: ['clock', 'bar'] },
-      { title: 'div', outputs: ['div2', 'div4', 'div8', 'div16'] },
-      { title: 'mul', outputs: ['mul2', 'mul3', 'mul4'] },
-    ],
-  }),
-
   // Poisson clock: the two statistics of the process on one row, with the
   // clock that can take the rate over sitting next to the rate it replaces.
   'com.dj.poisson': () => ({

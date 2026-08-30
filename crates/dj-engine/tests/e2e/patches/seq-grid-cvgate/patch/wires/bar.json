@@ -2,23 +2,18 @@
   "wires": [
     {
       "from_jack": "out",
-      "to": "bar",
-      "to_jack": "clock"
-    },
-    {
-      "from_jack": "out",
       "to": "grid",
-      "to_jack": "clock"
+      "to_jack": "reset"
     },
     {
       "from_jack": "out",
       "to": "gridm",
-      "to_jack": "clock"
+      "to_jack": "reset"
     },
     {
       "from_jack": "out",
       "to": "seq",
-      "to_jack": "clock"
+      "to_jack": "reset"
     }
   ]
 }

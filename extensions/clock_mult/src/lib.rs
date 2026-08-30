@@ -1,16 +1,33 @@
-//! Clock Multiplier: re-times an incoming clock by a detented ratio.
+//! Clock Multiplier: re-times an incoming clock by a continuous ratio.
 //!
 //! Inputs: `clock` (the clock to follow) and `mult` (the ratio knob).
 //! Output: `out` — pulses at the input rate times the selected ratio.
 //!
-//! ## Ratios
+//! ## The ratio
 //!
-//! The `mult` knob is a 10-detent selector over
-//! `/8 /4 /3 /2 1x 2x 3x 4x 6x 8x`, defaulting to `1x` (index 4). The set
-//! is the musically useful one: the binary divisions/multiples give
-//! half-time and 8th/16th-note grids, and `/3` and `3x` (with `6x`) give
-//! triplet feels. Ratios are exact rationals (`RATIOS`), never a float
-//! knob value, so `/3` divides by exactly three instead of drifting.
+//! `mult` is a CONTINUOUS knob spanning -64..+64 and its value IS the
+//! ratio: output pulses per input pulse. Values above 1 multiply (`4` =
+//! x4), values below 1 divide (`0.5` = every other pulse, `1/3` = every
+//! third), and anything between is allowed (`2.5` = five pulses every two
+//! input pulses). `0` freezes the grid — no pulses after the one at the
+//! origin. A NEGATIVE ratio walks the grid BACKWARDS at the same rate, so
+//! the audible tempo is `|mult|` times the input: the knob is symmetric
+//! about its centre, and sweeping it down through zero rides the clock to
+//! a standstill and back up again.
+//!
+//! ## Exact thirds
+//!
+//! The ratio is resolved to an exact rational ([`ratio_of`]) before it
+//! reaches the phase math, so a division lands on the incoming edges
+//! instead of drifting off them. The fractional part of the knob value
+//! SNAPS to a third when it falls within [`THIRD_SNAP_EPS`] of one:
+//! `0.333`, `0.334`, `0.666` and `0.667` become exactly 1/3 and 2/3 (and
+//! `4.667` exactly 14/3). Taken literally, `0.333` slips a whole pulse
+//! every few hundred beats, which is the difference between a triplet grid
+//! and a phasing patch; the window is far too narrow to swallow a
+//! deliberate `0.34`. The app's readout applies the same law and shows the
+//! snapped values as `1/3` and `2/3` (`app/src/display.ts`, kept in step by
+//! `app/tests/Display.test.ts`).
 //!
 //! ## Following the input
 //!
@@ -28,12 +45,13 @@
 //!
 //! With nothing patched into `clock` — or before the first edge arrives —
 //! the module free-runs as if fed a 2 Hz clock, so it is a usable clock
-//! source on its own: at the default `1x` it simply emits 2 Hz, and the
-//! knob multiplies that base rate like any other input. A clock that
-//! stops is treated the same way: after `STALL_PERIODS` measured periods
-//! without an edge (e.g. the wire was pulled, or the master clock's run
-//! switch went low) the module falls back to free-running, and the next
-//! edge re-phases it onto the incoming clock.
+//! source on its own: the fallback is an assumed INPUT rate, so the knob
+//! still applies and a continuous ratio makes it a clock at ANY tempo
+//! (2 Hz x `mult`: `1` is 2 Hz, `2` is 240 BPM, `0.5` is 1 Hz). A clock
+//! that stops is treated the same way: after `STALL_PERIODS` measured
+//! periods without an edge (e.g. the wire was pulled) the module falls
+//! back to free-running, and the next edge re-phases it onto the incoming
+//! clock.
 //!
 //! ## Pulse width
 //!
@@ -45,20 +63,11 @@ use dj_module_sdk::{export_module, InitCtx, Module, ProcessIo};
 const IN_CLOCK: usize = 0;
 const IN_MULT: usize = 1;
 
-/// Output pulses per input pulse as (numerator, denominator), in knob
-/// detent order. Index 4 is 1x, the manifest default.
-const RATIOS: [(f64, f64); 10] = [
-    (1.0, 8.0),
-    (1.0, 4.0),
-    (1.0, 3.0),
-    (1.0, 2.0),
-    (1.0, 1.0),
-    (2.0, 1.0),
-    (3.0, 1.0),
-    (4.0, 1.0),
-    (6.0, 1.0),
-    (8.0, 1.0),
-];
+/// Largest ratio either way; matches the `mult` knob's manifest range.
+const MAX_RATIO: f32 = 64.0;
+/// How close the fractional part of the knob value must be to a third for
+/// the ratio to snap to an exact one.
+const THIRD_SNAP_EPS: f32 = 0.002;
 
 const GATE_V: f32 = 10.0;
 const PULSE_SECS: f32 = 0.005;
@@ -74,13 +83,37 @@ const MAX_INTERVAL_SECS: f32 = 10.0;
 /// only reaches a whole period on an actual edge.
 const MAX_FRAC: f64 = 0.999;
 
+/// Output pulses per input pulse as an exact `(numerator, denominator)`,
+/// with the fractional part of the knob value snapped to a third when it
+/// is within [`THIRD_SNAP_EPS`] of one.
+fn ratio_of(mult: f32) -> (f64, f64) {
+    let v = if mult.is_finite() {
+        mult.clamp(-MAX_RATIO, MAX_RATIO)
+    } else {
+        0.0
+    };
+    let magnitude = v.abs();
+    let whole = magnitude.floor();
+    let frac = magnitude - whole;
+    let sign = if v < 0.0 { -1.0 } else { 1.0 };
+    let thirds = |n: f32| f64::from(sign * (3.0 * whole + n));
+    if (frac - 1.0 / 3.0).abs() <= THIRD_SNAP_EPS {
+        (thirds(1.0), 3.0)
+    } else if (frac - 2.0 / 3.0).abs() <= THIRD_SNAP_EPS {
+        (thirds(2.0), 3.0)
+    } else {
+        (f64::from(v), 1.0)
+    }
+}
+
 pub struct ClockMult {
     sample_rate: f32,
     /// Position in input periods; whole values are input edges.
     pos: f64,
     /// `pos` at the last input edge (a whole number).
     edge_pos: f64,
-    /// Output pulses started so far (at the current ratio).
+    /// Output pulses counted so far at the current ratio (counting down
+    /// while the ratio is negative).
     pulses: i64,
     timer: i32,
     /// Samples per input period; the free-run period while unlocked.
@@ -124,11 +157,11 @@ impl Module for ClockMult {
         if n == 0 {
             return;
         }
-        // The ratio is a mode selector: sampled once per block like every
-        // other stepped selector, so it can be wired without per-sample cost.
-        let idx = (io.inputs[IN_MULT][0].round() as i32).clamp(0, RATIOS.len() as i32 - 1) as usize;
-        let (num, den) = RATIOS[idx];
-        let ratio = (num / den) as f32;
+        // The ratio lays out the whole output grid rather than one pulse,
+        // so it is sampled once per block like every other mode-style
+        // input; it can be wired without per-sample cost.
+        let (num, den) = ratio_of(io.inputs[IN_MULT][0]);
+        let rate = (num / den).abs() as f32;
         let nominal = PULSE_SECS * self.sample_rate;
 
         for s in 0..n {
@@ -163,9 +196,12 @@ impl Module for ClockMult {
                 self.pos += 1.0 / self.interval as f64;
             }
 
+            // A crossing in EITHER direction fires: a negative ratio walks
+            // the grid backwards at the same rate, and a zero ratio never
+            // crosses again (silence after the pulse at the origin).
             let count = (self.pos * num / den).floor() as i64 + 1;
-            if count > self.pulses {
-                let out_interval = self.interval / ratio;
+            if count != self.pulses {
+                let out_interval = self.interval / rate.max(1e-9);
                 self.timer = (nominal.min(0.45 * out_interval) as i32).max(1);
             }
             self.pulses = count;

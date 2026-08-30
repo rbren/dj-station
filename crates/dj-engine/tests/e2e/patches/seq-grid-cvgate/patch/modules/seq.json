@@ -2,7 +2,7 @@
   "ext": "com.dj.step_seq",
   "knobs": {
     "clock": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -97,37 +97,37 @@
       "offset": 0.0
     },
     "gate10": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate11": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate12": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate13": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate14": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate15": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate16": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -147,27 +147,27 @@
       "offset": 0.0
     },
     "gate5": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate6": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate7": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate8": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
     "gate9": {
-      "position": 0.5,
+      "position": 1.0,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -262,7 +262,7 @@
       "offset": 0.0
     },
     "reset": {
-      "position": 4.5474735e-13,
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     }
