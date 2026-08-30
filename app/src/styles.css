@@ -3000,6 +3000,14 @@ body {
   flex-wrap: wrap;
 }
 
+/* Abbreviated to three letters (VOX/DRM/BAS/OTH) where the column is too
+   narrow to spell them out, and held to ONE line: a wrapped tag row in a
+   deck strip pushes the knobs under it out of the dock. */
+.stem-tags-short {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
 .stem-tag {
   border: 1px solid var(--line);
   border-radius: 3px;
@@ -5948,13 +5956,14 @@ body {
   align-items: baseline;
 }
 
-/* Project and clip on ONE line and nothing else on it — the strip is a
+/* Project ABOVE clip and nothing else on either line — the strip is a
    column 156 px wide, so the title is a legend, not a heading, and it is
    plain text: clicking it loads a clip, but a box around it would read as
    somewhere to type. */
 .decks-slot-name {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  align-items: stretch;
   flex: 1;
   min-width: 0;
   white-space: nowrap;
@@ -5972,8 +5981,8 @@ body {
   color: var(--ink);
 }
 
-/* Each half truncates on its own, so a long project name cannot push the
-   clip's own name off the strip. */
+/* Each line truncates on its own, so a long project name costs the
+   clip's own name nothing. */
 .decks-slot-project,
 .decks-slot-clip {
   overflow: hidden;
@@ -5981,13 +5990,13 @@ body {
   min-width: 0;
 }
 
-.decks-slot-clip {
-  color: var(--ink);
+/* The project is context; the clip is what the deck is holding. */
+.decks-slot-project {
+  color: var(--ink-dim);
 }
 
-.decks-slot-sep {
-  flex: none;
-  white-space: pre;
+.decks-slot-clip {
+  color: var(--ink);
 }
 
 .decks-slot-empty .decks-slot-name {

@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, expect, it, vi } from 'vitest';
 import { DecksView } from '../src/components/DecksView';
 import {
+  clipParts,
   clipTitle,
   stretchLabel,
   tempoLabel,
@@ -165,7 +166,7 @@ describe('DecksView', () => {
     slots[0] = loadedSlot(0);
     show(makeApi(makeStatus({ slots })));
     await waitFor(() => expect(screen.getByTestId('decks-strips').children.length).toBe(8));
-    expect(screen.getByTestId('decks-name-0').textContent).toBe('set one - clip 0');
+    expect(screen.getByTestId('decks-clip-0').textContent).toBe('clip 0');
     expect(screen.getByTestId('decks-name-3').textContent).toBe('empty');
   });
 
@@ -201,23 +202,25 @@ describe('DecksView', () => {
     expect(dots[33].className).toContain('decks-beat-tail');
   });
 
-  it("a deck names the Beatify project its clip was cut in, on the clip's own line", async () => {
+  it('a deck names the Beatify project its clip was cut in, on a line above the clip', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[0] = loadedSlot(0);
     slots[1] = loadedSlot(1, {
       clip: { project: 'p9', clip: 'c9', name: 'stab', project_name: '', stems: [] },
     });
     show(makeApi(makeStatus({ slots })));
-    await waitFor(() =>
-      expect(screen.getByTestId('decks-name-0').textContent).toBe('set one - clip 0'),
-    );
+    await waitFor(() => expect(screen.getByTestId('decks-project-0').textContent).toBe('set one'));
+    expect(screen.getByTestId('decks-clip-0').textContent).toBe('clip 0');
     // A patch saved before clips carried the project name falls back to
-    // its id rather than showing a dangling dash.
-    expect(screen.getByTestId('decks-name-1').textContent).toBe('p9 - stab');
+    // its id rather than leaving the line blank.
+    expect(screen.getByTestId('decks-project-1').textContent).toBe('p9');
+    expect(screen.getByTestId('decks-clip-1').textContent).toBe('stab');
+    // An empty deck has no project line at all, only the one word.
+    expect(screen.queryByTestId('decks-project-4')).toBeNull();
     expect(screen.getByTestId('decks-name-4').textContent).toBe('empty');
   });
 
-  it("the header line carries the clip's two names and nothing else", async () => {
+  it("the header carries the clip's two names, a line each, and nothing else", async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[0] = loadedSlot(0, {
       clip: {
@@ -232,11 +235,12 @@ describe('DecksView', () => {
     const name = await screen.findByTestId('decks-name-0');
     const head = name.parentElement!;
     expect(head.className).toContain('decks-slot-head');
-    // No deck number, no eject: the name is the whole line.
+    // No deck number, no eject: the name is the whole header.
     expect(head.children.length).toBe(1);
     expect(within(head).queryByTestId('decks-eject-0')).toBeNull();
-    expect(head.textContent).toBe('a very long project name - a very long clip name');
-    // Two elements, so each truncates on its own and both stay readable.
+    // A line each, so each truncates on its own and both stay readable —
+    // and no separator is printed between them any more.
+    expect(name.children.length).toBe(2);
     expect(name.querySelector('.decks-slot-project')!.textContent).toBe('a very long project name');
     expect(name.querySelector('.decks-slot-clip')!.textContent).toBe('a very long clip name');
     // Truncated on screen, so the whole of it is in the tooltip.
@@ -245,7 +249,7 @@ describe('DecksView', () => {
     );
   });
 
-  it('styles.css draws the header as plain text, both halves ellipsized', () => {
+  it('styles.css draws the header as plain text, two lines, both ellipsized', () => {
     // vitest runs with the app directory as cwd (see PanelLayout.test.tsx).
     const css = readFileSync('src/styles.css', 'utf8');
     const rule = (selector: RegExp) => {
@@ -258,10 +262,14 @@ describe('DecksView', () => {
     expect(name).toContain('padding: 0');
     expect(name).toContain('border: 0');
     expect(name).toContain('background: none');
-    // One line, with each half cut by an ellipsis rather than one of them
-    // pushing the other out.
+    // A line each, neither of them wrapping and each cut by its own
+    // ellipsis rather than one pushing the other out.
+    expect(name).toContain('flex-direction: column');
     expect(name).toContain('white-space: nowrap');
     expect(rule(/\.decks-slot-project,\s*\.decks-slot-clip/)).toContain('text-overflow: ellipsis');
+    // The stem tags are abbreviated here and held to the one line the
+    // eject button shares with them.
+    expect(rule(/\.stem-tags-short/)).toContain('flex-wrap: nowrap');
     // The deck number is gone, rule and all.
     expect(css).not.toContain('.decks-slot-number');
     // The eject button is sized like the stem tags it now sits with.
@@ -560,6 +568,10 @@ describe('DecksView', () => {
     slots[0] = loadedSlot(0);
     show(makeApi(makeStatus({ slots })));
     await waitFor(() => expect(screen.getByTestId('decks-stems-0-drums')).toBeTruthy());
+    // A strip is too narrow to spell them out, so it takes the short
+    // form — and the row is held to one line.
+    expect(screen.getByTestId('decks-stems-0-drums').textContent).toBe('DRM');
+    expect(screen.getByTestId('decks-stems-0').className).toContain('stem-tags-short');
     // Nothing known, nothing shown — an empty deck holds no clip.
     expect(screen.queryByTestId('decks-stems-3')).toBeNull();
 
@@ -639,14 +651,17 @@ describe('decks readouts', () => {
     expect(tempoLabel(128.5, 1)).toBe('128.5 bpm ±0.0%');
   });
 
-  it('names a clip by its project and its own name', () => {
-    expect(clipTitle({ project: 'p1', clip: 'c1', name: 'intro', project_name: 'set one' })).toBe(
-      'set one - intro',
-    );
+  it('keeps the two halves of a clip name apart, one line each', () => {
+    const clip = { project: 'p1', clip: 'c1', name: 'intro', project_name: 'set one' };
+    expect(clipParts(clip)).toEqual({ project: 'set one', name: 'intro' });
     // Before clips carried the project name, the id is what there is.
-    expect(clipTitle({ project: 'p9', clip: 'c9', name: 'stab', project_name: '' })).toBe(
-      'p9 - stab',
-    );
+    expect(clipParts({ project: 'p9', clip: 'c9', name: 'stab', project_name: '' })).toEqual({
+      project: 'p9',
+      name: 'stab',
+    });
+    expect(clipParts(null)).toBeNull();
+    // The one-line form is what the load button's tooltip says.
+    expect(clipTitle(clip)).toBe('set one - intro');
     expect(clipTitle(null)).toBe('empty');
   });
 });

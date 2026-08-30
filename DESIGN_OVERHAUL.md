@@ -387,11 +387,17 @@ chrome — only what the canvas contains per tab.
 **D15 — A deck strip says each thing once (post-overhaul).** A 156 px
 column had five label rows above its knobs: clip name, project, a beat
 count, a clip tempo and a stretch, plus "out"/"in" and an L/R on each of
-the four patch sockets. What survives is one title line at the project
-line's size (`project - clip`, ellipsized), one tempo line
-(`140 bpm +9.3%`) and an arrow per socket pair — ↑ for the send, ↓ for
-the return. The beat count went because the lamp row under it draws the
-same number, silence included, and shows where the bank is in it.
+the four patch sockets. What survives is a two-line title at the old
+project line's size (the Beatify project, then the clip, each ellipsized
+inside the one load button), one tempo line (`140 bpm +9.3%`) and an
+arrow per socket pair — ↑ for the send, ↓ for the return. The beat count
+went because the lamp row under it draws the same number, silence
+included, and shows where the bank is in it. The stem tags take the
+three-letter form here (VOX/DRM/BAS/OTH, MIX) and are held to one line —
+the spelled-out words wrapped as soon as a clip held three parts, and a
+wrapped tag row takes the eject button beside them down with it. The
+full word is still the tag's tooltip, and every wider surface that
+offers a clip keeps the words.
 
 **D16 — The Decks top bar says tempo, then clock, then output
 (post-overhaul).** Another recorded decision. The tempo is ONE control in
@@ -410,9 +416,11 @@ The head of a strip carried a deck number, the clip title in a bordered,
 padded button and eject, all on one row: three boxes in 156 px, so the
 title had room for about a dozen characters and read as somewhere to
 type. The number went (a strip is named by everything else on it and by
-its jacks), and the title is plain text filling the line on its own —
-project and clip as two spans, each ellipsized SEPARATELY, so a long
-project name can no longer eat the clip's own name. Eject dropped to the
+its jacks), and the title is plain text with the head to itself — the
+project ON ITS OWN LINE above the clip, each ellipsized SEPARATELY, so a
+long project name costs the clip's own name nothing and neither is read
+through a separator. The one-line form ("project - clip") is still what
+the hover tooltip says, where a line is all there is. Eject dropped to the
 stem-tag row and took a tag's size, since taking a clip out is the
 smallest move on the strip. Below, `silence`/`shift` became `SIL`/`SFT`
 with the word in a `title`, and the two steppers moved onto shared grid

@@ -220,18 +220,18 @@ export function tempoLabel(sourceBpm: number, stretch: number): string {
 }
 
 /** The two halves a deck names its clip by, kept apart so a strip can
- *  truncate each of them on its own: the Beatify project the clip was cut
- *  in (its base track, falling back to the project id for a patch saved
- *  before clips carried the name) and the clip. Null when the deck holds
- *  nothing. */
+ *  give each of them a line and truncate it on its own: the Beatify
+ *  project the clip was cut in (its base track, falling back to the
+ *  project id for a patch saved before clips carried the name) and the
+ *  clip. Null when the deck holds nothing. */
 export function clipParts(clip: BeatClipRef | null): { project: string; name: string } | null {
   if (!clip?.name) return null;
   return { project: clip.project_name || clip.project, name: clip.name };
 }
 
 /** What a deck calls what is in it, on one line: the project, then the
- *  clip. Two clips called "intro" are told apart by their project, so the
- *  project comes first. */
+ *  clip. The strip gives the two halves a line each, so this is the form
+ *  for somewhere a line is all there is — the load button's tooltip. */
 export function clipTitle(clip: BeatClipRef | null): string {
   const parts = clipParts(clip);
   if (!parts) return 'empty';

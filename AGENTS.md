@@ -1644,7 +1644,10 @@ beatify::build`.
   It rides to the rack on `SavedClip.stems` → `BeatClipEntry.stems` →
   `BeatClipRef.stems` (patch, `#[serde(default)]`, display-only like
   `name`, re-read on `hydrate`). In the UI all four parts are ONE `mix`
-  chip rather than four, and an empty list draws nothing at all.
+  chip rather than four, and an empty list draws nothing at all. A column
+  with no room to spell them out asks for `short` (the deck strip does):
+  same chips, same test ids, printed VOX/DRM/BAS/OTH (MIX) and held to
+  one line.
 - The module picker has TWO TABS, not one gallery: Modules (the panel
   gallery, with its category pills) and Clips (`PickerTab` in
   `ModulePicker.tsx`), which lists `beat_clip_list` rather than module

@@ -23,6 +23,21 @@ describe('StemTags', () => {
     expect(screen.getByTestId('tags-mix').title).toContain('vocals, drums, bass, other');
   });
 
+  it('abbreviates to three letters where there is no room to spell them out', () => {
+    const { rerender } = render(
+      <StemTags stems={['vocals', 'drums', 'bass']} testId="tags" short />,
+    );
+    expect(tags()).toEqual(['VOX', 'DRM', 'BAS']);
+    // The full word stays in the tooltip, so the short form never has to
+    // be guessed at.
+    expect(screen.getByTestId('tags-vocals').title).toBe('Contains the vocals');
+    rerender(<StemTags stems={['other']} testId="tags" short />);
+    expect(tags()).toEqual(['OTH']);
+    // All four is still one chip, abbreviated the same way.
+    rerender(<StemTags stems={['drums', 'other', 'vocals', 'bass']} testId="tags" short />);
+    expect(tags()).toEqual(['MIX']);
+  });
+
   it('shows nothing at all when nothing is known', () => {
     const { rerender } = render(<StemTags stems={undefined} testId="tags" />);
     expect(screen.queryByTestId('tags')).toBeNull();

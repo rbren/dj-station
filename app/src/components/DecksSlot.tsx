@@ -131,8 +131,8 @@ export function DecksSlot(props: DecksSlotProps) {
         )}
       </div>
 
-      {/* What is in the deck, and nothing else on the line: the project
-          the clip was cut in and the clip's own name, plain text rather
+      {/* What is in the deck, and nothing else on the lines: the project
+          the clip was cut in ABOVE the clip's own name, plain text rather
           than a box, each truncated on its own so neither one can push
           the other off the strip. */}
       <header className="decks-slot-head">
@@ -145,14 +145,13 @@ export function DecksSlot(props: DecksSlotProps) {
           {parts ? (
             <>
               {parts.project && (
-                <>
-                  <span className="decks-slot-project">{parts.project}</span>
-                  <span className="decks-slot-sep" aria-hidden="true">
-                    {' - '}
-                  </span>
-                </>
+                <span className="decks-slot-project" data-testid={`decks-project-${slot.slot}`}>
+                  {parts.project}
+                </span>
               )}
-              <span className="decks-slot-clip">{parts.name}</span>
+              <span className="decks-slot-clip" data-testid={`decks-clip-${slot.slot}`}>
+                {parts.name}
+              </span>
             </>
           ) : (
             'empty'
@@ -165,7 +164,9 @@ export function DecksSlot(props: DecksSlotProps) {
           rides with the tags rather than owning a line. */}
       {!empty && (
         <div className="decks-slot-tags" data-testid={`decks-tag-row-${slot.slot}`}>
-          <StemTags stems={slot.clip?.stems} testId={`decks-stems-${slot.slot}`} />
+          {/* Short form: the spelled-out parts wrap in a 156 px column,
+              and a wrapped tag row takes the eject button with it. */}
+          <StemTags stems={slot.clip?.stems} testId={`decks-stems-${slot.slot}`} short />
           <button
             className="decks-slot-eject"
             data-testid={`decks-eject-${slot.slot}`}
