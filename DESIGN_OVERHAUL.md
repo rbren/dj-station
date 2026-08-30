@@ -405,6 +405,19 @@ master fader for everything that pair carries (the cue row's label takes
 columns, because they are two destinations and a DJ reads them as
 "room / headphones".
 
+**D17 — The deck's title line is a title, not a field (post-overhaul).**
+The head of a strip carried a deck number, the clip title in a bordered,
+padded button and eject, all on one row: three boxes in 156 px, so the
+title had room for about a dozen characters and read as somewhere to
+type. The number went (a strip is named by everything else on it and by
+its jacks), and the title is plain text filling the line on its own —
+project and clip as two spans, each ellipsized SEPARATELY, so a long
+project name can no longer eat the clip's own name. Eject dropped to the
+stem-tag row and took a tag's size, since taking a clip out is the
+smallest move on the strip. Below, `silence`/`shift` became `SIL`/`SFT`
+with the word in a `title`, and the two steppers moved onto shared grid
+columns so their buttons stand in one pair of lines.
+
 ---
 
 ## G. Still open after this pass

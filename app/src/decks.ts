@@ -204,14 +204,23 @@ export function tempoLabel(sourceBpm: number, stretch: number): string {
   return `${Number(sourceBpm.toFixed(1))} bpm ${stretchLabel(stretch)}`;
 }
 
-/** What a deck calls what is in it: the Beatify project the clip was cut
- *  in, then the clip. Two clips called "intro" are told apart by their
- *  project, so the project comes first and both live on one line. A patch
- *  saved before clips carried the project name falls back to its id. */
+/** The two halves a deck names its clip by, kept apart so a strip can
+ *  truncate each of them on its own: the Beatify project the clip was cut
+ *  in (its base track, falling back to the project id for a patch saved
+ *  before clips carried the name) and the clip. Null when the deck holds
+ *  nothing. */
+export function clipParts(clip: BeatClipRef | null): { project: string; name: string } | null {
+  if (!clip?.name) return null;
+  return { project: clip.project_name || clip.project, name: clip.name };
+}
+
+/** What a deck calls what is in it, on one line: the project, then the
+ *  clip. Two clips called "intro" are told apart by their project, so the
+ *  project comes first. */
 export function clipTitle(clip: BeatClipRef | null): string {
-  if (!clip?.name) return 'empty';
-  const project = clip.project_name || clip.project;
-  return project ? `${project} - ${clip.name}` : clip.name;
+  const parts = clipParts(clip);
+  if (!parts) return 'empty';
+  return parts.project ? `${parts.project} - ${parts.name}` : parts.name;
 }
 
 /** Total loop length of a slot, silence included. */

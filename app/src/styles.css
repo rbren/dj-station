@@ -5838,36 +5838,71 @@ body {
 
 .decks-slot-head {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  align-items: baseline;
 }
 
-.decks-slot-number {
-  color: var(--ink-dim);
-  font-size: var(--fs-xs);
-  min-width: 1.5ch;
-}
-
-/* Project and clip on ONE line — the strip is a column 156 px wide, so
-   the title is a legend, not a heading. */
+/* Project and clip on ONE line and nothing else on it — the strip is a
+   column 156 px wide, so the title is a legend, not a heading, and it is
+   plain text: clicking it loads a clip, but a box around it would read as
+   somewhere to type. */
 .decks-slot-name {
+  display: flex;
+  align-items: baseline;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
-  padding: 3px 6px;
+  padding: 0;
+  background: none;
+  border: 0;
   font-size: var(--fs-nano);
+  color: var(--ink-muted);
+}
+
+.decks-slot-name:hover:not(:disabled) {
+  background: none;
+  border: 0;
+  color: var(--ink);
+}
+
+/* Each half truncates on its own, so a long project name cannot push the
+   clip's own name off the strip. */
+.decks-slot-project,
+.decks-slot-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.decks-slot-clip {
+  color: var(--ink);
+}
+
+.decks-slot-sep {
+  flex: none;
+  white-space: pre;
 }
 
 .decks-slot-empty .decks-slot-name {
   color: var(--ink-dim);
 }
 
+/* Stem tags and eject share a line: taking the clip out is the smallest
+   move on the strip, so its button matches a tag rather than a control. */
+.decks-slot-tags {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .decks-slot-eject {
-  padding: 3px 6px;
+  flex: none;
+  margin-left: auto;
+  padding: 0 4px;
+  border-radius: 3px;
   color: var(--ink-dim);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
 }
 
 /* Source tempo and stretch — what letting this clip in costs, one line.
@@ -6017,15 +6052,20 @@ body {
 }
 
 /* Add/remove a beat: a label, two nudge buttons and the count between
-   them, so the number the buttons change is the number you are reading. */
+   them, so the number the buttons change is the number you are reading.
+   Fixed columns rather than a flex row, so the two steppers' buttons
+   stand in the same places however wide their labels and counts run. */
 .decks-step {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.4rem 2.5ch 1.4rem;
   align-items: center;
   gap: 3px;
 }
 
 .decks-step-label {
-  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--ink-dim);
   font-size: var(--fs-nano);
   text-transform: uppercase;
@@ -6033,7 +6073,7 @@ body {
 }
 
 .decks-step button {
-  padding: 0 5px;
+  padding: 0;
   line-height: 1.6;
   font-size: var(--fs-xs);
 }
@@ -6041,7 +6081,6 @@ body {
 .decks-step-value {
   color: var(--ink-muted);
   font-size: var(--fs-xs);
-  min-width: 2ch;
   text-align: center;
 }
 

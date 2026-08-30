@@ -27,6 +27,7 @@ import { Knob } from './Knob';
 import { LiveJack } from './Jack';
 import { StemTags } from './StemTags';
 import {
+  clipParts,
   clipTitle,
   loopBeats,
   returnJack,
@@ -73,6 +74,7 @@ export function DecksSlot(props: DecksSlotProps) {
   const n = slot.slot + 1;
   const empty = slot.beats === 0;
   const loop = loopBeats(slot);
+  const parts = clipParts(slot.clip);
 
   // A jack with no label of its own is a bare socket: the send/return
   // pair is named once by the arrow beside it, not four times over.
@@ -117,29 +119,52 @@ export function DecksSlot(props: DecksSlotProps) {
         )}
       </div>
 
+      {/* What is in the deck, and nothing else on the line: the project
+          the clip was cut in and the clip's own name, plain text rather
+          than a box, each truncated on its own so neither one can push
+          the other off the strip. */}
       <header className="decks-slot-head">
-        <span className="decks-slot-number mono">{n}</span>
         <button
           className="decks-slot-name"
           data-testid={`decks-name-${slot.slot}`}
           onClick={props.onLoad}
-          title={empty ? 'Load a clip' : 'Load a different clip'}
+          title={empty ? 'Load a clip' : `${clipTitle(slot.clip)} — load a different clip`}
         >
-          {clipTitle(slot.clip)}
+          {parts ? (
+            <>
+              {parts.project && (
+                <>
+                  <span className="decks-slot-project">{parts.project}</span>
+                  <span className="decks-slot-sep" aria-hidden="true">
+                    {' - '}
+                  </span>
+                </>
+              )}
+              <span className="decks-slot-clip">{parts.name}</span>
+            </>
+          ) : (
+            'empty'
+          )}
         </button>
-        {!empty && (
+      </header>
+
+      {/* What the clip is made of, with eject at the end of the same row:
+          taking the clip out is the smallest thing on the strip, so it
+          rides with the tags rather than owning a line. */}
+      {!empty && (
+        <div className="decks-slot-tags" data-testid={`decks-tag-row-${slot.slot}`}>
+          <StemTags stems={slot.clip?.stems} testId={`decks-stems-${slot.slot}`} />
           <button
             className="decks-slot-eject"
             data-testid={`decks-eject-${slot.slot}`}
             aria-label={`Eject the clip in deck ${n}`}
+            title={`Eject the clip in deck ${n}`}
             onClick={props.onClear}
           >
             ⏏
           </button>
-        )}
-      </header>
-
-      <StemTags stems={slot.clip?.stems} testId={`decks-stems-${slot.slot}`} />
+        </div>
+      )}
 
       {/* What the clip costs at the bank's tempo: the tempo it was cut at
           and the stretch to get here, one line. The length is the lamp
@@ -260,8 +285,13 @@ export function DecksSlot(props: DecksSlotProps) {
               {slot.arm === 'drop' ? 'Dropping' : 'Drop'}
             </button>
           </div>
+          {/* Both steppers are the same four columns, so the label may be
+              short (its title says the whole word) and the buttons still
+              stand in one pair of lines down the strip. */}
           <div className="decks-step" data-testid={`decks-tail-${slot.slot}`}>
-            <span className="decks-step-label">silence</span>
+            <span className="decks-step-label" title="Silence: beats of rest after the clip">
+              SIL
+            </span>
             <button
               aria-label={`One beat less silence after deck ${n}`}
               disabled={empty || slot.tail === 0}
@@ -279,7 +309,12 @@ export function DecksSlot(props: DecksSlotProps) {
             </button>
           </div>
           <div className="decks-step" data-testid={`decks-phase-${slot.slot}`}>
-            <span className="decks-step-label">shift</span>
+            <span
+              className="decks-step-label"
+              title="Shift: where this deck sits on the bank's grid, in beats"
+            >
+              SFT
+            </span>
             <button
               aria-label={`Shift deck ${n} back one beat`}
               disabled={empty}

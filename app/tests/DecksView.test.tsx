@@ -2,6 +2,7 @@
 // what the controls send, and what the page does when there is no bank
 // (or no clips) yet.
 
+import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { DecksView } from '../src/components/DecksView';
@@ -206,6 +207,61 @@ describe('DecksView', () => {
     expect(screen.getByTestId('decks-name-4').textContent).toBe('empty');
   });
 
+  it("the header line carries the clip's two names and nothing else", async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[0] = loadedSlot(0, {
+      clip: {
+        project: 'p1',
+        clip: 'c1',
+        name: 'a very long clip name',
+        project_name: 'a very long project name',
+        stems: ['drums'],
+      },
+    });
+    show(makeApi(makeStatus({ slots })));
+    const name = await screen.findByTestId('decks-name-0');
+    const head = name.parentElement!;
+    expect(head.className).toContain('decks-slot-head');
+    // No deck number, no eject: the name is the whole line.
+    expect(head.children.length).toBe(1);
+    expect(within(head).queryByTestId('decks-eject-0')).toBeNull();
+    expect(head.textContent).toBe('a very long project name - a very long clip name');
+    // Two elements, so each truncates on its own and both stay readable.
+    expect(name.querySelector('.decks-slot-project')!.textContent).toBe('a very long project name');
+    expect(name.querySelector('.decks-slot-clip')!.textContent).toBe('a very long clip name');
+    // Truncated on screen, so the whole of it is in the tooltip.
+    expect(name.getAttribute('title')).toContain(
+      'a very long project name - a very long clip name',
+    );
+  });
+
+  it('styles.css draws the header as plain text, both halves ellipsized', () => {
+    // vitest runs with the app directory as cwd (see PanelLayout.test.tsx).
+    const css = readFileSync('src/styles.css', 'utf8');
+    const rule = (selector: RegExp) => {
+      const m = css.match(new RegExp(`${selector.source}\\s*{[^}]*}`));
+      if (!m) throw new Error(`missing rule ${selector.source}`);
+      return m[0];
+    };
+    const name = rule(/\.decks-slot-name/);
+    // Plain text, not a padded input.
+    expect(name).toContain('padding: 0');
+    expect(name).toContain('border: 0');
+    expect(name).toContain('background: none');
+    // One line, with each half cut by an ellipsis rather than one of them
+    // pushing the other out.
+    expect(name).toContain('white-space: nowrap');
+    expect(rule(/\.decks-slot-project,\s*\.decks-slot-clip/)).toContain('text-overflow: ellipsis');
+    // The deck number is gone, rule and all.
+    expect(css).not.toContain('.decks-slot-number');
+    // The eject button is sized like the stem tags it now sits with.
+    const tagSize = rule(/\.stem-tag/).match(/font-size: (.*);/)![1];
+    expect(rule(/\.decks-slot-eject/)).toContain(`font-size: ${tagSize}`);
+    // Both steppers are laid out on the same columns, so their buttons
+    // line up down the strip.
+    expect(rule(/\.decks-step/)).toContain('grid-template-columns:');
+  });
+
   it('the level fader, the tone knobs and mute/monitor all write the slot', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[2] = loadedSlot(2);
@@ -309,6 +365,25 @@ describe('DecksView', () => {
     // An empty deck has nothing to shift.
     const empty = within(screen.getByTestId('decks-phase-4'));
     expect(empty.getByLabelText('Shift deck 5 on one beat').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('names the two steppers in three letters, with the word in their tooltips', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[1] = loadedSlot(1);
+    show(makeApi(makeStatus({ slots })));
+    await waitFor(() => expect(screen.getByTestId('decks-tail-1')).toBeTruthy());
+
+    const label = (testId: string) =>
+      screen.getByTestId(testId).querySelector('.decks-step-label')!;
+    expect(label('decks-tail-1').textContent).toBe('SIL');
+    expect(label('decks-tail-1').getAttribute('title')).toContain('Silence');
+    expect(label('decks-phase-1').textContent).toBe('SFT');
+    expect(label('decks-phase-1').getAttribute('title')).toContain('Shift');
+    // Same four cells in the same order in both rows — that is what puts
+    // one row's buttons under the other's.
+    const shape = (testId: string) =>
+      [...screen.getByTestId(testId).children].map((c) => `${c.tagName}.${c.className}`);
+    expect(shape('decks-phase-1')).toEqual(shape('decks-tail-1'));
   });
 
   it('the tempo drives the whole bank, and the drag ends as one edit', async () => {
@@ -416,12 +491,15 @@ describe('DecksView', () => {
     expect(within(dialog).getByTestId('decks-clip-stems-p1-c1-bass')).toBeTruthy();
   });
 
-  it('ejecting a deck clears it', async () => {
+  it('ejecting a deck clears it, from the row its stem tags are on', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[3] = loadedSlot(3);
     const api = makeApi(makeStatus({ slots }));
     show(api);
     await waitFor(() => expect(screen.getByTestId('decks-eject-3')).toBeTruthy());
+    const tags = screen.getByTestId('decks-tag-row-3');
+    expect(within(tags).getByTestId('decks-eject-3')).toBeTruthy();
+    expect(within(tags).getByTestId('decks-stems-3-drums')).toBeTruthy();
     fireEvent.click(screen.getByTestId('decks-eject-3'));
     await waitFor(() => expect(api.clear).toHaveBeenCalledWith('decks1', 3));
     // An empty deck has nothing to eject.
