@@ -40,6 +40,15 @@
 //! going to the room, and the level of everything going to the
 //! headphones, with no way for one to move the other.
 //!
+//! THE BANK IS STOPPED UNTIL IT IS STARTED
+//! ([`crate::Engine::decks_set_running`]).
+//! Nothing here plays by itself: a fresh bank, and every bank restored
+//! from a patch, comes back with its clock parked on beat 0 and silent —
+//! opening the page is not a reason to make a noise. Starting runs the
+//! clock; stopping parks it back on beat 0, so the next start comes in
+//! from the top of every clip. Like an arm, the transport is NOT patch
+//! state: nothing serializes it, and a saved bank is reloaded stopped.
+//!
 //! ONE CLOCK, NO PER-SLOT TRANSPORT. The module owns a single fractional
 //! beat counter that advances at the `bpm` input's tempo, and a slot's
 //! playhead is DERIVED from it — `beat_pos - phase`, wrapped by the slot's
@@ -189,6 +198,11 @@ const EQ_HIGH_HZ: f32 = 2000.0;
 /// Level/mute/solo changes reach the audio over this long, so a mute is a
 /// mute and not a click.
 const GAIN_SMOOTH_SECS: f32 = 0.010;
+
+/// A smoothed gain this small is silence: what a deck has to be under to
+/// count as not playing, and what a stopped bank waits for before it
+/// parks on beat 0.
+const SILENT_GAIN: f32 = 1e-4;
 
 /// Time constant of a deck's OUTPUT METER
 /// ([`DecksShared::slot_output_level`]): the level it publishes follows
@@ -724,8 +738,10 @@ pub enum DecksCmd {
         live: f32,
         monitor: f32,
     },
-    /// Park the bank on beat 0.
-    Reset,
+    /// Run the bank's clock, or stop it and park it on beat 0.
+    Transport {
+        running: bool,
+    },
 }
 
 /// Control-side state per Decks node: the command ring, the garbage
@@ -736,6 +752,10 @@ pub struct DecksControl {
     pub garbage_rx: rtrb::Consumer<Arc<TrackData>>,
     pub shared: Arc<DecksShared>,
     pub state: DecksState,
+    /// Whether the bank's clock has been started. Transport, not patch
+    /// state, so it lives here rather than in [`DecksState`]: a bank is
+    /// created and restored STOPPED, and only the user starts it.
+    pub running: bool,
     /// The audio in each slot's hands. `None` beside a bound clip is a
     /// slot the app layer still has to assemble (`decks_pending`).
     pub tracks: Vec<Option<Arc<TrackData>>>,
@@ -771,6 +791,7 @@ impl DecksControl {
             garbage_rx,
             shared,
             state: DecksState::default(),
+            running: false,
             tracks: vec![None; SLOTS],
             surface: crate::launch_control::LaunchControlControl::default(),
             button_down: [None; SLOTS * 2],
@@ -873,6 +894,9 @@ pub struct DeckSlotStatus {
 #[derive(Debug, Clone, Serialize)]
 pub struct DecksStatus {
     pub bpm: f64,
+    /// Whether the bank's clock is running. A stopped bank is parked on
+    /// beat 0 and silent, whatever its slots hold.
+    pub running: bool,
     /// Fractional beats since the bank last reset.
     pub beat: f64,
     /// Beats until every loaded slot comes round together.
@@ -989,10 +1013,15 @@ impl RtSlot {
         }
     }
 
-    /// The gain this slot is heading for. An arm stands in for the mute
-    /// while the clock is still holding it: a queued deck is silent
-    /// though it is unmuted, a dropping one plays on though it is muted.
-    fn gain_target(&self) -> f32 {
+    /// The gain this slot is heading for. A stopped bank sends every deck
+    /// to silence — through the same ramp a mute uses, so stopping fades
+    /// rather than clicks. An arm stands in for the mute while the clock
+    /// is still holding it: a queued deck is silent though it is unmuted,
+    /// a dropping one plays on though it is muted.
+    fn gain_target(&self, running: bool) -> f32 {
+        if !running {
+            return 0.0;
+        }
         let open = self.level.max(0.0);
         match self.arm {
             DeckArm::Queue => 0.0,
@@ -1037,6 +1066,9 @@ pub struct DecksRtModule {
     engine_rate: f32,
     /// Fractional beats since the last reset — the bank's whole transport.
     beat_pos: f64,
+    /// Whether that counter is moving at all. A bank starts STOPPED and
+    /// silent: nothing here plays until the user asks for it.
+    running: bool,
     last_reset: f32,
     /// The two output faders, and the smoothed gains actually applied —
     /// which start AT unity, so a bank nobody has touched multiplies its
@@ -1077,6 +1109,7 @@ impl DecksRtModule {
             slots: (0..SLOTS).map(|_| RtSlot::new(rate)).collect(),
             engine_rate: rate,
             beat_pos: 0.0,
+            running: false,
             last_reset: 0.0,
             master: [1.0; 2],
             master_gain: [1.0; 2],
@@ -1163,11 +1196,8 @@ impl DecksRtModule {
             DecksCmd::Master { live, monitor } => {
                 self.master = [live.max(0.0), monitor.max(0.0)];
             }
-            DecksCmd::Reset => {
-                self.beat_pos = 0.0;
-                for slot in &mut self.slots {
-                    slot.grains.reset();
-                }
+            DecksCmd::Transport { running } => {
+                self.running = running;
             }
         }
     }
@@ -1199,6 +1229,7 @@ impl HostModule for DecksRtModule {
         let (a_low, a_high, a_gain, a_meter) = (self.a_low, self.a_high, self.a_gain, self.a_meter);
         let master = self.master;
         let engine_rate = self.engine_rate;
+        let running = self.running;
         for s in 0..frames {
             if reset[s] >= 1.0 && self.last_reset < 1.0 {
                 self.beat_pos = 0.0;
@@ -1210,9 +1241,10 @@ impl HostModule for DecksRtModule {
             self.last_reset = reset[s];
 
             // One pulse per beat of the bank's own clock — the thing the
-            // rack can lock to.
+            // rack can lock to. A stopped bank clocks nothing: the grid
+            // it would be handing out is not moving.
             let beat = self.beat_pos.floor() as i64;
-            if beat != self.last_beat {
+            if running && beat != self.last_beat {
                 self.last_beat = beat;
                 self.clock_left = self.clock_len;
             }
@@ -1246,7 +1278,7 @@ impl HostModule for DecksRtModule {
                 }
                 slot.last_local = local;
 
-                let target = slot.gain_target();
+                let target = slot.gain_target(running);
                 slot.gain += a_gain * (target - slot.gain);
                 // A wired return makes those modules this deck's insert:
                 // what comes back is what the wetness knob fades the
@@ -1347,7 +1379,22 @@ impl HostModule for DecksRtModule {
             outputs[OUT_AUDIO_R][s] = mix_r * self.master_gain[0] * SIGNAL_MAX;
             outputs[OUT_MON_L][s] = mon_l * self.master_gain[1] * SIGNAL_MAX;
             outputs[OUT_MON_R][s] = mon_r * self.master_gain[1] * SIGNAL_MAX;
-            self.beat_pos += tempo / 60.0 / self.engine_rate as f64;
+            if running {
+                self.beat_pos += tempo / 60.0 / self.engine_rate as f64;
+            }
+        }
+
+        // A STOP PARKS THE BANK, once its decks have faded out: every slot
+        // is ramping to silence (see `gain_target`), and the beat counter
+        // waits for them so the fade is heard where it was playing rather
+        // than jumping to beat 0 first. From there the next start comes in
+        // from the top of every clip.
+        if !running && self.beat_pos != 0.0 && self.slots.iter().all(|s| s.gain <= SILENT_GAIN) {
+            self.beat_pos = 0.0;
+            self.last_beat = -1;
+            for slot in &mut self.slots {
+                slot.grains.reset();
+            }
         }
 
         self.shared
@@ -1362,13 +1409,14 @@ impl HostModule for DecksRtModule {
                 (Some(track), len) if len > 0 => {
                     let local = (self.beat_pos - slot.phase as f64).rem_euclid(len as f64);
                     // The beat is where the LOOP is, tail included: a
-                    // silent beat is still a beat the lamp must show.
-                    let sounding = local < slot.beats as f64;
+                    // silent beat is still a beat the lamp must show. A
+                    // stopped bank sounds nowhere.
+                    let sounding = running && local < slot.beats as f64;
                     (
                         local * 60.0 / slot.source_bpm as f64,
                         local as i64,
                         sounding,
-                        sounding && slot.gain > 1e-4 && track.frames() > 0,
+                        sounding && slot.gain > SILENT_GAIN && track.frames() > 0,
                     )
                 }
                 _ => (0.0, -1, false, false),
@@ -1389,16 +1437,21 @@ impl HostModule for DecksRtModule {
         }
     }
 
-    /// The bank's phase across a hot reload — where the clock is. Every
-    /// slot's playhead is derived from it, and the clips themselves come
-    /// back from the control thread.
+    /// The bank's transport across a hot reload — where the clock is and
+    /// whether it is moving. Every slot's playhead is derived from it, and
+    /// the clips themselves come back from the control thread.
     fn save_state(&mut self) -> Vec<u8> {
-        self.beat_pos.to_le_bytes().to_vec()
+        let mut out = self.beat_pos.to_le_bytes().to_vec();
+        out.push(self.running as u8);
+        out
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
         if bytes.len() >= 8 {
             self.beat_pos = f64::from_le_bytes(bytes[..8].try_into().unwrap());
+        }
+        if let Some(&running) = bytes.get(8) {
+            self.running = running != 0;
         }
     }
 
@@ -1539,7 +1592,13 @@ mod tests {
         assert!(SlotControl::Mute.is_button() && !SlotControl::Level.is_button());
     }
 
-    /// Render `frames` of a bank whose slots are set up by `setup`.
+    /// Press play. A bank is built STOPPED, so every render below has to
+    /// start it first — the page's Start button.
+    fn start(tx: &mut rtrb::Producer<DecksCmd>) {
+        tx.push(DecksCmd::Transport { running: true }).unwrap();
+    }
+
+    /// Render `frames` of a started bank whose slots are set up by `setup`.
     fn render(
         setup: impl FnOnce(&mut rtrb::Producer<DecksCmd>),
         frames: usize,
@@ -1549,6 +1608,7 @@ mod tests {
         let (garbage_tx, _garbage_rx) = rtrb::RingBuffer::new(64);
         let shared = Arc::new(DecksShared::default());
         let mut m = DecksRtModule::new(rx, garbage_tx, 48_000.0, shared.clone());
+        start(&mut tx);
         setup(&mut tx);
         let mut inputs = vec![vec![0.0; frames]; N_INPUTS];
         inputs[IN_BPM].fill(bpm);
@@ -1569,6 +1629,7 @@ mod tests {
         let (garbage_tx, _garbage_rx) = rtrb::RingBuffer::new(64);
         let shared = Arc::new(DecksShared::default());
         let mut m = DecksRtModule::new(rx, garbage_tx, 48_000.0, shared);
+        start(&mut tx);
         setup(&mut tx);
         let mut inputs = vec![vec![0.0; frames]; N_INPUTS];
         inputs[IN_BPM].fill(120.0);
@@ -2027,6 +2088,7 @@ mod tests {
         let (garbage_tx, _g) = rtrb::RingBuffer::new(64);
         let shared = Arc::new(DecksShared::default());
         let mut m = DecksRtModule::new(rx, garbage_tx, 48_000.0, shared.clone());
+        start(&mut tx);
         load(&mut tx, 0, 2, 0.5);
         mix(&mut tx, 0, 1.0, false, false);
         let frames = 12_000;
@@ -2044,13 +2106,14 @@ mod tests {
         );
     }
 
-    /// A bank an arm test can drive block by block: the module, the
-    /// command ring and the atomics it publishes.
+    /// A started bank an arm test can drive block by block: the module,
+    /// the command ring and the atomics it publishes.
     fn rt_bank() -> (rtrb::Producer<DecksCmd>, DecksRtModule, Arc<DecksShared>) {
-        let (tx, rx) = rtrb::RingBuffer::new(64);
+        let (mut tx, rx) = rtrb::RingBuffer::new(64);
         let (garbage_tx, _g) = rtrb::RingBuffer::new(64);
         let shared = Arc::new(DecksShared::default());
         let m = DecksRtModule::new(rx, garbage_tx, 48_000.0, shared.clone());
+        start(&mut tx);
         (tx, m, shared)
     }
 
@@ -2070,6 +2133,41 @@ mod tests {
 
     /// A beat at 120 BPM and 48 kHz.
     const BEAT: usize = 24_000;
+
+    #[test]
+    fn a_stop_fades_the_decks_out_and_then_parks_the_bank() {
+        let (mut tx, mut m, shared) = rt_bank();
+        load(&mut tx, 0, 4, 0.5);
+        mix(&mut tx, 0, 1.0, false, false);
+        block(&mut m, BEAT);
+        assert!(shared.beat() > 0.9, "the bank is playing");
+
+        tx.push(DecksCmd::Transport { running: false }).unwrap();
+        // The block the stop lands in is a RAMP, not a cut: it starts
+        // where the deck was and ends in silence.
+        let out = block(&mut m, BEAT / 2);
+        assert!(
+            out[0].abs() > 1.0,
+            "the stop does not click, got {}",
+            out[0]
+        );
+        assert!(
+            out[BEAT / 4..].iter().all(|s| s.abs() < 1e-3),
+            "and the ramp has taken the deck out"
+        );
+        assert_eq!(shared.beat(), 0.0, "the faded-out bank parks on beat 0");
+        assert!(!shared.slot_playing(0) && !shared.slot_sounding(0));
+
+        // Nothing moves while it is stopped, and starting picks the clip
+        // up from its top.
+        let out = block(&mut m, BEAT);
+        assert!(out.iter().all(|s| s.abs() < 1e-3), "stopped is silent");
+        assert_eq!(shared.beat(), 0.0, "and the clock stays parked");
+        start(&mut tx);
+        let out = block(&mut m, BEAT);
+        assert!(out[BEAT / 2].abs() > 0.1, "started, the deck plays again");
+        assert!(shared.beat() > 0.9, "from the top");
+    }
 
     #[test]
     fn a_queued_deck_waits_for_its_clips_first_beat_and_then_plays() {

@@ -3161,7 +3161,7 @@ fn main() {
             decks::decks_set_phase,
             decks::decks_set_bpm,
             decks::decks_set_surface,
-            decks::decks_reset,
+            decks::decks_set_running,
             decks::decks_rehydrate,
         ])
         .run(tauri::generate_context!())

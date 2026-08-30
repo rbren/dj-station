@@ -27,6 +27,9 @@ use dj_engine::{Engine, EngineConfig};
 const SR: f32 = 48_000.0;
 const CLIP_BPM: f64 = 120.0;
 
+/// A bank wired to an output and STARTED — a bank is created stopped, so
+/// every test that listens to one has to press play first, exactly like
+/// the page's Start button.
 fn bank() -> Engine {
     let mut e = Engine::new(
         EngineConfig {
@@ -39,6 +42,7 @@ fn bank() -> Engine {
     e.add_module("bank1", DECKS_ID).unwrap();
     e.add_module("out1", "builtin.audio_out").unwrap();
     e.connect("bank1", "audio_l", "out1", "l").unwrap();
+    e.decks_set_running("bank1", true).unwrap();
     e
 }
 
@@ -103,6 +107,89 @@ fn decks_is_listed_in_all_manifests() {
         ids.contains(&DECKS_ID.to_string()),
         "{DECKS_ID} missing from the module list: {ids:?}"
     );
+}
+
+/// A bank exactly as it is created: wired to an output, but never
+/// started. What the app has when the Decks page first opens.
+fn stopped_bank() -> Engine {
+    let mut e = bank();
+    e.decks_set_running("bank1", false).unwrap();
+    e
+}
+
+#[test]
+fn a_new_bank_is_stopped_and_stays_silent_until_it_is_started() {
+    let mut e = stopped_bank();
+    load(&mut e, 0, 2);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    let st = e.decks_status("bank1").unwrap();
+    assert!(!st.running, "opening the page is not a reason to play");
+
+    let out = e.render_offline(48_000).unwrap().remove(0);
+    assert_eq!(peak(&out), 0.0, "an unmuted deck on a stopped bank is mute");
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!(st.beat, 0.0, "and the clock has not moved");
+    assert!(!st.slots[0].playing && !st.slots[0].sounding);
+
+    // Start is the whole difference: same slot, same mute, now audible.
+    e.decks_set_running("bank1", true).unwrap();
+    assert!(e.decks_status("bank1").unwrap().running);
+    let out = e.render_offline(48_000).unwrap().remove(0);
+    assert!(peak(&out[4_800..]) > 0.1, "started, the deck plays");
+    let st = e.decks_status("bank1").unwrap();
+    assert!(st.beat > 1.0, "the clock is running");
+    assert!(st.slots[0].playing);
+}
+
+#[test]
+fn stopping_parks_the_bank_back_on_beat_zero() {
+    let mut e = bank();
+    load(&mut e, 0, 4);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    e.render_offline(48_000).unwrap();
+    assert!(e.decks_status("bank1").unwrap().beat > 1.0);
+
+    e.decks_set_running("bank1", false).unwrap();
+    let out = e.render_offline(48_000).unwrap().remove(0);
+    assert!(
+        peak(&out[4_800..]) < 1e-4,
+        "a stopped bank is silent, mute or not"
+    );
+    let st = e.decks_status("bank1").unwrap();
+    assert!(!st.running);
+    assert_eq!(
+        st.beat, 0.0,
+        "so the next start comes in from the top of every clip"
+    );
+}
+
+#[test]
+fn a_stopped_bank_clocks_nothing() {
+    let mut e = stopped_bank();
+    e.add_module("out2", "builtin.audio_out").unwrap();
+    e.connect("bank1", "clock", "out2", "l").unwrap();
+    let out = e.render_offline(48_000).unwrap().remove(0);
+    assert_eq!(peak(&out), 0.0, "a grid that is not moving is not a grid");
+}
+
+#[test]
+fn the_transport_is_not_patch_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = bank();
+    load(&mut e, 0, 4);
+    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    e.save_patch(&dir.path().join("p"), "decks").unwrap();
+
+    let e2 = Engine::load_patch(&dir.path().join("p"), crate::common::registry()).unwrap();
+    let st = e2.decks_status("bank1").unwrap();
+    assert!(
+        !st.running,
+        "a bank restored with the app comes back stopped"
+    );
+    assert!(!st.slots[0].mute, "the mix the patch kept is untouched");
 }
 
 #[test]
@@ -568,6 +655,9 @@ fn a_bank_restored_from_a_patch_plays_once_its_audio_comes_back() {
         e2.decks_supply(&instance, slot, Some(cl), clip(2, 0.5), CLIP_BPM)
             .unwrap();
     }
+    // A restored bank comes back STOPPED, so the sound is what the page's
+    // Start button asks for.
+    e2.decks_set_running("bank1", true).unwrap();
     let out = e2.render_offline(48_000).unwrap().remove(0);
     let peak = out.iter().fold(0.0f32, |a, s| a.max(s.abs()));
     assert!(peak > 0.1, "a restored bank plays (peak {peak})");
@@ -589,6 +679,7 @@ fn a_restored_bank_runs_when_the_backend_starts_after_the_handover() {
         e2.decks_supply(&instance, slot, Some(cl), clip(2, 0.5), CLIP_BPM)
             .unwrap();
     }
+    e2.decks_set_running("bank1", true).unwrap();
     e2.start_null_realtime().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(300));
     let st = e2.decks_status("bank1").unwrap();
@@ -667,7 +758,8 @@ fn the_surface_lamps_follow_mute_and_monitor() {
 }
 
 /// A bank on its own in an empty patch — what the Decks tab's "add the
-/// deck bank" gesture starts from when the rack is bare.
+/// deck bank" gesture starts from when the rack is bare — started, like
+/// [`bank`].
 fn bare_bank() -> Engine {
     let mut e = Engine::new(
         EngineConfig {
@@ -678,6 +770,7 @@ fn bare_bank() -> Engine {
     )
     .unwrap();
     e.add_module("bank1", DECKS_ID).unwrap();
+    e.decks_set_running("bank1", true).unwrap();
     e
 }
 
@@ -887,6 +980,7 @@ fn the_output_masters_round_trip_through_a_patch() {
     load(&mut e2, 0, 2);
     e2.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
         .unwrap();
+    e2.decks_set_running("bank1", true).unwrap();
     let quiet = peak(&e2.render_offline(24_000).unwrap().remove(0)[4_800..]);
     e2.decks_set_master("bank1", MasterBus::Live, 1.0).unwrap();
     let loud = peak(&e2.render_offline(24_000).unwrap().remove(0)[4_800..]);

@@ -234,12 +234,14 @@ pub fn decks_set_surface(state: State<AppState>, instance: String, follow: bool)
         .map_err(err)
 }
 
-/// Park the bank on beat 0. Where the clock is is not saved state, so
-/// this is not an undoable edit.
+/// Start or stop the bank's clock — the page's transport. A bank is
+/// created and restored stopped, so opening the tab makes no noise on its
+/// own; stopping parks it back on beat 0. Where the clock is is not saved
+/// state, so this is not an undoable edit.
 #[tauri::command]
-pub fn decks_reset(state: State<AppState>, instance: String) -> CmdResult<()> {
+pub fn decks_set_running(state: State<AppState>, instance: String, running: bool) -> CmdResult<()> {
     let mut engine = engine_lock(&state)?;
-    engine.decks_reset(&instance).map_err(err)
+    engine.decks_set_running(&instance, running).map_err(err)
 }
 
 /// Assemble any slot still waiting for its audio. The page calls this

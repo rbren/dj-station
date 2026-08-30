@@ -74,6 +74,7 @@ function loadedSlot(slot: number, over: Partial<DeckSlotStatus> = {}): DeckSlotS
 function makeStatus(over: Partial<DecksStatus> = {}): DecksStatus {
   return {
     bpm: 128,
+    running: true,
     beat: 4.25,
     cycle_beats: 8,
     surface: true,
@@ -99,7 +100,7 @@ function makeApi(status: DecksStatus, over: Partial<DecksApi> = {}): DecksApi {
     setPhase: vi.fn().mockResolvedValue(null),
     setBpm: vi.fn().mockResolvedValue(null),
     setSurface: vi.fn().mockResolvedValue(null),
-    reset: vi.fn().mockResolvedValue(null),
+    setRunning: vi.fn().mockResolvedValue(null),
     rehydrate: vi.fn().mockResolvedValue(0),
     endEdit: vi.fn().mockResolvedValue(null),
     ...over,
@@ -645,13 +646,39 @@ describe('DecksView', () => {
     await waitFor(() => expect(api.setSurface).toHaveBeenCalledWith('decks1', false));
   });
 
-  it('counts beats against the cycle length, and restarts the bank on demand', async () => {
+  it('counts beats against the cycle length', async () => {
     const api = makeApi(makeStatus({ cycle_beats: 24, beat: 5.5 }));
     show(api);
     await waitFor(() => expect(screen.getByTestId('decks-beat').textContent).toBe('beat 6/24'));
     expect(screen.queryByTestId('decks-cycle')).toBeNull();
-    fireEvent.click(screen.getByTestId('decks-restart'));
-    await waitFor(() => expect(api.reset).toHaveBeenCalledWith('decks1'));
+  });
+
+  it('starts and stops the bank, and says which it is', async () => {
+    // A bank the page has just opened: nothing plays until Start is
+    // pressed, and the page says so rather than looking live.
+    const api = makeApi(makeStatus({ running: false }));
+    show(api);
+    await waitFor(() =>
+      expect(screen.getByTestId('decks-start').getAttribute('aria-pressed')).toBe('false'),
+    );
+    expect(screen.getByTestId('decks-stop').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('decks-beat').getAttribute('data-state')).toBe('stopped');
+    expect(api.setRunning).not.toHaveBeenCalled();
+
+    // Start, and the engine's next reading is a running bank — which is
+    // what the page draws (the transport is the engine's state, not a
+    // local flag).
+    api.status = vi.fn().mockResolvedValue(makeStatus({ running: true }));
+    fireEvent.click(screen.getByTestId('decks-start'));
+    await waitFor(() => expect(api.setRunning).toHaveBeenCalledWith('decks1', true));
+    await waitFor(() =>
+      expect(screen.getByTestId('decks-start').getAttribute('aria-pressed')).toBe('true'),
+    );
+    expect(screen.getByTestId('decks-stop').getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByTestId('decks-beat').getAttribute('data-state')).toBe('running');
+
+    fireEvent.click(screen.getByTestId('decks-stop'));
+    await waitFor(() => expect(api.setRunning).toHaveBeenCalledWith('decks1', false));
   });
 
   it('a bank with no cycle length says nothing is loaded instead of a divisor', async () => {

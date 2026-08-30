@@ -125,6 +125,9 @@ export interface DeckSlotStatus {
 
 export interface DecksStatus {
   bpm: number;
+  /** Whether the bank's clock is running: a stopped bank is parked on
+   *  beat 0 and silent, whatever its slots hold. */
+  running: boolean;
   /** Fractional beats since the bank last restarted. */
   beat: number;
   /** Beats until every loaded slot comes round together. */
@@ -164,7 +167,9 @@ export interface DecksApi {
   setPhase(instance: string, slot: number, phase: number): Promise<void | null>;
   setBpm(instance: string, bpm: number): Promise<void | null>;
   setSurface(instance: string, follow: boolean): Promise<void | null>;
-  reset(instance: string): Promise<void | null>;
+  /** The transport: start the bank's clock, or stop it and park it back
+   *  on beat 0 (so the next start comes in from the top of every clip). */
+  setRunning(instance: string, running: boolean): Promise<void | null>;
   /** Assemble any slot still waiting for its audio; resolves to how many
    *  were filled. */
   rehydrate(): Promise<number | null>;
@@ -210,8 +215,8 @@ export class DecksClient extends IpcClient implements DecksApi {
   setSurface(instance: string, follow: boolean) {
     return this.call<void>('decks_set_surface', { instance, follow });
   }
-  reset(instance: string) {
-    return this.call<void>('decks_reset', { instance });
+  setRunning(instance: string, running: boolean) {
+    return this.call<void>('decks_set_running', { instance, running });
   }
   rehydrate() {
     return this.call<number>('decks_rehydrate');

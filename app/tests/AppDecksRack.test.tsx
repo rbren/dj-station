@@ -143,6 +143,7 @@ vi.mock('../src/decks', async (importOriginal) => {
       ensure: vi.fn(async () => 'bank1'),
       status: vi.fn(async () => ({
         bpm: 128,
+        running: true,
         beat: 0,
         cycle_beats: 0,
         surface: false,
@@ -157,7 +158,7 @@ vi.mock('../src/decks', async (importOriginal) => {
       setPhase: vi.fn(async () => null),
       setBpm: vi.fn(async () => null),
       setSurface: vi.fn(async () => null),
-      reset: vi.fn(async () => null),
+      setRunning: vi.fn(async () => null),
       rehydrate: vi.fn(async () => 0),
       endEdit: vi.fn(async () => null),
     },

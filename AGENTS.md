@@ -1599,6 +1599,22 @@ beatify::build`.
   round trip too); the sidecar
   carries the slot mix in a `deck_slots` section (a load resets a slot, so
   the case sets the mix after the audio).
+- THE BANK HAS A TRANSPORT AND STARTS STOPPED (`DecksCmd::Transport`,
+  `Engine::decks_set_running`, `DecksStatus.running`, the page's
+  Start/Stop pair): a bank is created — and restored from a patch —
+  STOPPED, parked on beat 0 with its clock still, because opening the
+  Decks tab is not a reason to make a noise (the tab used to be playing
+  the moment it was opened, with only a "restart" button to press). The
+  transport is TRANSPORT, not patch state: nothing serializes it (only
+  the hot-reload state blob carries it, so a module rebuild does not
+  stop a set), so every test that wants to HEAR a bank has to start it —
+  see `bank()` in the integration tests and the e2e harness, which
+  starts every bank in the case's patch. Stopping FADES: the slots ramp
+  to silence through their own gain smoothing and the beat counter parks
+  only once they are out (`SILENT_GAIN`), so a stop neither clicks nor
+  jumps, and the next start comes in from the top of every clip. A
+  started bank keeps running while another tab is on screen — that is
+  the audio-focus rule's job, not the transport's.
 - Decks JACKS (`decks_manifest`): `bpm` and `reset` in, plus ONE RETURN
   per deck (`d<N>_in`); `audio_l/r`, the monitor pair `mon_l/r`,
   one `clock` gate (a pulse a beat) and per deck ONE SEND (`d<N>_out`)
@@ -2308,9 +2324,15 @@ of the page.
 - The top bar reads left to right as one thought: the tempo is ONE
   control in ONE unit, so the number and its slider stack under a single
   `BPM` label (`.decks-tempo-stack`) with the clock jack — the tempo made
-  audible — right beside them; then the beat readout; then where the bank
-  COMES OUT, `.decks-outs`, a row per pair (live over monitor, keyed by
-  `data-bus`) carrying just that pair's master fader — no L/R jacks. The
+  audible — right beside them; then the beat readout, which dims
+  (`data-state='stopped'` on `.decks-beat`) while the bank is parked, so
+  a count that is not moving does not read as one that is; then where the
+  bank COMES OUT, `.decks-outs`, a row per pair (live over monitor, keyed
+  by `data-bus`) carrying just that pair's master fader — no L/R jacks. The
+  bar's right-hand end is the TRANSPORT, `Start` and `Stop` beside
+  `Follow surface`: two buttons, whichever one is the bank's current
+  state lit (Start in the "playing" green), rather than one "restart"
+  that assumed the bank was already playing. The
   masters are engine state, not chrome: `decks_set_master` ->
   `Engine::decks_set_master`, drafted while dragged exactly like the
   tempo, and `end_edit` on release closes the undo window

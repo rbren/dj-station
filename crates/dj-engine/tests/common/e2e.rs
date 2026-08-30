@@ -315,6 +315,13 @@ fn render_case(case: &str) -> PathBuf {
             engine.decks_arm(&d.instance, d.slot, arm).unwrap();
         }
     }
+    // A bank is created STOPPED and the transport is not patch state (see
+    // `decks_set_running`), so the harness presses play for every bank in
+    // the patch — the Decks page's own Start button, and the only thing
+    // that makes a rendered bank anything but silence.
+    for instance in engine.decks_nodes() {
+        engine.decks_set_running(&instance, true).unwrap();
+    }
     for ev in &events.midi {
         engine.inject_midi(&ev.instance, ev.frame, ev.data).unwrap();
     }

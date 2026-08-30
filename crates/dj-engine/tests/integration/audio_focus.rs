@@ -46,8 +46,9 @@ fn page_pair() -> Engine {
     e
 }
 
-/// Put a two-beat clip in slot 0 and send it to the LIVE mix (a fresh
-/// load lands cued to the monitor).
+/// Put a two-beat clip in slot 0, send it to the LIVE mix (a fresh load
+/// lands cued to the monitor) and START the bank — a bank is created
+/// stopped, so nothing plays until it is asked to.
 fn play_clip(e: &mut Engine) {
     e.decks_load(
         "bank1",
@@ -70,6 +71,7 @@ fn play_clip(e: &mut Engine) {
         .unwrap();
     e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
         .unwrap();
+    e.decks_set_running("bank1", true).unwrap();
 }
 
 fn live(e: &mut Engine, frames: usize) -> Vec<f32> {

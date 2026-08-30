@@ -65,6 +65,7 @@ function slotFixture(slot: number): DeckSlotStatus {
 
 const STATUS: DecksStatus = {
   bpm: 128,
+  running: true,
   beat: 0,
   cycle_beats: 0,
   surface: false,
@@ -88,7 +89,7 @@ function makeApi(): DecksApi {
     setPhase: vi.fn().mockResolvedValue(null),
     setBpm: vi.fn().mockResolvedValue(null),
     setSurface: vi.fn().mockResolvedValue(null),
-    reset: vi.fn().mockResolvedValue(null),
+    setRunning: vi.fn().mockResolvedValue(null),
     rehydrate: vi.fn().mockResolvedValue(0),
     endEdit: vi.fn().mockResolvedValue(null),
   };

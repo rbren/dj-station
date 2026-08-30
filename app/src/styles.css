@@ -5795,6 +5795,12 @@ body {
   font-size: var(--fs-md);
 }
 
+/* A parked count is not a count: a stopped bank's beat reads as quietly
+   as the rest of the readout around it. */
+.decks-beat[data-state='stopped'] {
+  color: var(--ink-dim);
+}
+
 /* Where the bank comes out: the live pair over the monitor pair, each a
    row of its own so the two read as the two destinations they are. */
 .decks-outs {
@@ -5876,6 +5882,13 @@ body {
 .decks-btn.is-on {
   background: color-mix(in srgb, var(--brand) 28%, var(--canvas));
   border-color: color-mix(in srgb, var(--brand) 70%, var(--line-strong));
+}
+
+/* The transport's lit half is the bank RUNNING, so it takes the same
+   green a playing strip is tinted with rather than the brand tint. */
+.decks-btn-start.is-on {
+  background: color-mix(in srgb, var(--ok) 26%, var(--canvas));
+  border-color: color-mix(in srgb, var(--ok) 70%, var(--line-strong));
 }
 
 /* Monitor sends the deck to the headphones instead of the room, so it

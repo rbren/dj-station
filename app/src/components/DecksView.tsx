@@ -9,14 +9,19 @@
 // (decks_ensure keeps them wired to outputs) — and the eight strips
 // (each with its send/return and tone-CV jacks) sit below.
 //
+// The bank is STOPPED until the bar's Start is pressed — opening the tab
+// is not a reason to make a noise, and a bank restored with the app comes
+// back parked — and Stop puts it back on beat 0, so the next Start comes
+// in from the top of every clip.
+//
 // The page is a big panel for a single rack module (`builtin.decks`) — the
-// bank is in the patch and keeps RUNNING when the tab is not looking (it
-// is the OUTPUT that the open page owns, see `audioFocusForView`), so
-// this file only reads its state and writes edits back. Everything the
-// page shows comes from ONE poll of `decks_status` (the engine owns the
-// phase arithmetic and the stretch), which is what keeps
-// the page and a Launch Control XL saying the same thing: the hardware
-// writes the same state through the same commands.
+// bank is in the patch and a started one keeps RUNNING when the tab is not
+// looking (it is the OUTPUT that the open page owns, see
+// `audioFocusForView`), so this file only reads its state and writes edits
+// back. Everything the page shows comes from ONE poll of `decks_status`
+// (the engine owns the phase arithmetic and the stretch), which is what
+// keeps the page and a Launch Control XL saying the same thing: the
+// hardware writes the same state through the same commands.
 //
 // PATCHING here is the Rack tab's own machinery, not a copy: jack clicks
 // go through App's `onJackClick` (same pending-wire grammar, same colors),
@@ -360,6 +365,7 @@ export function DecksView(props: DecksViewProps) {
   }, [collapsed]);
 
   const bpm = bpmDraft ?? status?.bpm ?? 120;
+  const running = status?.running ?? false;
   const slots = useMemo(() => status?.slots ?? [], [status]);
   const shownSlots = useMemo(() => slots.map((s) => withDrafts(s, drafts)), [slots, drafts]);
 
@@ -450,7 +456,11 @@ export function DecksView(props: DecksViewProps) {
           </span>
         </div>
         <div className="decks-readout">
-          <span className="decks-beat mono" data-testid="decks-beat">
+          <span
+            className="decks-beat mono"
+            data-testid="decks-beat"
+            data-state={running ? 'running' : 'stopped'}
+          >
             beat {Math.floor(status?.beat ?? 0) + 1}
             {status && status.cycle_beats > 0 ? `/${status.cycle_beats}` : ''}
           </span>
@@ -504,8 +514,25 @@ export function DecksView(props: DecksViewProps) {
           >
             Follow surface
           </button>
-          <button data-testid="decks-restart" onClick={() => void write(() => api.reset(bank))}>
-            Restart
+          {/* The transport. A bank is stopped until it is asked to play —
+              opening this tab is not a reason to make a noise — and Stop
+              parks it back on beat 0, so Start always comes in from the
+              top of every clip. */}
+          <button
+            className={`decks-btn decks-btn-start${running ? ' is-on' : ''}`}
+            data-testid="decks-start"
+            aria-pressed={running}
+            onClick={() => void write(() => api.setRunning(bank, true))}
+          >
+            Start
+          </button>
+          <button
+            className={`decks-btn${running ? '' : ' is-on'}`}
+            data-testid="decks-stop"
+            aria-pressed={!running}
+            onClick={() => void write(() => api.setRunning(bank, false))}
+          >
+            Stop
           </button>
         </div>
       </header>

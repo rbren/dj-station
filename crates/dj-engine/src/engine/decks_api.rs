@@ -327,13 +327,17 @@ impl Engine {
         self.push_slot(node, slot)
     }
 
-    /// Park the whole bank on beat 0 — the transport's one button. Not a
-    /// patch edit: where the clock is is not saved state.
-    pub fn decks_reset(&mut self, instance_id: &str) -> Result<()> {
+    /// Start or stop the bank's clock — the transport. A bank is created
+    /// and restored STOPPED (nothing plays until it is asked to), and
+    /// stopping parks it back on beat 0, so a start always comes in from
+    /// the top of every clip. Not a patch edit: like an arm, where the
+    /// clock is and whether it is moving are not saved state.
+    pub fn decks_set_running(&mut self, instance_id: &str, running: bool) -> Result<()> {
         let node = self.decks_node(instance_id)?;
         let ctl = self.clip_decks.get_mut(&node).unwrap();
+        ctl.running = running;
         ctl.tx
-            .push(DecksCmd::Reset)
+            .push(DecksCmd::Transport { running })
             .map_err(|_| anyhow!("too many pending deck edits"))
     }
 
@@ -576,6 +580,7 @@ impl Engine {
             .collect();
         Ok(DecksStatus {
             bpm: bank_bpm,
+            running: ctl.running,
             beat: ctl.shared.beat(),
             cycle_beats: cycle_beats(&lengths),
             surface: self.nodes[node].params.get(SURFACE_PARAM).copied() != Some(0.0),
