@@ -4,7 +4,8 @@
 
 The full release test suite is a few minutes warm (it was 20+ before the
 test targets were consolidated — see below; keep it that way). Do NOT use it
-as an iteration loop.
+as an iteration loop. Measured wall-clock times for every build/test
+command (cold and warm) are in `reports/TIMINGS_REPORT.md`.
 
 - While developing, run only the tests affected by your change, scoped
   tightly: `cargo test -p <crate> --release --test <target>` or, better, a
