@@ -7,6 +7,13 @@ test targets were consolidated — see below; keep it that way). Do NOT use it
 as an iteration loop. Measured wall-clock times for every build/test
 command (cold and warm) are in `reports/TIMINGS_REPORT.md`.
 
+- MATCH THE VERIFICATION TO THE SIZE OF THE CHANGE. A trivial change (a
+  label or copy tweak, a style/token swap, a comment or doc edit, a
+  constant nudge, a rename) does NOT earn a test run: check it compiles /
+  typechecks, run at most the one test file that covers the thing you
+  touched, and finish. Only reach for tests that could FEASIBLY have
+  changed behaviour — if you cannot name the test that would catch a
+  regression from your edit, don't run tests at all.
 - While developing, run only the tests affected by your change, scoped
   tightly: `cargo test -p <crate> --release --test <target>` or, better, a
   single test name filter (`--test integration <name>`). Never
@@ -2304,3 +2311,12 @@ of the page.
   `integration workspaces` and the `decks-bank-two-clips` /
   `decks-master-mix` / `decks-rack-insert` / `workspace-focus-split`
   E2E goldens.
+
+## Manager
+
+- 2026-08-30 — "change AGENTS.md to tell the agents to spend less time
+  verifying trivial changes. only run tests that have feasibly changed
+  rather than full test suites". Added a rule at the top of "Test
+  discipline — be tactical": match verification to the size of the change,
+  no test run for trivial edits, only tests that could feasibly have
+  changed behaviour.
