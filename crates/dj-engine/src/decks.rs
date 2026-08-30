@@ -205,14 +205,14 @@ const GAIN_SMOOTH_SECS: f32 = 0.010;
 const SILENT_GAIN: f32 = 1e-4;
 
 /// Time constant of a deck's OUTPUT METER
-/// ([`DecksShared::slot_output_level`]): the level it publishes follows
-/// the deck over roughly the last second, exponentially weighted, so the
-/// beat that just played counts most and a deck that stops — muted,
-/// dropped, or on a silent beat — fades out instead of latching. The
-/// average runs over the SQUARE of the signal, so the coefficient is cut
-/// in half to leave the LEVEL with this constant. It is integrated
-/// sample by sample on the RT thread because the UI's 100 ms poll would
-/// alias a transient away.
+/// ([`DecksShared::slot_output_level`]): the level it publishes is the
+/// PEAK of the deck's output — jumping straight up to a transient and
+/// decaying exponentially over roughly this long, so a deck that stops —
+/// muted, dropped, or on a silent beat — fades out instead of latching.
+/// The peak is held over the SQUARE of the signal, so the decay rate is
+/// doubled to leave the LEVEL with this constant. It is tracked sample
+/// by sample on the RT thread because the UI's 100 ms poll would alias a
+/// transient away.
 const METER_WINDOW_SECS: f32 = 1.0;
 
 /// Beats a bank's cycle is reported up to; beyond it the clips are not
@@ -635,7 +635,7 @@ pub struct SlotShared {
     /// from "not looked at yet" ([`DecksControl::live_arm`]).
     arm: AtomicU8,
     arm_serial: AtomicU64,
-    /// RMS of what this deck put on its bus, smoothed over
+    /// Decaying peak of what this deck put on its bus, falling over
     /// [`METER_WINDOW_SECS`] (f32 bit pattern).
     out_level: AtomicU32,
 }
@@ -680,10 +680,11 @@ impl DecksShared {
     pub fn slot_arm_serial(&self, slot: usize) -> u64 {
         self.slots[slot].arm_serial.load(Ordering::Relaxed)
     }
-    /// How loud this deck's OUTPUT has been over roughly the last second
-    /// ([`METER_WINDOW_SECS`]): the RMS of what it actually put on its
-    /// bus — post insert, post tone, post fader and post mute — so a deck
-    /// that is muted, dropped or on a silent beat decays to 0.
+    /// How loud this deck's OUTPUT has peaked over roughly the last
+    /// second ([`METER_WINDOW_SECS`]): the decaying maximum of what it
+    /// actually put on its bus — post insert, post tone, post fader and
+    /// post mute — so a deck that is muted, dropped or on a silent beat
+    /// decays to 0.
     pub fn slot_output_level(&self, slot: usize) -> f32 {
         f32::from_bits(self.slots[slot].out_level.load(Ordering::Relaxed))
     }
@@ -880,9 +881,9 @@ pub struct DeckSlotStatus {
     /// Whether that beat is the clip's own audio rather than its tail.
     pub sounding: bool,
     pub playing: bool,
-    /// How loud this deck's output has been over roughly the last second
-    /// ([`DecksShared::slot_output_level`]) — an RMS in engine units, 0
-    /// once it is muted, dropped or on a silent beat.
+    /// How loud this deck's output has peaked over roughly the last
+    /// second ([`DecksShared::slot_output_level`]) — a decaying maximum
+    /// in engine units, 0 once it is muted, dropped or on a silent beat.
     pub output_level: f32,
     /// A quantized start or stop the bank's clock is still holding: the
     /// mute above is where this deck is GOING, the arm is what it is
@@ -960,7 +961,7 @@ struct RtSlot {
     last_local: f64,
     /// Smoothed level actually applied, so mute/monitor/fader moves ramp.
     gain: f32,
-    /// Exponentially weighted mean square of this deck's output over
+    /// Decaying peak of this deck's output squared, falling over
     /// [`METER_WINDOW_SECS`] — the meter the page tints a strip from.
     meter: f32,
     grains: GrainStretch,
@@ -1080,8 +1081,8 @@ pub struct DecksRtModule {
     a_low: f32,
     a_high: f32,
     a_gain: f32,
-    /// One-pole coefficient of the per-deck output meter.
-    a_meter: f32,
+    /// Per-sample decay multiplier of the per-deck output meter's peak.
+    meter_decay: f32,
     /// Samples of the clock output's pulse still to go, and the beat the
     /// last one was fired on.
     clock_left: u32,
@@ -1116,7 +1117,7 @@ impl DecksRtModule {
             a_low: one_pole(EQ_LOW_HZ, rate),
             a_high: one_pole(EQ_HIGH_HZ, rate),
             a_gain: 1.0 - (-1.0 / (GAIN_SMOOTH_SECS * rate)).exp(),
-            a_meter: 1.0 - (-2.0 / (METER_WINDOW_SECS * rate)).exp(),
+            meter_decay: (-2.0 / (METER_WINDOW_SECS * rate)).exp(),
             clock_left: 0,
             clock_len: ((rate * CLOCK_PULSE_SECS) as u32).max(1),
             // Beat 0 has not happened yet: the first sample fires it.
@@ -1226,7 +1227,8 @@ impl HostModule for DecksRtModule {
 
         let bpm = &inputs[IN_BPM];
         let reset = &inputs[IN_RESET];
-        let (a_low, a_high, a_gain, a_meter) = (self.a_low, self.a_high, self.a_gain, self.a_meter);
+        let (a_low, a_high, a_gain, meter_decay) =
+            (self.a_low, self.a_high, self.a_gain, self.meter_decay);
         let master = self.master;
         let engine_rate = self.engine_rate;
         let running = self.running;
@@ -1334,12 +1336,12 @@ impl HostModule for DecksRtModule {
                 l += wet * (wet_signal - l);
                 r += wet * (wet_signal - r);
                 // What this deck ACTUALLY put out, metered every sample:
-                // a silent slot is a run of zeros through the same
-                // average, which is what makes a mute or a silent beat
-                // fade rather than latch. (`l`/`r` are still zero unless
-                // the slot is sounding or has an insert.)
+                // the peak jumps straight up to a transient and decays on
+                // a run of zeros, which is what makes a mute or a silent
+                // beat fade rather than latch. (`l`/`r` are still zero
+                // unless the slot is sounding or has an insert.)
                 let (out_l, out_r) = (l * slot.gain, r * slot.gain);
-                slot.meter += a_meter * (0.5 * (out_l * out_l + out_r * out_r) - slot.meter);
+                slot.meter = (0.5 * (out_l * out_l + out_r * out_r)).max(slot.meter * meter_decay);
                 if !insert && !sounding {
                     continue;
                 }
@@ -2317,19 +2319,19 @@ mod tests {
     }
 
     #[test]
-    fn the_output_meter_averages_a_decks_own_output_and_fades_to_nothing_when_it_stops() {
+    fn the_output_meter_peaks_at_a_decks_own_output_and_fades_to_nothing_when_it_stops() {
         let (mut tx, mut m, shared) = rt_bank();
         load(&mut tx, 0, 2, 0.5);
         mix(&mut tx, 0, 1.0, false, false);
-        // Two seconds — two of the meter's time constants, so it has
-        // all but caught up with the deck.
+        // Two seconds — a couple of the meter's decay constants — to
+        // show the reading holds steady while the deck plays.
         for _ in 0..4 {
             block(&mut m, BEAT);
         }
         let playing = shared.slot_output_level(0);
         assert!(
             (0.45..=0.5).contains(&playing),
-            "a deck putting out 0.5 reads its RMS, got {playing}"
+            "a deck putting out 0.5 reads its peak, got {playing}"
         );
         assert_eq!(
             shared.slot_output_level(1),
@@ -2337,7 +2339,7 @@ mod tests {
             "a deck holding nothing puts out nothing"
         );
 
-        // A mute is not a jump to black: the same average carries the
+        // A mute is not a jump to black: the peak's decay carries the
         // tint down, most of the way inside its window.
         mix(&mut tx, 0, 1.0, true, false);
         block(&mut m, BEAT * 2);

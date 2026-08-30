@@ -93,8 +93,8 @@ export function DecksSlot(props: DecksSlotProps) {
   const loop = loopBeats(slot);
   const parts = clipParts(slot.clip);
   // The strip lights up with what this deck is putting out. The reading
-  // is the ENGINE's — an exponentially weighted second of the deck's own
-  // output — so the tint rises with the music and falls back to the
+  // is the ENGINE's — the deck's own peak over roughly the last second,
+  // decaying — so the tint jumps with the music and falls back to the
   // strip's black on its own when the deck is muted, drops, or plays a
   // silent beat: nothing here has to decide when the green ends.
   const glow = deckGlow(slot.output_level);

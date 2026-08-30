@@ -1577,8 +1577,8 @@ beatify::build`.
   saved 1.0 is now mid-fader, not the top). Double-clicking the fader
   (Knob's `onReset`) puts a deck back to unity; a load still leaves the
   level the user set alone. Each deck's OUTPUT LEVEL is metered on the
-  RT thread — an exponentially weighted average of what that deck
-  actually put on its bus over `METER_WINDOW_SECS` (1 s), published as
+  RT thread — the peak of what that deck actually put on its bus,
+  decaying exponentially over `METER_WINDOW_SECS` (1 s), published as
   `DecksShared::slot_output_level` / `DeckSlotStatus.output_level` — so
   the page tints a strip with the reading instead of point-sampling it
   at 100 ms (`--deck-level`, see the Decks page section). MONITOR
@@ -2380,10 +2380,10 @@ of the page.
   Endpoint GEOMETRY is pinned by `app/tests/DecksChromeWires.test.tsx` —
   keep pinning numbers, not just "a wire exists".
 - A strip is LIT BY ITS OWN OUTPUT: `DecksSlot` maps `output_level` (the
-  engine's 1 s weighted average, above) through `deckGlow`/
+  engine's decaying 1 s peak, above) through `deckGlow`/
   `DECK_GLOW_FULL` in `decks.ts` to a `--deck-level` custom property on
   the section, and `.decks-slot` mixes that share of `--ok` into its
-  background, border and inner glow. The fade is the ENGINE's average —
+  background, border and inner glow. The fade is the ENGINE's meter —
   a mute, a drop, a silent beat or a stopped deck all decay to black on
   their own, so the page never decides when the green ends. The tint is
   colour only (the transition dies in the `prefers-reduced-motion`

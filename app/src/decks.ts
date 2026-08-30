@@ -114,9 +114,9 @@ export interface DeckSlotStatus {
   /** Whether the playhead is inside the clip rather than its silence. */
   sounding: boolean;
   playing: boolean;
-  /** How loud this deck's output has been over roughly the last second —
-   *  an RMS in engine units, exponentially weighted towards now by the
-   *  engine, so a mute, a drop or a silent beat decays it to 0. */
+  /** How loud this deck's output has peaked over roughly the last second
+   *  — a maximum in engine units, decayed exponentially by the engine, so
+   *  a mute, a drop or a silent beat fades it to 0. */
   output_level: number;
   /** A queue or drop the bank's clock is still holding; the mute above is
    *  already where the deck is going. */
@@ -282,7 +282,7 @@ export function phaseForBeat(slot: DeckSlotStatus, beat: number): number {
   return ((Math.round(beat) % len) + len) % len;
 }
 
-/** Output RMS a strip is as green as it gets at — a deck running hot,
+/** Output peak a strip is as green as it gets at — a deck running hot,
  *  about −9 dBFS. Above it the tint simply stops, so a loud deck cannot
  *  keep getting greener and lose the difference between the others. */
 export const DECK_GLOW_FULL = 0.35;
@@ -290,8 +290,8 @@ export const DECK_GLOW_FULL = 0.35;
 /** How lit a deck's strip is, 0..1: its output level against a hot deck.
  *  Linear in amplitude, so the tint follows what the ear calls loudness
  *  and near-silence is black rather than a permanent faint green — the
- *  fade itself is the engine's own 1 s average (`output_level`), not
- *  anything this side smooths. */
+ *  fade itself is the engine's own decaying 1 s peak (`output_level`),
+ *  not anything this side smooths. */
 export function deckGlow(level: number): number {
   if (!Number.isFinite(level) || level <= 0) return 0;
   return Math.min(1, level / DECK_GLOW_FULL);
