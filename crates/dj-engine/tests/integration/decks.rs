@@ -9,15 +9,16 @@
 //! - a Launch Control XL column drives its slot (knobs = tone controls,
 //!   fader = level, buttons TOGGLE mute and monitor on ONE press, and the
 //!   lamps follow),
-//! - a cued deck leaves the live mix for the monitor bus,
+//! - a cued deck leaves the live mix for the monitor bus, and each of the
+//!   two pairs has a master fader of its own,
 //! - and the whole bank — bindings and mix — round-trips through a patch,
 //!   whose reload asks the app layer for the audio back.
 
 use dj_engine::beat_clip::BeatClipRef;
 use dj_engine::builtin::MONITOR_OUT_ID;
 use dj_engine::decks::{
-    led, DeckArm, SlotControl, DECKS_ID, DEFAULT_SURFACE_CHANNEL, EQ_MAX, MOMENTARY_RELEASE_SECS,
-    SLOTS,
+    led, DeckArm, MasterBus, SlotControl, DECKS_ID, DEFAULT_SURFACE_CHANNEL, EQ_MAX,
+    MOMENTARY_RELEASE_SECS, SLOTS,
 };
 use dj_engine::playback::TrackData;
 use dj_engine::{Engine, EngineConfig};
@@ -687,6 +688,76 @@ fn a_monitored_deck_leaves_the_live_mix_for_the_monitor_one() {
     );
     let monitor = e.render_offline_monitor(24_000).unwrap().remove(0);
     assert!(peak(&monitor[4_800..]) > 0.1, "and puts it in the cue");
+}
+
+#[test]
+fn each_output_pair_has_a_master_of_its_own() {
+    let mut e = bank();
+    e.add_module("mon1", MONITOR_OUT_ID).unwrap();
+    e.connect("bank1", "mon_l", "mon1", "l").unwrap();
+    // Two decks: one for the room, one cued into the headphones.
+    load(&mut e, 0, 2);
+    load(&mut e, 1, 2);
+    for slot in [0, 1] {
+        e.decks_set_control("bank1", slot, SlotControl::Mute, 0.0)
+            .unwrap();
+    }
+    e.decks_set_control("bank1", 1, SlotControl::Monitor, 10.0)
+        .unwrap();
+    let full_live = peak(&e.render_offline(24_000).unwrap().remove(0)[4_800..]);
+    let full_cue = peak(&e.render_offline_monitor(24_000).unwrap().remove(0)[4_800..]);
+    assert!(full_live > 0.1 && full_cue > 0.1);
+
+    // Half the room, and the cue untouched: a master is one pair's.
+    e.decks_set_master("bank1", MasterBus::Live, 0.5).unwrap();
+    let live = peak(&e.render_offline(24_000).unwrap().remove(0)[4_800..]);
+    let cue = peak(&e.render_offline_monitor(24_000).unwrap().remove(0)[4_800..]);
+    assert!(
+        (live / full_live - 0.5).abs() < 0.02,
+        "the live master halved the room ({live} of {full_live})"
+    );
+    assert!(
+        (cue - full_cue).abs() < 1e-3,
+        "and left the headphones where they were"
+    );
+
+    // And the other way round.
+    e.decks_set_master("bank1", MasterBus::Monitor, 0.0)
+        .unwrap();
+    let cue = peak(&e.render_offline_monitor(24_000).unwrap().remove(0)[4_800..]);
+    assert!(cue < 1e-3, "a closed cue master is silence in the phones");
+    let live = peak(&e.render_offline(24_000).unwrap().remove(0)[4_800..]);
+    assert!((live / full_live - 0.5).abs() < 0.02, "the room plays on");
+
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!((st.master_live, st.master_monitor), (0.5, 0.0));
+}
+
+#[test]
+fn the_output_masters_round_trip_through_a_patch() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = bank();
+    e.decks_set_master("bank1", MasterBus::Live, 0.7).unwrap();
+    e.decks_set_master("bank1", MasterBus::Monitor, 0.25)
+        .unwrap();
+    e.save_patch(&dir.path().join("p"), "decks").unwrap();
+
+    let mut e2 = Engine::load_patch(&dir.path().join("p"), crate::common::registry()).unwrap();
+    let st = e2.decks_status("bank1").unwrap();
+    assert_eq!((st.master_live, st.master_monitor), (0.7, 0.25));
+
+    // And the restored bank SOUNDS at the level it was saved at — the
+    // faders reach the RT thread on the way back in, not just the status.
+    load(&mut e2, 0, 2);
+    e2.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+        .unwrap();
+    let quiet = peak(&e2.render_offline(24_000).unwrap().remove(0)[4_800..]);
+    e2.decks_set_master("bank1", MasterBus::Live, 1.0).unwrap();
+    let loud = peak(&e2.render_offline(24_000).unwrap().remove(0)[4_800..]);
+    assert!(
+        (quiet / loud - 0.7).abs() < 0.02,
+        "the saved master was what was playing ({quiet} of {loud})"
+    );
 }
 
 #[test]

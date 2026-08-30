@@ -1,0 +1,33 @@
+{
+  "seconds": 1.0,
+  "midi": [],
+  "tracks": [
+    {
+      "instance": "bank1",
+      "file": "two-beat.wav",
+      "bpm": 120.0,
+      "slot": 0
+    },
+    {
+      "instance": "bank1",
+      "file": "cue-beat.wav",
+      "bpm": 120.0,
+      "slot": 1
+    }
+  ],
+  "deck_slots": [
+    {
+      "instance": "bank1",
+      "slot": 0,
+      "level": 1.0,
+      "mute": false
+    },
+    {
+      "instance": "bank1",
+      "slot": 1,
+      "level": 1.0,
+      "mute": false,
+      "monitor": true
+    }
+  ]
+}

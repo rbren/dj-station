@@ -70,6 +70,8 @@ function makeStatus(over: Partial<DecksStatus> = {}): DecksStatus {
     cycle_beats: 8,
     surface: true,
     surface_connected: true,
+    master_live: 1,
+    master_monitor: 1,
     slots: Array.from({ length: 8 }, (_, i) => emptySlot(i)),
     ...over,
   };
@@ -83,6 +85,7 @@ function makeApi(status: DecksStatus, over: Partial<DecksApi> = {}): DecksApi {
     load: vi.fn().mockResolvedValue(null),
     clear: vi.fn().mockResolvedValue(null),
     setControl: vi.fn().mockResolvedValue(null),
+    setMaster: vi.fn().mockResolvedValue(null),
     arm: vi.fn().mockResolvedValue(null),
     setTail: vi.fn().mockResolvedValue(null),
     setPhase: vi.fn().mockResolvedValue(null),
@@ -322,6 +325,58 @@ describe('DecksView', () => {
     await waitFor(() => expect(api.setBpm).toHaveBeenCalledWith('decks1', 300));
   });
 
+  it('the tempo is one control in one unit: the number and its slider under a single BPM label', async () => {
+    const api = makeApi(makeStatus());
+    show(api);
+    const tempo = (await screen.findByTestId('decks-bpm')).closest('.decks-tempo-stack');
+    expect(tempo).toBeTruthy();
+    const labels = within(tempo as HTMLElement).getAllByText(/bpm/i);
+    expect(labels).toHaveLength(1);
+    expect(labels[0].getAttribute('for')).toBe('decks-bpm');
+    // Both readings of the tempo live under that label, and nothing else.
+    expect(within(tempo as HTMLElement).getByTestId('decks-bpm-slider')).toBeTruthy();
+    // The clock the two of them run stands beside the stack, not across
+    // the bar from it.
+    const tempoGroup = screen.getByTestId('decks-clock-jack').closest('.decks-tempo');
+    expect(tempoGroup?.contains(screen.getByTestId('decks-bpm'))).toBe(true);
+  });
+
+  it('the two output pairs are stacked, each with its jacks and its master fader', async () => {
+    const api = makeApi(makeStatus({ master_live: 0.8, master_monitor: 0.4 }));
+    const { container } = show(api);
+    const outs = await screen.findByTestId('decks-outs');
+    // Live above monitor, in that order.
+    const rows = Array.from(outs.children).map((row) => row.getAttribute('data-bus'));
+    expect(rows).toEqual(['live', 'monitor']);
+
+    for (const jack of ['audio_l', 'audio_r', 'mon_l', 'mon_r']) {
+      expect(container.querySelector(`[data-jack="decks1:output:${jack}"]`)).toBeTruthy();
+    }
+
+    const live = screen.getByTestId<HTMLInputElement>('decks-master-live');
+    const monitor = screen.getByTestId<HTMLInputElement>('decks-master-monitor');
+    await waitFor(() => expect(live.value).toBe('0.8'));
+    expect(monitor.value).toBe('0.4');
+
+    fireEvent.change(live, { target: { value: '0.5' } });
+    await waitFor(() => expect(api.setMaster).toHaveBeenCalledWith('decks1', 'live', 0.5));
+    fireEvent.change(monitor, { target: { value: '1' } });
+    await waitFor(() => expect(api.setMaster).toHaveBeenCalledWith('decks1', 'monitor', 1));
+    fireEvent.pointerUp(monitor);
+    await waitFor(() => expect(api.endEdit).toHaveBeenCalled());
+  });
+
+  it('a master the user is dragging stays where they are dragging it until the engine agrees', async () => {
+    const api = makeApi(makeStatus({ master_live: 1 }));
+    show(api);
+    const live = await screen.findByTestId<HTMLInputElement>('decks-master-live');
+    fireEvent.change(live, { target: { value: '0.25' } });
+    // The poll keeps answering 1 — the drag wins while it is in hand.
+    await waitFor(() => expect(api.setMaster).toHaveBeenCalled());
+    expect(live.value).toBe('0.25');
+    expect(screen.getByTestId('decks-out-live').textContent).toContain('25%');
+  });
+
   it('loading a clip picks it by name and puts it in the deck that asked', async () => {
     const api = makeApi(makeStatus());
     show(api);
@@ -502,10 +557,17 @@ describe('the deck chrome is the bank, on jacks', () => {
     ]);
     expect(within(io).getByTestId('jack-output-d1_l').querySelector('.jack-name')).toBeNull();
     expect(within(io).getByTestId('jack-input-d1_in_r').querySelector('.jack-name')).toBeNull();
-    // The bank's clock rides in the top bar, next to the beat it counts.
+    // The bank's clock rides in the top bar, beside the tempo it counts,
+    // and so do the two pairs the bank comes out of.
     const clock = screen.getByTestId('decks-clock-jack');
     expect(within(clock).getByTestId('jack-output-clock')).toBeTruthy();
     expect(jackSocket(container, 'decks1:output:clock')).toBeTruthy();
+    const live = screen.getByTestId('decks-out-live');
+    expect(within(live).getByTestId('jack-output-audio_l')).toBeTruthy();
+    expect(within(live).getByTestId('jack-output-audio_r')).toBeTruthy();
+    const cue = screen.getByTestId('decks-out-monitor');
+    expect(within(cue).getByTestId('jack-output-mon_l')).toBeTruthy();
+    expect(within(cue).getByTestId('jack-output-mon_r')).toBeTruthy();
   });
 
   it('clicking a chrome jack goes through the rack grammar, bank instance first', async () => {
@@ -519,6 +581,8 @@ describe('the deck chrome is the bank, on jacks', () => {
     expect(onJackClick).toHaveBeenCalledWith('decks1', 'input', 'd1_in_r', true);
     fireEvent.click(screen.getByTestId('jack-output-clock'));
     expect(onJackClick).toHaveBeenCalledWith('decks1', 'output', 'clock', false);
+    fireEvent.click(screen.getByTestId('jack-output-mon_l'), { shiftKey: true });
+    expect(onJackClick).toHaveBeenCalledWith('decks1', 'output', 'mon_l', true);
   });
 
   it('a wired chrome jack shows its cable, and the armed one lights in the pending color', async () => {

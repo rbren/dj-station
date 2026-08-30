@@ -235,6 +235,80 @@ fn regen_decks_rack_insert() {
     );
 }
 
+/// `decks-master-mix`: two decks, one in the room and one cued into the
+/// headphones, under the bank's two MASTER faders — the live one pulled
+/// down to 0.6, the cue one left open. The golden is the master bus, so
+/// it pins two things: everything on the live pair comes out at the live
+/// master's level, and the cued deck is not in the room at all whatever
+/// the cue master says. Both faders are saved IN THE PATCH (they are bank
+/// state, like the slot mix), so the case also pins their round trip: the
+/// render is played from the file, not from the builder.
+fn regen_decks_master_mix() {
+    let dir = case_dir("decks-master-mix");
+    write_case_tone(&dir.join("two-beat.wav"), 220.0, 1.0);
+    write_case_tone(&dir.join("cue-beat.wav"), 330.0, 1.0);
+
+    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
+    e.add_module("bank1", "builtin.decks").unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.set_knob_value("bank1", "bpm", 120.0).unwrap();
+    e.connect("bank1", "audio_l", "out1", "l").unwrap();
+    e.connect("bank1", "audio_r", "out1", "r").unwrap();
+    e.decks_set_master("bank1", dj_engine::decks::MasterBus::Live, 0.6)
+        .unwrap();
+    e.decks_set_master("bank1", dj_engine::decks::MasterBus::Monitor, 1.0)
+        .unwrap();
+
+    e.save_patch(&dir.join("patch"), "e2e-decks-master-mix")
+        .unwrap();
+    write_events(
+        &dir,
+        &EventsFile {
+            seconds: 1.0,
+            tracks: vec![
+                TrackLoadSpec {
+                    instance: "bank1".into(),
+                    file: "two-beat.wav".into(),
+                    bpm: Some(120.0),
+                    slot: Some(0),
+                },
+                TrackLoadSpec {
+                    instance: "bank1".into(),
+                    file: "cue-beat.wav".into(),
+                    bpm: Some(120.0),
+                    slot: Some(1),
+                },
+            ],
+            deck_slots: vec![
+                DecksSlotSpec {
+                    instance: "bank1".into(),
+                    slot: 0,
+                    level: Some(1.0),
+                    mute: Some(false),
+                    ..slot_defaults()
+                },
+                DecksSlotSpec {
+                    instance: "bank1".into(),
+                    slot: 1,
+                    level: Some(1.0),
+                    mute: Some(false),
+                    monitor: Some(true),
+                    ..slot_defaults()
+                },
+            ],
+            ..EventsFile::default()
+        },
+    );
+}
+
+#[test]
+fn decks_master_mix() {
+    if regen() {
+        regen_decks_master_mix();
+    }
+    check_case("decks-master-mix");
+}
+
 #[test]
 fn decks_bank_two_clips() {
     if regen() {

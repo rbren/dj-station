@@ -196,6 +196,8 @@ enum EditKey<'a> {
     /// One control of a Decks slot; coalesced per control so a fader drag
     /// is one undo step.
     DeckSlotControl(&'a str, usize, &'static str),
+    /// The fader on one of a bank's two output pairs, per bus.
+    DeckMaster(&'a str, &'static str),
 }
 
 impl std::fmt::Display for EditKey<'_> {
@@ -239,6 +241,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::Track(i) => write!(f, "track:{i}"),
             EditKey::DeckSlot(i, s) => write!(f, "deckslot:{i}:{s}"),
             EditKey::DeckSlotControl(i, s, c) => write!(f, "deckctl:{i}:{s}:{c}"),
+            EditKey::DeckMaster(i, b) => write!(f, "deckmaster:{i}:{b}"),
         }
     }
 }
@@ -3101,6 +3104,7 @@ fn main() {
             decks::decks_load,
             decks::decks_clear,
             decks::decks_set_control,
+            decks::decks_set_master,
             decks::decks_arm,
             decks::decks_set_tail,
             decks::decks_set_phase,

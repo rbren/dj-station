@@ -66,6 +66,8 @@ const STATUS: DecksStatus = {
   cycle_beats: 0,
   surface: false,
   surface_connected: false,
+  master_live: 1,
+  master_monitor: 1,
   slots: Array.from({ length: 8 }, (_, i) => slotFixture(i)),
 };
 
@@ -77,6 +79,7 @@ function makeApi(): DecksApi {
     load: vi.fn().mockResolvedValue(null),
     clear: vi.fn().mockResolvedValue(null),
     setControl: vi.fn().mockResolvedValue(null),
+    setMaster: vi.fn().mockResolvedValue(null),
     arm: vi.fn().mockResolvedValue(null),
     setTail: vi.fn().mockResolvedValue(null),
     setPhase: vi.fn().mockResolvedValue(null),

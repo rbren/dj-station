@@ -10,13 +10,15 @@
 //!
 //! Every write goes through [`Engine::write_slot`], so the control-side
 //! state and the RT mirror can never disagree, whether the edit came from
-//! the panel or off the Launch Control XL.
+//! the panel or off the Launch Control XL. The bank's two output faders
+//! ([`Engine::decks_set_master`]) are the same shape one level up: bank
+//! state in the patch, mirrored to the RT thread.
 
 use super::*;
 use crate::decks::{
     cycle_beats, led_for, return_jack, tone_jack, DeckArm, DeckSlotState, DeckSlotStatus, DecksCmd,
-    DecksState, DecksStatus, SlotControl, EQ_MAX, IN_BPM, MAX_TAIL_BEATS, MOMENTARY_RELEASE_SECS,
-    SLOTS, SURFACE_PARAM,
+    DecksState, DecksStatus, MasterBus, SlotControl, EQ_MAX, IN_BPM, MAX_TAIL_BEATS,
+    MOMENTARY_RELEASE_SECS, SLOTS, SURFACE_PARAM,
 };
 use crate::launch_control::{jack_index, row, BUTTON_GATE_VOLTS};
 
@@ -67,6 +69,40 @@ impl Engine {
             .push(timing)
             .map_err(|_| anyhow!("too many pending deck edits"))?;
         Ok(())
+    }
+
+    /// Ship both output faders to the RT thread. They travel together
+    /// because they are one command, not because they move together.
+    fn push_master(&mut self, node: usize) -> Result<()> {
+        let ctl = self.clip_decks.get_mut(&node).unwrap();
+        let cmd = DecksCmd::Master {
+            live: ctl.state.master_live,
+            monitor: ctl.state.master_monitor,
+        };
+        ctl.tx
+            .push(cmd)
+            .map_err(|_| anyhow!("too many pending deck edits"))
+    }
+
+    /// The fader on one of the bank's two output pairs: everything going
+    /// to the room, or everything going to the headphones. Patch state
+    /// like the slot mix, and independent of it — a master is the last
+    /// thing the pair passes through, so cueing a deck is unaffected by
+    /// what the room is being given.
+    pub fn decks_set_master(
+        &mut self,
+        instance_id: &str,
+        bus: MasterBus,
+        value: f32,
+    ) -> Result<()> {
+        let node = self.decks_node(instance_id)?;
+        let value = value.clamp(0.0, 1.0);
+        let ctl = self.clip_decks.get_mut(&node).unwrap();
+        match bus {
+            MasterBus::Live => ctl.state.master_live = value,
+            MasterBus::Monitor => ctl.state.master_monitor = value,
+        }
+        self.push_master(node)
     }
 
     /// Which of a slot's three tone-control CV outputs are patched into
@@ -457,6 +493,7 @@ impl Engine {
             }
             ctl.state = state;
         }
+        self.push_master(node)?;
         for slot in 0..SLOTS {
             self.push_slot(node, slot)?;
             // A restored bank comes back UNARMED: the mute in the patch is
@@ -532,6 +569,8 @@ impl Engine {
             cycle_beats: cycle_beats(&lengths),
             surface: self.nodes[node].params.get(SURFACE_PARAM).copied() != Some(0.0),
             surface_connected: self.launchcontrol_connected(),
+            master_live: ctl.state.master_live,
+            master_monitor: ctl.state.master_monitor,
             slots,
         })
     }

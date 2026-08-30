@@ -22,7 +22,10 @@
 //! MONITOR IS A CUE, NOT A SOLO: a deck switched to it leaves the live
 //! pair and comes out of the monitor pair instead, and every other deck
 //! carries on exactly as it was. The app sends the two pairs to two
-//! chosen output devices.
+//! chosen output devices. Each pair has a MASTER fader of its own
+//! ([`MasterBus`], patch state like the slot mix): the level of everything
+//! going to the room, and the level of everything going to the
+//! headphones, with no way for one to move the other.
 //!
 //! ONE CLOCK, NO PER-SLOT TRANSPORT. The module owns a single fractional
 //! beat counter that advances at the `bpm` input's tempo, and a slot's
@@ -413,12 +416,20 @@ impl DeckSlotState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DecksState {
     pub slots: Vec<DeckSlotState>,
+    /// The two OUTPUT faders: everything on the live pair, and everything
+    /// on the cue pair, after the slots have been mixed. 1 is unity.
+    #[serde(default = "unity")]
+    pub master_live: f32,
+    #[serde(default = "unity")]
+    pub master_monitor: f32,
 }
 
 impl Default for DecksState {
     fn default() -> Self {
         DecksState {
             slots: vec![DeckSlotState::default(); SLOTS],
+            master_live: 1.0,
+            master_monitor: 1.0,
         }
     }
 }
@@ -430,6 +441,14 @@ impl DecksState {
         self.slots.truncate(SLOTS);
         self.slots.resize(SLOTS, DeckSlotState::default());
         self
+    }
+
+    /// The fader on one of the bank's two output pairs.
+    pub fn master(&self, bus: MasterBus) -> f32 {
+        match bus {
+            MasterBus::Live => self.master_live,
+            MasterBus::Monitor => self.master_monitor,
+        }
     }
 
     /// Loop lengths of the loaded slots, for the alignment arithmetic.
@@ -487,6 +506,17 @@ impl SlotControl {
             SlotControl::Mute | SlotControl::Monitor => unit,
         }
     }
+}
+
+/// One of the bank's two output pairs — the room and the headphones.
+/// Each carries a master fader, applied to the mix the slots have already
+/// been through: MONITOR IS A CUE, so the two are independent and the
+/// live master never touches what is being auditioned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MasterBus {
+    Live,
+    Monitor,
 }
 
 /// A quantized transport arm on one slot — a mute the bank's clock is
@@ -611,6 +641,11 @@ pub enum DecksCmd {
         slot: u8,
         arm: DeckArm,
         serial: u64,
+    },
+    /// The faders on the two output pairs, after the slot mix.
+    Master {
+        live: f32,
+        monitor: f32,
     },
     /// Park the bank on beat 0.
     Reset,
@@ -760,6 +795,9 @@ pub struct DecksStatus {
     pub surface: bool,
     /// Whether a surface is plugged in at all (engine-wide).
     pub surface_connected: bool,
+    /// The faders on the two output pairs (1 = unity).
+    pub master_live: f32,
+    pub master_monitor: f32,
     pub slots: Vec<DeckSlotStatus>,
 }
 
@@ -904,6 +942,11 @@ pub struct DecksRtModule {
     /// Fractional beats since the last reset — the bank's whole transport.
     beat_pos: f64,
     last_reset: f32,
+    /// The two output faders, and the smoothed gains actually applied —
+    /// which start AT unity, so a bank nobody has touched multiplies its
+    /// mix by exactly 1.0.
+    master: [f32; 2],
+    master_gain: [f32; 2],
     /// One-pole coefficients of the tone-control crossovers and of the
     /// gain smoother, all fixed at construction.
     a_low: f32,
@@ -937,6 +980,8 @@ impl DecksRtModule {
             engine_rate: rate,
             beat_pos: 0.0,
             last_reset: 0.0,
+            master: [1.0; 2],
+            master_gain: [1.0; 2],
             a_low: one_pole(EQ_LOW_HZ, rate),
             a_high: one_pole(EQ_HIGH_HZ, rate),
             a_gain: 1.0 - (-1.0 / (GAIN_SMOOTH_SECS * rate)).exp(),
@@ -1012,6 +1057,9 @@ impl DecksRtModule {
                 s.arm = arm;
                 s.arm_serial = serial;
             }
+            DecksCmd::Master { live, monitor } => {
+                self.master = [live.max(0.0), monitor.max(0.0)];
+            }
             DecksCmd::Reset => {
                 self.beat_pos = 0.0;
                 for slot in &mut self.slots {
@@ -1046,6 +1094,7 @@ impl HostModule for DecksRtModule {
         let bpm = &inputs[IN_BPM];
         let reset = &inputs[IN_RESET];
         let (a_low, a_high, a_gain) = (self.a_low, self.a_high, self.a_gain);
+        let master = self.master;
         let engine_rate = self.engine_rate;
         for s in 0..frames {
             if reset[s] >= 1.0 && self.last_reset < 1.0 {
@@ -1154,10 +1203,16 @@ impl HostModule for DecksRtModule {
                 *bus_l += l * slot.gain;
                 *bus_r += r * slot.gain;
             }
-            outputs[OUT_AUDIO_L][s] = mix_l * SIGNAL_MAX;
-            outputs[OUT_AUDIO_R][s] = mix_r * SIGNAL_MAX;
-            outputs[OUT_MON_L][s] = mon_l * SIGNAL_MAX;
-            outputs[OUT_MON_R][s] = mon_r * SIGNAL_MAX;
+            // The two output faders, last of all and ramped like a slot's
+            // own: they are the whole pair's level, so nothing on the way
+            // to them can tell they are there.
+            for (gain, target) in self.master_gain.iter_mut().zip(master) {
+                *gain += a_gain * (target - *gain);
+            }
+            outputs[OUT_AUDIO_L][s] = mix_l * self.master_gain[0] * SIGNAL_MAX;
+            outputs[OUT_AUDIO_R][s] = mix_r * self.master_gain[0] * SIGNAL_MAX;
+            outputs[OUT_MON_L][s] = mon_l * self.master_gain[1] * SIGNAL_MAX;
+            outputs[OUT_MON_R][s] = mon_r * self.master_gain[1] * SIGNAL_MAX;
             self.beat_pos += tempo / 60.0 / self.engine_rate as f64;
         }
 

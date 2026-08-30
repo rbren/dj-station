@@ -1,0 +1,200 @@
+{
+  "ext": "builtin.decks",
+  "knobs": {
+    "bpm": {
+      "position": 0.35714287,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d1_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d1_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d2_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d2_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d3_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d3_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d4_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d4_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d5_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d5_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d6_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d6_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d7_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d7_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d8_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d8_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {
+    "surface": 1.0
+  },
+  "decks": {
+    "slots": [
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      }
+    ],
+    "master_live": 0.6,
+    "master_monitor": 1.0
+  }
+}

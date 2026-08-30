@@ -393,6 +393,18 @@ line's size (`project - clip`, ellipsized), one tempo line
 the return. The beat count went because the lamp row under it draws the
 same number, silence included, and shows where the bank is in it.
 
+**D16 — The Decks top bar says tempo, then clock, then output
+(post-overhaul).** Another recorded decision. The tempo is ONE control in
+ONE unit, so the number and its slider stack under a single `BPM` label
+instead of standing side by side with the word printed twice, and the
+clock jack — the tempo made audible — sits against that stack rather than
+across the bar. To its right is where the bank COMES OUT: the live pair
+over the monitor pair, one row each, each row its own L/R jacks and the
+master fader for everything that pair carries (the cue row's label takes
+`--cue`, the same amber a monitored deck lights up in). Two rows, not two
+columns, because they are two destinations and a DJ reads them as
+"room / headphones".
+
 ---
 
 ## G. Still open after this pass

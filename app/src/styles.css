@@ -5564,11 +5564,19 @@ body {
 }
 
 /* The tempo is the one number that drives everything else on the page,
-   so it is the biggest thing on it. */
+   so it is the biggest thing on it — and it is ONE control in one unit,
+   so the number and its slider stack under a single label. The clock the
+   two of them run stands beside the stack. */
 .decks-tempo {
   display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.decks-tempo-stack {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
 }
 
 .decks-tempo-label {
@@ -5585,15 +5593,7 @@ body {
   text-align: right;
 }
 
-.decks-tempo-unit {
-  color: var(--ink-dim);
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
 .decks-tempo-slider {
-  align-self: center;
   width: 160px;
 }
 
@@ -5608,6 +5608,44 @@ body {
 .decks-beat {
   color: var(--ink);
   font-size: var(--fs-md);
+}
+
+/* Where the bank comes out: the live pair over the monitor pair, each a
+   row of its own so the two read as the two destinations they are. */
+.decks-outs {
+  display: grid;
+  gap: 2px;
+}
+
+.decks-out {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.decks-out-label {
+  width: 6ch;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* The cue row is the headphones, in the same amber a monitored deck
+   lights up in. */
+.decks-out[data-bus='monitor'] .decks-out-label {
+  color: var(--cue);
+}
+
+.decks-master {
+  width: 110px;
+}
+
+.decks-master-value {
+  width: 4ch;
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  text-align: right;
 }
 
 .decks-bar-actions {

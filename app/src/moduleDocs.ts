@@ -1301,9 +1301,11 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'd#_in_r': 'Deck # return, right.',
     },
     outputs: {
-      audio_l: 'Left of the live bank mix.',
+      audio_l: 'Left of the live bank mix, at the live master\u2019s level.',
       audio_r: 'Right of the live bank mix.',
-      mon_l: 'Left of the cue mix \u2014 the decks switched to Monitor.',
+      mon_l:
+        'Left of the cue mix \u2014 the decks switched to Monitor, at the ' +
+        'monitor master\u2019s level.',
       mon_r: 'Right of the cue mix \u2014 the decks switched to Monitor.',
       clock: 'One pulse per beat of the bank\u2019s own clock.',
       'd#_l': 'Deck # send, left \u2014 always carries the deck\u2019s audio.',

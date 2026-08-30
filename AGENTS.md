@@ -1300,8 +1300,17 @@ beatify::build`.
   an Audio Output while the cue pair always got one, so a bank in a patch
   without one played into the headphones and nowhere else. A pair the
   user has routed is never touched, and nothing to do is not an undo
-  step. Golden:
-  `decks-bank-two-clips` (the mix, the stretch, the phase); the sidecar
+  step. EACH OUTPUT PAIR HAS A MASTER FADER (`MasterBus`,
+  `Engine::decks_set_master`, `master_live`/`master_monitor` in
+  `DecksState` so they ride in the patch): the last thing a pair passes
+  through, ramped like a slot's gain and starting AT unity so an untouched
+  bank multiplies by exactly 1.0 (old goldens stay byte-identical). The
+  two are independent — pulling the room down never touches what is being
+  cued. Goldens:
+  `decks-bank-two-clips` (the mix, the stretch, the phase) and
+  `decks-master-mix` (the live master, and the cued deck staying out of
+  the room; the faders ride in that case's saved patch, so it pins the
+  round trip too); the sidecar
   carries the slot mix in a `deck_slots` section (a load resets a slot, so
   the case sets the mix after the audio).
 - Decks JACKS (`decks_manifest`): `bpm` and `reset` in, plus a RETURN
@@ -1965,14 +1974,26 @@ of the page.
   filter ignores by design, so the dock's geometry is folded into the
   chrome overlay's `layoutKey` — that is what re-measures the cables
   frame by frame during a drag. Collapsed, the strips leave the DOM and
-  their cables simply stop resolving (the same rule as bpm/the mix
-  pairs); the top bar's clock jack stays wired.
+  their cables simply stop resolving (the same rule as the bpm/reset
+  inputs, which have no socket at all); the top bar's clock and output
+  jacks stay wired.
 - The chrome IS the bank: on this tab App renders no panel for
   `DECKS_TYPE` modules, and the strips/top bar carry the bank's real
   jacks (`data-jack` on the bank instance) — send/return at the top of
   each strip, a CV jack under each tone knob (with `is-patched` state
-  from `tone_patched`), the clock next to the beat readout. Jack clicks
-  go through App's `onJackClick` (one grammar, one color set).
+  from `tone_patched`), and in the top bar the clock beside the tempo
+  plus BOTH OUTPUT PAIRS. Jack clicks go through App's `onJackClick`
+  (one grammar, one color set).
+- The top bar reads left to right as one thought: the tempo is ONE
+  control in ONE unit, so the number and its slider stack under a single
+  `BPM` label (`.decks-tempo-stack`) with the clock jack — the tempo made
+  audible — right beside them; then the beat readout; then where the bank
+  COMES OUT, `.decks-outs`, a row per pair (live over monitor, keyed by
+  `data-bus`) carrying that pair's L/R jacks and its master fader. The
+  masters are engine state, not chrome: `decks_set_master` ->
+  `Engine::decks_set_master`, drafted while dragged exactly like the
+  tempo, and `end_edit` on release closes the undo window
+  (`EditKey::DeckMaster`, coalesced per bus).
 - CHROME-TO-CANVAS CABLES are the tricky part, and they have their own
   layer: chrome jacks sit OUTSIDE the pan/zoom transform, so DecksView
   draws every wire touching the bank with a SECOND WireOverlay in screen
@@ -1983,8 +2004,9 @@ of the page.
   chrome childList changes (attribute churn under `.decks-chrome` — beat
   lamps, pills — is ignored like telemetry). The pending preview moves to
   the chrome overlay on this tab so it is never clipped at the
-  `.rack-area` edge; a bank jack with no chrome socket (bpm, the mix
-  pairs) resolves nowhere and its cable simply is not drawn here.
+  `.rack-area` edge; a bank jack with no chrome socket (the `bpm` and
+  `reset` inputs, which the bar drives as a number and a slider) resolves
+  nowhere and its cable simply is not drawn here.
   Endpoint GEOMETRY is pinned by `app/tests/DecksChromeWires.test.tsx` —
   keep pinning numbers, not just "a wire exists".
 - State ownership: `decks_status` is the single poll (the engine owns
@@ -2014,4 +2036,5 @@ of the page.
   isolation and the per-workspace file ops), plus the engine's
   `cargo test -p dj-engine --release --test integration decks` /
   `integration workspaces` and the `decks-bank-two-clips` /
-  `decks-rack-insert` / `workspace-focus-split` E2E goldens.
+  `decks-master-mix` / `decks-rack-insert` / `workspace-focus-split`
+  E2E goldens.

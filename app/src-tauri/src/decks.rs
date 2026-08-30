@@ -15,7 +15,7 @@
 //! on the main thread and would freeze the window.
 
 use dj_engine::beat_clip::BeatClipRef;
-use dj_engine::decks::{DeckArm, DecksStatus, SlotControl, DECKS_ID, SURFACE_PARAM};
+use dj_engine::decks::{DeckArm, DecksStatus, MasterBus, SlotControl, DECKS_ID, SURFACE_PARAM};
 use dj_engine::playback::TrackData;
 use dj_engine::{Engine, Workspace};
 use tauri::State;
@@ -160,6 +160,24 @@ pub fn decks_arm(
 ) -> CmdResult<()> {
     let mut engine = patch_edit(&state, EditKey::DeckSlotControl(&instance, slot, "mute"))?;
     engine.decks_arm(&instance, slot, arm).map_err(err)
+}
+
+/// The fader on one of the bank's two output pairs — the room, or the
+/// headphones. Bank state like the slot mix, so it rides in the deck
+/// patch; coalesced per bus, so a drag is one undo step.
+#[tauri::command]
+pub fn decks_set_master(
+    state: State<AppState>,
+    instance: String,
+    bus: MasterBus,
+    value: f32,
+) -> CmdResult<()> {
+    let name = match bus {
+        MasterBus::Live => "live",
+        MasterBus::Monitor => "monitor",
+    };
+    let mut engine = patch_edit(&state, EditKey::DeckMaster(&instance, name))?;
+    engine.decks_set_master(&instance, bus, value).map_err(err)
 }
 
 fn control_key(control: SlotControl) -> &'static str {

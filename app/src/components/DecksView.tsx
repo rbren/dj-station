@@ -2,8 +2,11 @@
 // strips under one tempo — CHROME around the real rack canvas. App keeps
 // the one rack (`.rack-area`, panels, wire overlay, pan/zoom) mounted and
 // visible on this tab, and this component renders the deck furniture
-// around it: the tempo bar (with the bank's clock on a jack) above, the
-// eight strips (each with its send/return and tone-CV jacks) below.
+// around it: the tempo bar above — the BPM (number and slider, one
+// control in one unit), the clock beside it, and where the bank comes
+// out: the live pair over the monitor pair, each on its own jacks with
+// the master fader for everything that pair carries — and the eight
+// strips (each with its send/return and tone-CV jacks) below.
 //
 // The page is a big panel for a single rack module (`builtin.decks`) — the
 // bank is in the patch and keeps RUNNING when the tab is not looking (it
@@ -42,11 +45,14 @@ import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '
 import {
   decks as defaultApi,
   CLOCK_JACK,
+  MASTER_BUSES,
   MAX_BPM,
   MIN_BPM,
+  outJack,
   type DecksApi,
   type DecksStatus,
   type DeckSlotStatus,
+  type MasterBus,
   type SlotControl,
 } from '../decks';
 import type { WireSnapshot } from '../engine';
@@ -138,6 +144,7 @@ export function DecksView(props: DecksViewProps) {
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Partial<Record<DraftKey, number>>>({});
   const [bpmDraft, setBpmDraft] = useState<number | null>(null);
+  const [masterDrafts, setMasterDrafts] = useState<Partial<Record<MasterBus, number>>>({});
   const rehydrated = useRef(false);
   const [collapsed, setCollapsed] = useState(
     () => loadJson<boolean>(DOCK_COLLAPSED_KEY, false) === true,
@@ -254,8 +261,9 @@ export function DecksView(props: DecksViewProps) {
   // Module-to-module cables stay with the rack overlay (they pan/zoom for
   // free); a bank wire's chrome end sits still while the canvas moves, so
   // these are measured in screen coordinates and re-measured on pan/zoom
-  // (overlayLayoutKey). A bank jack with no chrome socket (bpm, the mix
-  // pairs) simply does not resolve, and its cable is not drawn here.
+  // (overlayLayoutKey). A bank jack with no chrome socket (the tempo and
+  // reset inputs) simply does not resolve, and its cable is not drawn
+  // here.
   const chromeWires = useMemo(
     () => (wires ?? []).filter((w) => w.from_instance === bank || w.to_instance === bank),
     [wires, bank],
@@ -276,6 +284,30 @@ export function DecksView(props: DecksViewProps) {
       void write(() => api.setControl(bank, slot, control, value));
     },
     [api, bank, write],
+  );
+
+  // The two output faders, drafted while they are being dragged exactly
+  // like the tempo: the drag streams faster than the poll.
+  const master = useCallback(
+    (bus: MasterBus) =>
+      masterDrafts[bus] ??
+      (bus === 'live' ? (status?.master_live ?? 1) : (status?.master_monitor ?? 1)),
+    [masterDrafts, status],
+  );
+  const setMaster = useCallback(
+    (bus: MasterBus, value: number) => {
+      if (!bank) return;
+      setMasterDrafts((d) => ({ ...d, [bus]: value }));
+      void write(() => api.setMaster(bank, bus, value));
+    },
+    [api, bank, write],
+  );
+  const releaseMaster = useCallback(
+    (bus: MasterBus) => {
+      setMasterDrafts((d) => ({ ...d, [bus]: undefined }));
+      void api.endEdit();
+    },
+    [api],
   );
 
   // The dock: how much of the body the strips take, and whether they are
@@ -353,61 +385,54 @@ export function DecksView(props: DecksViewProps) {
   return (
     <div className="decks-view" data-testid="decks-view">
       <header className="decks-bar decks-chrome">
+        {/* The tempo, its slider and the clock the two of them run: one
+            number in one unit, so it is labelled ONCE, and the jack that
+            carries that number to the rack stands right beside it. */}
         <div className="decks-tempo">
-          <label className="decks-tempo-label" htmlFor="decks-bpm">
-            Tempo
-          </label>
-          <input
-            id="decks-bpm"
-            className="decks-bpm mono"
-            data-testid="decks-bpm"
-            type="number"
-            min={MIN_BPM}
-            max={MAX_BPM}
-            step={0.5}
-            value={Number(bpm.toFixed(2))}
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              if (!Number.isFinite(next)) return;
-              setBpmDraft(next);
-              void write(() => api.setBpm(bank, clampBpm(next)));
-            }}
-            onBlur={() => {
-              setBpmDraft(null);
-              void api.endEdit();
-            }}
-          />
-          <span className="decks-tempo-unit">BPM</span>
-          <input
-            className="decks-tempo-slider"
-            data-testid="decks-bpm-slider"
-            type="range"
-            aria-label="Bank tempo"
-            min={MIN_BPM}
-            max={MAX_BPM}
-            step={0.5}
-            value={bpm}
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              setBpmDraft(next);
-              void write(() => api.setBpm(bank, next));
-            }}
-            onPointerUp={() => {
-              setBpmDraft(null);
-              void api.endEdit();
-            }}
-          />
-        </div>
-        <div className="decks-readout">
-          <span className="decks-beat mono" data-testid="decks-beat">
-            beat {Math.floor(status?.beat ?? 0) + 1}
-            {status && status.cycle_beats > 0 ? `/${status.cycle_beats}` : ''}
-          </span>
-          {(!status || status.cycle_beats <= 0) && (
-            <span className="decks-cycle" data-testid="decks-cycle">
-              nothing loaded
-            </span>
-          )}
+          <div className="decks-tempo-stack">
+            <label className="decks-tempo-label" htmlFor="decks-bpm">
+              BPM
+            </label>
+            <input
+              id="decks-bpm"
+              className="decks-bpm mono"
+              data-testid="decks-bpm"
+              type="number"
+              min={MIN_BPM}
+              max={MAX_BPM}
+              step={0.5}
+              value={Number(bpm.toFixed(2))}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                if (!Number.isFinite(next)) return;
+                setBpmDraft(next);
+                void write(() => api.setBpm(bank, clampBpm(next)));
+              }}
+              onBlur={() => {
+                setBpmDraft(null);
+                void api.endEdit();
+              }}
+            />
+            <input
+              className="decks-tempo-slider"
+              data-testid="decks-bpm-slider"
+              type="range"
+              aria-label="Bank tempo"
+              min={MIN_BPM}
+              max={MAX_BPM}
+              step={0.5}
+              value={bpm}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                setBpmDraft(next);
+                void write(() => api.setBpm(bank, next));
+              }}
+              onPointerUp={() => {
+                setBpmDraft(null);
+                void api.endEdit();
+              }}
+            />
+          </div>
           {/* The bank's clock, on a jack: one pulse per beat, wired into
               the rack below (an LFO, a sequencer) to run it on the same
               grid the decks are on. */}
@@ -423,6 +448,56 @@ export function DecksView(props: DecksViewProps) {
               onClick={(shift) => onJack(CLOCK_JACK, 'output', shift)}
             />
           </span>
+        </div>
+        <div className="decks-readout">
+          <span className="decks-beat mono" data-testid="decks-beat">
+            beat {Math.floor(status?.beat ?? 0) + 1}
+            {status && status.cycle_beats > 0 ? `/${status.cycle_beats}` : ''}
+          </span>
+          {(!status || status.cycle_beats <= 0) && (
+            <span className="decks-cycle" data-testid="decks-cycle">
+              nothing loaded
+            </span>
+          )}
+        </div>
+        {/* Where the bank comes out, one row per pair: the room above the
+            headphones, each with its stereo jacks and the fader on
+            everything that pair carries. */}
+        <div className="decks-outs" data-testid="decks-outs">
+          {MASTER_BUSES.map((bus) => (
+            <div className="decks-out" data-bus={bus} data-testid={`decks-out-${bus}`} key={bus}>
+              <span className="decks-out-label">{bus}</span>
+              {(['l', 'r'] as const).map((side) => {
+                const id = outJack(bus, side);
+                return (
+                  <LiveJack
+                    key={id}
+                    instance={bank}
+                    id={id}
+                    kind="output"
+                    label={side.toUpperCase()}
+                    wired={isWired(id, 'output')}
+                    selected={isArmed(id, 'output')}
+                    selectedColor={armedColor}
+                    onClick={(shift) => onJack(id, 'output', shift)}
+                  />
+                );
+              })}
+              <input
+                className="decks-master"
+                data-testid={`decks-master-${bus}`}
+                type="range"
+                aria-label={`${bus} master volume`}
+                min={0}
+                max={1}
+                step={0.01}
+                value={master(bus)}
+                onChange={(e) => setMaster(bus, Number(e.target.value))}
+                onPointerUp={() => releaseMaster(bus)}
+              />
+              <span className="decks-master-value mono">{Math.round(master(bus) * 100)}%</span>
+            </div>
+          ))}
         </div>
         <div className="decks-bar-actions">
           <span

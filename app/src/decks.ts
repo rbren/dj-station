@@ -32,6 +32,12 @@ export type DeckArm = 'none' | 'queue' | 'drop';
  *  SEND carries its audio out to the rack and its RETURN brings the
  *  rack's answer back; the three tone controls each have a CV out. */
 export const CLOCK_JACK = 'clock';
+/** The bank's two output pairs: the room, and the headphones a deck's
+ *  Monitor button cues into. Each carries a master fader. */
+export const MASTER_BUSES = ['live', 'monitor'] as const;
+export type MasterBus = (typeof MASTER_BUSES)[number];
+export const outJack = (bus: MasterBus, side: 'l' | 'r') =>
+  bus === 'live' ? `audio_${side}` : `mon_${side}`;
 export const sendJack = (slot: number, side: 'l' | 'r') => `d${slot + 1}_${side}`;
 export const returnJack = (slot: number, side: 'l' | 'r') => `d${slot + 1}_in_${side}`;
 /** The tone controls of a strip, top to bottom — the order the surface's
@@ -87,6 +93,10 @@ export interface DecksStatus {
   surface: boolean;
   /** Whether a surface is plugged in at all. */
   surface_connected: boolean;
+  /** The fader on the live pair (1 = unity). */
+  master_live: number;
+  /** The fader on the monitor pair. */
+  master_monitor: number;
   slots: DeckSlotStatus[];
 }
 
@@ -106,6 +116,8 @@ export interface DecksApi {
     control: SlotControl,
     value: number,
   ): Promise<void | null>;
+  /** The fader on one of the bank's two output pairs. */
+  setMaster(instance: string, bus: MasterBus, value: number): Promise<void | null>;
   /** Queue/drop a deck on the bank's grid; 'none' takes an arm back. */
   arm(instance: string, slot: number, arm: DeckArm): Promise<void | null>;
   setTail(instance: string, slot: number, tail: number): Promise<void | null>;
@@ -139,6 +151,9 @@ export class DecksClient extends IpcClient implements DecksApi {
   }
   setControl(instance: string, slot: number, control: SlotControl, value: number) {
     return this.call<void>('decks_set_control', { instance, slot, control, value });
+  }
+  setMaster(instance: string, bus: MasterBus, value: number) {
+    return this.call<void>('decks_set_master', { instance, bus, value });
   }
   arm(instance: string, slot: number, arm: DeckArm) {
     return this.call<void>('decks_arm', { instance, slot, arm });

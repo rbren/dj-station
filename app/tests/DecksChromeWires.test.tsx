@@ -46,6 +46,8 @@ const STATUS: DecksStatus = {
   cycle_beats: 0,
   surface: false,
   surface_connected: false,
+  master_live: 1,
+  master_monitor: 1,
   slots: Array.from({ length: 8 }, (_, i) => slotFixture(i)),
 };
 
@@ -57,6 +59,7 @@ function makeApi(): DecksApi {
     load: vi.fn().mockResolvedValue(null),
     clear: vi.fn().mockResolvedValue(null),
     setControl: vi.fn().mockResolvedValue(null),
+    setMaster: vi.fn().mockResolvedValue(null),
     arm: vi.fn().mockResolvedValue(null),
     setTail: vi.fn().mockResolvedValue(null),
     setPhase: vi.fn().mockResolvedValue(null),
@@ -196,17 +199,45 @@ describe('chrome-to-canvas cables', () => {
     show({
       wires: [
         WIRE,
-        // audio_l has no chrome socket (the mix pair is plumbing, not a
-        // deck's patch point) — its cable must not be invented.
-        { from_instance: 'decks1', from_jack: 'audio_l', to_instance: 'out1', to_jack: 'in_l' },
+        // The tempo input has no chrome socket (the bar drives it with a
+        // number and a slider, not a jack) — its cable must not be
+        // invented.
+        { from_instance: 'lfo1', from_jack: 'out', to_instance: 'decks1', to_jack: 'bpm' },
       ],
     });
     await screen.findByTestId('decks-io-0');
     mockChromeJack('decks1:output:d1_l', 120, 500);
     addModuleSocket('vca1:input:in', 600, 200);
-    addModuleSocket('out1:input:in_l', 300, 300);
+    addModuleSocket('lfo1:output:out', 300, 300);
     await waitFor(() => expect(screen.getByTestId(`cable-${KEY}`)).toBeTruthy());
-    expect(screen.queryByTestId('cable-decks1:audio_l->out1:in_l')).toBeNull();
+    expect(screen.queryByTestId('cable-lfo1:out->decks1:bpm')).toBeNull();
+  });
+
+  it('the live and monitor pairs are chrome sockets of their own', async () => {
+    show({
+      wires: [
+        { from_instance: 'decks1', from_jack: 'audio_l', to_instance: 'out1', to_jack: 'in_l' },
+        { from_instance: 'decks1', from_jack: 'mon_r', to_instance: 'mon1', to_jack: 'in_r' },
+      ],
+    });
+    await screen.findByTestId('decks-outs');
+    mockChromeJack('decks1:output:audio_l', 300, 80);
+    mockChromeJack('decks1:output:mon_r', 340, 100);
+    addModuleSocket('out1:input:in_l', 600, 200);
+    addModuleSocket('mon1:input:in_r', 640, 240);
+    await waitFor(() => {
+      // Container origin (40, 60), socket centers 9px in.
+      const live = screen.getByTestId('cable-decks1:audio_l->out1:in_l');
+      expect(live.getAttribute('x1')).toBe('269');
+      expect(live.getAttribute('y1')).toBe('29');
+      expect(live.getAttribute('x2')).toBe('569');
+      expect(live.getAttribute('y2')).toBe('149');
+      const cue = screen.getByTestId('cable-decks1:mon_r->mon1:in_r');
+      expect(cue.getAttribute('x1')).toBe('309');
+      expect(cue.getAttribute('y1')).toBe('49');
+      expect(cue.getAttribute('x2')).toBe('609');
+      expect(cue.getAttribute('y2')).toBe('189');
+    });
   });
 
   it('the armed preview starts at the chrome jack it was armed on', async () => {
