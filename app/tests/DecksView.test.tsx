@@ -5,7 +5,14 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { DecksView } from '../src/components/DecksView';
-import { stretchLabel, type DecksApi, type DecksStatus, type DeckSlotStatus } from '../src/decks';
+import {
+  clipTitle,
+  stretchLabel,
+  tempoLabel,
+  type DecksApi,
+  type DecksStatus,
+  type DeckSlotStatus,
+} from '../src/decks';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
 
 function emptySlot(slot: number): DeckSlotStatus {
@@ -144,17 +151,20 @@ describe('DecksView', () => {
     slots[0] = loadedSlot(0);
     show(makeApi(makeStatus({ slots })));
     await waitFor(() => expect(screen.getByTestId('decks-strips').children.length).toBe(8));
-    expect(screen.getByTestId('decks-name-0').textContent).toBe('clip 0');
+    expect(screen.getByTestId('decks-name-0').textContent).toBe('set one - clip 0');
     expect(screen.getByTestId('decks-name-3').textContent).toBe('empty');
   });
 
-  it('a strip reports the clip against the bank: beats, its own tempo and the stretch', async () => {
+  it('a strip reports the clip against the bank: its own tempo and the stretch, one line', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[0] = loadedSlot(0, { tail: 2 });
     show(makeApi(makeStatus({ slots })));
-    await waitFor(() => expect(screen.getByTestId('decks-beats-0').textContent).toBe('8 + 2'));
-    expect(screen.getByTestId('decks-source-bpm-0').textContent).toBe('120.0');
-    expect(screen.getByTestId('decks-stretch-0').textContent).toBe('+6.7%');
+    // The tempo drops a trailing .0, and the length is the lamp row
+    // below rather than a beat count of its own.
+    await waitFor(() =>
+      expect(screen.getByTestId('decks-tempo-0').textContent).toBe('120 bpm +6.7%'),
+    );
+    expect(screen.getByTestId('decks-tempo-3').textContent).toBe('—');
     // Ten dots: the clip's eight beats and the two of silence after them,
     // with the playing beat lit.
     const dots = [...screen.getByTestId('decks-dots-0').children];
@@ -177,18 +187,20 @@ describe('DecksView', () => {
     expect(dots[33].className).toContain('decks-beat-tail');
   });
 
-  it('a deck names the Beatify project its clip was cut in', async () => {
+  it("a deck names the Beatify project its clip was cut in, on the clip's own line", async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[0] = loadedSlot(0);
     slots[1] = loadedSlot(1, {
       clip: { project: 'p9', clip: 'c9', name: 'stab', project_name: '', stems: [] },
     });
     show(makeApi(makeStatus({ slots })));
-    await waitFor(() => expect(screen.getByTestId('decks-project-0').textContent).toBe('set one'));
+    await waitFor(() =>
+      expect(screen.getByTestId('decks-name-0').textContent).toBe('set one - clip 0'),
+    );
     // A patch saved before clips carried the project name falls back to
-    // its id rather than showing a blank line.
-    expect(screen.getByTestId('decks-project-1').textContent).toBe('p9');
-    expect(screen.queryByTestId('decks-project-4')).toBeNull();
+    // its id rather than showing a dangling dash.
+    expect(screen.getByTestId('decks-name-1').textContent).toBe('p9 - stab');
+    expect(screen.getByTestId('decks-name-4').textContent).toBe('empty');
   });
 
   it('the level fader, the tone knobs and mute/monitor all write the slot', async () => {
@@ -409,6 +421,22 @@ describe('decks readouts', () => {
     expect(stretchLabel(128 / 120)).toBe('+6.7%');
     expect(stretchLabel(0.94)).toBe('−6.0%');
   });
+
+  it('puts the clip tempo and the stretch on one line, without a trailing .0', () => {
+    expect(tempoLabel(140, 1.093)).toBe('140 bpm +9.3%');
+    expect(tempoLabel(128.5, 1)).toBe('128.5 bpm ±0.0%');
+  });
+
+  it('names a clip by its project and its own name', () => {
+    expect(clipTitle({ project: 'p1', clip: 'c1', name: 'intro', project_name: 'set one' })).toBe(
+      'set one - intro',
+    );
+    // Before clips carried the project name, the id is what there is.
+    expect(clipTitle({ project: 'p9', clip: 'c9', name: 'stab', project_name: '' })).toBe(
+      'p9 - stab',
+    );
+    expect(clipTitle(null)).toBe('empty');
+  });
 });
 
 describe('a bank restored with the app', () => {
@@ -465,6 +493,15 @@ describe('the deck chrome is the bank, on jacks', () => {
         expect(jackSocket(container, `decks1:output:d${deck}_${tone}`)).toBeTruthy();
       }
     }
+    // The pair is named once, by the arrow beside it: no "out"/"in" words
+    // and no L/R on the sockets themselves.
+    const io = screen.getByTestId('decks-io-0');
+    expect([...io.querySelectorAll('.decks-io-label')].map((el) => el.textContent)).toEqual([
+      '↑',
+      '↓',
+    ]);
+    expect(within(io).getByTestId('jack-output-d1_l').querySelector('.jack-name')).toBeNull();
+    expect(within(io).getByTestId('jack-input-d1_in_r').querySelector('.jack-name')).toBeNull();
     // The bank's clock rides in the top bar, next to the beat it counts.
     const clock = screen.getByTestId('decks-clock-jack');
     expect(within(clock).getByTestId('jack-output-clock')).toBeTruthy();

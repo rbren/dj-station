@@ -5810,6 +5810,8 @@ body {
   min-width: 1.5ch;
 }
 
+/* Project and clip on ONE line — the strip is a column 156 px wide, so
+   the title is a legend, not a heading. */
 .decks-slot-name {
   flex: 1;
   min-width: 0;
@@ -5818,7 +5820,7 @@ body {
   white-space: nowrap;
   text-align: left;
   padding: 3px 6px;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-nano);
 }
 
 .decks-slot-empty .decks-slot-name {
@@ -5830,32 +5832,15 @@ body {
   color: var(--ink-dim);
 }
 
-/* Beats, source tempo, stretch — the three numbers a DJ checks before
-   letting a clip in. */
-.decks-slot-facts {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* Source tempo and stretch — what letting this clip in costs, one line.
+   The clip's length is the lamp row below it. */
+.decks-slot-tempo {
   margin: 0;
-}
-
-.decks-slot-facts > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.decks-slot-facts dt {
-  color: var(--ink-dim);
-  font-size: var(--fs-nano);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.decks-slot-facts dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--ink-muted);
   font-size: var(--fs-xs);
-  margin: 0;
 }
 
 .decks-slot-note {
@@ -5863,17 +5848,6 @@ body {
   color: var(--ink-dim);
   font-size: var(--fs-nano);
   line-height: 1.35;
-}
-
-/* Which Beatify project the clip was cut in — under its name, in the
-   quieter ink, because it is context and not the title. */
-.decks-slot-project {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-dim);
-  font-size: var(--fs-nano);
 }
 
 .decks-slot-missing {
@@ -5939,11 +5913,12 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
+/* An arrow names each pair: up is the deck's audio leaving, down is the
+   rack's answer coming back. */
 .decks-io-label {
   color: var(--ink-dim);
-  font-size: var(--fs-nano);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-xs);
+  line-height: 1;
 }
 
 /* The bank's clock, up in the bar with the beat it counts. */

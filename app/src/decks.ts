@@ -177,6 +177,23 @@ export function stretchLabel(stretch: number): string {
   return `${pct > 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}%`;
 }
 
+/** What a clip costs at the bank's tempo, on one line: the tempo it was
+ *  cut at, then the stretch to get it here. The tempo drops a trailing
+ *  `.0` — a clip cut at 140 reads "140 bpm". */
+export function tempoLabel(sourceBpm: number, stretch: number): string {
+  return `${Number(sourceBpm.toFixed(1))} bpm ${stretchLabel(stretch)}`;
+}
+
+/** What a deck calls what is in it: the Beatify project the clip was cut
+ *  in, then the clip. Two clips called "intro" are told apart by their
+ *  project, so the project comes first and both live on one line. A patch
+ *  saved before clips carried the project name falls back to its id. */
+export function clipTitle(clip: BeatClipRef | null): string {
+  if (!clip?.name) return 'empty';
+  const project = clip.project_name || clip.project;
+  return project ? `${project} - ${clip.name}` : clip.name;
+}
+
 /** Total loop length of a slot, silence included. */
 export function loopBeats(slot: DeckSlotStatus): number {
   return slot.beats === 0 ? 0 : slot.beats + slot.tail;

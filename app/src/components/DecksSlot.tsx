@@ -25,10 +25,11 @@ import { Knob } from './Knob';
 import { LiveJack } from './Jack';
 import { StemTags } from './StemTags';
 import {
+  clipTitle,
   loopBeats,
   returnJack,
   sendJack,
-  stretchLabel,
+  tempoLabel,
   toneJack,
   EQ_MAX,
   TONES,
@@ -70,12 +71,15 @@ export function DecksSlot(props: DecksSlotProps) {
   const empty = slot.beats === 0;
   const loop = loopBeats(slot);
 
-  const jack = (id: string, kind: 'input' | 'output', label: string) => (
+  // A jack with no label of its own is a bare socket: the send/return
+  // pair is named once by the arrow beside it, not four times over.
+  const jack = (id: string, kind: 'input' | 'output', label?: string) => (
     <LiveJack
       instance={instance}
       id={id}
       kind={kind}
       label={label}
+      showLabel={label !== undefined}
       wired={props.isWired(id, kind)}
       selected={props.isArmed(id, kind)}
       selectedColor={props.armedColor}
@@ -93,12 +97,16 @@ export function DecksSlot(props: DecksSlotProps) {
           the rack canvas arrive: OUT is the deck's audio (its send), IN
           brings the rack's answer back and makes it the deck's insert. */}
       <div className="decks-slot-io" data-testid={`decks-io-${slot.slot}`}>
-        <span className="decks-io-label">out</span>
-        {jack(sendJack(slot.slot, 'l'), 'output', 'L')}
-        {jack(sendJack(slot.slot, 'r'), 'output', 'R')}
-        <span className="decks-io-label">in</span>
-        {jack(returnJack(slot.slot, 'l'), 'input', 'L')}
-        {jack(returnJack(slot.slot, 'r'), 'input', 'R')}
+        <span className="decks-io-label" title={`Deck ${n} out`}>
+          ↑
+        </span>
+        {jack(sendJack(slot.slot, 'l'), 'output')}
+        {jack(sendJack(slot.slot, 'r'), 'output')}
+        <span className="decks-io-label" title={`Deck ${n} in`}>
+          ↓
+        </span>
+        {jack(returnJack(slot.slot, 'l'), 'input')}
+        {jack(returnJack(slot.slot, 'r'), 'input')}
         {slot.insert && (
           <span className="decks-slot-note" data-testid={`decks-insert-${slot.slot}`}>
             through the rack
@@ -114,7 +122,7 @@ export function DecksSlot(props: DecksSlotProps) {
           onClick={props.onLoad}
           title={empty ? 'Load a clip' : 'Load a different clip'}
         >
-          {slot.clip?.name || 'empty'}
+          {clipTitle(slot.clip)}
         </button>
         {!empty && (
           <button
@@ -128,36 +136,14 @@ export function DecksSlot(props: DecksSlotProps) {
         )}
       </header>
 
-      {/* Where the clip came from: two clips called "intro" are told
-          apart by their project, not by their name. */}
-      {slot.clip && (
-        <p className="decks-slot-project" data-testid={`decks-project-${slot.slot}`}>
-          {slot.clip.project_name || slot.clip.project}
-        </p>
-      )}
-
       <StemTags stems={slot.clip?.stems} testId={`decks-stems-${slot.slot}`} />
 
-      <dl className="decks-slot-facts">
-        <div>
-          <dt>beats</dt>
-          <dd className="mono" data-testid={`decks-beats-${slot.slot}`}>
-            {empty ? '—' : slot.tail > 0 ? `${slot.beats} + ${slot.tail}` : `${slot.beats}`}
-          </dd>
-        </div>
-        <div>
-          <dt>clip bpm</dt>
-          <dd className="mono" data-testid={`decks-source-bpm-${slot.slot}`}>
-            {empty ? '—' : slot.source_bpm.toFixed(1)}
-          </dd>
-        </div>
-        <div>
-          <dt>stretch</dt>
-          <dd className="mono" data-testid={`decks-stretch-${slot.slot}`}>
-            {empty ? '—' : stretchLabel(slot.stretch)}
-          </dd>
-        </div>
-      </dl>
+      {/* What the clip costs at the bank's tempo: the tempo it was cut at
+          and the stretch to get here, one line. The length is the lamp
+          row below — counting it twice said nothing new. */}
+      <p className="decks-slot-tempo mono" data-testid={`decks-tempo-${slot.slot}`}>
+        {empty ? '—' : tempoLabel(slot.source_bpm, slot.stretch)}
+      </p>
 
       {!empty && !slot.loaded && (
         <p

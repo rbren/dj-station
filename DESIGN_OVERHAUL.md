@@ -384,6 +384,15 @@ deck patches live in their own folder so the open dialog never mixes
 the two lists. The visual grammar did not change — same canvas, same
 chrome — only what the canvas contains per tab.
 
+**D15 — A deck strip says each thing once (post-overhaul).** A 156 px
+column had five label rows above its knobs: clip name, project, a beat
+count, a clip tempo and a stretch, plus "out"/"in" and an L/R on each of
+the four patch sockets. What survives is one title line at the project
+line's size (`project - clip`, ellipsized), one tempo line
+(`140 bpm +9.3%`) and an arrow per socket pair — ↑ for the send, ↓ for
+the return. The beat count went because the lamp row under it draws the
+same number, silence included, and shows where the bank is in it.
+
 ---
 
 ## G. Still open after this pass
