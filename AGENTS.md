@@ -2515,3 +2515,16 @@ of the page.
   the event timelines of the most recent worker conversations (tool wall
   time vs. LLM think time, broken down by command type) and reported the
   breakdown in chat; no code changes.
+- 2026-08-30 — "create a ticket to implement all these fixes and mark it
+  urgent" (the build-time fixes from the latency analysis above). I have
+  no way to create board cards from the manager chat, so the scope is
+  recorded here for whoever picks it up: (1) stop every worktree paying a
+  cold Rust build — shared sccache and/or a shared CARGO_TARGET_DIR
+  across /tmp/conversation-worktrees; (2) install and wire up a fast
+  linker (mold/lld); (3) rule: only `cargo check` app/src-tauri when that
+  crate was actually edited — it was 40% of all tool time (worst single
+  run: 50 min); (4) rule: stick to one cargo profile per ticket, do not
+  mix --release and debug (77 vs 30 calls = two cold artifact sets).
+  Also worth doing: garbage-collect old worktree target/ dirs (133 GB in
+  60 worktrees, disk at 74%). Asked the user to add the card and drag it
+  to the top of the pending column.
