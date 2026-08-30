@@ -74,6 +74,11 @@ export interface ClipProgram {
   /** Beat-tap time warp anchors, strictly increasing in both axes and
    *  identity outside the tapped span. Empty = no stretch. */
   warp: WarpPoint[];
+  /** How much the stretch is eased INSIDE each anchor pair, 0…1 (see
+   *  `smoothWarp`). 0 steps the rate at every anchor — the click this
+   *  control softens; the anchors themselves never move. Twin:
+   *  `warp_smoothing` in `dj_analysis::clip`. */
+  warp_smoothing: number;
   /** The beat grid the taps built — rides with the warp through undo,
    *  and is what selections quantize against. */
   beat_grid: ClipGrid | null;
@@ -206,6 +211,11 @@ export interface ClipRender {
 export const SILENCE_DB = -60;
 export const DEFAULT_CROSSFADE_MS = 5;
 
+/** Where the Clip page's smoothing slider starts: enough ease to take
+ *  the edge off the rate step at a section boundary, little enough that
+ *  the correction still happens where it was asked for. */
+export const DEFAULT_WARP_SMOOTHING = 0.3;
+
 export function emptyProgram(): ClipProgram {
   return {
     regions: [],
@@ -214,6 +224,7 @@ export function emptyProgram(): ClipProgram {
     level: [],
     crossfade_ms: DEFAULT_CROSSFADE_MS,
     warp: [],
+    warp_smoothing: 0,
     beat_grid: null,
   };
 }
@@ -251,7 +262,7 @@ export function programDuration(program: ClipProgram): number {
   for (const o of program.overlays) {
     total = Math.max(total, Math.max(0, o.at_secs) + regionDuration(o));
   }
-  return warpTime(program.warp, total);
+  return warpTime(program.warp, total, program.warp_smoothing);
 }
 
 // ---------------------------------------------------------------------------
@@ -285,17 +296,61 @@ function piecewise(points: WarpPoint[], x: number, from: 0 | 1, to: 0 | 1): numb
   return a[to] + ((b[to] - a[to]) * (x - a[from])) / span;
 }
 
+/** Sub-segments an eased section is approximated with — twin of
+ *  `SMOOTH_STEPS` in `dj_analysis::clip`. */
+const SMOOTH_STEPS = 12;
+/** Floor under an eased section's rate, so a wildly stretched section
+ *  cannot ease itself backwards (twin: `MIN_EASED_RATE`). */
+const MIN_EASED_RATE = 0.1;
+
+/** Ease the stretch inside every anchor pair, `smoothing` 0…1.
+ *
+ *  A section's rate is otherwise constant, so it STEPS at each anchor —
+ *  the click this control softens. Here the rate follows a raised cosine
+ *  over the section instead: `rate(u) = 1 + e·((1−s) + s·(1 − cos 2πu))`
+ *  with `e = ratio − 1`. Its mean over the section is `ratio` whatever
+ *  `s` is, so the anchors land EXACTLY where they did; at `s = 1` the
+ *  edges are unstretched and the whole correction happens mid-section,
+ *  which makes the rate continuous across the anchor. `s = 0` gives the
+ *  anchors back untouched.
+ *
+ *  Twin: `smooth_warp` in `dj_analysis::clip`. */
+export function smoothWarp(warp: WarpPoint[], smoothing: number): WarpPoint[] {
+  const s0 = Math.min(1, Math.max(0, smoothing));
+  if (s0 <= 0 || warp.length < 2) return warp;
+  const out: WarpPoint[] = [warp[0]];
+  for (let i = 0; i + 1 < warp.length; i += 1) {
+    const [x0, y0] = warp[i];
+    const [x1, y1] = warp[i + 1];
+    const lx = x1 - x0;
+    const ly = y1 - y0;
+    const e = lx > 0 ? ly / lx - 1 : 0;
+    if (lx > 1e-6 && ly > 1e-6 && e !== 0) {
+      const s = e < 0 ? Math.min(s0, Math.max(0, (1 - MIN_EASED_RATE) / -e - 1)) : s0;
+      for (let k = 1; k < SMOOTH_STEPS; k += 1) {
+        const u = k / SMOOTH_STEPS;
+        const x = x0 + lx * u;
+        const y = y0 + lx * (u + e * (u - (s * Math.sin(2 * Math.PI * u)) / (2 * Math.PI)));
+        const prev = out[out.length - 1];
+        if (x > prev[0] && y > prev[1]) out.push([x, y]);
+      }
+    }
+    out.push(warp[i + 1]);
+  }
+  return out;
+}
+
 /** Where the warp puts an output time (identity for the empty warp).
  *  Twin: `warp_time_secs` in `dj_analysis::clip`. */
-export function warpTime(warp: WarpPoint[], secs: number): number {
+export function warpTime(warp: WarpPoint[], secs: number, smoothing = 0): number {
   if (warp.length < 2) return secs;
-  return piecewise(guarded(warp), secs, 0, 1);
+  return piecewise(guarded(smoothWarp(warp, smoothing)), secs, 0, 1);
 }
 
 /** The inverse: which pre-warp time lands at `secs`. */
-export function warpSource(warp: WarpPoint[], secs: number): number {
+export function warpSource(warp: WarpPoint[], secs: number, smoothing = 0): number {
   if (warp.length < 2) return secs;
-  return piecewise(guarded(warp), secs, 1, 0);
+  return piecewise(guarded(smoothWarp(warp, smoothing)), secs, 1, 0);
 }
 
 /** How much the correction moved and stretched things: what the grid
@@ -324,10 +379,13 @@ export interface Tapped {
  *  `sectionBeats` is the length of the stretch correction: only every
  *  Nth tap is pinned to the ideal grid (a warp anchor). Within a section
  *  the audio moves as one piece and the beats between anchors keep their
- *  tapped positions — adjusted by the section's uniform stretch, not
- *  forced even (their remaining offset is the flam in `stats`). At 1,
- *  every beat is pinned: a perfect grid. */
-export function tapGrid(rawTaps: number[], sectionBeats = 4): Tapped | null {
+ *  tapped positions — adjusted by the section's stretch, not forced even
+ *  (their remaining offset is the flam in `stats`). At 1, every beat is
+ *  pinned: a perfect grid.
+ *
+ *  `smoothing` eases that stretch inside each section (`smoothWarp`), so
+ *  the beats between anchors land where the eased rate puts them. */
+export function tapGrid(rawTaps: number[], sectionBeats = 4, smoothing = 0): Tapped | null {
   const taps: number[] = [];
   for (const t of [...rawTaps].sort((a, b) => a - b)) {
     if (taps.length === 0 || t - taps[taps.length - 1] >= TAP_MIN_GAP_SECS) taps.push(t);
@@ -341,7 +399,7 @@ export function tapGrid(rawTaps: number[], sectionBeats = 4): Tapped | null {
   const warp: WarpPoint[] = [];
   for (let i = 0; i < last; i += step) warp.push([taps[i], first + i * period]);
   warp.push([taps[last], first + last * period]);
-  const times = taps.map((t) => warpTime(warp, t));
+  const times = taps.map((t) => warpTime(warp, t, smoothing));
   let maxFlamSecs = 0;
   for (let i = 0; i <= last; i += 1) {
     maxFlamSecs = Math.max(maxFlamSecs, Math.abs(times[i] - (first + i * period)));
@@ -359,7 +417,9 @@ export function tapGrid(rawTaps: number[], sectionBeats = 4): Tapped | null {
 
 /** One stretch-correction section of the warp, on the OUTPUT (post-warp)
  *  timeline, with the stretch it applies: `ratio` > 1 slowed the audio
- *  down (made it longer), < 1 sped it up. What the waveform colors. */
+ *  down (made it longer), < 1 sped it up. What the waveform colors —
+ *  the section's AVERAGE, which smoothing redistributes within the
+ *  section but never changes. */
 export interface StretchBand {
   start: number;
   end: number;
@@ -380,17 +440,25 @@ export function stretchBands(warp: WarpPoint[]): StretchBand[] {
 /** Compose two warps: `next` was tapped against the OUTPUT of `prev`, so
  *  the map the renderer needs is `next ∘ prev`. Exact for piecewise
  *  linear maps: the breakpoints are prev's anchors plus next's pulled
- *  back through prev. */
-export function composeWarp(prev: WarpPoint[], next: WarpPoint[]): WarpPoint[] {
+ *  back through prev. Each side is read through its own smoothing (the
+ *  composed anchors are then eased as one section list, so every anchor
+ *  still lands exactly where it did). */
+export function composeWarp(
+  prev: WarpPoint[],
+  next: WarpPoint[],
+  prevSmoothing = 0,
+  nextSmoothing = 0,
+): WarpPoint[] {
   if (prev.length < 2) return next;
   if (next.length < 2) return prev;
-  const xs = [...prev.map((p) => p[0]), ...next.map((p) => warpSource(prev, p[0]))].sort(
-    (a, b) => a - b,
-  );
+  const xs = [
+    ...prev.map((p) => p[0]),
+    ...next.map((p) => warpSource(prev, p[0], prevSmoothing)),
+  ].sort((a, b) => a - b);
   const out: WarpPoint[] = [];
   for (const x of xs) {
     if (out.length && x - out[out.length - 1][0] < 1e-9) continue;
-    out.push([x, warpTime(next, warpTime(prev, x))]);
+    out.push([x, warpTime(next, warpTime(prev, x, prevSmoothing), nextSmoothing)]);
   }
   return out;
 }

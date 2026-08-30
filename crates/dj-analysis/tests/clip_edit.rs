@@ -443,11 +443,89 @@ fn malformed_warps_are_rejected() {
 #[test]
 fn warp_time_maps_inside_the_anchors_and_is_identity_outside() {
     let warp = vec![[1.0, 1.0], [2.0, 3.0], [4.0, 4.0]];
-    assert_eq!(warp_time_secs(&warp, 0.5), 0.5);
-    assert_eq!(warp_time_secs(&warp, 1.5), 2.0);
-    assert_eq!(warp_time_secs(&warp, 3.0), 3.5);
-    assert_eq!(warp_time_secs(&warp, 5.0), 5.0);
-    assert_eq!(warp_time_secs(&[], 2.5), 2.5);
+    assert_eq!(warp_time_secs(&warp, 0.5, 0.0), 0.5);
+    assert_eq!(warp_time_secs(&warp, 1.5, 0.0), 2.0);
+    assert_eq!(warp_time_secs(&warp, 3.0, 0.0), 3.5);
+    assert_eq!(warp_time_secs(&warp, 5.0, 0.0), 5.0);
+    assert_eq!(warp_time_secs(&[], 2.5, 0.0), 2.5);
+}
+
+#[test]
+fn smoothing_eases_the_stretch_without_moving_an_anchor() {
+    // Two sections that correct in opposite directions: 1 s of audio into
+    // 1.2 s, then 1 s into 0.9 s. Unsmoothed, the rate steps from 1.2 to
+    // 0.9 the instant the middle anchor passes — the jump this softens.
+    let warp = vec![[1.0, 1.0], [2.0, 2.2], [3.0, 3.1]];
+    for smoothing in [0.0, 0.25, 1.0, 2.0] {
+        for anchor in &warp {
+            assert!(
+                (warp_time_secs(&warp, anchor[0], smoothing) - anchor[1]).abs() < 1e-9,
+                "smoothing {smoothing} moved the anchor at {}",
+                anchor[0]
+            );
+        }
+        // Outside the anchored span nothing is stretched at all, and the
+        // smoothing changes none of it.
+        assert_eq!(warp_time_secs(&warp, 0.25, smoothing), 0.25);
+        assert_eq!(
+            warp_time_secs(&warp, 4.0, smoothing),
+            warp_time_secs(&warp, 4.0, 0.0)
+        );
+    }
+
+    // Unsmoothed, a section stretches uniformly: its midpoint is halfway.
+    assert!((warp_time_secs(&warp, 1.5, 0.0) - 1.6).abs() < 1e-9);
+    // Smoothed, the section's edges stretch less and its middle more, so
+    // its own midpoint still lands halfway (the ease is symmetric) but
+    // the quarter points sit nearer the ends they came from.
+    assert!((warp_time_secs(&warp, 1.5, 1.0) - 1.6).abs() < 1e-9);
+    assert!(warp_time_secs(&warp, 1.25, 1.0) < warp_time_secs(&warp, 1.25, 0.0));
+    assert!(warp_time_secs(&warp, 1.75, 1.0) > warp_time_secs(&warp, 1.75, 0.0));
+
+    // What the ease buys: at the section boundary the two rates meet.
+    let rate =
+        |t: f64, s: f64| (warp_time_secs(&warp, t + 1e-4, s) - warp_time_secs(&warp, t, s)) / 1e-4;
+    assert!((rate(1.99, 0.0) - 1.2).abs() < 1e-3 && (rate(2.0, 0.0) - 0.9).abs() < 1e-3);
+    assert!(
+        (rate(1.99, 1.0) - rate(2.0, 1.0)).abs() < 0.05,
+        "the fully eased rate still steps: {} -> {}",
+        rate(1.99, 1.0),
+        rate(2.0, 1.0)
+    );
+}
+
+#[test]
+fn a_smoothed_render_keeps_the_beats_where_the_grid_puts_them() {
+    // The same uneven beats as the unsmoothed case, corrected every beat
+    // and eased: the anchors are exact either way, so every burst still
+    // lands on its grid slot and the clip keeps its length.
+    let played = [1.0, 1.4, 2.1, 3.0];
+    let period = 2.0 / 3.0;
+    let src = clicks(&played, 4.0);
+    let warp: Vec<[f64; 2]> = played
+        .iter()
+        .enumerate()
+        .map(|(i, &t)| [t, 1.0 + i as f64 * period])
+        .collect();
+    let program = ClipProgram {
+        regions: vec![whole(0, &src)],
+        crossfade_ms: 0.0,
+        warp,
+        warp_smoothing: 0.6,
+        ..ClipProgram::default()
+    };
+    assert!((program_duration_secs(&program) - 4.0).abs() < 1e-9);
+
+    let out = render_clip(&[&src], &program).unwrap();
+    assert_eq!(out.frames(), src.frames());
+    for n in 0..4 {
+        let want = 1.0 + n as f64 * period;
+        let got = burst_at(&out, want - 0.2, want + 0.2);
+        assert!(
+            (got - want).abs() < 0.03,
+            "beat {n}: burst at {got:.3}, wanted {want:.3}"
+        );
+    }
 }
 
 #[test]

@@ -764,6 +764,42 @@ describe('ClipView', () => {
     expect(screen.queryByTestId('clip-grid-tools')).toBeNull();
   });
 
+  it('smooths the correction across each section without moving a beat', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    fireEvent.click(screen.getByTestId('clip-play'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
+    tapAt(1.0);
+    tapAt(1.6);
+    tapAt(2.2);
+    tapAt(3.0);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4));
+
+    // Correct every beat, so each section really does stretch — the case
+    // where the rate steps at a boundary.
+    fireEvent.change(screen.getByTestId('clip-grid-section'), { target: { value: '1' } });
+    const hard = await programNow(clip, (p) => p.warp.length === 4);
+
+    // The slider starts subtle; sliding it to nothing is the old
+    // behaviour, and the anchors never move whatever it says.
+    expect(screen.getByTestId('clip-grid-smooth-readout').textContent).toBe('30%');
+    fireEvent.change(screen.getByTestId('clip-grid-smooth'), { target: { value: '0' } });
+    expect(screen.getByTestId('clip-grid-smooth-readout').textContent).toBe('hard');
+    const off = await programNow(clip, (p) => p.warp_smoothing === 0);
+    expect(off.warp).toEqual(hard.warp);
+
+    fireEvent.change(screen.getByTestId('clip-grid-smooth'), { target: { value: '0.8' } });
+    expect(screen.getByTestId('clip-grid-smooth-readout').textContent).toBe('80%');
+    const eased = await programNow(clip, (p) => p.warp_smoothing === 0.8);
+    expect(eased.warp).toEqual(hard.warp);
+    expect(eased.beat_grid?.times).toEqual(hard.beat_grid?.times);
+
+    // And the whole session — taps, both sliders — is still ONE undo.
+    fireEvent.click(screen.getByTestId('clip-undo'));
+    expect(screen.queryByTestId('clip-grid-tools')).toBeNull();
+  });
+
   it('builds the grid from the tracker beats the taps chose', async () => {
     // The tapped span is MEASURED: clip_tap_beats runs the tracker over
     // it and the taps pick a seed — the grid is the seed's beat times,

@@ -1032,8 +1032,21 @@ offset))`, offset in position units — so the knob's curve shapes the
   positions (its twin `BeatGrid.times` in `dj_analysis::clip`), the
   toolbar shows max flam / max stretch (`TapStats`), and the waveform
   washes each correction section by its stretch ratio (`stretchBands`,
-  `.clip-stretch-slower/-faster`). The WHOLE session — taps, slider
-  moves, extensions — is ONE undo step: ClipView's `tapSession` re-derives
+  `.clip-stretch-slower/-faster`, the section AVERAGE). A section's rate
+  would otherwise be rectangular and STEP at each anchor, which clicks:
+  `warp_smoothing` (program field, 0…1, second toolbar slider
+  `clip-grid-smooth`, default `DEFAULT_WARP_SMOOTHING` = 0.3, 0 = the old
+  hard step) eases it with a raised cosine over the section —
+  `rate(u) = 1 + e·((1−s) + s·(1 − cos 2πu))`, mean `ratio` whatever `s`
+  is, so ANCHORS AND SECTION DURATIONS ARE UNTOUCHED and at s = 1 the
+  rate meets its neighbour's at the boundary. It is a MAP-TIME
+  parameter, not baked into `warp`: `smooth_warp`/`smoothWarp`
+  (twins, `SMOOTH_STEPS` sub-segments a section, `MIN_EASED_RATE` floors
+  a wild one) densify the anchors inside `warp_map` and
+  `warpTime`/`warpSource`, so the anchor list stays the beat structure
+  the wash, `composeWarp` and the timeline edits read. The WHOLE session
+  — taps, slider moves, extensions — is ONE undo step: ClipView's
+  `tapSession` re-derives
   the program from the same taps and REPLACES the present (no history
   push); its controls only apply while the present IS the session's
   program. Selections then quantize outward to the grid's actual beats

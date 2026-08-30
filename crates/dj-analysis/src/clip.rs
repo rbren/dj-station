@@ -24,6 +24,8 @@
 //!    timeline, applied last through the Beatify WSOLA stretch
 //!    ([`crate::beatify::warp`]) — how tapped beats become an even grid.
 //!    Outside the anchors the audio is untouched (identity slope).
+//!    `warp_smoothing` eases the stretch WITHIN each anchor pair
+//!    ([`smooth_warp`]) so the rate does not step at the anchors.
 //!
 //! Sources may differ in sample rate and channel count: the render runs at
 //! the first source's rate with the widest channel count, resampling other
@@ -141,6 +143,13 @@ pub struct ClipProgram {
     /// before taps existed).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warp: Vec<[f64; 2]>,
+    /// How much the stretch is EASED inside each anchor pair, 0..=1 (see
+    /// [`smooth_warp`]). 0 is a rectangular rate per section — the rate
+    /// steps at every anchor, which is what clicks; 1 stretches only in
+    /// the middle of a section and not at all at its edges. The anchors
+    /// themselves never move.
+    #[serde(default)]
+    pub warp_smoothing: f64,
     /// The beat grid the taps built, carried with the edit (the renderer
     /// never reads it — the frontend quantizes selections against it and
     /// undo has to move it with the warp it belongs to).
@@ -185,6 +194,7 @@ impl Default for ClipProgram {
             level: Vec::new(),
             crossfade_ms: DEFAULT_CROSSFADE_MS,
             warp: Vec::new(),
+            warp_smoothing: 0.0,
             beat_grid: None,
         }
     }
@@ -480,13 +490,70 @@ pub fn render_clip(sources: &[&AudioData], program: &ClipProgram) -> Result<Audi
             sample_rate,
         },
         &program.warp,
+        program.warp_smoothing,
     )
 }
 
-/// The warp anchors as a [`WarpMap`], guarded on both sides with slope-1
-/// points so everything outside the tapped span stays exactly where it
-/// is (the map extrapolates its END SEGMENTS' slopes otherwise).
-fn warp_map(warp: &[[f64; 2]]) -> Result<Option<crate::beatify::WarpMap>> {
+/// Sub-segments an eased section is approximated with. The map stays
+/// piecewise linear (that is all the WSOLA renderer reads), so the ease
+/// is a staircase — fine enough that its steps are far below the one it
+/// replaces.
+const SMOOTH_STEPS: usize = 12;
+
+/// A section whose eased rate would dip this far below a standstill is
+/// stretching absurdly (taps half a section apart); its ease is capped
+/// rather than letting the map run backwards.
+const MIN_EASED_RATE: f64 = 0.1;
+
+/// Ease the stretch inside every anchor pair, `smoothing` in 0..=1.
+///
+/// A section's rate is constant otherwise, so it STEPS at each anchor —
+/// the audible click the Clip page's smoothing control exists to soften.
+/// Here the rate follows a raised cosine over the section instead:
+/// `rate(u) = 1 + e·((1−s) + s·(1 − cos 2πu))` where `e = ratio − 1`.
+/// Its mean over the section is `ratio` whatever `s` is, so the anchors
+/// land EXACTLY where they did (the section's duration is preserved to
+/// the last sample); at `s = 1` the edges are unstretched and all of the
+/// correction happens mid-section, which makes the rate continuous
+/// across the anchor. `s = 0` returns the anchors untouched.
+///
+/// TS twin: `smoothWarp` in `app/src/clip.ts`.
+pub fn smooth_warp(warp: &[[f64; 2]], smoothing: f64) -> Vec<[f64; 2]> {
+    let smoothing = smoothing.clamp(0.0, 1.0);
+    if smoothing <= 0.0 || warp.len() < 2 {
+        return warp.to_vec();
+    }
+    let mut out: Vec<[f64; 2]> = Vec::with_capacity(warp.len() * SMOOTH_STEPS);
+    out.push(warp[0]);
+    for w in warp.windows(2) {
+        let (lx, ly) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+        let e = if lx > 0.0 { ly / lx - 1.0 } else { 0.0 };
+        if lx > 1e-6 && ly > 1e-6 && e != 0.0 {
+            let s = if e < 0.0 {
+                smoothing.min(((1.0 - MIN_EASED_RATE) / -e - 1.0).max(0.0))
+            } else {
+                smoothing
+            };
+            for k in 1..SMOOTH_STEPS {
+                let u = k as f64 / SMOOTH_STEPS as f64;
+                let x = w[0][0] + lx * u;
+                let y = w[0][1] + lx * (u + e * (u - s * (2.0 * PI * u).sin() / (2.0 * PI)));
+                let prev = out[out.len() - 1];
+                if x > prev[0] && y > prev[1] {
+                    out.push([x, y]);
+                }
+            }
+        }
+        out.push(w[1]);
+    }
+    out
+}
+
+/// The warp anchors as a [`WarpMap`]: eased inside each section by
+/// `smoothing`, then guarded on both sides with slope-1 points so
+/// everything outside the tapped span stays exactly where it is (the map
+/// extrapolates its END SEGMENTS' slopes otherwise).
+fn warp_map(warp: &[[f64; 2]], smoothing: f64) -> Result<Option<crate::beatify::WarpMap>> {
     if warp.len() < 2 {
         ensure!(warp.is_empty(), "clip render: a warp needs two anchors");
         return Ok(None);
@@ -497,18 +564,19 @@ fn warp_map(warp: &[[f64; 2]]) -> Result<Option<crate::beatify::WarpMap>> {
             "clip render: warp anchors must increase in both axes"
         );
     }
-    let (first, last) = (warp[0], warp[warp.len() - 1]);
-    let mut points = Vec::with_capacity(warp.len() + 2);
+    let eased = smooth_warp(warp, smoothing);
+    let (first, last) = (eased[0], eased[eased.len() - 1]);
+    let mut points = Vec::with_capacity(eased.len() + 2);
     points.push((first[0] - 1.0, first[1] - 1.0));
-    points.extend(warp.iter().map(|p| (p[0], p[1])));
+    points.extend(eased.iter().map(|p| (p[0], p[1])));
     points.push((last[0] + 1.0, last[1] + 1.0));
     Ok(Some(crate::beatify::WarpMap { points }))
 }
 
 /// Stretch the rendered output through the tap warp. A missing or
 /// identity map is a sample-exact pass-through.
-fn apply_warp(audio: AudioData, warp: &[[f64; 2]]) -> Result<AudioData> {
-    let Some(map) = warp_map(warp)? else {
+fn apply_warp(audio: AudioData, warp: &[[f64; 2]], smoothing: f64) -> Result<AudioData> {
+    let Some(map) = warp_map(warp, smoothing)? else {
         return Ok(audio);
     };
     if map.is_identity() {
@@ -521,8 +589,8 @@ fn apply_warp(audio: AudioData, warp: &[[f64; 2]]) -> Result<AudioData> {
 /// Where the warp puts an output time. Identity for the empty (or
 /// malformed) warp, so plain programs cost nothing. TS twin: `warpTime`
 /// in `app/src/clip.ts`.
-pub fn warp_time_secs(warp: &[[f64; 2]], secs: f64) -> f64 {
-    match warp_map(warp) {
+pub fn warp_time_secs(warp: &[[f64; 2]], secs: f64, smoothing: f64) -> f64 {
+    match warp_map(warp, smoothing) {
         Ok(Some(map)) => map.map_time(secs),
         _ => secs,
     }
@@ -548,7 +616,7 @@ pub fn program_duration_secs(program: &ClipProgram) -> f64 {
     for o in &program.overlays {
         total = total.max(o.at_secs.max(0.0) + o.region.duration_secs());
     }
-    warp_time_secs(&program.warp, total)
+    warp_time_secs(&program.warp, total, program.warp_smoothing)
 }
 
 /// Cut a rendered span to EXACTLY `beats` whole beats at `bpm`: a

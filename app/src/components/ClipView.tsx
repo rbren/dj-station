@@ -20,7 +20,10 @@
 // (the toolbar slider, default 4): section boundaries are warped onto
 // the ideal grid and the beats inside keep their tapped feel, so the
 // toolbar shows the max flam (uncorrected offset) and max stretch that
-// choice leaves. The whole tap session — grid, warp, extensions, slider
+// choice leaves. A second slider SMOOTHS that stretch (`warp_smoothing`,
+// 0…1): the correction eases in and out across each section instead of
+// switching rate at its boundary, which is what the boundary clicked
+// with. The whole tap session — grid, warp, extensions, slider
 // moves — is ONE undo step (`tapSession` regenerates in place).
 // Selections then quantize to the grid's actual beats; ⌘-drag frees
 // them. A selection that was never tapped is measured by the Beatify
@@ -85,6 +88,7 @@ import {
   type ClipStemBackend,
   type ClipStemStatus,
   type TapStats,
+  DEFAULT_WARP_SMOOTHING,
   SILENCE_DB,
   STEM_NAMES,
 } from '../clip';
@@ -146,6 +150,9 @@ type Range = { start: number; end: number };
 /** Default stretch-correction length, in beats (the grid slider). */
 const DEFAULT_SECTION_BEATS = 4;
 const MAX_SECTION_BEATS = 16;
+/** Step of the smoothing slider (0 = the hard rate step at each anchor,
+ *  1 = all of the stretch in the middle of the section). */
+const SMOOTHING_STEP = 0.05;
 
 /** The tap commit, kept regenerable: the slider and the +/− extensions
  *  re-derive grid and warp from the SAME taps against the SAME base
@@ -189,19 +196,27 @@ function beatsLabel(grid: ClipGrid, sel: Range): string {
 }
 
 /** Build a tap session's program: grid + warp from the taps at the given
- *  correction length, the +/− edge extensions re-applied a beat at a
- *  time (an extension with nowhere to go simply stops). */
+ *  correction length and smoothing, the +/− edge extensions re-applied a
+ *  beat at a time (an extension with nowhere to go simply stops). */
 function sessionProgram(
   base: ClipProgram,
   taps: number[],
   sectionBeats: number,
+  smoothing: number,
   extBack: number,
   extFwd: number,
 ): { program: ClipProgram; stats: TapStats } | null {
-  const tapped = tapGrid(taps, sectionBeats);
+  const tapped = tapGrid(taps, sectionBeats, smoothing);
   if (!tapped) return null;
-  const warp = base.warp.length ? composeWarp(base.warp, tapped.warp) : tapped.warp;
-  let program: ClipProgram = { ...base, warp, beat_grid: tapped.grid };
+  const warp = base.warp.length
+    ? composeWarp(base.warp, tapped.warp, base.warp_smoothing, smoothing)
+    : tapped.warp;
+  let program: ClipProgram = {
+    ...base,
+    warp,
+    warp_smoothing: smoothing,
+    beat_grid: tapped.grid,
+  };
   const dur = programDuration(program);
   let grid = tapped.grid;
   for (const [edge, n] of [
@@ -274,6 +289,9 @@ export function ClipView({
   const [taps, setTaps] = useState<number[]>([]);
   /** Stretch-correction length in beats — the grid toolbar's slider. */
   const [sectionBeats, setSectionBeats] = useState(DEFAULT_SECTION_BEATS);
+  /** How much the correction eases across a section (0…1) — the grid
+   *  toolbar's second slider. */
+  const [smoothing, setSmoothing] = useState(DEFAULT_WARP_SMOOTHING);
   /** The last tap commit, regenerable (see TapSession). */
   const [tapSession, setTapSession] = useState<TapSession | null>(null);
   /** The measured tempo of an untapped span, keyed by what it measured
@@ -337,9 +355,9 @@ export function ClipView({
   // dispatch the next click — so pressing play in that gap read the
   // previous render's duration, computed an empty window, and silently
   // played nothing.
-  const live = useRef({ clip, request, duration, taps, program, sectionBeats });
+  const live = useRef({ clip, request, duration, taps, program, sectionBeats, smoothing });
   useLayoutEffect(() => {
-    live.current = { clip, request, duration, taps, program, sectionBeats };
+    live.current = { clip, request, duration, taps, program, sectionBeats, smoothing };
   });
 
   // One effect creates the transport and one effect destroys it, so React
@@ -387,7 +405,14 @@ export function ClipView({
             // An edit landing while the tracker measured would put the
             // grid's anchors under different audio: drop the pass.
             if (live.current.program !== prev) return;
-            const built = sessionProgram(prev, beats, live.current.sectionBeats, 0, 0);
+            const built = sessionProgram(
+              prev,
+              beats,
+              live.current.sectionBeats,
+              live.current.smoothing,
+              0,
+              0,
+            );
             if (!built) return;
             setPast((h) => [...h.slice(-HISTORY_DEPTH), prev]);
             setFuture([]);
@@ -481,8 +506,8 @@ export function ClipView({
   const applyTimeline = useCallback(
     (edit: (p: ClipProgram, at: (t: number) => number) => ClipProgram) => {
       apply((p) => {
-        const warp = p.warp;
-        return edit(dropGrid(p), (t) => warpSource(warp, t));
+        const { warp, warp_smoothing } = p;
+        return edit(dropGrid(p), (t) => warpSource(warp, t, warp_smoothing));
       });
     },
     [apply],
@@ -521,8 +546,8 @@ export function ClipView({
   const tunable = tapSession !== null && tapSession.program === program;
 
   const regenerate = useCallback(
-    (session: TapSession, beats: number, extBack: number, extFwd: number) => {
-      const built = sessionProgram(session.base, session.taps, beats, extBack, extFwd);
+    (session: TapSession, beats: number, ease: number, extBack: number, extFwd: number) => {
+      const built = sessionProgram(session.base, session.taps, beats, ease, extBack, extFwd);
       if (!built) return;
       setProgram(built.program);
       setTapSession({ ...session, program: built.program, stats: built.stats, extBack, extFwd });
@@ -534,10 +559,20 @@ export function ClipView({
     (beats: number) => {
       setSectionBeats(beats);
       if (tapSession && tapSession.program === program) {
-        regenerate(tapSession, beats, tapSession.extBack, tapSession.extFwd);
+        regenerate(tapSession, beats, smoothing, tapSession.extBack, tapSession.extFwd);
       }
     },
-    [program, regenerate, tapSession],
+    [program, regenerate, smoothing, tapSession],
+  );
+
+  const smooth = useCallback(
+    (ease: number) => {
+      setSmoothing(ease);
+      if (tapSession && tapSession.program === program) {
+        regenerate(tapSession, sectionBeats, ease, tapSession.extBack, tapSession.extFwd);
+      }
+    },
+    [program, regenerate, sectionBeats, tapSession],
   );
 
   const extend = useCallback(
@@ -546,11 +581,12 @@ export function ClipView({
       regenerate(
         tapSession,
         sectionBeats,
+        smoothing,
         tapSession.extBack + (edge === 'back' ? by : 0),
         tapSession.extFwd + (edge === 'fwd' ? by : 0),
       );
     },
-    [program, regenerate, sectionBeats, tapSession],
+    [program, regenerate, sectionBeats, smoothing, tapSession],
   );
 
   const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
@@ -618,7 +654,7 @@ export function ClipView({
               dropGrid(program),
               index,
               source.duration_secs,
-              warpSource(program.warp, at),
+              warpSource(program.warp, at, program.warp_smoothing),
             ),
           );
           setStatus(`Overlaid "${label}" at ${timecode(at)}`);
@@ -847,7 +883,8 @@ export function ClipView({
       prev.program.regions !== request.program.regions ||
       prev.program.overlays !== request.program.overlays ||
       prev.program.crossfade_ms !== request.program.crossfade_ms ||
-      prev.program.warp !== request.program.warp;
+      prev.program.warp !== request.program.warp ||
+      prev.program.warp_smoothing !== request.program.warp_smoothing;
     const toneChanged =
       prev.program.eq !== request.program.eq || prev.program.level !== request.program.level;
     if (timelineChanged) transportRef.current?.invalidate();
@@ -1340,6 +1377,23 @@ export function ClipView({
                 />
                 <span data-testid="clip-grid-section-readout">
                   {sectionBeats === 1 ? 'every beat' : `${sectionBeats} beats`}
+                </span>
+              </label>
+              <label className="clip-grid-section">
+                <span>Smooth</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={SMOOTHING_STEP}
+                  data-testid="clip-grid-smooth"
+                  disabled={!tunable}
+                  value={smoothing}
+                  onChange={(e) => smooth(Number(e.target.value))}
+                  title="How much each correction eases in and out across its section instead of changing rate at the boundary"
+                />
+                <span data-testid="clip-grid-smooth-readout">
+                  {smoothing <= 0 ? 'hard' : `${Math.round(smoothing * 100)}%`}
                 </span>
               </label>
               {tunable && tapSession && (

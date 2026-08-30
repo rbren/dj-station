@@ -31,6 +31,7 @@ import {
   selectionEdgeAt,
   setLevelPoint,
   SILENCE_DB,
+  smoothWarp,
   stretchBands,
   tapGrid,
   trimTo,
@@ -357,6 +358,54 @@ describe('beat taps', () => {
     expect(bands[0].ratio).toBeCloseTo(4 / 3 / 1.2, 9);
     expect(bands[1].ratio).toBeCloseTo(2 / 3 / 0.8, 9);
     expect(tapped.stats.maxStretch).toBeCloseTo(Math.abs(2 / 3 / 0.8 - 1), 9);
+  });
+
+  it('smooths the stretch inside a section without moving its anchors', () => {
+    // Two sections correcting opposite ways (1.2 s → 4/3 s, then 0.8 s →
+    // 2/3 s): unsmoothed the rate STEPS at the 2.2 s anchor, which is the
+    // click the smoothing softens. Twin: `smooth_warp` in
+    // `dj_analysis::clip` (tests/clip_edit.rs).
+    const warp = tapGrid([1, 1.5, 2.2, 3], 2)!.warp;
+    expect(smoothWarp(warp, 0)).toBe(warp);
+    expect(smoothWarp(warp, 1).length).toBeGreaterThan(warp.length);
+
+    for (const s of [0, 0.3, 1, 2]) {
+      for (const [from, to] of warp) expect(warpTime(warp, from, s)).toBeCloseTo(to, 9);
+      // Nothing outside the anchors moves either.
+      expect(warpTime(warp, 0.5, s)).toBe(0.5);
+      expect(warpTime(warp, 4, s)).toBeCloseTo(warpTime(warp, 4, 0), 9);
+      // Still invertible.
+      expect(warpSource(warp, warpTime(warp, 1.9, s), s)).toBeCloseTo(1.9, 6);
+    }
+
+    // Eased, a section stretches least at its edges and most in its
+    // middle — so the first quarter of the slowed section lags the
+    // uniform stretch and the last quarter runs ahead of it.
+    expect(warpTime(warp, 1.3, 1)).toBeLessThan(warpTime(warp, 1.3, 0));
+    expect(warpTime(warp, 1.9, 1)).toBeGreaterThan(warpTime(warp, 1.9, 0));
+
+    // What it buys: the two sections' rates meet at the anchor between
+    // them instead of jumping 1.111 → 0.833.
+    const rate = (t: number, s: number) =>
+      (warpTime(warp, t + 1e-4, s) - warpTime(warp, t, s)) / 1e-4;
+    expect(rate(2.19, 0)).toBeCloseTo(4 / 3 / 1.2, 3);
+    expect(rate(2.2, 0)).toBeCloseTo(2 / 3 / 0.8, 3);
+    expect(Math.abs(rate(2.19, 1) - rate(2.2, 1))).toBeLessThan(0.05);
+  });
+
+  it('moves the beats between anchors with the smoothed rate', () => {
+    // The unpinned beat sits where the eased rate carries it, not where
+    // the uniform stretch did; the anchors are untouched either way.
+    const hard = tapGrid([1, 1.5, 2.2, 3], 2, 0)!;
+    const eased = tapGrid([1, 1.5, 2.2, 3], 2, 0.5)!;
+    expect(eased.warp).toEqual(hard.warp);
+    expect(eased.grid.times[0]).toBeCloseTo(hard.grid.times[0], 9);
+    expect(eased.grid.times[2]).toBeCloseTo(hard.grid.times[2], 9);
+    expect(eased.grid.times[3]).toBeCloseTo(hard.grid.times[3], 9);
+    expect(eased.grid.times[1]).toBeLessThan(hard.grid.times[1]);
+    // The section wash still reports the whole section's stretch: the
+    // ease redistributes it, it does not change it.
+    expect(stretchBands(eased.warp)).toEqual(stretchBands(hard.warp));
   });
 
   it('ignores key bounce and refuses to build a grid from one tap', () => {
