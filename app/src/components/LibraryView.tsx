@@ -81,6 +81,55 @@ function DownloadRow({ job }: { job: DownloadJob }) {
   );
 }
 
+// A row's title or artist: the text as written until it is clicked, an
+// input while it is being changed. Enter or leaving the field commits it,
+// Escape puts back what was there — the same grammar as renaming a file.
+function EditableName({
+  value,
+  field,
+  placeholder,
+  onCommit,
+}: {
+  value: string;
+  field: 'title' | 'artist';
+  placeholder: string;
+  onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  if (draft === null) {
+    return (
+      <button
+        className="track-name"
+        data-testid={`track-${field}`}
+        data-tip={`click to rename this ${field}`}
+        onClick={() => setDraft(value)}
+      >
+        {value || <span className="track-name-blank">{placeholder}</span>}
+      </button>
+    );
+  }
+  const commit = () => {
+    setDraft(null);
+    onCommit(draft);
+  };
+  return (
+    <input
+      className="track-name-input"
+      data-testid={`track-${field}-input`}
+      aria-label={field}
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit();
+        else if (e.key === 'Escape') setDraft(null);
+      }}
+    />
+  );
+}
+
 function LicenseTag({ kind }: { kind: string }) {
   return (
     <span className={`tag tag-license tag-license-${kind}`} data-testid="license-tag">
@@ -165,6 +214,25 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
       await refreshTracks('');
     },
     [client, refreshTracks],
+  );
+
+  // Rename one field of a track. The list is not re-read: the backend
+  // returns the row as it now stands, and re-running the query would
+  // reorder (or drop) the row the user is still looking at.
+  const rename = useCallback(
+    async (t: Track, next: Partial<Pick<Track, 'title' | 'artist'>>) => {
+      const title = (next.title ?? t.title).trim();
+      const artist = (next.artist ?? t.artist).trim();
+      if (!title) {
+        setStatus(`A track needs a title — “${t.title}” kept its own`);
+        return;
+      }
+      if (title === t.title && artist === t.artist) return;
+      const updated = await client.setTrackNames(t.id, title, artist);
+      if (!updated) return;
+      setTracks((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+    },
+    [client],
   );
 
   // Delete the confirmed track and re-read the list the user is looking
@@ -493,8 +561,22 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
               <tbody>
                 {tracks.map((t) => (
                   <tr key={t.id} data-testid="library-track">
-                    <td>{t.title}</td>
-                    <td>{t.artist}</td>
+                    <td>
+                      <EditableName
+                        value={t.title}
+                        field="title"
+                        placeholder="untitled"
+                        onCommit={(title) => void rename(t, { title })}
+                      />
+                    </td>
+                    <td>
+                      <EditableName
+                        value={t.artist}
+                        field="artist"
+                        placeholder="unknown artist"
+                        onCommit={(artist) => void rename(t, { artist })}
+                      />
+                    </td>
                     <td>{formatDuration(t.duration_secs)}</td>
                     <td data-testid="track-bpm">{fixed(t.bpm, 1)}</td>
                     <td data-testid="track-key">{t.musical_key ?? '—'}</td>

@@ -131,7 +131,10 @@ fn probe(path: &Path) -> Probed {
 impl Library {
     /// Import an audio file into the library. The file stays where it is
     /// (the library stores its path); identical content (by hash) is
-    /// deduplicated. New tracks are queued for analysis.
+    /// deduplicated. New tracks are queued for analysis, and a title that
+    /// opens or closes with the artist we just learned is tidied by
+    /// [`crate::naming::strip_artist`] (the Library page edits either
+    /// field afterwards).
     ///
     /// Importing a path the user had deleted is a deliberate change of
     /// mind, so it clears that deletion (the watch folder never reaches
@@ -159,9 +162,16 @@ impl Library {
         } else {
             opts.source
         };
-        let track = self.insert_track(
+        let artist = opts.artist.or(probed.artist).unwrap_or_default();
+        // What a downloader or a file browser writes ("Lizzo - Boys") says
+        // the artist twice once the row has an artist column of its own.
+        let title = crate::naming::strip_artist(
             &opts.title.or(probed.title).unwrap_or(fallback_title),
-            &opts.artist.or(probed.artist).unwrap_or_default(),
+            &artist,
+        );
+        let track = self.insert_track(
+            &title,
+            &artist,
             &opts.album.or(probed.album).unwrap_or_default(),
             &path,
             &hash,

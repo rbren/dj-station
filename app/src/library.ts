@@ -114,6 +114,9 @@ export interface LibraryClientApi {
     filters: Record<string, string>,
   ): Promise<TrackResult[] | null>;
   importTrack(path: string): Promise<Track | null>;
+  /** Rename a track. Returns the row as it now stands (the backend trims
+   *  both fields and refuses a blank title). */
+  setTrackNames(trackId: number, title: string, artist: string): Promise<Track | null>;
   /** Delete a track: its row and DJ metadata, its cached stems, and the
    *  audio file when the app owns it (a download or a rendered clip). */
   deleteTrack(trackId: number): Promise<DeletedTrack | null>;
@@ -149,6 +152,9 @@ export class LibraryClient extends IpcClient implements LibraryClientApi {
   }
   importTrack(path: string) {
     return this.call<Track>('import_track', { path });
+  }
+  setTrackNames(trackId: number, title: string, artist: string) {
+    return this.call<Track>('set_track_names', { trackId, title, artist });
   }
   deleteTrack(trackId: number) {
     return this.call<DeletedTrack>('delete_track', { trackId });

@@ -30,6 +30,87 @@ fn import_probes_metadata_and_queues_analysis() {
 }
 
 #[test]
+fn import_takes_the_artist_credit_out_of_the_title() {
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::open(&tmp.path().join("data")).unwrap();
+
+    // A download hands over the provider's title verbatim.
+    let downloaded = tmp.path().join("boys.wav");
+    common::write_test_wav(&downloaded, 220.0, 0.4);
+    let track = lib
+        .import_file(
+            &downloaded,
+            ImportOptions {
+                title: Some("Lizzo - Boys (Official Video)".into()),
+                artist: Some("Lizzo".into()),
+                ..ImportOptions::default()
+            },
+        )
+        .unwrap()
+        .track()
+        .clone();
+    assert_eq!(track.title, "Boys (Official Video)");
+    assert_eq!(track.artist, "Lizzo");
+
+    // A file named the way a browser names one, with the artist known.
+    let named = tmp.path().join("Lizzo - Juice.wav");
+    common::write_test_wav(&named, 330.0, 0.4);
+    let track = lib
+        .import_file(
+            &named,
+            ImportOptions {
+                artist: Some("Lizzo".into()),
+                ..ImportOptions::default()
+            },
+        )
+        .unwrap()
+        .track()
+        .clone();
+    assert_eq!(track.title, "Juice");
+
+    // No artist to match: the title is left exactly as it was found.
+    let anon = tmp.path().join("Lizzo - Tempo.wav");
+    common::write_test_wav(&anon, 440.0, 0.4);
+    let track = lib
+        .import_file(&anon, ImportOptions::default())
+        .unwrap()
+        .track()
+        .clone();
+    assert_eq!(track.title, "Lizzo - Tempo");
+}
+
+#[test]
+fn a_track_can_be_renamed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::open(&tmp.path().join("data")).unwrap();
+    let wav = tmp.path().join("take.wav");
+    common::write_test_wav(&wav, 220.0, 0.4);
+    let track = lib
+        .import_file(&wav, ImportOptions::default())
+        .unwrap()
+        .track()
+        .clone();
+
+    let renamed = lib
+        .set_track_names(track.id, "  Boys  ", " Lizzo ")
+        .unwrap();
+    assert_eq!(renamed.title, "Boys");
+    assert_eq!(renamed.artist, "Lizzo");
+    assert_eq!(lib.track(track.id).unwrap().title, "Boys");
+    // The new name is what the library searches on.
+    assert_eq!(lib.search("lizzo").unwrap().len(), 1);
+
+    // An artist can be cleared; a title cannot.
+    assert_eq!(
+        lib.set_track_names(track.id, "Boys", "").unwrap().artist,
+        ""
+    );
+    assert!(lib.set_track_names(track.id, "   ", "Lizzo").is_err());
+    assert!(lib.set_track_names(track.id + 99, "Boys", "").is_err());
+    assert_eq!(lib.track(track.id).unwrap().title, "Boys");
+}
+
+#[test]
 fn identical_content_is_deduplicated_by_hash() {
     let tmp = tempfile::tempdir().unwrap();
     let lib = Library::open(&tmp.path().join("data")).unwrap();

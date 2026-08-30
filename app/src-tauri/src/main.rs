@@ -2318,6 +2318,21 @@ fn import_track(state: State<AppState>, path: String) -> CmdResult<Track> {
         .map_err(err)
 }
 
+/// Rename a track (Library page): title and artist only — everything
+/// else about the row is derived from the file or the analysis.
+#[tauri::command]
+fn set_track_names(
+    state: State<AppState>,
+    track_id: i64,
+    title: String,
+    artist: String,
+) -> CmdResult<Track> {
+    state
+        .library
+        .set_track_names(track_id, &title, &artist)
+        .map_err(err)
+}
+
 /// Delete a track and everything the app derived from it: the row with
 /// its DJ metadata (cues, loops, beatgrid, tags, crate membership), the
 /// stem cache keyed by its content, the Clip page's decoded copy, and the
@@ -3063,6 +3078,7 @@ fn main() {
             providers,
             search_provider,
             import_track,
+            set_track_names,
             delete_track,
             import_rekordbox,
             start_download,

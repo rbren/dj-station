@@ -2128,6 +2128,44 @@ body {
   color: var(--ink-muted);
 }
 
+/* Title and artist are the two fields a row lets the user fix (an import
+   guesses them from a file name or a video title). They read as plain
+   table text and turn into an input on click; a dashed rule under the
+   pointer is the only hint that they are more than text. */
+.library-tracks .track-name {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 1px dashed transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: text;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.library-tracks tbody tr:hover .track-name,
+.library-tracks .track-name:focus-visible {
+  border-bottom-color: var(--line-strong);
+}
+
+.library-tracks .track-name-blank {
+  color: var(--ink-dim);
+  font-style: italic;
+}
+
+.library-tracks .track-name-input {
+  width: 100%;
+  min-width: 10ch;
+  font: inherit;
+  color: var(--ink);
+  background: var(--canvas);
+  border: 1px solid var(--brand-dim);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
 /* The row's own action stays quiet until the row is under the pointer. */
 .library-tracks tbody td:last-child {
   text-align: right;

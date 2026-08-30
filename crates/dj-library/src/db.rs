@@ -290,6 +290,26 @@ impl Library {
         self.track(id)
     }
 
+    /// Rename a track: its title and its artist, which the import-time
+    /// guesses (file name, embedded tags, a provider's idea of a video
+    /// title) regularly get wrong. Both are trimmed; a blank title is
+    /// refused, because a row with no name cannot be found again. A blank
+    /// artist is fine — plenty of material has none.
+    pub fn set_track_names(&self, track_id: i64, title: &str, artist: &str) -> Result<Track> {
+        let title = title.trim();
+        let artist = artist.trim();
+        anyhow::ensure!(!title.is_empty(), "a track needs a title");
+        let changed = self.with_conn(|c| {
+            Ok(c.execute(
+                "UPDATE tracks SET title = ?2, artist = ?3, \
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1",
+                params![track_id, title, artist],
+            )?)
+        })?;
+        anyhow::ensure!(changed == 1, "no track {track_id}");
+        self.track(track_id)
+    }
+
     /// Delete a track: the row, everything hanging off it (tags, crate
     /// membership, cues, loops, beatgrid — all `ON DELETE CASCADE`), and
     /// the audio file itself when the file is one the app owns.

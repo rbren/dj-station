@@ -225,6 +225,11 @@ function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi
         Promise.resolve(RESULT_BY_PROVIDER[provider] ?? []),
       ),
     importTrack: vi.fn().mockResolvedValue(LOCAL_TRACK),
+    setTrackNames: vi
+      .fn()
+      .mockImplementation((id: number, title: string, artist: string) =>
+        Promise.resolve({ ...LOCAL_TRACK, id, title, artist }),
+      ),
     deleteTrack: vi.fn().mockResolvedValue({ track: LOCAL_TRACK, file_removed: false }),
     importRekordbox: vi.fn().mockResolvedValue({ imported: 0, duplicates: 0 }),
     startDownload: vi.fn().mockResolvedValue(1),
@@ -273,6 +278,53 @@ describe('LibraryView', () => {
     render(<LibraryView client={mockClient()} />);
     await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
     expect(screen.queryByTestId('library-edit')).toBeNull();
+  });
+
+  it('renames a track from its row, title and artist alike', async () => {
+    const client = mockClient();
+    render(<LibraryView client={client} />);
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
+
+    // The title is text until it is clicked; Enter commits the change.
+    fireEvent.click(screen.getByTestId('track-title'));
+    fireEvent.change(screen.getByTestId('track-title-input'), { target: { value: 'Boys' } });
+    fireEvent.keyDown(screen.getByTestId('track-title-input'), { key: 'Enter' });
+    await waitFor(() => expect(client.setTrackNames).toHaveBeenCalledWith(1, 'Boys', 'Me'));
+    await waitFor(() => expect(screen.getByTestId('track-title').textContent).toBe('Boys'));
+
+    // The artist is the same field twice over, and leaving it commits too.
+    fireEvent.click(screen.getByTestId('track-artist'));
+    fireEvent.change(screen.getByTestId('track-artist-input'), { target: { value: 'Lizzo' } });
+    fireEvent.blur(screen.getByTestId('track-artist-input'));
+    await waitFor(() => expect(client.setTrackNames).toHaveBeenCalledWith(1, 'Boys', 'Lizzo'));
+    await waitFor(() => expect(screen.getByTestId('track-artist').textContent).toBe('Lizzo'));
+    expect(client.setTrackNames).toHaveBeenCalledTimes(2);
+  });
+
+  it('escapes out of a rename, and refuses to leave a track untitled', async () => {
+    const client = mockClient();
+    render(<LibraryView client={client} />);
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
+
+    fireEvent.click(screen.getByTestId('track-title'));
+    fireEvent.change(screen.getByTestId('track-title-input'), { target: { value: 'Nope' } });
+    fireEvent.keyDown(screen.getByTestId('track-title-input'), { key: 'Escape' });
+    expect(screen.getByTestId('track-title').textContent).toBe('Basement Loop');
+
+    // Committing the same text is not a rename either.
+    fireEvent.click(screen.getByTestId('track-title'));
+    fireEvent.keyDown(screen.getByTestId('track-title-input'), { key: 'Enter' });
+    expect(client.setTrackNames).not.toHaveBeenCalled();
+
+    // A blank title would lose the row: it is refused, and said so.
+    fireEvent.click(screen.getByTestId('track-title'));
+    fireEvent.change(screen.getByTestId('track-title-input'), { target: { value: '   ' } });
+    fireEvent.keyDown(screen.getByTestId('track-title-input'), { key: 'Enter' });
+    await waitFor(() =>
+      expect(screen.getByTestId('library-status').textContent).toContain('needs a title'),
+    );
+    expect(client.setTrackNames).not.toHaveBeenCalled();
+    expect(screen.getByTestId('track-title').textContent).toBe('Basement Loop');
   });
 
   it('renders one tab per enabled provider plus Local', async () => {

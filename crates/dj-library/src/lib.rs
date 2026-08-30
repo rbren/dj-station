@@ -2,8 +2,9 @@
 //!
 //! - SQLite track database: file paths, content hashes, DJ metadata
 //!   placeholders, tags, crates/playlists, license info (§8.1).
-//! - Programmatic import (content-hashed, symphonia-probed metadata) and
-//!   watch-folder auto-import for new audio files.
+//! - Programmatic import (content-hashed, symphonia-probed metadata, the
+//!   artist credit taken back out of the title) and watch-folder
+//!   auto-import for new audio files.
 //! - Acquisition provider framework (§8.3): iTunes Search (deep link),
 //!   Freesound + Jamendo (download, keys from env), Internet Archive
 //!   (download, keyless), YouTube (download via the external `yt-dlp`
@@ -14,6 +15,7 @@
 pub mod db;
 pub mod downloads;
 pub mod import;
+pub mod naming;
 pub mod paths;
 pub mod providers;
 pub mod rekordbox;
@@ -22,6 +24,7 @@ pub mod watch;
 pub use db::{Beatgrid, CuePoint, DeletedTrack, Library, MacroRecord, SavedLoop, Track};
 pub use downloads::{DownloadJob, DownloadManager, DownloadState};
 pub use import::{ImportOptions, ImportOutcome, AUDIO_EXTENSIONS};
+pub use naming::strip_artist;
 pub use paths::{default_data_dir, init_data_dir, legacy_data_dir, migrate_legacy_data, Migration};
 pub use providers::{
     Acquire, AcquireKind, AcquisitionHub, AcquisitionProvider, FetchProgress, FilterOption,
