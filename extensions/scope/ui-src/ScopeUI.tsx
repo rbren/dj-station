@@ -14,6 +14,16 @@
 // The RT thread does no extra work: it writes samples it already has into
 // a fixed ring, and the FFT happens here, per poll, on the window the app
 // asked for.
+//
+// The FFT's own resolution is fixed by that ring — 2048 samples, so 1024
+// bins ~23 Hz apart at 48 kHz, and nothing on the panel changes it (the
+// `window` input is the level followers' time constant, not a buffer
+// length). What the `bins` input sets is how many log-spaced BANDS those
+// FFT bins are folded into for the display: fewer, wider bars read like a
+// spectrum analyser's octave bands; more, narrower ones separate partials
+// that sit close together, up to the point where the bottom of the range
+// runs out of FFT bins to distinguish (below ~200 Hz neighbouring bands
+// start reading the same bin and the bars step rather than curve).
 
 import { useEffect, useRef, useState } from "react";
 
@@ -42,10 +52,13 @@ const TRACE_H = 96;
 const SPEC_H = 120;
 const PAD = 4;
 
-/** Log-frequency display range and bar count for the spectrum. */
+/** Log-frequency display range for the spectrum. */
 const F_LO = 20;
 const F_HI = 16000;
-const BANDS = 48;
+/** Bar count: the `bins` input's detents (manifest.json), and its default. */
+export const MIN_BINS = 16;
+export const MAX_BINS = 144;
+export const DEFAULT_BINS = 48;
 /** Spectrum floor, dB relative to a 10 V full-scale sine. */
 const DB_FLOOR = -60;
 /** Trace full scale: the ±10 V signal rails, so the height is honest. */
@@ -127,21 +140,25 @@ export interface Band {
 }
 
 /**
- * Fold FFT magnitudes into log-spaced display bands. A band reads the MEAN
- * POWER of the bins it covers, so the display is a density: white noise —
- * equal power per bin — draws flat across bands of very different widths,
- * and no band can come out empty (the lowest bands, narrower than a bin,
- * read the bin they sit in).
+ * Fold FFT magnitudes into `count` log-spaced display bands. A band reads
+ * the MEAN POWER of the bins it covers, so the display is a density: white
+ * noise — equal power per bin — draws flat across bands of very different
+ * widths, and no band can come out empty (the lowest bands, narrower than
+ * a bin, read the bin they sit in).
  */
-export function spectrumBands(mags: Float32Array, sampleRate: number): Band[] {
+export function spectrumBands(
+  mags: Float32Array,
+  sampleRate: number,
+  count: number = DEFAULT_BINS,
+): Band[] {
   const n = mags.length * 2;
   const binHz = sampleRate / n;
   const bands: Band[] = [];
   const logLo = Math.log(F_LO);
   const logHi = Math.log(F_HI);
-  for (let b = 0; b < BANDS; b++) {
-    const fLo = Math.exp(logLo + ((logHi - logLo) * b) / BANDS);
-    const fHi = Math.exp(logLo + ((logHi - logLo) * (b + 1)) / BANDS);
+  for (let b = 0; b < count; b++) {
+    const fLo = Math.exp(logLo + ((logHi - logLo) * b) / count);
+    const fHi = Math.exp(logLo + ((logHi - logLo) * (b + 1)) / count);
     const hz = Math.sqrt(fLo * fHi);
     if (mags.length < 2) {
       bands.push({ hz, db: DB_FLOOR });
@@ -160,6 +177,17 @@ export function spectrumBands(mags: Float32Array, sampleRate: number): Band[] {
     bands.push({ hz, db: Math.max(DB_FLOOR, db) });
   }
   return bands;
+}
+
+/**
+ * The `bins` input read as a bar count: a whole number of bands inside the
+ * knob's range. The jack is patchable, so the value arriving here can be
+ * any voltage — clamping is what keeps a swept CV drawing a spectrum
+ * instead of nothing at all.
+ */
+export function binCount(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_BINS;
+  return Math.min(MAX_BINS, Math.max(MIN_BINS, Math.round(value)));
 }
 
 /**
@@ -294,11 +322,16 @@ export default function ScopeUI({ handle }: { handle: ModuleHandle }) {
     ? tracePoints(traceWindow(samples, sampleRate, f0), W, W, TRACE_H)
     : "";
 
+  const bins = binCount(handle.paramValue("bins"));
   let bands: Band[] = [];
   let peakBandHz = 0;
   if (showSpec) {
     const frame = fftFrame(samples);
-    bands = spectrumBands(frame.length > 0 ? fftMag(frame) : EMPTY, sampleRate);
+    bands = spectrumBands(
+      frame.length > 0 ? fftMag(frame) : EMPTY,
+      sampleRate,
+      bins,
+    );
     let best = DB_FLOOR;
     for (const b of bands) {
       if (b.db > best) {
@@ -352,11 +385,12 @@ export default function ScopeUI({ handle }: { handle: ModuleHandle }) {
           role="img"
           aria-label="spectrum"
           data-testid="scope-spectrum"
+          data-bins={bins}
           data-peak-hz={peakBandHz > 0 ? peakBandHz.toFixed(0) : ""}
         >
           <rect x={0} y={0} width={W} height={SPEC_H} className="scope-bg" />
           {bands.map((b, i) => {
-            const barW = (W - 2 * PAD) / BANDS;
+            const barW = (W - 2 * PAD) / bins;
             const h = ((b.db - DB_FLOOR) / -DB_FLOOR) * (SPEC_H - 2 * PAD);
             return (
               <rect

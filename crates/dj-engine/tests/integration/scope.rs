@@ -8,10 +8,11 @@
 //! display range with no dead band and NO fundamental to report, and an
 //! unwired scope captures silence.
 
-use dj_engine::{CaptureWindow, Engine, CAPTURE_SAMPLES};
+use dj_engine::{CaptureWindow, Engine, KnobConfig, KnobStyle, CAPTURE_SAMPLES};
 
 const SR: f32 = 48_000.0;
-/// The panel's log-frequency display bands (ScopeUI.tsx: F_LO, F_HI, BANDS).
+/// The panel's log-frequency display range (ScopeUI.tsx: F_LO, F_HI) and the
+/// default band count its `bins` input starts at (DEFAULT_BINS).
 const F_LO: f32 = 20.0;
 const F_HI: f32 = 16_000.0;
 const BANDS: usize = 48;
@@ -42,10 +43,11 @@ fn amp_at(x: &[f32], freq: f32) -> f32 {
     2.0 * (re * re + im * im).sqrt() as f32 / wsum as f32
 }
 
-/// RMS amplitude across one display band, probed at five frequencies so a
-/// single unlucky bin of a random signal cannot decide the answer.
-fn band_amp(x: &[f32], band: usize) -> f32 {
-    let edge = |b: usize| F_LO * (F_HI / F_LO).powf(b as f32 / BANDS as f32);
+/// RMS amplitude across one of `bands` display bands, probed at five
+/// frequencies so a single unlucky bin of a random signal cannot decide
+/// the answer.
+fn band_amp_of(x: &[f32], band: usize, bands: usize) -> f32 {
+    let edge = |b: usize| F_LO * (F_HI / F_LO).powf(b as f32 / bands as f32);
     let (lo, hi) = (edge(band), edge(band + 1));
     const PROBES: usize = 5;
     let mut power = 0.0f64;
@@ -55,6 +57,11 @@ fn band_amp(x: &[f32], band: usize) -> f32 {
         power += a * a;
     }
     (power / PROBES as f64).sqrt() as f32
+}
+
+/// The same, over the panel's default number of bands.
+fn band_amp(x: &[f32], band: usize) -> f32 {
+    band_amp_of(x, band, BANDS)
 }
 
 /// Highest normalized autocorrelation over lags that could be a period:
@@ -284,6 +291,108 @@ fn the_capture_is_never_stale() {
         quiet.samples.iter().all(|&v| v == 0.0),
         "the window still holds the old signal"
     );
+}
+
+/// The `bins` input's knob, as the panel reads it: the detents are whole
+/// band counts from 16 to 144, and the default is the 48 bars the spectrum
+/// has always been drawn with (ScopeUI.tsx MIN_BINS/MAX_BINS/DEFAULT_BINS).
+///
+/// The detent count is 17 rather than a round 16 on purpose: a manifest
+/// default lands on the position `position_for_value` binary-searches to,
+/// which is the boundary between two detents, and only a boundary at an
+/// exact binary fraction — `steps - 1` a power of two — snaps back to the
+/// detent that was asked for instead of the one below it.
+#[test]
+fn the_bins_knob_steps_through_whole_band_counts() {
+    let e = engine_with_scope();
+    let manifest = &crate::common::registry().extensions["com.dj.scope"].manifest;
+    let decl = manifest
+        .inputs
+        .iter()
+        .find(|i| i.id == "bins")
+        .expect("the scope declares a bins input");
+    let cfg: KnobConfig = decl.knob.clone().expect("bins is a knob");
+    assert_eq!(cfg.style, KnobStyle::Stepped);
+    assert_eq!((cfg.min, cfg.max, cfg.steps), (16.0, 144.0, Some(17)));
+    // Every detent is a usable bar count: whole, and 8 apart.
+    for step in 0..17 {
+        let value = cfg.map(step as f32 / 16.0);
+        assert_eq!(value.round(), (16 + 8 * step) as f32, "detent {step}");
+    }
+    // A fresh scope starts on the 48-bar detent — the panel's default.
+    let position = e.knob_state("scope1", "bins").unwrap().position;
+    assert_eq!(cfg.map(position).round(), BANDS as f32);
+}
+
+/// Moving `bins` moves the picture and nothing else: it is a display
+/// control, so the audio through `thru` and every measured output read
+/// exactly the same at the two ends of its range. (The jack still costs
+/// the DSP an input slot — this is also the pin that the module's input
+/// count and its manifest agree.)
+#[test]
+fn bins_changes_the_display_only() {
+    let render_at = |bins: f32| {
+        let mut e = engine_with_scope();
+        e.add_module("osc1", "com.dj.oscillator").unwrap();
+        e.add_module("out1", "builtin.audio_out").unwrap();
+        e.connect("osc1", "audio", "scope1", "in").unwrap();
+        e.connect("scope1", "thru", "out1", "l").unwrap();
+        e.set_knob_value("scope1", "bins", bins).unwrap();
+        let audio = e.render_offline((0.2 * SR) as usize).unwrap().remove(0);
+        let readings = ["hz", "peak", "rms"].map(|j| e.tap_out("scope1", j).unwrap().display);
+        (audio, readings)
+    };
+    let (few_audio, few_readings) = render_at(16.0);
+    let (many_audio, many_readings) = render_at(144.0);
+    assert_eq!(few_audio, many_audio, "bins must not touch the signal");
+    assert_eq!(few_readings, many_readings, "bins must not touch a reading");
+    assert!(few_readings[0] > 0.0, "the tone was measured at all");
+}
+
+/// The capture a denser spectrum is folded from covers the whole display
+/// range whatever the bar count: at the coarse end of `bins` every band of
+/// white noise carries energy, so turning the control down loses detail and
+/// never a part of the picture. (How bands are folded is the panel's — see
+/// `spectrumBands` in ScopeUI.test.tsx for the dense end, where a band is
+/// narrower than an FFT bin.)
+#[test]
+fn a_coarse_spectrum_still_covers_the_range() {
+    let mut e = engine_with_scope();
+    e.add_module("noise1", "com.dj.noise").unwrap();
+    e.connect("noise1", "white", "scope1", "in").unwrap();
+    e.render_offline((0.5 * SR) as usize).unwrap();
+
+    let w = capture(&e);
+    const COARSE: usize = 16;
+    let amps: Vec<f32> = (0..COARSE)
+        .map(|b| band_amp_of(&w.samples, b, COARSE))
+        .collect();
+    let mean = amps.iter().sum::<f32>() / COARSE as f32;
+    for (b, &a) in amps.iter().enumerate() {
+        assert!(a > mean * 0.2, "band {b} of {COARSE} is dead: {a} V");
+    }
+}
+
+/// A bin count is patch state like any other knob: it survives a save and
+/// a load, and a patch written before the input existed loads on the
+/// default (the committed E2E scope case is exactly such a patch).
+#[test]
+fn the_bin_count_survives_a_patch_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = engine_with_scope();
+    e.set_knob_value("scope1", "bins", 96.0).unwrap();
+    e.save_patch(dir.path(), "scope-bins").unwrap();
+
+    let reloaded = Engine::load_patch(dir.path(), crate::common::registry()).unwrap();
+    let cfg: KnobConfig = crate::common::registry().extensions["com.dj.scope"]
+        .manifest
+        .inputs
+        .iter()
+        .find(|i| i.id == "bins")
+        .and_then(|i| i.knob.clone())
+        .unwrap();
+    let position = reloaded.knob_state("scope1", "bins").unwrap().position;
+    assert_eq!(cfg.map(position).round(), 96.0);
 }
 
 /// Only jacks whose manifest asks for it carry a capture ring — one fixed

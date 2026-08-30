@@ -10,14 +10,23 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import ScopeUI, {
+  binCount,
   fftFrame,
   fftMag,
   spectrumBands,
   traceWindow,
   tracePoints,
   triggerStart,
+  DEFAULT_BINS,
+  MAX_BINS,
+  MIN_BINS,
   type CaptureWindow,
 } from '../../extensions/scope/ui-src/ScopeUI';
+import scopeManifestJson from '../../extensions/scope/manifest.json';
+import type { Manifest } from '../src/types';
+
+/** The scope's manifest on disk: the controls the panel is drawn around. */
+const scopeManifest = scopeManifestJson as unknown as Manifest;
 
 afterEach(cleanup);
 
@@ -45,9 +54,19 @@ function white(n = N, seed = 0x12345678): Float32Array {
   return out;
 }
 
-function handleWith(taps: Record<string, number>, samples?: Float32Array) {
+/** An input's manifest default, as the engine would hand it to the panel. */
+const manifestDefault = (id: string): number =>
+  scopeManifest.inputs.find((i) => i.id === id)?.default ?? 0;
+
+function handleWith(
+  taps: Record<string, number>,
+  samples?: Float32Array,
+  params: Record<string, number> = {},
+) {
   return {
-    paramValue: () => 0,
+    // Inputs read through the handle as their knob value, so an unset one
+    // reads the manifest default the panel would really see.
+    paramValue: (id: string) => params[id] ?? manifestDefault(id),
     signalTap: (jackId: string) => ({ display: taps[jackId] ?? 0 }),
     capture: async (): Promise<CaptureWindow | null> =>
       samples ? { sampleRate: SR, samples } : null,
@@ -112,6 +131,37 @@ describe('spectrumBands', () => {
     }
     const low = bands.slice(0, 12);
     for (const b of low) expect(b.db).toBeGreaterThan(mean - 12);
+  });
+
+  it('draws as many bands as it is asked for, over the same range', () => {
+    const at = (count: number) => spectrumBands(fftMag(fftFrame(white())), SR, count);
+    for (const count of [MIN_BINS, DEFAULT_BINS, MAX_BINS]) {
+      expect(at(count)).toHaveLength(count);
+    }
+    // Same 20 Hz .. 16 kHz display range however finely it is cut.
+    for (const count of [MIN_BINS, MAX_BINS]) {
+      const bands = at(count);
+      expect(bands[0].hz).toBeGreaterThan(20);
+      expect(bands[0].hz).toBeLessThan(bands[1].hz);
+      expect(bands[bands.length - 1].hz).toBeLessThan(16000);
+    }
+    // More bands is more DETAIL, not a different picture: the loudest bar
+    // of a tone still sits on the tone at either end of the range.
+    for (const count of [MIN_BINS, MAX_BINS]) {
+      const best = spectrumBands(fftMag(fftFrame(sine(440))), SR, count).reduce((a, b) =>
+        b.db > a.db ? b : a,
+      );
+      expect(best.hz).toBeGreaterThan(380);
+      expect(best.hz).toBeLessThan(510);
+    }
+  });
+
+  it('has no empty bands even where a band is narrower than an FFT bin', () => {
+    // At the dense end the lowest bands are far narrower than the 23 Hz
+    // bins of a 2048-sample capture, so they read the bin they sit in
+    // rather than nothing at all — bars step, they do not drop out.
+    const bands = spectrumBands(fftMag(fftFrame(white())), SR, MAX_BINS);
+    for (const b of bands) expect(b.db).toBeGreaterThan(-60);
   });
 
   it('shows silence as an empty spectrum', () => {
@@ -231,6 +281,54 @@ describe('ScopeUI', () => {
     for (const bar of screen.getByTestId('scope-spectrum').querySelectorAll('.scope-bar')) {
       expect(Number(bar.getAttribute('height'))).toBe(0);
     }
+  });
+
+  it('draws the number of bars the bins input asks for', async () => {
+    // The user-visible half of the control: the knob moves, the spectrum
+    // is cut into that many bars. (`window` never did this — it is the
+    // level followers' time constant, and the bars are unaffected by it.)
+    const bars = () => screen.getByTestId('scope-spectrum').querySelectorAll('.scope-bar').length;
+    await renderScope(handleWith(tone, sine(440)));
+    expect(bars()).toBe(DEFAULT_BINS);
+    expect(screen.getByTestId('scope-spectrum').getAttribute('data-bins')).toBe(
+      String(DEFAULT_BINS),
+    );
+    cleanup();
+
+    for (const count of [MIN_BINS, 96, MAX_BINS]) {
+      await renderScope(handleWith(tone, sine(440), { bins: count }));
+      expect(bars()).toBe(count);
+      cleanup();
+    }
+    // The window knob is not a bin count, whatever it is set to.
+    for (const window of [0.005, 0.5]) {
+      await renderScope(handleWith(tone, sine(440), { window }));
+      expect(bars()).toBe(DEFAULT_BINS);
+      cleanup();
+    }
+  });
+
+  it('keeps a patched bins CV inside the range it can draw', async () => {
+    // The jack is patchable, so anything can arrive on it.
+    expect(binCount(MIN_BINS - 40)).toBe(MIN_BINS);
+    expect(binCount(MAX_BINS * 10)).toBe(MAX_BINS);
+    expect(binCount(47.6)).toBe(48);
+    expect(binCount(NaN)).toBe(DEFAULT_BINS);
+    await renderScope(handleWith(tone, sine(440), { bins: 0 }));
+    expect(screen.getByTestId('scope-spectrum').querySelectorAll('.scope-bar').length).toBe(
+      MIN_BINS,
+    );
+  });
+
+  it('the bins knob in the manifest matches what the panel draws', () => {
+    const bins = scopeManifest.inputs.find((i) => i.id === 'bins');
+    expect(bins?.default).toBe(DEFAULT_BINS);
+    expect(bins?.knob).toMatchObject({
+      style: 'stepped',
+      min: MIN_BINS,
+      max: MAX_BINS,
+      steps: 17,
+    });
   });
 
   it('toggles between wave-only and spectrum-only views', async () => {

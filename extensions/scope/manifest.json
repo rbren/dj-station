@@ -7,9 +7,14 @@
   "inputs": [
     { "id": "in", "name": "In", "default": 0.0, "capture": true },
     { "id": "hysteresis", "name": "Hysteresis", "default": 0.15,
-      "knob": { "style": "continuous", "min": 0.02, "max": 0.6, "curve": "linear" } },
+      "knob": { "style": "continuous", "min": 0.02, "max": 0.6, "curve": "linear" },
+      "display": { "unit": "" } },
     { "id": "window", "name": "Window", "default": 0.05,
-      "knob": { "style": "continuous", "min": 0.005, "max": 0.5, "curve": "exp" } }
+      "knob": { "style": "continuous", "min": 0.005, "max": 0.5, "curve": "exp" },
+      "display": { "unit": "s" } },
+    { "id": "bins", "name": "Bins", "default": 48.0,
+      "knob": { "style": "stepped", "min": 16.0, "max": 144.0, "curve": "linear", "steps": 17 },
+      "display": { "unit": "" } }
   ],
   "outputs": [
     { "id": "thru", "name": "Thru" },

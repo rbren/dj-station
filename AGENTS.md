@@ -785,6 +785,14 @@ offset))`, offset in position units — so the knob's curve shapes the
   `position_for_value`; frontend imports the same manifest). Defaults only
   affect freshly added modules: patches serialize explicit knob positions,
   so goldens are unaffected by default tweaks.
+- A `stepped` knob's DEFAULT is only reachable when `steps - 1` is a POWER
+  OF TWO. `position_for_value` binary-searches a staircase, so it lands on
+  the BOUNDARY between the detent below the asked-for value and the detent
+  itself; only a boundary that is an exact binary fraction snaps back up to
+  the detent that was asked for, and any other spacing silently starts the
+  module one detent low. The Scope's `bins` (16..144, 17 detents) is sized
+  for that and pinned by `integration scope
+  the_bins_knob_steps_through_whole_band_counts`.
 - A gain of zero must be EXACT silence, not a rounding residue: the
   crossfader's equal-power law (`crossfader_gains` in
   `crates/dj-engine/src/mixer.rs`) clamps `cos`/`sin` at 0 because f32

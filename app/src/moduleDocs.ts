@@ -981,8 +981,33 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'triggering envelopes.',
     inputs: {
       in: 'Signal to analyze.',
-      hysteresis: 'Trigger-detection hysteresis, volts.',
-      window: 'Analysis window length, seconds.',
+      hysteresis:
+        'How far the signal must swing to close one cycle of the pitch ' +
+        'detector, as a FRACTION of the measured peak (not volts), so one ' +
+        'setting works at any level. Turn it down and bright harmonics ' +
+        'wiggling around the zero crossing get counted as cycles \u2014 the ' +
+        'reading jumps an octave (or two) high; turn it up and quiet or ' +
+        'decaying cycles never reach it \u2014 the reading drops an octave ' +
+        'or stops voicing. 0.15 suits most tones; raise it for a noisy or ' +
+        'harmonically rich source, lower it for a soft sine. It only ' +
+        'affects pitch/hz/trig \u2014 never peak, rms or thru.',
+      window:
+        'Time constant of the peak and rms level followers, in seconds: ' +
+        'peak jumps to a new maximum instantly and falls back over this ' +
+        'time, rms averages over it. Short (5\u201320 ms) reads individual ' +
+        'hits \u2014 a kick becomes a spike worth triggering off; long ' +
+        '(0.2\u20130.5 s) reads loudness \u2014 the smooth envelope you ' +
+        'would duck a bassline with. It is not a buffer length: the ' +
+        'displayed waveform and spectrum always come from the last 43 ms ' +
+        'the engine captured, and the pitch detector ignores it entirely.',
+      bins:
+        'How many log-spaced bars the panel\u2019s spectrum is drawn with ' +
+        '(16\u2013144, in steps of 8). Fewer, wider bars read like a ' +
+        'graphic-EQ display; more, narrower ones separate partials that ' +
+        'sit close together. Purely a display control \u2014 no jack\u2019s ' +
+        'value changes with it \u2014 and the underlying FFT stays at 1024 ' +
+        'bins (~23 Hz apart), so past ~64 bars the bottom octaves run out ' +
+        'of resolution and neighbouring bars start reading the same bin.',
     },
     outputs: {
       thru: 'Unchanged copy of in.',
@@ -993,15 +1018,22 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
         'Detected frequency, Hz-scaled CV (1 V per 100 Hz) \u2014 0 V when ' +
         'the input has no fundamental to report, e.g. noise or silence.',
       peak:
-        'Instantaneous peak level of the input as a CV \u2014 spikes on ' +
-        'transients; good for triggering off hits.',
+        'Peak level of the input as a CV: it jumps to every new maximum ' +
+        'and falls back over the window time \u2014 spikes on transients, ' +
+        'good for triggering off hits.',
       rms:
-        'Average loudness (RMS) of the input as a smooth CV \u2014 an ' +
-        'envelope follower: wire it (inverted) into a VCA to duck other ' +
-        'signals with the music.',
-      trig: 'Trigger on detected onsets.',
+        'Average loudness (RMS) of the input over the window, as a smooth ' +
+        'CV \u2014 an envelope follower: wire it (inverted) into a VCA to ' +
+        'duck other signals with the music.',
+      trig:
+        'A 1 ms pulse at the start of every detected period \u2014 a sync ' +
+        'trigger at the input\u2019s own frequency, silent while there is ' +
+        'no pitch to lock to.',
     },
-    examples: ['Sit inline after an oscillator to watch the waveform while patching.'],
+    examples: [
+      'Sit inline after an oscillator to watch the waveform while patching.',
+      'Spectrum view with bins at 144: see an FM pair\u2019s sidebands as separate bars.',
+    ],
   },
   'com.dj.camera': {
     summary:

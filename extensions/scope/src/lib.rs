@@ -20,6 +20,33 @@
 //! peak (`hysteresis`), and the last three periods are median-filtered, so
 //! harmonics and noise near the zero crossing do not double the reading.
 //!
+//! The two measurement controls own one half of that each, and neither
+//! touches the panel's picture — the trace and the spectrum are drawn from
+//! the capture ring, which is a fixed 2048 samples wide whatever these say:
+//!
+//! * `hysteresis` is the Schmitt threshold as a FRACTION OF THE MEASURED
+//!   PEAK (0.02..0.6, not volts): the signal has to reach +frac*peak and
+//!   come back below -frac*peak to close one cycle, so the same setting
+//!   means the same thing at any level. Low, the detector counts every
+//!   wiggle a bright harmonic puts near the zero crossing and reads an
+//!   octave (or two) high; high, cycles that never reach the threshold are
+//!   missed and the reading drops an octave or stops voicing on quiet or
+//!   decaying material. It decides the period only — `peak`, `rms` and
+//!   `thru` do not know it exists.
+//! * `window` is the TIME CONSTANT of the two level followers (seconds):
+//!   `peak` jumps to a new maximum instantly and decays towards the signal
+//!   with this constant, `rms` is a one-pole average of x² over it. Short
+//!   (5 ms) reads individual transients — a kick reads as a spike worth
+//!   triggering off; long (0.5 s) reads loudness, the smooth envelope you
+//!   would duck a bassline with. It is not a buffer length and not an FFT
+//!   size: pitch detection, the drawn trace and the spectrum's resolution
+//!   are all unaffected by it.
+//!
+//! `bins` is display-only — the number of log-spaced bars the panel folds
+//! its spectrum into (see `ui-src/ScopeUI.tsx`). It is an input jack so it
+//! is patchable and survives a save like every other control; the DSP here
+//! reads nothing from it.
+//!
 //! A crossing detector always measures SOMETHING — noise crosses the
 //! threshold constantly, and a median of three short random gaps is a
 //! perfectly plausible-looking "period" — so a measured period only counts
@@ -36,6 +63,10 @@ use dj_module_sdk::{export_module, InitCtx, Module, ProcessIo};
 const IN_SIGNAL: usize = 0;
 const IN_HYSTERESIS: usize = 1;
 const IN_WINDOW: usize = 2;
+/// Read by the panel, not here — but the jack still costs an input slot,
+/// and `N_INPUTS` must match the manifest or the host writes past the
+/// module's input buffer.
+const _IN_BINS: usize = 3;
 
 const OUT_THRU: usize = 0;
 const OUT_PITCH: usize = 1;
@@ -98,7 +129,7 @@ fn median3(a: f32, b: f32, c: f32) -> f32 {
 }
 
 impl Module for Scope {
-    const N_INPUTS: usize = 3;
+    const N_INPUTS: usize = 4;
     const N_OUTPUTS: usize = 6;
 
     fn new(ctx: &InitCtx) -> Self {
