@@ -2059,6 +2059,19 @@ of the page.
   `Engine::decks_set_master`, drafted while dragged exactly like the
   tempo, and `end_edit` on release closes the undo window
   (`EditKey::DeckMaster`, coalesced per bus).
+- A TEMPO CHANGE IS A MOVE, NOT A JUMP: the `smooth` tick box left of the
+  BPM box (ON by default, app-layer UI state — never patch state) makes
+  the number a TARGET, and the bank walks to it at `SMOOTH_BPM_PER_SEC`
+  (`rampBpm` in `decks.ts`), a `decks_set_bpm` write every 100 ms down
+  the ordinary path — one coalesced undo step (`EditKey::Knob`), closed
+  with `end_edit` when it lands. The reading right of the box
+  (`.decks-bpm-actual`) is where the bank ACTUALLY is: `decks_status.bpm`
+  and nothing local, so a tempo moved from the surface shows up in it
+  too. The target is a draft like the faders' — it clears itself once
+  the engine's reading agrees — and unticking `smooth` mid-walk applies
+  the target whole, which is also how the box behaved before there was a
+  walk. The engine knows nothing about any of this: `bpm` stays a
+  per-sample input jack, so a wired LFO still means what it says.
 - CHROME-TO-CANVAS CABLES are the tricky part, and they have their own
   layer: chrome jacks sit OUTSIDE the pan/zoom transform, so DecksView
   draws every wire touching the bank with a SECOND WireOverlay in screen

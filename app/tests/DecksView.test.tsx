@@ -10,6 +10,7 @@ import {
   beatGridLayout,
   clipParts,
   clipTitle,
+  rampBpm,
   stretchLabel,
   bpmLabel,
   BEAT_FIELD_HEIGHT,
@@ -146,6 +147,11 @@ const NO_POLL = 100000;
 
 function show(api: DecksApi, clips: BeatClipApi = makeClips()) {
   return render(<DecksView api={api} clips={clips} pollMs={NO_POLL} />);
+}
+
+/** Whether the bank walks to a new tempo or steps to it. */
+function smoothBox(): HTMLInputElement {
+  return within(screen.getByTestId('decks-smooth')).getByRole('checkbox') as HTMLInputElement;
 }
 
 /** How lit a strip is: the --deck-level the tint is mixed from. */
@@ -599,6 +605,8 @@ describe('DecksView', () => {
     const bpm = await screen.findByTestId<HTMLInputElement>('decks-bpm');
     await waitFor(() => expect(bpm.value).toBe('128'));
 
+    // Unticked, the box IS the tempo: the write goes out whole.
+    fireEvent.click(smoothBox());
     fireEvent.change(bpm, { target: { value: '140' } });
     await waitFor(() => expect(api.setBpm).toHaveBeenCalledWith('decks1', 140));
     fireEvent.blur(bpm);
@@ -607,6 +615,65 @@ describe('DecksView', () => {
     // Out-of-range typing is clamped rather than sent to the engine raw.
     fireEvent.change(bpm, { target: { value: '900' } });
     await waitFor(() => expect(api.setBpm).toHaveBeenCalledWith('decks1', 300));
+  });
+
+  it('smooth is on by default, and walks the bank to the target instead of jumping', async () => {
+    const api = makeApi(makeStatus());
+    show(api);
+    const bpm = await screen.findByTestId<HTMLInputElement>('decks-bpm');
+    await waitFor(() => expect(bpm.value).toBe('128'));
+    expect(smoothBox().checked).toBe(true);
+
+    // One beat away is one second's walk.
+    fireEvent.change(bpm, { target: { value: '129' } });
+    // Nothing is sent on the keystroke: the box says where the bank is
+    // going, not where it is.
+    expect(api.setBpm).not.toHaveBeenCalled();
+    expect(bpm.value).toBe('129');
+
+    await waitFor(() => expect(api.setBpm).toHaveBeenCalled());
+    const first = vi.mocked(api.setBpm).mock.calls[0][1];
+    expect(first).toBeGreaterThan(128);
+    expect(first).toBeLessThan(129);
+
+    // It arrives — exactly on the target — and closes the undo window it
+    // has been writing into.
+    await waitFor(() => expect(api.setBpm).toHaveBeenCalledWith('decks1', 129), {
+      timeout: 3000,
+    });
+    await waitFor(() => expect(api.endEdit).toHaveBeenCalled());
+    const walked = vi.mocked(api.setBpm).mock.calls.map(([, v]) => v);
+    expect(walked.length).toBeGreaterThan(1);
+    expect(walked).toEqual([...walked].sort((a, b) => a - b));
+  });
+
+  it('says where the bank actually is while it walks there', async () => {
+    const api = makeApi(makeStatus());
+    show(api);
+    const actual = await screen.findByTestId('decks-bpm-actual');
+    // The engine's own reading, beside the box and to one decimal.
+    await waitFor(() => expect(actual.textContent).toContain('128.0'));
+
+    // The box is the destination; the reading stays with the bank, which
+    // is still where it was.
+    fireEvent.change(screen.getByTestId('decks-bpm'), { target: { value: '140' } });
+    expect(actual.textContent).toContain('128.0');
+    // Both readings of the tempo sit beside the box that sets it.
+    const tempo = screen.getByTestId('decks-bpm').closest('.decks-tempo');
+    expect(tempo?.contains(actual)).toBe(true);
+    expect(tempo?.contains(smoothBox())).toBe(true);
+  });
+
+  it('unticking smooth mid-walk means "be there now"', async () => {
+    const api = makeApi(makeStatus());
+    show(api);
+    const bpm = await screen.findByTestId<HTMLInputElement>('decks-bpm');
+    await waitFor(() => expect(bpm.value).toBe('128'));
+
+    fireEvent.change(bpm, { target: { value: '140' } });
+    fireEvent.click(smoothBox());
+    await waitFor(() => expect(api.setBpm).toHaveBeenCalledWith('decks1', 140));
+    await waitFor(() => expect(api.endEdit).toHaveBeenCalled());
   });
 
   it('the tempo is one control in one unit: the number and its slider under a single BPM label', async () => {
@@ -837,6 +904,15 @@ describe('decks readouts', () => {
     // did it — "70 bpm ×2" is the same clip, twice as often.
     expect(bpmLabel(140, 2)).toBe('70 bpm ×2');
     expect(bpmLabel(140, 1 / 3)).toBe('420 bpm ×1/3');
+  });
+
+  it('walks the tempo a beat a second, and never past the target', () => {
+    expect(rampBpm(128, 140, 1)).toBe(129);
+    expect(rampBpm(140, 128, 2)).toBe(138);
+    // The last step lands ON the target rather than overshooting it, and
+    // a target already reached is a no-op.
+    expect(rampBpm(128, 128.4, 1)).toBe(128.4);
+    expect(rampBpm(128, 128, 5)).toBe(128);
   });
 
   it('keeps the two halves of a clip name apart, one line each', () => {

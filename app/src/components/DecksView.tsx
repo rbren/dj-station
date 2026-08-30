@@ -45,6 +45,13 @@
 // fader streams faster than the poll, so the drag's value wins until the
 // engine's own reading agrees with it. Drafts converge and clear
 // themselves — there is no timer, and no "who is right" ambiguity.
+//
+// The tempo box is that draft with a WALK behind it. Ticked, "smooth"
+// makes the number a destination: the bank's tempo moves toward it at
+// SMOOTH_BPM_PER_SEC, written a step at a time down the same
+// `decks_set_bpm` path (one coalesced undo step, closed when it lands),
+// and the reading beside the box says where the bank actually is
+// meanwhile. Unticked, the write goes out whole, as it always did.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '../beatClip';
@@ -54,6 +61,7 @@ import {
   MASTER_BUSES,
   MAX_BPM,
   MIN_BPM,
+  rampBpm,
   type DecksApi,
   type DecksStatus,
   type DeckSlotStatus,
@@ -68,6 +76,11 @@ import { LiveJack } from './Jack';
 import { WIRE_COLORS, WireOverlay } from './WireOverlay';
 
 const POLL_MS = 100;
+
+/** How often the smooth ramp writes the tempo on its way to the target:
+ *  the poll's cadence, so the actual reading and the walk that moves it
+ *  step together. */
+const SMOOTH_TICK_MS = 100;
 
 /** How tall the strip dock is, and whether it is open at all: cosmetic
  *  app-layer state, persisted in localStorage beside the rack's zoom and
@@ -148,7 +161,18 @@ export function DecksView(props: DecksViewProps) {
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Partial<Record<DraftKey, number>>>({});
-  const [bpmDraft, setBpmDraft] = useState<number | null>(null);
+  // The tempo the box is ASKING for, and whether the bank walks to it or
+  // jumps. The target is a draft like any other — it clears itself once
+  // the engine's reading agrees — but with `smooth` ticked it outlives
+  // the keystroke that set it, because the walk that answers it takes
+  // seconds (`SMOOTH_BPM_PER_SEC`) and the box has to keep saying where
+  // the bank is going while the readout beside it says where it is.
+  const [bpmTarget, setBpmTarget] = useState<number | null>(null);
+  const [smooth, setSmooth] = useState(true);
+  // The last tempo the walk wrote, so a target changed mid-walk carries
+  // on from where the bank actually is rather than from the poll's
+  // reading; null between walks.
+  const ramp = useRef<number | null>(null);
   const [masterDrafts, setMasterDrafts] = useState<Partial<Record<MasterBus, number>>>({});
   const rehydrated = useRef(false);
   // Where the bank's grid is BETWEEN polls: the last reading and the
@@ -174,6 +198,10 @@ export function DecksView(props: DecksViewProps) {
     if (!st) return;
     clock.current = { beat: st.beat, bpm: st.bpm, running: st.running, at: performance.now() };
     setStatus(st);
+    // The tempo the bank has arrived at is no longer a target — the box
+    // goes back to reading the engine, so a tempo moved from anywhere
+    // else (the surface) shows up in it.
+    setBpmTarget((t) => (t !== null && Math.abs(st.bpm - clampBpm(t)) < 1e-3 ? null : t));
     // A draft the engine has caught up with is no longer a draft.
     setDrafts((live) => {
       const settled = Object.fromEntries(
@@ -290,6 +318,67 @@ export function DecksView(props: DecksViewProps) {
     [poll],
   );
 
+  // The tempo in two halves: the TARGET the box asks for, and how the
+  // bank gets there. Unticked, it gets there in one step — the write
+  // goes straight out, as it always did.
+  const setBpmTo = useCallback(
+    (next: number) => {
+      if (!bank || !Number.isFinite(next)) return;
+      setBpmTarget(next);
+      if (!smooth) void write(() => api.setBpm(bank, clampBpm(next)));
+    },
+    [api, bank, smooth, write],
+  );
+
+  // Closing the tempo's undo window is the WALK's business while it is
+  // walking, so a blur or a released slider only ends the edit when the
+  // write has already gone out.
+  const endBpmEdit = useCallback(() => {
+    if (smooth) return;
+    setBpmTarget(null);
+    void api.endEdit();
+  }, [api, smooth]);
+
+  // SMOOTH: the bank WALKS to the target at SMOOTH_BPM_PER_SEC rather
+  // than jumping there, so a tempo change is something a floor moves
+  // with. Each step is the same tempo write the box makes — one undo
+  // step (`EditKey::Knob` coalesces until `end_edit`), closed when the
+  // walk arrives — and the actual tempo beside the box is the engine's
+  // own reading of it, never this loop's arithmetic.
+  useEffect(() => {
+    if (!bank || !smooth || bpmTarget === null) return;
+    const goal = clampBpm(bpmTarget);
+    let last = performance.now();
+    const timer = setInterval(() => {
+      const now = performance.now();
+      const next = rampBpm(ramp.current ?? clock.current?.bpm ?? goal, goal, (now - last) / 1000);
+      last = now;
+      void api.setBpm(bank, next);
+      if (next === goal) {
+        ramp.current = null;
+        clearInterval(timer);
+        void api.endEdit();
+      } else {
+        ramp.current = next;
+      }
+    }, SMOOTH_TICK_MS);
+    return () => clearInterval(timer);
+  }, [api, bank, bpmTarget, smooth]);
+
+  const toggleSmooth = useCallback(
+    (on: boolean) => {
+      setSmooth(on);
+      // Unticking it mid-walk means "be there now": the target the box
+      // still shows is applied whole, and the edit closes with it.
+      if (!on && bank && bpmTarget !== null) {
+        ramp.current = null;
+        void write(() => api.setBpm(bank, clampBpm(bpmTarget)));
+        void api.endEdit();
+      }
+    },
+    [api, bank, bpmTarget, write],
+  );
+
   // The bank's beat position right now: the last poll's reading plus the
   // beats that have gone by since it landed. A stopped bank is parked, so
   // its reading is already now.
@@ -382,7 +471,10 @@ export function DecksView(props: DecksViewProps) {
     saveJson(DOCK_COLLAPSED_KEY, next);
   }, [collapsed]);
 
-  const bpm = bpmDraft ?? status?.bpm ?? 120;
+  // What the box asks for, and what the bank is actually running: the
+  // same number until a smooth walk is between them.
+  const bpm = bpmTarget ?? status?.bpm ?? 120;
+  const actualBpm = status?.bpm ?? bpm;
   const running = status?.running ?? false;
   const slots = useMemo(() => status?.slots ?? [], [status]);
   const shownSlots = useMemo(() => slots.map((s) => withDrafts(s, drafts)), [slots, drafts]);
@@ -413,6 +505,17 @@ export function DecksView(props: DecksViewProps) {
             number in one unit, so it is labelled ONCE, and the jack that
             carries that number to the rack stands right beside it. */}
         <div className="decks-tempo">
+          {/* Whether the bank WALKS to a new tempo or steps to it, beside
+              the box that asks for one: ticked, the number is a
+              destination the bank takes a second per beat to reach. */}
+          <label className="decks-smooth" data-testid="decks-smooth">
+            <input
+              type="checkbox"
+              checked={smooth}
+              onChange={(e) => toggleSmooth(e.target.checked)}
+            />
+            smooth
+          </label>
           <div className="decks-tempo-stack">
             <label className="decks-tempo-label" htmlFor="decks-bpm">
               BPM
@@ -426,16 +529,8 @@ export function DecksView(props: DecksViewProps) {
               max={MAX_BPM}
               step={0.5}
               value={Number(bpm.toFixed(2))}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                if (!Number.isFinite(next)) return;
-                setBpmDraft(next);
-                void write(() => api.setBpm(bank, clampBpm(next)));
-              }}
-              onBlur={() => {
-                setBpmDraft(null);
-                void api.endEdit();
-              }}
+              onChange={(e) => setBpmTo(Number(e.target.value))}
+              onBlur={endBpmEdit}
             />
             <input
               className="decks-tempo-slider"
@@ -446,17 +541,17 @@ export function DecksView(props: DecksViewProps) {
               max={MAX_BPM}
               step={0.5}
               value={bpm}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                setBpmDraft(next);
-                void write(() => api.setBpm(bank, next));
-              }}
-              onPointerUp={() => {
-                setBpmDraft(null);
-                void api.endEdit();
-              }}
+              onChange={(e) => setBpmTo(Number(e.target.value))}
+              onPointerUp={endBpmEdit}
             />
           </div>
+          {/* Where the bank IS while it walks to where it was sent: the
+              engine's own reading of its tempo, which is the box's number
+              again the moment the walk arrives. */}
+          <span className="decks-bpm-actual" data-testid="decks-bpm-actual">
+            <span className="decks-bpm-actual-label">actual</span>
+            <span className="decks-bpm-actual-value mono">{actualBpm.toFixed(1)}</span>
+          </span>
           {/* The bank's clock, on a jack: one pulse per beat, wired into
               the rack below (an LFO, a sequencer) to run it on the same
               grid the decks are on. */}

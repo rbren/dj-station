@@ -36,6 +36,19 @@ export const LEVEL_MAX = 2;
 export const MIN_BPM = 20;
 export const MAX_BPM = 300;
 
+/** How fast "smooth" walks the bank's ACTUAL tempo to the target the box
+ *  asks for: a tempo change is a move, not a jump, so a floor is never
+ *  asked to notice it. */
+export const SMOOTH_BPM_PER_SEC = 1;
+
+/** One step of that walk: where the actual tempo stands `secs` after it
+ *  was at `actual`, moving toward `target` and never past it. */
+export function rampBpm(actual: number, target: number, secs: number): number {
+  const step = SMOOTH_BPM_PER_SEC * Math.max(0, secs);
+  if (Math.abs(target - actual) <= step) return target;
+  return actual + Math.sign(target - actual) * step;
+}
+
 /** One of a slot's controls: the six a Launch Control XL column carries,
  *  plus the two on the strip's insert row — how much of the insert is
  *  heard, and whether it is cued into the monitor. */

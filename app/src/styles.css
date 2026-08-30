@@ -4634,6 +4634,36 @@ body {
   width: 160px;
 }
 
+/* How the bank gets to a new tempo, beside the box that asks for one. */
+.decks-smooth {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+}
+
+/* Where the bank IS while it walks to where it was sent: quieter and
+   smaller than the number that sent it, because it is a reading and not
+   a control. */
+.decks-bpm-actual {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+}
+
+.decks-bpm-actual-label {
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.decks-bpm-actual-value {
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+}
+
 .decks-readout {
   display: flex;
   align-items: baseline;
