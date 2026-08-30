@@ -121,7 +121,7 @@ use crate::knob::{Curve, KnobConfig, KnobStyle};
 use crate::launch_control::{row, ROWS};
 use crate::manifest::{categories, DisplaySpec, JackDecl, Manifest, OutputDecl, ParamDecl};
 use crate::module_host::HostModule;
-use crate::playback::TrackData;
+use crate::playback::{ClipBleed, TrackData};
 use crate::stretch::{sample_at, GrainStretch};
 
 pub const DECKS_ID: &str = "builtin.decks";
@@ -763,6 +763,9 @@ pub enum DecksCmd {
     Load {
         slot: u8,
         track: Option<Arc<TrackData>>,
+        /// The clip's loop bleed, laid over its seam — empty for a clip
+        /// saved without one (see [`ClipBleed`]).
+        bleed: ClipBleed,
     },
     Mix {
         slot: u8,
@@ -1000,6 +1003,15 @@ impl BandSplit {
 
 struct RtSlot {
     track: Option<Arc<TrackData>>,
+    /// Material from outside the loop, overlaid on its seam.
+    bleed: ClipBleed,
+    /// Passes this deck has been heard through since it was last silent.
+    /// The right bleed is the tail of the pass BEFORE this one, so the
+    /// pass a deck comes in on does without it.
+    passes: u32,
+    /// Whether the deck was being heard on the previous sample — a pass
+    /// only counts once it has been listened to all the way round.
+    was_audible: bool,
     beats: u32,
     source_bpm: f32,
     tail: u32,
@@ -1037,6 +1049,9 @@ impl RtSlot {
     fn new(engine_rate: f32) -> Self {
         RtSlot {
             track: None,
+            bleed: ClipBleed::default(),
+            passes: 0,
+            was_audible: false,
             beats: 0,
             source_bpm: DEFAULT_BPM,
             tail: 0,
@@ -1193,14 +1208,25 @@ impl DecksRtModule {
 
     fn apply(&mut self, cmd: DecksCmd) {
         match cmd {
-            DecksCmd::Load { slot, track } => {
+            DecksCmd::Load { slot, track, bleed } => {
                 let Some(s) = self.slots.get_mut(slot as usize) else {
                     return;
                 };
-                let old = std::mem::replace(&mut s.track, track);
-                if let Some(old) = old {
+                // Everything the load replaces leaves on the garbage ring
+                // — the loop and both bleeds: an Arc must never be dropped
+                // on this thread.
+                for old in [
+                    std::mem::replace(&mut s.track, track),
+                    std::mem::replace(&mut s.bleed.left, bleed.left),
+                    std::mem::replace(&mut s.bleed.right, bleed.right),
+                ]
+                .into_iter()
+                .flatten()
+                {
                     let _ = self.garbage_tx.push(old);
                 }
+                s.passes = 0;
+                s.was_audible = false;
                 // A new clip is a new timeline: no grain may cross into it,
                 // and no arm survives into it either — what was queued or
                 // dropping was the clip that just left.
@@ -1344,9 +1370,20 @@ impl HostModule for DecksRtModule {
                 if slot.arm == DeckArm::Drop && slot.past_last_beat(local) {
                     slot.arm = DeckArm::None;
                 }
-                slot.last_local = local;
 
                 let target = slot.gain_target(running);
+                // WHICH PASS THIS IS, for the bleed. A deck nobody is
+                // hearing has no pass behind it, so the one it comes in on
+                // — the pass a queue lands it on — is a first pass and
+                // carries no right bleed; a seam it was already audible
+                // through is the next pass, which does.
+                if target <= 0.0 {
+                    slot.passes = 0;
+                } else if slot.was_audible && local < slot.last_local {
+                    slot.passes = slot.passes.saturating_add(1);
+                }
+                slot.was_audible = target > 0.0;
+                slot.last_local = local;
                 slot.gain += a_gain * (target - slot.gain);
                 // A wired return makes those modules this deck's insert:
                 // what comes back is what the wetness knob fades the
@@ -1367,6 +1404,15 @@ impl HostModule for DecksRtModule {
                         // whole stretch.
                         let step = track.sample_rate as f64 / engine_rate as f64;
                         let taps = slot.grains.tick(pos, step, &track.channels[0]);
+                        // The bleed rides the SAME grains, so it stretches
+                        // with the loop. The pass a deck comes in on takes
+                        // no right bleed (nothing played before it) and a
+                        // DROPPING deck takes no left bleed: it is playing
+                        // its last pass, and the left bleed is the loop
+                        // leaning into a pass that is not coming.
+                        let frames = track.frames() as f64;
+                        let head = slot.passes > 0;
+                        let tail = slot.arm != DeckArm::Drop;
                         for tap in taps.iter().flatten() {
                             let gl = sample_at(&track.channels[0], tap.pos);
                             let gr = if track.channels.len() > 1 {
@@ -1374,8 +1420,9 @@ impl HostModule for DecksRtModule {
                             } else {
                                 gl
                             };
-                            l += gl * tap.gain;
-                            r += gr * tap.gain;
+                            let (bl, br) = slot.bleed.tap(tap.pos, frames, head, tail);
+                            l += (gl + bl) * tap.gain;
+                            r += (gr + br) * tap.gain;
                         }
                         let (low, mid, high) = slot.bands();
                         l = slot.eq[0].process(l, a_low, a_high, low, mid, high);
@@ -1729,6 +1776,7 @@ mod tests {
         tx.push(DecksCmd::Load {
             slot,
             track: Some(flat_clip(value, beats as usize)),
+            bleed: ClipBleed::default(),
         })
         .unwrap();
         timing(tx, slot, beats, 0, 0);
@@ -2332,6 +2380,69 @@ mod tests {
             seam[8_000..].iter().all(|s| s.abs() < 1e-4),
             "and past the seam the deck is gone, not playing the clip again"
         );
+    }
+
+    /// The same flat clip, with a flat 200 ms BLEED either side of it —
+    /// long enough that a probe well inside one is clear of both the
+    /// anti-click ramp and the grain window.
+    fn load_bleeding(
+        tx: &mut rtrb::Producer<DecksCmd>,
+        slot: u8,
+        beats: u32,
+        value: f32,
+        bleed: f32,
+    ) {
+        let side = || {
+            Some(Arc::new(TrackData {
+                channels: vec![vec![bleed; 9_600]],
+                sample_rate: 48_000.0,
+            }))
+        };
+        tx.push(DecksCmd::Load {
+            slot,
+            track: Some(flat_clip(value, beats as usize)),
+            bleed: ClipBleed {
+                left: side(),
+                right: side(),
+            },
+        })
+        .unwrap();
+        timing(tx, slot, beats, 0, 0);
+    }
+
+    /// Is this sample the given deck level, in engine volts?
+    fn at_level(sample: f32, want: f32) -> bool {
+        (sample - want * SIGNAL_MAX).abs() < 0.05
+    }
+
+    #[test]
+    fn the_bleed_skips_the_pass_a_deck_comes_in_on_and_the_pass_a_drop_ends() {
+        let (mut tx, mut m, _shared) = rt_bank();
+        load_bleeding(&mut tx, 0, 2, 0.5, 0.25);
+        mix(&mut tx, 0, 1.0, false, false);
+
+        // THE PASS IT COMES IN ON has nothing before it, so the right
+        // bleed — the tail the previous pass would have carried over the
+        // seam — is not in the audio.
+        let head = block(&mut m, BEAT);
+        assert!(at_level(head[5_000], 0.5), "got {}", head[5_000]);
+        // Its END still takes the left bleed: the loop leaning into the
+        // pass that IS coming.
+        let tail = block(&mut m, BEAT);
+        assert!(at_level(tail[19_000], 0.75), "got {}", tail[19_000]);
+
+        // The NEXT pass has one behind it, so the right bleed is there.
+        let head = block(&mut m, BEAT);
+        assert!(at_level(head[5_000], 0.75), "got {}", head[5_000]);
+
+        // DROPPED: the mute is written then and there and the bank holds
+        // the deck up to the seam — and the pass it plays out does
+        // without the left bleed, which leans into a pass that is not
+        // coming.
+        mix(&mut tx, 0, 1.0, true, false);
+        arm(&mut tx, 0, DeckArm::Drop, 1);
+        let tail = block(&mut m, BEAT);
+        assert!(at_level(tail[19_000], 0.5), "got {}", tail[19_000]);
     }
 
     #[test]

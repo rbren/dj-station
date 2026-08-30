@@ -557,6 +557,10 @@ fn span_of(rendered: &AudioData, start_secs: f64, end_secs: f64) -> CmdResult<(f
 /// (never by title — that is the user's to change, and a row id is
 /// re-assigned on re-import) and the whole program, beat grid and warp
 /// included, so the clip could be opened here again.
+///
+/// The BLEED milliseconds are the selection's bookends: how much material
+/// either side of the span rides along as metadata, for whatever plays
+/// the clip to lay over the loop's seam.
 #[tauri::command(async)]
 // The arguments ARE the IPC surface: each one is a field the save row
 // sends by name, so bundling them into a struct would only move the list.
@@ -569,10 +573,24 @@ pub fn clip_save_beat_clip(
     end_secs: f64,
     bpm: f64,
     beats: usize,
+    left_bleed_ms: f64,
+    right_bleed_ms: f64,
 ) -> CmdResult<clip::BeatClipMeta> {
     let rendered = request.render(&state)?;
     let (a, b) = span_of(&rendered, start_secs, end_secs)?;
     let span = clip::slice(&rendered, a, b - a);
+    // The BLEED is cut from the edit either side of the span — the audio
+    // the loop was taken out of — and filed beside the loop, never into
+    // it. An edit that does not reach that far gives what it has.
+    let bleed_span = |from: f64, secs: f64| {
+        let audio = clip::slice(&rendered, from, secs);
+        (secs > 0.0 && audio.frames() > 0).then_some(audio)
+    };
+    let left_secs = (left_bleed_ms.max(0.0) / 1000.0).min(a);
+    let bleed = clip::BleedAudio {
+        left: bleed_span(a - left_secs, left_secs),
+        right: bleed_span(b, right_bleed_ms.max(0.0) / 1000.0),
+    };
 
     let sources = request
         .sources
@@ -611,6 +629,7 @@ pub fn clip_save_beat_clip(
         beats,
         stems,
         Some(edit),
+        &bleed,
     )
     .map_err(|e| CmdError::invalid(format!("clip: {e}")))
 }

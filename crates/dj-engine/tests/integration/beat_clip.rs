@@ -9,7 +9,9 @@
 //!   and never between two,
 //! - the clip binding (not its audio) survives a patch save/load, and a
 //!   reloaded node reports itself as waiting to be assembled,
-//! - copying a module copies the clip it is playing.
+//! - copying a module copies the clip it is playing,
+//! - the LOOP BLEED is laid over the seam and the first pass goes without
+//!   the right half of it (nothing played before it to carry over).
 //!
 //! The clip under test is a RAMP: sample *i* is `i / frames * 0.5`, so the
 //! rendered value says where the playhead is ([`played_frame`]) — read as
@@ -18,8 +20,9 @@
 //! test uses a tone instead.
 
 use dj_engine::beat_clip::{BeatClipRef, BEAT_CLIP_ID};
-use dj_engine::playback::TrackData;
+use dj_engine::playback::{ClipAudio, ClipBleed, TrackData};
 use dj_engine::{Engine, EngineConfig};
+use std::sync::Arc;
 
 const SR: f32 = 48_000.0;
 const BLOCK: usize = 128;
@@ -358,4 +361,64 @@ fn a_copy_plays_the_same_clip_as_its_source() {
         2,
         "both ends then wait for the app layer to assemble the clip"
     );
+}
+
+const BLEED_FRAMES: usize = 9_600;
+
+/// A SILENT loop with a flat bleed either side, so whatever is heard IS
+/// the overlay: the left bleed reads 0.25, the right 0.5, each 0.2 s long
+/// — long enough to probe well clear of a grain window at either end.
+fn bleeding_clip() -> ClipAudio {
+    let side = |level: f32| {
+        Some(Arc::new(TrackData {
+            channels: vec![vec![level; BLEED_FRAMES]],
+            sample_rate: SR,
+        }))
+    };
+    ClipAudio {
+        track: Arc::new(TrackData {
+            channels: vec![vec![0.0; CLIP_FRAMES]],
+            sample_rate: SR,
+        }),
+        bleed: ClipBleed {
+            left: side(0.25),
+            right: side(0.5),
+        },
+    }
+}
+
+/// Does a sample carry the given clip level, in engine volts?
+fn at_level(sample: f32, want: f32) -> bool {
+    (sample - want * 10.0).abs() < 0.05
+}
+
+#[test]
+fn the_bleed_lies_over_the_seam_and_the_first_pass_goes_without_its_head() {
+    let mut e = mono_engine();
+    e.add_module("bc1", BEAT_CLIP_ID).unwrap();
+    e.add_module("out1", "builtin.audio_out").unwrap();
+    e.connect("bc1", "audio_l", "out1", "l").unwrap();
+    e.beat_clip_load("bc1", None, bleeding_clip(), CLIP_BPM)
+        .unwrap();
+
+    // Beat 0 of the FIRST pass: nothing played before it, so the right
+    // bleed — the previous pass's tail, carried across the seam — is not
+    // in the audio, and the silent loop is all there is to hear.
+    tick(&mut e, 180);
+    let first = tick(&mut e, 180);
+    assert!(at_level(first[5_000], 0.0), "got {}", first[5_000]);
+
+    // Its LAST beat still takes the left bleed over the loop's end: the
+    // clip leaning into the pass that IS coming. That overlay starts
+    // BLEED_FRAMES before the end of the clip, part-way into beat 3.
+    tick(&mut e, 180);
+    tick(&mut e, 180);
+    let last = tick(&mut e, 180);
+    let into_bleed = BEAT_FRAMES - BLEED_FRAMES + 2_000;
+    assert!(at_level(last[into_bleed], 0.25), "got {}", last[into_bleed]);
+
+    // The NEXT pass has one behind it, so the right bleed sounds over its
+    // start.
+    let second = tick(&mut e, 180);
+    assert!(at_level(second[5_000], 0.5), "got {}", second[5_000]);
 }

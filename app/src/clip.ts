@@ -1088,6 +1088,10 @@ export interface SavedBeatClip {
   beats: number;
   file: string;
   stems: string[];
+  /** Milliseconds of material kept from outside the loop, for the player
+   *  to lay over its seam (0 for a clip saved without any). */
+  leftBleedMs: number;
+  rightBleedMs: number;
 }
 
 /** What ClipView needs; tests substitute a mock. */
@@ -1109,7 +1113,9 @@ export interface ClipClientApi {
    *  `bpm` (the save row's numbers). The edit is filed with it — the
    *  sources by the hash of their audio, the program's timestamps, beat
    *  grid and warp — and it lands in the decks' clip pickers, like a
-   *  Beatify clip. */
+   *  Beatify clip. The bleed milliseconds are the selection's bookends:
+   *  material from either side of the span, filed as metadata for the
+   *  decks to lay over the loop's seam rather than mixed into it. */
   saveBeatClip(
     request: ClipRequest,
     title: string,
@@ -1117,6 +1123,8 @@ export interface ClipClientApi {
     endSecs: number,
     bpm: number,
     beats: number,
+    leftBleedMs: number,
+    rightBleedMs: number,
   ): Promise<SavedBeatClip | null>;
   /** Which separation backend is configured, and is it installed? */
   stemBackend(): Promise<ClipStemBackend | null>;
@@ -1148,6 +1156,8 @@ export class ClipClient extends IpcClient implements ClipClientApi {
     endSecs: number,
     bpm: number,
     beats: number,
+    leftBleedMs: number,
+    rightBleedMs: number,
   ) {
     return this.call<SavedBeatClip>('clip_save_beat_clip', {
       request,
@@ -1156,6 +1166,8 @@ export class ClipClient extends IpcClient implements ClipClientApi {
       endSecs,
       bpm,
       beats,
+      leftBleedMs,
+      rightBleedMs,
     });
   }
   stemBackend() {

@@ -16,11 +16,10 @@
 
 use dj_engine::beat_clip::BeatClipRef;
 use dj_engine::decks::{DeckArm, DecksStatus, MasterBus, SlotControl, DECKS_ID, SURFACE_PARAM};
-use dj_engine::playback::TrackData;
 use dj_engine::{Engine, Workspace};
 use tauri::State;
 
-use crate::beatify_clip::{render_clip, RenderedClip};
+use crate::beatify_clip::render_clip;
 use crate::{engine_lock, err, patch_edit, AppState, CmdResult, EditKey};
 
 /// Every Decks bank on the rack (usually one).
@@ -119,7 +118,7 @@ pub fn decks_load(
             &instance,
             slot,
             Some(clip),
-            track_data(&rendered),
+            rendered.clip_audio(),
             rendered.bpm,
         )
         .map_err(err)
@@ -276,13 +275,6 @@ pub fn decks_rehydrate(state: State<AppState>) -> CmdResult<usize> {
     Ok(pending - engine.decks_pending().len())
 }
 
-fn track_data(rendered: &RenderedClip) -> TrackData {
-    TrackData {
-        channels: rendered.audio.channels.clone(),
-        sample_rate: rendered.audio.sample_rate as f32,
-    }
-}
-
 /// Re-assemble every bank slot that knows which clip it plays but has no
 /// audio behind it — after a patch load, or an undo/redo that recreated
 /// the module. A clip whose project has been deleted leaves its slot
@@ -292,7 +284,7 @@ pub fn hydrate(state: &AppState, engine: &mut Engine) {
     for (instance, slot, clip) in engine.decks_pending() {
         match render_clip(state, &clip.project, &clip.clip) {
             Ok(rendered) => {
-                let audio = track_data(&rendered);
+                let audio = rendered.clip_audio();
                 let bpm = rendered.bpm;
                 // The display fields are re-read off the clip as it now
                 // stands, like a Beat Clip's: a patch saved before clips

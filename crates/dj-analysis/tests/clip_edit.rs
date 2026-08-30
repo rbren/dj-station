@@ -11,8 +11,8 @@ use dj_analysis::beatify::detect::DspTracker;
 use dj_analysis::clip::{
     beats_from_taps, clips_dir, delete_beat_clip, load_beat_clip, migrate_beat_clips, pad_to_beats,
     peaks, program_duration_secs, read_beat_clips, render_clip, save_beat_clip, warp_time_secs,
-    wav16_bytes, write_clip, BeatClipEdit, BeatClipSource, ClipEq, ClipEqBand, ClipOverlay,
-    ClipProgram, ClipRegion, LevelPoint,
+    wav16_bytes, write_clip, BeatClipEdit, BeatClipSource, BleedAudio, ClipEq, ClipEqBand,
+    ClipOverlay, ClipProgram, ClipRegion, LevelPoint,
 };
 use dj_analysis::AudioData;
 use std::path::{Path, PathBuf};
@@ -663,6 +663,7 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
         4,
         vec!["drums".into()],
         Some(edit.clone()),
+        &BleedAudio::default(),
     )
     .unwrap();
     assert_eq!((first.id.as_str(), first.beats), ("b1", 4));
@@ -674,10 +675,21 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
         4,
         vec![],
         None,
+        &BleedAudio::default(),
     )
     .unwrap();
     assert_eq!(second.id, "b2");
-    assert!(save_beat_clip(tmp.path(), "  ", &tone(220.0, 1.0), 120.0, 2, vec![], None).is_err());
+    assert!(save_beat_clip(
+        tmp.path(),
+        "  ",
+        &tone(220.0, 1.0),
+        120.0,
+        2,
+        vec![],
+        None,
+        &BleedAudio::default()
+    )
+    .is_err());
 
     let clips = read_beat_clips(tmp.path());
     assert_eq!(
@@ -687,9 +699,12 @@ fn beat_clip_store_round_trips_and_mints_ids_in_order() {
 
     // The audio decodes back at the padded whole-beat length, silence
     // where the fractional last beat was filled.
-    let (meta, audio) = load_beat_clip(tmp.path(), "b1").unwrap();
+    let (meta, audio, bleed) = load_beat_clip(tmp.path(), "b1").unwrap();
     assert_eq!(meta.bpm, 120.0);
     assert_eq!(meta.stems, ["drums"]);
+    // Nothing was asked for either side, so the clip is bare.
+    assert_eq!((meta.left_bleed_ms, meta.right_bleed_ms), (0.0, 0.0));
+    assert!(bleed.left.is_none() && bleed.right.is_none());
     assert_eq!(audio.frames(), 2 * SR as usize);
     let tail = (1.75 * SR as f64) as usize;
     assert!(audio.channels[0][tail + 16..].iter().all(|&s| s == 0.0));
@@ -760,6 +775,7 @@ fn deleting_a_beat_clip_takes_its_audio_with_it() {
         4,
         vec![],
         None,
+        &BleedAudio::default(),
     )
     .unwrap();
     save_beat_clip(
@@ -770,6 +786,7 @@ fn deleting_a_beat_clip_takes_its_audio_with_it() {
         4,
         vec![],
         None,
+        &BleedAudio::default(),
     )
     .unwrap();
 
@@ -787,6 +804,49 @@ fn deleting_a_beat_clip_takes_its_audio_with_it() {
     assert!(load_beat_clip(tmp.path(), "b1").is_err());
     // A row that is not there means the caller's list is stale.
     assert!(delete_beat_clip(tmp.path(), "b1").is_err());
+}
+
+#[test]
+fn a_clips_bleed_is_filed_beside_its_loop_never_inside_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let loop_audio = tone(220.0, 2.0);
+    let bleed = BleedAudio {
+        left: Some(tone(110.0, 0.025)),
+        right: Some(tone(330.0, 0.010)),
+    };
+    let meta = save_beat_clip(
+        tmp.path(),
+        "with bleed",
+        &loop_audio,
+        120.0,
+        4,
+        vec![],
+        None,
+        &bleed,
+    )
+    .unwrap();
+    assert!((meta.left_bleed_ms - 25.0).abs() < 0.1, "{meta:?}");
+    assert!((meta.right_bleed_ms - 10.0).abs() < 0.1, "{meta:?}");
+
+    // The LOOP is exactly the beats that were saved — the bleed is two
+    // files beside it, and comes back as audio of its own.
+    let (read, audio, bleed) = load_beat_clip(tmp.path(), &meta.id).unwrap();
+    assert_eq!(audio.frames(), 2 * SR as usize);
+    assert_eq!(read.left_bleed_ms, meta.left_bleed_ms);
+    let left = bleed.left.expect("a left bleed was filed");
+    let right = bleed.right.expect("a right bleed was filed");
+    assert_eq!(left.frames(), (0.025 * SR as f64) as usize);
+    assert_eq!(right.frames(), (0.010 * SR as f64) as usize);
+
+    // A bleed file that has gone missing costs the overlay, not the clip.
+    std::fs::remove_file(
+        tmp.path()
+            .join("beat-clips")
+            .join(format!("{}-bleed-r.flac", meta.id)),
+    )
+    .unwrap();
+    let (_, _, bleed) = load_beat_clip(tmp.path(), &meta.id).unwrap();
+    assert!(bleed.left.is_some() && bleed.right.is_none());
 }
 
 #[test]

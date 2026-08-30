@@ -111,6 +111,8 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
         _endSecs: number,
         bpm: number,
         beats: number,
+        leftBleedMs: number,
+        rightBleedMs: number,
       ) => ({
         id: 'b1',
         name: title,
@@ -118,6 +120,8 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
         beats,
         file: 'b1.flac',
         stems: [],
+        leftBleedMs,
+        rightBleedMs,
       }),
     ),
     stemBackend: vi.fn(async () => ({
@@ -780,6 +784,26 @@ describe('ClipView', () => {
     expect([start, end, bpm, beats]).toEqual([0, 10, 120, 20]);
   });
 
+  it('files the bleed its bookends measure, and defaults to none', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    select(2, 6);
+
+    // The two controls flank the selection — the material each measures
+    // lies beyond the edge it sits at — and a clip has no bleed until
+    // one is asked for.
+    const left = screen.getByTestId('clip-bleed-left') as HTMLInputElement;
+    const right = screen.getByTestId('clip-bleed-right') as HTMLInputElement;
+    expect([left.value, right.value]).toEqual(['0', '0']);
+
+    fireEvent.change(left, { target: { value: '25' } });
+    fireEvent.change(right, { target: { value: '10' } });
+    await savedProgram(clip);
+
+    const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call.slice(2)).toEqual([2, 6, 120, 8, 25, 10]);
+  });
+
   it('says when a fractional selection will be padded to whole beats', async () => {
     const clip = clipMock();
     render(<ClipView clip={clip} library={libraryMock()} detectDelayMs={0} />);
@@ -802,7 +826,7 @@ describe('ClipView', () => {
     fireEvent.click(screen.getByTestId('clip-save'));
     await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
     const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call.slice(2)).toEqual([2, 5.75, 120, 8]);
+    expect(call.slice(2)).toEqual([2, 5.75, 120, 8, 0, 0]);
   });
 
   it('turns right-shift taps during playback into a beat grid over the tapped span', async () => {

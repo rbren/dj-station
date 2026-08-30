@@ -37,6 +37,11 @@ export interface ClipSelectionPaneProps {
   timecode(secs: number): string;
   /** The level automation lane, drawn under the waveform. */
   levelLane?: ReactNode;
+  /** BOOKENDS: controls that belong to the span's edges rather than to
+   *  the page — the bleed either side of the loop (see ClipView). They
+   *  are drawn flanking the waveform, so what they measure is where they
+   *  sit. */
+  bookends?: { left: ReactNode; right: ReactNode };
   /** Extra readout text (beats selected, sample rate…). */
   readoutExtra?: ReactNode;
 }
@@ -53,6 +58,7 @@ export function ClipSelectionPane({
   onSeek,
   timecode,
   levelLane,
+  bookends,
   readoutExtra,
 }: ClipSelectionPaneProps) {
   const len = Math.max(0, span.end - span.start);
@@ -96,25 +102,29 @@ export function ClipSelectionPane({
       </div>
 
       <div className="clip-timeline clip-sel-timeline">
-        <svg
-          data-testid="clip-sel-waveform"
-          className="clip-waveform clip-sel-waveform"
-          viewBox={`0 0 ${W} ${H}`}
-          preserveAspectRatio="none"
-          onMouseDown={seekAt}
-        >
-          <path className="waveform-peaks clip-sel-peaks" d={peaksPath(peaks, 0, 1, H)} />
-          {inside && (
-            <line
-              data-testid="clip-sel-playhead"
-              className="clip-playhead"
-              x1={xOf(playhead)}
-              x2={xOf(playhead)}
-              y1={0}
-              y2={H}
-            />
-          )}
-        </svg>
+        <div className="clip-sel-row">
+          {bookends?.left}
+          <svg
+            data-testid="clip-sel-waveform"
+            className="clip-waveform clip-sel-waveform"
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="none"
+            onMouseDown={seekAt}
+          >
+            <path className="waveform-peaks clip-sel-peaks" d={peaksPath(peaks, 0, 1, H)} />
+            {inside && (
+              <line
+                data-testid="clip-sel-playhead"
+                className="clip-playhead"
+                x1={xOf(playhead)}
+                x2={xOf(playhead)}
+                y1={0}
+                y2={H}
+              />
+            )}
+          </svg>
+          {bookends?.right}
+        </div>
         {levelLane}
         <p className="clip-readout" data-testid="clip-sel-readout">
           {timecode(len)} selected{readoutExtra}

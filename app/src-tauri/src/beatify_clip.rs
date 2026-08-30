@@ -19,6 +19,7 @@
 
 use dj_analysis::beatify::{build, store, BeatifyRecord, Grid, WarpMap};
 use dj_analysis::{stem_union, AudioData};
+use dj_engine::playback::{ClipAudio, ClipBleed, TrackData};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -656,6 +657,11 @@ fn track_of(state: &AppState, seed: &store::Seed) -> Option<i64> {
 /// the tempo it is laid out at (see `beat_clip.rs`).
 pub struct RenderedClip {
     pub audio: AudioData,
+    /// The clip's loop bleed, when it has one: material from outside the
+    /// loop that the player lays over its seam. Beat clips carry it (the
+    /// Clip page's bleed controls); a Beatify clip is assembled from
+    /// placements and has none.
+    pub bleed: dj_analysis::clip::BleedAudio,
     pub bpm: f64,
     pub name: String,
     /// The project it was cut in, by name — what a deck shows beside the
@@ -663,6 +669,27 @@ pub struct RenderedClip {
     pub project_name: String,
     /// What it is made of, for the module that ends up playing it.
     pub stems: Vec<String>,
+}
+
+impl RenderedClip {
+    /// The samples as a player takes them (`Engine::beat_clip_load`,
+    /// `Engine::decks_load`): the loop, and the bleed that goes over its
+    /// seam.
+    pub fn clip_audio(&self) -> ClipAudio {
+        let track = |a: &AudioData| {
+            Arc::new(TrackData {
+                channels: a.channels.clone(),
+                sample_rate: a.sample_rate as f32,
+            })
+        };
+        ClipAudio {
+            track: track(&self.audio),
+            bleed: ClipBleed {
+                left: self.bleed.left.as_ref().map(track),
+                right: self.bleed.right.as_ref().map(track),
+            },
+        }
+    }
 }
 
 /// The clips a project has saved. Read-only, and the same file the
@@ -722,10 +749,12 @@ pub fn clip_seeds<'a>(
 /// exactly like Beatify clips.
 pub fn render_clip(state: &AppState, project_id: &str, clip_id: &str) -> CmdResult<RenderedClip> {
     if project_id == crate::clip::BEAT_CLIPS_PROJECT {
-        let (meta, audio) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), clip_id)
-            .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+        let (meta, audio, bleed) =
+            dj_analysis::clip::load_beat_clip(state.library.data_dir(), clip_id)
+                .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
         return Ok(RenderedClip {
             audio,
+            bleed,
             bpm: meta.bpm,
             // Which store it came from, where a Beatify clip names its
             // project: the track it was cut from is a POINTER now
@@ -755,6 +784,7 @@ pub fn render_clip(state: &AppState, project_id: &str, clip_id: &str) -> CmdResu
     let project_name = resolver.project.name.clone();
     Ok(RenderedClip {
         audio,
+        bleed: Default::default(),
         bpm,
         stems: clip.stems,
         name: clip.name,

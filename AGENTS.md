@@ -1555,6 +1555,33 @@ beatify::build`.
   written by the loader from the project's grid. Panel readout comes from
   `BeatClipShared` (position/clock BPM/beat/playing atomics published once
   per block), like `AudioShared`.
+- LOOP BLEED is METADATA, never baked into the loop: a beat clip may
+  carry `leftBleedMs`/`rightBleedMs` (`dj_analysis::clip::BeatClipMeta`,
+  `#[serde(default)]`, so a clip saved before the field reads back as 0
+  with no migration) with the spans themselves filed BESIDE the loop
+  (`b<n>-bleed-l.flac` / `-r.flac`, `load_beat_clip` returning a
+  `BleedAudio` and a missing file costing the overlay, not the clip). The
+  loop stays exactly the beats that were selected. The Clip page asks for
+  it with the selection's BOOKENDS — `clip-bleed-left`/`-right`, ms,
+  default 0, drawn flanking the selection waveform through
+  `ClipSelectionPane`'s `bookends`, so each control sits at the edge its
+  material comes from — and `clip_save_beat_clip` cuts them out of the
+  same render, clamped to what the edit can give. Whoever PLAYS the clip
+  lays them over the seam (`playback::ClipBleed::tap`, read by the same
+  grains as the loop so a bleed stretches with it): the RIGHT bleed (the
+  audio that followed the clip) over the loop's START, the LEFT (the audio
+  before it) over its END. That is what keeping it out of the audio buys —
+  the FIRST pass goes without the right bleed, having no pass behind it to
+  carry over, and the LAST pass without the left, which leans into a pass
+  that is not coming. Both players count their own passes: the Beat Clip
+  module counts seams since it was armed (a reset or a fresh load starts
+  over; the count rides through a hot reload in `save_state`) and never
+  has a last pass, while a Decks slot counts a pass only while it is being
+  heard — so a queued deck comes in on a first pass — and takes no left
+  bleed while it is armed to DROP. Pinned by `clip_edit.rs`'s
+  `a_clips_bleed_is_filed_beside_its_loop_never_inside_it`, decks.rs's
+  `the_bleed_skips_the_pass_a_deck_comes_in_on_and_the_pass_a_drop_ends`,
+  the `beat_clip` integration suite and `ClipView.test.tsx`.
 - Decks bank (`builtin.decks`, `crates/dj-engine/src/decks.rs` +
   `engine/decks_api.rs`, Tauri `app/src-tauri/src/decks.rs`, page
   `app/src/components/DecksView.tsx`): EIGHT Beatify clips on ONE clock —

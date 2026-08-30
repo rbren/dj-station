@@ -372,6 +372,14 @@ export function ClipView({
   const [selection, setSelection] = useState<Range | null>(null);
   const [previewState, setPreview] = useState<ClipRender | null>(null);
   const [name, setName] = useState('');
+  /** BLEED, in milliseconds, as the selection's two bookends: material
+   *  from OUTSIDE the span, filed with the clip as metadata and laid over
+   *  the loop's seam by whatever plays it — never mixed into the loop
+   *  (dj-engine's `ClipBleed`). The RIGHT bleed is the audio after the
+   *  span and sounds over the loop's start; the LEFT is the audio before
+   *  it and sounds over the loop's end. Each control sits at the edge its
+   *  material comes from. */
+  const [bleed, setBleed] = useState({ left: 0, right: 0 });
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1418,6 +1426,8 @@ export function ClipView({
         range.end,
         tempo.bpm,
         tempo.beats,
+        bleed.left,
+        bleed.right,
       );
       if (saved) {
         setStatus(
@@ -1428,7 +1438,7 @@ export function ClipView({
     } finally {
       setBusy(false);
     }
-  }, [clip, name, range, request, tempo]);
+  }, [bleed, clip, name, range, request, tempo]);
 
   // Selections quantize to the tapped grid; AudioTimeline reads ⌘ live
   // and skips these, which is how the window is dragged off the beat.
@@ -1467,6 +1477,33 @@ export function ClipView({
     const to = Math.min(peaks.length, Math.ceil((sel.end / duration) * peaks.length));
     return peaks.slice(from, Math.max(from + 1, to));
   }, [liveOn, selPeaks, sel, duration, peaks]);
+
+  /** One BOOKEND of the selection: how many milliseconds of the material
+   *  beyond that edge ride with the clip as bleed. It is a save-time
+   *  setting, not an edit — nothing about the program moves — so it sits
+   *  outside the undo stacks. */
+  const bleedBookend = (side: 'left' | 'right') => (
+    <label
+      className={`clip-bleed clip-bleed-${side}`}
+      title={
+        side === 'left'
+          ? 'Left bleed: milliseconds from BEFORE the selection, laid over the END of the loop so it leans into the next pass — skipped on the last pass (a dropped deck)'
+          : 'Right bleed: milliseconds from AFTER the selection, laid over the START of the loop so a pass carries the last one\u2019s tail — skipped the first time it plays'
+      }
+    >
+      <input
+        type="number"
+        min={0}
+        step={5}
+        data-testid={`clip-bleed-${side}`}
+        value={bleed[side]}
+        onChange={(e) =>
+          setBleed({ ...bleed, [side]: Math.max(0, Math.round(Number(e.target.value) || 0)) })
+        }
+      />
+      <span>ms</span>
+    </label>
+  );
 
   /** Level automation, drawn against the SELECTION. Points outside it are
    *  still in the program (and still heard) — they simply belong to a
@@ -1888,6 +1925,7 @@ export function ClipView({
               onSeek={seek}
               timecode={timecode}
               levelLane={levelLane}
+              bookends={{ left: bleedBookend('left'), right: bleedBookend('right') }}
               readoutExtra={grid ? ` · ${beatsLabel(grid, sel)}` : ''}
             />
           ) : (

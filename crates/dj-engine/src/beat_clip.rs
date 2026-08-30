@@ -40,7 +40,7 @@ use crate::graph::SIGNAL_MAX;
 use crate::knob::{Curve, KnobConfig, KnobStyle};
 use crate::manifest::{categories, DisplaySpec, JackDecl, Manifest, OutputDecl};
 use crate::module_host::HostModule;
-use crate::playback::TrackData;
+use crate::playback::{ClipAudio, ClipBleed, TrackData};
 use crate::stretch::{sample_at, GrainStretch};
 
 pub const BEAT_CLIP_ID: &str = "builtin.beat_clip";
@@ -189,9 +189,9 @@ impl BeatClipShared {
 /// how the app tells a node that still needs assembling (patch load, undo)
 /// from one that is playing what it should.
 pub struct BeatClipControl {
-    pub tx: rtrb::Producer<Arc<TrackData>>,
+    pub tx: rtrb::Producer<ClipAudio>,
     pub garbage_rx: rtrb::Consumer<Arc<TrackData>>,
-    pub track: Option<Arc<TrackData>>,
+    pub track: Option<ClipAudio>,
     pub loaded: Option<BeatClipRef>,
     pub shared: Arc<BeatClipShared>,
 }
@@ -227,9 +227,15 @@ pub fn beats_of(duration_secs: f64, bpm: f64) -> usize {
 /// The RT-side Beat Clip module. Never allocates or blocks: clips arrive
 /// over an SPSC ring and replaced ones leave on the garbage ring.
 pub struct BeatClipModule {
-    rx: rtrb::Consumer<Arc<TrackData>>,
+    rx: rtrb::Consumer<ClipAudio>,
     garbage_tx: rtrb::Producer<Arc<TrackData>>,
     track: Option<Arc<TrackData>>,
+    /// The clip's bleed, laid over the seam — silent on the pass that has
+    /// no previous one to carry ([`ClipBleed`]).
+    bleed: ClipBleed,
+    /// Passes of the clip since it was armed. The right bleed is the tail
+    /// of the pass BEFORE this one, so pass 0 does without it.
+    passes: u32,
     engine_rate: f32,
     /// VIRTUAL playhead in clip frames: it moves at the clock's tempo,
     /// while the grains reading it move at the clip's own (that split is
@@ -253,7 +259,7 @@ pub struct BeatClipModule {
 
 impl BeatClipModule {
     pub fn new(
-        rx: rtrb::Consumer<Arc<TrackData>>,
+        rx: rtrb::Consumer<ClipAudio>,
         garbage_tx: rtrb::Producer<Arc<TrackData>>,
         engine_rate: f32,
         shared: Arc<BeatClipShared>,
@@ -262,6 +268,8 @@ impl BeatClipModule {
             rx,
             garbage_tx,
             track: None,
+            bleed: ClipBleed::default(),
+            passes: 0,
             engine_rate: engine_rate.max(1.0),
             pos: 0.0,
             beat: 0,
@@ -284,6 +292,9 @@ impl BeatClipModule {
         self.pos = 0.0;
         self.beat = 0;
         self.started = false;
+        // A re-armed clip has no pass behind it, so its first one comes
+        // in without the right bleed, exactly like a fresh load.
+        self.passes = 0;
         self.grains.reset();
     }
 }
@@ -296,10 +307,21 @@ impl HostModule for BeatClipModule {
         _mask: u64,
         frames: usize,
     ) {
-        // Pick up a newly assembled clip (latest wins).
+        // Pick up a newly assembled clip (latest wins). The bleed travels
+        // with it, and everything it replaces leaves on the garbage ring:
+        // an Arc must never be dropped on this thread.
         let mut loaded = false;
-        while let Ok(t) = self.rx.pop() {
-            if let Some(old) = self.track.replace(t) {
+        while let Ok(clip) = self.rx.pop() {
+            if let Some(old) = self.track.replace(clip.track) {
+                let _ = self.garbage_tx.push(old);
+            }
+            for old in [
+                std::mem::replace(&mut self.bleed.left, clip.bleed.left),
+                std::mem::replace(&mut self.bleed.right, clip.bleed.right),
+            ]
+            .into_iter()
+            .flatten()
+            {
                 let _ = self.garbage_tx.push(old);
             }
             loaded = true;
@@ -350,6 +372,12 @@ impl HostModule for BeatClipModule {
                 } else {
                     if self.started {
                         self.beat = (self.beat + 1) % beats as u32;
+                        // Back at beat 0 is another pass of the loop, and
+                        // from the second one on there is a pass behind
+                        // it for the right bleed to carry over the seam.
+                        if self.beat == 0 {
+                            self.passes = self.passes.saturating_add(1);
+                        }
                     } else {
                         // The edge that first knew the tempo is beat 0.
                         self.beat = 0;
@@ -372,6 +400,13 @@ impl HostModule for BeatClipModule {
                     let step = track.sample_rate as f64 / self.engine_rate as f64;
                     let taps = self.grains.tick(self.pos, step, &track.channels[0]);
                     let (mut l, mut r) = (0.0f32, 0.0f32);
+                    // The bleed rides the SAME grains as the loop, so it
+                    // is stretched with it. Nothing precedes pass 0, so
+                    // it plays without the right bleed; there is no last
+                    // pass here (a rack clip runs until its clock stops),
+                    // so the left bleed always sounds.
+                    let frames = track.frames() as f64;
+                    let head = self.passes > 0;
                     for tap in taps.iter().flatten() {
                         let gl = sample_at(&track.channels[0], tap.pos);
                         let gr = if track.channels.len() > 1 {
@@ -379,8 +414,9 @@ impl HostModule for BeatClipModule {
                         } else {
                             gl
                         };
-                        l += gl * tap.gain;
-                        r += gr * tap.gain;
+                        let (bl, br) = self.bleed.tap(tap.pos, frames, head, true);
+                        l += (gl + bl) * tap.gain;
+                        r += (gr + br) * tap.gain;
                     }
                     // One clip beat per clock interval: the whole tempo
                     // change lives in this advance.
@@ -413,14 +449,16 @@ impl HostModule for BeatClipModule {
         );
     }
 
-    /// Transport across a hot reload: the playhead, its beat, and the
-    /// tempo the clock had measured (without which nothing may play).
+    /// Transport across a hot reload: the playhead, its beat, the tempo
+    /// the clock had measured (without which nothing may play), and how
+    /// many passes are behind it (the right bleed's say).
     fn save_state(&mut self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(17);
+        let mut bytes = Vec::with_capacity(21);
         bytes.extend_from_slice(&self.pos.to_le_bytes());
         bytes.extend_from_slice(&self.beat.to_le_bytes());
         bytes.extend_from_slice(&self.interval.to_le_bytes());
         bytes.push(self.started as u8);
+        bytes.extend_from_slice(&self.passes.to_le_bytes());
         bytes
     }
 
@@ -431,6 +469,9 @@ impl HostModule for BeatClipModule {
             self.interval = f32::from_le_bytes(bytes[12..16].try_into().unwrap());
             self.started = bytes[16] != 0 && self.interval > 0.0;
             self.seen_edge = self.started;
+        }
+        if bytes.len() >= 21 {
+            self.passes = u32::from_le_bytes(bytes[17..21].try_into().unwrap());
         }
     }
 

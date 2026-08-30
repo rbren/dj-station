@@ -22,6 +22,7 @@ use crate::graph::SIGNAL_MAX;
 use crate::knob::{Curve, KnobConfig, KnobStyle};
 use crate::manifest::{categories, JackDecl, Manifest, OutputDecl};
 use crate::module_host::HostModule;
+use crate::stretch::sample_at;
 
 pub const PLAYBACK_ID: &str = "builtin.playback";
 
@@ -104,6 +105,78 @@ pub fn playback_manifest() -> Manifest {
 pub struct TrackData {
     pub channels: Vec<Vec<f32>>,
     pub sample_rate: f32,
+}
+
+/// LOOP BLEED: the material a beat clip keeps from OUTSIDE its loop, so
+/// the seam has continuity. `right` is the audio that followed the clip
+/// in the track it was cut from and is laid over the loop's START (a pass
+/// carries the previous one's tail across the seam); `left` is the audio
+/// that came before it and is laid over the loop's END (a pass announces
+/// the next one). Neither is mixed into the loop: the player overlays
+/// them, which is what lets the first pass drop the right one and the
+/// last — a dropped deck — drop the left. Filed as metadata beside the
+/// clip (`dj_analysis::clip::BeatClipMeta`), never baked into its audio.
+#[derive(Clone, Default)]
+pub struct ClipBleed {
+    pub left: Option<Arc<TrackData>>,
+    pub right: Option<Arc<TrackData>>,
+}
+
+impl ClipBleed {
+    /// What the overlays add for one grain tap at `pos` (loop frames) in
+    /// a loop `loop_frames` long. `head`/`tail` are the passes' say:
+    /// silence the right bleed on the first pass and the left bleed on
+    /// the last one. Out-of-range reads are silent ([`sample_at`]), so
+    /// the overlay simply stops where its material runs out.
+    #[inline]
+    pub fn tap(&self, pos: f64, loop_frames: f64, head: bool, tail: bool) -> (f32, f32) {
+        let (mut l, mut r) = (0.0f32, 0.0f32);
+        let mut read = |track: &TrackData, at: f64| {
+            let gl = sample_at(&track.channels[0], at);
+            let gr = if track.channels.len() > 1 {
+                sample_at(&track.channels[1], at)
+            } else {
+                gl
+            };
+            l += gl;
+            r += gr;
+        };
+        if head {
+            if let Some(track) = &self.right {
+                read(track, pos);
+            }
+        }
+        if tail {
+            if let Some(track) = &self.left {
+                read(track, pos - (loop_frames - track.frames() as f64));
+            }
+        }
+        (l, r)
+    }
+}
+
+/// A clip as it is handed to a player: the loop, and the bleed that goes
+/// over its seam. A bare [`TrackData`] converts into one with no bleed,
+/// so every caller that has no bleed to give keeps passing the audio.
+#[derive(Clone)]
+pub struct ClipAudio {
+    pub track: Arc<TrackData>,
+    pub bleed: ClipBleed,
+}
+
+impl From<TrackData> for ClipAudio {
+    fn from(track: TrackData) -> Self {
+        Arc::new(track).into()
+    }
+}
+
+impl From<Arc<TrackData>> for ClipAudio {
+    fn from(track: Arc<TrackData>) -> Self {
+        ClipAudio {
+            track,
+            bleed: ClipBleed::default(),
+        }
+    }
 }
 
 impl TrackData {

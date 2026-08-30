@@ -21,6 +21,7 @@ use crate::decks::{
     MOMENTARY_RELEASE_SECS, SLOTS, SURFACE_PARAM,
 };
 use crate::launch_control::{jack_index, row, BUTTON_GATE_VOLTS};
+use crate::playback::{ClipAudio, ClipBleed};
 
 impl Engine {
     fn decks_node(&self, instance_id: &str) -> Result<usize> {
@@ -267,7 +268,7 @@ impl Engine {
         instance_id: &str,
         slot: usize,
         clip: Option<BeatClipRef>,
-        audio: TrackData,
+        audio: impl Into<ClipAudio>,
         source_bpm: f64,
     ) -> Result<()> {
         self.hand_slot_clip(instance_id, slot, clip, audio, source_bpm, true)
@@ -281,7 +282,7 @@ impl Engine {
         instance_id: &str,
         slot: usize,
         clip: Option<BeatClipRef>,
-        audio: TrackData,
+        audio: impl Into<ClipAudio>,
         source_bpm: f64,
     ) -> Result<()> {
         self.hand_slot_clip(instance_id, slot, clip, audio, source_bpm, false)
@@ -292,13 +293,16 @@ impl Engine {
         instance_id: &str,
         slot: usize,
         clip: Option<BeatClipRef>,
-        audio: TrackData,
+        audio: impl Into<ClipAudio>,
         source_bpm: f64,
         fresh: bool,
     ) -> Result<()> {
         Self::check_slot(slot)?;
         let node = self.decks_node(instance_id)?;
-        let audio = Arc::new(audio);
+        let ClipAudio {
+            track: audio,
+            bleed,
+        } = audio.into();
         let source_bpm = source_bpm.max(1.0) as f32;
         let beats = crate::decks::beats_of(audio.duration_secs(), source_bpm as f64);
         let ctl = self.clip_decks.get_mut(&node).unwrap();
@@ -328,6 +332,7 @@ impl Engine {
             .push(DecksCmd::Load {
                 slot: slot as u8,
                 track: Some(audio),
+                bleed,
             })
             .map_err(|_| anyhow!("too many pending clip loads"))?;
         self.push_slot(node, slot)
@@ -381,6 +386,7 @@ impl Engine {
             .push(DecksCmd::Load {
                 slot: slot as u8,
                 track: None,
+                bleed: ClipBleed::default(),
             })
             .map_err(|_| anyhow!("too many pending clip loads"))?;
         self.push_slot(node, slot)
@@ -521,6 +527,7 @@ impl Engine {
                         .push(DecksCmd::Load {
                             slot: slot as u8,
                             track: None,
+                            bleed: ClipBleed::default(),
                         })
                         .map_err(|_| anyhow!("too many pending clip loads"))?;
                 }

@@ -943,6 +943,18 @@ pub struct BeatClipMeta {
     /// not a broken record.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit: Option<BeatClipEdit>,
+    /// BLEED, in milliseconds: material kept from OUTSIDE the loop so its
+    /// seam has continuity. The left bleed is the audio before the clip's
+    /// start (overlaid over its END, so a pass anticipates the next one);
+    /// the right bleed is the audio after its end (overlaid over its
+    /// START, so a pass carries the last one's tail). Neither is mixed
+    /// into the loop — it is the player that lays them over it, which is
+    /// what lets the first pass drop the right one and the last pass the
+    /// left. 0 (and no bleed file) for a clip saved without any.
+    #[serde(default)]
+    pub left_bleed_ms: f64,
+    #[serde(default)]
+    pub right_bleed_ms: f64,
     /// LEGACY: the source track's title, filed as a second label beside
     /// the clip's own name. Read so it can be folded into `name`, never
     /// written.
@@ -966,6 +978,29 @@ impl BeatClipMeta {
         };
         true
     }
+}
+
+/// A beat clip's bleed as audio: the spans either side of the loop, as
+/// they were rendered. Empty on both sides is the ordinary clip.
+#[derive(Debug, Clone, Default)]
+pub struct BleedAudio {
+    /// From before the loop's start — overlaid over its END.
+    pub left: Option<AudioData>,
+    /// From after the loop's end — overlaid over its START.
+    pub right: Option<AudioData>,
+}
+
+/// Where a bleed's audio is filed: beside the loop, named after it, so a
+/// clip is still one id and its bleed cannot be mistaken for a loop.
+fn bleed_file(clip_id: &str, left: bool) -> String {
+    format!("{clip_id}-bleed-{}.flac", if left { "l" } else { "r" })
+}
+
+fn bleed_ms(audio: &Option<AudioData>) -> f64 {
+    audio
+        .as_ref()
+        .map(|a| a.duration_secs() * 1000.0)
+        .unwrap_or(0.0)
 }
 
 /// Where beat clips land: `<data_dir>/beat-clips/`.
@@ -1027,16 +1062,30 @@ pub fn migrate_beat_clips(data_dir: &Path) -> usize {
     migrated
 }
 
-/// A beat clip's record and audio, for whatever is about to play it.
-pub fn load_beat_clip(data_dir: &Path, clip_id: &str) -> Result<(BeatClipMeta, AudioData)> {
+/// A beat clip's record, its loop and the bleed that goes over the seam,
+/// for whatever is about to play it. A bleed file that has gone missing
+/// costs the overlay, never the clip.
+pub fn load_beat_clip(
+    data_dir: &Path,
+    clip_id: &str,
+) -> Result<(BeatClipMeta, AudioData, BleedAudio)> {
     let meta = read_beat_clips(data_dir)
         .into_iter()
         .find(|c| c.id == clip_id)
         .ok_or_else(|| anyhow::anyhow!("no saved beat clip {clip_id}"))?;
-    let path = beat_clips_dir(data_dir).join(&meta.file);
-    let audio = crate::decode_audio(&path)
+    let dir = beat_clips_dir(data_dir);
+    let audio = crate::decode_audio(&dir.join(&meta.file))
         .map_err(|e| anyhow::anyhow!("reading beat clip {}: {e}", meta.name))?;
-    Ok((meta, audio))
+    let side = |ms: f64, left: bool| {
+        (ms > 0.0)
+            .then(|| crate::decode_audio(&dir.join(bleed_file(&meta.id, left))).ok())
+            .flatten()
+    };
+    let bleed = BleedAudio {
+        left: side(meta.left_bleed_ms, true),
+        right: side(meta.right_bleed_ms, false),
+    };
+    Ok((meta, audio, bleed))
 }
 
 /// File a rendered span as a beat clip: cut it to exactly `beats` whole
@@ -1044,7 +1093,13 @@ pub fn load_beat_clip(data_dir: &Path, clip_id: &str) -> Result<(BeatClipMeta, A
 /// audio + meta.
 /// `edit` is how it was cut ([`BeatClipEdit`]) — kept so the clip can be
 /// opened again, and so it points at its sources by id rather than by a
-/// copy of their titles.
+/// copy of their titles. The `bleed` spans are filed BESIDE the loop,
+/// never into it — the loop is exactly the beats that were selected, and
+/// the milliseconds recorded are the ones actually written, so a bleed
+/// the track was too short to give is smaller rather than wrong.
+// Every argument is a field of the record being written; a struct would
+// only move the list.
+#[allow(clippy::too_many_arguments)]
 pub fn save_beat_clip(
     data_dir: &Path,
     name: &str,
@@ -1053,6 +1108,7 @@ pub fn save_beat_clip(
     beats: usize,
     stems: Vec<String>,
     edit: Option<BeatClipEdit>,
+    bleed: &BleedAudio,
 ) -> Result<BeatClipMeta> {
     let name = name.trim();
     ensure!(!name.is_empty(), "beat clip: it needs a name");
@@ -1073,9 +1129,16 @@ pub fn save_beat_clip(
         file: format!("b{next}.flac"),
         stems,
         edit,
+        left_bleed_ms: bleed_ms(&bleed.left),
+        right_bleed_ms: bleed_ms(&bleed.right),
         legacy_source_title: String::new(),
     };
     write_clip(&dir.join(&meta.file), &padded)?;
+    for (side, audio) in [(true, &bleed.left), (false, &bleed.right)] {
+        if let Some(audio) = audio.as_ref().filter(|a| a.frames() > 0) {
+            write_clip(&dir.join(bleed_file(&meta.id, side)), audio)?;
+        }
+    }
     std::fs::write(
         dir.join(format!("b{next}.json")),
         serde_json::to_string_pretty(&meta)?,

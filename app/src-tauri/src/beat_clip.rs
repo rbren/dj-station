@@ -13,12 +13,11 @@
 //! window.
 
 use dj_engine::beat_clip::BeatClipRef;
-use dj_engine::playback::TrackData;
 use dj_engine::Engine;
 use serde::Serialize;
 use tauri::State;
 
-use crate::beatify_clip::{render_clip, RenderedClip};
+use crate::beatify_clip::render_clip;
 use crate::{engine_lock, err, patch_edit, AppState, CmdResult, EditKey};
 
 /// A library track a clip was cut from, as a row can show it: the
@@ -163,7 +162,7 @@ pub fn beat_clip_load(
     };
     let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
     engine
-        .beat_clip_load(&instance, Some(clip), track_data(&rendered), rendered.bpm)
+        .beat_clip_load(&instance, Some(clip), rendered.clip_audio(), rendered.bpm)
         .map_err(err)?;
     Ok(name_after_clip(&mut engine, &instance, &rendered.name))
 }
@@ -199,13 +198,6 @@ pub fn beat_clip_status(
     engine.beat_clip_status(&instance).map_err(err)
 }
 
-fn track_data(rendered: &RenderedClip) -> TrackData {
-    TrackData {
-        channels: rendered.audio.channels.clone(),
-        sample_rate: rendered.audio.sample_rate as f32,
-    }
-}
-
 /// Re-assemble every Beat Clip module that knows which clip it plays but
 /// has no audio behind it — after a patch load, or an undo/redo that
 /// recreated one. A clip whose project has been deleted leaves its module
@@ -215,7 +207,7 @@ pub fn hydrate(state: &AppState, engine: &mut Engine) {
     for (instance, clip) in engine.beat_clip_pending() {
         match render_clip(state, &clip.project, &clip.clip) {
             Ok(rendered) => {
-                let audio = track_data(&rendered);
+                let audio = rendered.clip_audio();
                 let bpm = rendered.bpm;
                 // Re-read the display fields off the clip as it now
                 // stands: a patch saved before clips said what they hold

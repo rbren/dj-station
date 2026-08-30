@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::beat_clip::{beats_of, BeatClipRef, BeatClipStatus, IN_BPM};
+use crate::playback::ClipAudio;
 
 impl Engine {
     fn beat_clip_node(&self, instance_id: &str) -> Result<usize> {
@@ -26,15 +27,18 @@ impl Engine {
     /// the tempo it was rendered at — the project's — and lands on the
     /// module's BPM input, which is what one beat of the clip means.
     /// Works stopped or running.
+    ///
+    /// `audio` is the loop, and a beat clip may bring a bleed with it
+    /// ([`ClipAudio`]) — a plain [`TrackData`] is a clip with none.
     pub fn beat_clip_load(
         &mut self,
         instance_id: &str,
         clip: Option<BeatClipRef>,
-        audio: TrackData,
+        audio: impl Into<ClipAudio>,
         bpm: f64,
     ) -> Result<()> {
         let node = self.beat_clip_node(instance_id)?;
-        self.hand_clip(node, clip, Arc::new(audio), bpm as f32)
+        self.hand_clip(node, clip, audio.into(), bpm as f32)
     }
 
     /// Put a clip in a node's hands: the RT module picks the audio up
@@ -44,7 +48,7 @@ impl Engine {
         &mut self,
         node: usize,
         clip: Option<BeatClipRef>,
-        audio: Arc<TrackData>,
+        audio: ClipAudio,
         bpm: f32,
     ) -> Result<()> {
         let ctl = self.beat_clips.get_mut(&node).unwrap();
@@ -118,7 +122,11 @@ impl Engine {
         let node = self.beat_clip_node(instance_id)?;
         let ctl = &self.beat_clips[&node];
         let bpm = self.knob_value(node, IN_BPM) as f64;
-        let duration_secs = ctl.track.as_ref().map(|t| t.duration_secs()).unwrap_or(0.0);
+        let duration_secs = ctl
+            .track
+            .as_ref()
+            .map(|c| c.track.duration_secs())
+            .unwrap_or(0.0);
         Ok(BeatClipStatus {
             clip: self.nodes[node].clip.clone(),
             duration_secs,
