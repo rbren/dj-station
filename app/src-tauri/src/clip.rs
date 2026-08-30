@@ -1,11 +1,12 @@
-//! Clip page IPC (PRD §9): edit library tracks into new library tracks.
+//! Clip page IPC (PRD §9): edit library tracks into BEAT CLIPS the decks
+//! can load like any Beatify clip.
 //!
 //! The editor is a pure control-plane feature — it never touches the
 //! engine or the RT thread. Commands decode library tracks (cached here so
 //! scrubbing an edit doesn't re-decode), render a
 //! [`ClipProgram`](dj_analysis::clip::ClipProgram) with `dj-analysis`, and
-//! import the result as a NEW library track; the sources are never
-//! rewritten.
+//! save a beat-quantized span of the result into the beat-clip store
+//! below; the sources are never rewritten.
 //!
 //! Every command is `async` so the (multi-second) decode/render runs on
 //! Tauri's worker pool instead of blocking the UI thread.
@@ -18,7 +19,6 @@
 
 use dj_analysis::clip::{self, ClipProgram};
 use dj_analysis::{AudioData, TrackStems};
-use dj_library::{ImportOptions, ImportOutcome, Track};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::State;
@@ -343,60 +343,98 @@ pub fn clip_preview_audio(
     Ok(tauri::ipc::Response::new(clip::wav16_bytes(&window)))
 }
 
-/// Render the edit to `<data_dir>/clips/` and import it as a NEW library
-/// track (the sources are left untouched). Analysis is queued by the
-/// import, so BPM/key land like any other track.
+// ---------------------------------------------------------------------------
+// Beat clips: the Clip tab's saved output
+// ---------------------------------------------------------------------------
+//
+// A BEAT CLIP is a rendered span of the edit cut to a whole number of
+// beats — the thing the Decks (and the module picker's Clips tab) can
+// load exactly like a Beatify clip. The store itself lives in
+// `dj_analysis::clip` (`<data_dir>/beat-clips/`); it is surfaced through
+// the SAME doors Beatify clips use: appended to `beat_clip_list` under
+// the reserved project id [`BEAT_CLIPS_PROJECT`], and
+// `beatify_clip::render_clip` routes that id here — so `beat_clip_load`,
+// patch-load hydration and copy/paste need no second code path.
+
+/// Reserved "project" id beat clips are listed under. Beatify mints
+/// project ids as `p<n>` (legacy: source-hash directory names), so this
+/// can never collide with a real project.
+pub const BEAT_CLIPS_PROJECT: &str = "beat-clips";
+/// Where the pickers say a beat clip came from.
+pub const BEAT_CLIPS_PROJECT_NAME: &str = "Clip tab";
+
+/// Tempo of a span of the edit, measured: what the save row shows when
+/// the selection was never tapped. Runs the Beatify tracker (`beat_this`
+/// when installed, the DSP fallback otherwise) over the rendered output.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipBeats {
+    pub bpm: f64,
+    /// Beats the span covers at that tempo — fractional until the save
+    /// pads the last one with silence.
+    pub beats: f64,
+    /// Which tracker actually produced the beats.
+    pub tracker: String,
+}
+
 #[tauri::command(async)]
-pub fn clip_save(state: State<AppState>, request: ClipRequest, title: String) -> CmdResult<Track> {
-    let title = title.trim().to_string();
-    if title.is_empty() {
-        return Err(CmdError::invalid("clip: the new track needs a name"));
-    }
+pub fn clip_detect_beats(
+    state: State<AppState>,
+    request: ClipRequest,
+    start_secs: f64,
+    end_secs: f64,
+) -> CmdResult<ClipBeats> {
     let rendered = request.render(&state)?;
+    let (a, b) = span_of(&rendered, start_secs, end_secs)?;
+    let tracker = dj_analysis::beatify::detect::default_tracker();
+    let analysis =
+        dj_analysis::beatify::analyze(&rendered, tracker.as_ref(), Some((a, b)), Default::default())
+            .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+    let bpm = analysis.grid.bpm;
+    Ok(ClipBeats {
+        bpm,
+        beats: (b - a) * bpm / 60.0,
+        tracker: analysis.tracker,
+    })
+}
 
-    let dir = clip::clips_dir(state.library.data_dir());
-    let name = dj_library::providers::sanitize_filename(&title);
-    let path = dj_library::providers::unique_path(&dir.join(format!("{name}.flac")));
-    clip::write_clip(&path, &rendered).map_err(err)?;
-
-    // A clip is a derivative work: it inherits the first source's artist
-    // and license, and records the tracks (and stems) it was cut from.
-    let first = state
-        .library
-        .track(request.sources[0].track_id)
-        .map_err(err)?;
-    let source_ref = request
-        .sources
-        .iter()
-        .map(|s| {
-            let s = s.normalized()?;
-            Ok(if s.stems.is_empty() {
-                s.track_id.to_string()
-            } else {
-                format!("{}:{}", s.track_id, s.stems.join("+"))
-            })
-        })
-        .collect::<CmdResult<Vec<_>>>()?
-        .into_iter()
-        .collect::<Vec<_>>()
-        .join(",");
-    let outcome = state
-        .library
-        .import_file(
-            &path,
-            ImportOptions {
-                source: "clip".into(),
-                source_ref,
-                license: first.license,
-                title: Some(title),
-                artist: Some(first.artist),
-                album: Some("Clips".into()),
-            },
-        )
-        .map_err(err)?;
-    if let ImportOutcome::Duplicate(_) = &outcome {
-        // Byte-identical to a clip already in the library; drop the copy.
-        let _ = std::fs::remove_file(&path);
+fn span_of(rendered: &AudioData, start_secs: f64, end_secs: f64) -> CmdResult<(f64, f64)> {
+    let dur = rendered.duration_secs();
+    let a = start_secs.max(0.0).min(dur);
+    let b = end_secs.max(0.0).min(dur);
+    if b - a <= 0.0 {
+        return Err(CmdError::invalid("clip: nothing selected to save"));
     }
-    Ok(outcome.track().clone())
+    Ok((a, b))
+}
+
+/// Render the selected span to `<data_dir>/beat-clips/`, padded to a
+/// whole number of beats at `bpm` — the tapped grid's tempo, or the
+/// measured one the save row showed. The saved clip loads into the decks
+/// exactly like a Beatify clip (see `beat_clip.rs`).
+#[tauri::command(async)]
+pub fn clip_save_beat_clip(
+    state: State<AppState>,
+    request: ClipRequest,
+    title: String,
+    start_secs: f64,
+    end_secs: f64,
+    bpm: f64,
+) -> CmdResult<clip::BeatClipMeta> {
+    let rendered = request.render(&state)?;
+    let (a, b) = span_of(&rendered, start_secs, end_secs)?;
+    let span = clip::slice(&rendered, a, b - a);
+
+    // What the clip is made of, for the tags every picker shows. An
+    // empty stem set is the whole mix, so it folds to all four.
+    let stems = dj_analysis::stem_union(
+        &request
+            .sources
+            .iter()
+            .map(|s| s.normalized().map(|s| s.stems))
+            .collect::<CmdResult<Vec<_>>>()?,
+    );
+
+    clip::save_beat_clip(state.library.data_dir(), &title, &span, bpm, stems)
+        .map_err(|e| CmdError::invalid(format!("clip: {e}")))
 }

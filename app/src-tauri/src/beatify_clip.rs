@@ -667,7 +667,23 @@ pub fn project_clips(state: &AppState, project_id: &str) -> CmdResult<Vec<SavedC
 
 /// Assemble a saved clip. Same path the builder's preview takes, so the
 /// module in the rack sounds like the clip in the editor.
+///
+/// The Clip tab's beat clips answer through this same door under their
+/// reserved project id, already rendered — which is what makes
+/// `beat_clip_load`, patch-load hydration and copy/paste treat them
+/// exactly like Beatify clips.
 pub fn render_clip(state: &AppState, project_id: &str, clip_id: &str) -> CmdResult<RenderedClip> {
+    if project_id == crate::clip::BEAT_CLIPS_PROJECT {
+        let (meta, audio) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), clip_id)
+            .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+        return Ok(RenderedClip {
+            audio,
+            bpm: meta.bpm,
+            name: meta.name,
+            project_name: crate::clip::BEAT_CLIPS_PROJECT_NAME.into(),
+            stems: meta.stems,
+        });
+    }
     let mut resolver = Resolver::new(state, project_id)?;
     let clip = resolver
         .clips

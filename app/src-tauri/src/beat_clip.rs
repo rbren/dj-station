@@ -39,7 +39,8 @@ pub struct BeatClipEntry {
 }
 
 /// Every clip in every Beatify project, newest project first (the order
-/// `store::list` sorts them in).
+/// `store::list` sorts them in), then the Clip tab's beat clips — same
+/// rows, same load path, a different store behind them.
 #[tauri::command(async)]
 pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
     let data_dir = state.library.data_dir();
@@ -60,6 +61,17 @@ pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
                 stems: clip.stems,
             });
         }
+    }
+    for meta in dj_analysis::clip::read_beat_clips(data_dir) {
+        out.push(BeatClipEntry {
+            project_id: crate::clip::BEAT_CLIPS_PROJECT.into(),
+            project_name: crate::clip::BEAT_CLIPS_PROJECT_NAME.into(),
+            clip_id: meta.id,
+            name: meta.name,
+            bpm: meta.bpm,
+            beats: meta.beats.max(1),
+            stems: meta.stems,
+        });
     }
     Ok(out)
 }

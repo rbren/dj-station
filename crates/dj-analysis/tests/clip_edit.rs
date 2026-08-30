@@ -8,8 +8,9 @@
 //! `./scripts/regen-goldens.sh` and review the diff.
 
 use dj_analysis::clip::{
-    clips_dir, peaks, program_duration_secs, render_clip, wav16_bytes, write_clip, ClipEq,
-    ClipEqBand, ClipOverlay, ClipProgram, ClipRegion, LevelPoint,
+    clips_dir, load_beat_clip, pad_to_beats, peaks, program_duration_secs, read_beat_clips,
+    render_clip, save_beat_clip, warp_time_secs, wav16_bytes, write_clip, ClipEq, ClipEqBand,
+    ClipOverlay, ClipProgram, ClipRegion, LevelPoint,
 };
 use dj_analysis::AudioData;
 use std::path::{Path, PathBuf};
@@ -345,6 +346,168 @@ fn empty_and_bad_programs_are_rejected() {
     assert!(render_clip(&[&src], &hard_cuts(vec![span(0, 0.2, 0.2)])).is_err());
 }
 
+/// Silence with a short burst of energy at each `at` (seconds): the beat
+/// material tap-warp tests move around.
+fn clicks(at: &[f64], seconds: f64) -> AudioData {
+    let n = (seconds * SR as f64) as usize;
+    let mut chan = vec![0.0f32; n];
+    for &t in at {
+        let first = (t * SR as f64) as usize;
+        for s in chan.iter_mut().take((first + 96).min(n)).skip(first) {
+            *s = 0.8;
+        }
+    }
+    AudioData {
+        channels: vec![chan.clone(), chan],
+        sample_rate: SR,
+    }
+}
+
+/// Centre of energy of `audio` within `lo..hi` seconds.
+fn burst_at(audio: &AudioData, lo: f64, hi: f64) -> f64 {
+    let (a, b) = ((lo * SR as f64) as usize, (hi * SR as f64) as usize);
+    let (mut num, mut den) = (0.0f64, 0.0f64);
+    for i in a..b.min(audio.frames()) {
+        let e = (audio.channels[0][i] as f64).abs();
+        num += e * i as f64;
+        den += e;
+    }
+    assert!(den > 0.0, "no energy in {lo}..{hi}");
+    num / den / SR as f64
+}
+
+#[test]
+fn tap_warp_evens_out_the_beats_and_leaves_the_rest_alone() {
+    // Unevenly played beats at 1.0/1.4/2.1/3.0 s, tapped into an even
+    // grid: 1.0 + n * (2.0 / 3). The endpoints are fixed (the average
+    // preserves the covered span), so the length must not change.
+    let played = [1.0, 1.4, 2.1, 3.0];
+    let period = 2.0 / 3.0;
+    let src = clicks(&played, 4.0);
+    let warp: Vec<[f64; 2]> = played
+        .iter()
+        .enumerate()
+        .map(|(i, &t)| [t, 1.0 + i as f64 * period])
+        .collect();
+    let program = ClipProgram {
+        regions: vec![whole(0, &src)],
+        crossfade_ms: 0.0,
+        warp,
+        ..ClipProgram::default()
+    };
+    assert!((program_duration_secs(&program) - 4.0).abs() < 1e-9);
+
+    let out = render_clip(&[&src], &program).unwrap();
+    assert_eq!(out.frames(), src.frames());
+    for n in 0..4 {
+        let want = 1.0 + n as f64 * period;
+        let got = burst_at(&out, want - 0.2, want + 0.2);
+        assert!(
+            (got - want).abs() < 0.03,
+            "beat {n}: burst at {got:.3}, wanted {want:.3}"
+        );
+    }
+}
+
+#[test]
+fn identity_warp_is_a_sample_exact_passthrough() {
+    let src = tone(220.0, 1.0);
+    let plain = render_clip(&[&src], &hard_cuts(vec![whole(0, &src)])).unwrap();
+    let warped = render_clip(
+        &[&src],
+        &ClipProgram {
+            regions: vec![whole(0, &src)],
+            crossfade_ms: 0.0,
+            warp: vec![[0.25, 0.25], [0.75, 0.75]],
+            ..ClipProgram::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(plain.channels, warped.channels);
+}
+
+#[test]
+fn malformed_warps_are_rejected() {
+    let src = tone(220.0, 1.0);
+    for warp in [vec![[0.5, 0.5]], vec![[0.5, 0.5], [0.2, 0.6]]] {
+        let program = ClipProgram {
+            regions: vec![whole(0, &src)],
+            warp,
+            ..ClipProgram::default()
+        };
+        assert!(render_clip(&[&src], &program).is_err());
+    }
+}
+
+#[test]
+fn warp_time_maps_inside_the_anchors_and_is_identity_outside() {
+    let warp = vec![[1.0, 1.0], [2.0, 3.0], [4.0, 4.0]];
+    assert_eq!(warp_time_secs(&warp, 0.5), 0.5);
+    assert_eq!(warp_time_secs(&warp, 1.5), 2.0);
+    assert_eq!(warp_time_secs(&warp, 3.0), 3.5);
+    assert_eq!(warp_time_secs(&warp, 5.0), 5.0);
+    assert_eq!(warp_time_secs(&[], 2.5), 2.5);
+}
+
+#[test]
+fn pad_to_beats_fills_the_last_beat_with_silence() {
+    // 1.75 s at 120 BPM is 3.5 beats: the clip becomes 4 whole beats,
+    // the last half-beat of it silence.
+    let src = tone(220.0, 1.75);
+    let (padded, beats) = pad_to_beats(&src, 120.0).unwrap();
+    assert_eq!(beats, 4);
+    assert_eq!(padded.frames(), 2 * SR as usize);
+    let tail_start = (1.75 * SR as f64) as usize;
+    assert!(padded.channels[0][tail_start..].iter().all(|&s| s == 0.0));
+    assert_eq!(&padded.channels[0][..tail_start], &src.channels[0][..]);
+
+    // A span that already IS whole beats gains nothing.
+    let whole_src = tone(220.0, 2.0);
+    let (kept, beats) = pad_to_beats(&whole_src, 120.0).unwrap();
+    assert_eq!(beats, 4);
+    assert_eq!(kept.frames(), whole_src.frames());
+
+    assert!(pad_to_beats(&src, 0.0).is_err());
+}
+
+#[test]
+fn beat_clip_store_round_trips_and_mints_ids_in_order() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    // Nothing filed yet is an empty list, not an error.
+    assert!(read_beat_clips(tmp.path()).is_empty());
+    assert!(load_beat_clip(tmp.path(), "b1").is_err());
+
+    // 1.75 s at 120 BPM: filed as 4 whole beats (2.0 s).
+    let first = save_beat_clip(
+        tmp.path(),
+        "kick pattern",
+        &tone(220.0, 1.75),
+        120.0,
+        vec!["drums".into()],
+    )
+    .unwrap();
+    assert_eq!((first.id.as_str(), first.beats), ("b1", 4));
+    let second = save_beat_clip(tmp.path(), "bass run", &tone(110.0, 2.0), 120.0, vec![]).unwrap();
+    assert_eq!(second.id, "b2");
+    assert!(save_beat_clip(tmp.path(), "  ", &tone(220.0, 1.0), 120.0, vec![]).is_err());
+
+    let clips = read_beat_clips(tmp.path());
+    assert_eq!(
+        clips.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+        ["kick pattern", "bass run"]
+    );
+
+    // The audio decodes back at the padded whole-beat length, silence
+    // where the fractional last beat was filled.
+    let (meta, audio) = load_beat_clip(tmp.path(), "b1").unwrap();
+    assert_eq!(meta.bpm, 120.0);
+    assert_eq!(meta.stems, ["drums"]);
+    assert_eq!(audio.frames(), 2 * SR as usize);
+    let tail = (1.75 * SR as f64) as usize;
+    assert!(audio.channels[0][tail + 16..].iter().all(|&s| s == 0.0));
+}
+
 #[test]
 fn peaks_and_wav_encoding_describe_the_render() {
     let src = tone(220.0, 1.0);
@@ -484,6 +647,7 @@ fn golden_program() -> ClipProgram {
             },
         ],
         crossfade_ms: 8.0,
+        ..ClipProgram::default()
     }
 }
 

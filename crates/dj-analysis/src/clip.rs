@@ -20,6 +20,10 @@
 //!    RBJ filters as the rack's EQ module — bypassed exactly at 0 dB.
 //! 4. **Level automation** ([`LevelPoint`]): a breakpoint envelope in dB
 //!    over the *output* timeline — fades in/out are just endpoints.
+//! 5. **Beat warp** (`warp`): anchor pairs `[from, to]` on the output
+//!    timeline, applied last through the Beatify WSOLA stretch
+//!    ([`crate::beatify::warp`]) — how tapped beats become an even grid.
+//!    Outside the anchors the audio is untouched (identity slope).
 //!
 //! Sources may differ in sample rate and channel count: the render runs at
 //! the first source's rate with the widest channel count, resampling other
@@ -130,6 +134,39 @@ pub struct ClipProgram {
     pub level: Vec<LevelPoint>,
     /// Equal-power crossfade at region joins, in milliseconds.
     pub crossfade_ms: f64,
+    /// Beat-tap time warp: `[from, to]` anchor pairs on the OUTPUT
+    /// timeline, strictly increasing in both axes, identity outside the
+    /// anchored span. Empty means no stretch at all (every clip saved
+    /// before taps existed).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warp: Vec<[f64; 2]>,
+    /// The beat grid the taps built, carried with the edit (the renderer
+    /// never reads it — the frontend quantizes selections against it and
+    /// undo has to move it with the warp it belongs to).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub beat_grid: Option<BeatGrid>,
+}
+
+/// A tapped-out beat grid on the output timeline: beat `n` sounds at
+/// `phase + n * period`. Mirrors the frontend's `Grid`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BeatGrid {
+    pub bpm: f64,
+    pub period: f64,
+    pub phase: f64,
+    pub beats: usize,
+}
+
+impl Default for BeatGrid {
+    fn default() -> Self {
+        BeatGrid {
+            bpm: 0.0,
+            period: 0.0,
+            phase: 0.0,
+            beats: 0,
+        }
+    }
 }
 
 impl Default for ClipProgram {
@@ -140,6 +177,8 @@ impl Default for ClipProgram {
             eq: ClipEq::default(),
             level: Vec::new(),
             crossfade_ms: DEFAULT_CROSSFADE_MS,
+            warp: Vec::new(),
+            beat_grid: None,
         }
     }
 }
@@ -428,10 +467,58 @@ pub fn render_clip(sources: &[&AudioData], program: &ClipProgram) -> Result<Audi
     }
     apply_eq(&mut channels, &program.eq, sample_rate);
     apply_level(&mut channels, &program.level, sample_rate);
-    Ok(AudioData {
-        channels,
-        sample_rate,
-    })
+    apply_warp(
+        AudioData {
+            channels,
+            sample_rate,
+        },
+        &program.warp,
+    )
+}
+
+/// The warp anchors as a [`WarpMap`], guarded on both sides with slope-1
+/// points so everything outside the tapped span stays exactly where it
+/// is (the map extrapolates its END SEGMENTS' slopes otherwise).
+fn warp_map(warp: &[[f64; 2]]) -> Result<Option<crate::beatify::WarpMap>> {
+    if warp.len() < 2 {
+        ensure!(warp.is_empty(), "clip render: a warp needs two anchors");
+        return Ok(None);
+    }
+    for w in warp.windows(2) {
+        ensure!(
+            w[1][0] > w[0][0] && w[1][1] > w[0][1],
+            "clip render: warp anchors must increase in both axes"
+        );
+    }
+    let (first, last) = (warp[0], warp[warp.len() - 1]);
+    let mut points = Vec::with_capacity(warp.len() + 2);
+    points.push((first[0] - 1.0, first[1] - 1.0));
+    points.extend(warp.iter().map(|p| (p[0], p[1])));
+    points.push((last[0] + 1.0, last[1] + 1.0));
+    Ok(Some(crate::beatify::WarpMap { points }))
+}
+
+/// Stretch the rendered output through the tap warp. A missing or
+/// identity map is a sample-exact pass-through.
+fn apply_warp(audio: AudioData, warp: &[[f64; 2]]) -> Result<AudioData> {
+    let Some(map) = warp_map(warp)? else {
+        return Ok(audio);
+    };
+    if map.is_identity() {
+        return Ok(audio);
+    }
+    let out_secs = map.map_time(audio.duration_secs());
+    Ok(crate::beatify::warp::render(&audio, &map, out_secs))
+}
+
+/// Where the warp puts an output time. Identity for the empty (or
+/// malformed) warp, so plain programs cost nothing. TS twin: `warpTime`
+/// in `app/src/clip.ts`.
+pub fn warp_time_secs(warp: &[[f64; 2]], secs: f64) -> f64 {
+    match warp_map(warp) {
+        Ok(Some(map)) => map.map_time(secs),
+        _ => secs,
+    }
 }
 
 /// Output length of a program without rendering it (region durations minus
@@ -454,7 +541,41 @@ pub fn program_duration_secs(program: &ClipProgram) -> f64 {
     for o in &program.overlays {
         total = total.max(o.at_secs.max(0.0) + o.region.duration_secs());
     }
-    total
+    warp_time_secs(&program.warp, total)
+}
+
+/// How far a whole beat is allowed to miss by before it counts as the
+/// next one: a slice lands on sample boundaries, and a clip that IS four
+/// beats must not gain a fifth of pure silence over a rounding error.
+const BEAT_EPS: f64 = 1e-6;
+
+/// Round a rendered span up to a WHOLE number of beats at `bpm`, filling
+/// the remainder of the last beat with silence (a fractional beat count
+/// would put every later beat of a looping clip off the grid).
+pub fn pad_to_beats(audio: &AudioData, bpm: f64) -> Result<(AudioData, usize)> {
+    ensure!(
+        bpm.is_finite() && bpm > 0.0,
+        "beat clip: a positive BPM is required"
+    );
+    ensure!(audio.frames() > 0, "beat clip: nothing to save there");
+    let beats_f = audio.duration_secs() * bpm / 60.0;
+    let beats = ((beats_f - BEAT_EPS).ceil().max(1.0)) as usize;
+    let target = (beats as f64 * 60.0 / bpm * audio.sample_rate as f64).round() as usize;
+    Ok((
+        AudioData {
+            channels: audio
+                .channels
+                .iter()
+                .map(|c| {
+                    let mut c = c.clone();
+                    c.resize(target, 0.0);
+                    c
+                })
+                .collect(),
+            sample_rate: audio.sample_rate,
+        },
+        beats,
+    ))
 }
 
 /// Waveform overview peaks (0..=1), `buckets` values — same law as the
@@ -542,4 +663,105 @@ pub fn write_clip(path: &Path, audio: &AudioData) -> Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     crate::stems::write_flac(path, audio)
+}
+
+// ---------------------------------------------------------------------------
+// Beat clips: the Clip page's saved output
+// ---------------------------------------------------------------------------
+//
+// A BEAT CLIP is a rendered span cut to a whole number of beats at a
+// known tempo — what the rack's Beat Clip module (and so the Decks) can
+// play on a clock, exactly like a Beatify clip. The store is one FLAC +
+// one meta JSON per clip under `<data_dir>/beat-clips/`, ids minted
+// `b<n>` — a sibling of `clips/` and the Beatify store.
+
+/// One saved beat clip, as filed beside its audio. camelCase on disk,
+/// like Beatify's records — one convention per feature family.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatClipMeta {
+    pub id: String,
+    pub name: String,
+    /// Tempo of the (perfectly even) beat grid the audio was cut on.
+    pub bpm: f64,
+    /// Whole beats the clip holds — the last one silence-padded when the
+    /// saved span was fractional.
+    pub beats: usize,
+    /// Audio file name, next to this meta.
+    pub file: String,
+    /// Which parts of its sources it is made of ([`crate::STEM_NAMES`]
+    /// order) — the tags the pickers show.
+    #[serde(default)]
+    pub stems: Vec<String>,
+}
+
+/// Where beat clips land: `<data_dir>/beat-clips/`.
+pub fn beat_clips_dir(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("beat-clips")
+}
+
+/// Every saved beat clip, oldest first (by minted id number). A store
+/// that does not exist yet is simply empty.
+pub fn read_beat_clips(data_dir: &Path) -> Vec<BeatClipMeta> {
+    let Ok(entries) = std::fs::read_dir(beat_clips_dir(data_dir)) else {
+        return Vec::new();
+    };
+    let mut out: Vec<BeatClipMeta> = entries
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .filter_map(|e| {
+            let text = std::fs::read_to_string(e.path()).ok()?;
+            serde_json::from_str(&text).ok()
+        })
+        .collect();
+    out.sort_by_key(|c| c.id.trim_start_matches('b').parse::<u64>().unwrap_or(0));
+    out
+}
+
+/// A beat clip's record and audio, for whatever is about to play it.
+pub fn load_beat_clip(data_dir: &Path, clip_id: &str) -> Result<(BeatClipMeta, AudioData)> {
+    let meta = read_beat_clips(data_dir)
+        .into_iter()
+        .find(|c| c.id == clip_id)
+        .ok_or_else(|| anyhow::anyhow!("no saved beat clip {clip_id}"))?;
+    let path = beat_clips_dir(data_dir).join(&meta.file);
+    let audio = crate::decode_audio(&path)
+        .map_err(|e| anyhow::anyhow!("reading beat clip {}: {e}", meta.name))?;
+    Ok((meta, audio))
+}
+
+/// File a rendered span as a beat clip: pad it to whole beats at `bpm`
+/// ([`pad_to_beats`]), mint the next `b<n>` id and write audio + meta.
+pub fn save_beat_clip(
+    data_dir: &Path,
+    name: &str,
+    audio: &AudioData,
+    bpm: f64,
+    stems: Vec<String>,
+) -> Result<BeatClipMeta> {
+    let name = name.trim();
+    ensure!(!name.is_empty(), "beat clip: it needs a name");
+    let (padded, beats) = pad_to_beats(audio, bpm)?;
+    let dir = beat_clips_dir(data_dir);
+    std::fs::create_dir_all(&dir)?;
+    let next = read_beat_clips(data_dir)
+        .iter()
+        .filter_map(|c| c.id.trim_start_matches('b').parse::<u64>().ok())
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let meta = BeatClipMeta {
+        id: format!("b{next}"),
+        name: name.to_string(),
+        bpm,
+        beats,
+        file: format!("b{next}.flac"),
+        stems,
+    };
+    write_clip(&dir.join(&meta.file), &padded)?;
+    std::fs::write(
+        dir.join(format!("b{next}.json")),
+        serde_json::to_string_pretty(&meta)?,
+    )?;
+    Ok(meta)
 }

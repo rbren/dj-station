@@ -2261,13 +2261,7 @@ export default function App() {
       )}
       {/* The clip editor stays mounted so the edit survives tab switches;
           it hides itself and pauses playback while inactive. */}
-      <ClipView
-        clip={clipClient}
-        library={library}
-        active={view === 'clip'}
-        onSaved={() => void refresh()}
-        ref={clipView}
-      />
+      <ClipView clip={clipClient} library={library} active={view === 'clip'} ref={clipView} />
       {view === 'beatify' && (
         <BeatifyView client={beatifyClient} library={library} clips={beatifyClipClient} />
       )}

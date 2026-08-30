@@ -3914,6 +3914,20 @@ body {
   opacity: 0.5;
 }
 
+/* Beats tapped out with right-shift during playback: pending taps in the
+   cue colour, and the even grid they become as quiet hairlines. */
+.clip-tap-line {
+  stroke: var(--cue);
+  stroke-width: 2;
+  opacity: 0.9;
+}
+
+.clip-beat-line {
+  stroke: var(--ink-dim);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+
 .clip-selection {
   fill: color-mix(in srgb, var(--brand) 22%, transparent);
   stroke: var(--brand);
@@ -4034,7 +4048,14 @@ body {
   cursor: default;
 }
 
-/* The one action on this page that produces a new track, among eight
+/* The tempo the save will file: the tapped grid's, or the measured one. */
+.clip-save-meta {
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one action on this page that produces a new beat clip, among eight
    neutral tools that must not compete with it. */
 .clip-save button.clip-save-button {
   color: var(--canvas);

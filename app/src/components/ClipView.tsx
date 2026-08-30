@@ -1,12 +1,22 @@
 // Clip page (PRD §9): load library tracks, cut/splice/reverse/overlay/EQ
-// them and automate their level, then render the edit into a NEW library
-// track.
+// them and automate their level, then save a span of the edit as a BEAT
+// CLIP — whole beats at a known tempo, loadable into the decks exactly
+// like a Beatify clip.
 //
 // The edit itself is a plain ClipProgram (src/clip.ts) — every operation is
 // a pure function over it, so this component only owns selection, undo/redo
 // history, the viewport (zoom), playback and the debounced preview render.
 // Nothing here touches the engine: rendering happens off-thread in the
 // shell (dj-analysis).
+//
+// BEATS ARE TAPPED: right-shift during playback drops a marker at the
+// playhead (drawn on the waveform), and when playback stops the taps
+// become the grid — the average BPM between first and last tap, with the
+// audio between taps stretched onto perfectly even beats (a warp in the
+// program, so it previews, saves and undoes like any other edit).
+// Selections then quantize to that grid; ⌘-drag frees them. A selection
+// that was never tapped is measured by the Beatify tracker (beat_this
+// when installed) the moment the save row needs numbers to show.
 //
 // The component stays MOUNTED when another page is showing (App hides it
 // with display: none) so the edit survives tab switches; `active` gates
@@ -26,19 +36,22 @@ import {
   addOverlay,
   appendSource,
   clearLevel,
+  composeWarp,
   cutRange,
+  dropGrid,
   duplicateRange,
   emptyProgram,
   fadeIn,
   fadeOut,
   gainRange,
+  gridBeatTimes,
   levelDbAt,
   moveRange,
+  nearestBeat,
   programDuration,
+  quantizeRange,
   regionSpans,
   removeLevelPoint,
-  removeOverlay,
-  removeRegion,
   sameSource,
   reverseRange,
   setLevelPoint,
@@ -47,10 +60,14 @@ import {
   stemLabel,
   stemSet,
   stemWait,
+  tapGrid,
   trimTo,
+  warpSource,
+  type ClipBeats,
   type ClipClientApi,
   type ClipProgram,
   type ClipRender,
+  type ClipRequest,
   type ClipSource,
   type ClipStemBackend,
   type ClipStemStatus,
@@ -62,7 +79,7 @@ import { logError } from '../errors';
 import { isEditableTarget } from '../fileShortcuts';
 import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
-import { AudioTimeline, viewSpan } from './AudioTimeline';
+import { AudioTimeline, viewSpan, type TimelineSnap } from './AudioTimeline';
 import { ClipEqUI } from './ClipEqUI';
 import { WAVEFORM_VIEW_W as W } from './WaveformView';
 
@@ -87,6 +104,10 @@ const HISTORY_DEPTH = 49;
 const STEM_POLL_MS = 2000;
 /** Playhead refresh while a Web Audio loop runs (it has no timeupdate). */
 const LOOP_TICK_MS = 50;
+/** Debounce before measuring an untapped selection's tempo: detection
+ *  renders the edit and may run a model, so it waits for the selection
+ *  to settle. */
+const DETECT_DELAY_MS = 600;
 
 function timecode(secs: number): string {
   if (!Number.isFinite(secs) || secs < 0) return '0:00.00';
@@ -116,8 +137,9 @@ export interface ClipViewProps {
   active?: boolean;
   /** How often to ask after the picked track's stems (tests shorten it). */
   stemPollMs?: number;
-  /** Called after a clip is imported, so the library list can refresh. */
-  onSaved?: (track: Track) => void;
+  /** Debounce before measuring an untapped selection's tempo (tests
+   *  shorten it). */
+  detectDelayMs?: number;
   /** Handle for the Library page's Edit button (see ClipViewHandle). */
   ref?: Ref<ClipViewHandle>;
 }
@@ -134,7 +156,7 @@ export function ClipView({
   library,
   active = true,
   stemPollMs = STEM_POLL_MS,
-  onSaved,
+  detectDelayMs = DETECT_DELAY_MS,
   ref,
 }: ClipViewProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -154,6 +176,18 @@ export function ClipView({
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(false);
   const [playhead, setPlayhead] = useState(0);
+  /** Right-shift taps of the current playback pass, output seconds. They
+   *  become the beat grid the moment playback stops. */
+  const [taps, setTaps] = useState<number[]>([]);
+  /** The measured tempo of an untapped span, keyed by what it measured
+   *  so a new selection or edit simply outdates it. */
+  const [detected, setDetected] = useState<{
+    request: ClipRequest;
+    start: number;
+    end: number;
+    beats: ClipBeats | null;
+  } | null>(null);
+  const [detecting, setDetecting] = useState(false);
 
   /** Zoomed viewport over the output timeline; null = the whole clip. */
   const [vp, setVp] = useState<Range | null>(null);
@@ -206,9 +240,9 @@ export function ClipView({
   // dispatch the next click — so pressing play in that gap read the
   // previous render's duration, computed an empty window, and silently
   // played nothing.
-  const live = useRef({ clip, request, duration });
+  const live = useRef({ clip, request, duration, taps, program });
   useLayoutEffect(() => {
-    live.current = { clip, request, duration };
+    live.current = { clip, request, duration, taps, program };
   });
 
   // One effect creates the transport and one effect destroys it, so React
@@ -225,6 +259,30 @@ export function ClipView({
       element: () => audioRef.current,
       render: (start, len) => live.current.clip.previewAudio(live.current.request, start, len),
       onStatus: (s) => {
+        // Playback stopping is what turns the pass's taps into the beat
+        // grid: average BPM between first and last tap, the audio
+        // between taps stretched onto perfectly even beats. One program
+        // edit (one undo step); a lone tap builds nothing and is simply
+        // cleared. All the setters used here are React's stable ones —
+        // this is an event callback, reading current state via `live`.
+        if (!s.playing && live.current.taps.length > 0) {
+          const tapped = tapGrid(live.current.taps);
+          setTaps([]);
+          if (tapped) {
+            const prev = live.current.program;
+            const next: ClipProgram = {
+              ...prev,
+              warp: prev.warp.length ? composeWarp(prev.warp, tapped.warp) : tapped.warp,
+              beat_grid: tapped.grid,
+            };
+            setPast((h) => [...h.slice(-HISTORY_DEPTH), prev]);
+            setFuture([]);
+            setProgram(next);
+            // The selection in hand is quantized to the new grid at once.
+            const dur = programDuration(next);
+            setSelection((cur) => (cur ? quantizeRange(tapped.grid, cur, dur) : cur));
+          }
+        }
         setPlaying(s.playing);
         setPlayhead(s.playhead);
       },
@@ -243,14 +301,6 @@ export function ClipView({
 
   // Viewport, clamped against the current duration (edits shrink clips).
   const { start: vpStart, end: vpEnd, len: vpLen } = viewSpan(vp, duration);
-
-  const refreshTracks = useCallback(async () => {
-    const list = await library.tracks();
-    if (list) {
-      setTracks(list);
-      setPick((cur) => cur ?? list[0]?.id ?? null);
-    }
-  }, [library]);
 
   // Refresh the pickable track list whenever the page comes back into
   // view — other pages import tracks while this one stays mounted.
@@ -298,6 +348,20 @@ export function ClipView({
       setProgram(next);
     },
     [program],
+  );
+
+  /** Apply a TIMELINE edit: one that re-splices material. It consumes
+   *  output times but cuts pre-warp audio, so the gesture's times are
+   *  mapped back through the tap warp (`at`) — and the warp and its grid
+   *  are dropped with it (see `dropGrid`), one undo step for the lot. */
+  const applyTimeline = useCallback(
+    (edit: (p: ClipProgram, at: (t: number) => number) => ClipProgram) => {
+      apply((p) => {
+        const warp = p.warp;
+        return edit(dropGrid(p), (t) => warpSource(warp, t));
+      });
+    },
+    [apply],
   );
 
   /** Snapshot for gestures (level-point and EQ drags) that then stream
@@ -370,7 +434,6 @@ export function ClipView({
           setName(
             stems.length ? `${source.title} (${stemLabel(stems)})` : `${source.title} (clip)`,
           );
-          setStatus(`Editing "${label}" — the original is never modified`);
           return;
         }
         const index = existing >= 0 ? existing : sources.length;
@@ -378,11 +441,18 @@ export function ClipView({
         setPast((h) => [...h.slice(-HISTORY_DEPTH), program]);
         setFuture([]);
         if (mode === 'append') {
-          setProgram(appendSource(program, index, source.duration_secs));
+          setProgram(appendSource(dropGrid(program), index, source.duration_secs));
           setStatus(`Spliced "${label}" onto the end`);
         } else {
           const at = sel ? sel.start : playhead;
-          setProgram(addOverlay(program, index, source.duration_secs, at));
+          setProgram(
+            addOverlay(
+              dropGrid(program),
+              index,
+              source.duration_secs,
+              warpSource(program.warp, at),
+            ),
+          );
           setStatus(`Overlaid "${label}" at ${timecode(at)}`);
         }
       } finally {
@@ -491,11 +561,11 @@ export function ClipView({
       // for the material to follow, so re-splice it there.
       if (!audio) return;
       const target = base.start + delta;
-      apply((p) => moveRange(p, base.start, base.end, target));
+      applyTimeline((p, at) => moveRange(p, at(base.start), at(base.end), at(target)));
       setSelection({ start: target, end: target + (base.end - base.start) });
       transportRef.current?.seek(target);
     },
-    [apply],
+    [applyTimeline],
   );
 
   const timeAt = useCallback(
@@ -608,7 +678,8 @@ export function ClipView({
       prev.sources !== request.sources ||
       prev.program.regions !== request.program.regions ||
       prev.program.overlays !== request.program.overlays ||
-      prev.program.crossfade_ms !== request.program.crossfade_ms;
+      prev.program.crossfade_ms !== request.program.crossfade_ms ||
+      prev.program.warp !== request.program.warp;
     if (timelineChanged) transportRef.current?.invalidate();
     else transportRef.current?.refreshTone();
   }, [request]);
@@ -641,6 +712,15 @@ export function ClipView({
         // Space would otherwise click a focused button / scroll the page.
         e.preventDefault();
         togglePlay();
+      } else if (e.code === 'ShiftRight' && !e.repeat) {
+        // A beat, tapped at the playhead — during playback only, and read
+        // LIVE off the sounding source: the status playhead only advances
+        // on timeupdate, far too coarse for a tapped beat.
+        const transport = transportRef.current;
+        if (transport?.playing) {
+          const at = transport.position() ?? transport.playhead;
+          setTaps((prev) => [...prev, at]);
+        }
       } else if (!mod && e.key === 'Escape') {
         // Clicking no longer drops the selection, so this is the way out
         // of one — the same key the Beatify track view uses.
@@ -651,21 +731,98 @@ export function ClipView({
     return () => window.removeEventListener('keydown', onKey);
   }, [active, redo, togglePlay, undo]);
 
+  // --- the beat grid, and what the save row says ---------------------------
+  //
+  // The grid rides in the program (it belongs to the warp, through undo).
+  // A selection — or the whole clip — is measured in beats against it; a
+  // span that was never tapped is measured by the tracker instead, and
+  // the save row shows whichever answer is in hand.
+  const grid = program.beat_grid;
+  const disabled = program.regions.length === 0;
+  /** What a save would file: the selection, or the whole clip. */
+  const range = useMemo<Range>(() => sel ?? { start: 0, end: duration }, [sel, duration]);
+
+  // Measure an untapped span once the selection settles. The result is
+  // keyed by what it measured, so an edit or a new selection outdates it
+  // without anything having to be cleared.
+  useEffect(() => {
+    if (!active || disabled || grid) return;
+    const { start, end } = range;
+    if (end - start <= 0) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        setDetecting(true);
+        try {
+          const beats = await clip.detectBeats(request, start, end);
+          if (!cancelled) setDetected({ request, start, end, beats });
+        } finally {
+          if (!cancelled) setDetecting(false);
+        }
+      })();
+    }, detectDelayMs);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [active, clip, detectDelayMs, disabled, grid, range, request]);
+
+  /** The measurement, only if it still describes the span being saved. */
+  const measured =
+    detected &&
+    detected.request === request &&
+    detected.start === range.start &&
+    detected.end === range.end
+      ? detected.beats
+      : null;
+
+  /** BPM + whole beats for the save row: the tapped grid's when there is
+   *  one, the tracker's otherwise. `padded` says the span was fractional
+   *  and the last beat will be filled with silence. */
+  const tempo = useMemo(() => {
+    const span = range.end - range.start;
+    if (span <= 0) return null;
+    const of = (bpm: number) => {
+      const beatsF = (span * bpm) / 60;
+      const beats = Math.max(1, Math.ceil(beatsF - 1e-6));
+      return { bpm, beats, padded: beats - beatsF > 1e-6 };
+    };
+    if (grid) return of(grid.bpm);
+    return measured ? of(measured.bpm) : null;
+  }, [grid, measured, range]);
+
   const save = useCallback(async () => {
+    if (!tempo) return;
     setBusy(true);
     setError(null);
     setStatus(null);
     try {
-      const track = await clip.save(request, name);
-      if (track) {
-        setStatus(`Saved "${track.title}" to the library as a new track`);
-        onSaved?.(track);
-        void refreshTracks();
+      const saved = await clip.saveBeatClip(request, name, range.start, range.end, tempo.bpm);
+      if (saved) {
+        setStatus(
+          `Saved "${saved.name}" — ${saved.beats} ${saved.beats === 1 ? 'beat' : 'beats'} at ` +
+            `${fixed(saved.bpm, 1)} BPM, ready for the decks' clip pickers`,
+        );
       }
     } finally {
       setBusy(false);
     }
-  }, [clip, name, onSaved, refreshTracks, request]);
+  }, [clip, name, range, request, tempo]);
+
+  // Selections quantize to the tapped grid; AudioTimeline reads ⌘ live
+  // and skips these, which is how the window is dragged off the beat.
+  const snap = useMemo<TimelineSnap | undefined>(() => {
+    if (!grid) return undefined;
+    const clampT = (secs: number) => Math.min(duration, Math.max(0, secs));
+    return {
+      seek: (secs, free) => (free ? secs : clampT(nearestBeat(grid, secs))),
+      range: (r) => quantizeRange(grid, r, duration),
+      slide: (r) => {
+        const start = clampT(nearestBeat(grid, r.start));
+        return { start, end: start + (r.end - r.start) };
+      },
+    };
+  }, [duration, grid]);
 
   // The preview belongs to the current edit only; an emptied program has none.
   const preview = program.regions.length === 0 ? null : previewState;
@@ -675,7 +832,6 @@ export function ClipView({
   /** The level lane shares the timeline's viewport (AudioTimeline uses
    *  the same mapping), so automation stays under its audio at any zoom. */
   const xOf = (secs: number) => (vpLen > 0 ? ((secs - vpStart) / vpLen) * W : 0);
-  const disabled = program.regions.length === 0;
   const noSelection = disabled || sel === null;
 
   return (
@@ -787,8 +943,8 @@ export function ClipView({
 
       {disabled ? (
         <p className="clip-empty" data-testid="clip-empty">
-          Open a library track to start editing. Saving always creates a new track — sources are
-          never overwritten.
+          Open a library track to start editing. Saving files a new beat clip the decks can load —
+          sources are never overwritten.
         </p>
       ) : (
         <>
@@ -809,7 +965,12 @@ export function ClipView({
             onToggleLoop={() => setLoop((v) => !v)}
             onSeek={(t) => transportRef.current?.seek(t)}
             onSelectionSlid={onSelectionSlid}
-            selectionTitle="Drag to move the selection — alt-drag to move the audio with it"
+            snap={snap}
+            selectionTitle={
+              grid
+                ? 'Drag to move the selection — ⌘ frees it from the beat grid, alt moves the audio'
+                : 'Drag to move the selection — alt-drag to move the audio with it'
+            }
             timecode={timecode}
             transportExtra={
               <>
@@ -821,19 +982,44 @@ export function ClipView({
                 </button>
               </>
             }
-            renderUnder={(xOf) =>
-              spans.map((s) => (
-                <line
-                  key={s.index}
-                  data-testid={`clip-join-${s.index}`}
-                  className="clip-join"
-                  x1={xOf(s.start)}
-                  x2={xOf(s.start)}
-                  y1={0}
-                  y2={WAVE_H}
-                />
-              ))
-            }
+            renderUnder={(xOf) => (
+              <>
+                {spans.map((s) => (
+                  <line
+                    key={s.index}
+                    data-testid={`clip-join-${s.index}`}
+                    className="clip-join"
+                    x1={xOf(s.start)}
+                    x2={xOf(s.start)}
+                    y1={0}
+                    y2={WAVE_H}
+                  />
+                ))}
+                {grid &&
+                  gridBeatTimes(grid, vpStart, vpEnd).map((t, i) => (
+                    <line
+                      key={`beat${i}`}
+                      data-testid="clip-beat-line"
+                      className="clip-beat-line"
+                      x1={xOf(t)}
+                      x2={xOf(t)}
+                      y1={0}
+                      y2={WAVE_H}
+                    />
+                  ))}
+                {taps.map((t, i) => (
+                  <line
+                    key={`tap${i}`}
+                    data-testid="clip-tap-line"
+                    className="clip-tap-line"
+                    x1={xOf(t)}
+                    x2={xOf(t)}
+                    y1={0}
+                    y2={WAVE_H}
+                  />
+                ))}
+              </>
+            )}
             renderOver={(xOf) =>
               program.overlays.map((o, i) => (
                 <rect
@@ -900,7 +1086,7 @@ export function ClipView({
               disabled={noSelection}
               onClick={() => {
                 if (!sel) return;
-                apply((p) => trimTo(p, sel.start, sel.end));
+                applyTimeline((p, at) => trimTo(p, at(sel.start), at(sel.end)));
                 setSelection(null);
               }}
             >
@@ -911,7 +1097,7 @@ export function ClipView({
               disabled={noSelection}
               onClick={() => {
                 if (!sel) return;
-                apply((p) => cutRange(p, sel.start, sel.end));
+                applyTimeline((p, at) => cutRange(p, at(sel.start), at(sel.end)));
                 setSelection(null);
               }}
             >
@@ -920,28 +1106,36 @@ export function ClipView({
             <button
               data-testid="clip-reverse"
               disabled={noSelection}
-              onClick={() => sel && apply((p) => reverseRange(p, sel.start, sel.end))}
+              onClick={() =>
+                sel && applyTimeline((p, at) => reverseRange(p, at(sel.start), at(sel.end)))
+              }
             >
               Reverse
             </button>
             <button
               data-testid="clip-duplicate"
               disabled={noSelection}
-              onClick={() => sel && apply((p) => duplicateRange(p, sel.start, sel.end))}
+              onClick={() =>
+                sel && applyTimeline((p, at) => duplicateRange(p, at(sel.start), at(sel.end)))
+              }
             >
               Duplicate
             </button>
             <button
               data-testid="clip-louder"
               disabled={noSelection}
-              onClick={() => sel && apply((p) => gainRange(p, sel.start, sel.end, 3))}
+              onClick={() =>
+                sel && applyTimeline((p, at) => gainRange(p, at(sel.start), at(sel.end), 3))
+              }
             >
               +3 dB
             </button>
             <button
               data-testid="clip-quieter"
               disabled={noSelection}
-              onClick={() => sel && apply((p) => gainRange(p, sel.start, sel.end, -3))}
+              onClick={() =>
+                sel && applyTimeline((p, at) => gainRange(p, at(sel.start), at(sel.end), -3))
+              }
             >
               −3 dB
             </button>
@@ -974,58 +1168,6 @@ export function ClipView({
             onChange={(bands) => setProgram({ ...program, eq: { bands } })}
           />
 
-          <table className="clip-regions" data-testid="clip-regions">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Source</th>
-                <th>In</th>
-                <th>Out</th>
-                <th>Rev</th>
-                <th>Gain</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {program.regions.map((r, i) => (
-                <tr key={i} data-testid="clip-region">
-                  <td>{i + 1}</td>
-                  <td>{sources[r.source]?.title ?? `source ${r.source + 1}`}</td>
-                  <td>{timecode(r.start_secs)}</td>
-                  <td>{timecode(r.end_secs)}</td>
-                  <td>{r.reverse ? '◀' : ''}</td>
-                  <td>{fixed(r.gain_db, 1)} dB</td>
-                  <td>
-                    <button
-                      data-testid={`clip-region-delete-${i}`}
-                      onClick={() => apply((p) => removeRegion(p, i))}
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {program.overlays.map((o, i) => (
-                <tr key={`ov${i}`} data-testid="clip-overlay">
-                  <td>+</td>
-                  <td>{sources[o.source]?.title ?? `source ${o.source + 1}`} (overlay)</td>
-                  <td>{timecode(o.at_secs)}</td>
-                  <td>{timecode(o.at_secs + (o.end_secs - o.start_secs))}</td>
-                  <td>{o.reverse ? '◀' : ''}</td>
-                  <td>{fixed(o.gain_db, 1)} dB</td>
-                  <td>
-                    <button
-                      data-testid={`clip-overlay-delete-${i}`}
-                      onClick={() => apply((p) => removeOverlay(p, i))}
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
           <div className="clip-save">
             <label>
               <span>Name</span>
@@ -1035,13 +1177,22 @@ export function ClipView({
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
+            <span className="clip-save-meta" data-testid="clip-save-meta">
+              {tempo
+                ? `${fixed(tempo.bpm, 1)} BPM · ${tempo.beats} ${tempo.beats === 1 ? 'beat' : 'beats'}${
+                    tempo.padded ? ' (last beat filled with silence)' : ''
+                  }${grid ? '' : ' · measured'}`
+                : detecting
+                  ? 'measuring the tempo…'
+                  : 'no tempo yet — tap beats with right-shift during playback'}
+            </span>
             <button
               className="clip-save-button"
               data-testid="clip-save"
-              disabled={busy || name.trim() === ''}
+              disabled={busy || name.trim() === '' || !tempo}
               onClick={() => void save()}
             >
-              Save as new track
+              Save as new beat clip
             </button>
             <audio ref={audioRef} data-testid="clip-audio" />
           </div>

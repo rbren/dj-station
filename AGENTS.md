@@ -820,16 +820,37 @@ offset))`, offset in position units — so the knob's curve shapes the
   peaking bells — same filter as the EQ module; empty/all-0 dB bands are
   an exact bypass), dB level breakpoints on the OUTPUT timeline
   (automation is timeline-based, so a cut shifts audio under it —
-  deliberate, like a DAW) and `crossfade_ms`.
+  deliberate, like a DAW), `crossfade_ms`, and a beat-tap `warp` +
+  `beat_grid` (below).
   Adjacent regions OVERLAP by the crossfade, capped at half of either
   neighbour: that one law exists twice — `splice` in
   `crates/dj-analysis/src/clip.rs` and `regionSpans` in `app/src/clip.ts`
   — pinned on both sides (`tests/clip_edit.rs`, `app/tests/ClipEdits.test.ts`);
-  change them together. Saving renders to FLAC under `<data_dir>/clips/`
-  (machine-local, gitignored) and imports a NEW library track
-  (`source = "clip"`, `source_ref` = comma-joined source refs,
-  license AND artist inherited from the first source) — a clip NEVER
-  overwrites the track it was cut from. Like the rack, ClipView stays
+  change them together. The same twinning holds for the tap warp:
+  `warp_time_secs`/`warpTime` map output times through the anchors
+  (identity outside them; the renderer stretches through Beatify's WSOLA
+  `warp::render` as its LAST stage). BEAT TAPS: right-shift during
+  playback marks beats at the live element position; when playback stops
+  ClipView turns them into an even grid (`tapGrid` — average BPM, first
+  and last tap pinned) and composes the warp into the program
+  (`composeWarp` for re-taps), ONE undo step. Selections then quantize
+  outward to that grid through AudioTimeline's `snap` hooks (⌘ frees the
+  gesture); a TIMELINE edit (cut/trim/move/splice/gain — anything through
+  ClipView's `applyTimeline`) maps its times back through the warp and
+  DROPS grid+warp (`dropGrid`), since the anchors would point at moved
+  audio. SAVING makes a BEAT CLIP, not a library track: `clip_detect_beats`
+  measures an untapped span with the Beatify tracker; `clip_save_beat_clip`
+  renders the selected span, pads it to whole beats (`pad_to_beats` fills
+  the fractional last beat with silence) and files it in
+  `dj_analysis::clip`'s store (`<data_dir>/beat-clips/`, `b<n>.flac` +
+  `b<n>.json`, ignored by `custom/.gitignore` like `clips/`). Those clips
+  reach the decks through the SAME doors Beatify clips use:
+  `beat_clip_list` appends them under the reserved project id
+  `clip::BEAT_CLIPS_PROJECT` ("beat-clips" — Beatify mints `p<n>`, no
+  collision) and `beatify_clip::render_clip` answers that id from the
+  store, so `beat_clip_load`/hydration/copy-paste need no second path.
+  A beat clip NEVER overwrites the track it was cut from. Like the rack,
+  ClipView stays
   MOUNTED while other pages show (App passes `active`; the component
   hides itself, pauses playback and detaches its shortcuts — space,
   ctrl/cmd+Z/shift+Z/Y). Playback streams the RENDERED edit: 60 s WAV
@@ -1540,7 +1561,9 @@ beatify::build`.
     they follow zoom; quantization goes through the `snap` hooks —
     Beatify's `beatSnap(grid)` (BeatifyTrackView.tsx) snaps seeks to the
     nearest beat (⌘ frees), selections OUTWARD to whole beats, slides by
-    whole beats; the Clip page passes no snap. Zoom law is
+    whole beats; the Clip page passes the same shape once a grid has been
+    tapped (built from `quantizeRange`/`nearestBeat` in ClipView), none
+    before. Zoom law is
     `viewSpan`/`zoomView` (exported, pinned in BeatifyGrid.test.ts).
     BeatifyTrackView is keyed by track+render in BeatifyView so a new
     render remounts it (fresh transport/viewport/selection) instead of

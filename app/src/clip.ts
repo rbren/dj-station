@@ -1,13 +1,16 @@
-// Clip page bridge (PRD §9): edit library tracks into new library tracks.
+// Clip page bridge (PRD §9): edit library tracks into beat clips the
+// decks can load.
 //
 // The program types mirror `dj_analysis::clip`; the edit operations below
 // are pure functions over a ClipProgram so the page's behaviour is
 // testable without a backend. Region positions on the output timeline
 // follow the same law as the Rust renderer (`splice`): adjacent regions
-// overlap by the crossfade, capped at half of either neighbour.
+// overlap by the crossfade, capped at half of either neighbour, and the
+// tap warp's time mapping exists on both sides too (`warpTime` /
+// `warp_time_secs`).
 
+import type { Grid } from './beatify';
 import { IpcClient } from './ipc';
-import type { Track } from './library';
 
 export interface ClipRegion {
   /** Index into the request's `sources` (library track ids). */
@@ -48,12 +51,22 @@ export interface LevelPoint {
   gain_db: number;
 }
 
+/** One tap-warp anchor: output time `[from, to]` — where the audio was,
+ *  and where the even grid puts it. */
+export type WarpPoint = [number, number];
+
 export interface ClipProgram {
   regions: ClipRegion[];
   overlays: ClipOverlay[];
   eq: ClipEq;
   level: LevelPoint[];
   crossfade_ms: number;
+  /** Beat-tap time warp anchors, strictly increasing in both axes and
+   *  identity outside the tapped span. Empty = no stretch. */
+  warp: WarpPoint[];
+  /** The beat grid the taps built — rides with the warp through undo,
+   *  and is what selections quantize against. */
+  beat_grid: Grid | null;
 }
 
 /** One thing the editor cuts from: a library track, or a chosen set of
@@ -190,6 +203,8 @@ export function emptyProgram(): ClipProgram {
     eq: { bands: defaultEqBands() },
     level: [],
     crossfade_ms: DEFAULT_CROSSFADE_MS,
+    warp: [],
+    beat_grid: null,
   };
 }
 
@@ -226,7 +241,134 @@ export function programDuration(program: ClipProgram): number {
   for (const o of program.overlays) {
     total = Math.max(total, Math.max(0, o.at_secs) + regionDuration(o));
   }
-  return total;
+  return warpTime(program.warp, total);
+}
+
+// ---------------------------------------------------------------------------
+// Beat taps: the warp they build and the grid it leaves behind
+// ---------------------------------------------------------------------------
+
+/** Two right-shift presses inside this window are one bounced key, not
+ *  two beats (a hand cannot tap 1200 BPM on purpose). */
+export const TAP_MIN_GAP_SECS = 0.05;
+
+/** The warp anchors with the slope-1 guard points the renderer adds, so
+ *  everything outside the tapped span stays put (twin of `warp_map` in
+ *  `dj_analysis::clip`). */
+function guarded(warp: WarpPoint[]): WarpPoint[] {
+  const [f0, f1] = warp[0];
+  const [l0, l1] = warp[warp.length - 1];
+  return [[f0 - 1, f1 - 1], ...warp, [l0 + 1, l1 + 1]];
+}
+
+function piecewise(points: WarpPoint[], x: number, from: 0 | 1, to: 0 | 1): number {
+  let i = points.length - 2;
+  for (let k = 0; k <= points.length - 2; k += 1) {
+    if (x < points[k + 1][from]) {
+      i = k;
+      break;
+    }
+  }
+  const [a, b] = [points[i], points[i + 1]];
+  const span = b[from] - a[from];
+  if (span <= 0) return a[to];
+  return a[to] + ((b[to] - a[to]) * (x - a[from])) / span;
+}
+
+/** Where the warp puts an output time (identity for the empty warp).
+ *  Twin: `warp_time_secs` in `dj_analysis::clip`. */
+export function warpTime(warp: WarpPoint[], secs: number): number {
+  if (warp.length < 2) return secs;
+  return piecewise(guarded(warp), secs, 0, 1);
+}
+
+/** The inverse: which pre-warp time lands at `secs`. */
+export function warpSource(warp: WarpPoint[], secs: number): number {
+  if (warp.length < 2) return secs;
+  return piecewise(guarded(warp), secs, 1, 0);
+}
+
+/** What a run of right-shift taps during playback builds: the average
+ *  BPM between the first and last tap, warp anchors that stretch the
+ *  audio between them onto a perfectly even grid (the endpoints stay
+ *  put — the average preserves the covered span), and that grid. */
+export function tapGrid(rawTaps: number[]): { warp: WarpPoint[]; grid: Grid } | null {
+  const taps: number[] = [];
+  for (const t of [...rawTaps].sort((a, b) => a - b)) {
+    if (taps.length === 0 || t - taps[taps.length - 1] >= TAP_MIN_GAP_SECS) taps.push(t);
+  }
+  if (taps.length < 2) return null;
+  const first = taps[0];
+  const period = (taps[taps.length - 1] - first) / (taps.length - 1);
+  if (period <= 0) return null;
+  return {
+    warp: taps.map((t, i) => [t, first + i * period]),
+    grid: { bpm: 60 / period, period, phase: first, beats: taps.length },
+  };
+}
+
+/** Compose two warps: `next` was tapped against the OUTPUT of `prev`, so
+ *  the map the renderer needs is `next ∘ prev`. Exact for piecewise
+ *  linear maps: the breakpoints are prev's anchors plus next's pulled
+ *  back through prev. */
+export function composeWarp(prev: WarpPoint[], next: WarpPoint[]): WarpPoint[] {
+  if (prev.length < 2) return next;
+  if (next.length < 2) return prev;
+  const xs = [...prev.map((p) => p[0]), ...next.map((p) => warpSource(prev, p[0]))].sort(
+    (a, b) => a - b,
+  );
+  const out: WarpPoint[] = [];
+  for (const x of xs) {
+    if (out.length && x - out[out.length - 1][0] < 1e-9) continue;
+    out.push([x, warpTime(next, warpTime(prev, x))]);
+  }
+  return out;
+}
+
+/** Beat times of the (unclamped) grid across a view, thinned to at most
+ *  `cap` lines so zooming out cannot fill the waveform with hairlines. */
+export function gridBeatTimes(grid: Grid, from: number, to: number, cap = 240): number[] {
+  if (grid.period <= 0 || to <= from) return [];
+  let step = 1;
+  while ((to - from) / (grid.period * step) > cap) step *= 2;
+  const out: number[] = [];
+  const first = Math.ceil((from - grid.phase) / (grid.period * step));
+  for (let n = first; grid.phase + n * step * grid.period <= to; n += 1) {
+    out.push(grid.phase + n * step * grid.period);
+  }
+  return out;
+}
+
+/** The nearest beat of the grid, unclamped: unlike Beatify's track view
+ *  the tapped grid extends across the whole clip at its period. */
+export function nearestBeat(grid: Grid, secs: number): number {
+  if (grid.period <= 0) return secs;
+  return grid.phase + Math.round((secs - grid.phase) / grid.period) * grid.period;
+}
+
+/** A TIMELINE EDIT DROPS THE TAPPED GRID. The warp's anchors and the
+ *  grid's beats are output times, and a cut/trim/move/splice puts
+ *  different audio under every one of them — keeping the stretch would
+ *  quietly bend the wrong material. Both live in the program, so one
+ *  undo brings the edit and the grid back together; tapping again
+ *  rebuilds it. Tone edits (EQ, level) keep it: nothing moved. */
+export function dropGrid(program: ClipProgram): ClipProgram {
+  if (program.warp.length === 0 && program.beat_grid === null) return program;
+  return { ...program, warp: [], beat_grid: null };
+}
+
+/** Selections quantize OUTWARD to whole beats of the tapped grid, capped
+ *  into the clip. ⌘ frees the gesture (AudioTimeline reads the modifier
+ *  live), which is how a window off the grid is chosen. */
+export function quantizeRange(grid: Grid, range: TimeRange, duration: number): TimeRange {
+  if (grid.period <= 0) return range;
+  const lo = Math.min(range.start, range.end);
+  const hi = Math.max(range.start, range.end);
+  const startBeat = Math.floor((lo - grid.phase) / grid.period + 1e-6);
+  const endBeat = Math.max(Math.ceil((hi - grid.phase) / grid.period - 1e-6), startBeat + 1);
+  const start = Math.max(0, grid.phase + startBeat * grid.period);
+  const end = Math.min(duration, grid.phase + endBeat * grid.period);
+  return end > start ? { start, end } : range;
 }
 
 /** The region under an output time, plus how far into it the time falls. */
@@ -577,6 +719,25 @@ export function rulerTicks(from: number, to: number, target = 8): TimeTick[] {
 // IPC
 // ---------------------------------------------------------------------------
 
+/** A measured tempo for a span of the edit (`clip_detect_beats`). */
+export interface ClipBeats {
+  bpm: number;
+  /** Beats the span covers — fractional until a save pads the last one. */
+  beats: number;
+  /** Which tracker produced it ("beat_this/…" or "dsp"). */
+  tracker: string;
+}
+
+/** What a beat-clip save filed: the record the decks' clip pickers list. */
+export interface SavedBeatClip {
+  id: string;
+  name: string;
+  bpm: number;
+  beats: number;
+  file: string;
+  stems: string[];
+}
+
 /** What ClipView needs; tests substitute a mock. */
 export interface ClipClientApi {
   /** Decode a track — or a mix of its separated stems — for editing. */
@@ -584,9 +745,19 @@ export interface ClipClientApi {
   renderPreview(request: ClipRequest, buckets: number): Promise<ClipRender | null>;
   /** 16-bit WAV bytes for a playback window of the rendered edit. */
   previewAudio(request: ClipRequest, startSecs: number, secs: number): Promise<ArrayBuffer | null>;
-  /** Render and import as a NEW library track (sources untouched). The
-   *  artist is inherited from the first source. */
-  save(request: ClipRequest, title: string): Promise<Track | null>;
+  /** Measure the tempo of a span of the edit (`beat_this` when it is
+   *  installed, the DSP tracker otherwise) — the save row's numbers when
+   *  no beat grid was tapped. */
+  detectBeats(request: ClipRequest, startSecs: number, endSecs: number): Promise<ClipBeats | null>;
+  /** Render a span as a beat clip, padded to whole beats at `bpm`. It
+   *  lands in the decks' clip pickers, like a Beatify clip. */
+  saveBeatClip(
+    request: ClipRequest,
+    title: string,
+    startSecs: number,
+    endSecs: number,
+    bpm: number,
+  ): Promise<SavedBeatClip | null>;
   /** Which separation backend is configured, and is it installed? */
   stemBackend(): Promise<ClipStemBackend | null>;
   /** Where this track's stems stand — asking also puts it at the front
@@ -604,8 +775,23 @@ export class ClipClient extends IpcClient implements ClipClientApi {
   previewAudio(request: ClipRequest, startSecs: number, secs: number) {
     return this.call<ArrayBuffer>('clip_preview_audio', { request, startSecs, secs });
   }
-  save(request: ClipRequest, title: string) {
-    return this.call<Track>('clip_save', { request, title });
+  detectBeats(request: ClipRequest, startSecs: number, endSecs: number) {
+    return this.call<ClipBeats>('clip_detect_beats', { request, startSecs, endSecs });
+  }
+  saveBeatClip(
+    request: ClipRequest,
+    title: string,
+    startSecs: number,
+    endSecs: number,
+    bpm: number,
+  ) {
+    return this.call<SavedBeatClip>('clip_save_beat_clip', {
+      request,
+      title,
+      startSecs,
+      endSecs,
+      bpm,
+    });
   }
   stemBackend() {
     return this.call<ClipStemBackend>('clip_stem_backend', {});

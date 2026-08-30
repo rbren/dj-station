@@ -1,13 +1,14 @@
 // Clip page: load a library track, edit it (select, drag, cut, reverse,
-// overlay, EQ, automation), play the result and save it as a NEW library
-// track. The backend is mocked; the edit math itself is pinned by
-// ClipEdits.test.ts and the rendered audio by dj-analysis's golden test.
+// overlay, EQ, automation), tap out a beat grid, play the result and save
+// a span of it as a BEAT CLIP the decks can load. The backend is mocked;
+// the edit math itself is pinned by ClipEdits.test.ts and the rendered
+// audio by dj-analysis's golden test.
 
 import { createRef, StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClipView, type ClipViewHandle } from '../src/components/ClipView';
-import type { ClipClientApi, ClipRequest, ClipSource } from '../src/clip';
+import type { ClipClientApi, ClipProgram, ClipRequest, ClipSource } from '../src/clip';
 import { closeAudio } from '../src/clipAudio';
 import type { LibraryClientApi, Track } from '../src/library';
 
@@ -77,7 +78,17 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
       peaks: SOURCE.peaks,
     })),
     previewAudio: vi.fn(async () => new ArrayBuffer(44)),
-    save: vi.fn(async (_r: ClipRequest, title: string) => ({ ...TRACK, id: 99, title })),
+    detectBeats: vi.fn(async () => ({ bpm: 120, beats: 20, tracker: 'dsp' })),
+    saveBeatClip: vi.fn(
+      async (_r: ClipRequest, title: string, startSecs: number, endSecs: number, bpm: number) => ({
+        id: 'b1',
+        name: title,
+        bpm,
+        beats: Math.ceil(((endSecs - startSecs) * bpm) / 60 - 1e-6),
+        file: 'b1.flac',
+        stems: [],
+      }),
+    ),
     stemBackend: vi.fn(async () => ({
       backend: 'htdemucs_ft',
       available: true,
@@ -173,11 +184,43 @@ async function openTrack(clip: ClipClientApi, library = libraryMock()) {
 }
 
 /** Drag a selection across the output waveform, in seconds of a 10 s clip. */
-function select(fromSecs: number, toSecs: number) {
+function select(fromSecs: number, toSecs: number, keys: { metaKey?: boolean } = {}) {
   const wave = sizeTimeline('clip-waveform');
-  fireEvent.mouseDown(wave, { clientX: fromSecs * 100 });
-  fireEvent.mouseMove(window, { clientX: toSecs * 100 });
-  fireEvent.mouseUp(window);
+  fireEvent.mouseDown(wave, { clientX: fromSecs * 100, ...keys });
+  fireEvent.mouseMove(window, { clientX: toSecs * 100, ...keys });
+  fireEvent.mouseUp(window, { ...keys });
+}
+
+/** The splice joins drawn on the waveform: one line per region. */
+function joins() {
+  return screen.queryAllByTestId(/^clip-join-/);
+}
+
+/** The program of the NEXT preview render satisfying `test` — how a test
+ *  reads the edit now that the page shows no region table. */
+async function programNow(
+  clip: ClipClientApi,
+  test: (p: ClipProgram) => boolean = () => true,
+): Promise<ClipProgram> {
+  const fn = clip.renderPreview as ReturnType<typeof vi.fn>;
+  await waitFor(
+    () => {
+      const calls = fn.mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      expect(test(calls[calls.length - 1][0].program)).toBe(true);
+    },
+    { timeout: 3000 },
+  );
+  const calls = fn.mock.calls;
+  return calls[calls.length - 1][0].program;
+}
+
+/** Tap right-shift with playback at `secs` (the transport reads the time
+ *  LIVE off the media element, not from the last status tick). */
+function tapAt(secs: number) {
+  const audio = screen.getByTestId('clip-audio') as HTMLAudioElement;
+  Object.defineProperty(audio, 'currentTime', { configurable: true, value: secs });
+  fireEvent.keyDown(window, { code: 'ShiftRight', key: 'Shift' });
 }
 
 describe('ClipView', () => {
@@ -218,9 +261,7 @@ describe('ClipView', () => {
     const clip = clipMock();
     await openTrack(clip);
     expect(clip.loadSource).toHaveBeenCalledWith(7, [], expect.any(Number));
-    const rows = screen.getAllByTestId('clip-region');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].textContent).toContain('0:00.00');
+    expect(joins()).toHaveLength(1);
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:10.00 total');
     expect((screen.getByTestId('clip-name') as HTMLInputElement).value).toBe(
       'Basement Loop (clip)',
@@ -228,30 +269,35 @@ describe('ClipView', () => {
   });
 
   it('drag-selects a range and cuts it, splicing the remainder', async () => {
-    await openTrack(clipMock());
+    const clip = clipMock();
+    await openTrack(clip);
     select(3, 7);
     expect(screen.getByTestId('clip-selection')).toBeTruthy();
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:03.00–0:07.00');
 
     fireEvent.click(screen.getByTestId('clip-cut'));
-    const rows = screen.getAllByTestId('clip-region');
-    expect(rows).toHaveLength(2);
-    expect(rows[0].textContent).toContain('0:03.00');
-    expect(rows[1].textContent).toContain('0:07.00');
+    expect(joins()).toHaveLength(2);
+    const p = await programNow(clip, (p) => p.regions.length === 2);
+    expect(p.regions.map((r) => [r.start_secs, r.end_secs])).toEqual([
+      [0, 3],
+      [7, 10],
+    ]);
   });
 
   it('trims, reverses and re-trims the level of a selection', async () => {
-    await openTrack(clipMock());
+    const clip = clipMock();
+    await openTrack(clip);
     select(2, 6);
     fireEvent.click(screen.getByTestId('clip-trim'));
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(1);
+    expect(joins()).toHaveLength(1);
+    await programNow(clip, (p) => p.regions.length === 1 && p.regions[0].start_secs === 2);
 
     select(0, 2);
     fireEvent.click(screen.getByTestId('clip-reverse'));
-    expect(screen.getAllByTestId('clip-region')[0].textContent).toContain('◀');
+    await programNow(clip, (p) => p.regions.some((r) => r.reverse));
 
     fireEvent.click(screen.getByTestId('clip-quieter'));
-    expect(screen.getAllByTestId('clip-region')[0].textContent).toContain('-3.0 dB');
+    await programNow(clip, (p) => p.regions.some((r) => r.gain_db === -3));
   });
 
   it('undo and redo respond to buttons and keyboard shortcuts', async () => {
@@ -261,20 +307,20 @@ describe('ClipView', () => {
 
     select(3, 7);
     fireEvent.click(screen.getByTestId('clip-cut'));
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+    expect(joins()).toHaveLength(2);
 
     fireEvent.click(screen.getByTestId('clip-undo'));
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(1);
+    expect(joins()).toHaveLength(1);
     fireEvent.click(screen.getByTestId('clip-redo'));
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+    expect(joins()).toHaveLength(2);
 
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(1);
+    expect(joins()).toHaveLength(1);
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+    expect(joins()).toHaveLength(2);
     fireEvent.keyDown(window, { key: 'z', metaKey: true });
     fireEvent.keyDown(window, { key: 'y', ctrlKey: true });
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+    expect(joins()).toHaveLength(2);
   });
 
   it('drags the selection along the timeline without touching the audio', async () => {
@@ -290,15 +336,13 @@ describe('ClipView', () => {
     // undo. Dragging picks what is selected; it does not re-splice.
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:05.00–0:07.00');
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:10.00 total');
-    const rows = screen.getAllByTestId('clip-region');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].textContent).toContain('0:00.00');
-    expect(rows[0].textContent).toContain('0:10.00');
+    expect(joins()).toHaveLength(1);
     expect(screen.getByTestId('clip-undo')).toHaveProperty('disabled', true);
   });
 
   it('alt-drags the selection to re-splice the audio with it', async () => {
-    await openTrack(clipMock());
+    const clip = clipMock();
+    await openTrack(clip);
     select(2, 4);
     const wave = sizeTimeline('clip-waveform');
     fireEvent.mouseDown(wave, { clientX: 300, altKey: true });
@@ -308,14 +352,13 @@ describe('ClipView', () => {
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:05.00–0:07.00');
     // Three new joins each eat one 5 ms crossfade (the splice law).
     expect(screen.getByTestId('clip-readout').textContent).toMatch(/0:09\.9\d total/);
-    const rows = screen.getAllByTestId('clip-region');
-    expect(rows).toHaveLength(4);
+    expect(joins()).toHaveLength(4);
     // The moved material sits third: [0-2][4-7][2-4][7-10].
-    expect(rows[2].textContent).toContain('0:02.00');
-    expect(rows[2].textContent).toContain('0:04.00');
+    const p = await programNow(clip, (p) => p.regions.length === 4);
+    expect([p.regions[2].start_secs, p.regions[2].end_secs]).toEqual([2, 4]);
 
     fireEvent.click(screen.getByTestId('clip-undo'));
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(1);
+    expect(joins()).toHaveLength(1);
   });
 
   it('drags either end of the selection to expand or shrink it', async () => {
@@ -338,7 +381,7 @@ describe('ClipView', () => {
 
     // Resizing only re-selects: the program is untouched, so there is
     // nothing to undo from it.
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(1);
+    expect(joins()).toHaveLength(1);
     expect(screen.getByTestId('clip-undo')).toHaveProperty('disabled', true);
   });
 
@@ -451,22 +494,22 @@ describe('ClipView', () => {
     // An edited one is.
     select(2, 6);
     fireEvent.click(screen.getByTestId('clip-cut'));
-    await waitFor(() => expect(screen.getAllByTestId('clip-region')).toHaveLength(2));
+    await waitFor(() => expect(joins()).toHaveLength(2));
     act(() => handle.current?.open(OTHER.id));
     await waitFor(() => expect(screen.getByTestId('clip-discard-dialog')).toBeTruthy());
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+    expect(joins()).toHaveLength(2);
 
     // Keeping the edit leaves the timeline exactly as it was...
     fireEvent.click(screen.getByTestId('clip-discard-cancel'));
     await waitFor(() => expect(screen.queryByTestId('clip-discard-dialog')).toBeNull());
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+    expect(joins()).toHaveLength(2);
 
     // ...and discarding starts that same track over, which is what Edit
     // means the second time round.
     act(() => handle.current?.open(OTHER.id));
     await waitFor(() => expect(screen.getByTestId('clip-discard-dialog')).toBeTruthy());
     fireEvent.click(screen.getByTestId('clip-discard-confirm'));
-    await waitFor(() => expect(screen.getAllByTestId('clip-region')).toHaveLength(1));
+    await waitFor(() => expect(joins()).toHaveLength(1));
   });
 
   it('splices a second library track onto the end', async () => {
@@ -474,10 +517,9 @@ describe('ClipView', () => {
     await openTrack(clip);
     fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '8' } });
     fireEvent.click(screen.getByTestId('clip-append-track'));
-    await waitFor(() => expect(screen.getAllByTestId('clip-region')).toHaveLength(2));
+    await waitFor(() => expect(joins()).toHaveLength(2));
     expect(clip.loadSource).toHaveBeenLastCalledWith(8, [], expect.any(Number));
     expect(screen.getByTestId('clip-sources').textContent).toContain('2. Hat Loop');
-    expect(screen.getAllByTestId('clip-region')[1].textContent).toContain('Hat Loop');
   });
 
   it('fades and automation points land on the level lane', async () => {
@@ -497,22 +539,22 @@ describe('ClipView', () => {
     expect(screen.queryByTestId('clip-level-point-0')).toBeNull();
   });
 
-  it('overlays a second track at the selection and can remove it', async () => {
+  it('overlays a second track at the selection and undo removes it', async () => {
     const clip = clipMock();
     await openTrack(clip);
     select(2, 6);
     fireEvent.change(screen.getByTestId('clip-track-select'), { target: { value: '8' } });
     fireEvent.click(screen.getByTestId('clip-overlay-track'));
-    await waitFor(() => expect(screen.getByTestId('clip-overlay')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('clip-overlay-span-0')).toBeTruthy());
 
-    expect(screen.getByTestId('clip-overlay').textContent).toContain('Hat Loop (overlay)');
-    expect(screen.getByTestId('clip-overlay').textContent).toContain('0:02.00');
     // A 10 s overlay starting at 2 s extends the clip to 12 s.
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:12.00 total');
-    expect(screen.getByTestId('clip-overlay-span-0')).toBeTruthy();
+    const p = await programNow(clip, (p) => p.overlays.length === 1);
+    expect(p.overlays[0].at_secs).toBe(2);
+    expect(screen.getByTestId('clip-sources').textContent).toContain('2. Hat Loop');
 
-    fireEvent.click(screen.getByTestId('clip-overlay-delete-0'));
-    expect(screen.queryByTestId('clip-overlay')).toBeNull();
+    fireEvent.click(screen.getByTestId('clip-undo'));
+    expect(screen.queryByTestId('clip-overlay-span-0')).toBeNull();
     expect(screen.getByTestId('clip-readout').textContent).toContain('0:10.00 total');
   });
 
@@ -566,25 +608,141 @@ describe('ClipView', () => {
     expect(screen.getByTestId('clip-eq-readout').textContent).toContain('Q1.0');
   });
 
-  it('saves the edit as a new library track and reports it', async () => {
+  it('measures an untapped selection and saves it as a beat clip', async () => {
     const clip = clipMock();
-    const onSaved = vi.fn();
-    render(<ClipView clip={clip} library={libraryMock()} onSaved={onSaved} />);
+    render(<ClipView clip={clip} library={libraryMock()} detectDelayMs={0} />);
     await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
     fireEvent.click(screen.getByTestId('clip-open-track'));
     await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
 
+    // No taps yet, so the whole clip is measured (mock: 120 BPM), which
+    // is exactly 20 beats of the 10 s edit — nothing to pad.
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-save-meta').textContent).toBe(
+        '120.0 BPM · 20 beats · measured',
+      ),
+    );
+    expect(clip.detectBeats).toHaveBeenCalledWith(expect.anything(), 0, 10);
+
     fireEvent.change(screen.getByTestId('clip-name'), { target: { value: 'Basement Edit' } });
     fireEvent.click(screen.getByTestId('clip-save'));
     await waitFor(() =>
-      expect(screen.getByTestId('clip-status').textContent).toMatch(/new track/i),
+      expect(screen.getByTestId('clip-status').textContent).toMatch(/20 beats at 120\.0 BPM/),
     );
 
-    const [request, title] = (clip.save as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [request, title, start, end, bpm] = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock
+      .calls[0];
     expect(request.sources).toEqual([{ track_id: 7, stems: [] }]);
     expect(request.program.regions).toHaveLength(1);
     expect(title).toBe('Basement Edit');
-    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ title: 'Basement Edit' }));
+    expect([start, end, bpm]).toEqual([0, 10, 120]);
+  });
+
+  it('says when a fractional selection will be padded to whole beats', async () => {
+    const clip = clipMock();
+    render(<ClipView clip={clip} library={libraryMock()} detectDelayMs={0} />);
+    await waitFor(() => expect(screen.getByTestId('clip-track-select')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('clip-open-track'));
+    await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
+
+    // 2–5.75 s at the measured 120 BPM is 7.5 beats: the save row rounds
+    // up and says the last beat is silence-filled.
+    select(2, 5.75);
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-save-meta').textContent).toBe(
+        '120.0 BPM · 8 beats (last beat filled with silence) · measured',
+      ),
+    );
+    await waitFor(() => expect(clip.detectBeats).toHaveBeenCalledWith(expect.anything(), 2, 5.75));
+
+    // The save covers the SELECTION at that tempo; the backend pads.
+    fireEvent.click(screen.getByTestId('clip-save'));
+    await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
+    const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call.slice(2)).toEqual([2, 5.75, 120]);
+  });
+
+  it('turns right-shift taps during playback into an even beat grid', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    const play = screen.getByTestId('clip-play');
+    fireEvent.click(play);
+    await waitFor(() => expect(play.textContent).toBe('❚❚'));
+
+    // Tap four beats, slightly unevenly (2 s covered → 3 gaps).
+    tapAt(1.0);
+    tapAt(1.6);
+    tapAt(2.2);
+    tapAt(3.0);
+    expect(screen.getAllByTestId('clip-tap-line')).toHaveLength(4);
+
+    // Stopping playback commits them: markers become the even grid…
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(play.textContent).toBe('▶'));
+    expect(screen.queryAllByTestId('clip-tap-line')).toHaveLength(0);
+    expect(screen.getAllByTestId('clip-beat-line').length).toBeGreaterThan(0);
+
+    // …at the average tempo: 2 s / 3 beats → 90 BPM, and the audio
+    // between the taps is warped onto perfectly even beats.
+    expect(screen.getByTestId('clip-save-meta').textContent).toBe('90.0 BPM · 15 beats');
+    const p = await programNow(clip, (p) => p.warp.length === 4);
+    expect(p.beat_grid?.bpm).toBeCloseTo(90, 6);
+    expect(p.warp.map(([from]) => from)).toEqual([1.0, 1.6, 2.2, 3.0]);
+    expect(p.warp.map(([, to]) => to.toFixed(4))).toEqual(['1.0000', '1.6667', '2.3333', '3.0000']);
+
+    // Saving needs no measuring pass — the grid's tempo is the clip's.
+    fireEvent.change(screen.getByTestId('clip-name'), { target: { value: 'Tapped' } });
+    fireEvent.click(screen.getByTestId('clip-save'));
+    await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
+    const call = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[4]).toBeCloseTo(90, 6);
+    expect(clip.detectBeats).not.toHaveBeenCalled();
+
+    // The grid is one undo step, like any other edit.
+    fireEvent.click(screen.getByTestId('clip-undo'));
+    expect(screen.queryAllByTestId('clip-beat-line')).toHaveLength(0);
+  });
+
+  it('quantizes selections to the tapped grid unless ⌘ frees them', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    fireEvent.click(screen.getByTestId('clip-play'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
+    // Taps at 1 and 3 s: a 30 BPM grid phased at 1 s (beats 1, 3, 5…).
+    tapAt(1.0);
+    tapAt(3.0);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('▶'));
+
+    // A sweep quantizes OUTWARD to whole beats…
+    select(3.4, 4.2);
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:03.00–0:05.00');
+    // …and ⌘ keeps the window exactly where the hand put it. (A press
+    // inside the old selection would slide it, so let that one go first.)
+    fireEvent.keyDown(window, { key: 'Escape' });
+    select(3.4, 4.2, { metaKey: true });
+    expect(screen.getByTestId('clip-readout').textContent).toContain('0:03.40–0:04.20');
+  });
+
+  it('drops the tapped grid when a timeline edit re-splices the audio', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    fireEvent.click(screen.getByTestId('clip-play'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
+    tapAt(1.0);
+    tapAt(3.0);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('▶'));
+    expect(screen.getAllByTestId('clip-beat-line').length).toBeGreaterThan(0);
+
+    // The warp's anchors point at audio a cut moves: the grid goes with
+    // it (undo brings both back together).
+    select(5, 7);
+    fireEvent.click(screen.getByTestId('clip-cut'));
+    expect(screen.queryAllByTestId('clip-beat-line')).toHaveLength(0);
+    await programNow(clip, (p) => p.warp.length === 0 && p.beat_grid === null);
+    fireEvent.click(screen.getByTestId('clip-undo'));
+    expect(screen.getAllByTestId('clip-beat-line').length).toBeGreaterThan(0);
   });
 
   it('seeks on a click but never on a sweep', async () => {
@@ -1064,7 +1222,7 @@ describe('ClipView', () => {
     // same length as their track, so the edit is still meaningful.
     select(3, 7);
     fireEvent.click(screen.getByTestId('clip-cut'));
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+    expect(joins()).toHaveLength(2);
 
     await waitFor(() =>
       expect(screen.getByTestId('clip-stem-bass')).toHaveProperty('disabled', false),
@@ -1077,7 +1235,7 @@ describe('ClipView', () => {
         expect.any(Number),
       ),
     );
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(2);
+    expect(joins()).toHaveLength(2);
     // One lane still, swapped in place rather than added alongside.
     expect(screen.getByTestId('clip-sources').textContent).toBe('1. Basement Loop — no bass');
   });
@@ -1203,6 +1361,6 @@ describe('ClipView', () => {
     // Coming back also re-reads the library and the stem report; let both
     // land before the test walks away from the component.
     await waitFor(() => expect(screen.getByTestId('clip-stem-ready')).toBeTruthy());
-    expect(screen.getAllByTestId('clip-region')).toHaveLength(1);
+    expect(joins()).toHaveLength(1);
   });
 });

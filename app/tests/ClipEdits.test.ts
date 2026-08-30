@@ -7,15 +7,20 @@ import { describe, expect, it } from 'vitest';
 import {
   addOverlay,
   appendSource,
+  composeWarp,
   cutRange,
+  dropGrid,
   duplicateRange,
   emptyProgram,
   fadeIn,
   fadeOut,
   gainRange,
+  gridBeatTimes,
   levelDbAt,
   moveRange,
+  nearestBeat,
   programDuration,
+  quantizeRange,
   regionSpans,
   removeOverlay,
   rulerTicks,
@@ -24,7 +29,10 @@ import {
   selectionEdgeAt,
   setLevelPoint,
   SILENCE_DB,
+  tapGrid,
   trimTo,
+  warpSource,
+  warpTime,
   type ClipProgram,
 } from '../src/clip';
 
@@ -283,5 +291,101 @@ describe('ruler ticks', () => {
     expect(labels[0]).toBe('0:00');
     expect(labels[1]).toBe('10:00');
     expect(labels[labels.length - 1]).toBe('120:00');
+  });
+});
+
+describe('beat taps', () => {
+  it('builds the average grid and the warp that evens the beats out', () => {
+    // 1→3 s in 3 uneven gaps: average period 2/3 s → 90 BPM. The first
+    // and last taps stay put; the middle ones move onto the even grid.
+    const tapped = tapGrid([1.0, 1.6, 2.2, 3.0]);
+    expect(tapped).not.toBeNull();
+    const { warp, grid } = tapped!;
+    expect(grid.bpm).toBeCloseTo(90, 9);
+    expect(grid.phase).toBe(1);
+    expect(grid.beats).toBe(4);
+    expect(warp.map(([from]) => from)).toEqual([1.0, 1.6, 2.2, 3.0]);
+    expect(warp[1][1]).toBeCloseTo(1 + 2 / 3, 9);
+    expect(warp[2][1]).toBeCloseTo(1 + 4 / 3, 9);
+
+    // The warp map is identity outside the tapped span and piecewise
+    // linear inside; the inverse takes it back.
+    expect(warpTime(warp, 0.5)).toBe(0.5);
+    expect(warpTime(warp, 9)).toBeCloseTo(9, 9);
+    expect(warpTime(warp, 1.6)).toBeCloseTo(1 + 2 / 3, 9);
+    expect(warpTime(warp, 1.3)).toBeCloseTo(1 + 1 / 3, 9);
+    expect(warpSource(warp, warpTime(warp, 1.9))).toBeCloseTo(1.9, 9);
+  });
+
+  it('ignores key bounce and refuses to build a grid from one tap', () => {
+    expect(tapGrid([2.0])).toBeNull();
+    expect(tapGrid([2.0, 2.01])).toBeNull();
+    // The bounced repeat collapses; the honest taps still count.
+    const tapped = tapGrid([1.0, 1.001, 2.0, 3.0]);
+    expect(tapped!.grid.beats).toBe(3);
+    expect(tapped!.grid.bpm).toBeCloseTo(60, 9);
+  });
+
+  it('composes a re-tap over an existing warp exactly', () => {
+    const first = tapGrid([1.0, 1.5, 3.0])!.warp;
+    const second = tapGrid([4.0, 4.5, 6.0])!.warp;
+    const both = composeWarp(first, second);
+    for (const t of [0.5, 1.25, 2.0, 3.5, 4.2, 5.0, 7.0]) {
+      expect(warpTime(both, t)).toBeCloseTo(warpTime(second, warpTime(first, t)), 9);
+    }
+    // Either side empty is just the other.
+    expect(composeWarp([], second)).toBe(second);
+    expect(composeWarp(first, [])).toBe(first);
+  });
+
+  it('stretches the program duration through the warp', () => {
+    const p = base();
+    // Push the last anchor later: everything after it shifts with it.
+    const withWarp: ClipProgram = {
+      ...p,
+      warp: [
+        [2, 2],
+        [4, 5],
+      ],
+    };
+    expect(programDuration(p)).toBe(10);
+    expect(programDuration(withWarp)).toBe(11);
+  });
+
+  it('quantizes selections outward to whole beats, clamped to the clip', () => {
+    const grid = { bpm: 60, period: 1, phase: 0.5, beats: 4 };
+    expect(quantizeRange(grid, { start: 1.7, end: 3.2 }, 10)).toEqual({ start: 1.5, end: 3.5 });
+    // A sliver still becomes one whole beat…
+    expect(quantizeRange(grid, { start: 2.6, end: 2.9 }, 10)).toEqual({ start: 2.5, end: 3.5 });
+    // …and the grid extends across the clip but never past its ends.
+    expect(quantizeRange(grid, { start: 0.1, end: 9.9 }, 10)).toEqual({ start: 0, end: 10 });
+    expect(nearestBeat(grid, 2.4)).toBe(2.5);
+  });
+
+  it('draws grid beats across the view, thinning as the view widens', () => {
+    const grid = { bpm: 120, period: 0.5, phase: 1, beats: 4 };
+    expect(gridBeatTimes(grid, 0, 2.4)).toEqual([0, 0.5, 1, 1.5, 2]);
+    // Far zoomed out, only every 2^n-th beat is drawn.
+    const sparse = gridBeatTimes(grid, 0, 1000, 100);
+    expect(sparse.length).toBeLessThanOrEqual(100);
+    expect(sparse.length).toBeGreaterThan(50);
+  });
+
+  it('dropGrid clears the warp and grid and is a no-op without one', () => {
+    const p = base();
+    expect(dropGrid(p)).toBe(p);
+    const tapped: ClipProgram = {
+      ...p,
+      warp: [
+        [1, 1],
+        [2, 2.1],
+      ],
+      beat_grid: { bpm: 60, period: 1, phase: 1, beats: 2 },
+    };
+    const dropped = dropGrid(tapped);
+    expect(dropped.warp).toEqual([]);
+    expect(dropped.beat_grid).toBeNull();
+    // The rest of the edit is untouched.
+    expect(dropped.regions).toBe(tapped.regions);
   });
 });

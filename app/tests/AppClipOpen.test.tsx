@@ -78,7 +78,8 @@ const clipMock = {
     peaks: [0.5, 0.5, 0.5, 0.5],
   })),
   previewAudio: vi.fn(async () => new ArrayBuffer(44)),
-  save: vi.fn(async () => TRACK),
+  detectBeats: vi.fn(async () => ({ bpm: 120, beats: 20, tracker: 'dsp' })),
+  saveBeatClip: vi.fn(async () => null),
   stemStatus: vi.fn(async (trackId: number) => ({
     track_id: trackId,
     backend: 'htdemucs_ft',
