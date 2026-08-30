@@ -83,23 +83,32 @@ impl ClipSourceRef {
 /// Decoded sources for the Clip page, keyed by [`ClipSourceRef`]. Bounded
 /// so a long editing session can't pin every track ever opened in memory.
 ///
-/// Beside the decodes it memoizes ONE rendered program: preview windows,
-/// the waveform peaks, tempo detection and the save all render the SAME
-/// edit, and once the program carries a tap warp each render is seconds
-/// of WSOLA — re-doing it per playback window is exactly the "press play,
+/// Beside the decodes it memoizes RENDERED PROGRAMS: preview windows, the
+/// waveform peaks, tempo detection and the save all render the same edit,
+/// and once the program carries a tap warp each render is seconds of
+/// WSOLA — re-doing it per playback window is exactly the "press play,
 /// wait two seconds" jam.
+///
+/// A few of them, not one: the page asks for the edit in two flavours at
+/// once — the DRY timeline it auditions (tone is applied live in the
+/// webview) and the full program a save files — and a single slot made
+/// those two evict each other on every alternation.
 #[derive(Default)]
 pub struct ClipCache {
     entries: Mutex<Vec<(ClipSourceRef, Arc<AudioData>)>>,
-    /// The last render, keyed by the request (sans `beat_grid`, which
-    /// never touches the audio).
-    rendered: Mutex<Option<(String, Arc<AudioData>)>>,
+    /// Recent renders, keyed by the request (sans `beat_grid`, which
+    /// never touches the audio); most recently used last.
+    rendered: Mutex<Vec<(String, Arc<AudioData>)>>,
     /// Held across a render so a concurrent command WAITS for the render
     /// in flight and then reuses it, instead of duplicating the work.
     render_gate: Mutex<()>,
 }
 
 const MAX_CACHED_SOURCES: usize = 4;
+/// Rendered programs kept at once. Two flavours of the live edit plus a
+/// little history (undo, a band flicked back off) — every entry is a
+/// whole rendered clip, so this is memory, not just bookkeeping.
+const MAX_CACHED_RENDERS: usize = 4;
 
 impl ClipCache {
     fn get(&self, key: &ClipSourceRef) -> Option<Arc<AudioData>> {
@@ -118,7 +127,7 @@ impl ClipCache {
             entries.retain(|(k, _)| k.track_id != track_id);
         }
         if let Ok(mut rendered) = self.rendered.lock() {
-            *rendered = None;
+            rendered.clear();
         }
     }
 
@@ -132,16 +141,22 @@ impl ClipCache {
     }
 
     fn render_hit(&self, key: &str) -> Option<Arc<AudioData>> {
-        let rendered = self.rendered.lock().ok()?;
-        rendered
-            .as_ref()
-            .filter(|(k, _)| k == key)
-            .map(|(_, a)| Arc::clone(a))
+        let mut rendered = self.rendered.lock().ok()?;
+        let at = rendered.iter().position(|(k, _)| k == key)?;
+        // Touch it: the page alternates between the flavours it is
+        // playing, so recency is what should decide the eviction.
+        let hit = rendered.remove(at);
+        let audio = Arc::clone(&hit.1);
+        rendered.push(hit);
+        Some(audio)
     }
 
     fn keep_render(&self, key: String, audio: Arc<AudioData>) {
         if let Ok(mut rendered) = self.rendered.lock() {
-            *rendered = Some((key, audio));
+            rendered.retain(|(k, _)| *k != key);
+            rendered.push((key, audio));
+            let overflow = rendered.len().saturating_sub(MAX_CACHED_RENDERS);
+            rendered.drain(..overflow);
         }
     }
 }

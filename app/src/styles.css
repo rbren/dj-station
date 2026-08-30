@@ -4039,6 +4039,50 @@ body {
   stroke: var(--ink-dim);
 }
 
+/* The selection pane: the live half of the page. It is boxed and inset so
+   the two waveforms read as reference (above) and result (here) rather
+   than as two tracks of one timeline. */
+.clip-sel-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--brand);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.clip-sel-waveform {
+  height: 120px;
+  cursor: pointer;
+}
+
+.clip-sel-title {
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "live" is a state worth seeing at a glance: it says a knob move is
+   already in the audio. Its off state says the opposite in the quiet ink,
+   so the pane never looks broken where Web Audio is missing. */
+.clip-sel-live {
+  color: var(--ok);
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.clip-sel-live-off {
+  color: var(--ink-dim);
+}
+
+.clip-sel-empty {
+  color: var(--ink-dim);
+  max-width: 46em;
+}
+
 .clip-join {
   stroke: var(--brand);
   stroke-width: 2;

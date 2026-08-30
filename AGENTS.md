@@ -1113,9 +1113,23 @@ offset))`, offset in position units — so the knob's curve shapes the
   ClipView stays
   MOUNTED while other pages show (App passes `active`; the component
   hides itself, pauses playback and detaches its shortcuts — space,
-  ctrl/cmd+Z/shift+Z/Y). Playback streams the RENDERED edit: 60 s WAV
+  ctrl/cmd+Z/shift+Z/Y).
+  TWO PANES, TWO JOBS. The SOURCE TRACK at the top is the reference: the
+  material as it was cut, with the beat grid, the splice joins, the taps
+  and the selection on it. Its waveform is the DRY render — the timeline
+  with no EQ and no level — so it NEVER moves under a tone edit; that is
+  what makes it something to cut against. Under it, the SELECTION PANE
+  (`ClipSelectionPane.tsx`) shows the selected span as it actually
+  sounds, with the level automation lane beneath it (the lane's x-axis is
+  the SELECTION's, though the breakpoints it writes are still absolute
+  output-timeline times), and it LOOPS. Clearing the selection (Escape)
+  takes the pane away and hands playback back to the source track.
+  Playback therefore has two owners, never both at once: a selection is
+  auditioned by `ClipLivePlayer` (`src/clipLive.ts`) and everything else
+  by `ClipTransport`. The transport streams the RENDERED edit: 60 s WAV
   windows through `clip_preview_audio`, chaining windows as they run out.
-  ALL of it belongs to ONE owner, `ClipTransport` (`src/clipTransport.ts`):
+  THAT path belongs entirely to ONE owner, `ClipTransport`
+  (`src/clipTransport.ts`):
   ClipView never touches an audio node, it calls commands (`play`, `pause`,
   `stop`, `seek`, `setLoop`, `refreshTone`, `invalidate`, `dispose`) and
   renders the `onStatus` it gets back. The transport owns the element src
@@ -1144,7 +1158,9 @@ offset))`, offset in position units — so the knob's curve shapes the
   Audio (`AudioBufferSourceNode.loop`) because the media element's own
   `loop` re-seeks and drops ~100 ms at every wrap — the renderer's splice
   is already sample-exact, so any audible gap is the frontend's. What an
-  edit costs playback depends on WHAT changed: a TIMELINE change
+  edit costs playback depends on WHAT changed (in the transport's path —
+  a selection's tone costs it nothing, see the live player below): a
+  TIMELINE change
   (sources/regions/overlays/crossfade — identity-compared on the memoized
   `request`, so keep `sourceRefs` memoized separately) invalidates,
   because every output time now means something else; a TONE-ONLY change
@@ -1152,9 +1168,11 @@ offset))`, offset in position units — so the knob's curve shapes the
   the same loop phase, since pausing for an EQ tweak would make the
   control useless for auditioning. A re-render keeps the OLD source
   playing until the new one is ready and swaps, rather than gapping.
-  Loop with NOTHING selected loops the whole clip (it used to light up and
-  do nothing), so a loop range routinely outgrows the 60 s window: a range
-  that fits still runs on one gapless Web Audio buffer, while a longer one
+  A SELECTION ALWAYS LOOPS (picking a span is asking to hear it round and
+  round while you shape it); the Loop button only decides the case with
+  nothing selected, where it loops the whole clip (it used to light up
+  and do nothing), so a loop range routinely outgrows the 60 s window: a
+  range that fits still runs on one gapless Web Audio buffer, while a longer
   chains element windows and wraps at the range end in `onEnded`. Arming a
   loop that already contains the playhead carries on from there instead of
   rewinding to its head.
@@ -1246,9 +1264,39 @@ offset))`, offset in position units — so the knob's curve shapes the
   from a kill is redone rather than trusted. The plumbing is tested
   against a fake CLI script (`tests/stem_separation.rs`, `#[cfg(unix)]`) —
   never the real model.
-- Clip playback has exactly ONE owner, `ClipTransport`
-  (`app/src/clipTransport.ts`); ClipView holds no audio state. Four
-  invariants keep it from playing twice: ONE SLOT (`install` runs only
+- TONE IS NOT A RENDER on the Clip page. An EQ knob or a level point
+  used to cost a full offline re-render of the program, a WAV window over
+  IPC, a decode and a source restart — measured on a 5-minute clip that
+  is ~0.5 s of DSP for EQ alone and ~7 s once a tap warp is in the
+  program, on top of a 350 ms debounce: several seconds before a knob was
+  audible. The split that fixes it: the BACKEND renders the TIMELINE
+  (regions, overlays, crossfades, the WSOLA warp — what audio exists and
+  when) and the WEBVIEW applies TONE (parametric EQ, level automation —
+  a filter coefficient and a gain). `ClipLivePlayer` (`app/src/clipLive.ts`)
+  fetches the DRY selection once, loops it on an `AudioBufferSourceNode`
+  through peaking biquads into a gain, and moves those params under the
+  running audio: no fetch, no gap, continuous while dragging. Level
+  automation is SCHEDULED, not sampled (`levelSchedule` lays the next
+  ~400 ms of breakpoints onto the gain param every 100 ms, ramping to the
+  span's last value at the loop seam and STEPPING back to its first) —
+  sampling from a timer smears a hard cut across the tick. Material
+  changes (a stem swap, a timeline edit) still cost a render, but the
+  running loop keeps playing until the new buffer is decoded and the two
+  are cross-faded at the SAME phase (~20 ms), so nothing ever stops for
+  an edit. The preview is a very close TWIN of the saved render, not a
+  bit-exact copy (float32 biquads, ramped envelope); what SAVES is always
+  the Rust render, so keep `dj_analysis::clip` the authority and keep
+  ClipView's `dryRequest`/`request` split — the dry one is what the
+  source waveform, the audition and beat detection use, the full one is
+  what the save files. Where a runtime has no Web Audio, or a selection
+  is longer than one 60 s window, the page falls back to the transport
+  and says so in the pane ("rendered" instead of "live").
+- Clip playback has exactly TWO owners, `ClipTransport`
+  (`app/src/clipTransport.ts`) for the source track and `ClipLivePlayer`
+  (`app/src/clipLive.ts`) for the selection; ClipView holds no audio
+  state and hands over in ONE effect (stop the outgoing owner first,
+  `publish()` from the incoming one so the readout follows). Four
+  invariants keep either from playing twice: ONE SLOT (`install` runs only
   right after `release`), EPOCHS (every command bumps one, every
   continuation rechecks after each await and drops out if superseded),
   NOTHING SOUNDS BEFORE ITS LAST CHECK (`clipAudio.prepareLoop` is
@@ -1257,10 +1305,14 @@ offset))`, offset in position units — so the knob's curve shapes the
   remount leaves nothing behind). Loops wrap at a sample boundary via an
   `AudioBufferSourceNode` (`<audio loop>` drops ~100 ms), falling back to
   the media element where Web Audio is absent. A TIMELINE edit
-  (sources/regions/overlays/crossfade) halts playback; a TONE-ONLY edit
-  (EQ, level) re-renders the window in place, debounced, resuming at the
-  same loop phase — keep that split, and keep the staleness identity
-  checks allocation-free or every keystroke reads as a timeline change.
+  (sources/regions/overlays/crossfade) halts playback; a MATERIAL edit (a
+  stem swapped) re-renders the window in place and swaps without
+  stopping; a TONE-ONLY edit (EQ, level) costs the transport a debounced
+  re-render (and the live player nothing at all) — keep that split, and
+  keep the staleness identity checks allocation-free or every keystroke
+  reads as a timeline change. A re-render resumes where playback has got
+  to BY THE TIME IT LANDS (`begin`'s `resumeAt`), not where it was when
+  the render was asked for, or every swap replays the second it took.
 - Audio module (`builtin.audio`, `crates/dj-engine/src/audio.rs`): the
   `loop` switch input defaults ON (`default: SIGNAL_MAX` in the manifest);
   a pass wraps BEFORE the sample read so the first sample of the next pass

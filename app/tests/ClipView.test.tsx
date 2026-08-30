@@ -154,10 +154,58 @@ interface FakeLoop {
   end?: () => void;
 }
 
+/** A recorded AudioParam: the live tone chain moves these instead of
+ *  re-rendering, so what they hold IS the audible EQ. */
+class FakeParam {
+  value = 0;
+  setValueAtTime(v: number) {
+    this.value = v;
+    return this;
+  }
+  linearRampToValueAtTime(v: number) {
+    this.value = v;
+    return this;
+  }
+  setTargetAtTime(v: number) {
+    this.value = v;
+    return this;
+  }
+  cancelScheduledValues() {
+    return this;
+  }
+}
+
+class FakeFilter {
+  type = '';
+  frequency = new FakeParam();
+  Q = new FakeParam();
+  gain = new FakeParam();
+  connect() {}
+  disconnect() {}
+}
+
+class FakeGain {
+  gain = new FakeParam();
+  connect() {}
+  disconnect() {}
+}
+
+interface FakeAudio {
+  /** Every buffer source that was started. */
+  starts: FakeLoop[];
+  /** The live tone chain's peaking bells, in order. */
+  filters: FakeFilter[];
+  /** Every gain node built (the level gain is the first). */
+  gains: FakeGain[];
+}
+
 /** jsdom has no Web Audio. Install just enough of it to observe how the
- *  loop transport drives an AudioBufferSourceNode. */
-function installWebAudio(bufferSecs = 4): FakeLoop[] {
+ *  loop transport drives an AudioBufferSourceNode, and what the live
+ *  selection player's tone chain is set to. */
+function installWebAudio(bufferSecs = 4): FakeAudio {
   const starts: FakeLoop[] = [];
+  const filters: FakeFilter[] = [];
+  const gains: FakeGain[] = [];
   class FakeSource {
     buffer: unknown = null;
     loopStart = 0;
@@ -188,17 +236,28 @@ function installWebAudio(bufferSecs = 4): FakeLoop[] {
     state = 'running';
     currentTime = 0;
     destination = {};
+    sampleRate = 48000;
     async decodeAudioData() {
-      return { duration: bufferSecs } as AudioBuffer;
+      return { duration: bufferSecs, sampleRate: 48000 } as AudioBuffer;
     }
     createBufferSource() {
       return new FakeSource() as unknown as AudioBufferSourceNode;
+    }
+    createBiquadFilter() {
+      const filter = new FakeFilter();
+      filters.push(filter);
+      return filter as unknown as BiquadFilterNode;
+    }
+    createGain() {
+      const gain = new FakeGain();
+      gains.push(gain);
+      return gain as unknown as GainNode;
     }
     async resume() {}
     async close() {}
   }
   (window as unknown as { AudioContext: unknown }).AudioContext = FakeContext;
-  return starts;
+  return { starts, filters, gains };
 }
 
 /** jsdom has no layout: give the editor SVG a width so time math works. */
@@ -246,6 +305,19 @@ async function programNow(
   );
   const calls = fn.mock.calls;
   return calls[calls.length - 1][0].program;
+}
+
+/** The full program a SAVE would file. The preview render is the DRY
+ *  edit now — tone is applied live in the webview — so this is where a
+ *  test reads EQ and level automation back out of the page. */
+async function savedProgram(clip: ClipClientApi): Promise<ClipProgram> {
+  fireEvent.change(screen.getByTestId('clip-name'), { target: { value: 'Edit' } });
+  const save = screen.getByTestId('clip-save') as HTMLButtonElement;
+  await waitFor(() => expect(save.disabled).toBe(false), { timeout: 3000 });
+  fireEvent.click(save);
+  await waitFor(() => expect(clip.saveBeatClip).toHaveBeenCalled());
+  const calls = (clip.saveBeatClip as ReturnType<typeof vi.fn>).mock.calls;
+  return calls[calls.length - 1][0].program as ClipProgram;
 }
 
 /** Tap right-shift with playback at `secs` (the transport reads the time
@@ -557,6 +629,9 @@ describe('ClipView', () => {
 
   it('fades and automation points land on the level lane', async () => {
     await openTrack(clipMock());
+    // The lane lives under the SELECTION now: it is drawn against the
+    // span being auditioned, so there has to be one.
+    select(0, 10);
     fireEvent.click(screen.getByTestId('clip-fade-in'));
     expect(screen.getByTestId('clip-level-point-0')).toBeTruthy();
     expect(screen.getByTestId('clip-level-point-1')).toBeTruthy();
@@ -604,12 +679,9 @@ describe('ClipView', () => {
     fireEvent.mouseUp(window);
     expect(screen.getByTestId('clip-eq-readout').textContent).toContain('+9.9dB');
 
-    await waitFor(() => {
-      const calls = (clip.renderPreview as ReturnType<typeof vi.fn>).mock.calls;
-      const bands = calls[calls.length - 1][0].program.eq.bands;
-      expect(bands[0].gain_db).toBeCloseTo(9.9, 5);
-      expect(bands[0].freq_hz).toBeCloseTo(99, 5);
-    });
+    const bands = (await savedProgram(clip)).eq.bands;
+    expect(bands[0].gain_db).toBeCloseTo(9.9, 5);
+    expect(bands[0].freq_hz).toBeCloseTo(99, 5);
 
     // The gesture is one undo step.
     fireEvent.click(screen.getByTestId('clip-undo'));
@@ -627,12 +699,8 @@ describe('ClipView', () => {
     fireEvent.mouseMove(window, { clientY: 40 });
     fireEvent.mouseUp(window);
 
-    const q = await waitFor(() => {
-      const calls = (clip.renderPreview as ReturnType<typeof vi.fn>).mock.calls;
-      const value = calls[calls.length - 1][0].program.eq.bands[0].q;
-      expect(value).toBeGreaterThan(1);
-      return value as number;
-    });
+    const q = (await savedProgram(clip)).eq.bands[0].q;
+    expect(q).toBeGreaterThan(1);
     expect(screen.getByTestId('clip-eq-readout').textContent).toContain(`Q${q.toFixed(1)}`);
     expect(knob.getAttribute('aria-valuenow')).toBe(String(q));
 
@@ -919,9 +987,12 @@ describe('ClipView', () => {
     fireEvent.click(screen.getByTestId('clip-stop'));
     await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(5));
 
+    // The level lane hangs under the SELECTION now, so there has to be
+    // one to drop a point on.
+    select(0, 10);
     const lane = sizeTimeline('clip-level-lane');
     fireEvent.mouseDown(lane, { clientX: 500, clientY: 30 });
-    await programNow(clip, (p) => p.level.length === 1);
+    await waitFor(() => expect(screen.getByTestId('clip-level-point-0')).toBeTruthy());
     expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(5);
     expect(screen.getByTestId('clip-grid-section')).toHaveProperty('disabled', false);
     expect(screen.getByTestId('clip-grid-fwd-plus')).toHaveProperty('disabled', false);
@@ -929,8 +1000,8 @@ describe('ClipView', () => {
     // And tuning the correction keeps the automation it was made over.
     fireEvent.change(screen.getByTestId('clip-grid-section'), { target: { value: '1' } });
     const p = await programNow(clip, (p) => p.warp.length === 5);
-    expect(p.level).toHaveLength(1);
     expect(p.beat_grid?.times).toHaveLength(5);
+    expect((await savedProgram(clip)).level).toHaveLength(1);
   });
 
   it('washes only the current tapping session, not the one before it', async () => {
@@ -1149,7 +1220,7 @@ describe('ClipView', () => {
   });
 
   it('loops the whole clip when nothing is selected', async () => {
-    const starts = installWebAudio(10);
+    const { starts } = installWebAudio(10);
     const clip = clipMock();
     await openTrack(clip);
     // No selection: Loop used to light up and change nothing at all.
@@ -1159,21 +1230,17 @@ describe('ClipView', () => {
     await waitFor(() => expect(starts).toHaveLength(1));
     expect(starts[0].loop).toBe(true);
 
-    // Selecting something afterwards does not interrupt the pass that is
-    // sounding — it only stops it wrapping at an end that is no longer
-    // the loop's…
-    const before = (clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls.length;
+    // Sweeping a selection hands playback to the live player, which
+    // loops that span instead — and the pass that was sounding is
+    // stopped as the new one starts, never left running beside it.
     select(2, 6);
-    await waitFor(() => expect(starts[0].looping).toBe(false));
-    expect((clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(before);
-
-    // …and the selection is what loops from the moment it runs out.
-    await act(async () => starts[0].end?.());
     await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 4));
+    await waitFor(() => expect(starts.filter((x) => !x.stopped)).toHaveLength(1));
+    expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
   });
 
   it('loops through Web Audio so the wrap is gapless', async () => {
-    const starts = installWebAudio(4);
+    const { starts } = installWebAudio(4);
     const clip = clipMock();
     await openTrack(clip);
     select(2, 6);
@@ -1233,10 +1300,173 @@ describe('ClipView', () => {
     await waitFor(() => expect(audio.loop).toBe(true));
     expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
 
-    // Turning it off is what carries on linearly.
+    // A selection always loops, so clearing it is what carries on
+    // linearly — the Loop button only decides the no-selection case.
     fireEvent.click(screen.getByTestId('clip-loop'));
+    fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(audio.loop).toBe(false));
     expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
+  });
+
+  // The reported jam: "several seconds before the audio changes". Tone
+  // is no longer something the backend bakes in — the selection loops in
+  // a Web Audio graph whose EQ and level move under the audio.
+  describe('the selection is live', () => {
+    /** Drag EQ band 1 up to about +9.9 dB. */
+    function dragBand() {
+      fireEvent.mouseDown(screen.getByTestId('clip-eq-handle-1'), {
+        clientX: 50,
+        clientY: 80,
+        button: 0,
+      });
+      fireEvent.mouseMove(window, { clientX: 50, clientY: 39 });
+      fireEvent.mouseUp(window);
+    }
+
+    it('sends an EQ move into the running graph, with no render and no gap', async () => {
+      const { starts, filters } = installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+      fireEvent.click(screen.getByTestId('clip-sel-play'));
+      await waitFor(() => expect(starts.filter((x) => !x.stopped)).toHaveLength(1));
+      const fetched = (clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls.length;
+
+      dragBand();
+
+      // The band lands on a live filter node…
+      await waitFor(() => expect(filters[0]?.gain.value).toBeCloseTo(9.9, 5));
+      expect(filters[0].frequency.value).toBeCloseTo(99, 5);
+      expect(filters[0].type).toBe('peaking');
+      // …with no re-render, and the very same source still sounding.
+      expect((clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(fetched);
+      expect(starts.filter((x) => !x.stopped)).toHaveLength(1);
+      expect(screen.getByTestId('clip-sel-play').textContent).toBe('❚❚');
+      expect(screen.getByTestId('clip-sel-live').textContent).toBe('live');
+    });
+
+    it('renders the selection dry and leaves the source waveform alone', async () => {
+      const { filters } = installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+      dragBand();
+      await waitFor(() => expect(filters[0]?.gain.value).toBeCloseTo(9.9, 5));
+
+      // Every render the page asks for is the DRY edit: the source track
+      // above is the material as it was cut, and tone never moves it.
+      const calls = (clip.renderPreview as ReturnType<typeof vi.fn>).mock.calls;
+      for (const [request] of calls) {
+        expect(request.program.eq.bands.every((b: { gain_db: number }) => b.gain_db === 0)).toBe(
+          true,
+        );
+        expect(request.program.level).toEqual([]);
+      }
+      const audition = (clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls;
+      for (const [request] of audition) {
+        expect(request.program.eq.bands.every((b: { gain_db: number }) => b.gain_db === 0)).toBe(
+          true,
+        );
+      }
+    });
+
+    it('automates level in the graph and draws the lane under the selection', async () => {
+      const { gains } = installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+
+      // The lane spans the SELECTION, so a click halfway across it is a
+      // breakpoint in the middle of that span, not of the whole clip.
+      const lane = sizeTimeline('clip-level-lane');
+      fireEvent.mouseDown(lane, { clientX: 500, clientY: 85 });
+      const level = (await savedProgram(clip)).level;
+      expect(level).toHaveLength(1);
+      expect(level[0].time_secs).toBeCloseTo(4, 5);
+      expect(level[0].gain_db).toBeLessThan(0);
+
+      // …and it is heard: the level gain follows the envelope live.
+      fireEvent.click(screen.getByTestId('clip-sel-play'));
+      await waitFor(() => expect(gains.length).toBeGreaterThan(0));
+      await waitFor(() => expect(gains[0].gain.value).toBeGreaterThan(0));
+    });
+
+    it('swaps stems under the loop without stopping it', async () => {
+      const { starts } = installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+      fireEvent.click(screen.getByTestId('clip-sel-play'));
+      await waitFor(() => expect(starts.filter((x) => !x.stopped)).toHaveLength(1));
+
+      // Switching drums off swaps the material under the loop.
+      fireEvent.click(screen.getByTestId('clip-stem-drums'));
+      await waitFor(() =>
+        expect(clip.previewAudio).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sources: [{ track_id: 7, stems: ['vocals', 'bass', 'other'] }],
+          }),
+          2,
+          4,
+        ),
+      );
+      // One source still sounding, and the transport never fell back to ▶.
+      await waitFor(() => expect(starts.filter((x) => !x.stopped)).toHaveLength(1));
+      expect(screen.getByTestId('clip-sel-play').textContent).toBe('❚❚');
+    });
+
+    it('hands playback back to the source track when the selection goes', async () => {
+      const { starts } = installWebAudio(4);
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+      expect(screen.getByTestId('clip-selection-pane')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('clip-sel-play'));
+      await waitFor(() => expect(starts.filter((x) => !x.stopped)).toHaveLength(1));
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+      // The pane goes with the selection, the live loop stops, and the
+      // source track's transport is parked (not resumed) where it was.
+      await waitFor(() => expect(screen.queryByTestId('clip-selection-pane')).toBeNull());
+      expect(starts.filter((x) => !x.stopped)).toHaveLength(0);
+      expect(screen.getByTestId('clip-play').textContent).toBe('▶');
+      expect(screen.getByTestId('clip-selection-empty')).toBeTruthy();
+    });
+
+    it('does not hand the source track back audio that predates the tone', async () => {
+      installWebAudio(10);
+      const clip = clipMock();
+      await openTrack(clip);
+      // Play the whole clip first, so the transport really is holding a
+      // rendered window when the selection takes playback off it.
+      fireEvent.click(screen.getByTestId('clip-play'));
+      await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 0, 10));
+      select(2, 6);
+      dragBand();
+
+      // The EQ was applied in the graph, so the window the transport is
+      // still holding is the clip WITHOUT it. Clearing the selection must
+      // not resume from that: the next play renders the tone in.
+      fireEvent.keyDown(window, { key: 'Escape' });
+      fireEvent.click(screen.getByTestId('clip-play'));
+      await waitFor(() => {
+        const last = (clip.previewAudio as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+        expect(last?.[0].program.eq.bands[0].gain_db).toBeCloseTo(9.9, 5);
+      });
+    });
+
+    it('says so when there is no live audio to be had', async () => {
+      const clip = clipMock();
+      await openTrack(clip);
+      select(2, 6);
+      // No AudioContext in this test's jsdom: the pane still shows the
+      // span, and says its tone comes from a render instead.
+      expect(screen.getByTestId('clip-sel-live').textContent).toBe('rendered');
+      fireEvent.click(screen.getByTestId('clip-sel-play'));
+      await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 4));
+      const audio = screen.getByTestId('clip-audio') as HTMLAudioElement;
+      await waitFor(() => expect(audio.loop).toBe(true));
+    });
   });
 
   it('keeps playing through an EQ change, re-rendering the window', async () => {
@@ -1275,7 +1505,7 @@ describe('ClipView', () => {
     const liveLoops = (starts: FakeLoop[]) => starts.filter((s) => !s.stopped);
 
     it('starts one source however hard play is hammered', async () => {
-      const starts = installWebAudio(4);
+      const { starts } = installWebAudio(4);
       const clip = clipMock();
       await openTrack(clip);
       select(2, 6);
@@ -1292,7 +1522,7 @@ describe('ClipView', () => {
     });
 
     it('keeps one source while the selection is dragged during playback', async () => {
-      const starts = installWebAudio(4);
+      const { starts } = installWebAudio(4);
       const clip = clipMock();
       await openTrack(clip);
       select(2, 6);
@@ -1313,7 +1543,7 @@ describe('ClipView', () => {
     });
 
     it('stops the loop when the page unmounts', async () => {
-      const starts = installWebAudio(4);
+      const { starts } = installWebAudio(4);
       const clip = clipMock();
       const library = libraryMock();
       const view = render(<ClipView clip={clip} library={library} />);
@@ -1330,7 +1560,7 @@ describe('ClipView', () => {
     });
 
     it('survives StrictMode double-mounting with one live source', async () => {
-      const starts = installWebAudio(4);
+      const { starts } = installWebAudio(4);
       const clip = clipMock();
       render(
         <StrictMode>
@@ -1350,7 +1580,7 @@ describe('ClipView', () => {
     });
 
     it('stops playing the old track when another one is opened', async () => {
-      const starts = installWebAudio(4);
+      const { starts } = installWebAudio(4);
       const clip = clipMock();
       await openTrack(clip);
       select(2, 6);

@@ -59,7 +59,7 @@ let shared: AudioContext | null = null;
 
 /** One context for the page: browsers cap how many can exist, and each
  *  costs a hardware stream. */
-function sharedContext(): AudioContext | null {
+export function sharedContext(): AudioContext | null {
   if (shared) return shared;
   const Ctor = contextCtor();
   if (!Ctor) return null;
@@ -69,6 +69,14 @@ function sharedContext(): AudioContext | null {
     return null;
   }
   return shared;
+}
+
+/** Is there Web Audio in this runtime? Asked while RENDERING (which of
+ *  the two playback owners the page is showing), so it must not build a
+ *  context as a side effect — that is `sharedContext`'s job, called from
+ *  a gesture. */
+export function audioAvailable(): boolean {
+  return contextCtor() !== null;
 }
 
 /** Release the shared context (page teardown; tests). */

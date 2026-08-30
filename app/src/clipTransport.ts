@@ -277,26 +277,50 @@ export class ClipTransport {
     if (this.win) this.win.loop = on;
   }
 
-  /** A TONE-ONLY edit (EQ, level) landed: the timeline still means what it
-   *  meant, so re-render the playing window in place instead of stopping.
-   *  Debounced — a knob drag streams edits and each re-render is a whole
-   *  window of DSP. */
+  /** A TONE-ONLY edit (EQ, level) landed on a page with no live tone
+   *  chain: the timeline still means what it meant, so re-render the
+   *  playing window in place instead of stopping. Debounced — a knob drag
+   *  streams edits and each re-render is a whole window of DSP.
+   *
+   *  Where the page CAN apply tone live (clipLive.ts) this is never
+   *  called: a knob move costs no render at all. */
   refreshTone(): void {
     if (this.disposed || !this.playingNow) return;
     this.cancelTone();
     this.toneTimer = setTimeout(() => {
       this.toneTimer = null;
-      const w = this.win;
-      if (this.disposed || !this.playingNow || !w) return;
-      if (this.loopRange) {
-        // Resume at the same phase, so the audition keeps its place while
-        // the tone changes underneath it.
-        const phase = Math.max(0, (this.position() ?? w.start) - w.start);
-        void this.begin(w.start, this.loopRange ?? { start: w.start, end: w.end }, phase);
-      } else {
-        void this.begin(this.position() ?? w.start, null, 0);
-      }
+      this.reload();
     }, this.toneDelayMs);
+  }
+
+  /** The MATERIAL changed but the timeline still means what it meant — a
+   *  stem swapped under the same span. Re-render now and swap; the old
+   *  source plays on until the new one is ready, so nothing stops. */
+  refreshMaterial(): void {
+    if (this.disposed || !this.playingNow) return;
+    this.cancelTone();
+    this.reload();
+  }
+
+  /** Re-fetch what is playing and carry on from wherever playback has got
+   *  to BY THEN. The position is read after the render resolves, not
+   *  before it: a render takes the best part of a second, and resuming at
+   *  the position it started from replays that second. */
+  private reload(): void {
+    const w = this.win;
+    if (this.disposed || !this.playingNow || !w) return;
+    const range = this.loopRange;
+    const live = () => this.position();
+    if (range) void this.begin(w.start, range, 0, live);
+    else void this.begin(this.position() ?? w.start, null, 0, live);
+  }
+
+  /** Push the current status at the host again. The page has TWO owners
+   *  (the other is ClipLivePlayer) and shows whichever holds playback:
+   *  when it changes hands, the readout has to come back to what this
+   *  one says, even though nothing about it moved. */
+  publish(): void {
+    if (!this.disposed) this.notify();
   }
 
   /** Stop everything and refuse all further commands. Idempotent. */
@@ -417,8 +441,17 @@ export class ClipTransport {
    *  Everything after an `await` is guarded by the epoch this call started
    *  with: a newer command silently wins, and this call must leave no
    *  trace. Note that the previous source keeps playing until the moment
-   *  the replacement is ready, so a re-render swaps rather than gaps. */
-  private async begin(fromSecs: number, loopRange: Range | null, seekWithin: number) {
+   *  the replacement is ready, so a re-render swaps rather than gaps.
+   *
+   *  `resumeAt`, where given, is asked AFTER the render for the absolute
+   *  position to enter the window at — how a re-render lands where the
+   *  audio that never stopped has actually got to. */
+  private async begin(
+    fromSecs: number,
+    loopRange: Range | null,
+    seekWithin: number,
+    resumeAt?: () => number | null,
+  ) {
     if (this.disposed) return;
     const epoch = ++this.epoch;
     this.cancelTone();
@@ -467,6 +500,13 @@ export class ClipTransport {
 
     const bytes = await this.host.render(start, end - start);
     if (this.stale(epoch) || !bytes) return;
+    if (resumeAt) {
+      // The old source has been playing all through the render: enter the
+      // new window where it has ACTUALLY got to, not where it was when
+      // the render was asked for.
+      const live = resumeAt();
+      if (live !== null) within = Math.max(0, Math.min(live - start, end - start - EPS));
+    }
 
     if (loopRange && wholeLoop) {
       const prepare = this.host.prepareLoop ?? defaultPrepareLoop;

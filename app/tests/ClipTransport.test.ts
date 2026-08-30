@@ -407,6 +407,49 @@ describe('ClipTransport', () => {
     expect(world.renders).toHaveLength(0);
   });
 
+  it('swaps the material under a running loop without stopping it', async () => {
+    transport.play(2, { start: 2, end: 6 });
+    await flush();
+    world.finishRender();
+    await flush();
+    world.finishDecode();
+    await flush();
+
+    // A stem switched: the timeline still means what it meant, so this
+    // is not the invalidate that halts playback.
+    transport.refreshMaterial();
+    await flush();
+    expect(world.renders).toHaveLength(2);
+    // The pass in the air keeps sounding all the way through the render.
+    expect(world.loops[0].stopped).toBe(false);
+
+    world.finishRender();
+    await flush();
+    world.finishDecode();
+    await flush();
+    expect(world.loops[1].stopped).toBe(false);
+    expect(world.loops[0].stopped).toBe(true);
+    expect(transport.playing).toBe(true);
+    expect(world.peak).toBe(1);
+  });
+
+  it('re-enters where playback GOT TO, not where the render was asked for', async () => {
+    transport.play(0, null);
+    await flush();
+    world.finishRender();
+    await flush();
+    world.element.currentTime = 3;
+
+    transport.refreshMaterial();
+    await flush();
+    // A render is the best part of a second, and the old source plays on
+    // through it: entering the new window at 3 s would replay that.
+    world.element.currentTime = 4;
+    world.finishRender();
+    await flush();
+    expect(transport.playhead).toBeCloseTo(4, 6);
+  });
+
   it('stops and forgets the window when the timeline changes', async () => {
     transport.play(0, null);
     await flush();

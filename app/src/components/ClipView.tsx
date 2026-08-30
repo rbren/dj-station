@@ -9,6 +9,23 @@
 // Nothing here touches the engine: rendering happens off-thread in the
 // shell (dj-analysis).
 //
+// TWO PANES, TWO JOBS. The SOURCE TRACK at the top is the reference —
+// the material as it was cut, with the beat grid, the joins and the
+// selection drawn on it. Its waveform is the DRY render (no EQ, no
+// level), so it never moves under a tone edit: that is what makes it
+// something to cut against. The SELECTION PANE below it is the result —
+// the chosen span as it actually sounds, with the level automation lane
+// under it, looping, and updating under the knob rather than after it.
+// Clearing the selection takes the pane away and hands playback back to
+// the source track.
+//
+// That split is also what makes the page quick. Tone is applied in the
+// webview (clipLive.ts) instead of being baked into a render, so an EQ
+// move or a dragged level point is a parameter change on running audio —
+// no render, no IPC, no gap — while the backend is asked only for
+// MATERIAL (the timeline, the stems), and even then the old audio plays
+// on until the new is decoded and cross-faded in.
+//
 // BEATS ARE TAPPED: right-shift during playback drops a marker at the
 // playhead (drawn on the waveform), and when playback stops the tapped
 // span is MEASURED — the Beatify tracker runs over it and the taps pick
@@ -98,15 +115,20 @@ import {
   STEM_NAMES,
 } from '../clip';
 import { ClipTransport, type TransportHost } from '../clipTransport';
+import { ClipLivePlayer, liveAudioAvailable, tonePeaks, type LiveHost } from '../clipLive';
 import { logError } from '../errors';
 import { isEditableTarget } from '../fileShortcuts';
 import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
 import { AudioTimeline, viewSpan, type TimelineSnap } from './AudioTimeline';
+import { ClipSelectionPane } from './ClipSelectionPane';
 import { ClipEqUI } from './ClipEqUI';
 import { WAVEFORM_VIEW_W as W } from './WaveformView';
 
 const WAVE_H = 120;
+/** The selection pane's waveform: shorter than the source track's, which
+ *  is the one you cut against. */
+const SEL_WAVE_H = 96;
 const LEVEL_H = 90;
 /** Preview peak resolution: enough per second that zooming stays sharp,
  *  within the backend's bucket cap. */
@@ -127,6 +149,13 @@ const HISTORY_DEPTH = 49;
 const STEM_POLL_MS = 2000;
 /** Playhead refresh while a Web Audio loop runs (it has no timeupdate). */
 const LOOP_TICK_MS = 50;
+/** Buckets for the selection pane's waveform: it is one pane wide, and
+ *  the peaks are computed in the webview, so this is cheap. */
+const SEL_BUCKETS = 2000;
+/** Debounce before re-drawing the selection's waveform after a tone edit.
+ *  The AUDIO is already live; this is only the picture catching up, and
+ *  redrawing it per mousemove is what would cost. */
+const SEL_PEAKS_DELAY_MS = 120;
 /** Debounce before measuring an untapped selection's tempo: detection
  *  renders the edit and may run a model, so it waits for the selection
  *  to settle. */
@@ -390,6 +419,24 @@ export function ClipView({
   const sourceRefs = useMemo(() => sources.map(sourceRef), [sources]);
   const request = useMemo(() => ({ sources: sourceRefs, program }), [sourceRefs, program]);
 
+  // THE DRY EDIT: the timeline with no tone on it. Tone (EQ, level) is
+  // applied LIVE in the webview (clipLive.ts), so the backend must not be
+  // asked to bake it in — and, more to the point, this request's identity
+  // does not move when a knob does, which is what keeps the source
+  // track's waveform still, the render memo warm and playback unbroken
+  // through a whole EQ session. The full `request` above is what the SAVE
+  // sends (and what the fallback audition path plays, where there is no
+  // live graph to apply tone).
+  const { regions, overlays, crossfade_ms, warp, warp_smoothing, beat_grid } = program;
+  const dryProgram = useMemo<ClipProgram>(
+    () => ({ ...emptyProgram(), regions, overlays, crossfade_ms, warp, warp_smoothing, beat_grid }),
+    [regions, overlays, crossfade_ms, warp, warp_smoothing, beat_grid],
+  );
+  const dryRequest = useMemo(
+    () => ({ sources: sourceRefs, program: dryProgram }),
+    [sourceRefs, dryProgram],
+  );
+
   // A fresh array each render would churn every callback that depends on
   // the stem choice.
   const stemsOn = useMemo(
@@ -397,21 +444,58 @@ export function ClipView({
     [pick, stemChoice],
   );
 
-  // --- playback: the owner ------------------------------------------------
+  // --- playback: the two owners -------------------------------------------
   //
-  // Every source that can make sound belongs to ONE ClipTransport
-  // (src/clipTransport.ts). This component never touches an audio node: it
-  // hands the transport a host to read the live edit through, calls
-  // commands (further down, and from the handlers below), and renders the
-  // status it is given back. See AGENTS.md for why: overlapping async play
-  // requests used to leave a second source playing with nobody holding its
-  // handle. The owner is declared up here because the editing handlers
-  // below issue commands to it.
+  // Playback belongs to one of exactly two objects, and never to both:
+  //
+  //   - a SELECTION is auditioned by ClipLivePlayer (src/clipLive.ts): the
+  //     dry span is fetched once and loops in a Web Audio graph whose EQ
+  //     and level automation move under the audio, so a knob costs no
+  //     render and playback never stops;
+  //   - with NOTHING selected the source track plays through ClipTransport
+  //     (src/clipTransport.ts), which streams rendered windows of the
+  //     whole edit — the same owner (and the same four invariants) the
+  //     page has always had. It is also the fallback for a selection too
+  //     long to hold as one buffer, or a runtime with no Web Audio.
+  //
+  // This component never touches an audio node itself: it hands each owner
+  // a host to read the live edit through, calls commands, and renders the
+  // status it is given back. ONE effect below ("who plays what") is the
+  // only place playback changes hands, so the "playing twice with nobody
+  // holding the handle" bug cannot come back through the second owner.
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const transportRef = useRef<ClipTransport | null>(null);
+  const liveRef = useRef<ClipLivePlayer | null>(null);
+  /** The decoded selection, when the live player has one: what the
+   *  selection pane's waveform is drawn from. */
+  const [selBuffer, setSelBuffer] = useState<AudioBuffer | null>(null);
+  /** Peaks of the selection WITH the tone on it, computed off the decoded
+   *  buffer; null until the first pass (the pane draws the dry material
+   *  meanwhile). */
+  const [selPeaks, setSelPeaks] = useState<number[] | null>(null);
+  /** The live player is fetching material (a stem swap, a timeline edit).
+   *  What is already loaded keeps playing until it lands. */
+  const [selLoading, setSelLoading] = useState(false);
 
-  // What the transport needs to read at CALL time, not at render time: the
-  // host closes over this ref so a single transport instance survives every
+  const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
+  /** Is the live graph what is auditioning the selection? A span longer
+   *  than one rendered window cannot be held as a single buffer, and a
+   *  runtime with no Web Audio has no graph at all — both fall back to
+   *  the transport, where tone still costs a render. */
+  const liveOn = sel !== null && sel.end - sel.start <= PLAY_WINDOW_SECS && liveAudioAvailable();
+
+  /** Move the playhead — on whichever owner has it. Declared here beside
+   *  the owners because the editing gestures below seek too. */
+  const seek = useCallback(
+    (secs: number) => {
+      if (liveOn && sel) liveRef.current?.seekPhase(secs - sel.start);
+      else transportRef.current?.seek(secs);
+    },
+    [liveOn, sel],
+  );
+
+  // What the owners need to read at CALL time, not at render time: their
+  // hosts close over this ref so a single instance of each survives every
   // edit.
   //
   // The mirror is updated in a LAYOUT effect, which React flushes during
@@ -419,98 +503,126 @@ export function ClipView({
   // dispatch the next click — so pressing play in that gap read the
   // previous render's duration, computed an empty window, and silently
   // played nothing.
-  const live = useRef({ clip, request, duration, program, sectionBeats, smoothing });
+  const live = useRef({
+    clip,
+    request,
+    dryRequest,
+    duration,
+    program,
+    sectionBeats,
+    smoothing,
+    sel,
+    liveOn,
+  });
   useLayoutEffect(() => {
-    live.current = { clip, request, duration, program, sectionBeats, smoothing };
+    live.current = {
+      clip,
+      request,
+      dryRequest,
+      duration,
+      program,
+      sectionBeats,
+      smoothing,
+      sel,
+      liveOn,
+    };
   });
 
-  // One effect creates the transport and one effect destroys it, so React
-  // StrictMode's mount/unmount/mount leaves nothing of the first instance
-  // behind: it is disposed (which stops everything and makes it refuse
-  // further commands) and replaced by a fresh one. The host is built here
-  // rather than memoized above so the transport owns nothing that outlives
-  // it, and reads everything that changes through `live`.
+  // Playback stopping is what turns the pass's taps into the beat grid —
+  // but the grid is MEASURED, not averaged: the tracker runs over the
+  // tapped span and the taps choose among its seeds (clip_tap_beats),
+  // falling back to the taps themselves when nothing fits. The chosen
+  // beat times go through the same rules either way: covering only the
+  // tapped span, stretch-corrected every `sectionBeats` beats, ONE
+  // program edit (one undo step); a lone tap builds nothing and is simply
+  // cleared. Both owners of playback call this when they stop, so it
+  // takes no arguments and reads what is current through `live` — all the
+  // setters it uses are React's stable ones.
+  //
+  // The taps are taken from a REF, not from `live`: stopping notifies
+  // twice (playing, then where the playhead parked) and a mirror that
+  // only refreshes on render still held them the second time — two
+  // tracker runs and two undo steps for one pass.
+  const commitTaps = useCallback(() => {
+    const rawTaps = tapRun.current;
+    if (rawTaps.length === 0) return;
+    tapRun.current = [];
+    setTaps([]);
+    const prev = live.current.program;
+    void (async () => {
+      let beats = rawTaps;
+      let seeds: ClipTapSeed[] = [];
+      let seed: string | null = null;
+      let note: string | null = null;
+      try {
+        const heard = await live.current.clip.tapBeats(live.current.dryRequest, rawTaps);
+        if (heard && heard.times.length >= 2) {
+          beats = heard.times;
+          seeds = heard.seeds ?? [];
+          seed = heard.seed || null;
+          note = heard.detail || null;
+        } else if (heard?.detail) {
+          note = `${heard.detail} — the grid is your taps as they were`;
+        }
+      } catch {
+        // The tracker not answering never loses the taps.
+      }
+      // An edit landing while the tracker measured would put the grid's
+      // anchors under different audio: drop the pass.
+      if (live.current.program !== prev) return;
+      const built = sessionProgram({
+        base: prev,
+        present: prev,
+        beats,
+        rawTaps,
+        sectionBeats: live.current.sectionBeats,
+        smoothing: live.current.smoothing,
+        extBack: 0,
+        extFwd: 0,
+      });
+      if (!built) return;
+      setPast((h) => [...h.slice(-HISTORY_DEPTH), prev]);
+      setFuture([]);
+      setProgram(built.program);
+      setTapSession({
+        base: prev,
+        rawTaps,
+        seeds,
+        seed,
+        beats,
+        grid: built.grid,
+        warp: built.warp,
+        stats: built.stats,
+        extBack: 0,
+        extFwd: 0,
+      });
+      // The selection in hand is quantized to the new grid at once.
+      const dur = programDuration(built.program);
+      setSelection((cur) => (cur ? quantizeRange(built.grid, cur, dur) : cur));
+      if (note) setStatus(note);
+    })();
+  }, []);
+
+  // One effect creates the owners and one effect destroys them, so React
+  // StrictMode's mount/unmount/mount leaves nothing of the first pair
+  // behind: they are disposed (which stops everything and makes them
+  // refuse further commands) and replaced. The hosts are built here rather
+  // than memoized above so neither owner holds anything that outlives it,
+  // and both read what changes through `live`.
   useEffect(() => {
     const host: TransportHost = {
       duration: () => live.current.duration,
       // The editor only renders an <audio> element once a track is open,
       // so the transport looks it up when it needs it.
       element: () => audioRef.current,
+      // The FULL program: with no live graph in this path, the backend is
+      // the only place tone can be applied.
       render: (start, len) => live.current.clip.previewAudio(live.current.request, start, len),
       onStatus: (s) => {
-        // Playback stopping is what turns the pass's taps into the beat
-        // grid — but the grid is MEASURED, not averaged: the tracker
-        // runs over the tapped span and the taps choose among its seeds
-        // (clip_tap_beats), falling back to the taps themselves when
-        // nothing fits. The chosen beat times go through the same rules
-        // either way: covering only the tapped span, stretch-corrected
-        // every `sectionBeats` beats, ONE program edit (one undo step);
-        // a lone tap builds nothing and is simply cleared. All the
-        // setters used here are React's stable ones — this is an event
-        // callback, reading current state via `live`.
-        //
-        // The taps are taken from a REF, not from `live`: stopping
-        // notifies twice (playing, then where the playhead parked) and a
-        // mirror that only refreshes on render still held them the second
-        // time — two tracker runs and two undo steps for one pass.
-        const rawTaps = tapRun.current;
-        if (!s.playing && rawTaps.length > 0) {
-          tapRun.current = [];
-          setTaps([]);
-          const prev = live.current.program;
-          void (async () => {
-            let beats = rawTaps;
-            let seeds: ClipTapSeed[] = [];
-            let seed: string | null = null;
-            let note: string | null = null;
-            try {
-              const heard = await live.current.clip.tapBeats(live.current.request, rawTaps);
-              if (heard && heard.times.length >= 2) {
-                beats = heard.times;
-                seeds = heard.seeds ?? [];
-                seed = heard.seed || null;
-                note = heard.detail || null;
-              } else if (heard?.detail) {
-                note = `${heard.detail} — the grid is your taps as they were`;
-              }
-            } catch {
-              // The tracker not answering never loses the taps.
-            }
-            // An edit landing while the tracker measured would put the
-            // grid's anchors under different audio: drop the pass.
-            if (live.current.program !== prev) return;
-            const built = sessionProgram({
-              base: prev,
-              present: prev,
-              beats,
-              rawTaps,
-              sectionBeats: live.current.sectionBeats,
-              smoothing: live.current.smoothing,
-              extBack: 0,
-              extFwd: 0,
-            });
-            if (!built) return;
-            setPast((h) => [...h.slice(-HISTORY_DEPTH), prev]);
-            setFuture([]);
-            setProgram(built.program);
-            setTapSession({
-              base: prev,
-              rawTaps,
-              seeds,
-              seed,
-              beats,
-              grid: built.grid,
-              warp: built.warp,
-              stats: built.stats,
-              extBack: 0,
-              extFwd: 0,
-            });
-            // The selection in hand is quantized to the new grid at once.
-            const dur = programDuration(built.program);
-            setSelection((cur) => (cur ? quantizeRange(built.grid, cur, dur) : cur));
-            if (note) setStatus(note);
-          })();
-        }
+        if (!s.playing) commitTaps();
+        // The live player owns the readout while a selection is armed;
+        // the transport's parting status must not overwrite it.
+        if (live.current.liveOn) return;
         setPlaying(s.playing);
         setPlayhead(s.playhead);
       },
@@ -521,14 +633,31 @@ export function ClipView({
       toneDelayMs: PREVIEW_DELAY_MS,
     });
     transportRef.current = transport;
+
+    const liveHost: LiveHost = {
+      // The DRY span: this graph applies the tone itself.
+      render: (start, len) => live.current.clip.previewAudio(live.current.dryRequest, start, len),
+      onBuffer: (buffer) => setSelBuffer(buffer),
+      onStatus: (s) => {
+        if (!s.playing) commitTaps();
+        if (!live.current.liveOn) return;
+        setPlaying(s.playing);
+        setPlayhead((live.current.sel?.start ?? 0) + s.phase);
+        setSelLoading(s.loading);
+      },
+    };
+    const player = new ClipLivePlayer(liveHost, { tickMs: LOOP_TICK_MS });
+    liveRef.current = player;
     return () => {
       transportRef.current = null;
+      liveRef.current = null;
       transport.dispose();
+      player.dispose();
     };
-  }, []);
+  }, [commitTaps]);
 
   // Viewport, clamped against the current duration (edits shrink clips).
-  const { start: vpStart, end: vpEnd, len: vpLen } = viewSpan(vp, duration);
+  const { start: vpStart, end: vpEnd } = viewSpan(vp, duration);
 
   // Refresh the pickable track list whenever the page comes back into
   // view — other pages import tracks while this one stays mounted.
@@ -545,8 +674,11 @@ export function ClipView({
     };
   }, [active, library]);
 
-  // Debounced preview render: the peaks the editor draws are the real
-  // rendered output, not a client-side guess.
+  // Debounced preview render: the source track's peaks are the real
+  // rendered output, not a client-side guess. It is the DRY render — the
+  // material as it was cut — so the waveform you are editing against
+  // holds still while EQ and level move. What those do to the audio is
+  // drawn under the selection instead.
   useEffect(() => {
     if (program.regions.length === 0 || sources.length === 0) return;
     let cancelled = false;
@@ -556,7 +688,7 @@ export function ClipView({
           MAX_BUCKETS,
           Math.max(MIN_BUCKETS, Math.round(programDuration(program) * PEAKS_PER_SEC)),
         );
-        const out = await clip.renderPreview(request, buckets);
+        const out = await clip.renderPreview(dryRequest, buckets);
         if (!cancelled && out) setPreview(out);
       })();
     }, PREVIEW_DELAY_MS);
@@ -564,7 +696,7 @@ export function ClipView({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [clip, request, program, sources.length]);
+  }, [clip, dryRequest, program, sources.length]);
 
   /** Apply a pure edit, remembering the previous program for undo. */
   const apply = useCallback(
@@ -703,8 +835,6 @@ export function ClipView({
     },
     [regenerate, tapSession, tunable],
   );
-
-  const sel = selection && selection.end - selection.start > 1e-4 ? selection : null;
 
   const loadTrack = useCallback(
     async (
@@ -882,35 +1012,42 @@ export function ClipView({
       const target = base.start + delta;
       applyTimeline((p, at) => moveRange(p, at(base.start), at(base.end), at(target)));
       setSelection({ start: target, end: target + (base.end - base.start) });
-      transportRef.current?.seek(target);
+      seek(target);
     },
-    [applyTimeline],
-  );
-
-  const timeAt = useCallback(
-    (clientX: number, rect: DOMRect | null) => {
-      if (!rect || rect.width <= 0 || duration <= 0) return 0;
-      const frac = (clientX - rect.left) / rect.width;
-      return Math.min(duration, Math.max(0, vpStart + frac * vpLen));
-    },
-    [duration, vpStart, vpLen],
+    [applyTimeline, seek],
   );
 
   // --- level automation lane -------------------------------------------
+  //
+  // The lane lives UNDER THE SELECTION, not under the source track: a
+  // fade is drawn against the span you are auditioning, at the zoom that
+  // span already gives you, and the audio follows the drag live. Its
+  // x-axis is therefore the selection's, and the breakpoints it writes
+  // are still absolute output-timeline times — automation belongs to the
+  // edit, not to the window you happened to be looking through.
   const laneRef = useRef<SVGSVGElement | null>(null);
   const dragBase = useRef<ClipProgram | null>(null);
   const [dragPoint, setDragPoint] = useState(false);
 
+  const laneTimeAt = useCallback(
+    (clientX: number, rect: DOMRect | null) => {
+      if (!rect || rect.width <= 0 || !sel) return 0;
+      const frac = (clientX - rect.left) / rect.width;
+      return sel.start + Math.min(1, Math.max(0, frac)) * (sel.end - sel.start);
+    },
+    [sel],
+  );
+
   const addLevelPoint = useCallback(
     (e: ReactMouseEvent<SVGSVGElement>) => {
-      if (duration <= 0) return;
+      if (duration <= 0 || !sel) return;
       const rect = e.currentTarget.getBoundingClientRect();
       if (rect.width <= 0) return;
-      const t = timeAt(e.clientX, rect);
+      const t = laneTimeAt(e.clientX, rect);
       const y = ((e.clientY - rect.top) / (rect.height || LEVEL_H)) * LEVEL_H;
       apply((p) => setLevelPoint(p, t, Math.round(levelDbFromY(y) * 10) / 10));
     },
-    [apply, duration, timeAt],
+    [apply, duration, laneTimeAt, sel],
   );
 
   useEffect(() => {
@@ -919,7 +1056,7 @@ export function ClipView({
       const rect = laneRef.current?.getBoundingClientRect();
       const base = dragBase.current;
       if (!rect || rect.width <= 0 || !base) return;
-      const t = timeAt(e.clientX, rect);
+      const t = laneTimeAt(e.clientX, rect);
       const y = ((e.clientY - rect.top) / (rect.height || LEVEL_H)) * LEVEL_H;
       setProgram(setLevelPoint(base, t, Math.round(levelDbFromY(y) * 10) / 10));
     };
@@ -930,7 +1067,7 @@ export function ClipView({
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
     };
-  }, [dragPoint, timeAt]);
+  }, [dragPoint, laneTimeAt]);
 
   // Opening from the Library page. An edit that has been touched but not
   // saved would be lost, so that case asks first — the source track is
@@ -958,65 +1095,180 @@ export function ClipView({
   );
 
   // --- playback: commands -------------------------------------------------
-  // What Loop loops: the selection if there is one, otherwise the whole
-  // clip. "Loop" with nothing selected used to light up and do nothing,
-  // which read as broken — and looping the whole edit is what you want
-  // when auditioning one anyway.
+  //
+  // A SELECTION ALWAYS LOOPS: choosing a span is asking to hear it round
+  // and round while you shape it, so there is nothing to arm. The Loop
+  // button is left for the case it is still a question — the whole clip,
+  // with nothing selected.
   const loopRange = useMemo(
-    () => (!loop ? null : (sel ?? (duration > 0 ? { start: 0, end: duration } : null))),
+    () => sel ?? (loop && duration > 0 ? { start: 0, end: duration } : null),
     [loop, sel, duration],
   );
 
   const togglePlay = useCallback(() => {
+    if (liveOn) {
+      const player = liveRef.current;
+      if (!player) return;
+      if (player.playing) player.pause();
+      else player.play();
+      return;
+    }
     const transport = transportRef.current;
     if (!transport) return;
     if (transport.playing) transport.pause();
     else transport.play(transport.playhead, loopRange);
-  }, [loopRange]);
+  }, [liveOn, loopRange]);
 
   const stop = useCallback(() => {
+    if (liveOn) {
+      liveRef.current?.stop();
+      setPlayhead(sel?.start ?? 0);
+      return;
+    }
     transportRef.current?.stop(sel ? sel.start : 0);
-  }, [sel]);
+  }, [liveOn, sel]);
+
+  // WHO PLAYS WHAT, in one place. Arming a selection hands playback to
+  // the live player; clearing it hands playback back to the source
+  // track. The one being handed to starts stopped and at the playhead the
+  // other left behind, and the one handed from is stopped FIRST — that
+  // ordering is what keeps two sources from ever sounding at once.
+  const liveWasOn = useRef(false);
+  /** Tone changed while the live graph owned playback: the transport's
+   *  loaded window predates it. */
+  const toneDirty = useRef(false);
+  useEffect(() => {
+    const player = liveRef.current;
+    const transport = transportRef.current;
+    if (liveOn === liveWasOn.current) return;
+    liveWasOn.current = liveOn;
+    if (liveOn) {
+      // Sweeping a span WHILE the clip plays drops straight into
+      // looping it; sweeping one in silence stays silent.
+      const wasPlaying = transport?.playing ?? false;
+      transport?.pause();
+      if (wasPlaying) player?.play();
+      else player?.publish();
+    } else {
+      // Handing back PARKS rather than resumes: clearing a selection is
+      // not a request to hear the whole clip, and this is also the path
+      // an "open another track" takes. What the live player decoded is
+      // left alone rather than cleared — the pane below reads it only
+      // while the live graph owns playback.
+      player?.pause();
+      // Tone the transport never saw (it was applied live) makes the
+      // window it is holding wrong: drop it so the next play renders.
+      if (toneDirty.current) transport?.invalidate();
+      toneDirty.current = false;
+      // Re-publish the source track's own playhead: it is where the
+      // transport was left, which is not where the selection got to (and
+      // this path is also how "open another track" lands).
+      transport?.publish();
+    }
+  }, [liveOn]);
+
+  // The selection IS the live player's span: moving an edge re-fetches
+  // that stretch (and only that stretch).
+  useEffect(() => {
+    if (!liveOn || !sel) return;
+    liveRef.current?.setSpan(sel.start, sel.end);
+  }, [liveOn, sel]);
+
+  // TONE IS NOT A RENDER. EQ and level go straight into the running graph
+  // — no fetch, no gap, and the drag that produced them is still under
+  // the user's finger.
+  useEffect(() => {
+    liveRef.current?.setEq(program.eq.bands);
+  }, [program.eq]);
+
+  useEffect(() => {
+    liveRef.current?.setLevel(program.level);
+  }, [program.level]);
+
+  // The PICTURE of the live audio: the decoded selection re-rendered
+  // through the same tone stage offline, so the waveform under the
+  // knob is what the knob is doing. Debounced, because only the drawing
+  // has to wait — the audio changed the moment the band moved.
+  useEffect(() => {
+    if (!liveOn || !selBuffer || !sel) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const toned = await tonePeaks(
+          selBuffer,
+          program.eq.bands,
+          program.level,
+          sel.start,
+          SEL_BUCKETS,
+        );
+        // Null where the runtime has no OfflineAudioContext: the pane
+        // keeps drawing the dry material, which is better than nothing.
+        if (!cancelled && toned) setSelPeaks(toned);
+      })();
+    }, SEL_PEAKS_DELAY_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [liveOn, selBuffer, program.eq, program.level, sel]);
 
   // An edit makes the fetched audio stale. What that costs playback
   // depends on WHAT changed:
   //
-  // - the timeline (regions/overlays/crossfade/sources): every output time
-  //   now means something else, so stop rather than play the old render;
-  // - tone only (EQ, level automation): the timeline is untouched, so
-  //   re-fetch the same window and carry on from the same spot — pausing
-  //   for an EQ tweak would make the control useless for auditioning.
-  const lastRequest = useRef(request);
+  // - the TIMELINE (regions/overlays/crossfade/warp): every output time
+  //   now means something else, so the transport stops rather than play
+  //   the old render (the live player re-fetches its span instead);
+  // - the MATERIAL (a stem switched): the timeline still means what it
+  //   meant, so re-render in place and swap — a stem toggle used to stop
+  //   playback dead and wait for a press of ▶;
+  // - TONE (EQ, level): nothing to do here at all where the live graph
+  //   owns playback. Only the fallback path re-renders for it.
+  const lastRequest = useRef(dryRequest);
   useEffect(() => {
     const prev = lastRequest.current;
     // Unrelated state moved (selection, zoom, …): leave any pending
     // re-render alone rather than re-arming its timer.
-    if (prev === request) return;
-    lastRequest.current = request;
+    if (prev === dryRequest) return;
+    lastRequest.current = dryRequest;
     const timelineChanged =
-      prev.sources !== request.sources ||
-      prev.program.regions !== request.program.regions ||
-      prev.program.overlays !== request.program.overlays ||
-      prev.program.crossfade_ms !== request.program.crossfade_ms ||
-      prev.program.warp !== request.program.warp ||
-      prev.program.warp_smoothing !== request.program.warp_smoothing;
-    const toneChanged =
-      prev.program.eq !== request.program.eq || prev.program.level !== request.program.level;
+      prev.program.regions !== dryRequest.program.regions ||
+      prev.program.overlays !== dryRequest.program.overlays ||
+      prev.program.crossfade_ms !== dryRequest.program.crossfade_ms ||
+      prev.program.warp !== dryRequest.program.warp ||
+      prev.program.warp_smoothing !== dryRequest.program.warp_smoothing;
+    const sourcesChanged = prev.sources !== dryRequest.sources;
+    if (timelineChanged || sourcesChanged) liveRef.current?.refresh();
     if (timelineChanged) transportRef.current?.invalidate();
-    else if (toneChanged) transportRef.current?.refreshTone();
-    // Only the beat grid moved (a +/− extension, say): no audio changed,
-    // so playback carries on with the window it has.
-  }, [request]);
+    else if (sourcesChanged) transportRef.current?.refreshMaterial();
+  }, [dryRequest]);
 
-  // Keep playback in step with the selection, so a loop follows its edges
-  // live instead of looping the old span until the next pause/play.
+  // With no live graph in the path, tone is still something the backend
+  // has to bake in: re-render the playing window, debounced, without
+  // stopping (pausing for an EQ tweak makes the control useless).
+  const lastTone = useRef(request.program);
+  useEffect(() => {
+    const prev = lastTone.current;
+    if (prev === request.program) return;
+    lastTone.current = request.program;
+    if (prev.eq === request.program.eq && prev.level === request.program.level) return;
+    // Live: the graph has it already, but the transport's window is now
+    // audio nobody asked for — remember to throw it away at the handover.
+    if (liveOn) toneDirty.current = true;
+    else transportRef.current?.refreshTone();
+  }, [liveOn, request.program]);
+
+  // Keep the fallback path's loop in step with the selection, so it
+  // follows its edges live instead of looping the old span.
   useEffect(() => {
     transportRef.current?.setLoop(loopRange);
   }, [loopRange]);
 
   // Leaving the page pauses (its shortcuts detach with it).
   useEffect(() => {
-    if (!active) transportRef.current?.pause();
+    if (!active) {
+      transportRef.current?.pause();
+      liveRef.current?.pause();
+    }
   }, [active]);
 
   // --- keyboard shortcuts (page-scoped; see AGENTS.md keyboard scope) ----
@@ -1038,11 +1290,18 @@ export function ClipView({
         togglePlay();
       } else if (e.code === 'ShiftRight' && !e.repeat) {
         // A beat, tapped at the playhead — during playback only, and read
-        // LIVE off the sounding source: the status playhead only advances
-        // on timeupdate, far too coarse for a tapped beat.
+        // LIVE off the sounding source (whichever owns it): the status
+        // playhead only advances on a tick, far too coarse for a tapped
+        // beat.
+        const player = liveRef.current;
         const transport = transportRef.current;
-        if (transport?.playing) {
-          const at = transport.position() ?? transport.playhead;
+        const at =
+          liveOn && sel && player?.playing
+            ? sel.start + player.phase()
+            : !liveOn && transport?.playing
+              ? (transport.position() ?? transport.playhead)
+              : null;
+        if (at !== null) {
           tapRun.current = [...tapRun.current, at];
           setTaps(tapRun.current);
         }
@@ -1054,7 +1313,7 @@ export function ClipView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, redo, togglePlay, undo]);
+  }, [active, liveOn, redo, sel, togglePlay, undo]);
 
   // --- the beat grid, and what the save row says ---------------------------
   //
@@ -1079,8 +1338,8 @@ export function ClipView({
       void (async () => {
         setDetecting(true);
         try {
-          const beats = await clip.detectBeats(request, start, end);
-          if (!cancelled) setDetected({ request, start, end, beats });
+          const beats = await clip.detectBeats(dryRequest, start, end);
+          if (!cancelled) setDetected({ request: dryRequest, start, end, beats });
         } finally {
           if (!cancelled) setDetecting(false);
         }
@@ -1090,12 +1349,12 @@ export function ClipView({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [active, clip, detectDelayMs, disabled, grid, range, request]);
+  }, [active, clip, detectDelayMs, disabled, dryRequest, grid, range]);
 
   /** The measurement, only if it still describes the span being saved. */
   const measured =
     detected &&
-    detected.request === request &&
+    detected.request === dryRequest &&
     detected.start === range.start &&
     detected.end === range.end
       ? detected.beats
@@ -1162,13 +1421,74 @@ export function ClipView({
 
   // The preview belongs to the current edit only; an emptied program has none.
   const preview = program.regions.length === 0 ? null : previewState;
-  const peaks = preview?.peaks ?? [];
+  const peaks = useMemo(() => preview?.peaks ?? [], [preview]);
   /** Can the picked track be loaded stem by stem right now? */
   const stemsReady = picked?.state === 'ready';
-  /** The level lane shares the timeline's viewport (AudioTimeline uses
-   *  the same mapping), so automation stays under its audio at any zoom. */
-  const xOf = (secs: number) => (vpLen > 0 ? ((secs - vpStart) / vpLen) * W : 0);
   const noSelection = disabled || sel === null;
+
+  /** The selection pane's x-mapping: the span fills the pane, so the
+   *  level lane under it lines up beat for beat with the waveform. */
+  const laneXOf = (secs: number) =>
+    sel && sel.end > sel.start ? ((secs - sel.start) / (sel.end - sel.start)) * W : 0;
+
+  /** What the selection pane draws: the toned peaks when the live graph
+   *  has computed them, the source track's own peaks over that span
+   *  until it has (a picture arriving a moment late beats an empty one). */
+  const selPeaksShown = useMemo(() => {
+    if (liveOn && selPeaks) return selPeaks;
+    if (!sel || duration <= 0 || peaks.length === 0) return [];
+    const from = Math.max(0, Math.floor((sel.start / duration) * peaks.length));
+    const to = Math.min(peaks.length, Math.ceil((sel.end / duration) * peaks.length));
+    return peaks.slice(from, Math.max(from + 1, to));
+  }, [liveOn, selPeaks, sel, duration, peaks]);
+
+  /** Level automation, drawn against the SELECTION. Points outside it are
+   *  still in the program (and still heard) — they simply belong to a
+   *  stretch of the edit this pane is not showing. */
+  const levelLane = sel ? (
+    <svg
+      ref={laneRef}
+      data-testid="clip-level-lane"
+      className="clip-level-lane"
+      viewBox={`0 0 ${W} ${LEVEL_H}`}
+      preserveAspectRatio="none"
+      onMouseDown={addLevelPoint}
+    >
+      <polyline
+        className="clip-level-line"
+        data-testid="clip-level-line"
+        points={[
+          sel.start,
+          ...program.level.map((p) => p.time_secs).filter((t) => t > sel.start && t < sel.end),
+          sel.end,
+        ]
+          .map((t) => `${laneXOf(t)},${levelY(levelDbAt(program.level, t))}`)
+          .join(' ')}
+      />
+      {program.level.map((p, i) =>
+        p.time_secs >= sel.start - 1e-6 && p.time_secs <= sel.end + 1e-6 ? (
+          <circle
+            key={`${p.time_secs}:${i}`}
+            data-testid={`clip-level-point-${i}`}
+            className="clip-level-point"
+            cx={laneXOf(p.time_secs)}
+            cy={levelY(p.gain_db)}
+            r={7}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              beginGesture();
+              dragBase.current = removeLevelPoint(program, i);
+              setDragPoint(true);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              apply((prog) => removeLevelPoint(prog, i));
+            }}
+          />
+        ) : null,
+      )}
+    </svg>
+  ) : null;
 
   return (
     <section
@@ -1295,11 +1615,11 @@ export function ClipView({
             onSelectionChange={setSelection}
             playing={playing}
             playhead={playhead}
-            loop={loop}
+            loop={loop || sel !== null}
             onTogglePlay={togglePlay}
             onStop={stop}
             onToggleLoop={() => setLoop((v) => !v)}
-            onSeek={(t) => transportRef.current?.seek(t)}
+            onSeek={seek}
             onSelectionSlid={onSelectionSlid}
             snap={snap}
             selectionTitle={
@@ -1392,48 +1712,6 @@ export function ClipView({
             readoutExtra={
               (grid && sel ? ` · ${beatsLabel(grid, sel)}` : '') +
               (preview ? ` · ${preview.channels}ch ${preview.sample_rate} Hz` : ' · rendering…')
-            }
-            belowWave={
-              <svg
-                ref={laneRef}
-                data-testid="clip-level-lane"
-                className="clip-level-lane"
-                viewBox={`0 0 ${W} ${LEVEL_H}`}
-                preserveAspectRatio="none"
-                onMouseDown={addLevelPoint}
-              >
-                <polyline
-                  className="clip-level-line"
-                  data-testid="clip-level-line"
-                  points={
-                    program.level.length === 0
-                      ? `${xOf(vpStart)},${levelY(0)} ${xOf(vpEnd)},${levelY(0)}`
-                      : [vpStart, ...program.level.map((p) => p.time_secs), duration]
-                          .map((t) => `${xOf(t)},${levelY(levelDbAt(program.level, t))}`)
-                          .join(' ')
-                  }
-                />
-                {program.level.map((p, i) => (
-                  <circle
-                    key={`${p.time_secs}:${i}`}
-                    data-testid={`clip-level-point-${i}`}
-                    className="clip-level-point"
-                    cx={xOf(p.time_secs)}
-                    cy={levelY(p.gain_db)}
-                    r={7}
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      beginGesture();
-                      dragBase.current = removeLevelPoint(program, i);
-                      setDragPoint(true);
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      apply((prog) => removeLevelPoint(prog, i));
-                    }}
-                  />
-                ))}
-              </svg>
             }
           />
 
@@ -1540,6 +1818,32 @@ export function ClipView({
                 </span>
               )}
             </div>
+          )}
+
+          {/* THE LIVE HALF. The source track above is the reference and
+              never moves under a tone edit; this is the selection as it
+              actually sounds — stems, EQ and automation on it, looping,
+              and updating under the knob rather than after it. */}
+          {sel ? (
+            <ClipSelectionPane
+              span={sel}
+              peaks={selPeaksShown}
+              waveHeight={SEL_WAVE_H}
+              playing={playing}
+              playhead={playhead}
+              live={liveOn}
+              loading={selLoading}
+              onTogglePlay={togglePlay}
+              onSeek={seek}
+              timecode={timecode}
+              levelLane={levelLane}
+              readoutExtra={grid ? ` · ${beatsLabel(grid, sel)}` : ''}
+            />
+          ) : (
+            <p className="clip-sel-empty" data-testid="clip-selection-empty">
+              Sweep the source track to pick a span: it loops here with the stems, EQ and level
+              automation on it, live, while the track above stays as it was cut.
+            </p>
           )}
 
           <div className="clip-tools">
