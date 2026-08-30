@@ -14,6 +14,7 @@
       "instance": "bank1",
       "slot": 0,
       "level": 0.8,
+      "monitor": false,
       "arm": "queue"
     }
   ]

@@ -20,7 +20,8 @@
       "instance": "bank1",
       "slot": 0,
       "level": 0.8,
-      "mute": false
+      "mute": false,
+      "monitor": false
     },
     {
       "instance": "bank1",
@@ -29,6 +30,7 @@
       "low": 0.0,
       "high": 1.5,
       "mute": false,
+      "monitor": false,
       "tail": 1,
       "phase": 1
     }

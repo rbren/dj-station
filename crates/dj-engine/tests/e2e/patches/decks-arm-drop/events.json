@@ -15,6 +15,7 @@
       "slot": 0,
       "level": 0.8,
       "mute": false,
+      "monitor": false,
       "arm": "drop"
     }
   ]

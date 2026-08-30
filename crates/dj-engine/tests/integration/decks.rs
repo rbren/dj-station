@@ -1,5 +1,6 @@
 //! Decks bank (`builtin.decks`) tests — the engine behind the Decks tab:
-//! - a clip lands MUTED, un-shifted and stretched to the bank's tempo,
+//! - a clip lands CUED to the monitor (unmuted, off the live mix),
+//!   un-shifted and stretched to the bank's tempo,
 //! - the bank's one clock is what phase-aligns the slots: an 8-beat clip
 //!   and a 2-beat clip share a downbeat, a 6-beat one lands on the even
 //!   beats they share, and a 7-beat one is honestly reported as sharing
@@ -60,6 +61,11 @@ fn clip_ref(name: &str) -> BeatClipRef {
     }
 }
 
+/// Load a clip and park it MUTED on the LIVE pair. A fresh load lands
+/// cued — unmuted, on the monitor pair (pinned by
+/// [`a_loaded_clip_arrives_cued_and_stretched_to_the_banks_tempo`]) — but
+/// these tests drive the live mix, so the helper puts the slot where a
+/// user who has taken it off cue and muted it would.
 fn load(e: &mut Engine, slot: usize, beats: usize) {
     e.decks_load(
         "bank1",
@@ -69,6 +75,10 @@ fn load(e: &mut Engine, slot: usize, beats: usize) {
         CLIP_BPM,
     )
     .unwrap();
+    e.decks_set_control("bank1", slot, SlotControl::Monitor, 0.0)
+        .unwrap();
+    e.decks_set_control("bank1", slot, SlotControl::Mute, 10.0)
+        .unwrap();
 }
 
 /// One control-surface gesture: press and release, so the next press is a
@@ -107,10 +117,12 @@ fn a_bank_starts_empty_muted_and_silent() {
 }
 
 #[test]
-fn a_loaded_clip_arrives_muted_and_stretched_to_the_banks_tempo() {
+fn a_loaded_clip_arrives_cued_and_stretched_to_the_banks_tempo() {
     let mut e = bank();
     e.set_knob_value("bank1", "bpm", 150.0).unwrap();
-    load(&mut e, 0, 4);
+    // The raw load, not the helper: this test pins what a fresh load is.
+    e.decks_load("bank1", 0, Some(clip_ref("clip4")), clip(4, 0.5), CLIP_BPM)
+        .unwrap();
 
     let st = e.decks_status("bank1").unwrap();
     let slot = &st.slots[0];
@@ -123,22 +135,29 @@ fn a_loaded_clip_arrives_muted_and_stretched_to_the_banks_tempo() {
         "the slot reports how far it is being stretched: {}",
         slot.stretch
     );
-    assert!(slot.mute, "a clip that loaded itself loud would be a bug");
+    assert!(!slot.mute, "a fresh load is unmuted, ready in the cue");
+    assert!(
+        slot.monitor,
+        "a clip that loaded itself into the LIVE mix would be a bug: it lands on the monitor pair"
+    );
     assert_eq!((slot.phase, slot.tail), (0, 0));
 
     let out = e.render_offline(4_096).unwrap().remove(0);
-    assert!(out.iter().all(|s| *s == 0.0), "muted is muted");
+    assert!(
+        out.iter().all(|s| *s == 0.0),
+        "cued is for the headphones: the live mix stays silent"
+    );
 
-    // Unmuted it plays, and the bank's tempo is what it plays at: one
-    // second of render (the muted blocks included — the clock runs
-    // whether or not anyone is listening) is 2.5 beats at 150 BPM, so a
-    // four-beat clip is on its beat 2.
-    e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
+    // Taken off cue it plays in the room, and the bank's tempo is what it
+    // plays at: one second of render (the cued blocks included — the
+    // clock runs whether or not anyone is listening) is 2.5 beats at 150
+    // BPM, so a four-beat clip is on its beat 2.
+    e.decks_set_control("bank1", 0, SlotControl::Monitor, 0.0)
         .unwrap();
     let out = e.render_offline(48_000 - 4_096).unwrap().remove(0);
     assert!(
         out[out.len() - 1_000..].iter().any(|s| s.abs() > 0.1),
-        "an unmuted slot sounds"
+        "off cue, an unmuted slot sounds"
     );
     let st = e.decks_status("bank1").unwrap();
     assert!(
@@ -273,7 +292,7 @@ fn a_surface_column_drives_its_slot() {
 
     // The buttons are momentary on the device and TOGGLE here: a mute you
     // have to hold is not a mute.
-    assert!(st.slots[2].mute, "it loaded muted");
+    assert!(st.slots[2].mute, "the helper parked it muted");
     press(&mut e, FOCUS_NOTES[2]);
     assert!(!e.decks_status("bank1").unwrap().slots[2].mute);
     press(&mut e, FOCUS_NOTES[2]);
@@ -585,7 +604,7 @@ fn one_button_press_is_one_change_whichever_template_sends_it() {
     let note = FOCUS_NOTES[0];
     assert!(
         e.decks_status("bank1").unwrap().slots[0].mute,
-        "loads muted"
+        "the helper parked it muted"
     );
 
     // A MOMENTARY button: down then straight back up is one press.
@@ -625,8 +644,8 @@ fn the_surface_lamps_follow_mute_and_monitor() {
     let leds = e.decks_drain_leds();
     assert_eq!(leds.len(), 2, "only the slot that moved");
     let status = 0x90 | DEFAULT_SURFACE_CHANNEL;
-    // It loaded muted, and is now cued as well: red under the fader, green
-    // beside it, on the channel the device last spoke on.
+    // The helper parked it muted, and it is now cued as well: red under
+    // the fader, green beside it, on the channel the device last spoke on.
     assert_eq!(leds[0].data, [status, FOCUS_NOTES[1], led::RED]);
     assert_eq!(leds[1].data, [status, CONTROL_NOTES[1], led::GREEN]);
 

@@ -46,7 +46,8 @@ fn page_pair() -> Engine {
     e
 }
 
-/// Put a two-beat clip in slot 0 and take it off mute.
+/// Put a two-beat clip in slot 0 and send it to the LIVE mix (a fresh
+/// load lands cued to the monitor).
 fn play_clip(e: &mut Engine) {
     e.decks_load(
         "bank1",
@@ -65,6 +66,8 @@ fn play_clip(e: &mut Engine) {
         CLIP_BPM,
     )
     .unwrap();
+    e.decks_set_control("bank1", 0, SlotControl::Monitor, 0.0)
+        .unwrap();
     e.decks_set_control("bank1", 0, SlotControl::Mute, 0.0)
         .unwrap();
 }

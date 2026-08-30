@@ -92,9 +92,10 @@ pub fn decks_status(state: State<AppState>, instance: String) -> CmdResult<Decks
     engine.decks_status(&instance).map_err(err)
 }
 
-/// Assemble a Beatify clip and drop it into a slot. It arrives muted and
-/// on the bank's grid (`Engine::decks_load`); the level, tone controls and
-/// solo the slot already had stay where the user left them.
+/// Assemble a Beatify clip and drop it into a slot. It arrives cued to
+/// the monitor — unmuted, out of the live mix — and on the bank's grid
+/// (`Engine::decks_load`); the level and tone controls the slot already
+/// had stay where the user left them.
 #[tauri::command(async)]
 pub fn decks_load(
     state: State<AppState>,

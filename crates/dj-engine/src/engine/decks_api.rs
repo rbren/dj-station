@@ -253,9 +253,10 @@ impl Engine {
     /// Put a clip in a slot: the audio (assembled by the app layer), what
     /// one of its beats means, and the binding a patch will remember.
     ///
-    /// The slot lands MUTED and un-shifted, so it enters the running bank
-    /// on the shared grid — an eight-beat clip and a two-beat clip start
-    /// together — and it makes no sound until the user says so.
+    /// The slot lands CUED — unmuted, on the monitor pair — and
+    /// un-shifted, so it enters the running bank on the shared grid — an
+    /// eight-beat clip and a two-beat clip start together — and it plays
+    /// in the headphones, not the live mix, until the user says so.
     pub fn decks_load(
         &mut self,
         instance_id: &str,
@@ -309,7 +310,11 @@ impl Engine {
         if fresh {
             s.tail = 0;
             s.phase = 0;
-            s.mute = true;
+            // A fresh clip lands cued: audible in the monitor, out of the
+            // live mix, so a load never makes an unasked-for noise in the
+            // room.
+            s.mute = false;
+            s.monitor = true;
         }
         ctl.tx
             .push(DecksCmd::Load {

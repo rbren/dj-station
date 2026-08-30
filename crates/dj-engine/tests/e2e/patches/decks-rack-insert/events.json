@@ -15,7 +15,8 @@
       "slot": 0,
       "level": 0.9,
       "low": 0.4,
-      "mute": false
+      "mute": false,
+      "monitor": false
     }
   ]
 }

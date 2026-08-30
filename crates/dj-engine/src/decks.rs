@@ -399,7 +399,10 @@ pub struct DeckSlotState {
     pub mid: f32,
     #[serde(default = "unity")]
     pub high: f32,
-    /// Clips arrive muted: a load can never make an unasked-for noise.
+    /// A FRESH load arrives unmuted but cued to the monitor (see
+    /// `Engine::decks_load`), so it still makes no unasked-for noise in
+    /// the live mix. A patch that omits the field reads back muted — the
+    /// silent default an empty slot has always had.
     #[serde(default = "yes")]
     pub mute: bool,
     /// Monitor (cue): this deck leaves the live mix and comes out of the

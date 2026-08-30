@@ -43,9 +43,10 @@ pub struct TrackLoadSpec {
 }
 
 /// One Decks slot's mix and place on the bank's grid, applied AFTER its
-/// audio. Loading a clip deliberately resets a slot (muted, un-shifted),
-/// so a case that wants to hear one says so here — the same shape as a
-/// deck's grid/cues arriving after `deck_load`.
+/// audio. Loading a clip deliberately resets a slot (cued to the monitor,
+/// unmuted, un-shifted), so a case that wants to hear one on the live
+/// pair says so here — the same shape as a deck's grid/cues arriving
+/// after `deck_load`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DecksSlotSpec {
     pub instance: String,

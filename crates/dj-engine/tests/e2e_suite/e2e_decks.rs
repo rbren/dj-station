@@ -61,6 +61,8 @@ fn regen_decks_bank_two_clips() {
                     slot: 0,
                     level: Some(0.8),
                     mute: Some(false),
+                    // A fresh load lands cued; the golden is the live mix.
+                    monitor: Some(false),
                     ..slot_defaults()
                 },
                 DecksSlotSpec {
@@ -72,6 +74,7 @@ fn regen_decks_bank_two_clips() {
                     low: Some(0.0),
                     high: Some(1.5),
                     mute: Some(false),
+                    monitor: Some(false),
                     // Three beats of clip plus one of silence, shifted a
                     // beat: four against the other slot's two.
                     tail: Some(1),
@@ -134,6 +137,9 @@ fn regen_decks_arm_queue() {
                 instance: "bank1".into(),
                 slot: 0,
                 level: Some(0.8),
+                // Off the cue (a fresh load lands on the monitor pair):
+                // the queue is heard landing in the live mix.
+                monitor: Some(false),
                 arm: Some(dj_engine::decks::DeckArm::Queue),
                 ..slot_defaults()
             }],
@@ -176,6 +182,8 @@ fn regen_decks_arm_drop() {
                 slot: 0,
                 level: Some(0.8),
                 mute: Some(false),
+                // A fresh load lands cued; the golden is the live mix.
+                monitor: Some(false),
                 arm: Some(dj_engine::decks::DeckArm::Drop),
                 ..slot_defaults()
             }],
@@ -229,6 +237,8 @@ fn regen_decks_rack_insert() {
                 // the band; patched, it is 2 V of gain for the VCA.
                 low: Some(0.4),
                 mute: Some(false),
+                // A fresh load lands cued; the golden is the live mix.
+                monitor: Some(false),
                 ..slot_defaults()
             }],
             ..EventsFile::default()
@@ -274,6 +284,8 @@ fn regen_decks_insert_wet() {
                 instance: "bank1".into(),
                 slot: 0,
                 mute: Some(false),
+                // A fresh load lands cued; the golden is the live mix.
+                monitor: Some(false),
                 wet: Some(0.5),
                 insert_monitor: Some(true),
                 ..slot_defaults()
@@ -333,6 +345,8 @@ fn regen_decks_master_mix() {
                     slot: 0,
                     level: Some(1.0),
                     mute: Some(false),
+                    // A fresh load lands cued; this is the deck in the room.
+                    monitor: Some(false),
                     ..slot_defaults()
                 },
                 DecksSlotSpec {
