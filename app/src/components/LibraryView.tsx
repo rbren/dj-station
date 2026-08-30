@@ -20,6 +20,21 @@ const ANALYSIS_POLL_MS = 2000;
 // Downloads are backend threads (yt-dlp can run for minutes); poll their
 // progress only while something is in flight.
 const DOWNLOAD_POLL_MS = 500;
+// The Downloads panel is a status line, not a history: at most this many
+// finished outcomes, newest first. In-flight jobs (queued included — a
+// running job's stage says which) always show, over and above the cap.
+const RECENT_DOWNLOADS_SHOWN = 3;
+
+// Newest first, every in-flight job, and only the most recent finished few.
+function visibleJobs(jobs: DownloadJob[]): DownloadJob[] {
+  const shown: DownloadJob[] = [];
+  let finished = 0;
+  for (const job of [...jobs].reverse()) {
+    if (job.state !== 'running' && finished++ >= RECENT_DOWNLOADS_SHOWN) continue;
+    shown.push(job);
+  }
+  return shown;
+}
 
 function formatDuration(secs: number | null): string {
   if (secs == null || !Number.isFinite(secs)) return '—';
@@ -375,7 +390,7 @@ export function LibraryView({ client, onEdit }: LibraryViewProps) {
         <div className="download-queue" data-testid="download-queue">
           <h2>Recent downloads</h2>
           <ul>
-            {[...jobs].reverse().map((job) => (
+            {visibleJobs(jobs).map((job) => (
               <DownloadRow key={job.id} job={job} />
             ))}
           </ul>

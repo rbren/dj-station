@@ -451,6 +451,32 @@ describe('LibraryView', () => {
     expect(screen.queryByTestId('library-status')).toBeNull();
   });
 
+  it('caps the Downloads panel at the 3 most recent finished jobs plus anything in flight', async () => {
+    // Five finished jobs and one still queued/running: the panel shows the
+    // running one plus only the three newest outcomes.
+    const jobs: DownloadJob[] = [
+      ...[1, 2, 3, 4, 5].map((id) =>
+        doneJob({ id, result_id: `${id}`, title: `finished ${id}`, track_id: id }),
+      ),
+      doneJob({
+        id: 6,
+        result_id: '6',
+        title: 'still coming',
+        state: 'running',
+        fraction: null,
+        stage: 'queued',
+        track_id: null,
+      }),
+    ];
+    const client = mockClient({ downloadJobs: vi.fn().mockResolvedValue(jobs) });
+    render(<LibraryView client={client} />);
+    await waitFor(() => expect(screen.getByTestId('download-queue')).toBeTruthy());
+    const titles = screen
+      .getAllByTestId('download-job')
+      .map((row) => row.querySelector('.download-job-title')?.textContent);
+    expect(titles).toEqual(['still coming', 'finished 5', 'finished 4', 'finished 3']);
+  });
+
   it('shows a loading state while a store search is in flight', async () => {
     let resolveSearch!: (r: TrackResult[]) => void;
     const client = mockClient({
