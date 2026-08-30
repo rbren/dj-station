@@ -2389,6 +2389,17 @@ of the page.
   colour only (the transition dies in the `prefers-reduced-motion`
   block) and the background keeps a small share of `--ok`, because the
   strip's `--ink-dim` text has to stay readable on it.
+- SFT IS ALSO A TAP: a strip's shift label is a button, and pressing it
+  puts that deck's FIRST BEAT on the beat nearest the press
+  (`phaseForBeat` in `decks.ts` — the slot's playhead is `beat - phase`,
+  so the shift IS the bank beat the press rounds to, wrapped into one
+  loop length the way `decks_set_phase` wraps it) — applied down the same
+  `onPhase` path as the arrows either side, which stay the beat-at-a-time
+  trim. "Now" is NOT the poll's reading: `DecksView` keeps the last
+  reading and the moment it landed in a ref and carries it forward at the
+  bank's tempo (`beatNow`, handed to the strip), because a status 100 ms
+  old is a fifth of a beat at 120 bpm — enough to round onto the wrong
+  beat. A stopped bank is parked, so its reading is already now.
 - State ownership: `decks_status` is the single poll (the engine owns
   phase, stretch, `insert` and `tone_patched` — never recompute them in
   the page), and the only local state is a DRAFT of the control being

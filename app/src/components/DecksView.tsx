@@ -151,6 +151,13 @@ export function DecksView(props: DecksViewProps) {
   const [bpmDraft, setBpmDraft] = useState<number | null>(null);
   const [masterDrafts, setMasterDrafts] = useState<Partial<Record<MasterBus, number>>>({});
   const rehydrated = useRef(false);
+  // Where the bank's grid is BETWEEN polls: the last reading and the
+  // moment it landed. A control that means "now" — clicking a strip's
+  // SFT label — cannot read a status a tenth of a second old, because
+  // that is a fifth of a beat at 120 bpm and enough to round onto the
+  // wrong beat; so the reading is carried forward at the tempo it came
+  // with. Nothing is DRAWN from this, so it stays a ref.
+  const clock = useRef<{ beat: number; bpm: number; running: boolean; at: number } | null>(null);
   const [collapsed, setCollapsed] = useState(
     () => loadJson<boolean>(DOCK_COLLAPSED_KEY, false) === true,
   );
@@ -165,6 +172,7 @@ export function DecksView(props: DecksViewProps) {
     if (!bank) return;
     const st = await api.status(bank);
     if (!st) return;
+    clock.current = { beat: st.beat, bpm: st.bpm, running: st.running, at: performance.now() };
     setStatus(st);
     // A draft the engine has caught up with is no longer a draft.
     setDrafts((live) => {
@@ -281,6 +289,16 @@ export function DecksView(props: DecksViewProps) {
     },
     [poll],
   );
+
+  // The bank's beat position right now: the last poll's reading plus the
+  // beats that have gone by since it landed. A stopped bank is parked, so
+  // its reading is already now.
+  const beatNow = useCallback(() => {
+    const c = clock.current;
+    if (!c) return 0;
+    if (!c.running) return c.beat;
+    return c.beat + ((performance.now() - c.at) / 1000) * (c.bpm / 60);
+  }, []);
 
   const setControl = useCallback(
     (slot: number, control: SlotControl, value: number) => {
@@ -606,6 +624,7 @@ export function DecksView(props: DecksViewProps) {
                 onArm={(arm) => void write(() => api.arm(bank, slot.slot, arm))}
                 onTail={(tail) => void write(() => api.setTail(bank, slot.slot, Math.max(0, tail)))}
                 onPhase={(phase) => void write(() => api.setPhase(bank, slot.slot, phase))}
+                beatNow={beatNow}
                 onRelease={() => void api.endEdit()}
                 onJack={onJack}
                 isArmed={isArmed}

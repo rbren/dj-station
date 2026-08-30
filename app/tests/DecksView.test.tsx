@@ -458,6 +458,47 @@ describe('DecksView', () => {
     expect(empty.getByLabelText('Shift deck 5 on one beat').hasAttribute('disabled')).toBe(true);
   });
 
+  it("clicking SFT puts the deck's first beat on the beat nearest the click", async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    // An 8-beat loop, so a shift of 8 or more comes back round.
+    slots[1] = loadedSlot(1, { phase: 0 });
+    const api = makeApi(makeStatus({ slots, beat: 5.6 }));
+    show(api);
+    await waitFor(() => expect(screen.getByTestId('decks-phase-now-1')).toBeTruthy());
+
+    // The bank is at beat 5.6, so the beat nearest the click is 6.
+    fireEvent.click(screen.getByTestId('decks-phase-now-1'));
+    await waitFor(() => expect(api.setPhase).toHaveBeenCalledWith('decks1', 1, 6));
+
+    // An empty deck has no first beat to place.
+    expect(screen.getByTestId('decks-phase-now-4').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('a click past the end of the loop wraps into it, like the arrows do', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    // Loop of 10: eight clip beats and two of silence.
+    slots[1] = loadedSlot(1, { tail: 2 });
+    const api = makeApi(makeStatus({ slots, beat: 26.6 }));
+    show(api);
+    await waitFor(() => expect(screen.getByTestId('decks-phase-now-1')).toBeTruthy());
+
+    // Nearest beat 27, which is beat 7 of this deck's ten-beat loop.
+    fireEvent.click(screen.getByTestId('decks-phase-now-1'));
+    await waitFor(() => expect(api.setPhase).toHaveBeenCalledWith('decks1', 1, 7));
+  });
+
+  it('a stopped bank is parked, so a click lands on the beat it stands on', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    slots[1] = loadedSlot(1, { phase: 3 });
+    const api = makeApi(makeStatus({ slots, running: false, beat: 6.4 }));
+    show(api);
+    await waitFor(() => expect(screen.getByTestId('decks-phase-now-1')).toBeTruthy());
+
+    // Nothing is carried forward from the reading: the clock is not moving.
+    fireEvent.click(screen.getByTestId('decks-phase-now-1'));
+    await waitFor(() => expect(api.setPhase).toHaveBeenCalledWith('decks1', 1, 6));
+  });
+
   it('names the two steppers in three letters, with the word in their tooltips', async () => {
     const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
     slots[1] = loadedSlot(1);
@@ -471,10 +512,14 @@ describe('DecksView', () => {
     expect(label('decks-phase-1').textContent).toBe('SFT');
     expect(label('decks-phase-1').getAttribute('title')).toContain('Shift');
     // Same four cells in the same order in both rows — that is what puts
-    // one row's buttons under the other's.
+    // one row's buttons under the other's. Only the ELEMENT of the first
+    // cell differs: SFT's label is a button (click it on the beat), SIL's
+    // is a plain word.
     const shape = (testId: string) =>
-      [...screen.getByTestId(testId).children].map((c) => `${c.tagName}.${c.className}`);
+      [...screen.getByTestId(testId).children].map((c) => c.className);
     expect(shape('decks-phase-1')).toEqual(shape('decks-tail-1'));
+    expect(label('decks-phase-1').tagName).toBe('BUTTON');
+    expect(label('decks-tail-1').tagName).toBe('SPAN');
   });
 
   it('the tempo drives the whole bank, and the drag ends as one edit', async () => {

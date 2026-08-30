@@ -269,6 +269,19 @@ export function loopBeats(slot: DeckSlotStatus): number {
   return slot.beats === 0 ? 0 : slot.beats + slot.tail;
 }
 
+/** The shift that lands a slot's FIRST beat on the beat NEAREST a moment
+ *  on the bank's grid — what clicking a strip's SFT label sets, from
+ *  where the bank's beat counter stood at the click. A slot's playhead is
+ *  `beat - phase` wrapped by its loop, so its first beat comes round
+ *  wherever the bank passes `phase`; the bank counts beats fractionally,
+ *  so "nearest" is a round, and the answer is kept inside one loop length
+ *  the way `decks_set_phase` keeps it. */
+export function phaseForBeat(slot: DeckSlotStatus, beat: number): number {
+  const len = loopBeats(slot);
+  if (len <= 0 || !Number.isFinite(beat)) return 0;
+  return ((Math.round(beat) % len) + len) % len;
+}
+
 /** Output RMS a strip is as green as it gets at — a deck running hot,
  *  about −9 dBFS. Above it the tint simply stops, so a loud deck cannot
  *  keep getting greener and lose the difference between the others. */

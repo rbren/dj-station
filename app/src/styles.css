@@ -6377,17 +6377,29 @@ body {
   gap: 3px;
 }
 
+/* SIL's label is a word; SFT's is a BUTTON too — tap it on the beat the
+   deck should start on — so the rule has to survive being one and still
+   read as the label beside it, not as a third stepper button. */
 .decks-step-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
   color: var(--ink-dim);
   font-size: var(--fs-nano);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.decks-step button {
+/* The only sign it is pressable; the tooltip says what for. */
+.decks-step-label:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.decks-step button:not(.decks-step-label) {
   padding: 0;
   line-height: 1.6;
   font-size: var(--fs-xs);

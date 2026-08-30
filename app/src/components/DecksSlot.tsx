@@ -37,6 +37,7 @@ import {
   clipTitle,
   deckGlow,
   loopBeats,
+  phaseForBeat,
   returnJack,
   sendJack,
   tempoLabel,
@@ -68,6 +69,11 @@ export interface DecksSlotProps {
   onArm(arm: DeckArm): void;
   onTail(tail: number): void;
   onPhase(phase: number): void;
+  /** Where the bank's beat counter stands AT THE MOMENT IT IS CALLED —
+   *  the poll's reading carried forward at the bank's tempo, since a
+   *  press means "now" and a reading can be a poll old. Clicking SFT
+   *  turns it into a shift. */
+  beatNow(): number;
   onRelease(): void;
   /** Arm/complete/unplug a wire at one of this deck's jacks (the Rack
    *  tab's own jack-click grammar; shift unplugs). */
@@ -349,13 +355,22 @@ export function DecksSlot(props: DecksSlotProps) {
               +
             </button>
           </div>
+          {/* The label is the third way to shift a deck, and the one a
+              hand can use in time: TAP IT ON THE BEAT the clip should
+              start on and the deck's first beat moves to the nearest beat
+              of the bank's grid — the arrows either side stay the beat-
+              at-a-time trim. */}
           <div className="decks-step" data-testid={`decks-phase-${slot.slot}`}>
-            <span
+            <button
               className="decks-step-label"
-              title="Shift: where this deck sits on the bank's grid, in beats"
+              data-testid={`decks-phase-now-${slot.slot}`}
+              disabled={empty}
+              aria-label={`Put deck ${n}'s first beat on the beat nearest this click`}
+              title="Shift: where this deck sits on the bank's grid, in beats — click on the beat you want this deck to start on"
+              onClick={() => props.onPhase(phaseForBeat(slot, props.beatNow()))}
             >
               SFT
-            </span>
+            </button>
             <button
               aria-label={`Shift deck ${n} back one beat`}
               disabled={empty}
