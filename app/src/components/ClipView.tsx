@@ -1,5 +1,5 @@
-// Clip page (PRD §9): load a library track, cut/splice/reverse/EQ it and
-// automate its level, then save a span of the edit as a BEAT CLIP —
+// Clip page (PRD §9): load a library track, splice it and automate its
+// level, then save a span of the edit as a BEAT CLIP —
 // whole beats at a known tempo, loadable into the decks and the rack's
 // Beat Clip module.
 //
@@ -19,17 +19,17 @@
 //
 // TWO PANES, TWO JOBS. The SOURCE TRACK at the top is the reference —
 // the material as it was cut, with the beat grid, the joins and the
-// selection drawn on it. Its waveform is the DRY render (no EQ, no
-// level), so it never moves under a tone edit: that is what makes it
-// something to cut against. The SELECTION PANE below it is the result —
-// the chosen span as it actually sounds, with the level automation lane
-// under it, looping, and updating under the knob rather than after it.
+// selection drawn on it. Its waveform is the DRY render (no level), so
+// it never moves under a tone edit: that is what makes it something to
+// cut against. The SELECTION PANE below it is the result — the chosen
+// span as it actually sounds, with the level automation lane under it,
+// looping, and updating under the hand rather than after it.
 // Clearing the selection takes the pane away and hands playback back to
 // the source track.
 //
 // That split is also what makes the page quick. Tone is applied in the
-// webview (clipLive.ts) instead of being baked into a render, so an EQ
-// move or a dragged level point is a parameter change on running audio —
+// webview (clipLive.ts) instead of being baked into a render, so a
+// dragged level point is a parameter change on running audio —
 // no render, no IPC, no gap — while the backend is asked only for
 // MATERIAL (the timeline, the stems), and even then the old audio plays
 // on until the new is decoded and cross-faded in.
@@ -81,14 +81,9 @@ import {
   beatSpan,
   clearLevel,
   composeWarp,
-  cutRange,
   dropGrid,
-  duplicateRange,
   emptyProgram,
   extendGrid,
-  fadeIn,
-  fadeOut,
-  gainRange,
   gridBeatTimes,
   gridOneTimes,
   levelDbAt,
@@ -98,7 +93,6 @@ import {
   quantizeRange,
   regionSpans,
   removeLevelPoint,
-  reverseRange,
   setLevelPoint,
   sourceLabel,
   sourceRef,
@@ -107,7 +101,6 @@ import {
   stemWait,
   stretchBands,
   tapGrid,
-  trimTo,
   warpSource,
   type ClipBeats,
   type ClipClientApi,
@@ -141,7 +134,6 @@ import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
 import { AudioTimeline, viewSpan, type TimelineSnap } from './AudioTimeline';
 import { ClipSelectionPane } from './ClipSelectionPane';
-import { ClipEqUI } from './ClipEqUI';
 import { WAVEFORM_VIEW_W as W } from './WaveformView';
 
 const WAVE_H = 120;
@@ -160,7 +152,12 @@ const PREVIEW_DELAY_MS = 350;
  *  consecutive windows for longer clips. */
 const PLAY_WINDOW_SECS = 60;
 const LEVEL_MAX_DB = 6;
-const FADE_SECS = 2;
+/** How near a whole beat counts AS that beat. A selection is chosen by
+ *  hand or snapped to a grid whose beats carry the tapping's flam, so the
+ *  fraction left over is arithmetic, not intent: anything inside a
+ *  hundredth of a beat rounds down rather than growing a beat of
+ *  silence. */
+const BEAT_EPS = 0.01;
 /** Undo depth for clip edits (page-local; unrelated to patch undo). */
 const HISTORY_DEPTH = 49;
 /** How often the picked track's stems are asked after. Separation is
@@ -243,7 +240,7 @@ type TapSession = {
   beats: number[];
   /** What the session put ON the program. The grid is the session's
    *  IDENTITY: its controls apply as long as the present program still
-   *  carries it — a tone edit (EQ, automation) keeps the grid and must
+   *  carries it — a tone edit (level automation) keeps the grid and must
    *  not silently end the session, while any timeline edit drops it. */
   grid: ClipGrid;
   /** The session's OWN warp, before composition with `base.warp`: the
@@ -283,15 +280,6 @@ function statsLine(s: TapStats): string {
     `tap miss ${ms(s.maxMissSecs)}/${ms(s.avgMissSecs)} ms · ` +
     `${s.beats} beats from ${s.taps} taps`
   );
-}
-
-/** "4 beats selected", fractional (to one decimal) when an end sits off
- *  the grid. */
-function beatsLabel(grid: ClipGrid, sel: Range): string {
-  const b = beatSpan(grid, sel.start, sel.end);
-  const whole = Math.abs(b - Math.round(b)) < 0.01;
-  const shown = whole ? String(Math.round(b)) : b.toFixed(1);
-  return `${shown} ${shown === '1' ? 'beat' : 'beats'} selected`;
 }
 
 /** What one grid control changed about the session (everything else is
@@ -418,6 +406,17 @@ export function ClipView({
    *  it and sounds over the loop's end. Each control sits at the edge its
    *  material comes from. */
   const [bleed, setBleed] = useState({ left: 0, right: 0 });
+  /** WHAT THE LAST SAVE FILED. The tick beside the save buttons is this
+   *  agreeing with what the page holds now, so it goes out by itself the
+   *  moment anything that would be filed differently moves. */
+  const [filed, setFiled] = useState<{
+    request: ClipRequest;
+    name: string;
+    range: Range;
+    bleed: { left: number; right: number };
+  } | null>(null);
+  /** The selection edges the bleed in hand was dialled against. */
+  const bleedEdges = useRef<Range | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -475,12 +474,12 @@ export function ClipView({
   const sourceRefs = useMemo(() => sources.map(sourceRef), [sources]);
   const request = useMemo(() => ({ sources: sourceRefs, program }), [sourceRefs, program]);
 
-  // THE DRY EDIT: the timeline with no tone on it. Tone (EQ, level) is
+  // THE DRY EDIT: the timeline with no tone on it. Tone (level) is
   // applied LIVE in the webview (clipLive.ts), so the backend must not be
   // asked to bake it in — and, more to the point, this request's identity
-  // does not move when a knob does, which is what keeps the source
+  // does not move when a point does, which is what keeps the source
   // track's waveform still, the render memo warm and playback unbroken
-  // through a whole EQ session. The full `request` above is what the SAVE
+  // through a whole automation pass. The full `request` above is what the SAVE
   // sends (and what the fallback audition path plays, where there is no
   // live graph to apply tone).
   const { regions, crossfade_ms, warp, warp_smoothing, beat_grid } = program;
@@ -505,9 +504,9 @@ export function ClipView({
   // Playback belongs to one of exactly two objects, and never to both:
   //
   //   - a SELECTION is auditioned by ClipLivePlayer (src/clipLive.ts): the
-  //     dry span is fetched once and loops in a Web Audio graph whose EQ
-  //     and level automation move under the audio, so a knob costs no
-  //     render and playback never stops;
+  //     dry span is fetched once and loops in a Web Audio graph whose
+  //     level automation moves under the audio, so a dragged point costs
+  //     no render and playback never stops;
   //   - with NOTHING selected the source track plays through ClipTransport
   //     (src/clipTransport.ts), which streams rendered windows of the
   //     whole edit — the same owner (and the same four invariants) the
@@ -775,7 +774,8 @@ export function ClipView({
   // Debounced preview render: the source track's peaks are the real
   // rendered output, not a client-side guess. It is the DRY render — the
   // material as it was cut — so the waveform you are editing against
-  // holds still while EQ and level move. What those do to the audio is
+  // holds still while the level automation moves. What that does to the
+  // audio is
   // drawn under the selection instead.
   useEffect(() => {
     if (program.regions.length === 0 || sources.length === 0) return;
@@ -822,8 +822,8 @@ export function ClipView({
     [apply],
   );
 
-  /** Snapshot for gestures (level-point and EQ drags) that then stream
-   *  edits through setProgram directly. */
+  /** Snapshot for gestures (level-point drags) that then stream edits
+   *  through setProgram directly. */
   const beginGesture = useCallback(() => {
     setPast((h) => [...h.slice(-HISTORY_DEPTH), program]);
     setFuture([]);
@@ -855,8 +855,8 @@ export function ClipView({
   // A session is live while the GRID IT MADE is the one on the program.
   // Whole-program identity used to gate this, which quietly ended the
   // session at the first tone edit: a stray click in the automation lane
-  // or a nudge of an EQ band left the grid drawn and every one of its
-  // controls dead until the next tapping pass. Tone edits do not touch
+  // left the grid drawn and every one of its controls dead until the
+  // next tapping pass. Tone edits do not touch
   // the grid, and the timeline edits that would invalidate it drop it
   // (`dropGrid`), so the grid IS the session's lifetime.
   const tunable = tapSession !== null && program.beat_grid === tapSession.grid;
@@ -982,7 +982,7 @@ export function ClipView({
    *  The change lands on the audio straight away — swapping the loaded
    *  lane for the new mix — rather than waiting for another Open. Stems
    *  are the same length as the track they came from, so the edit itself
-   *  (regions, level, EQ) survives untouched: only what those regions are
+   *  (regions, level) survives untouched: only what those regions are
    *  made of changes. A load that fails leaves the switches as they were,
    *  so the panel never claims a mix that isn't playing.
    */
@@ -1192,6 +1192,7 @@ export function ClipView({
         setTapSession(null);
         setVp(null);
         setSelection({ start: open.startSecs, end: open.endSecs });
+        bleedEdges.current = { start: open.startSecs, end: open.endSecs };
         setBleed({ left: open.leftBleedMs, right: open.rightBleedMs });
         setName(open.name);
         setEditing({ clipId: open.clipId });
@@ -1311,7 +1312,28 @@ export function ClipView({
     liveRef.current?.setBleed(bleed.left, bleed.right);
   }, [bleed]);
 
-  // TONE IS NOT A RENDER. EQ and level go straight into the running graph
+  // A BLEED BELONGS TO THE EDGE IT WAS DIALLED AT. Move that edge and the
+  // material behind it is different audio, so the milliseconds set by ear
+  // no longer mean anything: each side resets when — and only when — its
+  // own edge moves. `bleedEdges` is written by whoever else sets the two
+  // together (opening a saved clip), so a restored bleed is not read as a
+  // moved edge.
+  useEffect(() => {
+    const prev = bleedEdges.current;
+    const now = sel ? { start: sel.start, end: sel.end } : null;
+    bleedEdges.current = now;
+    if (!prev || !now) return;
+    const left = Math.abs(prev.start - now.start) > 1e-6;
+    const right = Math.abs(prev.end - now.end) > 1e-6;
+    if (!left && !right) return;
+    setBleed((b) =>
+      (left && b.left !== 0) || (right && b.right !== 0)
+        ? { left: left ? 0 : b.left, right: right ? 0 : b.right }
+        : b,
+    );
+  }, [sel]);
+
+  // TONE IS NOT A RENDER. Level goes straight into the running graph
   // — no fetch, no gap, and the drag that produced them is still under
   // the user's finger.
   useEffect(() => {
@@ -1368,7 +1390,7 @@ export function ClipView({
   // - the MATERIAL (a stem switched): the timeline still means what it
   //   meant, so re-render in place and swap — a stem toggle used to stop
   //   playback dead and wait for a press of ▶;
-  // - TONE (EQ, level): nothing to do here at all where the live graph
+  // - TONE (level): nothing to do here at all where the live graph
   //   owns playback. Only the fallback path re-renders for it.
   const lastRequest = useRef(dryRequest);
   useEffect(() => {
@@ -1390,7 +1412,7 @@ export function ClipView({
 
   // With no live graph in the path, tone is still something the backend
   // has to bake in: re-render the playing window, debounced, without
-  // stopping (pausing for an EQ tweak makes the control useless).
+  // stopping (pausing for a level tweak makes the control useless).
   const lastTone = useRef(request.program);
   useEffect(() => {
     const prev = lastTone.current;
@@ -1513,56 +1535,70 @@ export function ClipView({
       ? detected.beats
       : null;
 
-  /** BPM + whole beats for the save row: the tapped grid's when there is
+  /** BPM + whole beats for the span: the tapped grid's when there is
    *  one, the tracker's otherwise. `padded` says the span was fractional
    *  and the last beat will be filled with silence. Against a grid the
    *  count comes from its ACTUAL beats (`beatSpan`) — a selection
    *  quantized to two beats IS two, even where flam makes its seconds
    *  run a hair long — and the save sends this count, so the clip filed
-   *  is the clip this row showed. */
+   *  is the clip the page showed.
+   *
+   *  The rounding is deliberately blunt: a hundredth of a beat is far
+   *  below anything anyone chose, so a span that is four beats bar a
+   *  float's worth of error is FOUR, not five padded with silence. */
   const tempo = useMemo(() => {
     const span = range.end - range.start;
     if (span <= 0) return null;
     const of = (bpm: number, beatsF: number) => {
-      const beats = Math.max(1, Math.ceil(beatsF - 1e-6));
-      return { bpm, beats, padded: beats - beatsF > 1e-6 };
+      const beats = Math.max(1, Math.ceil(beatsF - BEAT_EPS));
+      return { bpm, beats, padded: beats - beatsF > BEAT_EPS };
     };
     if (grid) return of(grid.bpm, beatSpan(grid, range.start, range.end));
     return measured ? of(measured.bpm, (span * measured.bpm) / 60) : null;
   }, [grid, measured, range]);
 
-  const save = useCallback(async () => {
-    if (!tempo) return;
-    setBusy(true);
-    setError(null);
-    setStatus(null);
-    try {
-      const revising = editing?.clipId ?? null;
-      const saved = await clip.saveBeatClip(
-        request,
-        name,
-        range.start,
-        range.end,
-        tempo.bpm,
-        tempo.beats,
-        bleed.left,
-        bleed.right,
-        revising,
-      );
-      if (saved) {
-        // The page now works ON the clip it filed: saving again revises
-        // it, until a different track is picked up top.
-        setEditing({ clipId: saved.id });
-        const what = revising ? 'Updated' : 'Saved';
-        setStatus(
-          `${what} "${saved.name}" — ${saved.beats} ${saved.beats === 1 ? 'beat' : 'beats'} at ` +
-            `${fixed(saved.bpm, 1)} BPM, ready for the decks' clip pickers`,
+  /** File the span: OVER the clip this page is editing, or as a new one.
+   *  Overwriting is only offered once there is something to overwrite,
+   *  and either way the page ends up bound to what it filed. */
+  const save = useCallback(
+    async (overwrite: boolean) => {
+      if (!tempo) return;
+      setBusy(true);
+      setError(null);
+      setStatus(null);
+      setFiled(null);
+      try {
+        const saved = await clip.saveBeatClip(
+          request,
+          name,
+          range.start,
+          range.end,
+          tempo.bpm,
+          tempo.beats,
+          bleed.left,
+          bleed.right,
+          overwrite ? (editing?.clipId ?? null) : null,
         );
+        if (saved) {
+          // The page now works ON the clip it filed: saving again can
+          // revise it, until a different track is picked up top.
+          setEditing({ clipId: saved.id });
+          setFiled({ request, name, range, bleed });
+        }
+      } finally {
+        setBusy(false);
       }
-    } finally {
-      setBusy(false);
-    }
-  }, [bleed, clip, editing, name, range, request, tempo]);
+    },
+    [bleed, clip, editing, name, range, request, tempo],
+  );
+
+  /** Is what the page holds now exactly what the last save filed? */
+  const savedNow =
+    filed !== null &&
+    filed.request === request &&
+    filed.name === name &&
+    filed.range === range &&
+    filed.bleed === bleed;
 
   // Selections quantize to the tapped grid; AudioTimeline reads ⌘ live
   // and skips these, which is how the window is dragged off the beat.
@@ -1584,7 +1620,49 @@ export function ClipView({
   const peaks = useMemo(() => preview?.peaks ?? [], [preview]);
   /** Can the picked track be loaded stem by stem right now? */
   const stemsReady = picked?.state === 'ready';
-  const noSelection = disabled || sel === null;
+
+  /** WHAT THE SPAN IS, in one line over the pane: the beats it will be
+   *  filed as, its length, its ends and its tempo. The count is `tempo`'s
+   *  — the very number the save sends — so the page cannot show one beat
+   *  count here and file another. Its length and ends are known whatever
+   *  the tempo is, and are written even while that is being measured. */
+  const selHeading = sel ? (
+    <>
+      {tempo ? `Selected ${tempo.beats} ${tempo.beats === 1 ? 'beat' : 'beats'} · ` : ''}
+      {`${timecode(sel.end - sel.start)} · ${timecode(sel.start)}–${timecode(sel.end)} · `}
+      {tempo ? (
+        <>
+          {`${fixed(tempo.bpm, 1)} bpm`}
+          {grid ? '' : ' (measured)'}
+          {tempo.padded && (
+            <span
+              className="clip-sel-padded"
+              title="the span is fractional: the last beat is filled with silence"
+            >
+              {' '}
+              last beat filled with silence
+            </span>
+          )}
+        </>
+      ) : detecting ? (
+        'measuring the tempo…'
+      ) : (
+        'no tempo yet — tap beats with right-shift during playback'
+      )}
+    </>
+  ) : null;
+
+  /** The grid drawn ON the selection: the beats (and ones) inside the
+   *  pane's window, bookends included, so the picture of the result is
+   *  read against the same grid the source track above is cut on. */
+  const selBeats = useMemo(
+    () => (grid && laneRange ? gridBeatTimes(grid, laneRange.start, laneRange.end) : undefined),
+    [grid, laneRange],
+  );
+  const selOnes = useMemo(
+    () => (grid && laneRange ? gridOneTimes(grid, laneRange.start, laneRange.end) : undefined),
+    [grid, laneRange],
+  );
 
   /** The selection pane's x-mapping: the span AND its bookends fill the
    *  pane, so the level lane under it lines up with the waveform piece
@@ -1762,7 +1840,6 @@ export function ClipView({
           role="group"
           aria-label="Stems"
         >
-          <span>Stems</span>
           {(backend?.stems ?? STEM_NAMES).map((name) => {
             const on = stemsOn.includes(name);
             return (
@@ -1784,11 +1861,7 @@ export function ClipView({
             );
           })}
         </div>
-        {stemsReady ? (
-          <span className="clip-stem-ready" data-testid="clip-stem-ready">
-            stems ready ({picked?.backend ?? backend?.backend})
-          </span>
-        ) : picked?.state === 'loading' ? (
+        {stemsReady ? null : picked?.state === 'loading' ? (
           <span className="clip-stem-loading" data-testid="clip-stem-loading">
             Stems are loading…{picked.stage ? ` (${picked.stage})` : ''}
             {picked.pending > 1 ? ` · ${picked.pending} tracks queued` : ''}
@@ -1936,10 +2009,6 @@ export function ClipView({
                 ))}
               </>
             )}
-            readoutExtra={
-              (grid && sel ? ` · ${beatsLabel(grid, sel)}` : '') +
-              (preview ? ` · ${preview.channels}ch ${preview.sample_rate} Hz` : ' · rendering…')
-            }
           />
 
           {grid && (
@@ -2047,10 +2116,12 @@ export function ClipView({
             </div>
           )}
 
+          <hr className="clip-rule" />
+
           {/* THE LIVE HALF. The source track above is the reference and
               never moves under a tone edit; this is the selection as it
-              actually sounds — stems, EQ and automation on it, looping,
-              and updating under the knob rather than after it. */}
+              actually sounds — stems and automation on it, looping, and
+              updating under the hand rather than after it. */}
           {sel ? (
             <ClipSelectionPane
               span={sel}
@@ -2063,112 +2134,34 @@ export function ClipView({
                     }
                   : undefined
               }
+              beats={selBeats}
+              ones={selOnes}
               waveHeight={SEL_WAVE_H}
               playing={playing}
               playhead={playhead}
-              live={liveOn}
               loading={selLoading}
               onTogglePlay={togglePlay}
               onSeek={seek}
               timecode={timecode}
               levelLane={levelLane}
               bookends={{ left: bleedBookend('left'), right: bleedBookend('right') }}
-              readoutExtra={grid ? ` · ${beatsLabel(grid, sel)}` : ''}
+              title={selHeading}
+              actions={
+                <button
+                  data-testid="clip-clear-level"
+                  disabled={program.level.length === 0}
+                  onClick={() => apply(clearLevel)}
+                >
+                  Clear automation
+                </button>
+              }
             />
           ) : (
             <p className="clip-sel-empty" data-testid="clip-selection-empty">
-              Sweep the source track to pick a span: it loops here with the stems, EQ and level
+              Sweep the source track to pick a span: it loops here with the stems and level
               automation on it, live, while the track above stays as it was cut.
             </p>
           )}
-
-          <div className="clip-tools">
-            <button
-              data-testid="clip-trim"
-              disabled={noSelection}
-              onClick={() => {
-                if (!sel) return;
-                applyTimeline((p, at) => trimTo(p, at(sel.start), at(sel.end)));
-                setSelection(null);
-              }}
-            >
-              Trim to selection
-            </button>
-            <button
-              data-testid="clip-cut"
-              disabled={noSelection}
-              onClick={() => {
-                if (!sel) return;
-                applyTimeline((p, at) => cutRange(p, at(sel.start), at(sel.end)));
-                setSelection(null);
-              }}
-            >
-              Cut selection
-            </button>
-            <button
-              data-testid="clip-reverse"
-              disabled={noSelection}
-              onClick={() =>
-                sel && applyTimeline((p, at) => reverseRange(p, at(sel.start), at(sel.end)))
-              }
-            >
-              Reverse
-            </button>
-            <button
-              data-testid="clip-duplicate"
-              disabled={noSelection}
-              onClick={() =>
-                sel && applyTimeline((p, at) => duplicateRange(p, at(sel.start), at(sel.end)))
-              }
-            >
-              Duplicate
-            </button>
-            <button
-              data-testid="clip-louder"
-              disabled={noSelection}
-              onClick={() =>
-                sel && applyTimeline((p, at) => gainRange(p, at(sel.start), at(sel.end), 3))
-              }
-            >
-              +3 dB
-            </button>
-            <button
-              data-testid="clip-quieter"
-              disabled={noSelection}
-              onClick={() =>
-                sel && applyTimeline((p, at) => gainRange(p, at(sel.start), at(sel.end), -3))
-              }
-            >
-              −3 dB
-            </button>
-            <button
-              data-testid="clip-fade-in"
-              disabled={disabled}
-              onClick={() => apply((p) => fadeIn(p, FADE_SECS))}
-            >
-              Fade in
-            </button>
-            <button
-              data-testid="clip-fade-out"
-              disabled={disabled}
-              onClick={() => apply((p) => fadeOut(p, FADE_SECS))}
-            >
-              Fade out
-            </button>
-            <button
-              data-testid="clip-clear-level"
-              disabled={program.level.length === 0}
-              onClick={() => apply(clearLevel)}
-            >
-              Clear automation
-            </button>
-          </div>
-
-          <ClipEqUI
-            bands={program.eq.bands}
-            onBegin={beginGesture}
-            onChange={(bands) => setProgram({ ...program, eq: { bands } })}
-          />
 
           <div className="clip-save">
             <label>
@@ -2179,28 +2172,33 @@ export function ClipView({
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
-            <span className="clip-save-meta" data-testid="clip-save-meta">
-              {tempo
-                ? `${fixed(tempo.bpm, 1)} BPM · ${tempo.beats} ${tempo.beats === 1 ? 'beat' : 'beats'}${
-                    tempo.padded ? ' (last beat filled with silence)' : ''
-                  }${grid ? '' : ' · measured'}`
-                : detecting
-                  ? 'measuring the tempo…'
-                  : 'no tempo yet — tap beats with right-shift during playback'}
-            </span>
+            {/* Overwrite is only there once there is something to
+                overwrite: the clip this page filed (or opened). */}
+            {editing && (
+              <button
+                className="clip-save-button"
+                data-testid="clip-save"
+                disabled={busy || name.trim() === '' || !tempo}
+                title="Save over the clip this page is editing"
+                onClick={() => void save(true)}
+              >
+                Overwrite
+              </button>
+            )}
             <button
               className="clip-save-button"
-              data-testid="clip-save"
+              data-testid="clip-save-new"
               disabled={busy || name.trim() === '' || !tempo}
-              title={
-                editing
-                  ? 'Save over the clip this page is editing — open a track above to start another'
-                  : 'File this span as a new beat clip'
-              }
-              onClick={() => void save()}
+              title="File this span as a new beat clip"
+              onClick={() => void save(false)}
             >
-              {editing ? 'Save this beat clip' : 'Save as new beat clip'}
+              Create new
             </button>
+            {savedNow && (
+              <span className="clip-save-done" data-testid="clip-save-done" title="Saved">
+                ✓
+              </span>
+            )}
             <audio ref={audioRef} data-testid="clip-audio" />
           </div>
         </>
