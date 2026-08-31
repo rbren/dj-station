@@ -2242,7 +2242,15 @@ of the page.
   the deck is currently lined up by in `--ok` (`.decks-beat-lead-one`,
   the engine's `lead_one`), so a shifted deck says which of its ones the
   bank is now hearing on its downbeat; both sit below `.on`, so the
-  playhead still reads over them. Pinned by `DecksView.test.tsx`.
+  playhead still reads over them. Which beats those are is the ENGINE's
+  one derivation, `DeckSlotState::grid_ones` (this row and the V2 grids
+  only ever read `slot.ones`): it takes the clip's ones through the
+  deck's ratio AND folds a one at the clip's END boundary onto its beat
+  0 — `BeatGrid::cut_to` keeps the beat that closes the span, so an
+  8-beat clip tapped four-to-the-bar stores ones 0, 4 AND 8, and beat 8
+  is the next pass's downbeat, never the clip's last beat. Pinned by
+  `DecksView.test.tsx` and the engine's `integration decks`
+  (`a_one_closing_the_clip_marks_its_first_beat_not_its_last`).
 - SFT IS ALSO A TAP: a strip's shift label is a button, and pressing it
   puts that deck's FIRST BEAT on the beat nearest the press
   (`phaseForBeat` in `decks.ts` — the slot's playhead is `beat - phase`,

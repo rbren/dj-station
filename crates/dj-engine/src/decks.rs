@@ -581,11 +581,21 @@ impl DeckSlotState {
     /// [`DeckSlotState::grid_beats`], so a double-time deck's every-fourth
     /// one comes round every second bank beat. Ascending, and never twice
     /// the same beat (a big ratio can round two of them together).
+    ///
+    /// A ONE AT THE CLIP'S END BOUNDARY IS ITS BEAT 0. A grid cut to a
+    /// clip keeps the beat that closes it (`BeatGrid::cut_to` takes the
+    /// times at both edges of the span), so an eight-beat clip tapped
+    /// four-to-the-bar marks ones at 0, 4 AND 8 — and beat 8 is the
+    /// downbeat of the NEXT pass, the same instant the clip wraps to. It
+    /// therefore folds onto beat 0 rather than landing on the clip's last
+    /// beat, which is neither a one nor where the audio repeats.
     pub fn grid_ones(&self) -> Vec<u32> {
         let beats = self.grid_beats();
         let Some(clip) = &self.clip else {
             return Vec::new();
         };
+        // Zero only for an empty slot, i.e. exactly when `self.beats` is,
+        // which is what the fold below divides by.
         if beats == 0 {
             return Vec::new();
         }
@@ -593,7 +603,8 @@ impl DeckSlotState {
         let mut ones: Vec<u32> = clip
             .ones
             .iter()
-            .map(|&one| ((one as f32 / ratio).round() as u32).min(beats - 1))
+            .map(|&one| one % self.beats)
+            .map(|one| ((one as f32 / ratio).round() as u32).min(beats - 1))
             .collect();
         ones.sort_unstable();
         ones.dedup();

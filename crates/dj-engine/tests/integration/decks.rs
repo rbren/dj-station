@@ -366,6 +366,46 @@ fn shifting_a_deck_hands_the_lead_to_whichever_one_comes_round_first() {
 }
 
 #[test]
+fn a_one_closing_the_clip_marks_its_first_beat_not_its_last() {
+    let mut e = bank();
+    // A grid cut to an eight-beat clip keeps the beat at BOTH edges of the
+    // span, so a clip tapped four-to-the-bar marks 0, 4 and 8: beat 8 is
+    // the downbeat of the next pass, which is this clip's beat 0.
+    e.decks_load(
+        "bank1",
+        0,
+        Some(clip_ref_ones("a", &[0, 4, 8])),
+        clip(8, 0.5),
+        CLIP_BPM,
+    )
+    .unwrap();
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!(st.slots[0].beats, 8);
+    assert_eq!(
+        st.slots[0].ones,
+        vec![0, 4],
+        "the closing one is beat 0 come round again, never the clip's last beat"
+    );
+    assert_eq!(st.slots[0].lead_one, Some(0));
+    assert_eq!(st.slots[0].phase, 0, "and the load still lands unshifted");
+
+    // A clip that marks ONLY its closing beat is marked — and lined up —
+    // on its beat 0, the instant that marker names.
+    e.decks_load(
+        "bank1",
+        1,
+        Some(clip_ref_ones("b", &[8])),
+        clip(8, 0.5),
+        CLIP_BPM,
+    )
+    .unwrap();
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!(st.slots[1].ones, vec![0]);
+    assert_eq!(st.slots[1].lead_one, Some(0));
+    assert_eq!(st.slots[1].phase, 0);
+}
+
+#[test]
 fn a_deck_in_double_time_counts_its_ones_on_the_banks_grid() {
     let mut e = bank();
     e.decks_load(
