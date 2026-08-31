@@ -202,8 +202,8 @@ describe('collapse-to-macro UI', () => {
   it('macros list in their own library section and instantiate on click', async () => {
     state.modules = [OSC, VCA, TONE_MACRO];
     render(<App />);
-    await screen.findByTestId('add-module-btn');
-    fireEvent.click(screen.getByTestId('add-module-btn'));
+    await screen.findByTestId('tab-rack');
+    fireEvent.keyDown(window, { key: 'm', metaKey: true });
     await screen.findByTestId('picker-category-Macros');
     fireEvent.click(screen.getByTestId('library-add-macro.tone'));
     await waitFor(() =>
@@ -264,8 +264,8 @@ describe('collapse-to-macro UI', () => {
   it('right-clicking a picker macro offers rename and delete', async () => {
     state.modules = [OSC, VCA, TONE_MACRO];
     render(<App />);
-    await screen.findByTestId('add-module-btn');
-    fireEvent.click(screen.getByTestId('add-module-btn'));
+    await screen.findByTestId('tab-rack');
+    fireEvent.keyDown(window, { key: 'm', metaKey: true });
     await screen.findByTestId('picker-category-Macros');
 
     // Rename: prefilled with the current name; submit hits the engine.
@@ -289,8 +289,8 @@ describe('collapse-to-macro UI', () => {
   it('right-click on a non-macro picker entry opens no menu', async () => {
     state.modules = [OSC, VCA, TONE_MACRO];
     render(<App />);
-    await screen.findByTestId('add-module-btn');
-    fireEvent.click(screen.getByTestId('add-module-btn'));
+    await screen.findByTestId('tab-rack');
+    fireEvent.keyDown(window, { key: 'm', metaKey: true });
     await screen.findByTestId('picker-category-Macros');
     fireEvent.contextMenu(screen.getByTestId('library-add-com.dj.oscillator'));
     expect(screen.queryByTestId('picker-macro-rename')).toBeNull();
@@ -537,8 +537,8 @@ describe('expanded macro view', () => {
     state.modules = [OSC, VCA, TONE_MACRO];
     fakeEngine.macroLayout.mockResolvedValue({ osc1: [0, 0], vca1: [180, 20] });
     render(<App />);
-    await screen.findByTestId('add-module-btn');
-    fireEvent.click(screen.getByTestId('add-module-btn'));
+    await screen.findByTestId('tab-rack');
+    fireEvent.keyDown(window, { key: 'm', metaKey: true });
     await screen.findByTestId('picker-category-Macros');
     fireEvent.click(screen.getByTestId('library-add-macro.tone'));
     await waitFor(() => expect(fakeEngine.macroLayout).toHaveBeenCalledWith('macro.tone'));

@@ -279,9 +279,11 @@ describe('cmd+M module picker', () => {
     expect(screen.queryByTestId('module-picker')).toBeNull();
   });
 
-  it('the header button opens it too', async () => {
+  it('there is no header button any more: the rack context menu opens it too', async () => {
     await renderApp();
-    fireEvent.click(screen.getByTestId('add-module-btn'));
+    expect(screen.queryByTestId('add-module-btn')).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByTestId('ctx-add-module'));
     expect(screen.getByTestId('module-picker')).toBeTruthy();
   });
 

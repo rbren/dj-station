@@ -2,7 +2,8 @@
 // MONITOR mix (the headphones a deck's Monitor button cues into). Mirrors
 // the `audio_outputs` / `set_audio_outputs` commands in
 // `app/src-tauri/src/main.rs`; the control that drives it is
-// `components/AudioOutputPicker.tsx`, in the chrome at the top of the app.
+// `components/AudioOutputSelect.tsx`, one select per master fader row in
+// the Decks page's top bar.
 //
 // The choice is a property of the MACHINE, not of the patch — it is kept
 // beside the app's data, and a patch carried to another computer picks up

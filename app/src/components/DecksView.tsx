@@ -55,6 +55,7 @@
 // meanwhile. Unticked, the write goes out whole, as it always did.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AudioOutputsApi } from '../audioOutputs';
 import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '../beatClip';
 import {
   decks as defaultApi,
@@ -74,6 +75,7 @@ import {
 } from '../decks';
 import type { WireSnapshot } from '../engine';
 import { loadJson, saveJson, type PendingWire } from '../rackStore';
+import { AudioOutputSelect, useAudioOutputs } from './AudioOutputSelect';
 import { DecksClipPicker } from './DecksClipPicker';
 import { DecksSlot } from './DecksSlot';
 import { LiveJack } from './Jack';
@@ -119,6 +121,8 @@ export function clampDockHeight(px: number, viewport: number): number {
 export interface DecksViewProps {
   api?: DecksApi;
   clips?: BeatClipApi;
+  /** Where the two buses play out of (device pickers in the top bar). */
+  outputs?: AudioOutputsApi;
   /** The page keeps polling only while it is the open tab. */
   active?: boolean;
   pollMs?: number;
@@ -159,6 +163,9 @@ export function DecksView(props: DecksViewProps) {
   const api = props.api ?? defaultApi;
   const clipApi = props.clips ?? defaultClips;
   const active = props.active ?? true;
+  // Which hardware each bus plays out of, polled beside the faders that
+  // set how loud: the pair's row in the top bar is level + destination.
+  const { outputs, choose: chooseOutput } = useAudioOutputs(props.outputs);
   const [bank, setBank] = useState<string | null>(null);
   const [status, setStatus] = useState<DecksStatus | null>(null);
   const [clips, setClips] = useState<BeatClipEntry[]>([]);
@@ -608,10 +615,16 @@ export function DecksView(props: DecksViewProps) {
           )}
         </div>
         {/* Where the bank comes out, one row per pair: the room above the
-            headphones, each just its fader — the pairs themselves carry
-            no chrome jacks, because where they go is implied
-            (decks_ensure keeps them wired to outputs). */}
-        <div className="decks-outs" data-testid="decks-outs">
+            headphones, each its fader and the hardware it plays out of —
+            the pairs themselves carry no chrome jacks, because where they
+            go in the PATCH is implied (decks_ensure keeps them wired to
+            outputs). The note is the engine's own line about a device it
+            could not reach. */}
+        <div
+          className="decks-outs"
+          data-testid="decks-outs"
+          data-state={outputs?.note ? 'adrift' : 'ok'}
+        >
           {MASTER_BUSES.map((bus) => (
             <div className="decks-out" data-bus={bus} data-testid={`decks-out-${bus}`} key={bus}>
               <span className="decks-out-label">{bus}</span>
@@ -628,8 +641,14 @@ export function DecksView(props: DecksViewProps) {
                 onPointerUp={() => releaseMaster(bus)}
               />
               <span className="decks-master-value mono">{Math.round(master(bus) * 100)}%</span>
+              <AudioOutputSelect bus={bus} outputs={outputs} onChoose={chooseOutput} />
             </div>
           ))}
+          {outputs?.note && (
+            <span className="audio-output-note" data-testid="audio-output-note" role="status">
+              {outputs.note}
+            </span>
+          )}
         </div>
         <div className="decks-bar-actions">
           <span

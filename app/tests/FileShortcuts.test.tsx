@@ -74,7 +74,15 @@ beforeEach(() => {
 async function renderApp() {
   render(<App />);
   await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
-  await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+  // The header carries no patch title any more: wait out the engine's
+  // answer for the working name in the Save As dialog (opened from the
+  // rack background's context menu), whose default derives live.
+  fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 5, clientY: 5 });
+  fireEvent.click(screen.getByTestId('ctx-save-as'));
+  const input = (await screen.findByTestId('file-dialog-name')) as HTMLInputElement;
+  await waitFor(() => expect(input.value).toBe('demo'));
+  fireEvent.click(screen.getByTestId('file-dialog-cancel'));
+  await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
 }
 
 describe('file shortcuts', () => {

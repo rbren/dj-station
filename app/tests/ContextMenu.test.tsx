@@ -109,7 +109,19 @@ function node(instance: string, manifest: Manifest) {
 async function renderApp() {
   render(<App />);
   await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
-  await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+  await expectPatchName('demo');
+}
+
+/** The working name, read where it lives now that the header carries no
+ *  patch title: the Save As dialog (opened from the rack background's
+ *  context menu), whose default derives live from the loaded name. */
+async function expectPatchName(name: string) {
+  fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 5, clientY: 5 });
+  fireEvent.click(screen.getByTestId('ctx-save-as'));
+  const input = (await screen.findByTestId('file-dialog-name')) as HTMLInputElement;
+  await waitFor(() => expect(input.value).toBe(name));
+  fireEvent.click(screen.getByTestId('file-dialog-cancel'));
+  await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
 }
 
 beforeEach(() => {
@@ -122,7 +134,7 @@ describe('global right-click override', () => {
   it('suppresses the default context menu everywhere in the app', async () => {
     await renderApp();
     const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
-    const notCancelled = screen.getByTestId('engine-status').dispatchEvent(ev);
+    const notCancelled = screen.getByTestId('tab-library').dispatchEvent(ev);
     expect(notCancelled).toBe(false);
     expect(ev.defaultPrevented).toBe(true);
   });
@@ -256,7 +268,7 @@ describe('module presets submenu', () => {
     state.nodes = [node('osc1', OSC), node('vca1', VCA), node('snoise1', SPECTRAL)];
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-snoise1')).toBeTruthy());
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+    await expectPatchName('demo');
   }
 
   it('lists the manifest presets and applies the one clicked', async () => {
@@ -331,8 +343,8 @@ describe('background context menu', () => {
     fireEvent.contextMenu(screen.getByTestId('rack-area'), { clientX: 300, clientY: 200 });
     fireEvent.click(screen.getByTestId('ctx-new-patch'));
     await waitFor(() => expect(fakeEngine.newPatch).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('untitled'));
     expect(screen.queryByTestId('context-menu')).toBeNull();
+    await expectPatchName('untitled');
   });
 
   it('Save As / Open open the same dialogs as the File menu', async () => {

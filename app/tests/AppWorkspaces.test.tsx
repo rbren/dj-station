@@ -179,6 +179,17 @@ const fireMenu = (action: string) =>
   fireEvent(window, new CustomEvent('dj-menu', { detail: action }));
 const isSelected = (id: string) => screen.getByTestId(`module-${id}`).dataset.selected === 'true';
 
+/** The open workspace's working name, read where it lives now that the
+ *  header carries no patch title: the Save As dialog's default (derived
+ *  live, so this also waits out the engine's answer). */
+async function expectPatchName(name: string) {
+  fireMenu('save-as');
+  const input = (await screen.findByTestId('file-dialog-name')) as HTMLInputElement;
+  await waitFor(() => expect(input.value).toBe(name));
+  fireEvent.click(screen.getByTestId('file-dialog-cancel'));
+  await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
+}
+
 async function openDecksTab() {
   fireEvent.click(screen.getByTestId('tab-decks'));
   await waitFor(() => expect(screen.getByTestId('module-vca1')).toBeTruthy());
@@ -256,19 +267,20 @@ describe('two workspaces, one canvas', () => {
 });
 
 describe('per-workspace patch files', () => {
-  it('the header title is the open workspace working name', async () => {
+  it('the working name follows the open workspace', async () => {
     render(<App />);
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+    await expectPatchName('demo');
     await openDecksTab();
-    expect(screen.getByTestId('patch-title').textContent).toBe('deck-set');
+    await expectPatchName('deck-set');
     fireEvent.click(screen.getByTestId('tab-rack'));
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+    await expectPatchName('demo');
   });
 
   it('cmd+S on the Decks tab saves the decks workspace under its own name', async () => {
     render(<App />);
     await openDecksTab();
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('deck-set'));
+    await expectPatchName('deck-set');
     fireEvent.keyDown(window, { key: 's', metaKey: true });
     await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('deck-set', 'decks'));
   });
@@ -284,10 +296,10 @@ describe('per-workspace patch files', () => {
     await waitFor(() =>
       expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('club-night', 'decks'),
     );
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('club-night'));
+    await expectPatchName('club-night');
     // The rack workspace's working name is untouched.
     fireEvent.click(screen.getByTestId('tab-rack'));
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+    await expectPatchName('demo');
   });
 
   it('File > New on the Decks tab guards and resets only the decks workspace', async () => {
@@ -296,8 +308,8 @@ describe('per-workspace patch files', () => {
     fireMenu('request-new');
     await waitFor(() => expect(fakeEngine.patchDirty).toHaveBeenCalledWith('decks'));
     await waitFor(() => expect(fakeEngine.newPatch).toHaveBeenCalledWith('decks'));
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('untitled'));
+    await expectPatchName('untitled');
     fireEvent.click(screen.getByTestId('tab-rack'));
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+    await expectPatchName('demo');
   });
 });

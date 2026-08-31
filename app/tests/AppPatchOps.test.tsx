@@ -84,6 +84,17 @@ import App from '../src/App';
 const fireMenu = (action: string) =>
   fireEvent(window, new CustomEvent('dj-menu', { detail: action }));
 
+/** The working name has no header display any more: read it where it
+ *  lives, as the Save As dialog's default (it derives live, so this also
+ *  waits out the engine's answer), then close the dialog untouched. */
+async function expectPatchName(name: string) {
+  fireMenu('save-as');
+  const input = (await screen.findByTestId('file-dialog-name')) as HTMLInputElement;
+  await waitFor(() => expect(input.value).toBe(name));
+  fireEvent.click(screen.getByTestId('file-dialog-cancel'));
+  await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
+}
+
 function node(instance: string, manifest: Manifest, wired: string[] = []) {
   return {
     instance_id: instance,
@@ -105,35 +116,36 @@ beforeEach(() => {
 });
 
 describe('file menu patch save/load', () => {
-  it('shows the current patch name in the header (no in-app save/load controls)', async () => {
+  it('keeps the header clean: no patch name, no in-app save/load controls', async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+    expect(screen.queryByTestId('patch-title')).toBeNull();
     expect(screen.queryByTestId('patch-save')).toBeNull();
     expect(screen.queryByTestId('patch-load')).toBeNull();
+    // The working name still lives in the Save As dialog's default.
+    await expectPatchName('demo');
   });
 
   it('File > Save As opens a dialog and saves under the edited name', async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
 
     fireMenu('save-as');
     const nameInput = (await screen.findByTestId('file-dialog-name')) as HTMLInputElement;
-    expect(nameInput.value).toBe('demo');
+    await waitFor(() => expect(nameInput.value).toBe('demo'));
     fireEvent.change(nameInput, { target: { value: 'my-patch' } });
     fireEvent.click(screen.getByTestId('file-dialog-confirm'));
     await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('my-patch', 'rack'));
-    // Dialog closes; header shows the new name; patch list refreshed.
+    // Dialog closes; the new name is the working name; patch list refreshed.
     await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('my-patch'));
+    await expectPatchName('my-patch');
     expect(fakeEngine.listPatches.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it('cmd+S saves the patch under its current name', async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+    await expectPatchName('demo');
     fireEvent.keyDown(window, { key: 's', metaKey: true });
     await waitFor(() => expect(fakeEngine.savePatchAs).toHaveBeenCalledWith('demo', 'rack'));
   });
@@ -149,7 +161,7 @@ describe('file menu patch save/load', () => {
       expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set', 'rack'),
     );
     await waitFor(() => expect(screen.queryByTestId('file-dialog')).toBeNull());
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('live-set'));
+    await expectPatchName('live-set');
     // A clean load raises no warnings.
     expect(screen.queryByTestId('error-banner')).toBeNull();
   });
@@ -163,8 +175,10 @@ describe('file menu patch save/load', () => {
 
     fireMenu('open');
     fireEvent.click(await screen.findByTestId('file-dialog-patch-live-set'));
-    // The patch still loads (name updates) AND the warning is visible.
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('live-set'));
+    // The patch still loads AND the warning is visible.
+    await waitFor(() =>
+      expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set', 'rack'),
+    );
     const banner = await screen.findByTestId('error-banner');
     expect(banner.textContent).toContain('dropped wire');
     expect(banner.textContent).toContain('camera1');
@@ -191,7 +205,7 @@ describe('unsaved-changes prompt before destructive actions', () => {
     fireMenu('request-new');
     await waitFor(() => expect(fakeEngine.newPatch).toHaveBeenCalled());
     expect(screen.queryByTestId('unsaved-dialog')).toBeNull();
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('untitled'));
+    await expectPatchName('untitled');
   });
 
   it('a dirty patch prompts on File > New; Discard proceeds without saving', async () => {
@@ -212,7 +226,8 @@ describe('unsaved-changes prompt before destructive actions', () => {
   it('Save in the prompt saves under the current name, then proceeds', async () => {
     fakeEngine.patchDirty.mockResolvedValueOnce(true);
     render(<App />);
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('demo'));
+    await waitFor(() => expect(screen.getByTestId('module-osc1')).toBeTruthy());
+    await expectPatchName('demo');
 
     fireMenu('request-new');
     await screen.findByTestId('unsaved-dialog');
@@ -250,7 +265,7 @@ describe('unsaved-changes prompt before destructive actions', () => {
     await waitFor(() =>
       expect(fakeEngine.loadPatchByName).toHaveBeenCalledWith('live-set', 'rack'),
     );
-    await waitFor(() => expect(screen.getByTestId('patch-title').textContent).toBe('live-set'));
+    await expectPatchName('live-set');
   });
 });
 

@@ -1768,14 +1768,19 @@ offset))`, offset in position units — so the knob's curve shapes the
   guessed by the UI. Pinned by `lifecycle.rs`'s own unit tests (the stall
   clock) and `--test integration telemetry`
   (`a_backend_with_no_device_claims_no_output`).
-- The OUTPUT PICKER is app CHROME, not a page's furniture:
-  `app/src/components/AudioOutputPicker.tsx` sits in `.app-header` beside
-  the engine-status pill on every tab (the Decks bar used to own the only
-  copy — it does not any more, and there must never be two). It polls
-  `audio_outputs` every 2 s, because devices come and go without the app
-  doing anything, and it shows the engine's `note` verbatim rather than
-  inventing an explanation. Tests: `app/tests/AudioOutputPicker.test.tsx`
-  (the control) and `AppAudioOutputs.test.tsx` (its place in the chrome).
+- The OUTPUT PICKERS live in the DECKS TOP BAR, one per master fader row
+  (`app/src/components/AudioOutputSelect.tsx`: the `useAudioOutputs`
+  hook + a per-bus `AudioOutputSelect`, both consumed by `DecksView`'s
+  `.decks-out` rows — one hook instance, so a choice on either bus writes
+  a complete live+monitor assignment; there must never be two pollers).
+  The hook polls `audio_outputs` every 2 s, because devices come and go
+  without the app doing anything, and the bar shows the engine's `note`
+  verbatim rather than inventing an explanation. The app header carries
+  no picker (and no patch title, engine-status pill or Add Module button
+  — File menu, ⌘M and the rack context menu own those verbs; tests read
+  the working name from the Save As dialog's default, which derives live
+  from the workspace's patch name). Tests:
+  `app/tests/AudioOutputSelect.test.tsx`.
 - WORKSPACES (`Workspace` in `crates/dj-engine/src/engine.rs`): the Rack
   tab and the Decks tab are TWO SEPARATE RACKS sharing one engine. Every
   top-level module carries a `workspace` tag (`NodeInfo.workspace`,
@@ -2117,7 +2122,8 @@ of the page.
 - Where the code is. Frontend: `app/src/decks.ts` (`DecksApi`, the slot
   model and the jack-name helpers `sendJack`/`returnJack`/`toneJack`/
   `CLOCK_JACK`) and `app/src/components/Decks{View,Slot,ClipPicker}.tsx`
-  (the device pickers are in the app header, not on this page).
+  (the live/monitor device pickers sit in this page's top bar, one at
+  the end of each master fader row � see the OUTPUT PICKERS bullet).
   Backend: `app/src-tauri/src/decks.rs` over `Engine`'s `decks_*` API.
 - Tone knobs have TWO orders: `TONES` (`high, mid, low`) is canonical —
   CV jack indices, `tone_patched` and the Launch Control XL row mapping

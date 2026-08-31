@@ -295,86 +295,6 @@ body {
   color: var(--ink);
 }
 
-/* Engine state, in the one place the eye returns to. The text is
-   unchanged (tests read it); only its weight and colour say "fine" or
-   "not fine". */
-.engine-status {
-  font-size: var(--fs-xs);
-  color: var(--ink-dim);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 9px 2px 7px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--surface-raised);
-}
-
-.engine-status::before {
-  content: '';
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ink-dim);
-  box-shadow: 0 0 6px currentcolor;
-}
-
-.engine-status[data-state='on'] {
-  color: var(--ok);
-  border-color: color-mix(in srgb, var(--ok) 40%, var(--line-strong));
-}
-
-.engine-status[data-state='off'] {
-  color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 45%, var(--line-strong));
-}
-
-.engine-status[data-state='on']::before {
-  background: var(--ok);
-}
-
-.engine-status[data-state='off']::before {
-  background: var(--warn);
-}
-
-/* Where the sound goes, in the header beside the engine's own state. The
-   two buses read as one control group; the note only appears when the
-   engine has something to say (a device left, nothing could be opened),
-   and wears --cue because it is "look here", not a fault. */
-.audio-outputs {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.audio-output {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.audio-output-label {
-  color: var(--ink-dim);
-  font-size: var(--fs-nano);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.audio-output select {
-  max-width: 150px;
-  font-size: var(--fs-xs);
-}
-
-.audio-outputs[data-state='adrift'] select {
-  border-color: color-mix(in srgb, var(--cue) 55%, var(--line-strong));
-}
-
-.audio-output-note {
-  color: var(--cue);
-  font-size: var(--fs-xs);
-  max-width: 26ch;
-}
-
 /* Free placement canvas: placed panels are absolutely positioned on a
    coarse 48px grid; unplaced panels (tests/stories) still flow. */
 .rack {
@@ -2645,11 +2565,6 @@ body {
   padding: 2px 4px;
 }
 
-.patch-title {
-  color: var(--ink-dim);
-  font-size: var(--fs-xs);
-}
-
 /* Save As / Open dialogs (driven by the native File menu). */
 .file-dialog-backdrop {
   position: fixed;
@@ -3584,20 +3499,6 @@ body {
   background: rgba(77, 216, 255, 0.12);
   pointer-events: none;
   z-index: 5;
-}
-
-.add-module-btn {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--ink);
-  padding: 4px 12px;
-  font-size: var(--fs-md);
-  cursor: pointer;
-}
-
-.add-module-btn:hover {
-  border-color: var(--brand);
 }
 
 .collapse-macro-btn {
@@ -4915,6 +4816,25 @@ body {
   color: var(--ink-muted);
   font-size: var(--fs-xs);
   text-align: right;
+}
+
+/* Which hardware the pair plays out of, at the end of its row: the fader
+   says how loud, the select says where. The note only appears when the
+   engine has something to say (a device left, nothing could be opened),
+   and wears --cue because it is "look here", not a fault. */
+.audio-output-select {
+  max-width: 150px;
+  font-size: var(--fs-xs);
+}
+
+.decks-outs[data-state='adrift'] .audio-output-select {
+  border-color: color-mix(in srgb, var(--cue) 55%, var(--line-strong));
+}
+
+.audio-output-note {
+  color: var(--cue);
+  font-size: var(--fs-xs);
+  max-width: 36ch;
 }
 
 .decks-bar-actions {

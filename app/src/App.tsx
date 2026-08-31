@@ -22,7 +22,6 @@ import {
 import { isEditableTarget, useFileShortcuts } from './fileShortcuts';
 import { RackKeysContext } from './keyScope';
 import { library, type Track } from './library';
-import { AudioOutputPicker } from './components/AudioOutputPicker';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MacroBoxes } from './components/MacroBoxes';
 import { AudioUIContext } from './components/AudioPanel';
@@ -140,7 +139,6 @@ export default function App() {
 
   const [moduleLib, setModuleLib] = useState<Manifest[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
-  const [backend, setBackend] = useState<string | null>(null);
   const [view, setView] = useState<View>('rack');
   // The library's Edit button opens a track in the (always mounted) clip
   // editor, which owns what that costs the edit already in there.
@@ -167,7 +165,10 @@ export default function App() {
   const [decksEpoch, setDecksEpoch] = useState(0);
   // File-menu dialogs (Save As… / Open Patch…), driven by native menu events.
   const [fileDialog, setFileDialog] = useState<null | 'save-as' | 'open'>(null);
-  const [saveAsName, setSaveAsName] = useState('untitled');
+  // What the Save As field holds once the user has typed; until then the
+  // field shows the working name LIVE (null = "not edited yet"), so a name
+  // still loading from the engine lands in an open dialog too.
+  const [saveAsName, setSaveAsName] = useState<string | null>(null);
   // Unsaved-changes prompt: a destructive action (New Patch, Open) found
   // edits since the last save; `proceed` runs it after Save or Discard.
   const [confirmDiscard, setConfirmDiscard] = useState<null | { proceed: () => void }>(null);
@@ -991,7 +992,7 @@ export default function App() {
     void (async () => {
       try {
         await engine.loadDemoPatch();
-        setBackend(await engine.start());
+        await engine.start();
         const modules = await engine.listModules();
         if (modules) setModuleLib(modules);
         const current = await engine.currentPatch('rack');
@@ -1087,9 +1088,9 @@ export default function App() {
   );
 
   const openSaveAsDialog = useCallback(() => {
-    setSaveAsName(patchName);
+    setSaveAsName(null);
     setFileDialog('save-as');
-  }, [patchName]);
+  }, []);
 
   const openOpenDialog = useCallback(() => {
     void engine.listPatches(workspace).then((l) => setPatchList(l ?? []));
@@ -2068,11 +2069,11 @@ export default function App() {
             Rack
           </button>
           <button
-            className={view === 'library' ? 'tab active' : 'tab'}
-            onClick={() => setView('library')}
-            data-testid="tab-library"
+            className={view === 'decks' ? 'tab active' : 'tab'}
+            onClick={() => setView('decks')}
+            data-testid="tab-decks"
           >
-            Library
+            Decks
           </button>
           <button
             className={view === 'clip' ? 'tab active' : 'tab'}
@@ -2082,43 +2083,13 @@ export default function App() {
             Clip
           </button>
           <button
-            className={view === 'decks' ? 'tab active' : 'tab'}
-            onClick={() => setView('decks')}
-            data-testid="tab-decks"
+            className={view === 'library' ? 'tab active' : 'tab'}
+            onClick={() => setView('library')}
+            data-testid="tab-library"
           >
-            Decks
+            Library
           </button>
         </nav>
-        <button
-          className="add-module-btn"
-          data-testid="add-module-btn"
-          data-tip="Add a module (⌘M)"
-          onClick={() => setPickerOpen(true)}
-        >
-          + Add Module
-        </button>
-        <span
-          className="patch-title"
-          data-testid="patch-title"
-          data-tip="Current patch (File menu to save/load)"
-        >
-          {patchName}
-        </span>
-        {/* Where the sound goes, in the chrome above every page: a device
-            can leave mid-set, and picking another one must never mean
-            hunting for the page that happens to own the picker. */}
-        <AudioOutputPicker />
-        <span
-          className="engine-status"
-          data-testid="engine-status"
-          data-state={connected === null ? 'pending' : connected ? 'on' : 'off'}
-        >
-          {connected === null
-            ? 'connecting…'
-            : connected
-              ? `engine connected (${backend ?? '?'}${backend === 'null' ? ' — SILENT' : ''})`
-              : 'no engine (dev)'}
-        </span>
         {selected.length > 0 && collapseName === null && (
           <button
             className="collapse-macro-btn"
@@ -2178,12 +2149,12 @@ export default function App() {
                 <input
                   className="patch-name"
                   data-testid="file-dialog-name"
-                  value={saveAsName}
+                  value={saveAsName ?? patchName}
                   autoFocus
                   onChange={(e) => setSaveAsName(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                      void savePatch(saveAsName);
+                      void savePatch(saveAsName ?? patchName);
                       setFileDialog(null);
                     }
                   }}
@@ -2191,7 +2162,7 @@ export default function App() {
                 <button
                   data-testid="file-dialog-confirm"
                   onClick={() => {
-                    void savePatch(saveAsName);
+                    void savePatch(saveAsName ?? patchName);
                     setFileDialog(null);
                   }}
                 >
