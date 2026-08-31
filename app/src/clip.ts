@@ -263,6 +263,57 @@ export function programDuration(program: ClipProgram): number {
   return warpTime(program.warp, total, program.warp_smoothing);
 }
 
+/** A CLIENT-SIDE picture of the edit, cut from the peaks the sources
+ *  already arrived with: each region reads its own stretch of its source
+ *  (backwards where it is reversed) and lands where `regionSpans` puts
+ *  it on the output timeline.
+ *
+ *  This is a stand-in, not a substitute. It knows nothing about
+ *  crossfade shapes, warping or gain, so the backend's render (which
+ *  knows all three) replaces it as soon as it lands. What it buys is a
+ *  waveform that is right the INSTANT a track or a saved clip opens,
+ *  instead of a blank timeline — or, worse, the previous edit's picture
+ *  still sitting there — for as long as the debounce plus the render
+ *  take. */
+export function programPeaks(
+  program: ClipProgram,
+  sources: readonly { peaks: number[]; duration_secs: number }[],
+  buckets: number,
+): number[] {
+  const spans = regionSpans(program);
+  const total = spans.length ? spans[spans.length - 1].end : 0;
+  if (total <= 0 || buckets <= 0) return [];
+  const out = new Array<number>(buckets).fill(0);
+  for (const span of spans) {
+    const region = program.regions[span.index];
+    const source = sources[region.source];
+    if (!source || source.peaks.length === 0 || source.duration_secs <= 0) continue;
+    const n = source.peaks.length;
+    const perSec = n / source.duration_secs;
+    // Bucket range this region owns on the output timeline, and the
+    // source samples that feed it. Regions may overlap (a crossfade), so
+    // each keeps the loudest rather than overwriting its neighbour.
+    const from = Math.max(0, Math.floor((span.start / total) * buckets));
+    const to = Math.min(buckets, Math.ceil((span.end / total) * buckets));
+    const dur = span.end - span.start;
+    // One output bucket, in seconds: how much source each column covers,
+    // so a zoomed-out picture takes the loudest of what it spans rather
+    // than sampling one value and aliasing the rest.
+    const step = total / buckets;
+    for (let b = from; b < to; b++) {
+      const frac = (b / buckets) * total - span.start;
+      if (frac < 0 || frac >= dur) continue;
+      const a = region.reverse ? region.end_secs - frac - step : region.start_secs + frac;
+      const lo = Math.min(n - 1, Math.max(0, Math.floor(a * perSec)));
+      const hi = Math.min(n - 1, Math.max(lo, Math.ceil((a + step) * perSec) - 1));
+      let p = 0;
+      for (let i = lo; i <= hi; i++) p = Math.max(p, source.peaks[i]);
+      out[b] = Math.max(out[b], p);
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Beat taps: the warp they build and the grid it leaves behind
 // ---------------------------------------------------------------------------

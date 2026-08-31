@@ -22,6 +22,7 @@ import {
   moveRange,
   nearestBeat,
   programDuration,
+  programPeaks,
   quantizeRange,
   regionSpans,
   rulerTicks,
@@ -57,6 +58,34 @@ describe('clip region math', () => {
     // The overlap is capped at half the shorter neighbour.
     const tiny = appendSource({ ...base(), crossfade_ms: 1000 }, 0, 0.4);
     expect(programDuration(tiny)).toBeCloseTo(10.2, 9);
+  });
+
+  it('draws the edit from the peaks the sources came with', () => {
+    // A ramp: bucket i is loudest at the end of the source, so where a
+    // region reads from is visible in what comes back.
+    const src = [{ peaks: Array.from({ length: 100 }, (_, i) => i / 99), duration_secs: 10 }];
+
+    // The whole track, at its own resolution: the ramp survives.
+    const whole = programPeaks(base(), src, 100);
+    expect(whole).toHaveLength(100);
+    expect(whole[0]).toBeCloseTo(0, 5);
+    expect(whole[99]).toBeCloseTo(1, 5);
+
+    // Trimmed to the LAST two seconds: the picture is that stretch of
+    // the source stretched over the whole width, not the whole track.
+    const tail = programPeaks(trimTo(base(), 8, 10), src, 20);
+    expect(tail).toHaveLength(20);
+    expect(tail[0]).toBeGreaterThan(0.75);
+    expect(tail[19]).toBeCloseTo(1, 5);
+
+    // Reversed, the same stretch comes back the other way round.
+    const back = programPeaks(reverseRange(trimTo(base(), 8, 10), 0, 2), src, 20);
+    expect(back[0]).toBeCloseTo(1, 1);
+    expect(back[19]).toBeLessThan(back[0]);
+
+    // Nothing to draw with, nothing drawn — and no crash.
+    expect(programPeaks(base(), [], 20)).toEqual(new Array(20).fill(0));
+    expect(programPeaks(emptyProgram(), src, 20)).toEqual([]);
   });
 
   it('trims to the selection', () => {

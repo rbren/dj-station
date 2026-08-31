@@ -146,73 +146,76 @@ export function ClipSelectionPane({
         {actions}
       </div>
 
-      <div className="clip-timeline clip-sel-timeline">
-        <div className="clip-sel-row">
-          {bookends?.left}
-          <svg
-            data-testid="clip-sel-waveform"
-            className="clip-waveform clip-sel-waveform"
-            viewBox={`0 0 ${W} ${H}`}
-            preserveAspectRatio="none"
-            onMouseDown={seekAt}
-          >
-            {bleed && region('bleed-left', bleed.left.peaks, 0, loopX0)}
-            {region('loop', peaks, loopX0, loopX1)}
-            {bleed && region('bleed-right', bleed.right.peaks, loopX1, W)}
-            {/* The beat grid, drawn on the result as it is on the source
-                track above: a span chosen in beats is checked in beats. */}
-            {beats?.map((t, i) => (
+      {/* A GRID, not two rows: the waveform and the level lane under it
+          share one x-axis, so they have to share one column. The
+          bookends take a column each either side, and the lane starts
+          where the peaks do however wide a bleed control turns out to
+          be — a breakpoint lands on the peak it was aimed at. */}
+      <div className="clip-timeline clip-sel-timeline clip-sel-grid">
+        {bookends?.left}
+        <svg
+          data-testid="clip-sel-waveform"
+          className="clip-waveform clip-sel-waveform"
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          onMouseDown={seekAt}
+        >
+          {bleed && region('bleed-left', bleed.left.peaks, 0, loopX0)}
+          {region('loop', peaks, loopX0, loopX1)}
+          {bleed && region('bleed-right', bleed.right.peaks, loopX1, W)}
+          {/* The beat grid, drawn on the result as it is on the source
+              track above: a span chosen in beats is checked in beats. */}
+          {beats?.map((t, i) => (
+            <line
+              key={`beat${i}`}
+              data-testid="clip-sel-beat-line"
+              className="clip-beat-line"
+              x1={xOf(t)}
+              x2={xOf(t)}
+              y1={0}
+              y2={H}
+            />
+          ))}
+          {ones?.map((t, i) => (
+            <line
+              key={`one${i}`}
+              data-testid="clip-sel-one-line"
+              className="clip-one-line"
+              x1={xOf(t)}
+              x2={xOf(t)}
+              y1={0}
+              y2={H}
+            >
+              <title>the one</title>
+            </line>
+          ))}
+          {/* Where the loop ends and its bleed begins: the seams the
+              bookends are there to smooth. */}
+          {[loopX0, loopX1].map((x, i) =>
+            x > 0.01 && x < W - 0.01 ? (
               <line
-                key={`beat${i}`}
-                data-testid="clip-sel-beat-line"
-                className="clip-beat-line"
-                x1={xOf(t)}
-                x2={xOf(t)}
+                key={i}
+                className="clip-sel-seam"
+                data-testid={`clip-sel-seam-${i === 0 ? 'left' : 'right'}`}
+                x1={x}
+                x2={x}
                 y1={0}
                 y2={H}
               />
-            ))}
-            {ones?.map((t, i) => (
-              <line
-                key={`one${i}`}
-                data-testid="clip-sel-one-line"
-                className="clip-one-line"
-                x1={xOf(t)}
-                x2={xOf(t)}
-                y1={0}
-                y2={H}
-              >
-                <title>the one</title>
-              </line>
-            ))}
-            {/* Where the loop ends and its bleed begins: the seams the
-                bookends are there to smooth. */}
-            {[loopX0, loopX1].map((x, i) =>
-              x > 0.01 && x < W - 0.01 ? (
-                <line
-                  key={i}
-                  className="clip-sel-seam"
-                  data-testid={`clip-sel-seam-${i === 0 ? 'left' : 'right'}`}
-                  x1={x}
-                  x2={x}
-                  y1={0}
-                  y2={H}
-                />
-              ) : null,
-            )}
-            {inside && (
-              <line
-                data-testid="clip-sel-playhead"
-                className="clip-playhead"
-                x1={xOf(playhead)}
-                x2={xOf(playhead)}
-                y1={0}
-                y2={H}
-              />
-            )}
-          </svg>
-          {bookends?.right}
-        </div>
+            ) : null,
+          )}
+          {inside && (
+            <line
+              data-testid="clip-sel-playhead"
+              className="clip-playhead"
+              x1={xOf(playhead)}
+              x2={xOf(playhead)}
+              y1={0}
+              y2={H}
+            />
+          )}
+        </svg>
+        {bookends?.right}
         {levelLane}
       </div>
     </section>

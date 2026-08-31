@@ -297,6 +297,11 @@ async function openTrack(clip: ClipClientApi, library = libraryMock()) {
   await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
 }
 
+/** The drawn source-track waveform, as its path data. */
+function wavePath() {
+  return screen.getByTestId('clip-waveform').querySelector('.clip-peaks')?.getAttribute('d') ?? '';
+}
+
 /** Drag a selection across the output waveform, in seconds of a 10 s clip. */
 function select(fromSecs: number, toSecs: number, keys: { metaKey?: boolean } = {}) {
   const wave = sizeTimeline('clip-waveform');
@@ -2015,6 +2020,57 @@ describe('ClipView', () => {
     expect(save.mock.calls[3][8]).toBeNull();
   });
 
+  it('draws the material in hand at once, never the last edit\u2019s picture', async () => {
+    // Two tracks with different peaks, and a render slow enough to be
+    // caught mid-flight \u2014 which is exactly when the page used to show
+    // the wrong thing.
+    const loud = Array.from({ length: 50 }, () => 1);
+    const quiet = Array.from({ length: 50 }, () => 0.1);
+    let renders = 0;
+    const clip = clipMock({
+      loadSource: vi.fn(async (trackId: number, stems: string[]) => ({
+        ...SOURCE,
+        track_id: trackId,
+        stems,
+        title: trackId === OTHER.id ? OTHER.title : SOURCE.title,
+        peaks: trackId === OTHER.id ? quiet : loud,
+      })),
+      renderPreview: vi.fn(async () => {
+        renders += 1;
+        return {
+          duration_secs: 10,
+          sample_rate: 48000,
+          channels: 2,
+          peaks: renders === 1 ? loud : quiet,
+        };
+      }),
+    });
+    await openTrack(clip);
+
+    // The FIRST track draws immediately, from the peaks it arrived with:
+    // there is no render yet, and a blank timeline is not the answer.
+    const first = wavePath();
+    expect(first).not.toBe('');
+    await waitFor(() => expect(renders).toBe(1));
+
+    // Opening another track redraws on the spot. Before, the old render
+    // stayed on screen until a click happened to force one.
+    fireEvent.change(screen.getByTestId('clip-track-select'), {
+      target: { value: String(OTHER.id) },
+    });
+    fireEvent.click(screen.getByTestId('clip-open-track'));
+    await waitFor(() =>
+      expect((screen.getByTestId('clip-name') as HTMLInputElement).value).toContain(OTHER.title),
+    );
+    const second = wavePath();
+    expect(second).not.toBe('');
+    expect(second).not.toBe(first);
+
+    // And when the real render lands it is the one drawn.
+    await waitFor(() => expect(renders).toBe(2));
+    await waitFor(() => expect(wavePath()).not.toBe(''));
+  });
+
   it('opens a saved beat clip as the edit that made it, and saves back to it', async () => {
     const clip = clipMock({
       openBeatClip: vi.fn(async () => ({
@@ -2049,6 +2105,10 @@ describe('ClipView', () => {
     expect((screen.getByTestId('clip-name') as HTMLInputElement).value).toBe('chorus stack');
     expect((screen.getByTestId('clip-bleed-left') as HTMLInputElement).value).toBe('30');
     expect(selTitle()).toContain('0:02.00–0:06.00');
+    // The WHOLE source track is drawn, not just the span the clip kept:
+    // this pane is the reference to cut against, and a picture of only
+    // the selection leaves nowhere to move the selection to.
+    expect(wavePath()).not.toBe('');
 
     const save = screen.getByTestId('clip-save') as HTMLButtonElement;
     await waitFor(() => expect(save.disabled).toBe(false), { timeout: 3000 });

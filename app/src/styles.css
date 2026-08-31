@@ -4177,15 +4177,35 @@ body {
 
 /* The selection and its two BOOKENDS: the bleed controls stand at the
    edges the material they measure comes from, so the row reads as the
-   span with a little of the track either side of it. */
-.clip-sel-row {
-  display: flex;
+   span with a little of the track either side of it.
+
+   A GRID, because the level lane below the waveform is drawn against the
+   same x-axis and has to line up with it to the pixel: the bookends take
+   an auto column each, the waveform takes the rest, and the lane spans
+   only the waveform's column. Laid out as two flex rows instead, the
+   lane would run the full width and every breakpoint would sit a bleed
+   control's width off the peak it was dropped on. */
+.clip-sel-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: stretch;
   gap: 4px;
 }
 
-.clip-sel-row .clip-sel-waveform {
-  flex: 1;
+/* Both lanes are pinned to the middle column by name rather than left
+   to auto-placement: the bookends are optional, and without them the
+   waveform would otherwise fall into column 1 and the lane into column
+   2 — the very misalignment this grid exists to prevent. An empty auto
+   column is zero wide, so the no-bleed case still fills the row. */
+.clip-sel-grid .clip-sel-waveform {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.clip-sel-grid .clip-level-lane {
+  grid-column: 2;
+  grid-row: 2;
   min-width: 0;
 }
 
@@ -4201,6 +4221,19 @@ body {
   background: var(--surface);
   color: var(--ink-muted);
   font-size: var(--fs-xs);
+}
+
+/* The bookends take the outer columns, and only the first grid row:
+   the level lane below spans the middle column alone, so a bleed
+   control must not stretch down beside it. */
+.clip-sel-grid .clip-bleed-left {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.clip-sel-grid .clip-bleed-right {
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .clip-bleed input {

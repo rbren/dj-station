@@ -90,6 +90,7 @@ import {
   moveRange,
   nearestBeat,
   programDuration,
+  programPeaks,
   quantizeRange,
   regionSpans,
   removeLevelPoint,
@@ -109,6 +110,7 @@ import {
   type ClipRender,
   type ClipRequest,
   type ClipSource,
+  type ClipSourceRef,
   type ClipStemBackend,
   type ClipStemStatus,
   type ClipTapSeed,
@@ -148,6 +150,10 @@ const MIN_BUCKETS = 1200;
 const MAX_BUCKETS = 20000;
 /** Debounce before re-rendering the preview after an edit. */
 const PREVIEW_DELAY_MS = 350;
+/** Buckets for the client-side stand-in waveform (see `programPeaks`).
+ *  It is only ever shown until the backend's render lands, so it is cut
+ *  at the resolution a source arrives with rather than a finer one. */
+const PREVIEW_BUCKETS = MIN_BUCKETS;
 /** One playback fetch (the backend caps preview windows); playback chains
  *  consecutive windows for longer clips. */
 const PLAY_WINDOW_SECS = 60;
@@ -185,6 +191,16 @@ function timecode(secs: number): string {
   const m = Math.floor(secs / 60);
   const s = secs - m * 60;
   return `${m}:${s.toFixed(2).padStart(5, '0')}`;
+}
+
+/** Are two renders about the same material? A render outlives the edit
+ *  that asked for it, so this is what decides whether one in hand is a
+ *  picture of what is on the page or of what used to be. */
+function sameSources(a: readonly ClipSourceRef[], b: readonly ClipSourceRef[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((s, i) => s.track_id === b[i].track_id && s.stems.join() === b[i].stems.join())
+  );
 }
 
 /** dB -> y in the automation lane (0 dB near the top, silence at the bottom). */
@@ -387,7 +403,15 @@ export function ClipView({
   const [pendingOpen, setPendingOpen] = useState<number | null>(null);
   const [future, setFuture] = useState<ClipProgram[]>([]);
   const [selection, setSelection] = useState<Range | null>(null);
-  const [previewState, setPreview] = useState<ClipRender | null>(null);
+  /** The last render, WITH THE SOURCES IT WAS RENDERED FROM. The pairing
+   *  is what stops one edit's waveform being shown over the next one's
+   *  material: opening a track or a clip swaps the sources, and a render
+   *  of the old ones is then a picture of something no longer on the
+   *  page (see `peaks`). */
+  const [previewState, setPreview] = useState<{
+    render: ClipRender;
+    sources: ClipSourceRef[];
+  } | null>(null);
   const [name, setName] = useState('');
   /** The saved beat clip this page is revising: set by the first save,
    *  and by opening one from the Library. While it holds, saving re-files
@@ -787,7 +811,7 @@ export function ClipView({
           Math.max(MIN_BUCKETS, Math.round(programDuration(program) * PEAKS_PER_SEC)),
         );
         const out = await clip.renderPreview(dryRequest, buckets);
-        if (!cancelled && out) setPreview(out);
+        if (!cancelled && out) setPreview({ render: out, sources: dryRequest.sources });
       })();
     }, PREVIEW_DELAY_MS);
     return () => {
@@ -1615,9 +1639,21 @@ export function ClipView({
     };
   }, [duration, grid]);
 
-  // The preview belongs to the current edit only; an emptied program has none.
-  const preview = program.regions.length === 0 ? null : previewState;
-  const peaks = useMemo(() => preview?.peaks ?? [], [preview]);
+  /** The source track's waveform.
+   *
+   *  The backend's render is the real picture and is used whenever there
+   *  is one FOR THIS MATERIAL. Until then — the render is debounced, and
+   *  opening a track or a clip swaps the material under it — the peaks
+   *  the sources arrived with are cut to the same edit client-side. The
+   *  page therefore never draws the previous edit's waveform over the new
+   *  one, and never draws nothing at all. */
+  const peaks = useMemo(() => {
+    if (program.regions.length === 0) return [];
+    if (previewState && sameSources(previewState.sources, sourceRefs)) {
+      return previewState.render.peaks;
+    }
+    return programPeaks(program, sources, PREVIEW_BUCKETS);
+  }, [previewState, program, sourceRefs, sources]);
   /** Can the picked track be loaded stem by stem right now? */
   const stemsReady = picked?.state === 'ready';
 
