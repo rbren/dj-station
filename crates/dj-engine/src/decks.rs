@@ -78,9 +78,22 @@
 //! handed the divided grid — and the ratio is patch state, so a bank
 //! comes back in double time where it was left.
 //!
-//! Slots load MUTED and un-shifted: dropping a clip into a running bank
-//! can never make a noise the user did not ask for, and the level, EQ and
-//! monitor switch they already set stay where they are.
+//! Slots load MUTED: dropping a clip into a running bank can never make
+//! a noise the user did not ask for, and the level, EQ and monitor switch
+//! they already set stay where they are.
+//!
+//! A LOAD LINES THE CLIP UP BY ITS ONES ([`DeckSlotState::align_phase`]).
+//! A clip's beat grid marks which of its beats are downbeats — its ONES —
+//! and a fresh load shifts the slot so the FIRST of them lands on the
+//! bank's beat 0, rather than putting the clip's first beat there. Two
+//! clips that start a beat or two before their downbeat therefore hit
+//! those downbeats together instead of a beat apart; loops whose lengths
+//! do not divide each other still only share beat 0, the same relaxation
+//! one clock has always made. A clip that marks no ones lands unshifted,
+//! exactly as before. Which one a deck is lined up by afterwards is
+//! [`DeckSlotState::lead_one`]: a shift hands the job to whichever one
+//! now comes round first, because that is the one the rest of the bank is
+//! hearing on the downbeat.
 //!
 //! A SLOT'S LEVEL IS UNITY AT MID-TRAVEL ([`LEVEL_UNITY`], [`LEVEL_MAX`]),
 //! the way a tone control is flat at 12 o'clock: a fresh slot plays its
@@ -538,6 +551,65 @@ impl DeckSlotState {
             beats + self.tail
         }
     }
+
+    /// The clip's ONE beats where the bank counts them: its own ones
+    /// ([`BeatClipRef::ones`]) taken through the deck's ratio, like
+    /// [`DeckSlotState::grid_beats`], so a double-time deck's every-fourth
+    /// one comes round every second bank beat. Ascending, and never twice
+    /// the same beat (a big ratio can round two of them together).
+    pub fn grid_ones(&self) -> Vec<u32> {
+        let beats = self.grid_beats();
+        let Some(clip) = &self.clip else {
+            return Vec::new();
+        };
+        if beats == 0 {
+            return Vec::new();
+        }
+        let ratio = clamp_ratio(self.ratio);
+        let mut ones: Vec<u32> = clip
+            .ones
+            .iter()
+            .map(|&one| ((one as f32 / ratio).round() as u32).min(beats - 1))
+            .collect();
+        ones.sort_unstable();
+        ones.dedup();
+        ones
+    }
+
+    /// The shift a FRESH load lands on: the one that puts this clip's
+    /// first ONE beat on the bank's beat 0, so every deck's ones come
+    /// round together instead of merely their first beats. A clip that
+    /// marks no one is lined up by its first beat, which is what the bank
+    /// always did.
+    ///
+    /// Loops whose lengths do not divide each other can only share the
+    /// bank's own downbeat — a seven-beat deck's ones drift against an
+    /// eight-beat one's after it, the same relaxation the shared clock
+    /// already makes for beat 0.
+    pub fn align_phase(&self) -> i32 {
+        let len = self.length_beats() as i32;
+        match self.grid_ones().first() {
+            Some(&first) if len > 0 => (-(first as i32)).rem_euclid(len),
+            _ => 0,
+        }
+    }
+
+    /// Which one beat this deck is currently lined up BY: the first of
+    /// its ones to come round after the bank's beat 0, as a beat of the
+    /// deck's own loop. At the shift a load lands on that is the clip's
+    /// first one; shifting the deck hands the job to whichever one now
+    /// leads, which is the one everything else is in sync with. `None`
+    /// when the clip marks no ones at all.
+    pub fn lead_one(&self) -> Option<u32> {
+        let len = self.length_beats() as i64;
+        if len <= 0 {
+            return None;
+        }
+        let phase = self.phase as i64;
+        self.grid_ones()
+            .into_iter()
+            .min_by_key(|&one| (one as i64 + phase).rem_euclid(len))
+    }
 }
 
 /// A whole bank's control state, as the patch keeps it.
@@ -911,6 +983,13 @@ pub struct DeckSlotStatus {
     /// The clip's length in the BANK's beats — its own beats over the
     /// deck's ratio, so a double-time deck's eight-beat clip is four.
     pub beats: u32,
+    /// Which of those beats are the clip's ONES, in the clip's own order
+    /// ([`DeckSlotState::grid_ones`]) — what the strip's lamp row marks.
+    pub ones: Vec<u32>,
+    /// The one beat the deck is lined up by right now
+    /// ([`DeckSlotState::lead_one`]): the clip's first one until a shift
+    /// hands the job to another. `None` when the clip marks no ones.
+    pub lead_one: Option<u32>,
     pub tail: u32,
     pub phase: i32,
     /// The tempo the clip was rendered at.

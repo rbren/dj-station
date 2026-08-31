@@ -30,6 +30,8 @@ function emptySlot(slot: number): DeckSlotStatus {
     clip: null,
     loaded: false,
     beats: 0,
+    ones: [],
+    lead_one: null,
     tail: 0,
     phase: 0,
     source_bpm: 120,
@@ -248,6 +250,32 @@ describe('DecksView', () => {
     expect(dots.filter((d) => d.className.includes('on')).length).toBe(1);
     expect(dots[33].className).toContain('on');
     expect(dots[33].className).toContain('decks-beat-tail');
+  });
+
+  it('marks the clip ones in the lamp row and greens the one the deck is lined up by', async () => {
+    const slots = Array.from({ length: 8 }, (_, i) => emptySlot(i));
+    // The lamps stay in the CLIP's order however the deck is shifted:
+    // deck 0 sits where a load left it (its first one leads), deck 1 has
+    // been shifted, so the same clip's SECOND one is the one the bank
+    // hears on its downbeat and the first is an ordinary one again.
+    slots[0] = loadedSlot(0, { ones: [0, 4], lead_one: 0 });
+    slots[1] = loadedSlot(1, { ones: [0, 4], lead_one: 4, phase: 5 });
+    // A clip whose grid marks no ones is drawn as it always was.
+    slots[2] = loadedSlot(2);
+    show(makeApi(makeStatus({ slots })));
+    await waitFor(() => expect(screen.getByTestId('decks-dots-0').children.length).toBe(8));
+
+    const marks = (deck: number) =>
+      [...screen.getByTestId(`decks-dots-${deck}`).children].map((d) => d.getAttribute('data-one'));
+    expect(marks(0)).toEqual(['lead', null, null, null, 'yes', null, null, null]);
+    expect(marks(1)).toEqual(['yes', null, null, null, 'lead', null, null, null]);
+    expect(marks(2).every((m) => m === null)).toBe(true);
+
+    // Green and purple are classes, so the tokens live in the stylesheet.
+    const dots = [...screen.getByTestId('decks-dots-1').children];
+    expect(dots[0].className).toContain('decks-beat-one');
+    expect(dots[0].className).not.toContain('decks-beat-lead-one');
+    expect(dots[4].className).toContain('decks-beat-lead-one');
   });
 
   it('lays the lamps out in rows of a power of two, in a field of one size', () => {

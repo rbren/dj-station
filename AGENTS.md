@@ -1555,10 +1555,25 @@ offset))`, offset in position units — so the knob's curve shapes the
   re-triggering; `cycle_beats` is the lcm of the loaded loops (how often
   the whole bank comes round). A freshly loaded clip arrives CUED (un-muted
   with monitor on, so it is audible in the headphones but not the live
-  pair — see `hand_slot_clip`'s `fresh` path), un-shifted
+  pair — see `hand_slot_clip`'s `fresh` path)
   and tail-free — `decks_load` resets those, `decks_supply` deliberately
   does NOT (it is the app layer handing over audio for a binding that
-  already exists, after a patch load or undo). The three tone controls are
+  already exists, after a patch load or undo).
+  A LOAD LINES THE CLIP UP BY ITS ONES, not by its first beat
+  (`DeckSlotState::align_phase`): a clip's grid marks which of its beats
+  are downbeats (`BeatGrid::ones`, cut to the clip when it is saved and
+  carried into the engine on the BINDING — `BeatClipRef::ones`, refreshed
+  on every load/hydrate like `stems`, and the one field there that is not
+  display only), and the fresh shift puts the FIRST of them on the bank's
+  beat 0, so two clips that pick up before their downbeat still hit those
+  downbeats together. Loops whose lengths do not divide each other only
+  ever share beat 0 — the relaxation one clock has always made — and a
+  clip that marks no ones lands unshifted, exactly as before.
+  `DeckSlotState::lead_one` is which one a deck is lined up BY at any
+  moment: the clip's first until a SHIFT hands the job to whichever one
+  now comes round first after the bank's downbeat. Status carries both
+  ratio-divided, like `beats` (`DeckSlotStatus.ones`/`lead_one`).
+  The three tone controls are
   first-order crossovers where the mid band is the REMAINDER of low and
   high, so flat (1.0 = the surface knob at 12 o'clock) is bit-exact
   bypass; level/mute/monitor ramp per block rather than stepping. A
@@ -2210,7 +2225,14 @@ of the page.
   are drawn generously (8 beats = one row of 9 px lamps, 1024 = 64 x 16
   of 2 px with no gap). The numbers reach CSS as `--beat-*` custom
   properties on the div — decks.ts is the one source for the geometry,
-  the stylesheet only spends it. Pinned by `DecksView.test.tsx`.
+  the stylesheet only spends it. The row is always in the CLIP's OWN
+  ORDER (a shift never rotates it — the picture would stop being the
+  clip): what a shift moves is the MARKING. Every ONE beat the clip's
+  grid knows about is drawn in `--loop` (`.decks-beat-one`) and the one
+  the deck is currently lined up by in `--ok` (`.decks-beat-lead-one`,
+  the engine's `lead_one`), so a shifted deck says which of its ones the
+  bank is now hearing on its downbeat; both sit below `.on`, so the
+  playhead still reads over them. Pinned by `DecksView.test.tsx`.
 - SFT IS ALSO A TAP: a strip's shift label is a button, and pressing it
   puts that deck's FIRST BEAT on the beat nearest the press
   (`phaseForBeat` in `decks.ts` — the slot's playhead is `beat - phase`,

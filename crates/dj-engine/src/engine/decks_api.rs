@@ -259,10 +259,13 @@ impl Engine {
     /// Put a clip in a slot: the audio (assembled by the app layer), what
     /// one of its beats means, and the binding a patch will remember.
     ///
-    /// The slot lands CUED — unmuted, on the monitor pair — and
-    /// un-shifted, so it enters the running bank on the shared grid — an
-    /// eight-beat clip and a two-beat clip start together — and it plays
-    /// in the headphones, not the live mix, until the user says so.
+    /// The slot lands CUED — unmuted, on the monitor pair — so it plays
+    /// in the headphones, not the live mix, until the user says so, and
+    /// LINED UP BY ITS ONES: the shift is set so the clip's first one
+    /// beat falls on the bank's beat 0 ([`DeckSlotState::align_phase`]),
+    /// which is what makes two clips hit their downbeats together
+    /// whether or not those sit at the top of the clip. A clip that marks
+    /// no ones lands unshifted, on its first beat.
     pub fn decks_load(
         &mut self,
         instance_id: &str,
@@ -318,10 +321,16 @@ impl Engine {
         s.source_bpm = source_bpm;
         if fresh {
             s.tail = 0;
-            s.phase = 0;
             // On the bank's own grid: a ratio belonged to the clip that
             // just left, like the shift and the silence after it.
             s.ratio = 1.0;
+            // The shift is what LINES THE CLIP UP, and what the decks are
+            // lined up by is their ONE beats: the clip sits so its first
+            // one falls on the bank's beat 0, so two clips that mark
+            // their downbeats hit them together however far into each
+            // clip they are. A clip that marks none is lined up by its
+            // first beat, unshifted, as every clip used to be.
+            s.phase = s.align_phase();
             // A fresh clip lands cued: audible in the monitor, out of the
             // live mix, so a load never makes an unasked-for noise in the
             // room.
@@ -584,6 +593,8 @@ impl Engine {
                 // that share of the grid, and its stretch is against the
                 // baseline the ratio put it on.
                 beats: s.grid_beats(),
+                ones: s.grid_ones(),
+                lead_one: s.lead_one(),
                 tail: s.tail,
                 phase: s.phase,
                 source_bpm: s.source_bpm,

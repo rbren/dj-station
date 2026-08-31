@@ -116,6 +116,8 @@ const slots = Array.from({ length: 8 }, (_, i) => ({
   clip: null,
   loaded: false,
   beats: 0,
+  ones: [],
+  lead_one: null,
   tail: 0,
   phase: 0,
   source_bpm: 120,

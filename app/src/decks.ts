@@ -96,6 +96,14 @@ export interface DeckSlotStatus {
   /** The clip's length in the BANK's beats — its own beats over the
    *  deck's ratio, so a double-time deck's 8-beat clip is 4. */
   beats: number;
+  /** Which of those beats are the clip's ONES (its downbeats), in the
+   *  clip's own order — the beats the lamp row marks. Empty when the
+   *  clip's grid marks none. */
+  ones: number[];
+  /** The one beat the deck is LINED UP BY: the clip's first one where a
+   *  load left it, and whichever one now comes round first after a
+   *  shift. Null when the clip marks no ones. */
+  lead_one: number | null;
   tail: number;
   phase: number;
   /** The tempo the clip was rendered at. */

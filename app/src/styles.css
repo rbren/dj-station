@@ -5320,6 +5320,20 @@ body {
   box-shadow: inset 0 0 0 min(1px, calc(var(--beat-cell) / 3)) var(--line-strong);
 }
 
+/* The clip's ONE beats — the downbeats its grid marks — so the row shows
+   where the phrase turns over and not just how long the loop is. The one
+   the deck is LINED UP BY is green: a load puts the clip's first one on
+   the bank's downbeat, and a shift hands the green to whichever one comes
+   round there instead. Both sit below `.on` in specificity, so the
+   playhead still reads over them as it passes. */
+.decks-beat-one {
+  background: var(--loop);
+}
+
+.decks-beat-lead-one {
+  background: var(--ok);
+}
+
 .decks-beat-dot.on {
   background: var(--brand);
 }

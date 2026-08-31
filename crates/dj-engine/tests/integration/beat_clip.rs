@@ -282,6 +282,7 @@ fn the_clip_binding_survives_a_patch_round_trip() {
         name: "chorus stack".into(),
         project_name: "set two".into(),
         stems: vec!["drums".into(), "bass".into()],
+        ones: Vec::new(),
     };
 
     let mut e = beat_clip_engine();
@@ -318,6 +319,7 @@ fn a_copy_plays_the_same_clip_as_its_source() {
         name: "chorus stack".into(),
         project_name: "set two".into(),
         stems: vec!["drums".into(), "bass".into()],
+        ones: Vec::new(),
     };
     let mut e = beat_clip_engine();
     e.beat_clip_load("bc1", Some(clip.clone()), ramp_clip(), CLIP_BPM)

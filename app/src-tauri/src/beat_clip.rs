@@ -120,6 +120,10 @@ pub struct RenderedClip {
     pub project_name: String,
     /// What it is made of, for the module that ends up playing it.
     pub stems: Vec<String>,
+    /// Which of its beats its grid marks as ONES — what a deck lines the
+    /// clip up by. Empty for a clip whose grid marks none (and for one
+    /// filed before the edit was kept).
+    pub ones: Vec<u32>,
 }
 
 impl RenderedClip {
@@ -149,6 +153,16 @@ impl RenderedClip {
 pub fn render_clip(state: &AppState, clip_id: &str) -> CmdResult<RenderedClip> {
     let (meta, audio, bleed) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), clip_id)
         .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+    // The ones are the grid's, and the grid a clip keeps is the one cut
+    // to the clip (`BeatGrid::cut_to`), so its indices already count the
+    // clip's own beats. A clip filed without its edit, or tapped without
+    // marking a one, simply has none.
+    let ones = meta
+        .edit
+        .as_ref()
+        .and_then(|edit| edit.program.beat_grid.as_ref())
+        .map(|grid| grid.ones.iter().map(|&one| one as u32).collect())
+        .unwrap_or_default();
     Ok(RenderedClip {
         audio,
         bleed,
@@ -156,6 +170,7 @@ pub fn render_clip(state: &AppState, clip_id: &str) -> CmdResult<RenderedClip> {
         project_name: crate::clip::BEAT_CLIPS_PROJECT_NAME.into(),
         name: meta.name,
         stems: meta.stems,
+        ones,
     })
 }
 
@@ -178,6 +193,7 @@ pub fn beat_clip_load(
         name: rendered.name.clone(),
         project_name: rendered.project_name.clone(),
         stems: rendered.stems.clone(),
+        ones: rendered.ones.clone(),
     };
     let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
     engine

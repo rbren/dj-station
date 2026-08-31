@@ -39,6 +39,8 @@ function slotFixture(slot: number): DeckSlotStatus {
     clip: null,
     loaded: slot === 0,
     beats: 0,
+    ones: [],
+    lead_one: null,
     tail: 0,
     phase: 0,
     source_bpm: 120,

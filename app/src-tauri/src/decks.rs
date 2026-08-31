@@ -110,6 +110,7 @@ pub fn decks_load(
         name: rendered.name.clone(),
         project_name: rendered.project_name.clone(),
         stems: rendered.stems.clone(),
+        ones: rendered.ones.clone(),
     };
     let mut engine = patch_edit(&state, EditKey::DeckSlot(&instance, slot))?;
     engine
@@ -284,13 +285,17 @@ pub fn hydrate(state: &AppState, engine: &mut Engine) {
             Ok(rendered) => {
                 let audio = rendered.clip_audio();
                 let bpm = rendered.bpm;
-                // The display fields are re-read off the clip as it now
-                // stands, like a Beat Clip's: a patch saved before clips
-                // said what they hold carries no stems.
+                // What the clip SAYS is re-read off it as it now stands,
+                // like a Beat Clip's: a patch saved before clips said what
+                // they hold carries no stems, and a clip revised in the
+                // Clip page brings its new ones with it. The slot's SHIFT
+                // is not touched — this is the audio arriving late, not a
+                // new load, so the deck stays lined up where it was.
                 let clip = BeatClipRef {
                     name: rendered.name.clone(),
                     project_name: rendered.project_name.clone(),
                     stems: rendered.stems.clone(),
+                    ones: rendered.ones.clone(),
                     ..clip
                 };
                 if let Err(e) = engine.decks_supply(&instance, slot, Some(clip), audio, bpm) {

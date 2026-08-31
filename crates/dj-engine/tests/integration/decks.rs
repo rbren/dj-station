@@ -62,6 +62,15 @@ fn clip_ref(name: &str) -> BeatClipRef {
         name: name.into(),
         project_name: "set one".into(),
         stems: Vec::new(),
+        ones: Vec::new(),
+    }
+}
+
+/// The same binding, for a clip whose grid marks these beats as its ONES.
+fn clip_ref_ones(name: &str, ones: &[u32]) -> BeatClipRef {
+    BeatClipRef {
+        ones: ones.to_vec(),
+        ..clip_ref(name)
     }
 }
 
@@ -283,6 +292,98 @@ fn slots_share_the_banks_grid_however_long_their_loops_are() {
     load(&mut e, 3, 7);
     let st = e.decks_status("bank1").unwrap();
     assert_eq!(st.cycle_beats, 168, "and only comes round every 168 beats");
+}
+
+#[test]
+fn a_fresh_load_lines_the_clip_up_by_its_first_one_beat() {
+    let mut e = bank();
+    // Two 8-beat clips whose downbeats sit at different places in the
+    // audio: one starts on its one, the other picks up two beats before
+    // it. Lining up the FIRST beats would put those two ones two beats
+    // apart; lining up the ones puts them both on the bank's beat 0.
+    e.decks_load(
+        "bank1",
+        0,
+        Some(clip_ref_ones("a", &[0, 4])),
+        clip(8, 0.5),
+        CLIP_BPM,
+    )
+    .unwrap();
+    e.decks_load(
+        "bank1",
+        1,
+        Some(clip_ref_ones("b", &[2, 6])),
+        clip(8, 0.5),
+        CLIP_BPM,
+    )
+    .unwrap();
+    // A clip that marks no ones is lined up by its first beat, as before.
+    e.decks_load("bank1", 2, Some(clip_ref("c")), clip(8, 0.5), CLIP_BPM)
+        .unwrap();
+
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!(st.slots[0].phase, 0, "its one is already at the top");
+    assert_eq!(
+        st.slots[1].phase, 6,
+        "shifted so its beat 2 — its first one — lands on the bank's 0"
+    );
+    assert_eq!(st.slots[2].phase, 0, "no ones, no shift");
+    assert_eq!(st.slots[1].ones, vec![2, 6], "the lamp row marks both");
+    assert_eq!(st.slots[1].lead_one, Some(2), "led by the clip's first one");
+
+    // And it is real, not just arithmetic: the bank starts on beat 0, so
+    // two beats later each deck is two beats past the one it started on.
+    e.render_offline(48_000).unwrap(); // two beats at 120 BPM
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!(st.slots[0].beat, 2, "deck 0's one was at its beat 0");
+    assert_eq!(st.slots[1].beat, 4, "deck 1's was at its beat 2");
+}
+
+#[test]
+fn shifting_a_deck_hands_the_lead_to_whichever_one_comes_round_first() {
+    let mut e = bank();
+    e.decks_load(
+        "bank1",
+        0,
+        Some(clip_ref_ones("a", &[0, 4])),
+        clip(8, 0.5),
+        CLIP_BPM,
+    )
+    .unwrap();
+    assert_eq!(e.decks_status("bank1").unwrap().slots[0].lead_one, Some(0));
+
+    // Shifted five beats along, the clip's SECOND one is the one that now
+    // falls closest after the bank's downbeat (beat 1 against beat 5), so
+    // that is the one the deck is being lined up by.
+    e.decks_set_phase("bank1", 0, 5).unwrap();
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!(st.slots[0].lead_one, Some(4));
+    assert_eq!(st.slots[0].ones, vec![0, 4], "both are still ones");
+
+    // Back where the load put it, and the clip's first one leads again.
+    e.decks_set_phase("bank1", 0, 0).unwrap();
+    assert_eq!(e.decks_status("bank1").unwrap().slots[0].lead_one, Some(0));
+}
+
+#[test]
+fn a_deck_in_double_time_counts_its_ones_on_the_banks_grid() {
+    let mut e = bank();
+    e.decks_load(
+        "bank1",
+        0,
+        Some(clip_ref_ones("a", &[0, 4])),
+        clip(8, 0.5),
+        CLIP_BPM,
+    )
+    .unwrap();
+    e.decks_set_ratio("bank1", 0, 2.0).unwrap();
+    let st = e.decks_status("bank1").unwrap();
+    assert_eq!(st.slots[0].beats, 4, "eight clip beats in four bank ones");
+    assert_eq!(
+        st.slots[0].ones,
+        vec![0, 2],
+        "and its downbeats come round twice as often"
+    );
 }
 
 #[test]

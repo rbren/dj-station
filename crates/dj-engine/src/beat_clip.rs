@@ -82,6 +82,17 @@ pub struct BeatClipRef {
     /// patch saved before clips said, and re-filled on the next load.
     #[serde(default)]
     pub stems: Vec<String>,
+    /// The clip's ONE beats: indices into its own beats of the downbeats
+    /// its beat grid marks, ascending (`BeatGrid::ones`, cut to the clip
+    /// with the grid). A clip whose grid marks none — an untapped one,
+    /// or one saved before ones existed — has an empty list, which is a
+    /// normal state. Re-read off the clip on every load, like the name:
+    /// a clip revised in the Clip page brings its new ones with it.
+    ///
+    /// It is what a Decks bank LINES A DECK UP BY (`DeckSlotState::
+    /// align_phase`), so unlike the name it is not display only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ones: Vec<u32>,
 }
 
 pub fn beat_clip_manifest() -> Manifest {

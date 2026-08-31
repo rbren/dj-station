@@ -59,6 +59,7 @@ fn play_clip(e: &mut Engine) {
             name: "c1".into(),
             project_name: "set one".into(),
             stems: Vec::new(),
+            ones: Vec::new(),
         }),
         TrackData {
             channels: vec![vec![0.5; 24_000 * 2]],

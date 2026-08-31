@@ -110,6 +110,9 @@ export function DecksSlot(props: DecksSlotProps) {
   const empty = slot.beats === 0;
   const loop = loopBeats(slot);
   const grid = beatGridLayout(loop);
+  // The clip's downbeats, as beats of the bank's grid — the engine has
+  // already taken them through the deck's ratio, like the beat count.
+  const ones = new Set(slot.ones);
   const parts = clipParts(slot.clip);
   // The ratio menu, the strip's one piece of local state: which deck is
   // in double time is the engine's, whether its menu is open is not. The
@@ -291,13 +294,22 @@ export function DecksSlot(props: DecksSlotProps) {
         </p>
       )}
 
-      {/* Every beat of the loop, silence included: a lamp row that stopped
-          at sixteen lied about where a long clip was. The lamps fill a
-          FIELD of fixed size — rows of a power of two, lamps grown or
-          shrunk to fit it — so a 4-beat clip and a 1024-beat one take the
-          same space and nothing below moves when one replaces the other.
-          The bare number beside the field is the same total, silence
-          included, for when the lamps are too small to count. */}
+      {/* Every beat of the loop, silence included, IN THE CLIP'S OWN
+          ORDER: a lamp row that stopped at sixteen lied about where a
+          long clip was, and one rotated by the shift would stop being a
+          picture of the clip. The lamps fill a FIELD of fixed size — rows
+          of a power of two, lamps grown or shrunk to fit it — so a 4-beat
+          clip and a 1024-beat one take the same space and nothing below
+          moves when one replaces the other. The bare number beside the
+          field is the same total, silence included, for when the lamps
+          are too small to count.
+
+          The clip's ONES are marked in the row: every downbeat its grid
+          knows about, and the one this deck is LINED UP BY in green. That
+          is the clip's first one where a load left it — a load puts it on
+          the bank's downbeat — and shifting the deck moves the green to
+          whichever one now comes round first, because that is the one the
+          rest of the bank is hearing it on. */}
       <div className="decks-beats-row">
         <div
           className="decks-beats"
@@ -313,14 +325,26 @@ export function DecksSlot(props: DecksSlotProps) {
             } as CSSProperties
           }
         >
-          {Array.from({ length: loop }, (_, i) => (
-            <span
-              key={i}
-              className={`decks-beat-dot${i === slot.beat ? ' on' : ''}${
-                i >= slot.beats ? ' decks-beat-tail' : ''
-              }`}
-            />
-          ))}
+          {Array.from({ length: loop }, (_, i) => {
+            const one = ones.has(i);
+            const lead = i === slot.lead_one;
+            return (
+              <span
+                key={i}
+                className={`decks-beat-dot${i === slot.beat ? ' on' : ''}${
+                  i >= slot.beats ? ' decks-beat-tail' : ''
+                }${one ? ' decks-beat-one' : ''}${lead ? ' decks-beat-lead-one' : ''}`}
+                data-one={one ? (lead ? 'lead' : 'yes') : undefined}
+                title={
+                  lead
+                    ? `Beat ${i + 1}: the one this deck is lined up by`
+                    : one
+                      ? `Beat ${i + 1}: a one`
+                      : undefined
+                }
+              />
+            );
+          })}
         </div>
         {!empty && (
           <span className="decks-beats-count" data-testid={`decks-beat-count-${slot.slot}`}>

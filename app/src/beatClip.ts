@@ -51,6 +51,10 @@ export interface BeatClipRef {
   /** What the clip held when it was bound — display only, and absent in
    *  a patch saved before clips said. Refreshed on every load. */
   stems?: string[];
+  /** Which of the clip's own beats its grid marks as ONES (downbeats),
+   *  ascending. Absent for a clip that marks none — and it is what a
+   *  deck lines the clip up by, not just something to draw. */
+  ones?: number[];
 }
 
 export interface BeatClipStatus {
