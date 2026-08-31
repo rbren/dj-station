@@ -31,7 +31,7 @@ import { StemTags, STEM_TAG_SHORT } from './StemTags';
 
 const COLUMNS: { field: ClipSortField; label: string; numeric?: boolean }[] = [
   { field: 'name', label: 'Name' },
-  { field: 'track', label: 'Track' },
+  { field: 'track', label: 'Title' },
   { field: 'artist', label: 'Artist' },
   { field: 'bpm', label: 'BPM', numeric: true },
   { field: 'beats', label: 'Beats', numeric: true },
@@ -227,11 +227,19 @@ export function BeatClipTable({
             <td className="beat-clip-name" data-testid={`${testId}-${c.clipId}`}>
               {c.name}
             </td>
+            {/* The flex that lays out multiple sources lives on a div
+                INSIDE each cell: display:flex on the td itself knocks it
+                out of the table layout, and the row's columns collapse
+                out from under their headers. */}
             <td className="beat-clip-track">
-              <TrackCell sources={c.sources} onFilter={onFilterTrack} />
+              <div className="beat-clip-names">
+                <TrackCell sources={c.sources} onFilter={onFilterTrack} />
+              </div>
             </td>
             <td className="beat-clip-artist">
-              <ArtistCell clip={c} onFilter={onFilterArtist} />
+              <div className="beat-clip-names">
+                <ArtistCell clip={c} onFilter={onFilterArtist} />
+              </div>
             </td>
             <td className="beat-clip-num">{fixed(c.bpm, 1)}</td>
             <td className="beat-clip-num">{c.beats}</td>

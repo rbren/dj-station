@@ -3410,14 +3410,20 @@ body {
   font-weight: 500;
 }
 
-/* A clip can name more than one source, so both name columns are rows of
-   their own. */
+/* A clip can name more than one source, so both name columns lay their
+   entries out as a wrapping row — on a div INSIDE the cell
+   (`.beat-clip-names`), never on the td: display:flex on a td takes it
+   out of the table layout and the columns slide out from under their
+   headers. */
 .beat-clip-track,
 .beat-clip-artist {
+  color: var(--ink-muted);
+}
+
+.beat-clip-names {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 8px;
-  color: var(--ink-muted);
 }
 
 .beat-clip-num {

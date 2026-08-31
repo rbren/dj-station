@@ -59,6 +59,11 @@ const cells = (row: HTMLElement) => [...row.children].map((c) => c.textContent);
 describe('BeatClipTable', () => {
   it('gives the track and the artist a column each, and the stems their tags', () => {
     show();
+    // One header per field, each cell under its own: the source track's
+    // title is called Title, and BPM is a column of its own — not a
+    // second line under the title.
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers).toEqual(['Name', 'Title', 'Artist', 'BPM', 'Beats', 'Stems']);
     const rows = screen.getAllByTestId('beat-clip-row');
     expect(cells(rows[0])).toEqual(['main drums', 'Basement Loop', 'Nadia', '120.0', '8', 'drums']);
     // What a clip holds is said the way every other surface says it: all
