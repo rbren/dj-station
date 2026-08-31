@@ -802,11 +802,21 @@ export function DecksView(props: DecksViewProps) {
         <DecksClipPicker
           deck={picking + 1}
           clips={clips}
+          // What the bank is actually playing, not what a walk is aiming
+          // at: the songs are offered nearest-tempo-first, and a clip
+          // has to sit on the grid as it stands.
+          bankBpm={actualBpm}
           onClose={() => setPicking(null)}
           onPick={(clip) => {
             const slot = picking;
             setPicking(null);
-            void write(() => api.load(bank, slot, clip.clipId));
+            // A load takes the deck's cables out with the clip that is
+            // leaving (`Engine::decks_load`), so the graph moved: the
+            // rack behind this chrome has to re-read it.
+            void write(async () => {
+              await api.load(bank, slot, clip.clipId);
+              props.onGraphChange?.();
+            });
           }}
         />
       )}

@@ -4156,6 +4156,26 @@ body {
   cursor: pointer;
 }
 
+/* The BEAT FLAGS above the selection's waveform: a triangle per beat,
+   pointing down at its marker. Hollow is an ordinary beat, filled is a
+   one — the same green the one's line is drawn in, so the flag and what
+   it marks read as one object. */
+.clip-sel-beat-flag {
+  fill: none;
+  stroke: var(--ink-dim);
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.clip-sel-beat-flag.is-one {
+  fill: var(--ok);
+  stroke: var(--ok);
+}
+
+.clip-sel-beat-flag:hover {
+  stroke: var(--ok);
+}
+
 /* The BLEED regions extend the selection's waveform either side of the
    loop. They are drawn beside it, never over it: the overlaying is what
    playback does, and a picture of the sum would hide which piece a level
@@ -5457,6 +5477,57 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* The SONG level of the deck's load dialog: one row per song, in tempo
+   order. It is scrolled to put the song nearest the bank's tempo in the
+   middle, so the list needs real height — a short one would have no
+   middle to scroll to. */
+.decks-song-rows {
+  max-height: 50vh;
+}
+
+.decks-song-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 60px 60px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.decks-song-row.is-active {
+  background: var(--surface-raised);
+  border-color: var(--brand);
+}
+
+.decks-song-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decks-song-artist,
+.decks-song-count {
+  color: var(--ink-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decks-song-bpm {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.decks-song-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-dim);
 }
 
 /* ---- Decks V2: rows against two beat grids ------------------------

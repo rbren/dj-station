@@ -140,7 +140,19 @@ const CLIPS: BeatClipEntry[] = [
     bpm: 120,
     stems: [],
     editable: false,
-    sources: [],
+    // Cut from the same song as c1: the picker's clip level is what one
+    // song holds, so the two have to share one.
+    sources: [{ trackHash: 'abc123', title: 'Basement Loop', artist: 'Me' }],
+  },
+  // Another song, at another tempo: what the picker sorts BY.
+  {
+    clipId: 'c3',
+    name: 'amen roll',
+    beats: 4,
+    bpm: 174,
+    stems: ['drums'],
+    editable: true,
+    sources: [{ trackHash: 'def456', title: 'Jungle Thing', artist: 'DJ X' }],
   },
 ];
 
@@ -167,6 +179,18 @@ function smoothBox(): HTMLInputElement {
 /** How fast that walk is, in bpm a minute. */
 function rateBox(): HTMLInputElement {
   return screen.getByTestId('decks-smooth-rate') as HTMLInputElement;
+}
+
+/** The load dialog's CLIP level, for the tests that are about the clip
+ *  table: the picker opens on the songs, so getting to a clip means
+ *  choosing the song it was cut from first (Enter takes the one the
+ *  dialog opened on, which is `Basement Loop` at every tempo these
+ *  tests use). */
+async function openClips() {
+  const dialog = await screen.findByTestId('decks-clip-picker');
+  fireEvent.keyDown(screen.getByTestId('decks-clip-search'), { key: 'Enter' });
+  await waitFor(() => expect(within(dialog).queryByTestId('decks-song-row')).toBeNull());
+  return dialog;
 }
 
 /** How lit a strip is: the --deck-level the tint is mixed from. */
@@ -801,7 +825,7 @@ describe('DecksView', () => {
     await waitFor(() => expect(screen.getByTestId('decks-name-5')).toBeTruthy());
     fireEvent.click(screen.getByTestId('decks-name-5'));
 
-    const dialog = await screen.findByTestId('decks-clip-picker');
+    const dialog = await openClips();
     expect(within(dialog).getByTestId('decks-clip-c1')).toBeTruthy();
     fireEvent.change(screen.getByTestId('decks-clip-search'), { target: { value: 'hat' } });
     expect(within(dialog).queryByTestId('decks-clip-c1')).toBeNull();
@@ -809,6 +833,59 @@ describe('DecksView', () => {
 
     await waitFor(() => expect(api.load).toHaveBeenCalledWith('decks1', 5, 'c2'));
     await waitFor(() => expect(screen.queryByTestId('decks-clip-picker')).toBeNull());
+  });
+
+  it('the picker offers the songs by tempo, opened on the one nearest the bank', async () => {
+    // The bank is at 128: nearer the 120 song than the 174 one.
+    show(makeApi(makeStatus({ bpm: 128 })));
+    await waitFor(() => expect(screen.getByTestId('decks-name-0')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('decks-name-0'));
+    const dialog = await screen.findByTestId('decks-clip-picker');
+
+    // Songs, not clips, and slowest first — the clip table is a level in.
+    const titles = () =>
+      within(dialog)
+        .getAllByTestId('decks-song-row')
+        .map((r) => r.children[0].textContent);
+    expect(titles()).toEqual(['Basement Loop', 'Jungle Thing']);
+    expect(within(dialog).queryByTestId('decks-clip-row')).toBeNull();
+
+    // The nearest is already picked, so Enter alone drills into it.
+    const selected = () =>
+      within(dialog)
+        .getAllByTestId('decks-song-row')
+        .findIndex((r) => r.getAttribute('aria-selected') === 'true');
+    expect(selected()).toBe(0);
+
+    const search = screen.getByTestId('decks-clip-search');
+    // ↓ is FASTER, ↑ is SLOWER, and neither walks off the ends.
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    expect(selected()).toBe(1);
+    fireEvent.keyDown(search, { key: 'ArrowUp' });
+    fireEvent.keyDown(search, { key: 'ArrowUp' });
+    expect(selected()).toBe(0);
+
+    // Enter opens the song: its clips, and a way back to the songs.
+    fireEvent.keyDown(search, { key: 'Enter' });
+    await waitFor(() => expect(within(dialog).getByTestId('decks-clip-c1')).toBeTruthy());
+    // Only THAT song's clips — the 174 one is behind its own row.
+    expect(within(dialog).queryByTestId('decks-clip-c3')).toBeNull();
+    fireEvent.click(within(dialog).getByTestId('decks-song-back'));
+    await waitFor(() => expect(within(dialog).getAllByTestId('decks-song-row')).toHaveLength(2));
+  });
+
+  it('a bank at jungle tempo opens the picker on the jungle song', async () => {
+    show(makeApi(makeStatus({ bpm: 172 })));
+    await waitFor(() => expect(screen.getByTestId('decks-name-0')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('decks-name-0'));
+    const dialog = await screen.findByTestId('decks-clip-picker');
+    const rows = within(dialog).getAllByTestId('decks-song-row');
+    expect(rows.findIndex((r) => r.getAttribute('aria-selected') === 'true')).toBe(1);
+    expect(rows[1].children[0].textContent).toBe('Jungle Thing');
+
+    // And Enter loads from it, in two keystrokes from opening the dialog.
+    fireEvent.keyDown(screen.getByTestId('decks-clip-search'), { key: 'Enter' });
+    await waitFor(() => expect(within(dialog).getByTestId('decks-clip-c3')).toBeTruthy());
   });
 
   it('with no clips cut yet the picker says where clips come from', async () => {
@@ -832,7 +909,7 @@ describe('DecksView', () => {
     expect(screen.queryByTestId('decks-stems-3')).toBeNull();
 
     fireEvent.click(screen.getByTestId('decks-name-3'));
-    const dialog = await screen.findByTestId('decks-clip-picker');
+    const dialog = await openClips();
     expect(within(dialog).getByTestId('decks-clip-stems-c1-bass')).toBeTruthy();
   });
 
@@ -840,7 +917,7 @@ describe('DecksView', () => {
     show(makeApi(makeStatus()));
     await waitFor(() => expect(screen.getByTestId('decks-name-0')).toBeTruthy());
     fireEvent.click(screen.getByTestId('decks-name-0'));
-    const dialog = await screen.findByTestId('decks-clip-picker');
+    const dialog = await openClips();
 
     // Same vocabulary as the strips: the chips print the short form.
     expect(within(dialog).getByTestId('decks-clip-filter-drums').textContent).toBe('DRM');
@@ -873,7 +950,7 @@ describe('DecksView', () => {
     show(makeApi(makeStatus()));
     await waitFor(() => expect(screen.getByTestId('decks-name-0')).toBeTruthy());
     fireEvent.click(screen.getByTestId('decks-name-0'));
-    const dialog = await screen.findByTestId('decks-clip-picker');
+    const dialog = await openClips();
 
     // Same columns as the Beat Clips tab: track and artist apart.
     const row = within(dialog).getAllByTestId('decks-clip-row')[0];

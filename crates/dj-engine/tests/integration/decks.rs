@@ -780,6 +780,62 @@ fn clearing_a_slot_keeps_the_mix_the_user_set() {
 }
 
 #[test]
+fn a_new_clip_arrives_on_a_deck_with_nothing_the_last_one_was_played_with() {
+    let mut e = bank();
+    e.add_module("vca1", "com.dj.vca").unwrap();
+    load(&mut e, 0, 4);
+    // Everything a hand can do to a deck, said about the clip in it: the
+    // mix, the grid, the insert and the cables that make one.
+    for (control, value) in [
+        (SlotControl::Level, 0.4),
+        (SlotControl::Low, 0.0),
+        (SlotControl::Mid, 1.5),
+        (SlotControl::High, 0.25),
+        (SlotControl::Wet, 0.5),
+        (SlotControl::InsertMonitor, 10.0),
+    ] {
+        e.decks_set_control("bank1", 0, control, value).unwrap();
+    }
+    e.decks_set_tail("bank1", 0, 3).unwrap();
+    e.decks_set_phase("bank1", 0, 2).unwrap();
+    e.decks_set_ratio("bank1", 0, 2.0).unwrap();
+    e.connect("bank1", "d1_out", "vca1", "in").unwrap();
+    e.connect("vca1", "out", "bank1", "d1_in").unwrap();
+    e.connect("bank1", "d1_low", "vca1", "cv").unwrap();
+    // Deck two's own cables, to prove a load is about ONE deck.
+    e.connect("bank1", "d2_out", "vca1", "in").unwrap();
+    assert!(e.decks_status("bank1").unwrap().slots[0].insert);
+
+    // What the shell's load does, in order: the cables out, then the clip
+    // in (see `decks_load` in app/src-tauri/src/decks.rs).
+    e.decks_unplug_slot("bank1", 0).unwrap();
+    e.decks_load("bank1", 0, Some(clip_ref("next")), clip(2, 0.5), CLIP_BPM)
+        .unwrap();
+
+    let st = e.decks_status("bank1").unwrap();
+    let s = &st.slots[0];
+    assert_eq!(s.level, LEVEL_UNITY, "the fader is back at unity");
+    assert_eq!((s.low, s.mid, s.high), (1.0, 1.0, 1.0), "the tone is flat");
+    assert_eq!(s.wet, 1.0);
+    assert!(!s.insert_monitor);
+    assert_eq!((s.tail, s.phase, s.ratio), (0, 0, 1.0));
+    assert!(
+        !s.insert,
+        "the insert went with the clip it was built for: the deck's cables are out"
+    );
+    assert!(
+        s.tone_patched.iter().all(|p| !p),
+        "and so did the tone CV driving it"
+    );
+    assert!(
+        e.wire_specs()
+            .iter()
+            .any(|w| w.from_jack == dj_engine::decks::send_jack(1)),
+        "deck two's cable is deck two's business"
+    );
+}
+
+#[test]
 fn the_whole_bank_round_trips_through_a_patch_and_asks_for_its_audio_back() {
     let dir = tempfile::tempdir().unwrap();
     let mut e = bank();

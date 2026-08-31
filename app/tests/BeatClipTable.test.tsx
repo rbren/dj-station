@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   filterClips,
   nextClipSort,
+  songNearestBpm,
+  songsByBpm,
   sortClips,
   type BeatClipEntry,
   type ClipSort,
@@ -239,5 +241,41 @@ describe('clip sort and filter', () => {
     expect(names({ trackHash: 'h1' })).toEqual(['main drums']);
     expect(names({ artist: 'nadia' })).toEqual(['main drums']);
     expect(names({ artist: 'Nadia', query: 'chorus' })).toEqual([]);
+  });
+});
+
+describe('songs by tempo', () => {
+  it('groups the clips by source, slowest song first, on the songs’ own tempo', () => {
+    const songs = songsByBpm([
+      ...CLIPS,
+      clip({
+        clipId: 'c4',
+        name: 'second chorus',
+        bpm: 174,
+        sources: [{ trackHash: 'h2', title: 'Rooftop Take', artist: 'Ovid' }],
+      }),
+      clip({ clipId: 'c5', name: 'more drums', bpm: 120 }),
+      // Same song again, at half its tempo: the song takes the MEDIAN of
+      // its clips, so one outlier does not decide where it sorts.
+      clip({ clipId: 'c6', name: 'half-time drums', bpm: 60 }),
+    ]);
+    expect(songs.map((s) => [s.title, s.bpm])).toEqual([
+      // c3 has no source at all: still offered, under a heading of its own.
+      ['no source recorded', 90],
+      ['Basement Loop', 120],
+      ['Rooftop Take', 174],
+    ]);
+    // A song holds every clip cut from it, whatever their tempo.
+    expect(songs[1].clips.map((c) => c.clipId)).toEqual(['c1', 'c5', 'c6']);
+    expect(songs[2].clips.map((c) => c.clipId)).toEqual(['c2', 'c4']);
+  });
+
+  it('finds the song nearest a bank’s tempo, and says so about an empty list', () => {
+    const songs = songsByBpm(CLIPS);
+    expect(songs[songNearestBpm(songs, 128)].title).toBe('Basement Loop');
+    expect(songs[songNearestBpm(songs, 170)].title).toBe('Rooftop Take');
+    // Below everything: the slowest, not a failure.
+    expect(songs[songNearestBpm(songs, 20)].title).toBe('no source recorded');
+    expect(songNearestBpm([], 120)).toBe(-1);
   });
 });

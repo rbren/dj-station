@@ -275,10 +275,12 @@ pub fn decks_status(state: State<AppState>, instance: String) -> CmdResult<Decks
     engine.decks_status(&instance).map_err(err)
 }
 
-/// Load a saved beat clip into a slot. It arrives cued to
-/// the monitor — unmuted, out of the live mix — and on the bank's grid
-/// (`Engine::decks_load`); the level and tone controls the slot already
-/// had stay where the user left them.
+/// Load a saved beat clip into a slot. It arrives cued to the monitor —
+/// unmuted, out of the live mix — on the bank's grid and with the deck
+/// put back the way an empty one starts: the mix, the shift, the silence
+/// and the ratio belonged to the clip that just left (`Engine::decks_load`),
+/// and so did the cables at the deck's own jacks
+/// (`Engine::decks_unplug_slot` — the insert was built for that clip).
 #[tauri::command(async)]
 pub fn decks_load(
     state: State<AppState>,
@@ -297,6 +299,7 @@ pub fn decks_load(
         ones: rendered.ones.clone(),
     };
     let mut engine = patch_edit(&state, EditKey::DeckSlot(&instance, slot))?;
+    engine.decks_unplug_slot(&instance, slot).map_err(err)?;
     engine
         .decks_load(
             &instance,

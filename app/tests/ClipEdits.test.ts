@@ -34,6 +34,7 @@ import {
   smoothWarp,
   stretchBands,
   tapGrid,
+  toggleGridOne,
   trimTo,
   warpSource,
   warpTime,
@@ -566,6 +567,19 @@ describe('the grid covers only what was tapped (or extended)', () => {
     expect(gridOneTimes(marked, 0, 10)).toEqual([marked.times[2]]);
     expect(gridOneTimes(marked, 0, 2)).toEqual([]);
     expect(gridOneTimes(grid, 0, 10)).toEqual([]);
+  });
+
+  it('marks and unmarks the beat nearest a time, for the flags in the pane', () => {
+    const marked = toggleGridOne(grid, grid.times[2] + 0.05);
+    expect(marked.ones).toEqual([2]);
+    // A second beat marked joins the first, in beat order…
+    const both = toggleGridOne(marked, grid.times[0] - 0.05);
+    expect(both.ones).toEqual([0, 2]);
+    // …and marking one already marked takes it back, the field going
+    // away entirely with the last of them (a grid with no ones has none,
+    // rather than an empty list).
+    expect(toggleGridOne(both, grid.times[2]).ones).toEqual([0]);
+    expect(toggleGridOne(marked, grid.times[2]).ones).toBeUndefined();
   });
 
   it('carries the ones through an extension, dropping one stepped over', () => {

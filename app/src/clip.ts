@@ -630,6 +630,25 @@ export function gridOneTimes(grid: ClipGrid, from: number, to: number): number[]
   return out;
 }
 
+/** Mark the grid beat NEAREST an output time as a one, or unmark it if
+ *  it already is one — the mouse's way of saying what a left-shift tap
+ *  says while playing. The same grid back when it has no beats to mark,
+ *  so a caller can apply the result unconditionally. */
+export function toggleGridOne(grid: ClipGrid, secs: number): ClipGrid {
+  const ts = grid.times;
+  if (ts.length === 0) return grid;
+  let nearest = 0;
+  for (let i = 1; i < ts.length; i += 1) {
+    if (Math.abs(ts[i] - secs) < Math.abs(ts[nearest] - secs)) nearest = i;
+  }
+  const ones = (grid.ones ?? []).filter((i) => i !== nearest);
+  if (ones.length === (grid.ones?.length ?? 0)) ones.push(nearest);
+  const next: ClipGrid = { ...grid };
+  if (ones.length) next.ones = ones.sort((a, b) => a - b);
+  else delete next.ones;
+  return next;
+}
+
 /** Fractional beat index of an output time against the grid's ACTUAL
  *  beats — piecewise linear between them, continuing at the ideal period
  *  outside the covered span (negative before it). */

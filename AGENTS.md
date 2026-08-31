@@ -1085,6 +1085,22 @@ offset))`, offset in position units — so the knob's curve shapes the
   `<root>-edit`/`-delete`, and the stem chips of `ClipStemFilter`
   (`<root>-filter-<part>`, `-filter-all`). Pinned by
   `app/tests/BeatClipTable.test.tsx` plus the two hosts' suites.
+- THE DECK'S LOAD DIALOG ASKS FOR THE SONG FIRST. Given a `bankBpm`
+  (`DecksView` passes the bank's ACTUAL tempo, not what a walk is aiming
+  at), `DecksClipPicker` opens on a list of SONGS ordered by tempo,
+  slowest first (`songsByBpm` in `beatClip.ts`: one row per source
+  track, its tempo the MEDIAN of its clips, and one heading for the
+  clips that name no source at all), scrolled so the song nearest the
+  bank's tempo sits in the MIDDLE of the dialog and already picked —
+  ↑ is slower, ↓ is faster, Enter drills into that song's clips, and
+  `decks-song-back` (or Backspace on an empty search box) comes back
+  out. The cursor is `index: number | null`, null meaning "wherever the
+  list wants it", so narrowing the songs re-aims at the nearest tempo
+  instead of parking on row 0 (and keeps the lint rule against setState
+  in an effect happy). Without `bankBpm` — Decks V2, which adds a clip
+  to a grid rather than to a running bank — the dialog is the flat clip
+  table it always was. Test ids `decks-song-row` (`aria-selected` marks
+  the cursor), `decks-song-back`, `decks-song-note`.
 - The YouTube provider is keyless and shells out to `yt-dlp` (OPTIONAL
   runtime dep, `DJ_YTDLP_BIN` overrides the binary, `DJ_YTDLP_ARGS` adds
   flags — e.g. `--cookies-from-browser` for YouTube's bot check): search is
@@ -1256,8 +1272,20 @@ offset))`, offset in position units — so the knob's curve shapes the
   sounds, with the level automation lane beneath it (the lane's x-axis is
   the SELECTION's — plus its bleed bookends where it has them, see LOOP
   BLEED below — though the breakpoints it writes are still absolute
-  output-timeline times), and it LOOPS. Clearing the selection (Escape)
-  takes the pane away and hands playback back to the source track.
+  output-timeline times), and it LOOPS. Clearing the selection — Escape,
+  or the pane's own ✕ (`clip-sel-clear`, beside its play button) —
+  takes the pane away and hands playback back to the source track; the
+  BEAT GRID stays, because it was tapped against the material, not
+  against the span. Above the selection waveform is a strip of BEAT
+  FLAGS: one down-pointing triangle per grid beat, joined to the top of
+  that beat's marker (`clip-sel-beat-flag`, `clip-sel-one-flag` when the
+  beat is a one), and clicking one toggles whether that beat counts as a
+  one (`toggleGridOne` in `clip.ts`, applied through ClipView's undoable
+  `apply` and mirrored into a live tap session's grid) — the mouse
+  saying what a left-shift tap says during playback. The strip is drawn
+  only when the host passes `onToggleOne`; the pane's viewBox opens
+  upward (`0 -HEAD`) so the flags hang above y=0 and nothing drawn on
+  the audio had to move.
   Playback therefore has two owners, never both at once: a selection is
   auditioned by `ClipLivePlayer` (`src/clipLive.ts`) and everything else
   by `ClipTransport`. The transport streams the RENDERED edit: 60 s WAV
@@ -1553,12 +1581,23 @@ offset))`, offset in position units — so the knob's curve shapes the
   (clip beats + silent `tail`, minus its whole-beat `phase`), which is
   what makes a 2-beat clip and an 8-beat clip start together with no
   re-triggering; `cycle_beats` is the lcm of the loaded loops (how often
-  the whole bank comes round). A freshly loaded clip arrives CUED (un-muted
-  with monitor on, so it is audible in the headphones but not the live
-  pair — see `hand_slot_clip`'s `fresh` path)
-  and tail-free — `decks_load` resets those, `decks_supply` deliberately
-  does NOT (it is the app layer handing over audio for a binding that
-  already exists, after a patch load or undo).
+  the whole bank comes round). A NEW CLIP IS A NEW DECK. A freshly loaded clip
+  arrives CUED (un-muted with monitor on, so it is audible in the
+  headphones but not the live pair — see `hand_slot_clip`'s `fresh`
+  path) and with EVERYTHING the last clip was played with put back:
+  tail, ratio, shift, level, the three tone controls, wet,
+  `insert_monitor` and `live_level` all return to
+  `DeckSlotState::default()`, because a fader pulled down or a band cut
+  was said about the clip that has gone. `decks_load` does that reset;
+  `decks_supply` deliberately does NOT (it is the app layer handing over
+  audio for a binding that already exists, after a patch load or undo).
+  The deck's CABLES go with the clip too, but one level up:
+  `Engine::decks_unplug_slot` pulls the slot's own send, return and
+  three tone CVs, and it is the SHELL's `decks_load` (`app/src-tauri`)
+  that calls it — a patch load hands a slot audio for a graph it has
+  just read, and must not rewire it. Only the slot's jacks: the bank's
+  outputs, clock and tempo input belong to the bank, not to what is in
+  deck three.
   A LOAD LINES THE CLIP UP BY ITS ONES, not by its first beat
   (`DeckSlotState::align_phase`): a clip's grid marks which of its beats
   are downbeats (`BeatGrid::ones`, cut to the clip when it is saved and

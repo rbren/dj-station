@@ -102,6 +102,7 @@ import {
   stemWait,
   stretchBands,
   tapGrid,
+  toggleGridOne,
   warpSource,
   type ClipBeats,
   type ClipClientApi,
@@ -1700,6 +1701,23 @@ export function ClipView({
     [grid, laneRange],
   );
 
+  /** Make the beat under a flag a one, or an ordinary beat again — the
+   *  mouse saying what a left-shift tap says during playback. It is a
+   *  tone-shaped edit (nothing on the timeline moves), so it goes
+   *  through `apply` as one undo step, and a live tap session survives
+   *  it: the grid is still that session's, and the toolbar's own
+   *  controls keep working. A RE-TUNE of the session re-derives its ones
+   *  from the taps, which is what a re-tune is for. */
+  const toggleOne = useCallback(
+    (secs: number) => {
+      apply((p) => (p.beat_grid ? { ...p, beat_grid: toggleGridOne(p.beat_grid, secs) } : p));
+      setTapSession((s) =>
+        s && s.grid === program.beat_grid ? { ...s, grid: toggleGridOne(s.grid, secs) } : s,
+      );
+    },
+    [apply, program.beat_grid],
+  );
+
   /** The selection pane's x-mapping: the span AND its bookends fill the
    *  pane, so the level lane under it lines up with the waveform piece
    *  for piece — including over the bleed, which is the only way a point
@@ -2172,11 +2190,15 @@ export function ClipView({
               }
               beats={selBeats}
               ones={selOnes}
+              onToggleOne={grid ? toggleOne : undefined}
               waveHeight={SEL_WAVE_H}
               playing={playing}
               playhead={playhead}
               loading={selLoading}
               onTogglePlay={togglePlay}
+              // Just the span: the grid was tapped against the material,
+              // not against the selection, so it outlives it.
+              onClear={() => setSelection(null)}
               onSeek={seek}
               timecode={timecode}
               levelLane={levelLane}

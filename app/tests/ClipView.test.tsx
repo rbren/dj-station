@@ -927,6 +927,70 @@ describe('ClipView', () => {
     expect(screen.getAllByTestId('clip-sel-one-line')).toHaveLength(1);
   });
 
+  it('makes a beat a one, and an ordinary beat again, from its flag', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    const play = screen.getByTestId('clip-play');
+    fireEvent.click(play);
+    await waitFor(() => expect(play.textContent).toBe('❚❚'));
+    tapAt(1.0);
+    tapAt(1.6);
+    tapAt(2.2);
+    tapAt(3.0);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4));
+    select(1.0, 3.0);
+
+    // Nobody tapped a one, so every flag is an ordinary beat.
+    expect(screen.queryAllByTestId('clip-sel-one-flag')).toHaveLength(0);
+    const flags = screen.getAllByTestId('clip-sel-beat-flag');
+    expect(flags).toHaveLength(4);
+
+    // Clicking the third one's flag marks THAT beat.
+    fireEvent.mouseDown(flags[2]);
+    const marked = await programNow(clip, (p) => (p.beat_grid?.ones?.length ?? 0) > 0);
+    expect(marked.beat_grid?.ones).toEqual([2]);
+    expect(screen.getAllByTestId('clip-sel-one-flag')).toHaveLength(1);
+    expect(screen.getAllByTestId('clip-sel-one-line')).toHaveLength(1);
+
+    // And clicking it again takes it back — one flag, both ways.
+    fireEvent.mouseDown(screen.getByTestId('clip-sel-one-flag'));
+    await programNow(clip, (p) => p.beat_grid !== null && p.beat_grid.ones === undefined);
+    expect(screen.queryAllByTestId('clip-sel-one-flag')).toHaveLength(0);
+
+    // It is an ordinary edit: undo puts the one back (on the source
+    // track, since undo drops the selection with it).
+    fireEvent.click(screen.getByTestId('clip-undo'));
+    await waitFor(() => expect(screen.getAllByTestId('clip-one-line')).toHaveLength(1));
+  });
+
+  it('clears the selection with ✕, and the tapped grid stays', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    const play = screen.getByTestId('clip-play');
+    fireEvent.click(play);
+    await waitFor(() => expect(play.textContent).toBe('❚❚'));
+    tapAt(1.0);
+    tapAt(1.6);
+    tapAt(2.2);
+    tapAt(3.0);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4));
+    select(1.0, 3.0);
+    expect(screen.getByTestId('clip-selection-pane')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('clip-sel-clear'));
+
+    // Back to the source alone…
+    expect(screen.queryByTestId('clip-selection-pane')).toBeNull();
+    expect(screen.getByTestId('clip-selection-empty')).toBeTruthy();
+    // …with the grid still on it: it was tapped against the material,
+    // not against the span.
+    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4);
+    const p = await programNow(clip);
+    expect(p.beat_grid?.times).toEqual([1.0, 1.6, 2.2, 3.0]);
+  });
+
   it('smooths the correction across each section without moving a beat', async () => {
     const clip = clipMock();
     await openTrack(clip);

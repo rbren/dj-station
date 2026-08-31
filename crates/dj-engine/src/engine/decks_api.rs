@@ -16,9 +16,9 @@
 
 use super::*;
 use crate::decks::{
-    cycle_beats, led_for, return_jack, tone_jack, DeckArm, DeckSlotState, DeckSlotStatus,
-    DeckTransition, DecksCmd, DecksState, DecksStatus, MasterBus, SlotControl, EQ_MAX, IN_BPM,
-    LEVEL_MAX, MAX_TAIL_BEATS, MOMENTARY_RELEASE_SECS, SLOTS, SURFACE_PARAM,
+    cycle_beats, led_for, return_jack, send_jack, tone_jack, DeckArm, DeckSlotState,
+    DeckSlotStatus, DeckTransition, DecksCmd, DecksState, DecksStatus, MasterBus, SlotControl,
+    EQ_MAX, IN_BPM, LEVEL_MAX, MAX_TAIL_BEATS, MOMENTARY_RELEASE_SECS, SLOTS, SURFACE_PARAM,
 };
 use crate::launch_control::{jack_index, row, BUTTON_GATE_VOLTS};
 use crate::playback::{ClipAudio, ClipBleed};
@@ -136,6 +136,28 @@ impl Engine {
                 .any(|w| w.from_node == node && w.from_jack == jack);
         }
         out
+    }
+
+    /// Pull every cable out of one slot's own jacks — its send, its
+    /// return and the three tone CVs. An insert was built for the clip
+    /// that is leaving, so the app layer takes it out when the USER loads
+    /// a new one (`decks_load` in the shell) rather than dropping that
+    /// clip into someone else's effects chain. It is not part of
+    /// [`Engine::decks_load`] itself: handing a slot audio is also what a
+    /// patch load and an E2E case do, and those must not rewire the
+    /// graph they just read. Only the SLOT's jacks — the bank's outputs,
+    /// its clock and its tempo input belong to the bank, not to what is
+    /// in deck three.
+    pub fn decks_unplug_slot(&mut self, instance_id: &str, slot: usize) -> Result<()> {
+        Self::check_slot(slot)?;
+        let node = self.decks_node(instance_id)?;
+        let send = send_jack(slot);
+        let ret = return_jack(slot);
+        let tones: [usize; 3] = std::array::from_fn(|t| tone_jack(slot, t));
+        self.remove_wires_where(|w| {
+            (w.from_node == node && (w.from_jack == send || tones.contains(&w.from_jack)))
+                || (w.to_node == node && w.to_jack == ret)
+        })
     }
 
     /// Whether a slot's return is wired — the modules feeding it are the
@@ -270,13 +292,19 @@ impl Engine {
     /// Put a clip in a slot: the audio (assembled by the app layer), what
     /// one of its beats means, and the binding a patch will remember.
     ///
-    /// The slot lands CUED — unmuted, on the monitor pair — so it plays
-    /// in the headphones, not the live mix, until the user says so, and
-    /// LINED UP BY ITS ONES: the shift is set so the clip's first one
-    /// beat falls on the bank's beat 0 ([`DeckSlotState::align_phase`]),
-    /// which is what makes two clips hit their downbeats together
-    /// whether or not those sit at the top of the clip. A clip that marks
-    /// no ones lands unshifted, on its first beat.
+    /// A NEW CLIP IS A NEW DECK: everything the last one was played with
+    /// goes with it — the shift, the silence after it, the ratio, the
+    /// level, the three tone controls, the wetness and its cue. (The
+    /// deck's CABLES go too, but one level up: see
+    /// [`Engine::decks_unplug_slot`], which the shell's load calls and a
+    /// patch load does not.) The slot lands CUED — unmuted, on the
+    /// monitor pair — so it plays in the headphones, not the live mix,
+    /// until the user says so, and LINED UP BY ITS ONES: the shift is set
+    /// so the clip's first one beat falls on the bank's beat 0
+    /// ([`DeckSlotState::align_phase`]), which is what makes two clips
+    /// hit their downbeats together whether or not those sit at the top
+    /// of the clip. A clip that marks no ones lands unshifted, on its
+    /// first beat.
     pub fn decks_load(
         &mut self,
         instance_id: &str,
@@ -335,6 +363,17 @@ impl Engine {
             // On the bank's own grid: a ratio belonged to the clip that
             // just left, like the shift and the silence after it.
             s.ratio = 1.0;
+            // And so did the mix it was played with: a fader pulled down,
+            // a band cut, an insert dialled halfway in are all things
+            // said about the clip that has just gone.
+            let d = DeckSlotState::default();
+            s.level = d.level;
+            s.low = d.low;
+            s.mid = d.mid;
+            s.high = d.high;
+            s.wet = d.wet;
+            s.insert_monitor = d.insert_monitor;
+            s.live_level = d.live_level;
             // The shift is what LINES THE CLIP UP, and what the decks are
             // lined up by is their ONE beats: the clip sits so its first
             // one falls on the bank's beat 0, so two clips that mark

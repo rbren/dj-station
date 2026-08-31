@@ -123,6 +123,64 @@ export function clipSourceLabel(clip: BeatClipEntry): string {
   return clip.sources.length > 0 ? 'source not in the library' : 'no source recorded';
 }
 
+/** THE SONG A DECK IS LOOKING FOR, before the clip: every track at least
+ *  one clip was cut from, with the clips cut from it. `hash` is null for
+ *  the clips that name no source at all — they are still loadable, so
+ *  they are still offered, gathered under one heading rather than left
+ *  out. */
+export interface ClipSong {
+  hash: string | null;
+  title: string;
+  artist: string | null;
+  /** The tempo the song's clips are laid out at (their median, so one
+   *  half-time clip among many does not move it): what a bank looking
+   *  for something to play at its own tempo sorts on. */
+  bpm: number;
+  clips: BeatClipEntry[];
+}
+
+/** Clips grouped by the song they were cut from, SLOWEST FIRST — the
+ *  order a deck picks in, because what makes a clip usable on a running
+ *  bank is its tempo. A clip cut from two sources belongs to both. */
+export function songsByBpm(clips: BeatClipEntry[]): ClipSong[] {
+  const songs = new Map<string, ClipSong>();
+  for (const clip of clips) {
+    const sources: (BeatClipSourceInfo | null)[] = clip.sources.length ? clip.sources : [null];
+    for (const src of sources) {
+      const key = src?.trackHash ?? '';
+      let song = songs.get(key);
+      if (!song) {
+        song = {
+          hash: src?.trackHash ?? null,
+          title: src ? (src.title ?? 'source not in the library') : 'no source recorded',
+          artist: src?.artist ?? null,
+          bpm: 0,
+          clips: [],
+        };
+        songs.set(key, song);
+      }
+      if (!song.clips.includes(clip)) song.clips.push(clip);
+    }
+  }
+  const out = [...songs.values()];
+  for (const song of out) {
+    const bpms = song.clips.map((c) => c.bpm).sort((a, b) => a - b);
+    song.bpm = bpms[Math.floor((bpms.length - 1) / 2)] ?? 0;
+  }
+  return out.sort((a, b) => a.bpm - b.bpm || a.title.localeCompare(b.title));
+}
+
+/** Which of the songs is nearest a tempo — the one a picker opens on.
+ *  -1 when there are none. A tie goes to the SLOWER song, so the same
+ *  list always opens in the same place. */
+export function songNearestBpm(songs: ClipSong[], bpm: number): number {
+  let best = -1;
+  for (let i = 0; i < songs.length; i += 1) {
+    if (best < 0 || Math.abs(songs[i].bpm - bpm) < Math.abs(songs[best].bpm - bpm)) best = i;
+  }
+  return best;
+}
+
 /** A column of the clip table, by what it orders on. */
 export type ClipSortField = 'name' | 'track' | 'artist' | 'bpm' | 'beats' | 'stems';
 
