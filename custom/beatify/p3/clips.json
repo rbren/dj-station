@@ -1,0 +1,206 @@
+[
+  {
+    "id": "1",
+    "name": "Theme",
+    "rows": 1,
+    "columns": 8,
+    "placements": [
+      {
+        "id": "p1",
+        "row": 0,
+        "col": 0,
+        "beats": 8,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": []
+        },
+        "sourceBeat": 8.0
+      }
+    ]
+  },
+  {
+    "id": "2",
+    "name": "Drums",
+    "rows": 1,
+    "columns": 16,
+    "placements": [
+      {
+        "id": "p2",
+        "row": 0,
+        "col": 0,
+        "beats": 16,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": [
+            "drums"
+          ]
+        },
+        "sourceBeat": 19.0
+      }
+    ]
+  },
+  {
+    "id": "3",
+    "name": "Guitar Riff",
+    "rows": 1,
+    "columns": 16,
+    "placements": [
+      {
+        "id": "p3",
+        "row": 0,
+        "col": 0,
+        "beats": 16,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": [
+            "vocals",
+            "bass",
+            "other"
+          ]
+        },
+        "sourceBeat": 8.0
+      }
+    ]
+  },
+  {
+    "id": "4",
+    "name": "My house",
+    "rows": 1,
+    "columns": 4,
+    "placements": [
+      {
+        "id": "p5",
+        "row": 0,
+        "col": 0,
+        "beats": 4,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": [
+            "vocals"
+          ]
+        },
+        "sourceBeat": 103.0
+      }
+    ]
+  },
+  {
+    "id": "5",
+    "name": "Set em ups",
+    "rows": 1,
+    "columns": 32,
+    "placements": [
+      {
+        "id": "p6",
+        "row": 0,
+        "col": 0,
+        "beats": 32,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": [
+            "vocals",
+            "drums",
+            "bass",
+            "other"
+          ]
+        },
+        "sourceBeat": 321.0
+      }
+    ]
+  },
+  {
+    "id": "6",
+    "name": "Solo",
+    "rows": 1,
+    "columns": 64,
+    "placements": [
+      {
+        "id": "p7",
+        "row": 0,
+        "col": 0,
+        "beats": 64,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": [
+            "vocals",
+            "drums",
+            "bass",
+            "other"
+          ]
+        },
+        "sourceBeat": 384.0
+      }
+    ]
+  },
+  {
+    "id": "7",
+    "name": "Never let em go",
+    "rows": 1,
+    "columns": 16,
+    "placements": [
+      {
+        "id": "p8",
+        "row": 0,
+        "col": 0,
+        "beats": 8,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": [
+            "vocals"
+          ]
+        },
+        "sourceBeat": 640.0
+      }
+    ]
+  },
+  {
+    "id": "8",
+    "name": "My houuuu",
+    "rows": 1,
+    "columns": 16,
+    "placements": [
+      {
+        "id": "p9",
+        "row": 0,
+        "col": 0,
+        "beats": 16,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": [
+            "vocals"
+          ]
+        },
+        "sourceBeat": 519.0
+      }
+    ]
+  },
+  {
+    "id": "9",
+    "name": "DP is playing at my house",
+    "rows": 1,
+    "columns": 16,
+    "placements": [
+      {
+        "id": "p15",
+        "row": 0,
+        "col": 0,
+        "beats": 16,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": [
+            "vocals"
+          ]
+        },
+        "sourceBeat": 128.0
+      }
+    ]
+  }
+]

@@ -1,0 +1,18 @@
+{
+  "id": "p3",
+  "name": "Daft Punk is Playing",
+  "bpm": 135.0,
+  "seeds": [
+    {
+      "id": "s1",
+      "name": "LCD Soundsystem- Daft Punk Is Playing At My House",
+      "trackId": 9,
+      "sourceHash": "c3fbdee0f1837d0baf4ffa93a1591a216f4338880ac12c8b6c4aa95ecf053a0e",
+      "dir": "seeds/s1",
+      "sourceBpm": 135.99482839919403,
+      "speed": 0.992684807129034
+    }
+  ],
+  "updated": 1787776717,
+  "version": 1
+}

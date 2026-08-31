@@ -1,0 +1,34 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio_l",
+      "to": "out1",
+      "to_jack": "l"
+    },
+    {
+      "from_jack": "audio_r",
+      "to": "out1",
+      "to_jack": "r"
+    },
+    {
+      "from_jack": "d1_l",
+      "to": "eq1",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "d1_r",
+      "to": "eq1",
+      "to_jack": "in"
+    },
+    {
+      "from_jack": "mon_l",
+      "to": "monitor1",
+      "to_jack": "l"
+    },
+    {
+      "from_jack": "mon_r",
+      "to": "monitor1",
+      "to_jack": "r"
+    }
+  ]
+}

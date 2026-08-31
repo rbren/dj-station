@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "decks1",
+      "to_jack": "d1_in_l"
+    },
+    {
+      "from_jack": "out",
+      "to": "decks1",
+      "to_jack": "d1_in_r"
+    }
+  ]
+}

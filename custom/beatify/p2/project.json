@@ -1,0 +1,18 @@
+{
+  "id": "p2",
+  "name": "blue orchid",
+  "bpm": 152.8324489930227,
+  "seeds": [
+    {
+      "id": "s1",
+      "name": "Blue Orchid",
+      "trackId": 11,
+      "sourceHash": "5987847b792a61fd8226f730a4768dfeef1b3700d4fa754ba14565ecb93c80b6",
+      "dir": "seeds/s1",
+      "sourceBpm": 149.62352290210802,
+      "speed": 1.0214466684694632
+    }
+  ],
+  "updated": 1788021150,
+  "version": 1
+}

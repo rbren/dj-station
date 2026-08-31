@@ -1,0 +1,246 @@
+{
+  "ext": "builtin.decks",
+  "knobs": {
+    "bpm": {
+      "position": 0.42857143,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d1_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d1_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d2_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d2_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d3_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d3_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d4_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d4_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d5_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d5_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d6_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d6_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d7_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d7_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d8_in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "d8_in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {
+    "surface": 1.0
+  },
+  "decks": {
+    "slots": [
+      {
+        "clip": {
+          "project": "p2",
+          "clip": "1",
+          "name": "intro",
+          "project_name": "blue orchid",
+          "stems": [
+            "vocals",
+            "drums",
+            "bass",
+            "other"
+          ]
+        },
+        "beats": 16,
+        "source_bpm": 152.83244,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": false,
+        "monitor": false
+      },
+      {
+        "clip": {
+          "project": "p3",
+          "clip": "2",
+          "name": "Drums",
+          "project_name": "Daft Punk is Playing",
+          "stems": [
+            "drums"
+          ]
+        },
+        "beats": 16,
+        "source_bpm": 135.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": false,
+        "monitor": false
+      },
+      {
+        "clip": {
+          "project": "p3",
+          "clip": "4",
+          "name": "My house",
+          "project_name": "Daft Punk is Playing",
+          "stems": [
+            "vocals"
+          ]
+        },
+        "beats": 4,
+        "source_bpm": 135.0,
+        "tail": 12,
+        "phase": 4,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": false,
+        "monitor": false
+      },
+      {
+        "clip": {
+          "project": "p1",
+          "clip": "9",
+          "name": "dont touch the flame",
+          "project_name": "True Thrush",
+          "stems": [
+            "vocals"
+          ]
+        },
+        "beats": 4,
+        "source_bpm": 139.99515,
+        "tail": 12,
+        "phase": 11,
+        "level": 1.0,
+        "low": 1.4133333,
+        "mid": 0.29333332,
+        "high": 0.0,
+        "mute": false,
+        "monitor": false
+      },
+      {
+        "clip": {
+          "project": "p1",
+          "clip": "12",
+          "name": "evom uoy",
+          "project_name": "True Thrush",
+          "stems": [
+            "vocals"
+          ]
+        },
+        "beats": 4,
+        "source_bpm": 139.99515,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": false,
+        "monitor": true
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      },
+      {
+        "beats": 0,
+        "source_bpm": 120.0,
+        "tail": 0,
+        "phase": 0,
+        "level": 1.0,
+        "low": 1.0,
+        "mid": 1.0,
+        "high": 1.0,
+        "mute": true,
+        "monitor": false
+      }
+    ]
+  }
+}

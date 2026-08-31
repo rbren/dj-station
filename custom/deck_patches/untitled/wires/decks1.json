@@ -1,0 +1,29 @@
+{
+  "wires": [
+    {
+      "from_jack": "audio_l",
+      "to": "out1",
+      "to_jack": "l"
+    },
+    {
+      "from_jack": "audio_r",
+      "to": "out1",
+      "to_jack": "r"
+    },
+    {
+      "from_jack": "clock",
+      "to": "clockmul1",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "mon_l",
+      "to": "monitor1",
+      "to_jack": "l"
+    },
+    {
+      "from_jack": "mon_r",
+      "to": "monitor1",
+      "to_jack": "r"
+    }
+  ]
+}

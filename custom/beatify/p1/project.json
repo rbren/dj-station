@@ -1,0 +1,27 @@
+{
+  "id": "p1",
+  "name": "True Thrush",
+  "bpm": 139.99514737222955,
+  "seeds": [
+    {
+      "id": "s1",
+      "name": "Dan Deacon - True Thrush (Official Music Video)",
+      "trackId": 10,
+      "sourceHash": "1ed7d7373e2aff350a4be99d8f756caa4d281265bef6e0e498d49191b67594eb",
+      "dir": "seeds/s1",
+      "sourceBpm": 139.99514737222955,
+      "speed": 1.0
+    },
+    {
+      "id": "s2",
+      "name": "Dan Deacon - True Thrush (Official Music Video)",
+      "trackId": 10,
+      "sourceHash": "1ed7d7373e2aff350a4be99d8f756caa4d281265bef6e0e498d49191b67594eb",
+      "dir": "seeds/s2",
+      "sourceBpm": 139.99672799557982,
+      "speed": 0.9999887095693386
+    }
+  ],
+  "updated": 1787697042,
+  "version": 1
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "1",
+    "name": "intro",
+    "rows": 1,
+    "columns": 16,
+    "placements": [
+      {
+        "id": "p1",
+        "row": 0,
+        "col": 0,
+        "beats": 16,
+        "source": {
+          "kind": "seed",
+          "id": "s1",
+          "stems": []
+        },
+        "sourceBeat": 0.0
+      }
+    ]
+  }
+]
