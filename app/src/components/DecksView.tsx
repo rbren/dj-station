@@ -46,11 +46,12 @@
 // engine's own reading agrees with it. Drafts converge and clear
 // themselves — there is no timer, and no "who is right" ambiguity.
 //
-// The tempo box is that draft with a WALK behind it. Ticked, "smooth"
-// makes the number a destination: the bank's tempo moves toward it at
-// SMOOTH_BPM_PER_SEC, written a step at a time down the same
-// `decks_set_bpm` path (one coalesced undo step, closed when it lands),
-// and the reading beside the box says where the bank actually is
+// The tempo box is that draft with a WALK behind it. Ticked, the tick
+// box left of it makes the number a destination: the bank's tempo moves
+// toward it at the rate in the box under the tick — `bpm / min`, the
+// user's, DEFAULT_BPM_PER_MIN to start — written a step at a time down
+// the same `decks_set_bpm` path (one coalesced undo step, closed when it
+// lands), and the reading beside the box says where the bank actually is
 // meanwhile. Unticked, the write goes out whole, as it always did.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -58,9 +59,12 @@ import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '
 import {
   decks as defaultApi,
   CLOCK_JACK,
+  DEFAULT_BPM_PER_MIN,
   MASTER_BUSES,
   MAX_BPM,
+  MAX_BPM_PER_MIN,
   MIN_BPM,
+  MIN_BPM_PER_MIN,
   rampBpm,
   type DecksApi,
   type DecksStatus,
@@ -161,14 +165,16 @@ export function DecksView(props: DecksViewProps) {
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Partial<Record<DraftKey, number>>>({});
-  // The tempo the box is ASKING for, and whether the bank walks to it or
-  // jumps. The target is a draft like any other — it clears itself once
-  // the engine's reading agrees — but with `smooth` ticked it outlives
-  // the keystroke that set it, because the walk that answers it takes
-  // seconds (`SMOOTH_BPM_PER_SEC`) and the box has to keep saying where
-  // the bank is going while the readout beside it says where it is.
+  // The tempo the box is ASKING for, whether the bank walks to it or
+  // jumps, and how fast it walks. The target is a draft like any other —
+  // it clears itself once the engine's reading agrees — but with the
+  // walk ticked it outlives the keystroke that set it, because the walk
+  // that answers it takes minutes at the rates this page is for, and the
+  // box has to keep saying where the bank is going while the readout
+  // beside it says where it is.
   const [bpmTarget, setBpmTarget] = useState<number | null>(null);
   const [smooth, setSmooth] = useState(true);
+  const [perMin, setPerMin] = useState(DEFAULT_BPM_PER_MIN);
   // The last tempo the walk wrote, so a target changed mid-walk carries
   // on from where the bank actually is rather than from the poll's
   // reading; null between walks.
@@ -339,19 +345,20 @@ export function DecksView(props: DecksViewProps) {
     void api.endEdit();
   }, [api, smooth]);
 
-  // SMOOTH: the bank WALKS to the target at SMOOTH_BPM_PER_SEC rather
-  // than jumping there, so a tempo change is something a floor moves
-  // with. Each step is the same tempo write the box makes — one undo
-  // step (`EditKey::Knob` coalesces until `end_edit`), closed when the
-  // walk arrives — and the actual tempo beside the box is the engine's
-  // own reading of it, never this loop's arithmetic.
+  // THE WALK: the bank moves to the target at the rate box's bpm a
+  // minute rather than jumping there, so a tempo change is something a
+  // floor moves with. Each step is the same tempo write the box makes —
+  // one undo step (`EditKey::Knob` coalesces until `end_edit`), closed
+  // when the walk arrives — and the actual tempo beside the box is the
+  // engine's own reading of it, never this loop's arithmetic.
   useEffect(() => {
     if (!bank || !smooth || bpmTarget === null) return;
     const goal = clampBpm(bpmTarget);
     let last = performance.now();
     const timer = setInterval(() => {
       const now = performance.now();
-      const next = rampBpm(ramp.current ?? clock.current?.bpm ?? goal, goal, (now - last) / 1000);
+      const from = ramp.current ?? clock.current?.bpm ?? goal;
+      const next = rampBpm(from, goal, (now - last) / 1000, perMin);
       last = now;
       void api.setBpm(bank, next);
       if (next === goal) {
@@ -363,7 +370,7 @@ export function DecksView(props: DecksViewProps) {
       }
     }, SMOOTH_TICK_MS);
     return () => clearInterval(timer);
-  }, [api, bank, bpmTarget, smooth]);
+  }, [api, bank, bpmTarget, perMin, smooth]);
 
   const toggleSmooth = useCallback(
     (on: boolean) => {
@@ -505,17 +512,34 @@ export function DecksView(props: DecksViewProps) {
             number in one unit, so it is labelled ONCE, and the jack that
             carries that number to the rack stands right beside it. */}
         <div className="decks-tempo">
-          {/* Whether the bank WALKS to a new tempo or steps to it, beside
-              the box that asks for one: ticked, the number is a
-              destination the bank takes a second per beat to reach. */}
-          <label className="decks-smooth" data-testid="decks-smooth">
+          {/* Whether the bank WALKS to a new tempo or steps to it, and how
+              fast it walks — the tick and its rate say one thing between
+              them, so the rate box sits under the tick that turns it on
+              and the two share the `bpm / min` label. */}
+          <div className="decks-smooth" data-testid="decks-smooth">
+            <label className="decks-smooth-tick">
+              <input
+                type="checkbox"
+                checked={smooth}
+                onChange={(e) => toggleSmooth(e.target.checked)}
+              />
+              bpm / min
+            </label>
             <input
-              type="checkbox"
-              checked={smooth}
-              onChange={(e) => toggleSmooth(e.target.checked)}
+              className="decks-smooth-rate mono"
+              data-testid="decks-smooth-rate"
+              type="number"
+              aria-label="Tempo walk, bpm per minute"
+              min={MIN_BPM_PER_MIN}
+              max={MAX_BPM_PER_MIN}
+              step={1}
+              value={perMin}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                if (Number.isFinite(next)) setPerMin(next);
+              }}
             />
-            smooth
-          </label>
+          </div>
           <div className="decks-tempo-stack">
             <label className="decks-tempo-label" htmlFor="decks-bpm">
               BPM

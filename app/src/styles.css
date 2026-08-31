@@ -4816,13 +4816,27 @@ body {
   width: 160px;
 }
 
-/* How the bank gets to a new tempo, beside the box that asks for one. */
+/* How the bank gets to a new tempo, beside the box that asks for one:
+   the tick that turns the walk on, and under it the rate it walks at. */
 .decks-smooth {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+}
+
+.decks-smooth-tick {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  color: var(--ink-dim);
-  font-size: var(--fs-xs);
+}
+
+.decks-smooth-rate {
+  width: 5ch;
+  font-size: var(--fs-sm);
+  padding: 1px 3px;
+  text-align: right;
 }
 
 /* Where the bank IS while it walks to where it was sent: quieter and

@@ -36,15 +36,31 @@ export const LEVEL_MAX = 2;
 export const MIN_BPM = 20;
 export const MAX_BPM = 300;
 
-/** How fast "smooth" walks the bank's ACTUAL tempo to the target the box
- *  asks for: a tempo change is a move, not a jump, so a floor is never
- *  asked to notice it. */
-export const SMOOTH_BPM_PER_SEC = 1;
+/** How fast the smooth walk takes the bank's ACTUAL tempo to the target
+ *  the box asks for, in BPM PER MINUTE — the rate is the user's, set in
+ *  the box under the tick, and this is where it starts: five bpm a
+ *  minute is a move a floor is never asked to notice. */
+export const DEFAULT_BPM_PER_MIN = 5;
+/** A walk that does not move is not a walk (and a negative one runs
+ *  away), so the rate box is bounded either side. */
+export const MIN_BPM_PER_MIN = 0.1;
+export const MAX_BPM_PER_MIN = 600;
+
+export function clampBpmPerMin(rate: number): number {
+  if (!Number.isFinite(rate)) return DEFAULT_BPM_PER_MIN;
+  return Math.min(MAX_BPM_PER_MIN, Math.max(MIN_BPM_PER_MIN, rate));
+}
 
 /** One step of that walk: where the actual tempo stands `secs` after it
- *  was at `actual`, moving toward `target` and never past it. */
-export function rampBpm(actual: number, target: number, secs: number): number {
-  const step = SMOOTH_BPM_PER_SEC * Math.max(0, secs);
+ *  was at `actual`, moving toward `target` at `perMin` bpm a minute and
+ *  never past it. */
+export function rampBpm(
+  actual: number,
+  target: number,
+  secs: number,
+  perMin = DEFAULT_BPM_PER_MIN,
+): number {
+  const step = (clampBpmPerMin(perMin) / 60) * Math.max(0, secs);
   if (Math.abs(target - actual) <= step) return target;
   return actual + Math.sign(target - actual) * step;
 }

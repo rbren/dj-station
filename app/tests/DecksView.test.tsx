@@ -156,6 +156,11 @@ function smoothBox(): HTMLInputElement {
   return within(screen.getByTestId('decks-smooth')).getByRole('checkbox') as HTMLInputElement;
 }
 
+/** How fast that walk is, in bpm a minute. */
+function rateBox(): HTMLInputElement {
+  return screen.getByTestId('decks-smooth-rate') as HTMLInputElement;
+}
+
 /** How lit a strip is: the --deck-level the tint is mixed from. */
 function deckLevel(slot: number): number {
   const strip = screen.getByTestId(`decks-slot-${slot}`) as HTMLElement;
@@ -649,24 +654,43 @@ describe('DecksView', () => {
     await waitFor(() => expect(api.setBpm).toHaveBeenCalledWith('decks1', 300));
   });
 
-  it('smooth is on by default, and walks the bank to the target instead of jumping', async () => {
+  it('the walk is on by default, at five bpm a minute, and never jumps', async () => {
     const api = makeApi(makeStatus());
     show(api);
     const bpm = await screen.findByTestId<HTMLInputElement>('decks-bpm');
     await waitFor(() => expect(bpm.value).toBe('128'));
+    // The tick and the rate under it are one control, in one unit.
     expect(smoothBox().checked).toBe(true);
+    expect(screen.getByTestId('decks-smooth').textContent).toContain('bpm / min');
+    expect(rateBox().value).toBe('5');
 
-    // One beat away is one second's walk.
     fireEvent.change(bpm, { target: { value: '129' } });
     // Nothing is sent on the keystroke: the box says where the bank is
     // going, not where it is.
     expect(api.setBpm).not.toHaveBeenCalled();
     expect(bpm.value).toBe('129');
 
+    // Five bpm a minute is a step of hundredths: the bank leaves 128
+    // without ever being told 129.
     await waitFor(() => expect(api.setBpm).toHaveBeenCalled());
     const first = vi.mocked(api.setBpm).mock.calls[0][1];
     expect(first).toBeGreaterThan(128);
-    expect(first).toBeLessThan(129);
+    expect(first).toBeLessThan(128.2);
+    expect(api.setBpm).not.toHaveBeenCalledWith('decks1', 129);
+  });
+
+  it('the rate box says how fast the walk is, and the walk lands on the target', async () => {
+    const api = makeApi(makeStatus());
+    show(api);
+    const bpm = await screen.findByTestId<HTMLInputElement>('decks-bpm');
+    await waitFor(() => expect(bpm.value).toBe('128'));
+
+    // A bpm a second: one beat away is one second's walk.
+    fireEvent.change(rateBox(), { target: { value: '60' } });
+    fireEvent.change(bpm, { target: { value: '129' } });
+
+    await waitFor(() => expect(api.setBpm).toHaveBeenCalled());
+    expect(vi.mocked(api.setBpm).mock.calls[0][1]).toBeLessThan(129);
 
     // It arrives — exactly on the target — and closes the undo window it
     // has been writing into.
@@ -696,7 +720,7 @@ describe('DecksView', () => {
     expect(tempo?.contains(smoothBox())).toBe(true);
   });
 
-  it('unticking smooth mid-walk means "be there now"', async () => {
+  it('unticking the walk mid-walk means "be there now"', async () => {
     const api = makeApi(makeStatus());
     show(api);
     const bpm = await screen.findByTestId<HTMLInputElement>('decks-bpm');
@@ -968,13 +992,19 @@ describe('decks readouts', () => {
     expect(bpmLabel(140, 1 / 3)).toBe('420 bpm ×1/3');
   });
 
-  it('walks the tempo a beat a second, and never past the target', () => {
-    expect(rampBpm(128, 140, 1)).toBe(129);
-    expect(rampBpm(140, 128, 2)).toBe(138);
+  it('walks the tempo at bpm a MINUTE, and never past the target', () => {
+    // Five bpm a minute unless the rate box says otherwise.
+    expect(rampBpm(128, 140, 60)).toBeCloseTo(133, 6);
+    expect(rampBpm(128, 140, 30, 10)).toBeCloseTo(133, 6);
+    expect(rampBpm(140, 128, 12, 5)).toBeCloseTo(139, 6);
     // The last step lands ON the target rather than overshooting it, and
     // a target already reached is a no-op.
-    expect(rampBpm(128, 128.4, 1)).toBe(128.4);
-    expect(rampBpm(128, 128, 5)).toBe(128);
+    expect(rampBpm(128, 128.4, 60)).toBe(128.4);
+    expect(rampBpm(128, 128, 60)).toBe(128);
+    // A rate of nothing would be a walk that never arrives, so the box's
+    // floor is what a zero (or a minus) is worth.
+    expect(rampBpm(128, 140, 60, 0)).toBeCloseTo(128.1, 6);
+    expect(rampBpm(128, 140, 60, -10)).toBeCloseTo(128.1, 6);
   });
 
   it('keeps the two halves of a clip name apart, one line each', () => {
