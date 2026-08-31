@@ -82,6 +82,24 @@ pub struct DecksSlotSpec {
     /// when the mute it stands for lands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arm: Option<dj_engine::decks::DeckArm>,
+    /// The LIVE side of a V2 bank's slot (the classic fields above are
+    /// the monitor arrangement there; the `v2` flag itself is patch
+    /// state and rides in the case's saved patch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_level: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_mute: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_phase: Option<i32>,
+}
+
+/// A jump/crossfade armed on a V2 bank before the render — transport,
+/// like a slot's `arm`, so it lives in the sidecar: the bank's clock
+/// fires it on its first cycle seam.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeckTransitionSpec {
+    pub instance: String,
+    pub mode: dj_engine::decks::DeckTransition,
 }
 
 /// Deck DJ metadata applied after load. In the app this comes from the
@@ -149,6 +167,9 @@ pub struct EventsFile {
     pub decks: Vec<DeckSetupSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deck_slots: Vec<DecksSlotSpec>,
+    /// Jump/crossfades armed on V2 banks before the render.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deck_transitions: Vec<DeckTransitionSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hands: Vec<HandsTraceSpec>,
     /// Audio focus for the whole render ("rack" is the engine default;
@@ -318,10 +339,33 @@ fn render_case(case: &str) -> PathBuf {
         if let Some(v) = d.phase {
             engine.decks_set_phase(&d.instance, d.slot, v).unwrap();
         }
+        if let Some(v) = d.live_level {
+            engine
+                .decks_set_live_control(&d.instance, d.slot, SlotControl::Level, v)
+                .unwrap();
+        }
+        if let Some(v) = d.live_mute {
+            engine
+                .decks_set_live_control(
+                    &d.instance,
+                    d.slot,
+                    SlotControl::Mute,
+                    if v { 10.0 } else { 0.0 },
+                )
+                .unwrap();
+        }
+        if let Some(v) = d.live_phase {
+            engine.decks_set_live_phase(&d.instance, d.slot, v).unwrap();
+        }
         // After the mix, so the arm's own mute write is the last word.
         if let Some(arm) = d.arm {
             engine.decks_arm(&d.instance, d.slot, arm).unwrap();
         }
+    }
+    // A jump/crossfade is transport like an arm: armed before the render,
+    // fired by the bank's clock on its first cycle seam.
+    for t in &events.deck_transitions {
+        engine.decks_transition(&t.instance, t.mode).unwrap();
     }
     // A bank is created STOPPED and the transport is not patch state (see
     // `decks_set_running`), so the harness presses play for every bank in

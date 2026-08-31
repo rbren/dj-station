@@ -15,17 +15,32 @@
 //! window.
 
 use dj_engine::beat_clip::BeatClipRef;
-use dj_engine::decks::{DeckArm, DecksStatus, MasterBus, SlotControl, DECKS_ID, SURFACE_PARAM};
+use dj_engine::decks::{
+    DeckArm, DeckTransition, DecksStatus, MasterBus, SlotControl, DECKS_ID, SURFACE_PARAM,
+};
 use dj_engine::{Engine, Workspace};
 use tauri::State;
 
 use crate::beat_clip::render_clip;
 use crate::{engine_lock, err, patch_edit, AppState, CmdResult, EditKey};
 
-/// Every Decks bank on the rack (usually one).
+/// Whether a bank is a Decks V2 one — the two-arrangement bank its own
+/// tab drives. The two tabs share the workspace but never a bank, so
+/// both listing commands filter by this flag.
+fn is_v2(engine: &Engine, instance: &str) -> bool {
+    engine.decks_state(instance).map(|s| s.v2).unwrap_or(false)
+}
+
+/// Every CLASSIC Decks bank on the rack (usually one) — a V2 bank is the
+/// other tab's and never listed here.
 #[tauri::command]
 pub fn decks_banks(state: State<AppState>) -> CmdResult<Vec<String>> {
-    Ok(engine_lock(&state)?.decks_nodes())
+    let engine = engine_lock(&state)?;
+    Ok(engine
+        .decks_nodes()
+        .into_iter()
+        .filter(|id| !is_v2(&engine, id))
+        .collect())
 }
 
 /// The bank the Decks tab drives, wired so it can be HEARD: the first one
@@ -42,7 +57,11 @@ pub fn decks_banks(state: State<AppState>) -> CmdResult<Vec<String>> {
 pub fn decks_ensure(state: State<AppState>) -> CmdResult<String> {
     let existing = {
         let engine = engine_lock(&state)?;
-        match engine.decks_nodes().into_iter().next() {
+        let first = engine
+            .decks_nodes()
+            .into_iter()
+            .find(|id| !is_v2(&engine, id));
+        match first {
             Some(first) => {
                 // The bank belongs to the Decks workspace. A pre-workspace
                 // session's bank carries the Rack default and gets moved
@@ -61,7 +80,7 @@ pub fn decks_ensure(state: State<AppState>) -> CmdResult<String> {
     let instance = match existing {
         Some(bank) => bank,
         None => {
-            let instance = fresh_id(&engine);
+            let instance = fresh_id(&engine, "decks");
             engine.add_module(&instance, DECKS_ID).map_err(err)?;
             instance
         }
@@ -73,16 +92,181 @@ pub fn decks_ensure(state: State<AppState>) -> CmdResult<String> {
     Ok(instance)
 }
 
-fn fresh_id(engine: &Engine) -> String {
+fn fresh_id(engine: &Engine, stem: &str) -> String {
     let taken: std::collections::BTreeSet<&str> = engine
         .nodes
         .iter()
         .map(|n| n.instance_id.as_str())
         .collect();
     (1..)
-        .map(|n| format!("decks{n}"))
+        .map(|n| format!("{stem}{n}"))
         .find(|id| !taken.contains(id.as_str()))
         .unwrap()
+}
+
+/// Every V2 bank on the rack (usually one) — what the Decks V2 tab looks
+/// for before it offers to make one.
+#[tauri::command]
+pub fn decks_v2_banks(state: State<AppState>) -> CmdResult<Vec<String>> {
+    let engine = engine_lock(&state)?;
+    Ok(engine
+        .decks_nodes()
+        .into_iter()
+        .filter(|id| is_v2(&engine, id))
+        .collect())
+}
+
+/// The bank the Decks V2 tab drives: the first V2 bank on the rack, or a
+/// new one — same gesture as [`decks_ensure`], for the other tab. A fresh
+/// V2 bank ignores the Launch Control XL (the page offers no surface) and
+/// is wired to outputs like any bank; the two tabs share the decks
+/// workspace but never a bank.
+#[tauri::command]
+pub fn decks_v2_ensure(state: State<AppState>) -> CmdResult<String> {
+    let existing = {
+        let engine = engine_lock(&state)?;
+        let first = engine
+            .decks_nodes()
+            .into_iter()
+            .find(|id| is_v2(&engine, id));
+        match first {
+            Some(first) => {
+                if engine.module_workspace(&first).map_err(err)? == Workspace::Decks
+                    && engine.decks_loose_outputs(&first).map_err(err)? == (false, false)
+                {
+                    return Ok(first);
+                }
+                Some(first)
+            }
+            None => None,
+        }
+    };
+    let mut engine = patch_edit(&state, EditKey::Add("decks-v2"))?;
+    let instance = match existing {
+        Some(bank) => bank,
+        None => {
+            let instance = fresh_id(&engine, "decksv2_");
+            engine.add_module(&instance, DECKS_ID).map_err(err)?;
+            engine.decks_set_v2(&instance, true).map_err(err)?;
+            engine
+                .set_param(&instance, SURFACE_PARAM, 0.0)
+                .map_err(err)?;
+            instance
+        }
+    };
+    engine
+        .set_module_workspace(&instance, Workspace::Decks)
+        .map_err(err)?;
+    engine.decks_connect_outputs(&instance).map_err(err)?;
+    Ok(instance)
+}
+
+/// Load a saved beat clip into a V2 row. Like [`decks_load`] it arrives
+/// in the MONITOR arrangement (a new row never touches the room); with
+/// `muted` it lands silent there too — the page adds a whole song's clips
+/// that way, so eight rows landing at once make no noise anywhere.
+#[tauri::command(async)]
+pub fn decks_v2_load(
+    state: State<AppState>,
+    instance: String,
+    slot: usize,
+    clip_id: String,
+    muted: bool,
+) -> CmdResult<()> {
+    // Load BEFORE taking the engine lock: this decodes seconds of audio.
+    let rendered = render_clip(&state, &clip_id)?;
+    let clip = BeatClipRef {
+        project: crate::clip::BEAT_CLIPS_PROJECT.into(),
+        clip: clip_id,
+        name: rendered.name.clone(),
+        project_name: rendered.project_name.clone(),
+        stems: rendered.stems.clone(),
+        ones: rendered.ones.clone(),
+    };
+    let mut engine = patch_edit(&state, EditKey::DeckSlot(&instance, slot))?;
+    engine
+        .decks_load(
+            &instance,
+            slot,
+            Some(clip),
+            rendered.clip_audio(),
+            rendered.bpm,
+        )
+        .map_err(err)?;
+    if muted {
+        engine
+            .decks_set_control(&instance, slot, SlotControl::Mute, 10.0)
+            .map_err(err)?;
+    }
+    Ok(())
+}
+
+/// One of the LIVE side's controls on a V2 row — its own fader or mute
+/// (the classic `decks_set_control` writes the monitor arrangement).
+/// Coalesced per control, like the monitor side's.
+#[tauri::command]
+pub fn decks_v2_set_live_control(
+    state: State<AppState>,
+    instance: String,
+    slot: usize,
+    control: SlotControl,
+    value: f32,
+) -> CmdResult<()> {
+    let name = match control {
+        SlotControl::Level => "live_level",
+        SlotControl::Mute => "live_mute",
+        other => return Err(err(anyhow::anyhow!("not a live-side control: {other:?}"))),
+    };
+    let mut engine = patch_edit(&state, EditKey::DeckSlotControl(&instance, slot, name))?;
+    engine
+        .decks_set_live_control(&instance, slot, control, value)
+        .map_err(err)
+}
+
+/// Shift the LIVE side of a V2 row along the bank's grid (the disarmed
+/// live grid's own shift control).
+#[tauri::command]
+pub fn decks_v2_set_live_phase(
+    state: State<AppState>,
+    instance: String,
+    slot: usize,
+    phase: i32,
+) -> CmdResult<()> {
+    let mut engine = patch_edit(&state, EditKey::DeckSlot(&instance, slot))?;
+    engine
+        .decks_set_live_phase(&instance, slot, phase)
+        .map_err(err)
+}
+
+/// Arm (or cancel) a jump/crossfade on a V2 bank. Transport, like a
+/// deck's queue/drop: the bank's clock fires it on the cycle seam, and
+/// nothing here is an undoable edit.
+#[tauri::command]
+pub fn decks_v2_transition(
+    state: State<AppState>,
+    instance: String,
+    mode: DeckTransition,
+) -> CmdResult<()> {
+    let mut engine = engine_lock(&state)?;
+    engine.decks_transition(&instance, mode).map_err(err)
+}
+
+/// Finish a fired transition: copy the monitor arrangement into the live
+/// side (`Engine::decks_transition_commit`). The page calls this when its
+/// poll sees `transition_done`; inaudible, one undo step, and idempotent
+/// — a second poll finds nothing owed and edits nothing.
+#[tauri::command]
+pub fn decks_v2_commit(state: State<AppState>, instance: String) -> CmdResult<bool> {
+    // Nothing owed is nothing to edit (and no undo step): peek first.
+    if !engine_lock(&state)?
+        .decks_status(&instance)
+        .map_err(err)?
+        .transition_done
+    {
+        return Ok(false);
+    }
+    let mut engine = patch_edit(&state, EditKey::DeckCommit(&instance))?;
+    engine.decks_transition_commit(&instance).map_err(err)
 }
 
 #[tauri::command]

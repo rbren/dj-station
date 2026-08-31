@@ -2284,6 +2284,47 @@ of the page.
   `decks-master-mix` / `decks-rack-insert` / `workspace-focus-split`
   E2E goldens.
 
+## The Decks V2 page at a glance
+
+- One `builtin.decks` bank flagged `v2` (`DecksState::v2`, patch state)
+  plays TWO ARRANGEMENTS of its slots on one clock: the classic per-slot
+  fields are the MONITOR side (editable, on the monitor pair), the
+  `live_*` fields (`live_level/live_mute/live_phase`, serde-skipped at
+  defaults so classic patches keep their bytes) are what the room hears.
+  RT: `process_v2` in `crates/dj-engine/src/decks.rs` -- each side has its
+  own `RtSide` reader/ramp; no EQ, inserts or arms on this path; sends
+  carry the monitor side. The classic path is untouched (goldens pin it).
+- Transitions are TRANSPORT, not edits: `DeckTransition` (jump/crossfade)
+  is armed with a serial (`DecksCmd::Transition`), fires on the bank's
+  CYCLE SEAM (jump swaps the blend target, crossfade ramps over one whole
+  cycle), and the RT thread publishes `transition_fired`; the page's poll
+  sees `transition_done` and calls `decks_transition_commit`, which
+  copies monitor -> live and rests the blend (inaudible; one undo step,
+  `EditKey::DeckCommit`). The blend itself is smoothed by the fader
+  one-pole so a jump lands without a click.
+- The two tabs SHARE the decks workspace but never a bank:
+  `decks_banks`/`decks_ensure` filter v2 banks OUT, `decks_v2_banks`/
+  `decks_v2_ensure` filter them in (a fresh V2 bank is created with
+  surface off and id stem `decksv2_`). `decks_v2_load` takes a `muted`
+  flag: a single add lands audible in the monitor, a whole-song batch
+  lands muted everywhere.
+- Frontend: `app/src/decksV2.ts` (`DecksV2Client extends DecksClient`,
+  rows/LCM/zoom arithmetic, song grouping + FNV hue -- every clip cut
+  from one song wears one color, keyed by source `trackHash`) and
+  `app/src/components/DecksV2View.tsx` (top bar copied from DecksView --
+  deliberately copied, not shared; titles column; two `V2Grid`s zooming
+  and scrolling independently, both drawn to `cycle_beats` columns
+  (capped at `V2_MAX_COLS`), one playhead path; the 100 px gap holds
+  Jump/Crossfade; live side locked behind the `disarm` button; a row
+  muted on one side is grayed on that side). App: view `'decks2'`, tab
+  label "Decks V2", audio focus/workspace both map like `'decks'`.
+- Deliberately absent for now: rack integration (no chrome jacks, no
+  canvas under the page), cue/drop, Launch Control, hi/mid/low knobs.
+- Tests: `app/tests/DecksV2View.test.tsx`; engine
+  `integration decks` (`a_v2_*`, jump/crossfade/commit, patch
+  round-trip + classic-bytes pin) and the `decks-v2-jump` E2E golden
+  (sidecar grew `live_*` slot fields and `deck_transitions`).
+
 ## Manager
 
 - 2026-08-30 — "change AGENTS.md to tell the agents to spend less time

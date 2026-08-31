@@ -637,7 +637,16 @@ pub fn clip_save_beat_clip(
             Some(edit),
             &bleed,
         ),
-        None => clip::save_beat_clip(data_dir, &title, &span, bpm, beats, stems, Some(edit), &bleed),
+        None => clip::save_beat_clip(
+            data_dir,
+            &title,
+            &span,
+            bpm,
+            beats,
+            stems,
+            Some(edit),
+            &bleed,
+        ),
     }
     .map_err(|e| CmdError::invalid(format!("clip: {e}")))
 }
@@ -706,7 +715,11 @@ pub fn clip_open_beat_clip(state: State<AppState>, clip_id: String) -> CmdResult
     let mut sources = Vec::new();
     let mut missing = Vec::new();
     for source in &edit.sources {
-        match state.library.track_by_hash(&source.track_hash).map_err(err)? {
+        match state
+            .library
+            .track_by_hash(&source.track_hash)
+            .map_err(err)?
+        {
             Some(track) => sources.push(ClipSourceRef {
                 track_id: track.id,
                 stems: source.stems.clone(),

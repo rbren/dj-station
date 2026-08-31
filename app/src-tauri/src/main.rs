@@ -197,6 +197,9 @@ enum EditKey<'a> {
     DeckSlotControl(&'a str, usize, &'static str),
     /// The fader on one of a bank's two output pairs, per bus.
     DeckMaster(&'a str, &'static str),
+    /// A V2 transition commit: the monitor arrangement copied into the
+    /// live side, one undo step per commit.
+    DeckCommit(&'a str),
 }
 
 impl std::fmt::Display for EditKey<'_> {
@@ -242,6 +245,7 @@ impl std::fmt::Display for EditKey<'_> {
             EditKey::DeckSlot(i, s) => write!(f, "deckslot:{i}:{s}"),
             EditKey::DeckSlotControl(i, s, c) => write!(f, "deckctl:{i}:{s}:{c}"),
             EditKey::DeckMaster(i, b) => write!(f, "deckmaster:{i}:{b}"),
+            EditKey::DeckCommit(i) => write!(f, "deckcommit:{i}"),
         }
     }
 }
@@ -3125,6 +3129,13 @@ fn main() {
             beat_clip::beat_clip_status,
             decks::decks_banks,
             decks::decks_ensure,
+            decks::decks_v2_banks,
+            decks::decks_v2_ensure,
+            decks::decks_v2_load,
+            decks::decks_v2_set_live_control,
+            decks::decks_v2_set_live_phase,
+            decks::decks_v2_transition,
+            decks::decks_v2_commit,
             decks::decks_status,
             decks::decks_load,
             decks::decks_clear,

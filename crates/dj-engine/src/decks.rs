@@ -465,6 +465,18 @@ pub struct DeckSlotState {
     /// the rack's answer can be heard while the room hears the deck.
     #[serde(default)]
     pub insert_monitor: bool,
+    /// V2 banks only ([`DecksState::v2`]): the LIVE side's own mix and
+    /// shift. In a V2 bank the classic fields above are the MONITOR
+    /// arrangement (the one being edited) and these three are what the
+    /// room is hearing — a transition commit copies monitor into them.
+    /// All three skip their defaults, so a bank that has never been V2
+    /// keeps its bytes.
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    pub live_level: f32,
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub live_mute: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub live_phase: i32,
 }
 
 fn default_bpm() -> f32 {
@@ -478,6 +490,15 @@ fn is_unity(v: &f32) -> bool {
 }
 fn yes() -> bool {
     true
+}
+fn is_true(v: &bool) -> bool {
+    *v
+}
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+fn is_zero(v: &i32) -> bool {
+    *v == 0
 }
 
 /// How far a deck may be taken off the bank's grid ([`DeckSlotState::ratio`]).
@@ -512,6 +533,9 @@ impl Default for DeckSlotState {
             monitor: false,
             wet: 1.0,
             insert_monitor: false,
+            live_level: LEVEL_UNITY,
+            live_mute: true,
+            live_phase: 0,
         }
     }
 }
@@ -601,11 +625,17 @@ impl DeckSlotState {
     /// leads, which is the one everything else is in sync with. `None`
     /// when the clip marks no ones at all.
     pub fn lead_one(&self) -> Option<u32> {
+        self.lead_one_at(self.phase)
+    }
+
+    /// [`DeckSlotState::lead_one`] at an arbitrary shift — a V2 bank's
+    /// LIVE side can sit at its own shift ([`DeckSlotState::live_phase`]).
+    pub fn lead_one_at(&self, phase: i32) -> Option<u32> {
         let len = self.length_beats() as i64;
         if len <= 0 {
             return None;
         }
-        let phase = self.phase as i64;
+        let phase = phase as i64;
         self.grid_ones()
             .into_iter()
             .min_by_key(|&one| (one as i64 + phase).rem_euclid(len))
@@ -622,6 +652,16 @@ pub struct DecksState {
     pub master_live: f32,
     #[serde(default = "unity")]
     pub master_monitor: f32,
+    /// A V2 bank plays TWO ARRANGEMENTS of the same slots on one clock:
+    /// the classic per-slot fields are the MONITOR side (the editable
+    /// one, on the monitor pair) and the `live_*` fields are what the
+    /// room hears on the live pair — every loaded slot feeds both, each
+    /// side through its own level/mute/shift, and the per-slot `monitor`
+    /// cue switch has no meaning. Jump/crossfade move the monitor
+    /// arrangement into the live one ([`DeckTransition`]). Skipped when
+    /// false, so a classic bank's patch keeps its bytes.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub v2: bool,
 }
 
 impl Default for DecksState {
@@ -630,6 +670,7 @@ impl Default for DecksState {
             slots: vec![DeckSlotState::default(); SLOTS],
             master_live: 1.0,
             master_monitor: 1.0,
+            v2: false,
         }
     }
 }
@@ -756,6 +797,30 @@ impl DeckArm {
     }
 }
 
+/// How a V2 bank moves what is in the MONITOR arrangement into the room —
+/// armed by the page's two buttons, held by the RT thread until the
+/// bank's cycle next comes round (its "right edge"), because the clock is
+/// the one thing the audio thread can get right. Like a [`DeckArm`] it is
+/// transport, not patch state: nothing serializes it and a restored bank
+/// comes back with none pending.
+///
+/// A JUMP swaps the live pair onto the monitor arrangement AT the seam; a
+/// CROSSFADE starts there and blends over one whole cycle (so the monitor
+/// arrangement is heard through exactly once as it takes over). Either
+/// way, once the RT thread reports the transition FIRED
+/// ([`DecksShared::transition_fired`]) the control side copies the
+/// monitor arrangement into the live one and resets the blend
+/// ([`crate::Engine::decks_transition_commit`]) — a no-op audibly, since
+/// by then the two sides are identical.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeckTransition {
+    #[default]
+    None,
+    Jump,
+    Crossfade,
+}
+
 /// What the RT thread publishes for one slot each block.
 #[derive(Debug, Default)]
 pub struct SlotShared {
@@ -780,6 +845,13 @@ pub struct SlotShared {
 pub struct DecksShared {
     beat: AtomicU64,
     bpm: AtomicU64,
+    /// V2 only: the smoothed blend actually on the live pair (0 = the
+    /// live arrangement, 1 = the monitor one), and the serial of the last
+    /// transition the RT thread has FIRED — the control side compares it
+    /// with the serial it armed to see that a jump/crossfade has landed
+    /// and the commit copy is owed.
+    xfade: AtomicU32,
+    transition_fired: AtomicU64,
     slots: [SlotShared; SLOTS],
 }
 
@@ -790,6 +862,14 @@ impl DecksShared {
     }
     pub fn bpm(&self) -> f64 {
         f64::from_bits(self.bpm.load(Ordering::Relaxed))
+    }
+    /// How far the live pair is blended onto the monitor arrangement.
+    pub fn xfade(&self) -> f32 {
+        f32::from_bits(self.xfade.load(Ordering::Relaxed))
+    }
+    /// Serial of the last [`DeckTransition`] the RT thread completed.
+    pub fn transition_fired(&self) -> u64 {
+        self.transition_fired.load(Ordering::Relaxed)
     }
     pub fn slot_position_secs(&self, slot: usize) -> f64 {
         f64::from_bits(self.slots[slot].pos_secs.load(Ordering::Relaxed))
@@ -876,6 +956,21 @@ pub enum DecksCmd {
     Master { live: f32, monitor: f32 },
     /// Run the bank's clock, or stop it and park it on beat 0.
     Transport { running: bool },
+    /// V2 only: the LIVE side of one slot — its own fader, mute and shift
+    /// ([`DeckSlotState::live_level`] and friends).
+    LiveMix {
+        slot: u8,
+        level: f32,
+        mute: bool,
+        phase: i32,
+    },
+    /// Whether this bank plays two arrangements ([`DecksState::v2`]).
+    V2 { on: bool },
+    /// Arm (or cancel) a jump/crossfade on the bank's cycle. `serial` is
+    /// the request's number, published back when the transition has fired
+    /// ([`DecksShared::transition_fired`]). [`DeckTransition::None`] takes
+    /// a pending one back and fades the live pair home.
+    Transition { mode: DeckTransition, serial: u64 },
 }
 
 /// Control-side state per Decks node: the command ring, the garbage
@@ -912,6 +1007,12 @@ pub struct DecksControl {
     /// one it has not looked at yet.
     pub(crate) arm: [DeckArm; SLOTS],
     pub(crate) arm_serial: [u64; SLOTS],
+    /// The jump/crossfade last ASKED for and the serial the ask went out
+    /// under — the RT thread answers with the serial once it has fired
+    /// ([`DecksShared::transition_fired`]), which is when the commit copy
+    /// is owed. Transport, like an arm: never persisted.
+    pub(crate) transition: DeckTransition,
+    pub(crate) transition_serial: u64,
 }
 
 impl DecksControl {
@@ -933,7 +1034,17 @@ impl DecksControl {
             surface_channel: DEFAULT_SURFACE_CHANNEL,
             arm: [DeckArm::None; SLOTS],
             arm_serial: [0; SLOTS],
+            transition: DeckTransition::None,
+            transition_serial: 0,
         }
+    }
+
+    /// Whether the armed transition has FIRED — the RT thread has taken
+    /// the live pair over to the monitor arrangement — and the commit
+    /// copy ([`crate::Engine::decks_transition_commit`]) is owed.
+    pub fn transition_done(&self) -> bool {
+        self.transition != DeckTransition::None
+            && self.shared.transition_fired() == self.transition_serial
     }
 
     /// What a slot is STILL waiting on. The RT thread's own answer once it
@@ -1036,6 +1147,15 @@ pub struct DeckSlotStatus {
     /// mute above is where this deck is GOING, the arm is what it is
     /// waiting for.
     pub arm: DeckArm,
+    /// V2 banks: the LIVE side's own mix and shift (the classic fields
+    /// above are the monitor arrangement there). At their defaults on a
+    /// classic bank.
+    pub live_level: f32,
+    pub live_mute: bool,
+    pub live_phase: i32,
+    /// The one beat the LIVE side is lined up by
+    /// ([`DeckSlotState::lead_one_at`] at `live_phase`).
+    pub live_lead_one: Option<u32>,
 }
 
 /// A bank, as a UI sees it.
@@ -1056,6 +1176,17 @@ pub struct DecksStatus {
     /// The faders on the two output pairs (1 = unity).
     pub master_live: f32,
     pub master_monitor: f32,
+    /// Whether this bank plays two arrangements ([`DecksState::v2`]).
+    pub v2: bool,
+    /// The jump/crossfade still armed (or mid-fade); [`DeckTransition::None`]
+    /// once it has been committed or was never asked for.
+    pub transition: DeckTransition,
+    /// The armed transition has FIRED and the commit copy
+    /// ([`crate::Engine::decks_transition_commit`]) is owed.
+    pub transition_done: bool,
+    /// How far the live pair is blended onto the monitor arrangement
+    /// right now (0 = the live side, 1 = the monitor one).
+    pub xfade: f32,
     pub slots: Vec<DeckSlotStatus>,
 }
 
@@ -1122,6 +1253,40 @@ struct RtSlot {
     meter: f32,
     grains: GrainStretch,
     eq: [BandSplit; 2],
+    /// The LIVE side of a V2 bank ([`DecksCmd::LiveMix`]): its own mix and
+    /// shift, and its own reader — a shift can put the two sides on
+    /// different parts of the same clip, so each side reads its own
+    /// grains. Idle (and costing nothing) while the bank is classic.
+    live: RtSide,
+}
+
+/// One side's own playback state in a V2 slot: the live arrangement's
+/// mix/shift and the reader that follows them. The classic [`RtSlot`]
+/// fields play the MONITOR side.
+struct RtSide {
+    level: f32,
+    mute: bool,
+    phase: i32,
+    gain: f32,
+    passes: u32,
+    was_audible: bool,
+    last_local: f64,
+    grains: GrainStretch,
+}
+
+impl RtSide {
+    fn new(engine_rate: f32) -> Self {
+        RtSide {
+            level: 1.0,
+            mute: true,
+            phase: 0,
+            gain: 0.0,
+            passes: 0,
+            was_audible: false,
+            last_local: 0.0,
+            grains: GrainStretch::new(engine_rate),
+        }
+    }
 }
 
 impl RtSlot {
@@ -1151,6 +1316,7 @@ impl RtSlot {
             meter: 0.0,
             grains: GrainStretch::new(engine_rate),
             eq: [BandSplit::default(); 2],
+            live: RtSide::new(engine_rate),
         }
     }
 
@@ -1247,6 +1413,25 @@ pub struct DecksRtModule {
     clock_left: u32,
     clock_len: u32,
     last_beat: i64,
+    /// V2: whether this bank plays two arrangements ([`DecksCmd::V2`]).
+    v2: bool,
+    /// The jump/crossfade still waiting for the cycle seam, and the
+    /// serial it was armed under ([`DecksCmd::Transition`]).
+    transition: DeckTransition,
+    transition_serial: u64,
+    /// Serial of the last transition COMPLETED, published each block.
+    fired: u64,
+    /// Bank beat a running crossfade started on (None = no fade running).
+    fade_from: Option<f64>,
+    /// Blend TARGET on the live pair (0 = the live arrangement, 1 = the
+    /// monitor one) and the smoothed blend actually applied — smoothed by
+    /// the same one-pole a fader uses, so a jump lands on the seam
+    /// without a click.
+    xf: f32,
+    xf_gain: f32,
+    /// Where the bank's cycle stood on the previous sample, so the seam —
+    /// the live loop's right edge — is an edge this thread can see.
+    last_cycle_pos: f64,
     shared: Arc<DecksShared>,
 }
 
@@ -1281,6 +1466,14 @@ impl DecksRtModule {
             clock_len: ((rate * CLOCK_PULSE_SECS) as u32).max(1),
             // Beat 0 has not happened yet: the first sample fires it.
             last_beat: -1,
+            v2: false,
+            transition: DeckTransition::None,
+            transition_serial: 0,
+            fired: 0,
+            fade_from: None,
+            xf: 0.0,
+            xf_gain: 0.0,
+            last_cycle_pos: 0.0,
             shared,
         }
     }
@@ -1308,11 +1501,16 @@ impl DecksRtModule {
                 s.was_audible = false;
                 // A new clip is a new timeline: no grain may cross into it,
                 // and no arm survives into it either — what was queued or
-                // dropping was the clip that just left.
+                // dropping was the clip that just left. The live side reads
+                // the same clip, so its reader starts over too.
                 s.grains.reset();
                 s.eq = [BandSplit::default(); 2];
                 s.arm = DeckArm::None;
                 s.last_local = 0.0;
+                s.live.grains.reset();
+                s.live.passes = 0;
+                s.live.was_audible = false;
+                s.live.last_local = 0.0;
             }
             DecksCmd::Mix {
                 slot,
@@ -1371,8 +1569,332 @@ impl DecksRtModule {
             DecksCmd::Transport { running } => {
                 self.running = running;
             }
+            DecksCmd::LiveMix {
+                slot,
+                level,
+                mute,
+                phase,
+            } => {
+                let Some(s) = self.slots.get_mut(slot as usize) else {
+                    return;
+                };
+                s.live.level = level;
+                s.live.mute = mute;
+                s.live.phase = phase;
+            }
+            DecksCmd::V2 { on } => {
+                self.v2 = on;
+            }
+            DecksCmd::Transition { mode, serial } => {
+                self.transition = mode;
+                self.transition_serial = serial;
+                if mode == DeckTransition::None {
+                    // A cancel — or the commit's reset, which lands with
+                    // the live side rewritten to match, so fading the
+                    // blend home is inaudible there.
+                    self.fade_from = None;
+                    self.xf = 0.0;
+                }
+            }
         }
     }
+
+    /// The block's shared-state publish, common to both paths: transport,
+    /// per-slot positions, meters — and the V2 blend and fired serial,
+    /// which a classic bank simply leaves at rest.
+    fn publish(&mut self, bpm: &[f32], frames: usize) {
+        let running = self.running;
+        self.shared
+            .beat
+            .store(self.beat_pos.to_bits(), Ordering::Relaxed);
+        let tempo = bpm[frames.saturating_sub(1)].clamp(MIN_BPM, MAX_BPM) as f64;
+        self.shared.bpm.store(tempo.to_bits(), Ordering::Relaxed);
+        self.shared
+            .xfade
+            .store(self.xf_gain.to_bits(), Ordering::Relaxed);
+        self.shared
+            .transition_fired
+            .store(self.fired, Ordering::Relaxed);
+        for (i, slot) in self.slots.iter().enumerate() {
+            let pub_slot = &self.shared.slots[i];
+            let len = slot.length_beats();
+            let (pos_secs, beat, sounding, playing) = match (&slot.track, len) {
+                (Some(track), len) if len > 0 => {
+                    let local = (self.beat_pos - slot.phase as f64).rem_euclid(len as f64);
+                    // The beat is where the LOOP is, tail included: a
+                    // silent beat is still a beat the lamp must show. A
+                    // stopped bank sounds nowhere.
+                    let sounding = running && local < slot.beats as f64;
+                    (
+                        local * 60.0 / slot.source_bpm as f64,
+                        local as i64,
+                        sounding,
+                        sounding && slot.gain > SILENT_GAIN && track.frames() > 0,
+                    )
+                }
+                _ => (0.0, -1, false, false),
+            };
+            pub_slot
+                .pos_secs
+                .store(pos_secs.to_bits(), Ordering::Relaxed);
+            pub_slot.beat.store(beat, Ordering::Relaxed);
+            pub_slot.sounding.store(sounding, Ordering::Relaxed);
+            pub_slot.playing.store(playing, Ordering::Relaxed);
+            pub_slot.arm.store(slot.arm as u8, Ordering::Relaxed);
+            pub_slot
+                .arm_serial
+                .store(slot.arm_serial, Ordering::Relaxed);
+            pub_slot
+                .out_level
+                .store(slot.meter.max(0.0).sqrt().to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// The V2 path: every loaded slot plays TWICE — once at the live
+    /// side's mix and shift, once at the monitor's — and the two sums go
+    /// out as the two pairs, the live pair blended onto the monitor
+    /// arrangement by the transition ([`DeckTransition`]). No EQ, no
+    /// inserts, no arms: the V2 page offers none of them, and each side
+    /// is the raw clip through its own fader/mute ramp. Sends still carry
+    /// the monitor side, so the rack stays reachable later.
+    fn process_v2(&mut self, inputs: &[Vec<f32>], outputs: &mut [Vec<f32>], frames: usize) {
+        let bpm = &inputs[IN_BPM];
+        let reset = &inputs[IN_RESET];
+        let (a_gain, meter_decay) = (self.a_gain, self.meter_decay);
+        let master = self.master;
+        let engine_rate = self.engine_rate;
+        let running = self.running;
+        // The bank's cycle — the LCM the page's grids draw, and the loop
+        // edge (its "right edge") a transition waits for. Constant across
+        // the block, like every control read.
+        let cycle = self
+            .slots
+            .iter()
+            .fold(0u32, |acc, s| lcm(acc, s.length_beats()));
+        for s in 0..frames {
+            if reset[s] >= 1.0 && self.last_reset < 1.0 {
+                self.beat_pos = 0.0;
+                self.last_beat = -1;
+                self.last_cycle_pos = 0.0;
+                for slot in &mut self.slots {
+                    slot.grains.reset();
+                    slot.live.grains.reset();
+                }
+            }
+            self.last_reset = reset[s];
+
+            let beat = self.beat_pos.floor() as i64;
+            if running && beat != self.last_beat {
+                self.last_beat = beat;
+                self.clock_left = self.clock_len;
+            }
+            outputs[OUT_CLOCK][s] = if self.clock_left > 0 {
+                self.clock_left -= 1;
+                SIGNAL_MAX
+            } else {
+                0.0
+            };
+
+            // THE TRANSITION FIRES ON THE CYCLE SEAM. A jump swaps the
+            // blend target there (the smoother below keeps it from
+            // clicking); a crossfade starts there and takes one whole
+            // cycle, so what was in the monitor is heard through exactly
+            // once as it takes the room over. A bank with nothing loaded
+            // has no edge, so a transition on it fires straight away.
+            let cycle_pos = if cycle > 0 {
+                self.beat_pos.rem_euclid(cycle as f64)
+            } else {
+                0.0
+            };
+            if running && self.transition != DeckTransition::None {
+                let seam = cycle == 0 || cycle_pos < self.last_cycle_pos;
+                match self.transition {
+                    DeckTransition::Jump if seam => {
+                        self.xf = 1.0;
+                        self.fired = self.transition_serial;
+                        self.transition = DeckTransition::None;
+                    }
+                    DeckTransition::Crossfade => {
+                        if self.fade_from.is_none() && seam {
+                            self.fade_from = Some(self.beat_pos);
+                        }
+                        if let Some(from) = self.fade_from {
+                            let span = (cycle as f64).max(1.0);
+                            self.xf = ((self.beat_pos - from) / span).clamp(0.0, 1.0) as f32;
+                            if self.xf >= 1.0 {
+                                self.fade_from = None;
+                                self.fired = self.transition_serial;
+                                self.transition = DeckTransition::None;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            self.last_cycle_pos = cycle_pos;
+
+            let tempo = bpm[s].clamp(MIN_BPM, MAX_BPM) as f64;
+            // The two arrangements, summed pre-master: `a` is the live
+            // side, `b` the monitor one.
+            let (mut a_l, mut a_r) = (0.0f32, 0.0f32);
+            let (mut b_l, mut b_r) = (0.0f32, 0.0f32);
+            for (i, slot) in self.slots.iter_mut().enumerate() {
+                let len = slot.length_beats();
+                let Some(track) = &slot.track else {
+                    slot.meter *= meter_decay;
+                    continue;
+                };
+                if len == 0 {
+                    slot.meter *= meter_decay;
+                    continue;
+                }
+
+                // MONITOR side — the classic per-slot fields.
+                let local = (self.beat_pos - slot.phase as f64).rem_euclid(len as f64);
+                let target = if running && !slot.mute {
+                    slot.level.max(0.0)
+                } else {
+                    0.0
+                };
+                if target <= 0.0 {
+                    slot.passes = 0;
+                } else if slot.was_audible && local < slot.last_local {
+                    slot.passes = slot.passes.saturating_add(1);
+                }
+                slot.was_audible = target > 0.0;
+                slot.last_local = local;
+                slot.gain += a_gain * (target - slot.gain);
+                let (ml, mr) = side_sample(
+                    track,
+                    &slot.bleed,
+                    &mut slot.grains,
+                    local,
+                    slot.beats,
+                    slot.source_bpm,
+                    engine_rate,
+                    slot.passes > 0,
+                );
+                // ONE CABLE OUT, like the classic path: the monitor side
+                // summed to mono is what the send carries.
+                outputs[send_jack(i)][s] = 0.5 * (ml + mr) * SIGNAL_MAX;
+                let (ml, mr) = (ml * slot.gain, mr * slot.gain);
+                b_l += ml;
+                b_r += mr;
+
+                // LIVE side — its own mix, shift and reader.
+                let live = &mut slot.live;
+                let llocal = (self.beat_pos - live.phase as f64).rem_euclid(len as f64);
+                let ltarget = if running && !live.mute {
+                    live.level.max(0.0)
+                } else {
+                    0.0
+                };
+                if ltarget <= 0.0 {
+                    live.passes = 0;
+                } else if live.was_audible && llocal < live.last_local {
+                    live.passes = live.passes.saturating_add(1);
+                }
+                live.was_audible = ltarget > 0.0;
+                live.last_local = llocal;
+                live.gain += a_gain * (ltarget - live.gain);
+                let (ll, lr) = side_sample(
+                    track,
+                    &slot.bleed,
+                    &mut live.grains,
+                    llocal,
+                    slot.beats,
+                    slot.source_bpm,
+                    engine_rate,
+                    live.passes > 0,
+                );
+                let (ll, lr) = (ll * live.gain, lr * live.gain);
+                a_l += ll;
+                a_r += lr;
+
+                // The meter reads the LOUDER of the two sides, so a row
+                // playing anywhere lights up.
+                let sq = (0.5 * (ml * ml + mr * mr)).max(0.5 * (ll * ll + lr * lr));
+                slot.meter = sq.max(slot.meter * meter_decay);
+            }
+            for (gain, target) in self.master_gain.iter_mut().zip(master) {
+                *gain += a_gain * (target - *gain);
+            }
+            // The blend rides the same one-pole a fader does, so a jump
+            // lands on the seam without a click.
+            self.xf_gain += a_gain * (self.xf - self.xf_gain);
+            let xf = self.xf_gain;
+            outputs[OUT_AUDIO_L][s] =
+                (a_l * (1.0 - xf) + b_l * xf) * self.master_gain[0] * SIGNAL_MAX;
+            outputs[OUT_AUDIO_R][s] =
+                (a_r * (1.0 - xf) + b_r * xf) * self.master_gain[0] * SIGNAL_MAX;
+            outputs[OUT_MON_L][s] = b_l * self.master_gain[1] * SIGNAL_MAX;
+            outputs[OUT_MON_R][s] = b_r * self.master_gain[1] * SIGNAL_MAX;
+            if running {
+                self.beat_pos += tempo / 60.0 / self.engine_rate as f64;
+            }
+        }
+
+        // A STOP PARKS THE BANK once BOTH sides have faded out — the same
+        // wait the classic path makes, over both of a slot's ramps.
+        if !running
+            && self.beat_pos != 0.0
+            && self
+                .slots
+                .iter()
+                .all(|s| s.gain <= SILENT_GAIN && s.live.gain <= SILENT_GAIN)
+        {
+            self.beat_pos = 0.0;
+            self.last_beat = -1;
+            self.last_cycle_pos = 0.0;
+            for slot in &mut self.slots {
+                slot.grains.reset();
+                slot.live.grains.reset();
+            }
+        }
+
+        self.publish(bpm, frames);
+    }
+}
+
+/// One sample of a slot's clip for ONE SIDE of a V2 bank, read at `local`
+/// (beats of the slot's own loop) by that side's own grains: the raw clip
+/// plus its seam bleed, silent past the clip's beats or the audio's end —
+/// exactly the classic read, minus the EQ and insert a V2 bank does not
+/// offer. `head` is whether this pass follows an audible one (the left
+/// bleed's condition); the right bleed always plays, as there are no
+/// drops here.
+#[allow(clippy::too_many_arguments)]
+fn side_sample(
+    track: &Arc<TrackData>,
+    bleed: &ClipBleed,
+    grains: &mut GrainStretch,
+    local: f64,
+    beats: u32,
+    source_bpm: f32,
+    engine_rate: f32,
+    head: bool,
+) -> (f32, f32) {
+    let beat_frames = 60.0 / source_bpm.max(1.0) as f64 * track.sample_rate as f64;
+    let pos = local * beat_frames;
+    if local >= beats as f64 || pos >= track.frames() as f64 {
+        return (0.0, 0.0);
+    }
+    let step = track.sample_rate as f64 / engine_rate as f64;
+    let taps = grains.tick(pos, step, &track.channels[0]);
+    let frames = track.frames() as f64;
+    let (mut l, mut r) = (0.0f32, 0.0f32);
+    for tap in taps.iter().flatten() {
+        let gl = sample_at(&track.channels[0], tap.pos);
+        let gr = if track.channels.len() > 1 {
+            sample_at(&track.channels[1], tap.pos)
+        } else {
+            gl
+        };
+        let (bl, br) = bleed.tap(tap.pos, frames, head, true);
+        l += (gl + bl) * tap.gain;
+        r += (gr + br) * tap.gain;
+    }
+    (l, r)
 }
 
 impl HostModule for DecksRtModule {
@@ -1394,6 +1916,13 @@ impl HostModule for DecksRtModule {
                 let volts = (value / EQ_MAX).clamp(0.0, 1.0) * SIGNAL_MAX;
                 outputs[tone_jack(i, t)][..frames].fill(volts);
             }
+        }
+
+        // A V2 bank mixes two arrangements of the same slots; the classic
+        // path below is untouched by it (its audio is pinned by goldens).
+        if self.v2 {
+            self.process_v2(inputs, outputs, frames);
+            return;
         }
 
         let bpm = &inputs[IN_BPM];
@@ -1591,44 +2120,7 @@ impl HostModule for DecksRtModule {
             }
         }
 
-        self.shared
-            .beat
-            .store(self.beat_pos.to_bits(), Ordering::Relaxed);
-        let tempo = bpm[frames.saturating_sub(1)].clamp(MIN_BPM, MAX_BPM) as f64;
-        self.shared.bpm.store(tempo.to_bits(), Ordering::Relaxed);
-        for (i, slot) in self.slots.iter().enumerate() {
-            let pub_slot = &self.shared.slots[i];
-            let len = slot.length_beats();
-            let (pos_secs, beat, sounding, playing) = match (&slot.track, len) {
-                (Some(track), len) if len > 0 => {
-                    let local = (self.beat_pos - slot.phase as f64).rem_euclid(len as f64);
-                    // The beat is where the LOOP is, tail included: a
-                    // silent beat is still a beat the lamp must show. A
-                    // stopped bank sounds nowhere.
-                    let sounding = running && local < slot.beats as f64;
-                    (
-                        local * 60.0 / slot.source_bpm as f64,
-                        local as i64,
-                        sounding,
-                        sounding && slot.gain > SILENT_GAIN && track.frames() > 0,
-                    )
-                }
-                _ => (0.0, -1, false, false),
-            };
-            pub_slot
-                .pos_secs
-                .store(pos_secs.to_bits(), Ordering::Relaxed);
-            pub_slot.beat.store(beat, Ordering::Relaxed);
-            pub_slot.sounding.store(sounding, Ordering::Relaxed);
-            pub_slot.playing.store(playing, Ordering::Relaxed);
-            pub_slot.arm.store(slot.arm as u8, Ordering::Relaxed);
-            pub_slot
-                .arm_serial
-                .store(slot.arm_serial, Ordering::Relaxed);
-            pub_slot
-                .out_level
-                .store(slot.meter.max(0.0).sqrt().to_bits(), Ordering::Relaxed);
-        }
+        self.publish(bpm, frames);
     }
 
     /// The bank's transport across a hot reload — where the clock is and

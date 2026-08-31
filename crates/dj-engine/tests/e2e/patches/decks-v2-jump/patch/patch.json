@@ -1,0 +1,8 @@
+{
+  "block_size": 128,
+  "format": "djpatch-1",
+  "master_channels": 2,
+  "name": "e2e-decks-v2-jump",
+  "sample_rate": 48000.0,
+  "version": "0.1.0"
+}
