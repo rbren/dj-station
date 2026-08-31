@@ -4210,24 +4210,25 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* WHAT THE SPAN IS — beats, length, ends, tempo — in the pane's title
+   row: the one description of the selection, and the numbers the save
+   files. It takes the row's spare width so the controls beside it stay
+   at its right-hand end. */
 .clip-sel-title {
+  flex: 1;
   color: var(--ink-muted);
   font-size: var(--fs-md);
   font-variant-numeric: tabular-nums;
 }
 
-/* "live" is a state worth seeing at a glance: it says a knob move is
-   already in the audio. Its off state says the opposite in the quiet ink,
-   so the pane never looks broken where Web Audio is missing. */
-.clip-sel-live {
-  color: var(--ok);
-  font-size: var(--fs-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+.clip-sel-padded {
+  color: var(--ink-dim);
 }
 
-.clip-sel-live-off {
+/* Material on its way, said quietly: what is loaded keeps playing. */
+.clip-sel-loading {
   color: var(--ink-dim);
+  font-size: var(--fs-sm);
 }
 
 .clip-sel-empty {
@@ -4399,13 +4400,16 @@ body {
   cursor: grab;
 }
 
-.clip-readout {
-  color: var(--ink-muted);
-  font-size: var(--fs-md);
-  font-variant-numeric: tabular-nums;
+/* The page's one horizontal division: the source track and its grid
+   above, the selection being shaped below. */
+.clip-rule {
+  width: 100%;
+  height: 0;
+  margin: 2px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
 }
 
-.clip-tools,
 .clip-save {
   display: flex;
   flex-wrap: wrap;
@@ -4413,7 +4417,6 @@ body {
   gap: 8px;
 }
 
-.clip-tools button,
 .clip-load button,
 .clip-save button {
   background: var(--surface);
@@ -4426,22 +4429,21 @@ body {
 
 /* Disabled is the shared treatment (opacity + no border); the local rule
    only needs the dimmer ink. */
-.clip-tools button:disabled,
 .clip-load button:disabled,
 .clip-save button:disabled {
   color: var(--ink-dim);
   cursor: default;
 }
 
-/* The tempo the save will file: the tapped grid's, or the measured one. */
-.clip-save-meta {
-  color: var(--ink-muted);
-  font-size: var(--fs-md);
-  font-variant-numeric: tabular-nums;
+/* The save landed: a tick, because the numbers it would repeat are the
+   ones already written over the selection. */
+.clip-save-done {
+  color: var(--ok);
+  font-size: var(--fs-lg);
 }
 
-/* The one action on this page that produces a new beat clip, among eight
-   neutral tools that must not compete with it. */
+/* The actions that produce a beat clip: the page's outcome, so they read
+   as the outcome. */
 .clip-save button.clip-save-button {
   color: var(--canvas);
   background: var(--brand);
@@ -4509,11 +4511,6 @@ body {
   flex-wrap: wrap;
 }
 
-.clip-stem-ready {
-  color: var(--ok);
-  font-size: var(--fs-md);
-}
-
 .clip-stem-toggles {
   display: flex;
   align-items: center;
@@ -4542,60 +4539,6 @@ body {
   color: var(--ink-dim);
   font-size: var(--fs-md);
   max-width: 46em;
-}
-
-/* The clip EQ reuses the EQ module's plot styling (.eq-ui etc.), wrapped
-   in a captioned card so plot, knobs and readout read as one instrument
-   instead of loose parts floating on the page. */
-.clip-eq-ui {
-  position: relative;
-  align-self: flex-start;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 10px 12px 8px;
-}
-
-/* A quiet escape hatch in the card's caption row: back to flat. */
-.clip-eq-reset {
-  position: absolute;
-  top: 7px;
-  right: 10px;
-  padding: 1px 8px;
-  font-size: var(--fs-micro);
-  color: var(--ink-dim);
-}
-
-.clip-eq-ui::before {
-  content: 'EQ';
-  display: block;
-  margin-bottom: 6px;
-  color: var(--ink-dim);
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-}
-
-.clip-eq-qrow {
-  display: flex;
-  justify-content: space-around;
-  gap: 6px;
-  padding: 2px 8px 0;
-}
-
-.clip-eq-q {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  cursor: ns-resize;
-  user-select: none;
-}
-
-.clip-eq-q-label {
-  font-size: var(--fs-xs);
-  color: var(--ink-dim);
 }
 
 /* Sized to its content rather than stretched: six columns across the

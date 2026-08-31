@@ -2,9 +2,9 @@
 //
 // The source track above it is the reference — its waveform is the
 // material as it was cut, and tone never redraws it. This pane is the
-// other half: the selected span with the EQ, the level automation and
-// the chosen stems ON it, looping, and updating under the knob rather
-// than after it (see clipLive.ts for the graph that plays it).
+// other half: the selected span with the level automation and the
+// chosen stems ON it, looping, and updating under the hand rather than
+// after it (see clipLive.ts for the graph that plays it).
 //
 // It draws and gestures only: the span, the peaks and the playhead are
 // props, seeking is a callback, and the level lane is passed in whole by
@@ -33,15 +33,15 @@ export interface ClipSelectionPaneProps {
    *  waveform either side of the loop, so the x-axis of this pane — and
    *  of the level lane under it — covers all three pieces. */
   bleed?: { left: ClipSelectionBleed; right: ClipSelectionBleed };
+  /** The grid's beats inside the drawn window, in output-timeline
+   *  seconds, and which of them are ONES: the span is chosen in beats, so
+   *  it is read in beats too. */
+  beats?: number[];
+  ones?: number[];
   waveHeight: number;
   playing: boolean;
   /** Playhead, in output-timeline seconds (drawn only inside the span). */
   playhead: number;
-  /** True while this pane owns playback through the live graph — false
-   *  means the page is auditioning it the old way (no Web Audio here, or
-   *  a span too long to hold as one buffer), where tone still costs a
-   *  render. */
-  live: boolean;
   /** Material is being fetched (a stem swap, a timeline edit). The audio
    *  in hand keeps playing until it lands. */
   loading: boolean;
@@ -56,25 +56,31 @@ export interface ClipSelectionPaneProps {
    *  are drawn flanking the waveform, so what they measure is where they
    *  sit. */
   bookends?: { left: ReactNode; right: ReactNode };
-  /** Extra readout text (beats selected, sample rate…). */
-  readoutExtra?: ReactNode;
+  /** What the span IS — beats, length, ends, tempo — written where the
+   *  pane is titled, since that is the one description of it. */
+  title: ReactNode;
+  /** Controls that belong to the span rather than to the page (clearing
+   *  its automation), drawn in the title row. */
+  actions?: ReactNode;
 }
 
 export function ClipSelectionPane({
   span,
   peaks,
   bleed,
+  beats,
+  ones,
   waveHeight: H,
   playing,
   playhead,
-  live,
   loading,
   onTogglePlay,
   onSeek,
   timecode,
   levelLane,
   bookends,
-  readoutExtra,
+  title,
+  actions,
 }: ClipSelectionPaneProps) {
   const len = Math.max(0, span.end - span.start);
   // The drawn window is the LOOP PLUS ITS BOOKENDS. All three pieces are
@@ -130,19 +136,14 @@ export function ClipSelectionPane({
           {timecode(Math.max(0, (inside ? playhead : span.start) - span.start))}
         </span>
         <span className="clip-sel-title" data-testid="clip-sel-title">
-          Selection {timecode(span.start)}–{timecode(span.end)} · loops
+          {title}
         </span>
-        <span
-          className={live ? 'clip-sel-live' : 'clip-sel-live clip-sel-live-off'}
-          data-testid="clip-sel-live"
-          title={
-            live
-              ? 'EQ, level and stems are applied live — playback never stops for an edit'
-              : 'No live audio here: tone changes re-render this span'
-          }
-        >
-          {loading ? 'loading…' : live ? 'live' : 'rendered'}
-        </span>
+        {loading && (
+          <span className="clip-sel-loading" data-testid="clip-sel-loading">
+            loading…
+          </span>
+        )}
+        {actions}
       </div>
 
       <div className="clip-timeline clip-sel-timeline">
@@ -158,6 +159,32 @@ export function ClipSelectionPane({
             {bleed && region('bleed-left', bleed.left.peaks, 0, loopX0)}
             {region('loop', peaks, loopX0, loopX1)}
             {bleed && region('bleed-right', bleed.right.peaks, loopX1, W)}
+            {/* The beat grid, drawn on the result as it is on the source
+                track above: a span chosen in beats is checked in beats. */}
+            {beats?.map((t, i) => (
+              <line
+                key={`beat${i}`}
+                data-testid="clip-sel-beat-line"
+                className="clip-beat-line"
+                x1={xOf(t)}
+                x2={xOf(t)}
+                y1={0}
+                y2={H}
+              />
+            ))}
+            {ones?.map((t, i) => (
+              <line
+                key={`one${i}`}
+                data-testid="clip-sel-one-line"
+                className="clip-one-line"
+                x1={xOf(t)}
+                x2={xOf(t)}
+                y1={0}
+                y2={H}
+              >
+                <title>the one</title>
+              </line>
+            ))}
             {/* Where the loop ends and its bleed begins: the seams the
                 bookends are there to smooth. */}
             {[loopX0, loopX1].map((x, i) =>
@@ -187,9 +214,6 @@ export function ClipSelectionPane({
           {bookends?.right}
         </div>
         {levelLane}
-        <p className="clip-readout" data-testid="clip-sel-readout">
-          {timecode(len)} selected{readoutExtra}
-        </p>
       </div>
     </section>
   );

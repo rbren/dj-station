@@ -167,10 +167,8 @@ export interface AudioTimelineProps {
   onDoubleClickAt?(secs: number): void;
   /** Extra transport-row controls, after zoom (Clip: undo/redo). */
   transportExtra?: ReactNode;
-  /** Extra readout text, after the standard readout. */
-  readoutExtra?: ReactNode;
-  /** Rendered inside the timeline pane between waveform and readout,
-   *  sharing its width (Clip: the level automation lane). */
+  /** Rendered inside the timeline pane under the waveform, sharing its
+   *  width (Clip: the level automation lane). */
   belowWave?: ReactNode;
   /** SVG painted under / over the selection & playhead. */
   renderUnder?(xOf: (secs: number) => number): ReactNode;
@@ -206,7 +204,6 @@ export function AudioTimeline({
   onSelectionSlid,
   onDoubleClickAt,
   transportExtra,
-  readoutExtra,
   belowWave,
   renderUnder,
   renderOver,
@@ -587,12 +584,6 @@ export function AudioTimeline({
           />
         </svg>
         {belowWave}
-        <p className="clip-readout" data-testid={`${p}-readout`}>
-          {timecode(duration)} total
-          {sel ? ` · selection ${timecode(sel.start)}–${timecode(sel.end)}` : ' · no selection'}
-          {vp ? ` · view ${timecode(vpStart)}–${timecode(vpEnd)}` : ''}
-          {readoutExtra}
-        </p>
       </div>
     </>
   );
