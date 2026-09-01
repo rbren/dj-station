@@ -2569,8 +2569,11 @@ of the page.
   beat surgery, the history, the document), `GridTransport.test.ts`
   (clock, live edits, pause — fake timers), `GridView.test.tsx` (picker
   order, placement, clip blocks, levels, selection across rows, the ruler
-  gesture, beat surgery, undo, files, keys), `GridPerf.test.tsx` (renders
-  per edit, per poll and per zoom).
+  gesture, beat surgery, undo, files, keys, and a CSS-LEVEL PIN over the
+  paint jsdom cannot see — the level line's weight, the loop's edges, the
+  chrome's z-order — read out of `styles.css` the way
+  `AppShellLayout.test.tsx` reads the shell), `GridPerf.test.tsx`
+  (renders per edit, per poll and per zoom).
 
 ## Manager
 

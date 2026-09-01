@@ -3,6 +3,7 @@
 // clip by its one, the master tempo lane, the loop drag and the
 // transport.
 
+import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
@@ -911,5 +912,63 @@ describe('GridView selection across rows', () => {
     // The drag is over: passing back over the grid must not resize it.
     fireEvent.mouseOver(screen.getByTestId('grid-cell-row2-12'));
     expect(screen.getByTestId('grid-cell-row2-12').getAttribute('data-selected')).toBe('false');
+  });
+});
+
+// CSS-LEVEL PINS. jsdom loads no stylesheet, so the parts of this ticket
+// that are only a paint — the automation line's weight, the loop's edges,
+// what covers what as the grid scrolls — cannot be asserted through the
+// DOM. They are read out of the stylesheet instead, the way the app
+// shell's layout is (`AppShellLayout.test.tsx`).
+describe('Grid paint (CSS-level pin)', () => {
+  const css = readFileSync('src/styles.css', 'utf-8');
+  /** The bodies of every rule whose selector list matches `pattern`. */
+  const rules = (pattern: RegExp): string[] =>
+    [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+      .filter((m) => m[1].split(',').some((s) => pattern.test(s.trim().split('\n').pop()!.trim())))
+      .map((m) => m[2]);
+  const rule = (selector: string): string => {
+    const bodies = rules(new RegExp(`^${selector.replace(/[.[\]()*+?^$|\\]/g, '\\$&')}$`));
+    expect(bodies.length, `rule for ${selector}`).toBeGreaterThan(0);
+    return bodies.join(';');
+  };
+
+  it('draws a WRITTEN level line exactly like a resting one', () => {
+    // The whole of the request: a row with automation in it must read the
+    // same as a row without. Nothing may re-colour or thicken the line
+    // once it has points on it.
+    for (const body of rules(/\.grid-level\[data-written='true'\]/)) {
+      expect(body).not.toMatch(/stroke/);
+    }
+    const line = rule('.grid-level-svg polyline');
+    expect(line).toMatch(/stroke:\s*color-mix\(in srgb, var\(--ink\)/);
+    expect(line).toMatch(/stroke-width:\s*1;/);
+    // …and the handles are gray too, not the accent they used to be.
+    expect(rule('.grid-level-point')).toMatch(/background:\s*color-mix\(in srgb, var\(--ink\)/);
+  });
+
+  it('marks the loop on the grid with edges, and only on the ruler with a wash', () => {
+    // No rule may tint a looped CELL: that is what buried the clips.
+    expect(rules(/\.grid-cell\[data-loop='true'\]/)).toHaveLength(0);
+    for (const body of rules(/\.grid-cell\[data-loop-edge/)) {
+      expect(body).toMatch(/var\(--loop\)/);
+      expect(body).not.toMatch(/background/);
+    }
+    // The ruler keeps its highlight, in the same purple.
+    expect(rule(".grid-ruler-cell[data-loop='true']")).toMatch(/var\(--loop\)/);
+  });
+
+  it('keeps the ruler flush with the chrome and the gutter over the grid', () => {
+    // A sticky child sticks to the top of the scrollport's padding box, so
+    // ANY top padding here is a strip the rows show through.
+    expect(rule('.grid-body')).toMatch(/padding:\s*0 /);
+    const zOf = (selector: string) => Number(/z-index:\s*(\d+)/.exec(rule(selector))?.[1]);
+    // Both come BEFORE the cells and the level lines in the DOM, so they
+    // need the higher z-index to cover them rather than be painted over.
+    expect(zOf('.grid-gutter')).toBeGreaterThan(zOf('.grid-level'));
+    expect(zOf('.grid-ruler')).toBeGreaterThan(zOf('.grid-level'));
+    expect(zOf('.grid-ruler')).toBeGreaterThan(zOf('.grid-cell'));
+    // An opaque title blocks the grid scrolling under it.
+    expect(rule('.grid-row-title')).toMatch(/background:\s*var\(--canvas\)/);
   });
 });
