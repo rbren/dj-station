@@ -55,6 +55,14 @@ command (cold and warm) are in `reports/TIMINGS_REPORT.md`.
   `rustup update stable` first and reproduce on the same version CI uses.
 - Frontend: run a single test file during iteration
   (`npx vitest run tests/<File>.test.tsx`), not the whole vitest suite.
+- Frontend flakiness is usually CPU STARVATION, not a bug. This box has 4
+  cores and several suites (ClipView above all) drive REAL timers and wait
+  on them through `waitFor`; when every core is busy the poll never gets a
+  timeslice and the test dies on its timeout, a different one each run. Two
+  things hold it: `app/tests/setup.ts` raises `asyncUtilTimeout` to 5s, and
+  `npm test` runs the heavy `GridPerf` suite AFTER the others rather than
+  beside them (`vitest run` on its own still includes it). Before blaming a
+  flake on your change, check whether it fails when run alone.
 - LEAN ON CI. Do NOT run a full workspace/CI-equivalent sweep to be sure —
   CI runs it on every push and is there to catch what you missed. Before
   pushing, run only the scoped checks for what you touched (the crate's or
