@@ -72,7 +72,19 @@ export class GridTransport {
   #buffers = new Map<string, AudioBuffer>();
   /** Renders in flight, so a re-schedule does not ask twice. */
   #pending = new Set<string>();
-  #nodes: { node: AudioBufferSourceNode; gain: GainNode; endsAt: number }[] = [];
+  /** Every voice in flight. A node is remembered with the copy and pass
+   *  it came from, because an edit has to be able to FIND it again:
+   *  Web Audio schedules a whole pass ahead of the sound, so a clip
+   *  deleted (or a level re-drawn) after that point is already committed
+   *  unless the node itself is revisited. */
+  #nodes: {
+    node: AudioBufferSourceNode;
+    gain: GainNode;
+    pass: Pass;
+    key: string;
+    at: number;
+    endsAt: number;
+  }[] = [];
   #timer: ReturnType<typeof setInterval> | null = null;
   #passes: Pass[] = [];
   /** The pass being scheduled next, or null once the last one is laid
@@ -205,6 +217,7 @@ export class GridTransport {
       });
       return;
     }
+    this.#resync(state);
     void this.prime(state, clips);
     this.#pump();
   }
@@ -364,8 +377,75 @@ export class GridTransport {
         node.disconnect();
         gain.disconnect();
       };
-      this.#nodes.push({ node, gain, endsAt: at + duration });
+      this.#nodes.push({ node, gain, pass, key: copy.key, at, endsAt: at + duration });
     }
+  }
+
+  /** Bring the voices already scheduled into line with a grid that has
+   *  just changed under them. A pass is committed to Web Audio well
+   *  before it is heard, so without this a copy taken off the grid still
+   *  sounds on the next time round a loop, and a level re-drawn during
+   *  playback is not heard at all.
+   *
+   *  A voice that has not started yet is simply thrown away and left to
+   *  be laid down again from the current grid. One already SOUNDING is
+   *  cut short if its copy is gone, and otherwise has its level rewritten
+   *  underneath it — a note in progress cannot be un-rung, but it can
+   *  still be faded. */
+  #resync(state: GridState): void {
+    const ctx = sharedContext();
+    if (!ctx || this.#nodes.length === 0) return;
+    const now = ctx.currentTime;
+
+    // What the grid says each live pass should be playing, by copy key.
+    const wanted = new Map<Pass, Map<string, ScheduledClip>>();
+    for (const pass of this.#passes) {
+      const copies = new Map<string, ScheduledClip>();
+      for (const copy of scheduleRange(state, this.#clips, {
+        start: pass.from,
+        end: this.#range.end,
+      })) {
+        copies.set(copy.key, copy);
+      }
+      wanted.set(pass, copies);
+    }
+
+    this.#nodes = this.#nodes.filter((voice) => {
+      const copies = wanted.get(voice.pass);
+      if (!copies) return true;
+      const copy = copies.get(voice.key);
+      const started = voice.at <= now;
+
+      if (!copy) {
+        this.#drop(voice, started ? now : voice.at);
+        voice.pass.laid.delete(voice.key);
+        return false;
+      }
+      if (!started) {
+        // Not heard yet: drop it and let the next pump lay it down from
+        // the grid as it stands now, gain and all.
+        this.#drop(voice, voice.at);
+        voice.pass.laid.delete(voice.key);
+        return false;
+      }
+      // Sounding: rewrite the level under it. Times are absolute from
+      // the copy's own start, so past points simply take effect at once.
+      voice.gain.gain.cancelScheduledValues(now);
+      this.#writeLevels(voice.gain, copy, voice.at);
+      return true;
+    });
+  }
+
+  /** Silence one voice, at `when` or as soon as possible. */
+  #drop(voice: { node: AudioBufferSourceNode; gain: GainNode }, when: number): void {
+    try {
+      voice.node.stop(when);
+    } catch {
+      // Already stopped, or never started: nothing to take back.
+    }
+    voice.node.onended = null;
+    voice.node.disconnect();
+    voice.gain.disconnect();
   }
 
   /** Write the row's level line onto a copy's gain: the first value is

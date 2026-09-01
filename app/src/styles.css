@@ -272,6 +272,28 @@ body {
   overflow: hidden;
 }
 
+/* NOTHING IS TEXT TO SELECT. This is an instrument: every drag here is
+   meant to be a gesture — marking a loop, sweeping a selection, bending
+   an automation line — and a drag that smears a blue text highlight
+   across half the page instead is a drag that went wrong. Selection is
+   given back only where there is genuinely something to copy out: form
+   controls, and the panels that show text to read. */
+.app,
+.app button,
+.app label {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.app input,
+.app textarea,
+.app select,
+.app [data-selectable='true'],
+.app code,
+.app pre {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* The instrument's fascia: the wordmark has presence, the tabs read
    as one segmented control, and engine state is a status pill so a broken
    engine can never look like a healthy one. */
@@ -6009,13 +6031,29 @@ body {
   position: relative;
 }
 
-/* The ruler: bar numbers, and the drag that marks the loop. */
+/* The ruler: bar numbers, and the drag that marks the loop.
+
+   STICKY, so the beat numbers are still there fifty rows down. It sticks
+   to the top of `.grid-body`, which is the box that scrolls; the gutter
+   beside it sticks the same way so the two never come apart. */
 .grid-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   height: var(--grid-row-h);
   display: flex;
   align-items: stretch;
   cursor: ew-resize;
   user-select: none;
+  background: var(--canvas);
+  border-bottom: 1px solid var(--line-strong);
+}
+.grid-gutter-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--canvas);
+  border-bottom: 1px solid var(--line-strong);
 }
 .grid-ruler-cell {
   flex: none;
@@ -6120,8 +6158,18 @@ body {
 .grid-cell[data-kind='lead'] {
   background: color-mix(in srgb, var(--ok) 25%, transparent);
 }
+/* AN EMPTY DOWNBEAT is still the beat you count from, so it carries a
+   faint wash of the same purple the ones inside a clip are marked with —
+   enough to read the bar lines while scanning, not enough to compete
+   with a placed clip. */
+.grid-cell[data-downbeat='true'][data-kind='empty'] {
+  background: color-mix(in srgb, var(--loop) 10%, transparent);
+}
 .grid-cell[data-loop='true'][data-kind='empty'] {
   background: color-mix(in srgb, var(--loop) 12%, transparent);
+}
+.grid-cell[data-loop='true'][data-downbeat='true'][data-kind='empty'] {
+  background: color-mix(in srgb, var(--loop) 22%, transparent);
 }
 .grid-cell[data-selected='true'] {
   background: color-mix(in srgb, var(--accent, var(--ok)) 25%, transparent);
@@ -6170,6 +6218,102 @@ body {
   width: 2px;
   background: var(--ink);
   pointer-events: none;
+  z-index: 4;
+}
+/* The beat being played, lit across every row at once. Drawn here rather
+   than marked on each cell so that the playhead moving does not re-render
+   the grid — see GridRowCells. */
+.grid-now {
+  position: absolute;
+  top: 96px;
+  bottom: 0;
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* The loop's edges, as handles. Wider than they look so they can be
+   grabbed; the drag itself is the ruler's. */
+.grid-loop-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--loop);
+  cursor: ew-resize;
+  pointer-events: none;
+  z-index: 2;
+}
+.grid-loop-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+.grid-ruler {
+  cursor: ew-resize;
+}
+
+.grid-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.grid-zoom-readout {
+  min-width: 3.2em;
+  text-align: right;
+  opacity: 0.75;
+  font-size: 0.85em;
+}
+
+/* The file menu, hung under the arrangement's name. */
+.grid-file {
+  position: relative;
+}
+.grid-file-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  margin-top: 2px;
+  min-width: 12rem;
+  display: flex;
+  flex-direction: column;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel, var(--canvas));
+  box-shadow: 0 6px 20px rgb(0 0 0 / 35%);
+}
+.grid-file-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.grid-file-item:hover,
+.grid-file-item:focus-visible {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.grid-file-key {
+  opacity: 0.5;
+}
+
+.grid-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
 }
 
 /* The picker: tracks first, each expandable to the clips cut from it. */

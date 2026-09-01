@@ -25,18 +25,16 @@
 // its next beat. Dragging across the ruler marks a loop; dragging across
 // the cells marks a selection, which copies and pastes at the playhead.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '../beatClip';
 import { MAX_BPM, MIN_BPM } from '../decks';
 import { fixed } from '../format';
 import { isEditableTarget } from '../fileShortcuts';
 import {
   addRow,
-  bpmAt,
   cellKind,
   clampBpm,
   clearRow,
-  clearTempo,
   copySelection,
   deleteSelection,
   emptyGrid,
@@ -44,7 +42,6 @@ import {
   gridColumns,
   groupRows,
   inRange,
-  inSelection,
   isEmptyGrid,
   leadOne,
   loopFromDrag,
@@ -59,12 +56,18 @@ import {
   removeLevelPoint,
   removeRow,
   removeTempoPoint,
+  selectionFor,
   selectionFromDrag,
   setLevelPoint,
   setTempoPoint,
   toDocument,
+  clampBar,
+  MAX_BAR,
   MAX_LEVEL,
+  MIN_BAR,
+  type ColumnRange,
   type GridClipboard,
+  type GridRow,
   type GridSelection,
   type GridState,
 } from '../grid';
@@ -72,9 +75,79 @@ import { GridTransport } from '../gridTransport';
 import { AutomationLane, type LanePoint } from './AutomationLane';
 import { GridClipPicker } from './GridClipPicker';
 
-/** Column width in px. Fixed: a beat is a beat, and the page scrolls. */
+/** Column width in px at 1×. The grid zooms about this. */
 export const GRID_CELL_W = 22;
 export const GRID_LANE_H = 96;
+
+/** How far the grid can be zoomed, as a multiple of `GRID_CELL_W`. Out
+ *  far enough to see an arrangement whole, in far enough to place a clip
+ *  against a beat without squinting. */
+export const MIN_ZOOM = 0.25;
+export const MAX_ZOOM = 4;
+const ZOOM_STEP = 1.15;
+
+/** One notch of the wheel, as a zoom factor. */
+export function zoomBy(zoom: number, deltaY: number): number {
+  const next = deltaY < 0 ? zoom * ZOOM_STEP : zoom / ZOOM_STEP;
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+}
+
+/** Shared so a row with no peaks yet keeps the SAME array between
+ *  renders: a fresh `[]` would be a new prop and would defeat the memo. */
+const EMPTY_PEAKS: readonly number[] = [];
+
+/** How close to an edge counts as GRABBING it, in beats. A fixed pixel
+ *  target would be most of a bar when zoomed out and invisible when
+ *  zoomed in, so it is measured in beats and widened as they narrow. */
+export function grabBeats(zoom: number): number {
+  return Math.max(1, Math.round(0.5 / zoom));
+}
+
+/** Which edge of the loop, if either, a press at `col` takes hold of.
+ *  The END is checked against the last beat inside the loop, because
+ *  `end` is exclusive and the beat past the loop is not part of it. */
+export function loopEdgeAt(
+  loop: ColumnRange | null,
+  col: number,
+  grab: number,
+): 'start' | 'end' | null {
+  if (!loop) return null;
+  const fromStart = Math.abs(col - loop.start);
+  const fromEnd = Math.abs(col - (loop.end - 1));
+  if (fromStart > grab && fromEnd > grab) return null;
+  return fromStart <= fromEnd ? 'start' : 'end';
+}
+
+/** The modifier this machine writes shortcuts with, for the labels only
+ *  — both are accepted wherever a shortcut is read. */
+const MOD =
+  typeof navigator !== 'undefined' && /mac/i.test(navigator.platform ?? '') ? '⌘' : 'Ctrl+';
+
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+      <polygon points="3,2 14,8 3,14" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PauseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+      <rect x="3" y="2" width="4" height="12" fill="currentColor" />
+      <rect x="9" y="2" width="4" height="12" fill="currentColor" />
+    </svg>
+  );
+}
+
+function RewindIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+      <rect x="2" y="2" width="2.5" height="12" fill="currentColor" />
+      <polygon points="14,2 14,14 5,8" fill="currentColor" />
+    </svg>
+  );
+}
 /** How often the playhead is re-read from the transport. */
 const POLL_MS = 60;
 /** Peaks fetched per clip — enough to see the shape of a bar or two. */
@@ -115,12 +188,14 @@ export function GridView(props: GridViewProps) {
   const active = props.active ?? true;
   const [grid, setGrid] = useState<GridState>(() => emptyGrid());
   const [clips, setClips] = useState<BeatClipEntry[]>([]);
-  const [peaks, setPeaks] = useState<Record<string, number[]>>({});
+  const [peaks, setPeaks] = useState<Record<string, readonly number[]>>({});
   const [dialog, setDialog] = useState<Dialog>(null);
   const [name, setName] = useState('untitled');
   const [saved, setSaved] = useState<string | null>(null);
   const [selection, setSelection] = useState<GridSelection | null>(null);
   const [board, setBoard] = useState<GridClipboard | null>(null);
+  const [fileMenu, setFileMenu] = useState(false);
+  const [zoom, setZoom] = useState(1);
   const [playhead, setPlayhead] = useState<{ playing: boolean; column: number }>({
     playing: false,
     column: 0,
@@ -129,7 +204,9 @@ export function GridView(props: GridViewProps) {
     () => props.transport ?? new GridTransport(clipApi),
     [props.transport, clipApi],
   );
-  const loopDrag = useRef<number | null>(null);
+  /** The loop drag in flight: the edge held STILL, and whether the
+   *  pointer has moved since the press. */
+  const loopDrag = useRef<{ anchor: number; moved: boolean } | null>(null);
   const cellDrag = useRef<{ rowId: string; col: number } | null>(null);
   const levelDrag = useRef<{ rowId: string; beat: number } | null>(null);
 
@@ -149,7 +226,29 @@ export function GridView(props: GridViewProps) {
   const columns = useMemo(() => gridColumns(grid, byId), [grid, byId]);
   const groups = useMemo(() => groupRows(grid.rows, byId), [grid.rows, byId]);
   const range = useMemo(() => playRange(grid, columns), [grid, columns]);
-  const width = columns * GRID_CELL_W;
+  const cellW = GRID_CELL_W * zoom;
+  const width = columns * cellW;
+
+  /** The scrolling box the grid lives in, and the beat a zoom should
+   *  hold still under the pointer. */
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const keepBeat = useRef<{ beat: number; x: number } | null>(null);
+  const scrollLeft = useCallback(() => scroller.current?.scrollLeft ?? 0, []);
+  /** The column a page-x sits on, at the zoom in force. */
+  const colAt = useCallback(
+    (clientX: number, rect: { left: number }) =>
+      Math.max(0, Math.floor((clientX - rect.left) / cellW)),
+    [cellW],
+  );
+
+  // After a zoom, put the beat that was under the pointer back under it.
+  useEffect(() => {
+    const hold = keepBeat.current;
+    const box = scroller.current;
+    keepBeat.current = null;
+    if (!hold || !box) return;
+    box.scrollLeft = Math.max(0, hold.beat * cellW - hold.x);
+  }, [cellW]);
 
   // Waveforms for whatever the grid holds. Peaks are a drawing, so they
   // are fetched once per clip and kept: re-placing a clip redraws from
@@ -159,7 +258,13 @@ export function GridView(props: GridViewProps) {
     const wanted = [...new Set(grid.rows.map((r) => r.clipId))].filter((id) => !(id in peaks));
     if (wanted.length === 0) return;
     void Promise.all(
-      wanted.map(async (id) => [id, (await clipApi.peaks(id, PEAK_BUCKETS)) ?? []] as const),
+      wanted.map(async (id) => {
+        const got = await clipApi.peaks(id, PEAK_BUCKETS);
+        // A clip with no peaks keeps the SHARED empty array, so that the
+        // rows drawing it are handed the same value they already had and
+        // stay memoised.
+        return [id, got && got.length > 0 ? got : EMPTY_PEAKS] as const;
+      }),
     ).then((pairs) => {
       if (live) setPeaks((prev) => ({ ...prev, ...Object.fromEntries(pairs) }));
     });
@@ -219,6 +324,93 @@ export function GridView(props: GridViewProps) {
     [byId],
   );
 
+  // The row's handlers. They are held HERE, and stable, because each one
+  // is a prop of a memoised row: a handler rebuilt every render would
+  // make every row re-render every time and undo the memo entirely. The
+  // grid's own state is reached through the setter's callback form, and
+  // what a handler needs to read (`selection`) it reads from a ref.
+  // Written in an effect, not in the render body: a render React
+  // discards must not leave these pointing at state that never landed.
+  const selectionRef = useRef<GridSelection | null>(null);
+  const rowsRef = useRef<GridRow[]>(grid.rows);
+  useEffect(() => {
+    selectionRef.current = selection;
+    rowsRef.current = grid.rows;
+  }, [selection, grid.rows]);
+
+  const onCellDown = useCallback((_e: MouseEvent<HTMLElement>, rowId: string, col: number) => {
+    cellDrag.current = { rowId, col };
+    setSelection(null);
+  }, []);
+
+  const onCellEnter = useCallback((rowId: string, col: number) => {
+    const from = cellDrag.current;
+    if (!from) return;
+    setSelection(selectionFromDrag(rowsRef.current, from.rowId, from.col, rowId, col));
+  }, []);
+
+  const onCellUp = useCallback(() => {
+    cellDrag.current = null;
+  }, []);
+
+  // PLACING stays on click, which fires only when press and release
+  // share a cell. A drag that crossed cells has made a selection by now,
+  // and a selection is not a placement.
+  const onCellClick = useCallback(
+    (e: MouseEvent<HTMLElement>, rowId: string, col: number) => {
+      if (e.metaKey || e.ctrlKey || selectionRef.current) return;
+      clickCell(rowId, col);
+    },
+    [clickCell],
+  );
+
+  const zoomRef = useRef(zoom);
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  const onLevelDown = useCallback((e: MouseEvent<HTMLElement>, rowId: string) => {
+    e.preventDefault();
+    const { beat, level } = levelFromPointer(
+      e,
+      e.currentTarget.getBoundingClientRect(),
+      zoomRef.current,
+    );
+    levelDrag.current = { rowId, beat };
+    setGrid((prev) => ({
+      ...prev,
+      rows: prev.rows.map((r) => (r.id === rowId ? setLevelPoint(r, beat, level) : r)),
+    }));
+  }, []);
+
+  const onLevelMove = useCallback((e: MouseEvent<HTMLElement>, rowId: string) => {
+    const drag = levelDrag.current;
+    if (!drag || drag.rowId !== rowId) return;
+    const { beat, level } = levelFromPointer(
+      e,
+      e.currentTarget.getBoundingClientRect(),
+      zoomRef.current,
+    );
+    levelDrag.current = { rowId, beat };
+    setGrid((prev) => ({
+      ...prev,
+      rows: prev.rows.map((r) => (r.id === rowId ? moveLevelPoint(r, drag.beat, beat, level) : r)),
+    }));
+  }, []);
+
+  const onLevelUp = useCallback(() => {
+    levelDrag.current = null;
+  }, []);
+
+  const onLevelClear = useCallback((e: MouseEvent<HTMLElement>, rowId: string) => {
+    e.preventDefault();
+    const { beat } = levelFromPointer(e, e.currentTarget.getBoundingClientRect(), zoomRef.current);
+    setGrid((prev) => ({
+      ...prev,
+      rows: prev.rows.map((r) => (r.id === rowId ? removeLevelPoint(r, beat) : r)),
+    }));
+  }, []);
+
   const play = useCallback(
     (from?: number) => {
       void transport.play(grid, byId, columns, from);
@@ -268,8 +460,17 @@ export function GridView(props: GridViewProps) {
     if (selection) setBoard(copySelection(grid, byId, selection));
   }, [selection, grid, byId]);
 
+  // PASTE LANDS ON THE PLAYHEAD, always. It used to land on the
+  // selection, which read well until you noticed the selection is
+  // normally still sitting on the thing you just copied: pasting there
+  // put the copy back exactly where it already was, and since a copy
+  // does not stack on itself the paste looked like it had done nothing
+  // at all. The selection says what to copy; the playhead says where it
+  // goes, and moving the playhead is how you aim it.
   const paste = useCallback(() => {
-    if (board) setGrid((prev) => pasteAt(prev, byId, board, Math.round(playhead.column)));
+    if (!board) return;
+    setGrid((prev) => pasteAt(prev, byId, board, Math.round(playhead.column)));
+    setSelection(null);
   }, [board, byId, playhead.column]);
 
   // File actions. New/Open go behind a warning when there is work to
@@ -342,6 +543,7 @@ export function GridView(props: GridViewProps) {
     const onKey = (e: KeyboardEvent) => {
       if (dialog || isEditableTarget(e.target)) return;
       const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
       if (e.key === ' ') {
         e.preventDefault();
         toggle();
@@ -349,23 +551,58 @@ export function GridView(props: GridViewProps) {
         e.preventDefault();
         const back = e.key === 'ArrowLeft';
         if (e.ctrlKey && !e.metaKey) seekTo(back ? range.start : range.end - 1);
-        else if (e.metaKey) seekBy(back ? -4 : 4);
+        else if (e.metaKey) seekBy(back ? -grid.barBeats : grid.barBeats);
         else seekBy(back ? -1 : 1);
-      } else if (mod && e.key.toLowerCase() === 'c') {
+      } else if (mod && key === 'c') {
         copy();
-      } else if (mod && e.key.toLowerCase() === 'v') {
+      } else if (mod && key === 'v') {
         e.preventDefault();
         paste();
+      } else if (mod && key === 's') {
+        // FILE SHORTCUTS, now that the buttons are gone. They are caught
+        // here rather than through `useFileShortcuts` because that hook
+        // is the PATCH's — on this page the same keys mean the grid.
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) setDialog({ kind: 'saveAs', name });
+        else void doSave();
+      } else if (mod && key === 'o') {
+        e.preventDefault();
+        e.stopPropagation();
+        doOpen();
+      } else if (mod && key === 'n') {
+        e.preventDefault();
+        e.stopPropagation();
+        doNew();
       } else if ((e.key === 'Backspace' || e.key === 'Delete') && selection) {
         e.preventDefault();
         setGrid((prev) => deleteSelection(prev, byId, selection));
       } else if (e.key === 'Escape') {
         setSelection(null);
+        setFileMenu(false);
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [active, dialog, toggle, seekBy, seekTo, range, copy, paste, selection, byId]);
+    // CAPTURE, so the page's own Save beats the patch's global one while
+    // the Grid is the visible tab.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [
+    active,
+    dialog,
+    toggle,
+    seekBy,
+    seekTo,
+    range,
+    copy,
+    paste,
+    selection,
+    byId,
+    grid.barBeats,
+    name,
+    doSave,
+    doOpen,
+    doNew,
+  ]);
 
   const tempoPoints: LanePoint[] = useMemo(
     () => grid.tempo.points.map((p) => ({ at: p.beat, value: p.bpm })),
@@ -385,53 +622,100 @@ export function GridView(props: GridViewProps) {
       style={active ? undefined : { display: 'none' }}
     >
       <header className="grid-bar">
+        {/* THE NAME IS THE FILE MENU. New/Open/Save/Save As were four
+            buttons for something done a handful of times a session; the
+            shortcuts do the work and this is where they are discovered. */}
         <div className="grid-file">
-          <span className="grid-name mono" data-testid="grid-name" title="This arrangement">
+          <button
+            className="decks-btn grid-name mono"
+            data-testid="grid-name"
+            aria-haspopup="menu"
+            aria-expanded={fileMenu}
+            title="This arrangement — click for New, Open, Save"
+            onClick={() => setFileMenu((was) => !was)}
+          >
             {name}
             {dirty ? ' •' : ''}
-          </span>
-          <button className="decks-btn" data-testid="grid-new" onClick={doNew}>
-            New
           </button>
-          <button className="decks-btn" data-testid="grid-open" onClick={doOpen}>
-            Open
-          </button>
-          <button className="decks-btn" data-testid="grid-save" onClick={() => void doSave()}>
-            Save
-          </button>
-          <button
-            className="decks-btn"
-            data-testid="grid-save-as"
-            onClick={() => setDialog({ kind: 'saveAs', name })}
-          >
-            Save As
-          </button>
+          {fileMenu && (
+            <div className="grid-file-menu" data-testid="grid-file-menu" role="menu">
+              <button
+                className="grid-file-item"
+                data-testid="grid-new"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenu(false);
+                  doNew();
+                }}
+              >
+                New <span className="grid-file-key mono">{MOD}N</span>
+              </button>
+              <button
+                className="grid-file-item"
+                data-testid="grid-open"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenu(false);
+                  doOpen();
+                }}
+              >
+                Open… <span className="grid-file-key mono">{MOD}O</span>
+              </button>
+              <button
+                className="grid-file-item"
+                data-testid="grid-save"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenu(false);
+                  void doSave();
+                }}
+              >
+                Save <span className="grid-file-key mono">{MOD}S</span>
+              </button>
+              <button
+                className="grid-file-item"
+                data-testid="grid-save-as"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenu(false);
+                  setDialog({ kind: 'saveAs', name });
+                }}
+              >
+                Save As… <span className="grid-file-key mono">{MOD}⇧S</span>
+              </button>
+            </div>
+          )}
         </div>
         <div className="grid-transport">
           <button
-            className={`decks-btn decks-btn-start${playing ? ' is-on' : ''}`}
+            className={`decks-btn grid-icon-btn decks-btn-start${playing ? ' is-on' : ''}`}
             data-testid="grid-play"
             aria-pressed={playing}
+            aria-label="Play"
+            title={`Play (${playing ? 'playing' : 'space'})`}
             onClick={() => play(playhead.column)}
           >
-            Play
+            <PlayIcon />
           </button>
           <button
-            className="decks-btn"
+            className="decks-btn grid-icon-btn"
             data-testid="grid-pause"
             aria-pressed={!playing}
+            aria-label="Pause"
+            title="Pause (space)"
             disabled={!playing}
             onClick={pause}
           >
-            Pause
+            <PauseIcon />
           </button>
           <button
-            className="decks-btn"
+            className="decks-btn grid-icon-btn"
             data-testid="grid-rewind"
+            aria-label="Back to the start of the play range"
             title="Back to the start of the play range"
             onClick={() => seekTo(range.start)}
           >
-            ⏮
+            <RewindIcon />
           </button>
           <span className="grid-position mono" data-testid="grid-position">
             beat {Math.floor(playhead.column) + 1}/{columns}
@@ -440,9 +724,31 @@ export function GridView(props: GridViewProps) {
             {columns} beats · {clockTime(totalSecs)}
           </span>
         </div>
+        {/* COPY AND PASTE, said out loud: the shortcuts are easy to miss
+            and there is no menu bar on this page to find them in. */}
+        <div className="grid-clipboard">
+          <button
+            className="decks-btn"
+            data-testid="grid-copy"
+            disabled={!selection}
+            title={`Copy the selection (${MOD}C)`}
+            onClick={copy}
+          >
+            Copy
+          </button>
+          <button
+            className="decks-btn"
+            data-testid="grid-paste"
+            disabled={!board}
+            title={`Paste at the selection, or at the playhead (${MOD}V)`}
+            onClick={paste}
+          >
+            Paste
+          </button>
+        </div>
         <div className="grid-tempo">
           <label className="decks-tempo-label" htmlFor="grid-bpm">
-            master BPM
+            BPM
           </label>
           <input
             id="grid-bpm"
@@ -459,25 +765,51 @@ export function GridView(props: GridViewProps) {
                 setGrid((prev) => ({ ...prev, tempo: { ...prev.tempo, bpm: clampBpm(next) } }));
             }}
           />
-          <span className="grid-bpm-here mono" data-testid="grid-bpm-here">
-            {fixed(bpmAt(grid.tempo, playhead.column), 1)} here
+          <label className="decks-tempo-label" htmlFor="grid-bar-beats">
+            bar
+          </label>
+          <input
+            id="grid-bar-beats"
+            className="decks-bpm mono grid-bar-input"
+            data-testid="grid-bar-beats"
+            type="number"
+            min={MIN_BAR}
+            max={MAX_BAR}
+            step={1}
+            value={grid.barBeats}
+            title="Beats to a bar: what the ruler counts and what cmd+arrow steps by"
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              if (Number.isFinite(next)) setGrid((prev) => ({ ...prev, barBeats: clampBar(next) }));
+            }}
+          />
+        </div>
+        <div className="grid-zoom">
+          <button
+            className="decks-btn"
+            data-testid="grid-zoom-out"
+            aria-label="Zoom out"
+            title="Zoom out (or scroll over the ruler)"
+            disabled={zoom <= MIN_ZOOM}
+            onClick={() => setZoom((z) => zoomBy(z, 1))}
+          >
+            −
+          </button>
+          <span className="grid-zoom-readout mono" data-testid="grid-zoom">
+            {Math.round(zoom * 100)}%
           </span>
           <button
             className="decks-btn"
-            data-testid="grid-tempo-clear"
-            disabled={grid.tempo.points.length === 0}
-            title="Drop every tempo breakpoint"
-            onClick={() => setGrid((prev) => ({ ...prev, tempo: clearTempo(prev.tempo) }))}
+            data-testid="grid-zoom-in"
+            aria-label="Zoom in"
+            title="Zoom in (or scroll over the ruler)"
+            disabled={zoom >= MAX_ZOOM}
+            onClick={() => setZoom((z) => zoomBy(z, -1))}
           >
-            flat
+            +
           </button>
         </div>
         <div className="grid-loop-controls">
-          {grid.loop && (
-            <span className="grid-loop-readout mono" data-testid="grid-loop">
-              {`loop ${grid.loop.start + 1}–${grid.loop.end}`}
-            </span>
-          )}
           <button
             className="decks-btn"
             data-testid="grid-loop-clear"
@@ -574,7 +906,7 @@ export function GridView(props: GridViewProps) {
           </div>
         </div>
 
-        <div className="grid-scroll" data-testid="grid-scroll">
+        <div className="grid-scroll" data-testid="grid-scroll" ref={scroller}>
           <div className="grid-lanes" style={{ width }}>
             {/* MASTER TEMPO over the same columns as the grid below it. */}
             <AutomationLane
@@ -604,22 +936,37 @@ export function GridView(props: GridViewProps) {
               }
             />
 
-            {/* THE RULER: bar numbers, and the drag that marks a loop. */}
+            {/* THE RULER: bar numbers, the drag that marks a loop, and
+                the wheel that zooms. */}
             <div
               className="grid-ruler"
               data-testid="grid-ruler"
               onMouseDown={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const col = Math.floor((e.clientX - rect.left) / GRID_CELL_W);
-                loopDrag.current = col;
-                setGrid((prev) => ({ ...prev, loop: loopFromDrag(col, col) }));
+                const col = colAt(e.clientX, e.currentTarget.getBoundingClientRect());
+                // A press on a loop EDGE takes hold of that edge and
+                // leaves the other one where it is, so a loop can be
+                // stretched a beat at a time instead of being redrawn
+                // from scratch every time it is not quite right.
+                const edge = loopEdgeAt(grid.loop, col, grabBeats(zoom));
+                loopDrag.current = edge
+                  ? {
+                      anchor: edge === 'start' ? grid.loop!.end - 1 : grid.loop!.start,
+                      moved: true,
+                    }
+                  : { anchor: col, moved: false };
+                if (edge)
+                  setGrid((prev) => ({
+                    ...prev,
+                    loop: loopFromDrag(loopDrag.current!.anchor, col),
+                  }));
+                else setGrid((prev) => ({ ...prev, loop: loopFromDrag(col, col) }));
               }}
               onMouseMove={(e) => {
-                if (loopDrag.current === null) return;
-                const rect = e.currentTarget.getBoundingClientRect();
-                const col = Math.floor((e.clientX - rect.left) / GRID_CELL_W);
-                const from = loopDrag.current;
-                setGrid((prev) => ({ ...prev, loop: loopFromDrag(from, col) }));
+                const drag = loopDrag.current;
+                if (!drag) return;
+                const col = colAt(e.clientX, e.currentTarget.getBoundingClientRect());
+                drag.moved = true;
+                setGrid((prev) => ({ ...prev, loop: loopFromDrag(drag.anchor, col) }));
               }}
               onMouseUp={() => {
                 loopDrag.current = null;
@@ -627,186 +974,98 @@ export function GridView(props: GridViewProps) {
               onMouseLeave={() => {
                 loopDrag.current = null;
               }}
+              // THE WHEEL ZOOMS while the pointer is over the ruler, which
+              // is the one strip of the page with nothing to scroll.
+              onWheel={(e) => {
+                if (e.deltaY === 0) return;
+                e.preventDefault();
+                const rect = e.currentTarget.getBoundingClientRect();
+                const beat = (e.clientX - rect.left + scrollLeft()) / cellW;
+                const next = zoomBy(zoom, e.deltaY);
+                setZoom(next);
+                // Hold the beat under the pointer STILL, so zooming reads
+                // as the grid growing around it rather than the view
+                // jumping somewhere else.
+                keepBeat.current = { beat, x: e.clientX - rect.left };
+              }}
             >
               {Array.from({ length: columns }, (_, col) => (
                 <span
                   className="grid-ruler-cell"
                   data-testid={`grid-ruler-${col}`}
-                  data-bar={col % 4 === 0 ? 'true' : 'false'}
+                  data-bar={col % grid.barBeats === 0 ? 'true' : 'false'}
                   data-loop={inRange(range, col) && grid.loop ? 'true' : 'false'}
                   key={col}
-                  style={{ width: GRID_CELL_W }}
+                  style={{ width: cellW }}
                 >
-                  {col % 4 === 0 ? col / 4 + 1 : ''}
+                  {col % grid.barBeats === 0 && cellW * grid.barBeats >= 18
+                    ? col / grid.barBeats + 1
+                    : ''}
                 </span>
               ))}
+              {/* The loop's edges, as handles you can take hold of. */}
+              {grid.loop && (
+                <>
+                  <span
+                    className="grid-loop-handle"
+                    data-testid="grid-loop-handle-start"
+                    data-edge="start"
+                    style={{ left: grid.loop.start * cellW }}
+                  />
+                  <span
+                    className="grid-loop-handle"
+                    data-testid="grid-loop-handle-end"
+                    data-edge="end"
+                    style={{ left: grid.loop.end * cellW }}
+                  />
+                </>
+              )}
             </div>
 
             {groups.map((group) => (
               <div className="grid-group-cells" key={group.key}>
                 <div className="grid-group-spacer" />
-                {group.rows.map((row) => {
-                  const clip = byId.get(row.clipId);
-                  return (
-                    <div
-                      className="grid-row-cells"
-                      data-testid={`grid-cells-${row.id}`}
-                      key={row.id}
-                      // THE LEVEL GESTURE lives on the row, not on the
-                      // line: a line a pixel thick is not a hit target,
-                      // and the whole row height is what the level is
-                      // read against anyway. cmd/ctrl is what tells it
-                      // apart from placing a clip.
-                      onMouseDown={(e) => {
-                        if (!(e.metaKey || e.ctrlKey)) return;
-                        e.preventDefault();
-                        const { beat, level } = levelFromPointer(
-                          e,
-                          e.currentTarget.getBoundingClientRect(),
-                        );
-                        levelDrag.current = { rowId: row.id, beat };
-                        setGrid((prev) => ({
-                          ...prev,
-                          rows: prev.rows.map((r) =>
-                            r.id === row.id ? setLevelPoint(r, beat, level) : r,
-                          ),
-                        }));
-                      }}
-                      onMouseMove={(e) => {
-                        const drag = levelDrag.current;
-                        if (!drag || drag.rowId !== row.id) return;
-                        const { beat, level } = levelFromPointer(
-                          e,
-                          e.currentTarget.getBoundingClientRect(),
-                        );
-                        levelDrag.current = { rowId: row.id, beat };
-                        setGrid((prev) => ({
-                          ...prev,
-                          rows: prev.rows.map((r) =>
-                            r.id === row.id ? moveLevelPoint(r, drag.beat, beat, level) : r,
-                          ),
-                        }));
-                      }}
-                      onMouseUp={() => {
-                        levelDrag.current = null;
-                      }}
-                      onContextMenu={(e) => {
-                        if (row.levels.length === 0) return;
-                        e.preventDefault();
-                        const { beat } = levelFromPointer(
-                          e,
-                          e.currentTarget.getBoundingClientRect(),
-                        );
-                        setGrid((prev) => ({
-                          ...prev,
-                          rows: prev.rows.map((r) =>
-                            r.id === row.id ? removeLevelPoint(r, beat) : r,
-                          ),
-                        }));
-                      }}
-                      onMouseLeave={() => {
-                        cellDrag.current = null;
-                        levelDrag.current = null;
-                      }}
-                    >
-                      {/* The clips, drawn as blocks BEHIND the cells: one
-                          run per copy, with its waveform inside it. */}
-                      {clip &&
-                        row.placements.map((start) => {
-                          const span = placementSpan(clip, start);
-                          const shape = peaks[row.clipId] ?? [];
-                          return (
-                            <div
-                              className="grid-clip"
-                              data-testid={`grid-clip-${row.id}-${start}`}
-                              key={start}
-                              style={{
-                                left: span.start * GRID_CELL_W,
-                                width: (span.end - span.start) * GRID_CELL_W,
-                              }}
-                            >
-                              <ClipWave peaks={shape} />
-                              {/* The ones, marked inside the block. */}
-                              {clip.ones.map((beat) => (
-                                <span
-                                  className="grid-clip-one"
-                                  data-lead={beat === leadOne(clip) ? 'true' : 'false'}
-                                  key={beat}
-                                  style={{ left: beat * GRID_CELL_W }}
-                                />
-                              ))}
-                            </div>
-                          );
-                        })}
-
-                      {/* The row's LEVEL LINE, through its middle. */}
-                      <LevelLine row={row} columns={columns} />
-
-                      {Array.from({ length: columns }, (_, col) => {
-                        const kind = clip ? cellKind(row, clip, col) : 'empty';
-                        const hit = clip ? placementAt(row, clip, col) : -1;
-                        const span =
-                          hit >= 0 && clip ? placementSpan(clip, row.placements[hit]) : null;
-                        return (
-                          <button
-                            className="grid-cell"
-                            data-testid={`grid-cell-${row.id}-${col}`}
-                            data-kind={kind}
-                            data-edge={
-                              span
-                                ? span.start === col
-                                  ? 'start'
-                                  : span.end - 1 === col
-                                    ? 'end'
-                                    : 'mid'
-                                : 'none'
-                            }
-                            data-now={playing && col === nowCol ? 'true' : 'false'}
-                            data-loop={grid.loop && inRange(range, col) ? 'true' : 'false'}
-                            data-selected={inSelection(selection, row.id, col) ? 'true' : 'false'}
-                            aria-label={`Row ${row.id}, beat ${col + 1}`}
-                            key={col}
-                            style={{ width: GRID_CELL_W }}
-                            onMouseDown={(e) => {
-                              // cmd/ctrl is the level line's gesture, not
-                              // the grid's.
-                              if (e.metaKey || e.ctrlKey) return;
-                              cellDrag.current = { rowId: row.id, col };
-                              setSelection(null);
-                            }}
-                            onMouseEnter={() => {
-                              const from = cellDrag.current;
-                              if (!from) return;
-                              setSelection(
-                                selectionFromDrag(grid.rows, from.rowId, from.col, row.id, col),
-                              );
-                            }}
-                            onMouseUp={() => {
-                              cellDrag.current = null;
-                            }}
-                            // PLACING stays on click, which fires only
-                            // when press and release share a cell. A drag
-                            // that crossed cells has made a selection by
-                            // now, and a selection is not a placement.
-                            onClick={(e) => {
-                              if (e.metaKey || e.ctrlKey || selection) return;
-                              clickCell(row.id, col);
-                            }}
-                          />
-                        );
-                      })}
-                    </div>
-                  );
-                })}
+                {group.rows.map((row) => (
+                  <GridRowCells
+                    key={row.id}
+                    row={row}
+                    clip={byId.get(row.clipId)}
+                    columns={columns}
+                    cellW={cellW}
+                    barBeats={grid.barBeats}
+                    peaks={peaks[row.clipId] ?? EMPTY_PEAKS}
+                    loop={grid.loop ? range : null}
+                    selection={selectionFor(selection, row.id)}
+                    onCellDown={onCellDown}
+                    onCellEnter={onCellEnter}
+                    onCellUp={onCellUp}
+                    onCellClick={onCellClick}
+                    onLevelDown={onLevelDown}
+                    onLevelMove={onLevelMove}
+                    onLevelUp={onLevelUp}
+                    onLevelClear={onLevelClear}
+                  />
+                ))}
               </div>
             ))}
 
+            {/* THE MOVING PARTS, drawn once over the whole grid rather
+                than marked on every cell. This is what lets the rows be
+                memoised: the playhead can move sixteen times a second
+                without a single row re-rendering. */}
             {playing && (
-              <div
-                className="grid-playhead"
-                data-testid="grid-playhead"
-                style={{ left: playhead.column * GRID_CELL_W }}
-              />
+              <>
+                <div
+                  className="grid-now"
+                  data-testid="grid-now"
+                  style={{ left: nowCol * cellW, width: cellW }}
+                />
+                <div
+                  className="grid-playhead"
+                  data-testid="grid-playhead"
+                  style={{ left: playhead.column * cellW }}
+                />
+              </>
             )}
           </div>
           {grid.rows.length === 0 && (
@@ -933,8 +1192,9 @@ function ClipWave({ peaks }: { peaks: readonly number[] }) {
 export function levelFromPointer(
   e: { clientX: number; clientY: number },
   rect: { left: number; top: number; height: number },
+  zoom = 1,
 ): { beat: number; level: number } {
-  const beat = Math.max(0, Math.round((e.clientX - rect.left) / GRID_CELL_W));
+  const beat = Math.max(0, Math.round((e.clientX - rect.left) / (GRID_CELL_W * zoom)));
   const height = rect.height || 1;
   const level = Math.max(0, Math.min(MAX_LEVEL, (1 - (e.clientY - rect.top) / height) * MAX_LEVEL));
   return { beat, level };
@@ -944,7 +1204,15 @@ export function levelFromPointer(
  *  writes on it. Purely a drawing — the gesture that writes on it lives
  *  on the row itself, because the cells have to stay clickable and a line
  *  a pixel thick is not a hit target. */
-function LevelLine({ row, columns }: { row: GridState['rows'][number]; columns: number }) {
+function LevelLine({
+  row,
+  columns,
+  cellW,
+}: {
+  row: GridState['rows'][number];
+  columns: number;
+  cellW: number;
+}) {
   const y = (level: number) => (1 - level / MAX_LEVEL) * 100;
   const points = [...row.levels].sort((a, b) => a.beat - b.beat);
   const x = (beat: number) => (beat / Math.max(1, columns)) * 100;
@@ -962,7 +1230,7 @@ function LevelLine({ row, columns }: { row: GridState['rows'][number]; columns: 
       className="grid-level"
       data-testid={`grid-level-${row.id}`}
       data-written={points.length > 0 ? 'true' : 'false'}
-      style={{ width: columns * GRID_CELL_W }}
+      style={{ width: columns * cellW }}
     >
       <svg
         className="grid-level-svg"
@@ -977,9 +1245,184 @@ function LevelLine({ row, columns }: { row: GridState['rows'][number]; columns: 
           className="grid-level-point"
           data-testid={`grid-level-point-${row.id}-${p.beat}`}
           key={p.beat}
-          style={{ left: p.beat * GRID_CELL_W, top: `${y(p.level)}%` }}
+          style={{ left: p.beat * cellW, top: `${y(p.level)}%` }}
         />
       ))}
     </div>
   );
 }
+
+/** How many times a row has drawn itself. Read by the performance tests,
+ *  which are the only thing standing between this page and the crawl it
+ *  had at fifty clips. Counted from an effect rather than from the render
+ *  body: a render that React throws away never reaches the screen and
+ *  should not be counted as work the user paid for. */
+export const __rowRenderCount = {
+  n: 0,
+  get(): number {
+    return this.n;
+  },
+  bump(): void {
+    this.n += 1;
+  },
+  reset(): void {
+    this.n = 0;
+  },
+};
+
+interface RowCellsProps {
+  row: GridRow;
+  clip: BeatClipEntry | undefined;
+  columns: number;
+  cellW: number;
+  barBeats: number;
+  peaks: readonly number[];
+  /** The play range, when a loop is set — else null. */
+  loop: ColumnRange | null;
+  /** This row's slice of the selection, or null. */
+  selection: ColumnRange | null;
+  onCellDown: (e: MouseEvent<HTMLElement>, rowId: string, col: number) => void;
+  onCellEnter: (rowId: string, col: number) => void;
+  onCellUp: () => void;
+  onCellClick: (e: MouseEvent<HTMLElement>, rowId: string, col: number) => void;
+  onLevelDown: (e: MouseEvent<HTMLElement>, rowId: string) => void;
+  onLevelMove: (e: MouseEvent<HTMLElement>, rowId: string) => void;
+  onLevelUp: () => void;
+  onLevelClear: (e: MouseEvent<HTMLElement>, rowId: string) => void;
+}
+
+/** One row of cells.
+ *
+ *  MEMOISED, and deliberately ignorant of the playhead. A row that knew
+ *  where the playhead was would redraw sixteen times a second, and fifty
+ *  rows of a few hundred cells redrawing at that rate is what made the
+ *  page crawl and the scrolling stick. The moving parts — the playhead
+ *  line and the lit column — are drawn ONCE over the whole grid instead,
+ *  so a poll costs one small render no matter how much is on the grid.
+ *
+ *  The cell handlers are the row's, not the cell's: one set of four
+ *  closures per row rather than four per cell, with the column read back
+ *  off the target. At fifty rows and three hundred columns that is the
+ *  difference between 200 closures per render and 60,000. */
+const GridRowCells = memo(function GridRowCells({
+  row,
+  clip,
+  columns,
+  cellW,
+  barBeats,
+  peaks,
+  loop,
+  selection,
+  onCellDown,
+  onCellEnter,
+  onCellUp,
+  onCellClick,
+  onLevelDown,
+  onLevelMove,
+  onLevelUp,
+  onLevelClear,
+}: RowCellsProps) {
+  useEffect(() => {
+    __rowRenderCount.bump();
+  });
+
+  /** The column a delegated pointer event happened on, or -1. */
+  const colOf = (e: MouseEvent<HTMLElement>): number => {
+    const cell = (e.target as HTMLElement).closest('[data-col]');
+    if (!cell) return -1;
+    return Number((cell as HTMLElement).dataset.col);
+  };
+
+  return (
+    <div
+      className="grid-row-cells"
+      data-testid={`grid-cells-${row.id}`}
+      onMouseDown={(e) => {
+        // cmd/ctrl writes on the level line; a bare press is the grid's.
+        if (e.metaKey || e.ctrlKey) {
+          onLevelDown(e, row.id);
+          return;
+        }
+        const col = colOf(e);
+        if (col >= 0) onCellDown(e, row.id, col);
+      }}
+      onMouseMove={(e) => {
+        onLevelMove(e, row.id);
+      }}
+      onMouseOver={(e) => {
+        const col = colOf(e);
+        if (col >= 0) onCellEnter(row.id, col);
+      }}
+      onMouseUp={() => {
+        onCellUp();
+        onLevelUp();
+      }}
+      onContextMenu={(e) => {
+        if (row.levels.length > 0) onLevelClear(e, row.id);
+      }}
+      onMouseLeave={() => {
+        onCellUp();
+        onLevelUp();
+      }}
+      onClick={(e) => {
+        const col = colOf(e);
+        if (col >= 0) onCellClick(e, row.id, col);
+      }}
+    >
+      {/* The clips, drawn as blocks BEHIND the cells: one run per copy,
+          with its waveform inside it. */}
+      {clip &&
+        row.placements.map((start) => {
+          const span = placementSpan(clip, start);
+          return (
+            <div
+              className="grid-clip"
+              data-testid={`grid-clip-${row.id}-${start}`}
+              key={start}
+              style={{ left: span.start * cellW, width: (span.end - span.start) * cellW }}
+            >
+              <ClipWave peaks={peaks} />
+              {clip.ones.map((beat) => (
+                <span
+                  className="grid-clip-one"
+                  data-lead={beat === leadOne(clip) ? 'true' : 'false'}
+                  key={beat}
+                  style={{ left: beat * cellW }}
+                />
+              ))}
+            </div>
+          );
+        })}
+
+      <LevelLine row={row} columns={columns} cellW={cellW} />
+
+      {Array.from({ length: columns }, (_, col) => {
+        const kind = clip ? cellKind(row, clip, col) : 'empty';
+        const hit = clip ? placementAt(row, clip, col) : -1;
+        const span = hit >= 0 && clip ? placementSpan(clip, row.placements[hit]) : null;
+        return (
+          <button
+            className="grid-cell"
+            data-testid={`grid-cell-${row.id}-${col}`}
+            data-col={col}
+            data-kind={kind}
+            // THE ONE, marked the whole way down the grid and not only
+            // where a clip sits: an empty downbeat is still the beat you
+            // count from.
+            data-downbeat={col % barBeats === 0 ? 'true' : 'false'}
+            data-edge={
+              span ? (span.start === col ? 'start' : span.end - 1 === col ? 'end' : 'mid') : 'none'
+            }
+            data-loop={loop && col >= loop.start && col < loop.end ? 'true' : 'false'}
+            data-selected={
+              selection && col >= selection.start && col < selection.end ? 'true' : 'false'
+            }
+            aria-label={`Row ${row.id}, beat ${col + 1}`}
+            key={col}
+            style={{ width: cellW }}
+          />
+        );
+      })}
+    </div>
+  );
+});

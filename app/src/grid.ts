@@ -84,6 +84,9 @@ export interface GridState {
   /** Columns the grid shows at rest. It grows to hold what is placed on
    *  it (`gridColumns`) but never shrinks below this. */
   beats: number;
+  /** Beats to a bar: what the ruler counts by and what a bar-sized seek
+   *  steps by. Four unless the music says otherwise. */
+  barBeats: number;
   /** The columns playback is confined to, or null for the whole grid. */
   loop: ColumnRange | null;
 }
@@ -91,9 +94,22 @@ export interface GridState {
 export const GRID_MIN_BEATS = 32;
 /** One click of the "longer" button — a phrase, not a beat. */
 export const GRID_GROW_BEATS = 16;
+export const DEFAULT_BAR_BEATS = 4;
+export const MIN_BAR = 1;
+export const MAX_BAR = 32;
+
+export function clampBar(beats: number): number {
+  return Math.min(Math.max(Math.round(beats), MIN_BAR), MAX_BAR);
+}
 
 export function emptyGrid(bpm = 120): GridState {
-  return { rows: [], tempo: { bpm, points: [] }, beats: GRID_MIN_BEATS, loop: null };
+  return {
+    rows: [],
+    tempo: { bpm, points: [] },
+    beats: GRID_MIN_BEATS,
+    barBeats: DEFAULT_BAR_BEATS,
+    loop: null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +436,15 @@ export function selectionFromDrag(
 export function inSelection(sel: GridSelection | null, rowId: string, col: number): boolean {
   if (!sel) return false;
   return sel.rowIds.includes(rowId) && inRange(sel.columns, col);
+}
+
+/** One row's share of a selection: the columns, or null when the row is
+ *  not in it. Passed to a row instead of the whole selection so that a
+ *  row outside it is handed the SAME null every time and can be left
+ *  undrawn. */
+export function selectionFor(sel: GridSelection | null, rowId: string): ColumnRange | null {
+  if (!sel || !sel.rowIds.includes(rowId)) return null;
+  return sel.columns;
 }
 
 /** A placement counts as inside a selection when the beat it is ANCHORED
@@ -752,6 +777,7 @@ export function fromDocument(raw: unknown): GridState {
         : [],
     },
     beats: Math.max(1, Math.round(Number(state.beats ?? GRID_MIN_BEATS))),
+    barBeats: clampBar(Number(state.barBeats ?? DEFAULT_BAR_BEATS)),
     loop: state.loop ? { start: Number(state.loop.start), end: Number(state.loop.end) } : null,
   };
 }
@@ -764,6 +790,7 @@ export function isEmptyGrid(state: GridState): boolean {
     state.rows.length === 0 &&
     state.tempo.points.length === 0 &&
     state.loop === null &&
-    state.beats === GRID_MIN_BEATS
+    state.beats === GRID_MIN_BEATS &&
+    state.barBeats === DEFAULT_BAR_BEATS
   );
 }

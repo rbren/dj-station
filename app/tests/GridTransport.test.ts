@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BeatClipEntry } from '../src/beatClip';
-import { emptyGrid, placeClip, setTempoPoint, type GridState } from '../src/grid';
+import { emptyGrid, placeClip, setLevelPoint, setTempoPoint, type GridState } from '../src/grid';
 import { GridTransport } from '../src/gridTransport';
 
 function clip(over: Partial<BeatClipEntry> = {}): BeatClipEntry {
@@ -226,5 +226,167 @@ describe('GridTransport pause', () => {
     transport.seek(12);
     expect(transport.status().column).toBe(12);
     expect(transport.playing).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What actually reaches Web Audio
+// ---------------------------------------------------------------------------
+
+// The tests above run without an AudioContext, which pins the clock but
+// leaves every pass silent. These build a RECORDING one, so the voices
+// themselves can be inspected: what was scheduled, what was called back
+// when the grid changed underneath it, and what gain was written.
+
+interface FakeVoice {
+  startedAt: number;
+  stoppedAt: number | null;
+  gain: string[];
+}
+
+let voices: FakeVoice[] = [];
+let ctxTime = 0;
+
+class FakeParam {
+  #log: string[];
+  constructor(log: string[]) {
+    this.#log = log;
+  }
+  setValueAtTime(v: number, t: number) {
+    this.#log.push(`set ${v.toFixed(2)}@${t.toFixed(2)}`);
+  }
+  linearRampToValueAtTime(v: number, t: number) {
+    this.#log.push(`ramp ${v.toFixed(2)}@${t.toFixed(2)}`);
+  }
+  cancelScheduledValues(t: number) {
+    this.#log.push(`cancel@${t.toFixed(2)}`);
+  }
+}
+
+function fakeContext() {
+  return class {
+    destination = {};
+    sampleRate = 48000;
+    state = 'running';
+    get currentTime() {
+      return ctxTime;
+    }
+    createGain() {
+      const log: string[] = [];
+      return { gain: new FakeParam(log), log, connect() {}, disconnect() {} };
+    }
+    createBufferSource() {
+      const voice: FakeVoice = { startedAt: -1, stoppedAt: null, gain: [] };
+      return {
+        buffer: null,
+        onended: null,
+        playbackRate: { value: 1 },
+        connect(dest: { log?: string[] }) {
+          if (dest.log) voice.gain = dest.log;
+        },
+        disconnect() {},
+        start(at: number) {
+          voice.startedAt = at;
+          voices.push(voice);
+        },
+        stop(at?: number) {
+          voice.stoppedAt = at ?? ctxTime;
+        },
+      };
+    }
+    decodeAudioData() {
+      return Promise.resolve({ duration: 8, length: 8 * 48000, sampleRate: 48000 });
+    }
+    resume() {
+      return Promise.resolve();
+    }
+    close() {
+      return Promise.resolve();
+    }
+  };
+}
+
+describe('GridTransport voices', () => {
+  let audio: GridTransport;
+  const withAudio = { audio: vi.fn().mockResolvedValue(new ArrayBuffer(16)) };
+
+  beforeEach(() => {
+    voices = [];
+    ctxTime = 0;
+    (window as unknown as { AudioContext: unknown }).AudioContext = fakeContext();
+    audio = new GridTransport(withAudio);
+  });
+
+  afterEach(() => {
+    audio.dispose();
+    delete (window as unknown as { AudioContext?: unknown }).AudioContext;
+  });
+
+  /** Let the render land and the pump run. */
+  async function settle() {
+    await vi.advanceTimersByTimeAsync(200);
+  }
+
+  it('stops a voice taken off the grid before it has sounded', async () => {
+    const loop = { start: 0, end: 8 };
+    const state = gridWith({ loop });
+    await audio.play(state, CLIPS, 32);
+    await settle();
+    const scheduled = voices.filter((v) => v.startedAt >= 0);
+    expect(scheduled.length).toBeGreaterThan(0);
+    // Everything here is still in the FUTURE: that is the window the bug
+    // lived in, where the audio was committed but not yet heard.
+    expect(scheduled.every((v) => v.startedAt >= ctxTime)).toBe(true);
+
+    const emptied = gridWith({ loop, rows: [{ ...state.rows[0], placements: [] }] });
+    audio.update(emptied, CLIPS, 32);
+    await settle();
+
+    expect(scheduled.every((v) => v.stoppedAt !== null)).toBe(true);
+  });
+
+  it('lays a clip down again when it comes back', async () => {
+    const loop = { start: 0, end: 8 };
+    const state = gridWith({ loop });
+    await audio.play(state, CLIPS, 32);
+    await settle();
+    const before = voices.length;
+
+    const emptied = gridWith({ loop, rows: [{ ...state.rows[0], placements: [] }] });
+    audio.update(emptied, CLIPS, 32);
+    await settle();
+    audio.update(state, CLIPS, 32);
+    await settle();
+
+    // The copy was un-laid along with its voice, so it is free to sound.
+    expect(voices.length).toBeGreaterThan(before);
+    expect(voices.some((v) => v.stoppedAt === null)).toBe(true);
+  });
+
+  it('writes a row level onto the voice it belongs to', async () => {
+    let row = gridWith().rows[0];
+    row = setLevelPoint(row, 0, 1);
+    row = setLevelPoint(row, 4, 0);
+    await audio.play(gridWith({ rows: [row] }), CLIPS, 32);
+    await settle();
+    const sounded = voices.find((v) => v.gain.length > 0);
+    expect(sounded).toBeDefined();
+    // A fade is a RAMP, not a step.
+    expect(sounded?.gain.some((g) => g.startsWith('ramp 0.00'))).toBe(true);
+  });
+
+  it('re-levels a voice that was already scheduled', async () => {
+    const state = gridWith({ loop: { start: 0, end: 8 } });
+    await audio.play(state, CLIPS, 32);
+    await settle();
+    expect(voices.some((v) => v.startedAt >= 0)).toBe(true);
+
+    // Draw a level line WHILE it plays: the old voices were committed at
+    // full level, so the change is only heard if they are revisited.
+    const faded = setLevelPoint(state.rows[0], 0, 0.25);
+    audio.update(gridWith({ ...state, rows: [faded] }), CLIPS, 32);
+    await settle();
+
+    expect(voices.some((v) => v.gain.some((g) => g.includes('0.25')))).toBe(true);
   });
 });

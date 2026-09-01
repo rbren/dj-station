@@ -6,7 +6,14 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
-import { GridView } from '../src/components/GridView';
+import {
+  GridView,
+  grabBeats,
+  loopEdgeAt,
+  zoomBy,
+  MAX_ZOOM,
+  MIN_ZOOM,
+} from '../src/components/GridView';
 import { median, pickerTracks } from '../src/components/GridClipPicker';
 import { GridTransport } from '../src/gridTransport';
 
@@ -199,33 +206,60 @@ describe('GridView', () => {
     fireEvent.mouseDown(lane);
     await waitFor(() => expect(screen.getByTestId('grid-tempo-lane-point-0')).toBeTruthy());
     expect(screen.getByTestId('grid-tempo-lane').getAttribute('data-empty')).toBe('false');
-    expect(screen.getByTestId('grid-tempo-clear').hasAttribute('disabled')).toBe(false);
-    fireEvent.click(screen.getByTestId('grid-tempo-clear'));
+    // A breakpoint comes off the way it went on — on the lane itself,
+    // right-clicked. The "flat" button that used to do this is gone.
+    fireEvent.contextMenu(screen.getByTestId('grid-tempo-lane-point-0'));
     await waitFor(() => expect(screen.queryByTestId('grid-tempo-lane-point-0')).toBeNull());
   });
 
-  it('the master BPM box sets the tempo the grid runs at', async () => {
+  it('the BPM box sets the tempo the grid runs at', async () => {
     show();
     const bpm = await screen.findByTestId('grid-bpm');
     fireEvent.change(bpm, { target: { value: '145' } });
-    await waitFor(() => expect(screen.getByTestId('grid-bpm-here').textContent).toContain('145.0'));
+    // The box IS the readout now — the separate "here" line it used to
+    // be checked against is gone.
+    await waitFor(() => expect((bpm as HTMLInputElement).value).toBe('145'));
   });
 
-  // The readout only APPEARS when there is a loop: an empty grid should
-  // not carry a line of text telling you what you have not done.
   it('a drag across the ruler marks the loop, and it can be cleared', async () => {
     show();
     await screen.findByTestId('grid-ruler');
-    expect(screen.queryByTestId('grid-loop')).toBeNull();
+    expect(screen.queryByTestId('grid-loop-handle-start')).toBeNull();
     const ruler = screen.getByTestId('grid-ruler');
     // jsdom has no layout: every clientX maps to column 0, so the drag
     // marks one column — which is still a loop, and still clears.
     fireEvent.mouseDown(ruler, { clientX: 0 });
     fireEvent.mouseMove(ruler, { clientX: 40 });
     fireEvent.mouseUp(ruler);
-    await waitFor(() => expect(screen.getByTestId('grid-loop').textContent).toContain('loop 1'));
+    // The loop shows as marked columns and a pair of handles, not as a
+    // line of text saying "loop 1–2".
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-ruler-0').getAttribute('data-loop')).toBe('true'),
+    );
+    expect(screen.getByTestId('grid-loop-handle-start')).toBeTruthy();
+    expect(screen.getByTestId('grid-loop-handle-end')).toBeTruthy();
     fireEvent.click(screen.getByTestId('grid-loop-clear'));
-    await waitFor(() => expect(screen.queryByTestId('grid-loop')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('grid-loop-handle-start')).toBeNull());
+  });
+
+  it('zooms in and out, and stops at the ends', async () => {
+    show();
+    await screen.findByTestId('grid-view');
+    expect(screen.getByTestId('grid-zoom').textContent).toBe('100%');
+    fireEvent.click(screen.getByTestId('grid-zoom-in'));
+    await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('115%'));
+    fireEvent.click(screen.getByTestId('grid-zoom-out'));
+    await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('100%'));
+  });
+
+  it('the wheel over the ruler zooms, and nowhere else does', async () => {
+    show();
+    const ruler = await screen.findByTestId('grid-ruler');
+    fireEvent.wheel(ruler, { deltaY: -120 });
+    await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('115%'));
+    // The body is for scrolling. A wheel there must not resize anything.
+    fireEvent.wheel(screen.getByTestId('grid-scroll'), { deltaY: -120 });
+    expect(screen.getByTestId('grid-zoom').textContent).toBe('115%');
   });
 
   it('plays and pauses', async () => {
@@ -430,14 +464,103 @@ describe('GridView selection', () => {
   });
 });
 
+describe('GridView clipboard', () => {
+  /** Sweep a selection across a row. `mouseOver` and not `mouseEnter`:
+   *  the cells delegate to their row, and enter does not bubble. */
+  /** Walk the playhead on by whole bars, the way cmd+arrow does. */
+  function seekBars(n: number) {
+    for (let i = 0; i < n; i += 1) fireEvent.keyDown(window, { key: 'ArrowRight', metaKey: true });
+  }
+
+  function sweep(rowId: string, from: number, to: number) {
+    fireEvent.mouseDown(screen.getByTestId(`grid-cell-${rowId}-${from}`));
+    fireEvent.mouseOver(screen.getByTestId(`grid-cell-${rowId}-${to}`));
+    fireEvent.mouseUp(screen.getByTestId(`grid-cell-${rowId}-${to}`));
+  }
+
+  // THE BUG: copy then paste left ONE copy on the grid, not two. Paste
+  // was landing on the selection, which is still sitting on the thing
+  // that was just copied — so the copy went back where it already was
+  // and nothing appeared to happen.
+  it('copies a selection and pastes it where the playhead is', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-4'));
+    await screen.findByTestId('grid-clip-row1-4');
+
+    sweep('row1', 3, 8);
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-cell-row1-4').getAttribute('data-selected')).toBe('true'),
+    );
+
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+    // Three bars along, which is clear of the four-beat copy already
+    // sitting at beat 4 — a copy cannot overlap itself in a row.
+    seekBars(3);
+    fireEvent.keyDown(window, { key: 'v', metaKey: true });
+
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-testid^="grid-clip-row1-"]')).toHaveLength(2),
+    );
+    // The first copy is untouched: a paste ADDS, it does not move.
+    expect(screen.getByTestId('grid-clip-row1-4')).toBeTruthy();
+  });
+
+  it('the Copy and Paste buttons do the same as the shortcuts', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-4'));
+    await screen.findByTestId('grid-clip-row1-4');
+
+    expect(screen.getByTestId('grid-copy').hasAttribute('disabled')).toBe(true);
+    sweep('row1', 3, 8);
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-copy').hasAttribute('disabled')).toBe(false),
+    );
+
+    fireEvent.click(screen.getByTestId('grid-copy'));
+    // Nothing has been copied yet from an empty board, so Paste only
+    // wakes up once there is something on it.
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-paste').hasAttribute('disabled')).toBe(false),
+    );
+    seekBars(3);
+    fireEvent.click(screen.getByTestId('grid-paste'));
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-testid^="grid-clip-row1-"]')).toHaveLength(2),
+    );
+  });
+});
+
 describe('GridView files', () => {
+  /** The file options live behind the arrangement's NAME now: the
+   *  New/Open/Save buttons that used to sit in the header are gone, so
+   *  every one of these has to open that menu first. */
+  function fileMenu(item: 'new' | 'open' | 'save' | 'save-as') {
+    fireEvent.click(screen.getByTestId('grid-name'));
+    fireEvent.click(screen.getByTestId(`grid-${item}`));
+  }
+
+  it('the title opens the file menu, and Escape closes it', async () => {
+    show();
+    await screen.findByTestId('grid-view');
+    expect(screen.queryByTestId('grid-open')).toBeNull();
+    fireEvent.click(screen.getByTestId('grid-name'));
+    expect(screen.getByTestId('grid-new')).toBeTruthy();
+    expect(screen.getByTestId('grid-open')).toBeTruthy();
+    expect(screen.getByTestId('grid-save')).toBeTruthy();
+    expect(screen.getByTestId('grid-save-as')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('grid-open')).toBeNull());
+  });
+
   it('saves under a typed name, and stops calling itself dirty', async () => {
     const clips = makeClips();
     show(clips);
     await addClip('h1', 'c1');
     fireEvent.click(screen.getByTestId('grid-cell-row1-0'));
     await waitFor(() => expect(screen.getByTestId('grid-name').textContent).toContain('•'));
-    fireEvent.click(screen.getByTestId('grid-save-as'));
+    fileMenu('save-as');
     const field = await screen.findByTestId('grid-save-name');
     fireEvent.change(field, { target: { value: 'friday set' } });
     fireEvent.click(screen.getByTestId('grid-save-confirm'));
@@ -464,7 +587,7 @@ describe('GridView files', () => {
     );
     show(clips);
     await screen.findByTestId('grid-view');
-    fireEvent.click(screen.getByTestId('grid-open'));
+    fileMenu('open');
     fireEvent.click(await screen.findByTestId('grid-open-friday set'));
     await waitFor(() =>
       expect(screen.getByTestId('grid-name').textContent).toContain('friday set'),
@@ -481,7 +604,7 @@ describe('GridView files', () => {
     await addClip('h1', 'c1');
     fireEvent.click(screen.getByTestId('grid-cell-row1-0'));
     await screen.findByTestId('grid-clip-row1-0');
-    fireEvent.click(screen.getByTestId('grid-new'));
+    fileMenu('new');
     await screen.findByTestId('grid-confirm');
     fireEvent.click(screen.getByTestId('grid-confirm-cancel'));
     await waitFor(() => expect(screen.queryByTestId('grid-confirm')).toBeNull());
@@ -493,7 +616,7 @@ describe('GridView files', () => {
     await addClip('h1', 'c1');
     fireEvent.click(screen.getByTestId('grid-cell-row1-0'));
     await screen.findByTestId('grid-clip-row1-0');
-    fireEvent.click(screen.getByTestId('grid-new'));
+    fileMenu('new');
     fireEvent.click(await screen.findByTestId('grid-confirm-discard'));
     await waitFor(() => expect(screen.getByTestId('grid-empty')).toBeTruthy());
     expect(screen.getByTestId('grid-name').textContent).toContain('untitled');
@@ -503,7 +626,56 @@ describe('GridView files', () => {
   it('does not warn when there is nothing to lose', async () => {
     show();
     await screen.findByTestId('grid-view');
-    fireEvent.click(screen.getByTestId('grid-new'));
+    fileMenu('new');
     expect(screen.queryByTestId('grid-confirm')).toBeNull();
+  });
+});
+
+// jsdom has no layout, so the geometry these two do is checked directly
+// rather than through a drag that would land on column 0 whatever it was
+// given.
+describe('grid zoom', () => {
+  it('steps up and down, and stops at the ends', () => {
+    expect(zoomBy(1, -100)).toBeCloseTo(1.15, 5);
+    expect(zoomBy(1, 100)).toBeCloseTo(1 / 1.15, 5);
+    expect(zoomBy(MAX_ZOOM, -100)).toBe(MAX_ZOOM);
+    expect(zoomBy(MIN_ZOOM, 100)).toBe(MIN_ZOOM);
+  });
+
+  it('a step out then in comes back to where it started', () => {
+    expect(zoomBy(zoomBy(2, 100), -100)).toBeCloseTo(2, 5);
+  });
+});
+
+describe('loop edges', () => {
+  const loop = { start: 8, end: 16 };
+
+  it('takes the near edge, and nothing in the middle', () => {
+    expect(loopEdgeAt(loop, 8, 1)).toBe('start');
+    // `end` is exclusive, so the last beat INSIDE the loop is 15 — that
+    // is the one the end handle answers to.
+    expect(loopEdgeAt(loop, 15, 1)).toBe('end');
+    expect(loopEdgeAt(loop, 12, 1)).toBeNull();
+    expect(loopEdgeAt(null, 8, 1)).toBeNull();
+  });
+
+  it('reaches a beat either side of the edge', () => {
+    expect(loopEdgeAt(loop, 7, 1)).toBe('start');
+    expect(loopEdgeAt(loop, 9, 1)).toBe('start');
+    expect(loopEdgeAt(loop, 16, 1)).toBe('end');
+  });
+
+  it('on a one-beat loop the edges do not fight', () => {
+    // start and end-1 are the SAME column; whichever it answers, taking
+    // hold of it must not crash or invert the loop.
+    expect(loopEdgeAt({ start: 4, end: 5 }, 4, 1)).toBe('start');
+  });
+
+  it('widens the grab as the beats narrow', () => {
+    expect(grabBeats(1)).toBe(1);
+    expect(grabBeats(4)).toBe(1);
+    // Zoomed right out a beat is a few pixels, so the grab has to cover
+    // more of them to stay catchable.
+    expect(grabBeats(0.25)).toBe(2);
   });
 });
