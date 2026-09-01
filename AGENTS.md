@@ -73,6 +73,38 @@ command (cold and warm) are in `reports/TIMINGS_REPORT.md`.
   is genuinely workspace-wide (a cross-crate refactor, a toolchain or
   dependency bump), not for ordinary feature work.
 
+## Context discipline — reading is what costs, not building
+
+Measured over the last 20 worker conversations ($210, 1,692 LLM calls, 239 M
+prompt tokens — `reports/AGENT_SPEND_REPORT.md`): test/build output is 1.8 % of
+spend, file reads and greps are 39 %. Every token you put in context is re-read
+by every later call, so 1,000 tokens dropped early into a 300-call ticket costs
+~$0.26; cost is roughly quadratic in how many calls a ticket takes.
+
+- NEVER `cat` a whole file over ~200 lines. `grep -n` for the symbol, then
+  `sed -n 'START,ENDp'` a window around it (or `file_editor view` with an
+  explicit `view_range`). The files you will reach for are the big ones —
+  `styles.css` 6.4k lines, `decks.rs` 3.1k, `ClipView.tsx` 2.3k.
+- NEVER `cat AGENTS.md`. It is 46k tokens and terminal output is clipped
+  middle-out at 30k chars, so you pay ~8k tokens for a copy with its middle
+  missing. `grep -n '^#' AGENTS.md` for the section list, then `sed -n` the
+  sections you need.
+- READ A FILE ONCE. 60 % of all file-read tokens in that sample were re-reads of
+  a file already read in the same conversation (one ticket opened
+  `ClipView.test.tsx` 64 times). If you must look again, re-read the range, not
+  the file.
+- CAP EVERY COMMAND'S OUTPUT: `| head -40` on greps, `--stat` before
+  `git diff`, `| grep -E "Tests |Test Files"` on vitest, a `python3 -c` filter
+  instead of dumping JSON (`vibectl.py snapshot` raw is 9k tokens). Scope greps
+  (`grep -rn foo app/src --include='*.tsx'`), never the whole repo. If output
+  hit the 30k-char clip, the command was wrong.
+- FEWER, BIGGER STEPS. ~20k tokens of system prompt and tool schemas ride on
+  every call (25 % of all spend), and an over-large context eventually triggers
+  condensation, which re-writes the whole prompt cache — 1.2 % of calls did that
+  and cost 7 % of the money. Batch shell commands into one action, and take a
+  genuinely new ask in a fresh conversation rather than as the tenth follow-up
+  on a 500-call session.
+
 ## Build cache — share the artifacts, don't recompile them
 
 FIRST COMMAND IN A FRESH WORKTREE: `scripts/use-shared-target.sh`. It points
