@@ -11,7 +11,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
-import { GridView, __rowRenderCount } from '../src/components/GridView';
+import { GridView, __pageRenderCount, __rowRenderCount } from '../src/components/GridView';
 
 const ROWS = 50;
 // The ROW COUNT is what these tests are about, so it stays at a real
@@ -84,6 +84,7 @@ async function renderBig() {
 
 beforeEach(() => {
   __rowRenderCount.reset();
+  __pageRenderCount.reset();
 });
 
 afterEach(() => {
@@ -143,10 +144,60 @@ describe('Grid performance', () => {
     await renderBig();
     __rowRenderCount.reset();
 
-    // Zoom is the honest opposite case: it changes the geometry of every
-    // cell, so every row SHOULD be redrawn. The memo must not be so
+    // The honest opposite case: the bar length is drawn on every cell, so
+    // changing it SHOULD redraw every row. The memo must not be so
     // aggressive that it holds a stale layout.
-    fireEvent.wheel(screen.getByTestId('grid-ruler'), { deltaY: -120 });
+    fireEvent.change(screen.getByTestId('grid-bar-beats'), { target: { value: '3' } });
     await waitFor(() => expect(__rowRenderCount.get()).toBeGreaterThanOrEqual(ROWS));
+  });
+});
+
+// ZOOMING is the gesture that used to make the page stutter: it changes
+// the geometry of every one of the ROWS x BEATS cells, and it arrives as
+// a stream of wheel events rather than as one click of a button. Two
+// things keep it smooth, and both are counted here rather than timed:
+// the geometry is a CSS variable (so React re-renders nothing below the
+// container), and a burst of events is coalesced into one animation
+// frame (so a flick of the wheel costs one render, not thirty).
+describe('Grid zoom performance', () => {
+  it('does NOT re-render a single row when the grid is zoomed', async () => {
+    await renderBig();
+    __rowRenderCount.reset();
+
+    fireEvent.wheel(screen.getByTestId('grid-ruler'), { deltaY: -100 });
+    await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('115%'));
+
+    // Every cell is a beat wide in `--grid-cell-w`, so the browser lays
+    // the new geometry out and React touches none of it.
+    expect(__rowRenderCount.get()).toBe(0);
+  });
+
+  it('coalesces a burst of wheel events into one render per frame', async () => {
+    await renderBig();
+    const ruler = screen.getByTestId('grid-ruler');
+    __pageRenderCount.reset();
+
+    // A trackpad flick: thirty events between two frames. One state
+    // update per event is what made the zoom feel clicky.
+    for (let i = 0; i < 30; i += 1) fireEvent.wheel(ruler, { deltaY: -10 });
+    await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).not.toBe('100%'));
+
+    expect(__pageRenderCount.get()).toBeLessThanOrEqual(2);
+    // …and the whole burst was applied, not just the event that got in
+    // first: thirty tenth-notches is three notches of zoom.
+    expect(screen.getByTestId('grid-zoom').textContent).toBe('152%');
+  });
+
+  it('keeps the clip blocks off the zoom too, waveforms and all', async () => {
+    await renderBig();
+    const block = screen.getByTestId('grid-clip-row1-0');
+    fireEvent.wheel(screen.getByTestId('grid-ruler'), { deltaY: -100 });
+    await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('115%'));
+
+    // The same element, with the same declaration on it: nothing about a
+    // placed clip — its block, its waveform, its ones — is re-rendered by
+    // a zoom.
+    expect(screen.getByTestId('grid-clip-row1-0')).toBe(block);
+    expect(block.style.width).toBe('calc(var(--grid-cell-w) * 4)');
   });
 });

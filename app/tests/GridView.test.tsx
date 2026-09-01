@@ -255,11 +255,31 @@ describe('GridView', () => {
   it('the wheel over the ruler zooms, and nowhere else does', async () => {
     show();
     const ruler = await screen.findByTestId('grid-ruler');
-    fireEvent.wheel(ruler, { deltaY: -120 });
+    // A NOTCH of the wheel is 100 units of delta and one 15% step; the
+    // zoom itself is continuous in between, and lands on the next frame.
+    fireEvent.wheel(ruler, { deltaY: -100 });
     await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('115%'));
     // The body is for scrolling. A wheel there must not resize anything.
-    fireEvent.wheel(screen.getByTestId('grid-scroll'), { deltaY: -120 });
+    fireEvent.wheel(screen.getByTestId('grid-scroll'), { deltaY: -100 });
     expect(screen.getByTestId('grid-zoom').textContent).toBe('115%');
+  });
+
+  it('takes a half-notch of the wheel as half a step, not a whole one', async () => {
+    show();
+    const ruler = await screen.findByTestId('grid-ruler');
+    // The clicky part of the old zoom was a fixed step per EVENT: a
+    // trackpad's small deltas each jumped a full 15%.
+    fireEvent.wheel(ruler, { deltaY: -50 });
+    await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('107%'));
+  });
+
+  it('zooms on cmd +/-', async () => {
+    show();
+    await screen.findByTestId('grid-view');
+    fireEvent.keyDown(window, { key: '=', metaKey: true });
+    await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('115%'));
+    fireEvent.keyDown(window, { key: '-', metaKey: true });
+    await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('100%'));
   });
 
   it('plays and pauses', async () => {
@@ -365,8 +385,10 @@ describe('GridView clip blocks', () => {
     await addClip('h1', 'c2');
     fireEvent.click(screen.getByTestId('grid-cell-row1-10'));
     const block = await screen.findByTestId('grid-clip-row1-9');
-    expect(block.style.width).toBe(`${8 * 22}px`);
-    expect(block.style.left).toBe(`${9 * 22}px`);
+    // Geometry is written in BEATS off the zoom variable, so the block
+    // follows a zoom without React re-rendering the row.
+    expect(block.style.width).toBe('calc(var(--grid-cell-w) * 8)');
+    expect(block.style.left).toBe('calc(var(--grid-cell-w) * 9)');
     // One block, not eight.
     expect(document.querySelectorAll('[data-testid^="grid-clip-row1-"]')).toHaveLength(1);
   });
@@ -677,5 +699,217 @@ describe('loop edges', () => {
     // Zoomed right out a beat is a few pixels, so the grab has to cover
     // more of them to stay catchable.
     expect(grabBeats(0.25)).toBe(2);
+  });
+});
+
+// THE LOOP IS DRAWN ON THE RULER, and the gesture that draws it belongs
+// to the WINDOW: a drag is a horizontal thing and the ruler is 26 px
+// tall, so the pointer leaves it almost immediately.
+describe('the ruler gesture', () => {
+  it('keeps marking the loop when the pointer leaves the ruler vertically', async () => {
+    show();
+    const ruler = await screen.findByTestId('grid-ruler');
+    fireEvent.mouseDown(ruler, { clientX: 0 });
+    // Out of the strip and down over the rows, which used to end the
+    // drag on the spot.
+    fireEvent.mouseMove(document.body, { clientX: 5 * 22, clientY: 300 });
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-ruler-5').getAttribute('data-loop')).toBe('true'),
+    );
+    fireEvent.mouseUp(document.body, { clientX: 5 * 22, clientY: 300 });
+    expect(screen.getByTestId('grid-ruler-3').getAttribute('data-loop')).toBe('true');
+  });
+
+  it('a CLICK puts the playback there instead of marking a one-beat loop', async () => {
+    show();
+    const ruler = await screen.findByTestId('grid-ruler');
+    fireEvent.mouseDown(ruler, { clientX: 5 * 22 });
+    fireEvent.mouseUp(ruler, { clientX: 5 * 22 });
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-position').textContent).toContain('beat 6/'),
+    );
+    // …and nothing has been looped.
+    expect(screen.queryByTestId('grid-loop-handle-start')).toBeNull();
+  });
+
+  it('marks the loop with EDGES on the grid rather than a wash over it', async () => {
+    show();
+    await addClip('h1', 'c1');
+    const ruler = screen.getByTestId('grid-ruler');
+    fireEvent.mouseDown(ruler, { clientX: 0 });
+    fireEvent.mouseMove(document.body, { clientX: 3 * 22 });
+    fireEvent.mouseUp(document.body, { clientX: 3 * 22 });
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-cell-row1-0').getAttribute('data-loop-edge')).toBe('start'),
+    );
+    expect(screen.getByTestId('grid-cell-row1-3').getAttribute('data-loop-edge')).toBe('end');
+    // The columns between the edges are left alone.
+    expect(screen.getByTestId('grid-cell-row1-2').getAttribute('data-loop-edge')).toBe('none');
+    // The ruler keeps its highlight the whole way across.
+    expect(screen.getByTestId('grid-ruler-2').getAttribute('data-loop')).toBe('true');
+  });
+});
+
+// N COLUMNS MARKED BY THE LOOP is what the ruler's menu operates on.
+describe('beat surgery from the ruler', () => {
+  /** Mark a loop `n` columns wide from column 0. */
+  async function loopOf(n: number) {
+    const ruler = screen.getByTestId('grid-ruler');
+    fireEvent.mouseDown(ruler, { clientX: 0 });
+    fireEvent.mouseMove(document.body, { clientX: (n - 1) * 22 });
+    fireEvent.mouseUp(document.body, { clientX: (n - 1) * 22 });
+    await waitFor(() => expect(screen.getByTestId('grid-loop-handle-start')).toBeTruthy());
+  }
+
+  it('offers the five operations, counted in the beats the loop marks', async () => {
+    show();
+    await addClip('h1', 'c1');
+    await loopOf(2);
+    fireEvent.contextMenu(screen.getByTestId('grid-ruler'), { clientX: 10, clientY: 10 });
+    const menu = await screen.findByTestId('context-menu');
+    expect(menu.textContent).toContain('Insert 2 beats left');
+    expect(menu.textContent).toContain('Insert 2 beats right');
+    expect(menu.textContent).toContain('Copy 2 beats left');
+    expect(menu.textContent).toContain('Copy 2 beats right');
+    expect(menu.textContent).toContain('Delete 2 beats');
+  });
+
+  it('says nothing when no loop is marked', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.contextMenu(screen.getByTestId('grid-ruler'), { clientX: 10, clientY: 10 });
+    expect(screen.queryByTestId('context-menu')).toBeNull();
+  });
+
+  it('inserts beats to the right, pushing what follows along', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-8'));
+    await screen.findByTestId('grid-clip-row1-8');
+    await loopOf(2);
+    fireEvent.contextMenu(screen.getByTestId('grid-ruler'), { clientX: 10, clientY: 10 });
+    fireEvent.click(await screen.findByTestId('grid-beats-insert-right'));
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-10')).toBeTruthy());
+  });
+
+  it('copies the loop to the right, so the phrase is there twice', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-0'));
+    await screen.findByTestId('grid-clip-row1-0');
+    await loopOf(4);
+    fireEvent.contextMenu(screen.getByTestId('grid-ruler'), { clientX: 10, clientY: 10 });
+    fireEvent.click(await screen.findByTestId('grid-beats-copy-right'));
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-4')).toBeTruthy());
+    expect(screen.getByTestId('grid-clip-row1-0')).toBeTruthy();
+  });
+
+  it('deletes the marked beats, closing the gap behind them', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-8'));
+    await screen.findByTestId('grid-clip-row1-8');
+    await loopOf(4);
+    fireEvent.contextMenu(screen.getByTestId('grid-ruler'), { clientX: 10, clientY: 10 });
+    fireEvent.click(await screen.findByTestId('grid-beats-delete'));
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-4')).toBeTruthy());
+  });
+});
+
+describe('GridView undo', () => {
+  it('takes back a placement, and puts it back on redo', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-4'));
+    await screen.findByTestId('grid-clip-row1-4');
+
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-testid^="grid-clip-row1-"]')).toHaveLength(0),
+    );
+    fireEvent.keyDown(window, { key: 'z', metaKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-4')).toBeTruthy());
+  });
+
+  it('undoes a loop DRAG as one step, not one per beat crossed', async () => {
+    show();
+    const ruler = await screen.findByTestId('grid-ruler');
+    fireEvent.mouseDown(ruler, { clientX: 0 });
+    fireEvent.mouseMove(document.body, { clientX: 22 });
+    fireEvent.mouseMove(document.body, { clientX: 2 * 22 });
+    fireEvent.mouseMove(document.body, { clientX: 5 * 22 });
+    fireEvent.mouseUp(document.body, { clientX: 5 * 22 });
+    await waitFor(() => expect(screen.getByTestId('grid-loop-handle-start')).toBeTruthy());
+
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    await waitFor(() => expect(screen.queryByTestId('grid-loop-handle-start')).toBeNull());
+  });
+
+  it('offers Undo and Redo in the file menu, greyed until there is one', async () => {
+    show();
+    await screen.findByTestId('grid-view');
+    fireEvent.click(screen.getByTestId('grid-name'));
+    expect(screen.getByTestId('grid-undo').hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByTestId('grid-name'));
+
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-4'));
+    await screen.findByTestId('grid-clip-row1-4');
+    fireEvent.click(screen.getByTestId('grid-name'));
+    fireEvent.click(screen.getByTestId('grid-undo'));
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-testid^="grid-clip-row1-"]')).toHaveLength(0),
+    );
+    fireEvent.click(screen.getByTestId('grid-name'));
+    fireEvent.click(screen.getByTestId('grid-redo'));
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-4')).toBeTruthy());
+  });
+
+  it('does not walk back into the document a New replaced', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-4'));
+    await screen.findByTestId('grid-clip-row1-4');
+    fireEvent.click(screen.getByTestId('grid-name'));
+    fireEvent.click(screen.getByTestId('grid-new'));
+    fireEvent.click(await screen.findByTestId('grid-confirm-discard'));
+    await waitFor(() => expect(screen.getByTestId('grid-empty')).toBeTruthy());
+
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    expect(screen.getByTestId('grid-empty')).toBeTruthy();
+  });
+});
+
+// A SELECTION IS ANY RECTANGLE: the rows a drag crosses, not the one it
+// started on. The rows are separate elements, so leaving one used to end
+// the drag before it ever reached the next.
+describe('GridView selection across rows', () => {
+  it('grows onto the rows below as the drag passes over them', async () => {
+    show();
+    await addTrack('h1');
+    fireEvent.mouseDown(screen.getByTestId('grid-cell-row1-2'));
+    // Leaving row 1 is what a drag DOWN the grid does first.
+    fireEvent.mouseLeave(screen.getByTestId('grid-cells-row1'));
+    fireEvent.mouseOver(screen.getByTestId('grid-cell-row2-6'));
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-cell-row2-4').getAttribute('data-selected')).toBe('true'),
+    );
+    expect(screen.getByTestId('grid-cell-row1-4').getAttribute('data-selected')).toBe('true');
+    // …and the columns outside the drag are not in it.
+    expect(screen.getByTestId('grid-cell-row2-8').getAttribute('data-selected')).toBe('false');
+  });
+
+  it('ends when the mouse is let go anywhere, not only over a row', async () => {
+    show();
+    await addTrack('h1');
+    fireEvent.mouseDown(screen.getByTestId('grid-cell-row1-2'));
+    fireEvent.mouseOver(screen.getByTestId('grid-cell-row2-6'));
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-cell-row2-4').getAttribute('data-selected')).toBe('true'),
+    );
+    fireEvent.mouseUp(document.body);
+    // The drag is over: passing back over the grid must not resize it.
+    fireEvent.mouseOver(screen.getByTestId('grid-cell-row2-12'));
+    expect(screen.getByTestId('grid-cell-row2-12').getAttribute('data-selected')).toBe('false');
   });
 });

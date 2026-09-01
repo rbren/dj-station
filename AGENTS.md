@@ -2446,16 +2446,54 @@ of the page.
   it, right-click removes it. The first point on a resting row brings a
   unity point at beat 0 with it, so the line BENDS from the middle rather
   than jumping. Levels reach the sound as a `GainNode` ramp per copy
-  (`ScheduledClip.levels`).
-- DRAG-SELECT across cells marks a rectangle (rows by id, columns as a
+  (`ScheduledClip.levels`). A WRITTEN LINE IS DRAWN LIKE A RESTING ONE —
+  the same gray, the same weight, only its handles picked out: in the
+  accent it shouted over the clips it belongs to.
+- DRAG-SELECT across cells marks ANY n x m rectangle (rows by id in the
+  order they are DRAWN — `groups.flatMap`, not `grid.rows` — columns as a
   range); cmd+C copies the placements ANCHORED inside it, measured from
   the selection's left edge, and cmd+V pastes at the PLAYHEAD's beat.
   Paste replaces rather than toggles. Backspace clears the selection's
   copies, Escape drops the selection. Placing stays on `onClick`, which
   fires only when press and release share a cell.
+- A DRAG BELONGS TO THE WINDOW, not to the element it started on. Both
+  the cell drag and the LOOP drag listen on `window` for move/up: hung
+  off the row's `onMouseLeave` a selection died as soon as it crossed
+  into the next row, and hung off the 26 px ruler the loop died the
+  moment the pointer strayed vertically. Only the LEVEL drag still ends
+  at its row's edge — that line is the row's.
+- THE RULER: a drag marks the loop, a CLICK (press and release on one
+  column) seeks the playhead there and marks nothing — it used to leave a
+  one-beat loop behind. `loopDrag.moved` is what tells the two apart, and
+  it turns true only once the pointer has reached a different column;
+  grabbing an existing loop EDGE counts as moved from the press, so
+  trimming a loop never moves the playhead.
+- THE LOOP IS AN EDGE ON THE GRID, a wash only on the ruler. The ruler
+  keeps `data-loop` per column; the cells carry `data-loop-edge`
+  (`start|end|both|none`) and draw the loop's first column's LEFT border
+  and its last column's RIGHT border in `--loop` — the bright purple of
+  the ruler's handles. Tinting every looped column buried the clips.
+- RIGHT-CLICK ON THE RULER, with a loop marked, is BEAT SURGERY over its
+  N columns: insert / copy N beats left or right, delete N beats
+  (`insertBeats`/`copyBeats`/`deleteBeats` in `grid.ts`, drawn with the
+  app's `ContextMenu`). All three are measured by a placement's ANCHOR,
+  and they carry the tempo and level breakpoints and the grid's length
+  along with them; a clip straddling the cut keeps its place (its anchor
+  is before the cut). An insert whose column IS the loop's end leaves the
+  loop over its own beats; a delete that swallows the loop clears it.
+- UNDO/REDO (`src/gridHistory.ts`, cmd+Z / cmd+shift+Z / cmd+Y, and the
+  file menu) covers the page because there is ONE recorded setter: the
+  page holds a `GridHistory` (past/present/future) and every edit goes
+  through `setGrid(update, gesture?)`. A GESTURE IS ONE STEP — a drag or
+  a field being typed into names itself (`loop`, `tempo`, `level:<row>`,
+  `bpm`…) and consecutive edits under that name replace the present
+  instead of stacking; the window's mouse-up (and a field's blur) calls
+  `endEdit` to close it. New/Open start a fresh history rather than let
+  undo walk back into the document that was replaced.
 - KEYS (guarded by `isEditableTarget`, and off while a dialog is open):
   space = play/pause, left/right = one beat, cmd+arrow = a bar,
-  ctrl+arrow = to the ends, cmd+C/V, Backspace, Escape.
+  ctrl+arrow = to the ends, cmd+C/V, cmd+Z / cmd+shift+Z, cmd +/− (zoom),
+  Backspace, Escape.
 - THE GRID IS LIVE WHILE IT PLAYS. `GridTransport.update` takes a new
   state after every edit: a new placement is spliced into the pass in
   flight and fires on its own beat (copies are remembered per pass by
@@ -2479,11 +2517,28 @@ of the page.
   runs at one master tempo, so how far a track must be stretched to sit
   on it is the useful sort. Median, not mean — one half-time clip should
   not drag its track's number down.
-- Deliberately absent for now: engine routing, undo, per-row mute.
+- ZOOM IS A CSS VARIABLE AND A FRAME. Cell width is published once as
+  `--grid-cell-w` on `.grid-lanes` and everything below measures itself
+  in beats off it (`beatsWide` -> `calc(var(--grid-cell-w) * n)`), so a
+  zoom re-lays the grid out with NO row re-rendering at all — the memo
+  holds because `cellW` is no longer a prop. The wheel is CONTINUOUS in
+  `deltaY` (a 100-unit notch is the 15 % step the buttons and cmd +/−
+  take) and coalesced into one `requestAnimationFrame`, because a step
+  per event is what made it feel clicky. Pinned by the zoom cases in
+  `GridPerf.test.tsx` (`__pageRenderCount`, `__rowRenderCount`).
+- CHROME BEATS CONTENT, in z-order and in layout: `.grid-body` carries NO
+  top padding (a sticky element sticks to the top of the scrollport's
+  PADDING box, so the padding was a strip the rows peeked through above
+  the ruler), the ruler sits at z-index 5 and the pinned gutter at 6 —
+  above the cells (2) and the level lines (3), which come after them in
+  the DOM and used to paint straight over the row titles.
+- Deliberately absent for now: engine routing, per-row mute.
 - Tests: `app/tests/Grid.test.ts` (arithmetic, levels, selection/paste,
-  the document), `GridTransport.test.ts` (clock, live edits, pause — fake
-  timers), `GridView.test.tsx` (picker order, placement, clip blocks,
-  levels, selection, files, keys).
+  beat surgery, the history, the document), `GridTransport.test.ts`
+  (clock, live edits, pause — fake timers), `GridView.test.tsx` (picker
+  order, placement, clip blocks, levels, selection across rows, the ruler
+  gesture, beat surgery, undo, files, keys), `GridPerf.test.tsx` (renders
+  per edit, per poll and per zoom).
 
 ## Manager
 

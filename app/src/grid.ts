@@ -526,6 +526,136 @@ export function deleteSelection(
   return { ...state, rows };
 }
 
+// ---------------------------------------------------------------------------
+// Beat surgery (the ruler's right-click menu)
+// ---------------------------------------------------------------------------
+
+/** Which side of a span an insert or a copy lands on. */
+export type BeatSide = 'left' | 'right';
+
+/** Where a beat ends up once `count` beats are opened at `at`. */
+function shiftedBeat(beat: number, at: number, count: number): number {
+  return beat >= at ? beat + count : beat;
+}
+
+/** OPEN `count` empty beats at column `at`: everything ANCHORED there or
+ *  later moves along by that many, and the grid grows to match. A clip
+ *  that straddles the cut stays where it is — its anchor is before the
+ *  cut, and the anchor is the musical fact a placement is held by. */
+export function insertBeats(
+  state: GridState,
+  clips: ReadonlyMap<string, BeatClipEntry>,
+  at: number,
+  count: number,
+): GridState {
+  const n = Math.max(0, Math.round(count));
+  if (n === 0) return state;
+  const rows = state.rows.map((row) => {
+    const clip = clips.get(row.clipId);
+    if (!clip) return row;
+    return {
+      ...row,
+      placements: row.placements
+        .map((start) => (anchorOf(clip, start) >= at ? start + n : start))
+        .sort((a, b) => a - b),
+      levels: row.levels.map((p) => ({ ...p, beat: shiftedBeat(p.beat, at, n) })),
+    };
+  });
+  return {
+    ...state,
+    rows,
+    tempo: {
+      ...state.tempo,
+      points: state.tempo.points.map((p) => ({ ...p, beat: shiftedBeat(p.beat, at, n) })),
+    },
+    beats: state.beats + n,
+    loop: state.loop
+      ? {
+          start: shiftedBeat(state.loop.start, at, n),
+          // A loop whose END is exactly the cut does not grow: the beats
+          // go in AFTER it, which is what "insert to the right" means.
+          end: state.loop.end > at ? state.loop.end + n : state.loop.end,
+        }
+      : null,
+  };
+}
+
+/** TAKE the columns `range` covers out of the grid: what is anchored
+ *  inside them goes, and everything after closes up over the gap. */
+export function deleteBeats(
+  state: GridState,
+  clips: ReadonlyMap<string, BeatClipEntry>,
+  range: ColumnRange,
+): GridState {
+  const n = Math.max(0, Math.round(range.end - range.start));
+  if (n === 0) return state;
+  const closed = (beat: number): number =>
+    beat < range.start ? beat : Math.max(range.start, beat - n);
+  const rows = state.rows.map((row) => {
+    const clip = clips.get(row.clipId);
+    if (!clip) return row;
+    return {
+      ...row,
+      placements: row.placements
+        .filter((start) => !inRange(range, anchorOf(clip, start)))
+        .map((start) => (anchorOf(clip, start) >= range.end ? start - n : start))
+        .sort((a, b) => a - b),
+      levels: row.levels
+        .filter((p) => !inRange(range, p.beat))
+        .map((p) => ({ ...p, beat: closed(p.beat) })),
+    };
+  });
+  const loop = state.loop;
+  return {
+    ...state,
+    rows,
+    tempo: {
+      ...state.tempo,
+      points: state.tempo.points
+        .filter((p) => !inRange(range, p.beat))
+        .map((p) => ({ ...p, beat: closed(p.beat) })),
+    },
+    beats: Math.max(1, state.beats - n),
+    // A loop the deletion swallowed whole has nothing left to mark.
+    loop:
+      !loop || (loop.start >= range.start && loop.end <= range.end)
+        ? null
+        : { start: closed(loop.start), end: Math.max(closed(loop.start) + 1, closed(loop.end)) },
+  };
+}
+
+/** DUPLICATE the columns `range` covers to one side of themselves: the
+ *  beats are opened first (so nothing is overwritten) and the copies land
+ *  in them, anchored the same distance from the new span's start as they
+ *  were from the old one's. */
+export function copyBeats(
+  state: GridState,
+  clips: ReadonlyMap<string, BeatClipEntry>,
+  range: ColumnRange,
+  side: BeatSide,
+): GridState {
+  const n = Math.max(0, Math.round(range.end - range.start));
+  if (n === 0) return state;
+  const grown = insertBeats(state, clips, side === 'left' ? range.start : range.end, n);
+  // Inserting on the LEFT pushed the material being copied along with
+  // everything else; on the right it stayed put.
+  const from: ColumnRange =
+    side === 'left' ? { start: range.start + n, end: range.end + n } : { ...range };
+  const to = side === 'left' ? range.start : range.end;
+  const rows = grown.rows.map((row) => {
+    const clip = clips.get(row.clipId);
+    if (!clip) return row;
+    const anchors = row.placements
+      .map((start) => anchorOf(clip, start))
+      .filter((anchor) => inRange(from, anchor));
+    return anchors.reduce(
+      (next, anchor) => placeAnchored(next, clip, to + (anchor - from.start)),
+      row,
+    );
+  });
+  return { ...grown, rows };
+}
+
 /** The pieces beat->time integrates over: the envelope between 0 and
  *  `upto`, cut at every breakpoint inside it. */
 function tempoSegments(tempo: GridTempo, upto: number) {

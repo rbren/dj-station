@@ -5925,7 +5925,12 @@ body {
   align-items: flex-start;
   min-height: 0;
   overflow: auto;
-  padding: 0.6rem 0.75rem;
+  /* NO PADDING AT THE TOP. A sticky element sticks to the top of the
+     SCROLLPORT's padding box, so a top padding here left a strip above
+     the ruler that the rows scrolled up through — the tracks peeking out
+     between the ruler and the page's chrome. The ruler is flush with the
+     chrome instead, and the breathing room goes below the grid. */
+  padding: 0 0.75rem 0.6rem;
 }
 
 /* The pinned gutter: the master lane's label, the ruler's, and one block
@@ -5933,7 +5938,11 @@ body {
 .grid-gutter {
   position: sticky;
   left: 0;
-  z-index: 2;
+  /* ABOVE EVERYTHING THE TIMELINE DRAWS. The cells (z-index 2) and the
+     level lines (3) come after the gutter in the DOM, so at an equal
+     z-index they painted straight over the row titles and the grid could
+     be read through them as it scrolled past. */
+  z-index: 6;
   flex: none;
   width: 210px;
   display: flex;
@@ -5966,6 +5975,7 @@ body {
   gap: 0.4rem;
   min-width: 0;
   border-top: 1px solid var(--line-strong);
+  background: var(--canvas);
 }
 .grid-group-name {
   font-size: var(--fs-xs);
@@ -5988,6 +5998,7 @@ body {
   padding-left: 0.8rem;
   min-width: 0;
   border-bottom: 1px solid var(--line);
+  background: var(--canvas);
 }
 .grid-row-name {
   flex: 1;
@@ -6039,7 +6050,8 @@ body {
 .grid-ruler {
   position: sticky;
   top: 0;
-  z-index: 3;
+  /* Over the cells and the level lines, which come later in the DOM. */
+  z-index: 5;
   height: var(--grid-row-h);
   display: flex;
   align-items: stretch;
@@ -6051,7 +6063,7 @@ body {
 .grid-gutter-ruler {
   position: sticky;
   top: 0;
-  z-index: 4;
+  z-index: 7;
   background: var(--canvas);
   border-bottom: 1px solid var(--line-strong);
 }
@@ -6093,6 +6105,10 @@ body {
   flex: none;
   position: relative;
   z-index: 2;
+  /* ONE BEAT WIDE, in the variable the lanes publish the zoom as. Set
+     here rather than per cell so that zooming re-lays the grid out
+     without React touching a single row. */
+  width: var(--grid-cell-w, 22px);
   height: 100%;
   padding: 0;
   box-sizing: border-box;
@@ -6165,11 +6181,23 @@ body {
 .grid-cell[data-downbeat='true'][data-kind='empty'] {
   background: color-mix(in srgb, var(--loop) 10%, transparent);
 }
-.grid-cell[data-loop='true'][data-kind='empty'] {
-  background: color-mix(in srgb, var(--loop) 12%, transparent);
+/* THE LOOP, on the grid, is TWO LINES. Washing every looped column in
+   purple tinted most of an arrangement and made the clips under it hard
+   to read; the ruler keeps its highlight (that is the loop's own strip)
+   and down here only the first and last columns are marked — with the
+   same bright purple the ruler's handles are drawn in. */
+.grid-cell[data-loop-edge='start'],
+.grid-cell[data-loop-edge='both'] {
+  border-left-color: var(--loop);
+  box-shadow: inset 1px 0 0 0 var(--loop);
 }
-.grid-cell[data-loop='true'][data-downbeat='true'][data-kind='empty'] {
-  background: color-mix(in srgb, var(--loop) 22%, transparent);
+.grid-cell[data-loop-edge='end'] {
+  box-shadow: inset -2px 0 0 0 var(--loop);
+}
+.grid-cell[data-loop-edge='both'] {
+  box-shadow:
+    inset 1px 0 0 0 var(--loop),
+    inset -2px 0 0 0 var(--loop);
 }
 .grid-cell[data-selected='true'] {
   background: color-mix(in srgb, var(--accent, var(--ok)) 25%, transparent);
@@ -6198,17 +6226,18 @@ body {
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
-.grid-level[data-written='true'] .grid-level-svg polyline {
-  stroke: var(--ok);
-  stroke-width: 1.5;
-}
+/* A WRITTEN LINE IS DRAWN LIKE A RESTING ONE — deliberately NO override
+   here. In the accent, at half a pixel more, it shouted over the clips it
+   belongs to; the automation is a line through a row of music, not the
+   loudest thing in the row. Only its handles are picked out, and only
+   enough to be found and grabbed. */
 .grid-level-point {
   position: absolute;
-  width: 7px;
-  height: 7px;
-  margin: -4px 0 0 -4px;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
   border-radius: 50%;
-  background: var(--ok);
+  background: color-mix(in srgb, var(--ink) 55%, transparent);
   box-shadow: 0 0 0 1px var(--canvas);
 }
 .grid-playhead {

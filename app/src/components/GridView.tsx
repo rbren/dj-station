@@ -22,10 +22,28 @@
 //
 // PLAYBACK is the webview's, not the engine's (`GridTransport`), and the
 // grid stays LIVE while it sounds: placing a clip mid-play is heard on
-// its next beat. Dragging across the ruler marks a loop; dragging across
-// the cells marks a selection, which copies and pastes at the playhead.
+// its next beat. Dragging across the ruler marks a loop and CLICKING it
+// puts the playhead there; dragging across the cells marks a selection of
+// any n x m rectangle, which copies and pastes at the playhead. Both
+// drags belong to the WINDOW, so a pointer that wanders off the strip or
+// off the row it started on keeps the gesture it began.
+//
+// Right-clicking the ruler with a loop marked opens the beat surgery the
+// loop's span defines (insert / copy / delete N beats), and every edit on
+// the page — placement, level, tempo, loop, surgery, the header's fields
+// — goes through one recorded setter, so cmd+Z takes back whatever it was
+// (`gridHistory`).
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+} from 'react';
 import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '../beatClip';
 import { MAX_BPM, MIN_BPM } from '../decks';
 import { fixed } from '../format';
@@ -35,13 +53,16 @@ import {
   cellKind,
   clampBpm,
   clearRow,
+  copyBeats,
   copySelection,
+  deleteBeats,
   deleteSelection,
   emptyGrid,
   fromDocument,
   gridColumns,
   groupRows,
   inRange,
+  insertBeats,
   isEmptyGrid,
   leadOne,
   loopFromDrag,
@@ -71,8 +92,18 @@ import {
   type GridSelection,
   type GridState,
 } from '../grid';
+import {
+  canRedo,
+  canUndo,
+  endGesture,
+  initHistory,
+  record,
+  redo as redoHistory,
+  undo as undoHistory,
+} from '../gridHistory';
 import { GridTransport } from '../gridTransport';
 import { AutomationLane, type LanePoint } from './AutomationLane';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { GridClipPicker } from './GridClipPicker';
 
 /** Column width in px at 1×. The grid zooms about this. */
@@ -84,11 +115,19 @@ export const GRID_LANE_H = 96;
  *  against a beat without squinting. */
 export const MIN_ZOOM = 0.25;
 export const MAX_ZOOM = 4;
+/** A notch of the wheel — 100 units of `deltaY` — is this much zoom. The
+ *  buttons and the keys step by exactly one notch. */
 const ZOOM_STEP = 1.15;
+export const ZOOM_NOTCH = 100;
+/** Zoom is CONTINUOUS in the wheel's delta, not one step per event: a
+ *  trackpad sends a stream of small deltas and stepping each of them made
+ *  the zoom lurch a notch at a time. The rate is set so a full notch
+ *  still lands on `ZOOM_STEP`, which is what the buttons and keys use. */
+const ZOOM_RATE = Math.log(ZOOM_STEP) / ZOOM_NOTCH;
 
-/** One notch of the wheel, as a zoom factor. */
+/** Zoom moved by `deltaY` of wheel (negative zooms in). */
 export function zoomBy(zoom: number, deltaY: number): number {
-  const next = deltaY < 0 ? zoom * ZOOM_STEP : zoom / ZOOM_STEP;
+  const next = zoom * Math.exp(-deltaY * ZOOM_RATE);
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
 }
 
@@ -96,11 +135,37 @@ export function zoomBy(zoom: number, deltaY: number): number {
  *  renders: a fresh `[]` would be a new prop and would defeat the memo. */
 const EMPTY_PEAKS: readonly number[] = [];
 
+/** The CSS custom property one beat's width is published as.
+ *
+ *  ZOOM IS A CSS VARIABLE, not a prop. Everything laid out on the grid
+ *  measures itself in beats through `beatsWide`, so a zoom changes ONE
+ *  declaration on the lanes container and the browser re-lays the whole
+ *  grid out itself — no row re-renders, which is what turned zooming from
+ *  a stutter into a smooth thing at fifty rows. */
+export const CELL_W_VAR = '--grid-cell-w';
+
+/** `n` beats, as a CSS length that follows the zoom. */
+export function beatsWide(n: number): string {
+  return `calc(var(${CELL_W_VAR}) * ${n})`;
+}
+
 /** How close to an edge counts as GRABBING it, in beats. A fixed pixel
  *  target would be most of a bar when zoomed out and invisible when
  *  zoomed in, so it is measured in beats and widened as they narrow. */
 export function grabBeats(zoom: number): number {
   return Math.max(1, Math.round(0.5 / zoom));
+}
+
+/** Which of the loop's two edges a cell carries: the loop's first column
+ *  owns its LEFT border, its last column owns its RIGHT one, and a
+ *  one-beat loop owns both. */
+export function loopEdge(loop: ColumnRange | null, col: number): 'start' | 'end' | 'both' | 'none' {
+  if (!loop) return 'none';
+  const start = col === loop.start;
+  const end = col === loop.end - 1;
+  if (start && end) return 'both';
+  if (start) return 'start';
+  return end ? 'end' : 'none';
 }
 
 /** Which edge of the loop, if either, a press at `col` takes hold of.
@@ -186,7 +251,23 @@ type Dialog =
 export function GridView(props: GridViewProps) {
   const clipApi = props.clips ?? defaultClips;
   const active = props.active ?? true;
-  const [grid, setGrid] = useState<GridState>(() => emptyGrid());
+  // THE GRID IS A HISTORY, not a state: every edit below goes through
+  // `setGrid`, which records it, so undo/redo covers the page rather than
+  // a list of operations someone remembered to wire up.
+  const [history, setHistory] = useState(() => initHistory(emptyGrid()));
+  const grid = history.present;
+  /** Edit the grid. `gesture` names a continuous one (a drag, a field
+   *  being typed into): consecutive edits under the same name are ONE
+   *  undo step until `endEdit` closes it. */
+  const setGrid = useCallback(
+    (update: GridState | ((prev: GridState) => GridState), gesture?: string) => {
+      setHistory((h) =>
+        record(h, typeof update === 'function' ? update(h.present) : update, gesture ?? null),
+      );
+    },
+    [],
+  );
+  const endEdit = useCallback(() => setHistory(endGesture), []);
   const [clips, setClips] = useState<BeatClipEntry[]>([]);
   const [peaks, setPeaks] = useState<Record<string, readonly number[]>>({});
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -205,10 +286,17 @@ export function GridView(props: GridViewProps) {
     [props.transport, clipApi],
   );
   /** The loop drag in flight: the edge held STILL, and whether the
-   *  pointer has moved since the press. */
-  const loopDrag = useRef<{ anchor: number; moved: boolean } | null>(null);
+   *  pointer has moved off the column it was pressed on. */
+  const loopDrag = useRef<{ anchor: number; from: number; moved: boolean } | null>(null);
   const cellDrag = useRef<{ rowId: string; col: number } | null>(null);
   const levelDrag = useRef<{ rowId: string; beat: number } | null>(null);
+  const ruler = useRef<HTMLDivElement | null>(null);
+  /** The ruler's right-click menu, while it is open. */
+  const [rulerMenu, setRulerMenu] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    __pageRenderCount.bump();
+  });
 
   useEffect(() => () => transport.dispose(), [transport]);
 
@@ -249,6 +337,60 @@ export function GridView(props: GridViewProps) {
     if (!hold || !box) return;
     box.scrollLeft = Math.max(0, hold.beat * cellW - hold.x);
   }, [cellW]);
+
+  // ZOOMING IS COALESCED TO A FRAME. A trackpad fires wheel events far
+  // faster than the screen refreshes, and a React state update per event
+  // is what made the zoom feel clicky: the deltas are added up in a ref
+  // and applied ONCE per animation frame, so a flick of the wheel costs
+  // one re-layout instead of thirty.
+  const wheelDelta = useRef(0);
+  const wheelAnchor = useRef<{ beat: number; x: number } | null>(null);
+  const zoomFrame = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (zoomFrame.current !== null) cancelAnimationFrame(zoomFrame.current);
+    },
+    [],
+  );
+
+  /** Zoom, holding `anchor` (a beat and the x it sits at inside the
+   *  scroller) still under the pointer. */
+  const applyZoom = useCallback((delta: number, anchor: { beat: number; x: number } | null) => {
+    keepBeat.current = anchor;
+    setZoom((z) => zoomBy(z, delta));
+  }, []);
+
+  const zoomStep = useCallback(
+    (dir: -1 | 1) => {
+      // Keyboard and buttons hold the LEFT EDGE of the view still: there
+      // is no pointer to zoom about.
+      applyZoom(-dir * ZOOM_NOTCH, { beat: scrollLeft() / cellW, x: 0 });
+    },
+    [applyZoom, cellW, scrollLeft],
+  );
+
+  const onRulerWheel = useCallback(
+    (e: { deltaY: number; clientX: number; preventDefault(): void }) => {
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      wheelDelta.current += e.deltaY;
+      if (wheelAnchor.current === null) {
+        const rect = ruler.current?.getBoundingClientRect() ?? { left: 0 };
+        const x = e.clientX - rect.left;
+        wheelAnchor.current = { beat: (x + scrollLeft()) / cellW, x };
+      }
+      if (zoomFrame.current !== null) return;
+      zoomFrame.current = requestAnimationFrame(() => {
+        zoomFrame.current = null;
+        const delta = wheelDelta.current;
+        const anchor = wheelAnchor.current;
+        wheelDelta.current = 0;
+        wheelAnchor.current = null;
+        applyZoom(delta, anchor);
+      });
+    },
+    [applyZoom, cellW, scrollLeft],
+  );
 
   // Waveforms for whatever the grid holds. Peaks are a drawing, so they
   // are fetched once per clip and kept: re-placing a clip redraws from
@@ -305,10 +447,13 @@ export function GridView(props: GridViewProps) {
 
   const dirty = saved !== JSON.stringify(toDocument(grid));
 
-  const addClips = useCallback((picked: BeatClipEntry[]) => {
-    setDialog(null);
-    setGrid((prev) => picked.reduce((state, clip) => addRow(state, clip), prev));
-  }, []);
+  const addClips = useCallback(
+    (picked: BeatClipEntry[]) => {
+      setDialog(null);
+      setGrid((prev) => picked.reduce((state, clip) => addRow(state, clip), prev));
+    },
+    [setGrid],
+  );
 
   const clickCell = useCallback(
     (rowId: string, col: number) => {
@@ -321,7 +466,7 @@ export function GridView(props: GridViewProps) {
         }),
       }));
     },
-    [byId],
+    [byId, setGrid],
   );
 
   // The row's handlers. They are held HERE, and stable, because each one
@@ -332,11 +477,14 @@ export function GridView(props: GridViewProps) {
   // Written in an effect, not in the render body: a render React
   // discards must not leave these pointing at state that never landed.
   const selectionRef = useRef<GridSelection | null>(null);
-  const rowsRef = useRef<GridRow[]>(grid.rows);
+  /** The rows in the order they are DRAWN in (grouped by track), which is
+   *  the order a drag down the page crosses them in. */
+  const orderedRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
+  const rowsRef = useRef<GridRow[]>(orderedRows);
   useEffect(() => {
     selectionRef.current = selection;
-    rowsRef.current = grid.rows;
-  }, [selection, grid.rows]);
+    rowsRef.current = orderedRows;
+  }, [selection, orderedRows]);
 
   const onCellDown = useCallback((_e: MouseEvent<HTMLElement>, rowId: string, col: number) => {
     cellDrag.current = { rowId, col };
@@ -352,6 +500,21 @@ export function GridView(props: GridViewProps) {
   const onCellUp = useCallback(() => {
     cellDrag.current = null;
   }, []);
+
+  // A DRAG ENDS WHEREVER IT IS LET GO. The rows only see a mouse-up that
+  // happens over them, so a selection dragged off the bottom of the grid
+  // (or off the window) used to stay live and keep growing on the next
+  // pass of the mouse. The window is where a gesture really ends, and it
+  // is also where an undo step is closed.
+  useEffect(() => {
+    const up = () => {
+      cellDrag.current = null;
+      levelDrag.current = null;
+      endEdit();
+    };
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, [endEdit]);
 
   // PLACING stays on click, which fires only when press and release
   // share a cell. A drag that crossed cells has made a selection by now,
@@ -369,47 +532,71 @@ export function GridView(props: GridViewProps) {
     zoomRef.current = zoom;
   }, [zoom]);
 
-  const onLevelDown = useCallback((e: MouseEvent<HTMLElement>, rowId: string) => {
-    e.preventDefault();
-    const { beat, level } = levelFromPointer(
-      e,
-      e.currentTarget.getBoundingClientRect(),
-      zoomRef.current,
-    );
-    levelDrag.current = { rowId, beat };
-    setGrid((prev) => ({
-      ...prev,
-      rows: prev.rows.map((r) => (r.id === rowId ? setLevelPoint(r, beat, level) : r)),
-    }));
-  }, []);
+  const onLevelDown = useCallback(
+    (e: MouseEvent<HTMLElement>, rowId: string) => {
+      e.preventDefault();
+      const { beat, level } = levelFromPointer(
+        e,
+        e.currentTarget.getBoundingClientRect(),
+        zoomRef.current,
+      );
+      levelDrag.current = { rowId, beat };
+      // One drag of a level point is ONE undo step, from the press to the
+      // release: the gesture is named here and closed on mouse-up.
+      setGrid(
+        (prev) => ({
+          ...prev,
+          rows: prev.rows.map((r) => (r.id === rowId ? setLevelPoint(r, beat, level) : r)),
+        }),
+        `level:${rowId}`,
+      );
+    },
+    [setGrid],
+  );
 
-  const onLevelMove = useCallback((e: MouseEvent<HTMLElement>, rowId: string) => {
-    const drag = levelDrag.current;
-    if (!drag || drag.rowId !== rowId) return;
-    const { beat, level } = levelFromPointer(
-      e,
-      e.currentTarget.getBoundingClientRect(),
-      zoomRef.current,
-    );
-    levelDrag.current = { rowId, beat };
-    setGrid((prev) => ({
-      ...prev,
-      rows: prev.rows.map((r) => (r.id === rowId ? moveLevelPoint(r, drag.beat, beat, level) : r)),
-    }));
-  }, []);
+  const onLevelMove = useCallback(
+    (e: MouseEvent<HTMLElement>, rowId: string) => {
+      const drag = levelDrag.current;
+      if (!drag || drag.rowId !== rowId) return;
+      const { beat, level } = levelFromPointer(
+        e,
+        e.currentTarget.getBoundingClientRect(),
+        zoomRef.current,
+      );
+      levelDrag.current = { rowId, beat };
+      setGrid(
+        (prev) => ({
+          ...prev,
+          rows: prev.rows.map((r) =>
+            r.id === rowId ? moveLevelPoint(r, drag.beat, beat, level) : r,
+          ),
+        }),
+        `level:${rowId}`,
+      );
+    },
+    [setGrid],
+  );
 
   const onLevelUp = useCallback(() => {
     levelDrag.current = null;
-  }, []);
+    endEdit();
+  }, [endEdit]);
 
-  const onLevelClear = useCallback((e: MouseEvent<HTMLElement>, rowId: string) => {
-    e.preventDefault();
-    const { beat } = levelFromPointer(e, e.currentTarget.getBoundingClientRect(), zoomRef.current);
-    setGrid((prev) => ({
-      ...prev,
-      rows: prev.rows.map((r) => (r.id === rowId ? removeLevelPoint(r, beat) : r)),
-    }));
-  }, []);
+  const onLevelClear = useCallback(
+    (e: MouseEvent<HTMLElement>, rowId: string) => {
+      e.preventDefault();
+      const { beat } = levelFromPointer(
+        e,
+        e.currentTarget.getBoundingClientRect(),
+        zoomRef.current,
+      );
+      setGrid((prev) => ({
+        ...prev,
+        rows: prev.rows.map((r) => (r.id === rowId ? removeLevelPoint(r, beat) : r)),
+      }));
+    },
+    [setGrid],
+  );
 
   const play = useCallback(
     (from?: number) => {
@@ -471,7 +658,7 @@ export function GridView(props: GridViewProps) {
     if (!board) return;
     setGrid((prev) => pasteAt(prev, byId, board, Math.round(playhead.column)));
     setSelection(null);
-  }, [board, byId, playhead.column]);
+  }, [board, byId, playhead.column, setGrid]);
 
   // File actions. New/Open go behind a warning when there is work to
   // lose; Save falls through to Save As until the grid has a name.
@@ -498,7 +685,9 @@ export function GridView(props: GridViewProps) {
   const doNew = useCallback(() => {
     guard('Start a new grid', () => {
       transport.stop();
-      setGrid(emptyGrid());
+      // A NEW DOCUMENT IS A NEW HISTORY: undo must not walk back into the
+      // arrangement that was replaced.
+      setHistory(initHistory(emptyGrid()));
       setName('untitled');
       setSaved(null);
       setSelection(null);
@@ -520,7 +709,7 @@ export function GridView(props: GridViewProps) {
       try {
         const state = fromDocument(JSON.parse(raw));
         transport.stop();
-        setGrid(state);
+        setHistory(initHistory(state));
         setName(which);
         setSaved(JSON.stringify(toDocument(state)));
         setSelection(null);
@@ -533,6 +722,111 @@ export function GridView(props: GridViewProps) {
     },
     [clipApi, transport],
   );
+
+  /** The column a page-x sits on in the RULER, whatever the pointer is
+   *  over now: a loop drag is measured against the ruler even after the
+   *  pointer has left it. */
+  const rulerCol = useCallback(
+    (clientX: number) => colAt(clientX, ruler.current?.getBoundingClientRect() ?? { left: 0 }),
+    [colAt],
+  );
+
+  const onRulerDown = useCallback(
+    (e: MouseEvent<HTMLElement>) => {
+      if (e.button !== 0) return;
+      const col = rulerCol(e.clientX);
+      // A press on a loop EDGE takes hold of that edge and leaves the
+      // other one where it is, so a loop can be stretched a beat at a
+      // time instead of being redrawn from scratch every time it is not
+      // quite right.
+      const edge = loopEdgeAt(grid.loop, col, grabBeats(zoom));
+      if (edge && grid.loop) {
+        const anchor = edge === 'start' ? grid.loop.end - 1 : grid.loop.start;
+        loopDrag.current = { anchor, from: col, moved: true };
+        setGrid((prev) => ({ ...prev, loop: loopFromDrag(anchor, col) }), 'loop');
+        return;
+      }
+      // A PRESS ALONE MARKS NOTHING. The loop is drawn once the drag has
+      // reached another column; a press and release on one column is a
+      // CLICK, and a click on the ruler puts the playback there.
+      loopDrag.current = { anchor: col, from: col, moved: false };
+    },
+    [grid.loop, rulerCol, setGrid, zoom],
+  );
+
+  // THE LOOP DRAG BELONGS TO THE WINDOW, not to the ruler. Hung off the
+  // ruler's own move/leave handlers, it ended the moment the pointer
+  // strayed a few pixels up or down out of a 26 px strip — which is most
+  // of the way through any real drag.
+  useEffect(() => {
+    const move = (e: globalThis.MouseEvent) => {
+      const drag = loopDrag.current;
+      if (!drag) return;
+      const col = rulerCol(e.clientX);
+      if (col !== drag.from) drag.moved = true;
+      if (!drag.moved) return;
+      setGrid((prev) => ({ ...prev, loop: loopFromDrag(drag.anchor, col) }), 'loop');
+    };
+    const up = (e: globalThis.MouseEvent) => {
+      const drag = loopDrag.current;
+      if (!drag) return;
+      loopDrag.current = null;
+      endEdit();
+      if (!drag.moved) seekTo(rulerCol(e.clientX));
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, [endEdit, rulerCol, seekTo, setGrid]);
+
+  // BEAT SURGERY on the loop's span, from the ruler's right-click menu:
+  // what N is, is the loop — the columns the user has already marked.
+  const beatMenu: ContextMenuItem[] = useMemo(() => {
+    const loop = grid.loop;
+    if (!loop) return [];
+    const n = Math.max(1, loop.end - loop.start);
+    const beats = `${n} ${n === 1 ? 'beat' : 'beats'}`;
+    return [
+      {
+        label: `Insert ${beats} left`,
+        testId: 'grid-beats-insert-left',
+        onSelect: () => setGrid((prev) => insertBeats(prev, byId, loop.start, n)),
+      },
+      {
+        label: `Insert ${beats} right`,
+        testId: 'grid-beats-insert-right',
+        onSelect: () => setGrid((prev) => insertBeats(prev, byId, loop.end, n)),
+      },
+      {
+        label: `Copy ${beats} left`,
+        testId: 'grid-beats-copy-left',
+        onSelect: () => setGrid((prev) => copyBeats(prev, byId, loop, 'left')),
+      },
+      {
+        label: `Copy ${beats} right`,
+        testId: 'grid-beats-copy-right',
+        onSelect: () => setGrid((prev) => copyBeats(prev, byId, loop, 'right')),
+      },
+      {
+        label: `Delete ${beats}`,
+        testId: 'grid-beats-delete',
+        onSelect: () => setGrid((prev) => deleteBeats(prev, byId, loop)),
+      },
+    ];
+  }, [byId, grid.loop, setGrid]);
+
+  const undo = useCallback(() => {
+    setHistory(undoHistory);
+    setSelection(null);
+  }, []);
+
+  const redo = useCallback(() => {
+    setHistory(redoHistory);
+    setSelection(null);
+  }, []);
 
   // Keyboard: space plays, the arrows move the playhead (bare = a beat,
   // cmd = a bar, ctrl = to the ends), cmd+C/V copy and paste. They stand
@@ -558,6 +852,24 @@ export function GridView(props: GridViewProps) {
       } else if (mod && key === 'v') {
         e.preventDefault();
         paste();
+      } else if (mod && key === 'z') {
+        // UNDO/REDO for everything on the page, the standard pair.
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (mod && key === 'y') {
+        e.preventDefault();
+        e.stopPropagation();
+        redo();
+      } else if (mod && (key === '=' || key === '+')) {
+        // cmd/ctrl +/− zoom, the way every timeline does. `=` is the
+        // unshifted key `+` lives on, and both arrive here.
+        e.preventDefault();
+        zoomStep(1);
+      } else if (mod && (key === '-' || key === '_')) {
+        e.preventDefault();
+        zoomStep(-1);
       } else if (mod && key === 's') {
         // FILE SHORTCUTS, now that the buttons are gone. They are caught
         // here rather than through `useFileShortcuts` because that hook
@@ -602,6 +914,10 @@ export function GridView(props: GridViewProps) {
     doSave,
     doOpen,
     doNew,
+    undo,
+    redo,
+    zoomStep,
+    setGrid,
   ]);
 
   const tempoPoints: LanePoint[] = useMemo(
@@ -660,6 +976,30 @@ export function GridView(props: GridViewProps) {
                 }}
               >
                 Open… <span className="grid-file-key mono">{MOD}O</span>
+              </button>
+              <button
+                className="grid-file-item"
+                data-testid="grid-undo"
+                role="menuitem"
+                disabled={!canUndo(history)}
+                onClick={() => {
+                  setFileMenu(false);
+                  undo();
+                }}
+              >
+                Undo <span className="grid-file-key mono">{MOD}Z</span>
+              </button>
+              <button
+                className="grid-file-item"
+                data-testid="grid-redo"
+                role="menuitem"
+                disabled={!canRedo(history)}
+                onClick={() => {
+                  setFileMenu(false);
+                  redo();
+                }}
+              >
+                Redo <span className="grid-file-key mono">{MOD}⇧Z</span>
               </button>
               <button
                 className="grid-file-item"
@@ -759,10 +1099,14 @@ export function GridView(props: GridViewProps) {
             max={MAX_BPM}
             step={0.5}
             value={Number(grid.tempo.bpm.toFixed(2))}
+            onBlur={endEdit}
             onChange={(e) => {
               const next = Number(e.target.value);
               if (Number.isFinite(next))
-                setGrid((prev) => ({ ...prev, tempo: { ...prev.tempo, bpm: clampBpm(next) } }));
+                setGrid(
+                  (prev) => ({ ...prev, tempo: { ...prev.tempo, bpm: clampBpm(next) } }),
+                  'bpm',
+                );
             }}
           />
           <label className="decks-tempo-label" htmlFor="grid-bar-beats">
@@ -778,9 +1122,11 @@ export function GridView(props: GridViewProps) {
             step={1}
             value={grid.barBeats}
             title="Beats to a bar: what the ruler counts and what cmd+arrow steps by"
+            onBlur={endEdit}
             onChange={(e) => {
               const next = Number(e.target.value);
-              if (Number.isFinite(next)) setGrid((prev) => ({ ...prev, barBeats: clampBar(next) }));
+              if (Number.isFinite(next))
+                setGrid((prev) => ({ ...prev, barBeats: clampBar(next) }), 'bar');
             }}
           />
         </div>
@@ -789,9 +1135,9 @@ export function GridView(props: GridViewProps) {
             className="decks-btn"
             data-testid="grid-zoom-out"
             aria-label="Zoom out"
-            title="Zoom out (or scroll over the ruler)"
+            title={`Zoom out (${MOD}−, or scroll over the ruler)`}
             disabled={zoom <= MIN_ZOOM}
-            onClick={() => setZoom((z) => zoomBy(z, 1))}
+            onClick={() => zoomStep(-1)}
           >
             −
           </button>
@@ -802,9 +1148,9 @@ export function GridView(props: GridViewProps) {
             className="decks-btn"
             data-testid="grid-zoom-in"
             aria-label="Zoom in"
-            title="Zoom in (or scroll over the ruler)"
+            title={`Zoom in (${MOD}+, or scroll over the ruler)`}
             disabled={zoom >= MAX_ZOOM}
-            onClick={() => setZoom((z) => zoomBy(z, -1))}
+            onClick={() => zoomStep(1)}
           >
             +
           </button>
@@ -831,10 +1177,11 @@ export function GridView(props: GridViewProps) {
             min={1}
             step={4}
             value={grid.beats}
+            onBlur={endEdit}
             onChange={(e) => {
               const next = Number(e.target.value);
               if (Number.isFinite(next))
-                setGrid((prev) => ({ ...prev, beats: Math.max(1, Math.round(next)) }));
+                setGrid((prev) => ({ ...prev, beats: Math.max(1, Math.round(next)) }), 'beats');
             }}
           />
           {columns > grid.beats && (
@@ -907,7 +1254,13 @@ export function GridView(props: GridViewProps) {
         </div>
 
         <div className="grid-scroll" data-testid="grid-scroll" ref={scroller}>
-          <div className="grid-lanes" style={{ width }}>
+          {/* ZOOM IS PUBLISHED HERE, once, as a CSS variable: everything
+              below measures itself in beats off it, so a zoom re-lays the
+              grid out without re-rendering a single row. */}
+          <div
+            className="grid-lanes"
+            style={{ width, [CELL_W_VAR]: `${cellW}px` } as CSSProperties}
+          >
             {/* MASTER TEMPO over the same columns as the grid below it. */}
             <AutomationLane
               testId="grid-tempo-lane"
@@ -923,14 +1276,21 @@ export function GridView(props: GridViewProps) {
               quantize={(v) => Math.round(v * 2) / 2}
               label={(v) => `${v}`}
               onAdd={(at, value) =>
-                setGrid((prev) => ({ ...prev, tempo: setTempoPoint(prev.tempo, at, value) }))
+                setGrid(
+                  (prev) => ({ ...prev, tempo: setTempoPoint(prev.tempo, at, value) }),
+                  'tempo',
+                )
               }
               onMove={(fromAt, at, value) =>
-                setGrid((prev) => ({
-                  ...prev,
-                  tempo: moveTempoPoint(prev.tempo, fromAt, at, value),
-                }))
+                setGrid(
+                  (prev) => ({
+                    ...prev,
+                    tempo: moveTempoPoint(prev.tempo, fromAt, at, value),
+                  }),
+                  'tempo',
+                )
               }
+              onRelease={endEdit}
               onRemove={(at) =>
                 setGrid((prev) => ({ ...prev, tempo: removeTempoPoint(prev.tempo, at) }))
               }
@@ -941,52 +1301,16 @@ export function GridView(props: GridViewProps) {
             <div
               className="grid-ruler"
               data-testid="grid-ruler"
-              onMouseDown={(e) => {
-                const col = colAt(e.clientX, e.currentTarget.getBoundingClientRect());
-                // A press on a loop EDGE takes hold of that edge and
-                // leaves the other one where it is, so a loop can be
-                // stretched a beat at a time instead of being redrawn
-                // from scratch every time it is not quite right.
-                const edge = loopEdgeAt(grid.loop, col, grabBeats(zoom));
-                loopDrag.current = edge
-                  ? {
-                      anchor: edge === 'start' ? grid.loop!.end - 1 : grid.loop!.start,
-                      moved: true,
-                    }
-                  : { anchor: col, moved: false };
-                if (edge)
-                  setGrid((prev) => ({
-                    ...prev,
-                    loop: loopFromDrag(loopDrag.current!.anchor, col),
-                  }));
-                else setGrid((prev) => ({ ...prev, loop: loopFromDrag(col, col) }));
-              }}
-              onMouseMove={(e) => {
-                const drag = loopDrag.current;
-                if (!drag) return;
-                const col = colAt(e.clientX, e.currentTarget.getBoundingClientRect());
-                drag.moved = true;
-                setGrid((prev) => ({ ...prev, loop: loopFromDrag(drag.anchor, col) }));
-              }}
-              onMouseUp={() => {
-                loopDrag.current = null;
-              }}
-              onMouseLeave={() => {
-                loopDrag.current = null;
-              }}
+              ref={ruler}
+              onMouseDown={onRulerDown}
               // THE WHEEL ZOOMS while the pointer is over the ruler, which
               // is the one strip of the page with nothing to scroll.
-              onWheel={(e) => {
-                if (e.deltaY === 0) return;
+              onWheel={onRulerWheel}
+              // RIGHT-CLICK OPERATES ON THE LOOP: with N columns marked,
+              // this is where N beats are opened, doubled or taken out.
+              onContextMenu={(e) => {
                 e.preventDefault();
-                const rect = e.currentTarget.getBoundingClientRect();
-                const beat = (e.clientX - rect.left + scrollLeft()) / cellW;
-                const next = zoomBy(zoom, e.deltaY);
-                setZoom(next);
-                // Hold the beat under the pointer STILL, so zooming reads
-                // as the grid growing around it rather than the view
-                // jumping somewhere else.
-                keepBeat.current = { beat, x: e.clientX - rect.left };
+                if (grid.loop) setRulerMenu({ x: e.clientX, y: e.clientY });
               }}
             >
               {Array.from({ length: columns }, (_, col) => (
@@ -996,7 +1320,7 @@ export function GridView(props: GridViewProps) {
                   data-bar={col % grid.barBeats === 0 ? 'true' : 'false'}
                   data-loop={inRange(range, col) && grid.loop ? 'true' : 'false'}
                   key={col}
-                  style={{ width: cellW }}
+                  style={{ width: beatsWide(1) }}
                 >
                   {col % grid.barBeats === 0 && cellW * grid.barBeats >= 18
                     ? col / grid.barBeats + 1
@@ -1010,13 +1334,13 @@ export function GridView(props: GridViewProps) {
                     className="grid-loop-handle"
                     data-testid="grid-loop-handle-start"
                     data-edge="start"
-                    style={{ left: grid.loop.start * cellW }}
+                    style={{ left: beatsWide(grid.loop.start) }}
                   />
                   <span
                     className="grid-loop-handle"
                     data-testid="grid-loop-handle-end"
                     data-edge="end"
-                    style={{ left: grid.loop.end * cellW }}
+                    style={{ left: beatsWide(grid.loop.end) }}
                   />
                 </>
               )}
@@ -1031,7 +1355,6 @@ export function GridView(props: GridViewProps) {
                     row={row}
                     clip={byId.get(row.clipId)}
                     columns={columns}
-                    cellW={cellW}
                     barBeats={grid.barBeats}
                     peaks={peaks[row.clipId] ?? EMPTY_PEAKS}
                     loop={grid.loop ? range : null}
@@ -1076,6 +1399,15 @@ export function GridView(props: GridViewProps) {
           )}
         </div>
       </div>
+
+      {rulerMenu && (
+        <ContextMenu
+          x={rulerMenu.x}
+          y={rulerMenu.y}
+          items={beatMenu}
+          onClose={() => setRulerMenu(null)}
+        />
+      )}
 
       {dialog?.kind === 'pick' && (
         <GridClipPicker clips={clips} onPick={addClips} onClose={() => setDialog(null)} />
@@ -1204,15 +1536,7 @@ export function levelFromPointer(
  *  writes on it. Purely a drawing — the gesture that writes on it lives
  *  on the row itself, because the cells have to stay clickable and a line
  *  a pixel thick is not a hit target. */
-function LevelLine({
-  row,
-  columns,
-  cellW,
-}: {
-  row: GridState['rows'][number];
-  columns: number;
-  cellW: number;
-}) {
+function LevelLine({ row, columns }: { row: GridState['rows'][number]; columns: number }) {
   const y = (level: number) => (1 - level / MAX_LEVEL) * 100;
   const points = [...row.levels].sort((a, b) => a.beat - b.beat);
   const x = (beat: number) => (beat / Math.max(1, columns)) * 100;
@@ -1230,7 +1554,7 @@ function LevelLine({
       className="grid-level"
       data-testid={`grid-level-${row.id}`}
       data-written={points.length > 0 ? 'true' : 'false'}
-      style={{ width: columns * cellW }}
+      style={{ width: beatsWide(columns) }}
     >
       <svg
         className="grid-level-svg"
@@ -1245,7 +1569,7 @@ function LevelLine({
           className="grid-level-point"
           data-testid={`grid-level-point-${row.id}-${p.beat}`}
           key={p.beat}
-          style={{ left: p.beat * cellW, top: `${y(p.level)}%` }}
+          style={{ left: beatsWide(p.beat), top: `${y(p.level)}%` }}
         />
       ))}
     </div>
@@ -1270,11 +1594,26 @@ export const __rowRenderCount = {
   },
 };
 
+/** How many times the PAGE has drawn itself. What the zoom performance
+ *  tests count: a wheel spun through thirty events must cost one render
+ *  per frame, not one per event. */
+export const __pageRenderCount = {
+  n: 0,
+  get(): number {
+    return this.n;
+  },
+  bump(): void {
+    this.n += 1;
+  },
+  reset(): void {
+    this.n = 0;
+  },
+};
+
 interface RowCellsProps {
   row: GridRow;
   clip: BeatClipEntry | undefined;
   columns: number;
-  cellW: number;
   barBeats: number;
   peaks: readonly number[];
   /** The play range, when a loop is set — else null. */
@@ -1308,7 +1647,6 @@ const GridRowCells = memo(function GridRowCells({
   row,
   clip,
   columns,
-  cellW,
   barBeats,
   peaks,
   loop,
@@ -1360,8 +1698,11 @@ const GridRowCells = memo(function GridRowCells({
       onContextMenu={(e) => {
         if (row.levels.length > 0) onLevelClear(e, row.id);
       }}
+      // A cell drag that leaves the row is a selection GROWING onto the
+      // next row, not one ending: only the level drag (which belongs to
+      // this row's line) stops at the row's edge. The cell drag is ended
+      // by the window's mouse-up instead.
       onMouseLeave={() => {
-        onCellUp();
         onLevelUp();
       }}
       onClick={(e) => {
@@ -1379,7 +1720,7 @@ const GridRowCells = memo(function GridRowCells({
               className="grid-clip"
               data-testid={`grid-clip-${row.id}-${start}`}
               key={start}
-              style={{ left: span.start * cellW, width: (span.end - span.start) * cellW }}
+              style={{ left: beatsWide(span.start), width: beatsWide(span.end - span.start) }}
             >
               <ClipWave peaks={peaks} />
               {clip.ones.map((beat) => (
@@ -1387,14 +1728,14 @@ const GridRowCells = memo(function GridRowCells({
                   className="grid-clip-one"
                   data-lead={beat === leadOne(clip) ? 'true' : 'false'}
                   key={beat}
-                  style={{ left: beat * cellW }}
+                  style={{ left: beatsWide(beat) }}
                 />
               ))}
             </div>
           );
         })}
 
-      <LevelLine row={row} columns={columns} cellW={cellW} />
+      <LevelLine row={row} columns={columns} />
 
       {Array.from({ length: columns }, (_, col) => {
         const kind = clip ? cellKind(row, clip, col) : 'empty';
@@ -1413,13 +1754,17 @@ const GridRowCells = memo(function GridRowCells({
             data-edge={
               span ? (span.start === col ? 'start' : span.end - 1 === col ? 'end' : 'mid') : 'none'
             }
-            data-loop={loop && col >= loop.start && col < loop.end ? 'true' : 'false'}
+            // THE LOOP IS AN EDGE, not a wash. Colouring every looped
+            // column tinted half the arrangement and buried the clips
+            // under it; what actually has to be legible is where the loop
+            // BEGINS and ENDS, so those two cells carry the same bright
+            // purple the ruler's handles do and the rest is left alone.
+            data-loop-edge={loopEdge(loop, col)}
             data-selected={
               selection && col >= selection.start && col < selection.end ? 'true' : 'false'
             }
             aria-label={`Row ${row.id}, beat ${col + 1}`}
             key={col}
-            style={{ width: cellW }}
           />
         );
       })}

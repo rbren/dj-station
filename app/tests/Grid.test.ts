@@ -10,7 +10,9 @@ import {
   bpmAt,
   cellKind,
   clearRow,
+  copyBeats,
   copySelection,
+  deleteBeats,
   deleteSelection,
   emptyGrid,
   fromDocument,
@@ -24,6 +26,7 @@ import {
   toDocument,
   gridColumns,
   groupRows,
+  insertBeats,
   leadOne,
   loopFromDrag,
   moveTempoPoint,
@@ -38,6 +41,7 @@ import {
   type GridRow,
   type GridState,
 } from '../src/grid';
+import { canRedo, canUndo, endGesture, initHistory, record, redo, undo } from '../src/gridHistory';
 
 function clip(over: Partial<BeatClipEntry> = {}): BeatClipEntry {
   return {
@@ -477,5 +481,140 @@ describe('the grid document', () => {
     expect(isEmptyGrid(emptyGrid())).toBe(true);
     expect(isEmptyGrid({ ...emptyGrid(), rows: [row()] })).toBe(false);
     expect(isEmptyGrid({ ...emptyGrid(), loop: { start: 0, end: 4 } })).toBe(false);
+  });
+});
+
+// BEAT SURGERY: the ruler's right-click operations on the loop's span.
+// All three are measured by a placement's ANCHOR — where the clip's one
+// landed is what says which side of a cut it is on.
+describe('inserting, copying and deleting beats', () => {
+  const clips = new Map([['c1', clip()]]);
+  const base = (over: Partial<GridState> = {}): GridState => ({
+    ...emptyGrid(),
+    rows: [row({ placements: [0, 8] })],
+    ...over,
+  });
+
+  it('opens beats at a column and moves what is anchored from there on', () => {
+    const out = insertBeats(base(), clips, 4, 2);
+    expect(out.rows[0].placements).toEqual([0, 10]);
+    // The grid grows by what was opened in it.
+    expect(out.beats).toBe(base().beats + 2);
+  });
+
+  it('carries the tempo and level automation along with the beats', () => {
+    const state = base({
+      rows: [row({ placements: [], levels: [{ beat: 8, level: 0.5 }] })],
+      tempo: { bpm: 120, points: [{ beat: 8, bpm: 140 }] },
+    });
+    const out = insertBeats(state, clips, 4, 4);
+    expect(out.rows[0].levels[0].beat).toBe(12);
+    expect(out.tempo.points[0].beat).toBe(12);
+  });
+
+  it('an insert to the RIGHT of the loop leaves the loop over its own beats', () => {
+    const out = insertBeats(base({ loop: { start: 0, end: 4 } }), clips, 4, 4);
+    expect(out.loop).toEqual({ start: 0, end: 4 });
+    // …and one to the left takes the loop with the music it marks.
+    expect(insertBeats(base({ loop: { start: 4, end: 8 } }), clips, 4, 4).loop).toEqual({
+      start: 8,
+      end: 12,
+    });
+  });
+
+  it('deletes what is anchored in a span and closes the gap behind it', () => {
+    const out = deleteBeats(base(), clips, { start: 0, end: 4 });
+    expect(out.rows[0].placements).toEqual([4]);
+    expect(out.beats).toBe(base().beats - 4);
+  });
+
+  it('a deletion that swallowed the loop leaves no loop behind', () => {
+    const out = deleteBeats(base({ loop: { start: 0, end: 4 } }), clips, { start: 0, end: 4 });
+    expect(out.loop).toBeNull();
+  });
+
+  it('copies a span to the right, leaving the original where it was', () => {
+    const out = copyBeats(
+      base({ rows: [row({ placements: [0] })] }),
+      clips,
+      {
+        start: 0,
+        end: 4,
+      },
+      'right',
+    );
+    expect(out.rows[0].placements).toEqual([0, 4]);
+  });
+
+  it('copies a span to the left, opening the beats it needs first', () => {
+    const out = copyBeats(
+      base({ rows: [row({ placements: [0] })] }),
+      clips,
+      {
+        start: 0,
+        end: 4,
+      },
+      'left',
+    );
+    // The original moved along to make room; the copy is in front of it.
+    expect(out.rows[0].placements).toEqual([0, 4]);
+    expect(out.beats).toBe(base().beats + 4);
+  });
+
+  it('leaves a grid alone when the span is empty', () => {
+    const state = base();
+    expect(insertBeats(state, clips, 4, 0)).toBe(state);
+    expect(deleteBeats(state, clips, { start: 4, end: 4 })).toBe(state);
+  });
+});
+
+// UNDO/REDO. The grid's state is one immutable value, so history is a
+// stack of them; what the module has to get right is what counts as ONE
+// step when a drag streams thirty of them.
+describe('the grid history', () => {
+  const a = emptyGrid();
+  const b = { ...a, beats: 64 };
+  const c = { ...a, beats: 96 };
+
+  it('walks back and forward through the edits', () => {
+    const h = record(record(initHistory(a), b), c);
+    expect(canUndo(h)).toBe(true);
+    expect(undo(h).present).toBe(b);
+    expect(undo(undo(h)).present).toBe(a);
+    expect(redo(undo(h)).present).toBe(c);
+  });
+
+  it('stops at the ends rather than falling off them', () => {
+    const h = initHistory(a);
+    expect(canUndo(h)).toBe(false);
+    expect(canRedo(h)).toBe(false);
+    expect(undo(h)).toBe(h);
+    expect(redo(h)).toBe(h);
+  });
+
+  it('an edit that changed nothing is not a step', () => {
+    const h = initHistory(a);
+    expect(record(h, a)).toBe(h);
+  });
+
+  it('a gesture is ONE step, however many edits it streams', () => {
+    let h = initHistory(a);
+    h = record(h, b, 'loop');
+    h = record(h, c, 'loop');
+    expect(h.present).toBe(c);
+    // One undo, back past the whole drag.
+    expect(undo(h).present).toBe(a);
+  });
+
+  it('the next gesture is its own step once the last one is closed', () => {
+    let h = record(initHistory(a), b, 'loop');
+    h = record(endGesture(h), c, 'loop');
+    expect(undo(h).present).toBe(b);
+  });
+
+  it('a fresh edit spends the redo stack', () => {
+    const h = undo(record(initHistory(a), b));
+    expect(canRedo(h)).toBe(true);
+    expect(canRedo(record(h, c))).toBe(false);
   });
 });
