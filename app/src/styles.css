@@ -5850,6 +5850,11 @@ body {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   cursor: crosshair;
+  /* A DRAG ON THE LANE IS THE LANE'S. Without this the browser starts a
+     selection of its own over the SVG and swallows the mouse-up, which
+     left a dragged breakpoint stuck to the pointer until it was clicked
+     again. */
+  user-select: none;
 }
 .automation-lane-line {
   fill: none;
@@ -5952,11 +5957,40 @@ body {
 .grid-gutter-head {
   height: 96px; /* GRID_LANE_H */
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 2px 0;
   font-size: var(--fs-nano);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-dim);
+}
+/* THE TEMPO WINDOW'S HANDLES, at the two ends of the lane they open. */
+.grid-bpm-window {
+  display: flex;
+  gap: 2px;
+}
+.grid-bpm-wider {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-dim);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+  font-size: var(--fs-xs);
+  transition: color var(--dur-fast) var(--ease);
+}
+.grid-bpm-wider:hover:not(:disabled) {
+  color: var(--ink);
+}
+.grid-bpm-wider:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.grid-gutter-head-label {
+  font-family: var(--font-mono);
 }
 .grid-gutter-ruler {
   height: var(--grid-row-h);

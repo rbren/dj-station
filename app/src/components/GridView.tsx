@@ -58,6 +58,7 @@ import {
   deleteBeats,
   deleteSelection,
   emptyGrid,
+  fillSelection,
   fromDocument,
   gridColumns,
   groupRows,
@@ -67,6 +68,7 @@ import {
   leadOne,
   loopFromDrag,
   moveLevelPoint,
+  moveSelection,
   moveTempoPoint,
   pasteAt,
   placeClip,
@@ -242,11 +244,47 @@ const POLL_MS = 60;
 /** Peaks fetched per clip — enough to see the shape of a bar or two. */
 const PEAK_BUCKETS = 256;
 
-/** The bpm rules the tempo lane marks. */
-const BPM_TICKS = [60, 90, 120, 150, 180];
-/** What the lane's vertical axis spans — the useful part of MIN..MAX. */
-const LANE_MIN_BPM = 40;
-const LANE_MAX_BPM = 200;
+/** What the tempo lane shows without being asked: this much bpm either
+ *  side of the grid's own tempo. A lane spanning 40..200 gave a whole
+ *  96 px to 160 bpm, so the two bpm a set is really automated over were
+ *  a pixel apart and unaimable. Each `+` at the lane's ends widens that
+ *  side by the same amount again. */
+export const BPM_WINDOW = 15;
+/** The bpm a guide line is drawn every, while the window is small
+ *  enough to carry them. */
+export const BPM_GUIDE = 5;
+/** How many guides the lane will draw before the step is coarsened. */
+const MAX_GUIDES = 12;
+
+/** What the tempo lane's vertical axis spans: the window around the
+ *  grid's tempo, widened by whatever the ends have been opened to and by
+ *  any breakpoint already written outside it — a point you cannot see is
+ *  a point you cannot take back. */
+export function bpmWindow(
+  bpm: number,
+  points: readonly { bpm: number }[],
+  view: { up: number; down: number },
+): { min: number; max: number } {
+  let min = bpm - view.down;
+  let max = bpm + view.up;
+  for (const p of points) {
+    min = Math.min(min, p.bpm);
+    max = Math.max(max, p.bpm);
+  }
+  return {
+    min: Math.max(MIN_BPM, Math.floor(min)),
+    max: Math.min(MAX_BPM, Math.ceil(max)),
+  };
+}
+
+/** The rules the tempo lane marks: every 5 bpm, coarsened as the window
+ *  is opened so a wide range does not become a hatch. */
+export function bpmTicks(min: number, max: number): number[] {
+  const step = [BPM_GUIDE, 10, 20, 50].find((s) => (max - min) / s <= MAX_GUIDES) ?? 100;
+  const out: number[] = [];
+  for (let v = Math.ceil(min / step) * step; v <= max; v += step) out.push(v);
+  return out;
+}
 
 /** mm:ss.s — a duration as a musician reads a clock. */
 export function clockTime(secs: number): string {
@@ -293,7 +331,16 @@ export function GridView(props: GridViewProps) {
     },
     [],
   );
-  const endEdit = useCallback(() => setHistory(endGesture), []);
+  // A DRAG IS NOT AN EDIT UNTIL IT IS LET GO, as far as the sound is
+  // concerned. Dragging the tempo envelope or the loop re-cues the
+  // transport on every pointer move, which tore the playback apart while
+  // the pointer was still down; the page holds the transport at the
+  // state the drag began on and hands it the result once.
+  const [holdAudio, setHoldAudio] = useState(false);
+  const endEdit = useCallback(() => {
+    setHistory(endGesture);
+    setHoldAudio(false);
+  }, []);
   const [clips, setClips] = useState<BeatClipEntry[]>([]);
   const [peaks, setPeaks] = useState<Record<string, readonly number[]>>({});
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -303,6 +350,16 @@ export function GridView(props: GridViewProps) {
   const [board, setBoard] = useState<GridClipboard | null>(null);
   const [fileMenu, setFileMenu] = useState(false);
   const [zoom, setZoom] = useState(1);
+  /** How far the tempo lane has been opened past `BPM_WINDOW`, each end
+   *  on its own. Cosmetic: it is how much of the axis is on screen, not
+   *  anything the arrangement means, so it never reaches the document. */
+  const [bpmView, setBpmView] = useState({ up: BPM_WINDOW, down: BPM_WINDOW });
+  /** What is being typed into the BPM box, while it is being typed.
+   *  THE FIELD IS NOT THE VALUE until it is committed: reading every
+   *  keystroke through `clampBpm` turned a half-typed "1" of "140" into
+   *  the minimum and ate the rest. Enter and blur commit; Escape drops
+   *  the draft. */
+  const [bpmDraft, setBpmDraft] = useState<string | null>(null);
   const [playhead, setPlayhead] = useState<{ playing: boolean; column: number }>({
     playing: false,
     column: 0,
@@ -316,6 +373,17 @@ export function GridView(props: GridViewProps) {
   const loopDrag = useRef<{ anchor: number; from: number; moved: boolean } | null>(null);
   const cellDrag = useRef<{ rowId: string; col: number } | null>(null);
   const levelDrag = useRef<{ rowId: string; beat: number } | null>(null);
+  /** A selection being dragged about: where it was taken hold of, the
+   *  grid it was taken hold of ON (every move is measured from there, so
+   *  the drag is one operation and not a walk), and whether it leaves
+   *  the original behind. */
+  const moveDrag = useRef<{
+    rowId: string;
+    col: number;
+    copy: boolean;
+    base: GridState;
+    from: GridSelection;
+  } | null>(null);
   const ruler = useRef<HTMLDivElement | null>(null);
   /** The ruler's right-click menu, while it is open. */
   const [rulerMenu, setRulerMenu] = useState<{ x: number; y: number } | null>(null);
@@ -466,13 +534,23 @@ export function GridView(props: GridViewProps) {
     if (!active) transport.stop();
   }, [active, transport]);
 
-  // EVERY EDIT REACHES THE TRANSPORT. This is what makes the grid live:
-  // the transport decides for itself what a given change means (a new
-  // placement is laid down on its own beat; a tempo or loop change
-  // re-cues), so the page just tells it the truth after every edit.
+  // EVERY FINISHED EDIT REACHES THE TRANSPORT. This is what makes the
+  // grid live: the transport decides for itself what a given change
+  // means (a new placement is laid down on its own beat; a tempo or loop
+  // change re-cues), so the page just tells it the truth after every
+  // edit.
+  //
+  // NOT DURING A DRAG, though. A tempo or loop change cannot be spliced
+  // into the pass in flight, so it re-cues — and a drag makes one of
+  // those per pointer move, which is a stutter for as long as the mouse
+  // is down. The state the pointer is passing through is not a state
+  // anyone asked to hear: `holdAudio` keeps the sound on the last
+  // finished edit, and the release (which is where the undo step closes
+  // too) hands the transport the one result.
   useEffect(() => {
+    if (holdAudio) return;
     transport.update(grid, byId, columns);
-  }, [transport, grid, byId, columns]);
+  }, [transport, grid, byId, columns, holdAudio]);
 
   const dirty = saved !== JSON.stringify(toDocument(grid));
 
@@ -526,24 +604,66 @@ export function GridView(props: GridViewProps) {
    *  the order a drag down the page crosses them in. */
   const orderedRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
   const rowsRef = useRef<GridRow[]>(orderedRows);
+  const gridRef = useRef<GridState>(grid);
+  const byIdRef = useRef(byId);
   useEffect(() => {
     selectionRef.current = selection;
     rowsRef.current = orderedRows;
-  }, [selection, orderedRows]);
+    gridRef.current = grid;
+    byIdRef.current = byId;
+  }, [selection, orderedRows, grid, byId]);
 
   const onCellDown = useCallback((_e: MouseEvent<HTMLElement>, rowId: string, col: number) => {
     cellDrag.current = { rowId, col };
     setSelection(null);
   }, []);
 
-  const onCellEnter = useCallback((rowId: string, col: number) => {
-    const from = cellDrag.current;
+  // A PRESS INSIDE THE SELECTION PICKS IT UP. Marking a rectangle and
+  // then dragging it is how a phrase is moved a bar later; cmd+drag
+  // leaves the original where it was and carries a copy, the gesture
+  // every arranger already has in their hands.
+  const onSelectionDown = useCallback((e: MouseEvent<HTMLElement>, rowId: string, col: number) => {
+    const from = selectionRef.current;
     if (!from) return;
-    setSelection(selectionFromDrag(rowsRef.current, from.rowId, from.col, rowId, col));
+    e.preventDefault();
+    moveDrag.current = {
+      rowId,
+      col,
+      copy: e.metaKey || e.ctrlKey,
+      base: gridRef.current,
+      from,
+    };
+    setHoldAudio(true);
   }, []);
+
+  const onCellEnter = useCallback(
+    (rowId: string, col: number) => {
+      const move = moveDrag.current;
+      if (move) {
+        const order = rowsRef.current.map((r) => r.id);
+        const moved = moveSelection(
+          move.base,
+          byIdRef.current,
+          order,
+          move.from,
+          order.indexOf(rowId) - order.indexOf(move.rowId),
+          col - move.col,
+          move.copy,
+        );
+        setGrid(moved.state, 'move');
+        setSelection(moved.selection);
+        return;
+      }
+      const from = cellDrag.current;
+      if (!from) return;
+      setSelection(selectionFromDrag(rowsRef.current, from.rowId, from.col, rowId, col));
+    },
+    [setGrid],
+  );
 
   const onCellUp = useCallback(() => {
     cellDrag.current = null;
+    moveDrag.current = null;
   }, []);
 
   // A DRAG ENDS WHEREVER IT IS LET GO. The rows only see a mouse-up that
@@ -555,6 +675,7 @@ export function GridView(props: GridViewProps) {
     const up = () => {
       cellDrag.current = null;
       levelDrag.current = null;
+      moveDrag.current = null;
       endEdit();
     };
     window.addEventListener('mouseup', up);
@@ -813,6 +934,9 @@ export function GridView(props: GridViewProps) {
       const col = rulerCol(e.clientX);
       if (col !== drag.from) drag.moved = true;
       if (!drag.moved) return;
+      // The loop only reaches the sound once the drag is over: every
+      // column it is dragged through would otherwise re-cue the pass.
+      setHoldAudio(true);
       setGrid((prev) => ({ ...prev, loop: loopFromDrag(drag.anchor, col) }), 'loop');
     };
     const up = (e: globalThis.MouseEvent) => {
@@ -937,6 +1061,12 @@ export function GridView(props: GridViewProps) {
       } else if ((e.key === 'Backspace' || e.key === 'Delete') && selection) {
         e.preventDefault();
         setGrid((prev) => deleteSelection(prev, byId, selection));
+      } else if (e.key === 'Enter' && selection) {
+        // ENTER FILLS WHAT IS MARKED. Sixteen bars of a four-beat clip is
+        // sixteen clicks otherwise, and the rectangle already says both
+        // which rows and how far.
+        e.preventDefault();
+        setGrid((prev) => fillSelection(prev, byId, selection));
       } else if (e.key === 'Escape') {
         setSelection(null);
         setFileMenu(false);
@@ -972,6 +1102,28 @@ export function GridView(props: GridViewProps) {
     () => grid.tempo.points.map((p) => ({ at: p.beat, value: p.bpm })),
     [grid.tempo.points],
   );
+  const laneRange = useMemo(
+    () => bpmWindow(grid.tempo.bpm, grid.tempo.points, bpmView),
+    [grid.tempo.bpm, grid.tempo.points, bpmView],
+  );
+  const laneTicks = useMemo(() => bpmTicks(laneRange.min, laneRange.max), [laneRange]);
+  /** Open (or close again) one end of the tempo lane's window. */
+  const widenLane = useCallback((end: 'up' | 'down', by: number) => {
+    setBpmView((was) => ({ ...was, [end]: Math.max(BPM_WINDOW, was[end] + by) }));
+  }, []);
+
+  /** Take what is in the BPM box as the tempo. Called on Enter and on
+   *  blur — never per keystroke, which is what made a "1" on the way to
+   *  "140" snap to the minimum. */
+  const commitBpm = useCallback(() => {
+    const draft = bpmDraft;
+    setBpmDraft(null);
+    endEdit();
+    if (draft === null) return;
+    const next = Number(draft);
+    if (draft.trim() === '' || !Number.isFinite(next)) return;
+    setGrid((prev) => ({ ...prev, tempo: { ...prev.tempo, bpm: clampBpm(next) } }), 'bpm');
+  }, [bpmDraft, endEdit, setGrid]);
 
   // A page that is not looking is not playing, whatever the last poll
   // said — the effect above has already stopped the transport.
@@ -1146,15 +1298,15 @@ export function GridView(props: GridViewProps) {
             min={MIN_BPM}
             max={MAX_BPM}
             step={0.5}
-            value={Number(grid.tempo.bpm.toFixed(2))}
-            onBlur={endEdit}
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              if (Number.isFinite(next))
-                setGrid(
-                  (prev) => ({ ...prev, tempo: { ...prev.tempo, bpm: clampBpm(next) } }),
-                  'bpm',
-                );
+            value={bpmDraft ?? String(Number(grid.tempo.bpm.toFixed(2)))}
+            title="The tempo the grid runs at — Enter or click away to set it"
+            onBlur={commitBpm}
+            onChange={(e) => setBpmDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitBpm();
+              // Escape puts the box back to the tempo in force, the way
+              // out of a half-typed number.
+              else if (e.key === 'Escape') setBpmDraft(null);
             }}
           />
           <label className="decks-tempo-label" htmlFor="grid-bar-beats">
@@ -1245,7 +1397,57 @@ export function GridView(props: GridViewProps) {
           this is the only element whose `scrollLeft` means anything. */}
       <div className="grid-body" data-testid="grid-body" ref={scroller}>
         <div className="grid-gutter">
-          <div className="grid-gutter-head">master</div>
+          {/* THE TEMPO LANE'S WINDOW, opened from its two ends. The lane
+              shows ±15 bpm around the grid's tempo, which is where a set
+              is actually automated; the + at each end asks for another
+              15 in that direction, and the − gives it back. */}
+          <div className="grid-gutter-head">
+            <div className="grid-bpm-window">
+              <button
+                className="grid-bpm-wider"
+                data-testid="grid-bpm-up-more"
+                title={`Show ${BPM_WINDOW} bpm more above`}
+                aria-label="Show a higher tempo range"
+                onClick={() => widenLane('up', BPM_WINDOW)}
+              >
+                +
+              </button>
+              <button
+                className="grid-bpm-wider"
+                data-testid="grid-bpm-up-less"
+                title={`Show ${BPM_WINDOW} bpm less above`}
+                aria-label="Show a smaller tempo range above"
+                disabled={bpmView.up <= BPM_WINDOW}
+                onClick={() => widenLane('up', -BPM_WINDOW)}
+              >
+                −
+              </button>
+            </div>
+            <span className="grid-gutter-head-label" data-testid="grid-bpm-range">
+              master {laneRange.min}–{laneRange.max}
+            </span>
+            <div className="grid-bpm-window">
+              <button
+                className="grid-bpm-wider"
+                data-testid="grid-bpm-down-more"
+                title={`Show ${BPM_WINDOW} bpm more below`}
+                aria-label="Show a lower tempo range"
+                onClick={() => widenLane('down', BPM_WINDOW)}
+              >
+                +
+              </button>
+              <button
+                className="grid-bpm-wider"
+                data-testid="grid-bpm-down-less"
+                title={`Show ${BPM_WINDOW} bpm less below`}
+                aria-label="Show a smaller tempo range below"
+                disabled={bpmView.down <= BPM_WINDOW}
+                onClick={() => widenLane('down', -BPM_WINDOW)}
+              >
+                −
+              </button>
+            </div>
+          </div>
           <div className="grid-gutter-ruler">bar</div>
           {groups.map((group) => (
             <div className="grid-group-titles" key={group.key}>
@@ -1331,28 +1533,34 @@ export function GridView(props: GridViewProps) {
               width={width}
               height={GRID_LANE_H}
               domain={columns}
-              min={LANE_MIN_BPM}
-              max={LANE_MAX_BPM}
+              min={laneRange.min}
+              max={laneRange.max}
               base={grid.tempo.bpm}
               points={tempoPoints}
-              ticks={BPM_TICKS}
+              ticks={laneTicks}
               quantize={(v) => Math.round(v * 2) / 2}
               label={(v) => `${v}`}
-              onAdd={(at, value) =>
+              onAdd={(at, value) => {
+                setHoldAudio(true);
                 setGrid(
                   (prev) => ({ ...prev, tempo: setTempoPoint(prev.tempo, at, value) }),
                   'tempo',
-                )
-              }
-              onMove={(fromAt, at, value) =>
+                );
+              }}
+              onMove={(fromAt, at, value) => {
+                // The envelope reaches the transport on release, not
+                // under the pointer: a tempo change re-cues, and one per
+                // pointer move is what made a drag during playback
+                // unlistenable.
+                setHoldAudio(true);
                 setGrid(
                   (prev) => ({
                     ...prev,
                     tempo: moveTempoPoint(prev.tempo, fromAt, at, value),
                   }),
                   'tempo',
-                )
-              }
+                );
+              }}
               onRelease={endEdit}
               onRemove={(at) =>
                 setGrid((prev) => ({ ...prev, tempo: removeTempoPoint(prev.tempo, at) }))
@@ -1423,6 +1631,7 @@ export function GridView(props: GridViewProps) {
                     loop={grid.loop ? range : null}
                     selection={selectionFor(selection, row.id)}
                     onCellDown={onCellDown}
+                    onSelectionDown={onSelectionDown}
                     onCellEnter={onCellEnter}
                     onCellUp={onCellUp}
                     onCellClick={onCellClick}
@@ -1699,6 +1908,8 @@ interface RowCellsProps {
   /** This row's slice of the selection, or null. */
   selection: ColumnRange | null;
   onCellDown: (e: MouseEvent<HTMLElement>, rowId: string, col: number) => void;
+  /** A press that landed INSIDE this row's slice of the selection. */
+  onSelectionDown: (e: MouseEvent<HTMLElement>, rowId: string, col: number) => void;
   onCellEnter: (rowId: string, col: number) => void;
   onCellUp: () => void;
   onCellClick: (e: MouseEvent<HTMLElement>, rowId: string, col: number) => void;
@@ -1730,6 +1941,7 @@ const GridRowCells = memo(function GridRowCells({
   loop,
   selection,
   onCellDown,
+  onSelectionDown,
   onCellEnter,
   onCellUp,
   onCellClick,
@@ -1754,12 +1966,20 @@ const GridRowCells = memo(function GridRowCells({
       className="grid-row-cells"
       data-testid={`grid-cells-${row.id}`}
       onMouseDown={(e) => {
+        const col = colOf(e);
+        // A PRESS INSIDE THE MARKED RECTANGLE TAKES HOLD OF IT — dragging
+        // moves what is selected, and cmd+dragging carries a copy. That
+        // is why this is checked before the level gesture: inside a
+        // selection, cmd means "copy this", not "write a level point".
+        if (col >= 0 && selection && col >= selection.start && col < selection.end) {
+          onSelectionDown(e, row.id, col);
+          return;
+        }
         // cmd/ctrl writes on the level line; a bare press is the grid's.
         if (e.metaKey || e.ctrlKey) {
           onLevelDown(e, row.id);
           return;
         }
-        const col = colOf(e);
         if (col >= 0) onCellDown(e, row.id, col);
       }}
       onMouseMove={(e) => {

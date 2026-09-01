@@ -4,11 +4,15 @@
 // transport.
 
 import { readFileSync } from 'node:fs';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
+import { AutomationLane } from '../src/components/AutomationLane';
 import {
   GridView,
+  BPM_WINDOW,
+  bpmTicks,
+  bpmWindow,
   grabBeats,
   loopEdgeAt,
   zoomAnchor,
@@ -485,6 +489,265 @@ describe('GridView selection', () => {
     await waitFor(() =>
       expect(document.querySelectorAll('[data-testid^="grid-clip-row1-"]')).toHaveLength(0),
     );
+  });
+});
+
+describe('GridView selection drags', () => {
+  /** Mark a rectangle across one row. */
+  function sweep(rowId: string, from: number, to: number) {
+    fireEvent.mouseDown(screen.getByTestId(`grid-cell-${rowId}-${from}`));
+    fireEvent.mouseOver(screen.getByTestId(`grid-cell-${rowId}-${to}`));
+    fireEvent.mouseUp(screen.getByTestId(`grid-cell-${rowId}-${to}`));
+  }
+
+  it('drags what is selected to another beat', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-4'));
+    await screen.findByTestId('grid-clip-row1-4');
+
+    sweep('row1', 3, 8);
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-cell-row1-4').getAttribute('data-selected')).toBe('true'),
+    );
+
+    // A press INSIDE the rectangle takes hold of it; the drag carries
+    // the copy along and leaves nothing behind.
+    fireEvent.mouseDown(screen.getByTestId('grid-cell-row1-4'));
+    fireEvent.mouseOver(screen.getByTestId('grid-cell-row1-12'));
+    fireEvent.mouseUp(screen.getByTestId('grid-cell-row1-12'));
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-12')).toBeTruthy());
+    expect(document.querySelectorAll('[data-testid^="grid-clip-row1-"]')).toHaveLength(1);
+    // The selection travelled with it, so it can be dragged on again.
+    expect(screen.getByTestId('grid-cell-row1-12').getAttribute('data-selected')).toBe('true');
+  });
+
+  it('cmd+drag leaves the original and carries a copy', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-4'));
+    await screen.findByTestId('grid-clip-row1-4');
+
+    sweep('row1', 3, 8);
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-cell-row1-4').getAttribute('data-selected')).toBe('true'),
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('grid-cell-row1-4'), { metaKey: true });
+    fireEvent.mouseOver(screen.getByTestId('grid-cell-row1-12'));
+    fireEvent.mouseUp(screen.getByTestId('grid-cell-row1-12'));
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-testid^="grid-clip-row1-"]')).toHaveLength(2),
+    );
+    // The copy is a copy: the original is still on beat 4, and no level
+    // point was written where cmd normally writes one.
+    expect(screen.getByTestId('grid-clip-row1-4')).toBeTruthy();
+    expect(screen.getByTestId('grid-level-row1').getAttribute('data-written')).toBe('false');
+  });
+
+  // A whole drag is ONE undo step, however many columns it passed
+  // through on the way.
+  it('takes a whole drag back in one undo', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-4'));
+    await screen.findByTestId('grid-clip-row1-4');
+    sweep('row1', 3, 8);
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-cell-row1-4').getAttribute('data-selected')).toBe('true'),
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('grid-cell-row1-4'));
+    fireEvent.mouseOver(screen.getByTestId('grid-cell-row1-8'));
+    fireEvent.mouseOver(screen.getByTestId('grid-cell-row1-12'));
+    fireEvent.mouseUp(screen.getByTestId('grid-cell-row1-12'));
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-12')).toBeTruthy());
+
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-4')).toBeTruthy());
+  });
+
+  it('fills a marked rectangle with clips on Enter', async () => {
+    show();
+    await addClip('h1', 'c1');
+    sweep('row1', 0, 11);
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-cell-row1-4').getAttribute('data-selected')).toBe('true'),
+    );
+    fireEvent.keyDown(window, { key: 'Enter' });
+    // Twelve beats of a four-beat clip: three copies, back to back.
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-testid^="grid-clip-row1-"]')).toHaveLength(3),
+    );
+    expect(screen.getByTestId('grid-clip-row1-0')).toBeTruthy();
+    expect(screen.getByTestId('grid-clip-row1-4')).toBeTruthy();
+    expect(screen.getByTestId('grid-clip-row1-8')).toBeTruthy();
+  });
+});
+
+describe('the tempo lane window', () => {
+  it('spans 15 bpm either side of the grid tempo, and says so', async () => {
+    show();
+    const readout = await screen.findByTestId('grid-bpm-range');
+    expect(readout.textContent).toContain('105–135');
+  });
+
+  it('opens each end on its own, and closes it again', async () => {
+    show();
+    const readout = await screen.findByTestId('grid-bpm-range');
+    fireEvent.click(screen.getByTestId('grid-bpm-up-more'));
+    await waitFor(() => expect(readout.textContent).toContain('105–150'));
+    fireEvent.click(screen.getByTestId('grid-bpm-down-more'));
+    await waitFor(() => expect(readout.textContent).toContain('90–150'));
+    fireEvent.click(screen.getByTestId('grid-bpm-up-less'));
+    await waitFor(() => expect(readout.textContent).toContain('90–135'));
+    // The default window is as narrow as it goes.
+    expect(screen.getByTestId('grid-bpm-up-less').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('takes a window around the tempo, widened by whatever is written outside it', () => {
+    expect(bpmWindow(128, [], { up: BPM_WINDOW, down: BPM_WINDOW })).toEqual({
+      min: 113,
+      max: 143,
+    });
+    // A point outside the window is still reachable — a breakpoint you
+    // cannot see is one you cannot take back.
+    expect(bpmWindow(128, [{ bpm: 170 }], { up: BPM_WINDOW, down: BPM_WINDOW })).toEqual({
+      min: 113,
+      max: 170,
+    });
+    // And nothing outside what the engine will play.
+    expect(bpmWindow(25, [], { up: 15, down: 90 }).min).toBe(20);
+  });
+
+  it('rules every 5 bpm, coarsening as the window opens', () => {
+    expect(bpmTicks(105, 135)).toEqual([105, 110, 115, 120, 125, 130, 135]);
+    // Sixty bpm of window is twelve rules at 5; wider than that and the
+    // step coarsens rather than drawing a hatch.
+    expect(bpmTicks(60, 180).every((v) => v % 10 === 0)).toBe(true);
+    expect(bpmTicks(60, 180).length).toBeLessThanOrEqual(13);
+  });
+});
+
+describe('the BPM box', () => {
+  // THE BUG: every keystroke was read as a tempo, so the "1" on the way
+  // to "140" was clamped to the minimum and the rest was typed onto it.
+  it('does not take the tempo until Enter', async () => {
+    show();
+    const bpm = (await screen.findByTestId('grid-bpm')) as HTMLInputElement;
+    fireEvent.change(bpm, { target: { value: '1' } });
+    fireEvent.change(bpm, { target: { value: '14' } });
+    fireEvent.change(bpm, { target: { value: '140' } });
+    expect(bpm.value).toBe('140');
+    // The lane's window still reads the tempo in force, which has not
+    // moved yet.
+    expect(screen.getByTestId('grid-bpm-range').textContent).toContain('105–135');
+    fireEvent.keyDown(bpm, { key: 'Enter' });
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-bpm-range').textContent).toContain('125–155'),
+    );
+  });
+
+  it('takes it on blur too, and Escape puts the box back', async () => {
+    show();
+    const bpm = (await screen.findByTestId('grid-bpm')) as HTMLInputElement;
+    fireEvent.change(bpm, { target: { value: '90' } });
+    fireEvent.blur(bpm);
+    await waitFor(() => expect(bpm.value).toBe('90'));
+
+    fireEvent.change(bpm, { target: { value: '7' } });
+    fireEvent.keyDown(bpm, { key: 'Escape' });
+    await waitFor(() => expect(bpm.value).toBe('90'));
+  });
+});
+
+describe('what a drag does to the sound', () => {
+  /** The transport, with its `update` counted: the page must hand it one
+   *  state per finished edit, not one per pointer move. */
+  function withSpy() {
+    const clips = makeClips();
+    const transport = new GridTransport(clips);
+    const update = vi.spyOn(transport, 'update');
+    show(clips, { transport });
+    return update;
+  }
+
+  it('holds the loop until the drag is let go', async () => {
+    const update = withSpy();
+    const ruler = await screen.findByTestId('grid-ruler');
+    // The clip list lands after the first render and is itself an
+    // update; the drag is what this test counts.
+    await act(async () => {});
+    update.mockClear();
+    fireEvent.mouseDown(ruler, { clientX: 0 });
+    fireEvent.mouseMove(window, { clientX: 40 });
+    fireEvent.mouseMove(window, { clientX: 80 });
+    await waitFor(() => expect(screen.getByTestId('grid-loop-handle-start')).toBeTruthy());
+    // The loop is drawn, but the sound has not been asked to follow it.
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.mouseUp(window, { clientX: 80 });
+    await waitFor(() => expect(update).toHaveBeenCalled());
+  });
+
+  it('holds the tempo envelope until the drag is let go', async () => {
+    const update = withSpy();
+    const lane = await screen.findByTestId('grid-tempo-lane');
+    await act(async () => {});
+    update.mockClear();
+    fireEvent.mouseDown(lane);
+    await waitFor(() => expect(screen.getByTestId('grid-tempo-lane-point-0')).toBeTruthy());
+    fireEvent.mouseDown(screen.getByTestId('grid-tempo-lane-point-0'));
+    fireEvent.mouseMove(window, { clientX: 40, clientY: 10, buttons: 1 });
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.mouseUp(window);
+    await waitFor(() => expect(update).toHaveBeenCalled());
+  });
+});
+
+describe('the automation lane drag', () => {
+  function lane(over: Partial<React.ComponentProps<typeof AutomationLane>> = {}) {
+    const props = {
+      width: 200,
+      height: 100,
+      domain: 32,
+      min: 100,
+      max: 140,
+      base: 120,
+      points: [{ at: 4, value: 120 }],
+      testId: 'lane',
+      onAdd: vi.fn(),
+      onMove: vi.fn(),
+      onRemove: vi.fn(),
+      onRelease: vi.fn(),
+      ...over,
+    };
+    render(<AutomationLane {...props} />);
+    return props;
+  }
+
+  // THE BUG: the mouse-up that ends a point drag can be eaten — the
+  // browser starts a selection of its own over the SVG — and the point
+  // then followed the pointer until it was clicked again.
+  it('ends when the pointer comes back with no button down', () => {
+    const props = lane();
+    fireEvent.mouseDown(screen.getByTestId('lane-point-0'));
+    fireEvent.mouseMove(window, { clientX: 20, clientY: 20, buttons: 1 });
+    expect(props.onMove).toHaveBeenCalledTimes(1);
+
+    fireEvent.mouseMove(window, { clientX: 30, clientY: 30, buttons: 0 });
+    expect(props.onRelease).toHaveBeenCalled();
+    (props.onMove as ReturnType<typeof vi.fn>).mockClear();
+    fireEvent.mouseMove(window, { clientX: 40, clientY: 40, buttons: 1 });
+    expect(props.onMove).not.toHaveBeenCalled();
+  });
+
+  it('lets go on mouse-up, and says so once', () => {
+    const props = lane();
+    fireEvent.mouseDown(screen.getByTestId('lane-point-0'));
+    fireEvent.mouseUp(window);
+    expect(props.onRelease).toHaveBeenCalledTimes(1);
+    fireEvent.mouseMove(window, { clientX: 40, clientY: 40, buttons: 1 });
+    expect(props.onMove).not.toHaveBeenCalled();
   });
 });
 

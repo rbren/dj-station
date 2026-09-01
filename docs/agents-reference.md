@@ -2344,6 +2344,22 @@ of the page.
   Paste replaces rather than toggles. Backspace clears the selection's
   copies, Escape drops the selection. Placing stays on `onClick`, which
   fires only when press and release share a cell.
+- A PRESS INSIDE THE SELECTION DRAGS IT (`moveSelection`): what is
+  anchored inside travels with the pointer, cmd+drag leaves the
+  originals and carries a COPY, and the marked rectangle travels too so
+  it can be dragged on again. Inside a selection cmd therefore means
+  "copy", not the level line's "write a point" — the row checks the
+  selection before the level gesture. Every move is measured from the
+  grid the press landed on (`moveDrag.base`), so the drag is ONE
+  operation and one undo step (`'move'`) rather than a walk, and it
+  stops at beat 0 instead of dragging material off the front. A row IS
+  its clip, so the vertical part of a drag only happens where every
+  selected row lands on a row playing the SAME clip; otherwise it is
+  dropped and the horizontal part still happens.
+- ENTER FILLS THE SELECTION (`fillSelection`): each selected row lays
+  whole copies of its own clip end to end from the rectangle's left
+  edge — sixteen bars of a four-beat clip without sixteen clicks. A
+  selection too short for one copy still gets one.
 - A DRAG BELONGS TO THE WINDOW, not to the element it started on. Both
   the cell drag and the LOOP drag listen on `window` for move/up: hung
   off the row's `onMouseLeave` a selection died as soon as it crossed
@@ -2465,6 +2481,32 @@ of the page.
   costs the document nothing; `isTrackFxModified` is a COMPARISON against
   it rather than a flag, which is what lights the row's button `--brand`
   and lets it go gray again when the change is undone.
+- THE TEMPO LANE IS A WINDOW, not the whole bpm axis: ±`BPM_WINDOW`
+  (15) around the grid's own tempo, ruled every 5 bpm (`bpmTicks`,
+  coarsening to 10/20/50 so a wide window is not a hatch). 40..200 over
+  96 px put the two bpm a set is really automated over a pixel apart.
+  The `+`/`−` pair at each end of the pinned gutter head opens that end
+  by another 15 and closes it again, and `bpmWindow` widens the view on
+  its own around any breakpoint written outside it — a point you cannot
+  see is one you cannot take back. Cosmetic state: it never reaches the
+  document.
+- A DRAG DOES NOT REACH THE SOUND UNTIL IT IS LET GO. A tempo or loop
+  change cannot be spliced into the pass in flight, so `update` re-cues
+  — one re-cue per pointer move made dragging either of them during
+  playback unlistenable. `holdAudio` gates the effect that calls
+  `transport.update`; the tempo lane, the loop drag and the selection
+  drag raise it, and `endEdit` (the window's mouse-up, where the undo
+  step closes too) drops it and hands the transport the one result.
+- A BREAKPOINT DRAG ENDS WHERE IT IS LET GO: `AutomationLane` says
+  `preventDefault` on both mousedowns and the lane sets `user-select:
+  none`, because the browser's own selection/element drag over the SVG
+  swallowed the mouse-up and left the point stuck to the pointer until
+  it was clicked again. A `mousemove` arriving with `buttons === 0` is
+  taken as the release that was eaten.
+- THE BPM BOX IS A DRAFT until Enter or blur (`bpmDraft`/`commitBpm`).
+  Read per keystroke through `clampBpm`, the "1" on the way to "140"
+  became the minimum and ate the rest of what was being typed; Escape
+  puts the box back to the tempo in force.
 - Deliberately absent for now: engine routing, per-row mute, and a track
   rack that actually PROCESSES audio — Wetness is stored and the modules
   are drawn, but nothing renders through them yet.

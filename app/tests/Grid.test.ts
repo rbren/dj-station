@@ -15,10 +15,12 @@ import {
   deleteBeats,
   deleteSelection,
   emptyGrid,
+  fillSelection,
   fromDocument,
   isEmptyGrid,
   levelAt,
   moveLevelPoint,
+  moveSelection,
   pasteAt,
   removeLevelPoint,
   selectionFromDrag,
@@ -443,6 +445,134 @@ describe('selection, copy and paste', () => {
     const sel = selectionFromDrag(state.rows, 'row1', 0, 'row2', 31)!;
     const cleared = deleteSelection(state, clips, sel);
     expect(cleared.rows.every((r) => r.placements.length === 0)).toBe(true);
+  });
+});
+
+describe('dragging a selection about', () => {
+  const c = clip({ beats: 4, bpm: 120, ones: [1] });
+  const clips = new Map([['c1', c]]);
+  const order = ['row1', 'row2'];
+
+  function twoRows(): GridState {
+    return {
+      ...emptyGrid(120),
+      rows: [
+        placeClip(row({ id: 'row1' }), c, 4),
+        placeClip(row({ id: 'row2', clipId: 'c1' }), c, 20),
+      ],
+    };
+  }
+
+  it('carries what the selection covers along, leaving nothing behind', () => {
+    const state = twoRows();
+    const sel = selectionFromDrag(state.rows, 'row1', 4, 'row1', 7)!;
+    const moved = moveSelection(state, clips, order, sel, 0, 8, false);
+    // The copy was anchored at 4 (body from 3); eight beats later its
+    // anchor is 12 and its body starts at 11.
+    expect(moved.state.rows[0].placements).toEqual([11]);
+    expect(moved.selection.columns).toEqual({ start: 12, end: 16 });
+    // The other row is untouched by a drag that never covered it.
+    expect(moved.state.rows[1].placements).toEqual(state.rows[1].placements);
+  });
+
+  it('a copy drag leaves the original where it was', () => {
+    const state = twoRows();
+    const sel = selectionFromDrag(state.rows, 'row1', 4, 'row1', 7)!;
+    const moved = moveSelection(state, clips, order, sel, 0, 8, true);
+    expect(moved.state.rows[0].placements).toEqual([3, 11]);
+  });
+
+  it('measures from the state the drag began on, so every move is one operation', () => {
+    const state = twoRows();
+    const sel = selectionFromDrag(state.rows, 'row1', 4, 'row1', 7)!;
+    const near = moveSelection(state, clips, order, sel, 0, 4, false);
+    const far = moveSelection(state, clips, order, sel, 0, 8, false);
+    expect(near.state.rows[0].placements).toEqual([7]);
+    expect(far.state.rows[0].placements).toEqual([11]);
+  });
+
+  it('stops at the start of the grid rather than dragging material off it', () => {
+    const state = twoRows();
+    const sel = selectionFromDrag(state.rows, 'row1', 4, 'row1', 7)!;
+    const moved = moveSelection(state, clips, order, sel, 0, -40, false);
+    expect(moved.selection.columns.start).toBe(0);
+    expect(moved.state.rows[0].placements).toEqual([-1]);
+  });
+
+  it('steps down the page onto a row playing the same clip', () => {
+    const state = twoRows();
+    const sel = selectionFromDrag(state.rows, 'row1', 4, 'row1', 7)!;
+    const moved = moveSelection(state, clips, order, sel, 1, 0, false);
+    expect(moved.state.rows[0].placements).toEqual([]);
+    expect(moved.state.rows[1].placements).toContain(3);
+    expect(moved.selection.rowIds).toEqual(['row2']);
+  });
+
+  // A row IS its clip, so there is nothing a copy could mean in a row
+  // playing a different one: the vertical part of the drag is dropped
+  // and the horizontal part still happens.
+  it('drops the vertical move when the row below plays another clip', () => {
+    const other = clip({ clipId: 'c2', beats: 4, ones: [0] });
+    const state: GridState = {
+      ...emptyGrid(120),
+      rows: [placeClip(row({ id: 'row1' }), c, 4), row({ id: 'row2', clipId: 'c2' })],
+    };
+    const sel = selectionFromDrag(state.rows, 'row1', 4, 'row1', 7)!;
+    const moved = moveSelection(
+      state,
+      new Map([
+        ['c1', c],
+        ['c2', other],
+      ]),
+      order,
+      sel,
+      1,
+      4,
+      false,
+    );
+    expect(moved.state.rows[1].placements).toEqual([]);
+    expect(moved.state.rows[0].placements).toEqual([7]);
+    expect(moved.selection.rowIds).toEqual(['row1']);
+  });
+});
+
+describe('filling a selection', () => {
+  const c = clip({ beats: 4, bpm: 120, ones: [1] });
+  const clips = new Map([['c1', c]]);
+
+  it('lays whole copies end to end from the selection\u2019s left edge', () => {
+    const state: GridState = { ...emptyGrid(120), rows: [row({ id: 'row1' })] };
+    const sel = { rowIds: ['row1'], columns: { start: 4, end: 16 } };
+    const filled = fillSelection(state, clips, sel);
+    // Three four-beat copies, each starting where the last ended.
+    expect(filled.rows[0].placements).toEqual([4, 8, 12]);
+  });
+
+  it('lays only what fits, and a copy even where nothing does', () => {
+    const state: GridState = { ...emptyGrid(120), rows: [row({ id: 'row1' })] };
+    const short = fillSelection(state, clips, {
+      rowIds: ['row1'],
+      columns: { start: 0, end: 6 },
+    });
+    expect(short.rows[0].placements).toEqual([0]);
+    const tiny = fillSelection(state, clips, {
+      rowIds: ['row1'],
+      columns: { start: 0, end: 2 },
+    });
+    expect(tiny.rows[0].placements).toEqual([0]);
+  });
+
+  it('fills every row of the selection and no other', () => {
+    const state: GridState = {
+      ...emptyGrid(120),
+      rows: [row({ id: 'row1' }), row({ id: 'row2', clipId: 'c1' })],
+    };
+    const filled = fillSelection(state, clips, {
+      rowIds: ['row2'],
+      columns: { start: 0, end: 8 },
+    });
+    expect(filled.rows[0].placements).toEqual([]);
+    expect(filled.rows[1].placements).toEqual([0, 4]);
   });
 });
 

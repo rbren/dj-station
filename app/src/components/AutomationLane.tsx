@@ -101,18 +101,28 @@ export function AutomationLane(props: AutomationLaneProps) {
 
   useEffect(() => {
     if (!dragging) return;
+    const up = () => {
+      dragAt.current = null;
+      setDragging(false);
+      onRelease?.();
+    };
     const move = (e: MouseEvent) => {
+      // A MOVE WITH NO BUTTON DOWN IS A RELEASE WE MISSED. The mouse-up
+      // that ends a drag can be swallowed — the browser starts a
+      // selection or an element drag of its own over an SVG, and from
+      // then on the point stuck to the pointer until it was clicked
+      // again. `mousedown` now says preventDefault so that gesture never
+      // starts, and this catches whatever else eats a release.
+      if (e.buttons === 0) {
+        up();
+        return;
+      }
       const rect = svg.current?.getBoundingClientRect();
       const from = dragAt.current;
       if (!rect || from === null) return;
       const { at, value } = fromPointer(e.clientX, e.clientY, rect);
       dragAt.current = at;
       onMove(from, at, value);
-    };
-    const up = () => {
-      dragAt.current = null;
-      setDragging(false);
-      onRelease?.();
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
@@ -147,6 +157,7 @@ export function AutomationLane(props: AutomationLaneProps) {
       width={width}
       height={height}
       onMouseDown={(e) => {
+        e.preventDefault();
         const rect = e.currentTarget.getBoundingClientRect();
         const { at, value } = fromPointer(e.clientX, e.clientY, rect);
         onAdd(at, value);
@@ -182,6 +193,7 @@ export function AutomationLane(props: AutomationLaneProps) {
           r={6}
           onMouseDown={(e) => {
             e.stopPropagation();
+            e.preventDefault();
             dragAt.current = point.at;
             setDragging(true);
           }}

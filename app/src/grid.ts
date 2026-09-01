@@ -513,6 +513,113 @@ function placeAnchored(row: GridRow, clip: BeatClipEntry, col: number): GridRow 
   return { ...row, placements: [...kept, start].sort((a, b) => a - b) };
 }
 
+/** FILL a selection with the rows' own clips, laid end to end from its
+ *  left edge: a rectangle of empty cells and Enter is how a loop is
+ *  written out over sixteen bars without sixteen clicks. Only whole
+ *  copies are laid, so a fill never spills past what was marked — except
+ *  on a selection too short to hold one, which still gets the single copy
+ *  it was asked for. */
+export function fillSelection(
+  state: GridState,
+  clips: ReadonlyMap<string, BeatClipEntry>,
+  sel: GridSelection,
+): GridState {
+  const width = Math.max(1, sel.columns.end - sel.columns.start);
+  const rows = state.rows.map((row) => {
+    if (!sel.rowIds.includes(row.id)) return row;
+    const clip = clips.get(row.clipId);
+    if (!clip) return row;
+    const beats = Math.max(1, clip.beats);
+    const copies = Math.max(1, Math.floor(width / beats));
+    let next = row;
+    for (let i = 0; i < copies; i += 1) {
+      next = placeAnchored(next, clip, sel.columns.start + i * beats + leadOne(clip));
+    }
+    return next;
+  });
+  return { ...state, rows };
+}
+
+/** A selection moved, and where it now is: the caller keeps the marked
+ *  rectangle under the pointer as the drag goes. */
+export interface SelectionMove {
+  state: GridState;
+  selection: GridSelection;
+}
+
+/** How far the selection may really step DOWN THE PAGE. A row IS its
+ *  clip — a row plays one voice of one clip — so a copy can only land in
+ *  a row playing the same clip; anything else and the vertical part of
+ *  the drag is simply dropped rather than losing what it carried. */
+function rowShift(
+  state: GridState,
+  order: readonly string[],
+  sel: GridSelection,
+  dRow: number,
+): number {
+  if (dRow === 0) return 0;
+  const clipOf = (id: string) => state.rows.find((r) => r.id === id)?.clipId;
+  const lands = sel.rowIds.every((id) => {
+    const to = order[order.indexOf(id) + dRow];
+    return to !== undefined && clipOf(to) === clipOf(id);
+  });
+  return lands ? dRow : 0;
+}
+
+/** DRAG THE SELECTION. What is anchored inside it travels by `dCol`
+ *  beats (and `dRow` rows, where that lands on the same clip); `copy`
+ *  leaves the originals where they are, which is what cmd+drag means.
+ *
+ *  Measured from the state the drag STARTED on, so the caller can call
+ *  this on every pointer move with the total offset and get one result
+ *  rather than a walk. */
+export function moveSelection(
+  state: GridState,
+  clips: ReadonlyMap<string, BeatClipEntry>,
+  order: readonly string[],
+  sel: GridSelection,
+  dRow: number,
+  dCol: number,
+  copy: boolean,
+): SelectionMove {
+  const shift = rowShift(state, order, sel, dRow);
+  // The grid has no beats left of zero: a drag past its start stops
+  // there rather than throwing the material away.
+  const dx = Math.max(dCol, -sel.columns.start);
+  if (shift === 0 && dx === 0) return { state, selection: sel };
+
+  const carried = sel.rowIds.flatMap((id) => {
+    const row = state.rows.find((r) => r.id === id);
+    const clip = row && clips.get(row.clipId);
+    if (!row || !clip) return [];
+    const anchors = row.placements
+      .map((start) => anchorOf(clip, start))
+      .filter((anchor) => inRange(sel.columns, anchor));
+    return [{ id, clip, anchors }];
+  });
+
+  // Everything the drag picked up leaves first, so a move ONTO a row the
+  // selection also covers cannot delete what has just landed there.
+  let rows = copy ? state.rows : deleteSelection(state, clips, sel).rows;
+  for (const { id, clip, anchors } of carried) {
+    const to = order[order.indexOf(id) + shift];
+    const at = rows.findIndex((r) => r.id === to);
+    if (at < 0) continue;
+    rows = rows.map((row, i) =>
+      i === at
+        ? anchors.reduce((next, anchor) => placeAnchored(next, clip, anchor + dx), row)
+        : row,
+    );
+  }
+  return {
+    state: { ...state, rows },
+    selection: {
+      rowIds: sel.rowIds.map((id) => order[order.indexOf(id) + shift] ?? id),
+      columns: { start: sel.columns.start + dx, end: sel.columns.end + dx },
+    },
+  };
+}
+
 /** Take every placement anchored inside the selection away. */
 export function deleteSelection(
   state: GridState,
