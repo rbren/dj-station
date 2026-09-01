@@ -237,13 +237,113 @@ fn name_after_clip(engine: &mut Engine, instance: &str, clip_name: &str) -> Stri
 /// them itself, the way the Clip page auditions a render). The bleed
 /// stays out: it is the seam of a looping player, and the grid lays
 /// clips out on a timeline instead of looping them.
+///
+/// `bpm` RE-TIMES the clip to that tempo before handing it over, and it
+/// does so by WSOLA (`beats::warp`), the same stretcher the Clip page's
+/// warp uses — NOT by resampling. Playing a 120 bpm clip at 1.5× rate to
+/// make it 180 would take its pitch up a fifth with it; a grid whose
+/// master tempo transposes every clip on it is not a grid anyone can
+/// write music on. The webview then plays what comes back at rate 1.0.
 #[tauri::command(async)]
-pub fn beat_clip_audio(state: State<AppState>, clip_id: String) -> CmdResult<tauri::ipc::Response> {
-    let (_, audio, _) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
+pub fn beat_clip_audio(
+    state: State<AppState>,
+    clip_id: String,
+    bpm: Option<f64>,
+) -> CmdResult<tauri::ipc::Response> {
+    let (meta, audio, _) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
         .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+    let audio = match bpm {
+        Some(bpm) if bpm > 0.0 && meta.bpm > 0.0 => stretch_to_bpm(&audio, meta.bpm, bpm),
+        _ => audio,
+    };
     Ok(tauri::ipc::Response::new(dj_analysis::clip::wav16_bytes(
         &audio,
     )))
+}
+
+/// A clip's waveform, as one peak per BEAT-fraction: `buckets` samples
+/// of its shape, for a surface that draws the clip inside the cells it
+/// occupies (the Grid page). Peaks rather than audio because that is all
+/// a drawing needs, and a grid can hold a great many clips.
+#[tauri::command(async)]
+pub fn beat_clip_peaks(state: State<AppState>, clip_id: String, buckets: usize) -> CmdResult<Vec<f32>> {
+    let (_, audio, _) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
+        .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+    Ok(dj_analysis::clip::peaks(&audio, buckets.clamp(1, 4096)))
+}
+
+/// Saved Grid arrangements: `grids/<name>.json` beside the patches. An
+/// arrangement is JSON the frontend owns end to end (`GridDocument`) —
+/// the backend only files it, because nothing here plays it: the grid is
+/// scheduled in the webview.
+fn grids_dir() -> std::path::PathBuf {
+    dj_library::default_data_dir().join("grids")
+}
+
+/// The same rule patch names follow, so a grid cannot name a path.
+fn valid_grid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+}
+
+#[tauri::command(async)]
+pub fn grid_save(name: String, doc: String) -> CmdResult<()> {
+    let name = name.trim().to_string();
+    if !valid_grid_name(&name) {
+        return Err(CmdError::invalid(format!("invalid grid name: {name:?}")));
+    }
+    let dir = grids_dir();
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    std::fs::write(dir.join(format!("{name}.json")), doc).map_err(err)?;
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn grid_load(name: String) -> CmdResult<String> {
+    if !valid_grid_name(&name) {
+        return Err(CmdError::invalid(format!("invalid grid name: {name:?}")));
+    }
+    std::fs::read_to_string(grids_dir().join(format!("{name}.json"))).map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn grid_list() -> CmdResult<Vec<String>> {
+    let mut names = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(grids_dir()) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    names.push(stem.to_string());
+                }
+            }
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// Re-time `audio` from `from_bpm` to `to_bpm`, keeping its pitch. The
+/// map is a single linear segment — one constant ratio over the whole
+/// clip — so the beats stay evenly spaced; WSOLA does the rest.
+fn stretch_to_bpm(audio: &AudioData, from_bpm: f64, to_bpm: f64) -> AudioData {
+    let ratio = from_bpm / to_bpm;
+    // A ratio this close to 1 is below what WSOLA would change anyway,
+    // and re-rendering it would only cost the clip a round trip through
+    // the overlap-add.
+    if (ratio - 1.0).abs() < 1e-4 {
+        return audio.clone();
+    }
+    let src_secs = audio.duration_secs();
+    let out_secs = src_secs * ratio;
+    let map = dj_analysis::beats::WarpMap {
+        points: vec![(0.0, 0.0), (src_secs, out_secs)],
+    };
+    dj_analysis::beats::warp::render(audio, &map, out_secs)
 }
 
 /// Clip + transport snapshot for the Beat Clip module panel.

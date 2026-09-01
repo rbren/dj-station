@@ -21,10 +21,28 @@ export interface GridPickerTrack {
   title: string;
   artist: string | null;
   clips: BeatClipEntry[];
+  /** The track's tempo as its clips report it. MEDIAN, not mean: one
+   *  clip cut across a half-time section reads at half the tempo, and a
+   *  mean would drag the whole track's number with it. */
+  medianBpm: number;
 }
 
-/** The clips grouped by the track they were cut from, by title. A clip
- *  cut from two tracks belongs to both — it is one clip either way. */
+/** The middle value of `values`, or 0 for none. An even count takes the
+ *  mean of the two middles. */
+export function median(values: readonly number[]): number {
+  const sorted = [...values].filter((v) => v > 0).sort((a, b) => a - b);
+  if (sorted.length === 0) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** The clips grouped by the track they were cut from. A clip cut from
+ *  two tracks belongs to both — it is one clip either way.
+ *
+ *  Ordered by TEMPO, slowest first, because that is what the list is for:
+ *  the grid runs at one master tempo, and the tracks that will sit on it
+ *  without being stretched far are the ones near it. Alphabetical order
+ *  would only help someone who already knows what they want. */
 export function pickerTracks(clips: readonly BeatClipEntry[]): GridPickerTrack[] {
   const groups = new Map<string, GridPickerTrack>();
   for (const clip of clips) {
@@ -38,13 +56,18 @@ export function pickerTracks(clips: readonly BeatClipEntry[]): GridPickerTrack[]
           title: source ? (source.title ?? 'source not in the library') : 'no source recorded',
           artist: source?.artist ?? null,
           clips: [],
+          medianBpm: 0,
         };
         groups.set(key, group);
       }
       if (!group.clips.includes(clip)) group.clips.push(clip);
     }
   }
-  return [...groups.values()].sort((a, b) => a.title.localeCompare(b.title));
+  const tracks = [...groups.values()].map((t) => ({
+    ...t,
+    medianBpm: median(t.clips.map((c) => c.bpm)),
+  }));
+  return tracks.sort((a, b) => a.medianBpm - b.medianBpm || a.title.localeCompare(b.title));
 }
 
 export interface GridClipPickerProps {
@@ -115,6 +138,13 @@ export function GridClipPicker({ clips, onPick, onClose }: GridClipPickerProps) 
                 >
                   <span className="grid-picker-title">{track.title}</span>
                   {track.artist && <span className="grid-picker-artist">{track.artist}</span>}
+                  <span
+                    className="grid-picker-bpm mono"
+                    data-testid={`grid-picker-bpm-${track.key}`}
+                    title="Median tempo of this track's clips"
+                  >
+                    {track.medianBpm > 0 ? `${fixed(track.medianBpm, 1)} bpm` : '—'}
+                  </span>
                   <span className="grid-picker-count mono">
                     {track.clips.length} clip{track.clips.length === 1 ? '' : 's'}
                   </span>

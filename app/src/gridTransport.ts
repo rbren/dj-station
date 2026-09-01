@@ -9,7 +9,13 @@
 // clock exactly. That is also what makes a loop seamless — the next
 // pass's first clip is already scheduled while the current one plays.
 //
-// The playhead is DERIVED, never counted: the page asks `column()`, which
+// The grid is LIVE: `update` hands in a new state mid-play and the
+// transport lays down whatever the edit added, so placing a clip while
+// the music runs is heard on its next beat. Copies already scheduled are
+// remembered by key (`rowId:start`), which is what keeps a re-schedule
+// from re-triggering something already sounding.
+//
+// The playhead is DERIVED, never counted: the page asks `status()`, which
 // converts elapsed clock time back through the tempo envelope
 // (`secsToBeat`). Nothing accumulates, so a slow render or a backgrounded
 // tab cannot make the highlight drift away from the sound.
@@ -28,15 +34,18 @@ import {
   secsToBeat,
   type ColumnRange,
   type GridState,
+  type ScheduledClip,
 } from './grid';
 
 /** How far ahead passes are scheduled, and how often that is re-run. */
 const LOOKAHEAD_SECS = 0.25;
 const SCHEDULE_MS = 100;
 
-/** Where a clip's audio comes from — `BeatClipApi.audio`, narrowed. */
+/** Where a clip's audio comes from. `bpm` asks for it RE-TIMED — the
+ *  backend stretches it (WSOLA), so the grid's tempo can change without
+ *  the pitch following it. */
 export interface GridAudioSource {
-  audio(clipId: string): Promise<ArrayBuffer | null>;
+  audio(clipId: string, bpm?: number): Promise<ArrayBuffer | null>;
 }
 
 interface Pass {
@@ -46,6 +55,9 @@ interface Pass {
    *  resumed part-way through. */
   from: number;
   secs: number;
+  /** Keys of the copies already laid down for this pass, so a live edit
+   *  re-schedules only what is new. */
+  laid: Set<string>;
 }
 
 export interface GridPlayback {
@@ -56,8 +68,11 @@ export interface GridPlayback {
 
 export class GridTransport {
   #source: GridAudioSource;
+  /** Decoded audio, keyed by clip AND the tempo it was stretched to. */
   #buffers = new Map<string, AudioBuffer>();
-  #nodes: AudioBufferSourceNode[] = [];
+  /** Renders in flight, so a re-schedule does not ask twice. */
+  #pending = new Set<string>();
+  #nodes: { node: AudioBufferSourceNode; gain: GainNode; endsAt: number }[] = [];
   #timer: ReturnType<typeof setInterval> | null = null;
   #passes: Pass[] = [];
   /** The pass being scheduled next, or null once the last one is laid
@@ -65,9 +80,15 @@ export class GridTransport {
   #next: Pass | null = null;
   #state: GridState | null = null;
   #clips: ReadonlyMap<string, BeatClipEntry> = new Map();
+  #columns = 0;
   #range: ColumnRange = { start: 0, end: 0 };
   #looping = false;
   #playing = false;
+  /** Re-arming after an edit that cannot be spliced into the pass in
+   *  flight. `play` is async (it may have audio to fetch), so without
+   *  this the transport would report itself STOPPED for the microtask
+   *  between the two — a blip the page would draw as a stop. */
+  #cueing = false;
   #at = 0;
   #disposed = false;
 
@@ -76,7 +97,7 @@ export class GridTransport {
   }
 
   get playing(): boolean {
-    return this.#playing;
+    return this.#playing || this.#cueing;
   }
 
   /** The audio clock where there is one, the wall clock where there is
@@ -86,26 +107,36 @@ export class GridTransport {
     return ctx ? ctx.currentTime : performance.now() / 1000;
   }
 
-  /** Decode every clip the grid plays, so a pass can be scheduled without
-   *  awaiting anything (an await between "it is time" and `start(when)`
-   *  is how a clip ends up late). Clips already decoded cost nothing. */
+  #key(clipId: string, bpm: number): string {
+    return `${clipId}@${bpm}`;
+  }
+
+  /** Fetch and decode every (clip, tempo) the grid asks for, so a pass
+   *  can be scheduled without awaiting anything — an await between "it
+   *  is time" and `start(when)` is how a clip ends up late. */
   async prime(state: GridState, clips: ReadonlyMap<string, BeatClipEntry>): Promise<void> {
     const ctx = sharedContext();
     if (!ctx) return;
-    const wanted = new Set(state.rows.filter((r) => r.placements.length > 0).map((r) => r.clipId));
+    const columns = Math.max(this.#columns, state.beats);
+    const wanted = new Map<string, { clipId: string; bpm: number }>();
+    for (const copy of scheduleRange(state, clips, playRange(state, columns))) {
+      wanted.set(this.#key(copy.clipId, copy.bpm), { clipId: copy.clipId, bpm: copy.bpm });
+    }
     await Promise.all(
-      [...wanted]
-        .filter((id) => clips.has(id) && !this.#buffers.has(id))
-        .map(async (id) => {
-          const bytes = await this.#source.audio(id);
+      [...wanted].map(async ([key, { clipId, bpm }]) => {
+        if (this.#buffers.has(key) || this.#pending.has(key)) return;
+        this.#pending.add(key);
+        try {
+          const bytes = await this.#source.audio(clipId, bpm);
           if (!bytes || this.#disposed) return;
-          try {
-            this.#buffers.set(id, await ctx.decodeAudioData(bytes.slice(0)));
-          } catch {
-            // A clip that will not decode simply stays silent; the grid
-            // still plays everything else.
-          }
-        }),
+          this.#buffers.set(key, await ctx.decodeAudioData(bytes.slice(0)));
+        } catch {
+          // A clip that will not decode simply stays silent; the grid
+          // still plays everything else.
+        } finally {
+          this.#pending.delete(key);
+        }
+      }),
     );
   }
 
@@ -118,28 +149,78 @@ export class GridTransport {
     fromColumn?: number,
   ): Promise<void> {
     if (this.#disposed) return;
-    this.stop();
+    const cued = this.#cueing;
+    this.#silence();
     const range = playRange(state, columns);
     if (range.end <= range.start) return;
     this.#state = state;
     this.#clips = clips;
+    this.#columns = columns;
     this.#range = range;
     this.#looping = state.loop !== null;
     await this.prime(state, clips);
-    if (this.#disposed) return;
+    // A stop while the audio was being fetched wins: it cleared the cue
+    // this play was arming, so there is nothing left to start.
+    if (this.#disposed || (cued && !this.#cueing)) return;
     const from = Math.min(Math.max(fromColumn ?? range.start, range.start), range.end - 1e-9);
     this.#playing = true;
     this.#next = {
       at: this.#now() + 0.05,
       from,
       secs: rangeSecs(state.tempo, { start: from, end: range.end }),
+      laid: new Set(),
     };
     this.#pump();
     this.#timer = setInterval(() => this.#pump(), SCHEDULE_MS);
   }
 
-  /** Stop, keeping nothing: the next play starts where the caller says. */
+  /** Take a new grid mid-play: the arrangement is EDITABLE while it
+   *  sounds. Copies already scheduled keep playing (they are held by
+   *  key); everything the edit added — a new placement, a moved level
+   *  point — is laid down by the next pump, on its own beat.
+   *
+   *  A tempo change is the one edit that cannot be spliced into a pass
+   *  in flight: every copy's start is measured through the envelope from
+   *  the pass's beginning, so a new envelope re-times beats that are
+   *  already sounding. Changing the loop moves the range the pass walks.
+   *  Both re-cue from where the playhead is, which keeps the grid honest
+   *  at the cost of one seam. */
+  update(state: GridState, clips: ReadonlyMap<string, BeatClipEntry>, columns: number): void {
+    const was = this.#state;
+    this.#state = state;
+    this.#clips = clips;
+    this.#columns = columns;
+    if (!this.#playing || !was) return;
+    const range = playRange(state, columns);
+    const recue =
+      JSON.stringify(was.tempo) !== JSON.stringify(state.tempo) ||
+      range.start !== this.#range.start ||
+      range.end !== this.#range.end;
+    if (recue) {
+      const at = this.#at;
+      const from = at >= range.start && at < range.end ? at : range.start;
+      this.#cueing = true;
+      void this.play(state, clips, columns, from).finally(() => {
+        this.#cueing = false;
+      });
+      return;
+    }
+    void this.prime(state, clips);
+    this.#pump();
+  }
+
+  /** Stop, keeping nothing: the next play starts where the caller says.
+   *  A stop the caller ASKED FOR also cancels a re-cue in flight — the
+   *  page has said to be quiet, and the pending `play` must not undo
+   *  that when it lands. */
   stop(): void {
+    this.#cueing = false;
+    this.#silence();
+  }
+
+  /** Tear the current pass down without touching `#cueing`: what `play`
+   *  does to itself before cueing the next one. */
+  #silence(): void {
     this.#playing = false;
     this.#next = null;
     this.#passes = [];
@@ -147,15 +228,31 @@ export class GridTransport {
       clearInterval(this.#timer);
       this.#timer = null;
     }
-    for (const node of this.#nodes) {
+    for (const { node, gain } of this.#nodes) {
       try {
         node.stop();
       } catch {
         // Already finished.
       }
       node.disconnect();
+      gain.disconnect();
     }
     this.#nodes = [];
+  }
+
+  /** Stop the sound but keep the place, so the next play resumes here.
+   *  That is the whole difference between pause and stop on this page:
+   *  the playhead survives. */
+  pause(): number {
+    const at = this.status().column;
+    this.stop();
+    this.#at = at;
+    return at;
+  }
+
+  /** Park the playhead somewhere while stopped (a seek). */
+  seek(column: number): void {
+    this.#at = Math.max(0, column);
   }
 
   /** Where the playhead is, and whether it is moving. A play with no loop
@@ -186,56 +283,97 @@ export class GridTransport {
     this.#buffers.clear();
   }
 
-  /** Lay down every pass that begins inside the lookahead. */
+  /** Lay down every pass that begins inside the lookahead, and top up the
+   *  passes already begun with whatever a live edit has added. */
   #pump(): void {
     const state = this.#state;
     if (!this.#playing || !state) return;
     const horizon = this.#now() + LOOKAHEAD_SECS;
     while (this.#next && this.#next.at <= horizon) {
       const pass = this.#next;
-      this.#schedule(state, pass);
       this.#passes = [...this.#passes.slice(-3), pass];
+      this.#schedule(state, pass);
       this.#next = this.#looping
         ? {
             at: pass.at + pass.secs,
             from: this.#range.start,
             secs: rangeSecs(state.tempo, this.#range),
+            laid: new Set(),
           }
         : null;
+    }
+    // Live edits: a pass still sounding gets whatever is now on the grid
+    // and has not been laid down yet.
+    const now = this.#now();
+    for (const pass of this.#passes) {
+      if (now < pass.at + pass.secs) this.#schedule(state, pass);
     }
     // Passes that have played out are dropped, but the LATEST one is
     // always kept: it is what tells `status` a non-looping play has run
     // off its end, and pruning it would leave the playhead frozen and
     // still calling itself playing.
-    const cutoff = this.#now() - 1;
+    const cutoff = now - 1;
     this.#passes = this.#passes.filter(
       (p, i) => i === this.#passes.length - 1 || p.at + p.secs >= cutoff,
     );
+    this.#nodes = this.#nodes.filter(({ node, gain, endsAt }) => {
+      if (endsAt >= now) return true;
+      node.disconnect();
+      gain.disconnect();
+      return false;
+    });
   }
 
   #schedule(state: GridState, pass: Pass): void {
     const ctx = sharedContext();
     if (!ctx) return;
+    const now = ctx.currentTime;
     for (const copy of scheduleRange(state, this.#clips, {
       start: pass.from,
       end: this.#range.end,
     })) {
-      const buffer = this.#buffers.get(copy.clipId);
-      if (!buffer) continue;
-      const node = ctx.createBufferSource();
-      node.buffer = buffer;
-      node.playbackRate.value = copy.rate;
-      node.connect(ctx.destination);
+      if (pass.laid.has(copy.key)) continue;
       const at = pass.at + copy.atSecs;
+      // A copy whose moment has passed is not started late — that would
+      // put it off the beat. Mark it so later pumps stop reconsidering
+      // it; the next pass plays it properly.
+      if (at < now) {
+        pass.laid.add(copy.key);
+        continue;
+      }
+      const buffer = this.#buffers.get(this.#key(copy.clipId, copy.bpm));
+      if (!buffer) {
+        // Its stretch is still rendering. Leave the copy UNMARKED so a
+        // later pump lays it down once the audio lands, as long as its
+        // moment has not passed by then.
+        void this.prime(state, this.#clips);
+        continue;
+      }
+      pass.laid.add(copy.key);
       const offset = Math.min(copy.offsetSecs, buffer.duration);
       const duration = Math.max(0, Math.min(copy.durationSecs, buffer.duration - offset));
       if (duration <= 0) continue;
-      node.start(Math.max(at, ctx.currentTime), offset, duration);
+      const node = ctx.createBufferSource();
+      node.buffer = buffer;
+      const gain = ctx.createGain();
+      this.#writeLevels(gain, copy, at);
+      node.connect(gain);
+      gain.connect(ctx.destination);
+      node.start(at, offset, duration);
       node.onended = () => {
-        this.#nodes = this.#nodes.filter((n) => n !== node);
         node.disconnect();
+        gain.disconnect();
       };
-      this.#nodes.push(node);
+      this.#nodes.push({ node, gain, endsAt: at + duration });
     }
+  }
+
+  /** Write the row's level line onto a copy's gain: the first value is
+   *  set where the copy starts and every bend after it is ramped to, so
+   *  a fade drawn across a clip is heard as a fade, not a step. */
+  #writeLevels(gain: GainNode, copy: ScheduledClip, at: number): void {
+    const [first, ...rest] = copy.levels;
+    gain.gain.setValueAtTime(first ? first[1] : 1, at);
+    for (const [secs, level] of rest) gain.gain.linearRampToValueAtTime(level, at + secs);
   }
 }

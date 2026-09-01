@@ -88,8 +88,17 @@ export interface BeatClipApi {
   /** Delete a saved clip. Resolves to the list as it now stands. */
   delete(clipId: string): Promise<BeatClipEntry[] | null>;
   /** The clip's loop as WAV bytes, for a page that plays it in the
-   *  webview instead of through the engine (the Grid page). */
-  audio(clipId: string): Promise<ArrayBuffer | null>;
+   *  webview instead of through the engine (the Grid page). `bpm` asks
+   *  for it RE-TIMED to that tempo, which is a stretch and not a resample
+   *  — the clip keeps its pitch. */
+  audio(clipId: string, bpm?: number): Promise<ArrayBuffer | null>;
+  /** The clip's shape in `buckets` peaks, for drawing it on a grid. */
+  peaks(clipId: string, buckets: number): Promise<number[] | null>;
+  /** Save/open/list Grid arrangements. The document is JSON the frontend
+   *  owns end to end; the backend only files it. */
+  gridSave(name: string, doc: string): Promise<void>;
+  gridLoad(name: string): Promise<string | null>;
+  gridList(): Promise<string[] | null>;
 }
 
 export class BeatClipClient extends IpcClient implements BeatClipApi {
@@ -105,8 +114,20 @@ export class BeatClipClient extends IpcClient implements BeatClipApi {
   delete(clipId: string) {
     return this.call<BeatClipEntry[]>('beat_clip_delete', { clipId });
   }
-  audio(clipId: string) {
-    return this.call<ArrayBuffer>('beat_clip_audio', { clipId });
+  audio(clipId: string, bpm?: number) {
+    return this.call<ArrayBuffer>('beat_clip_audio', { clipId, bpm });
+  }
+  peaks(clipId: string, buckets: number) {
+    return this.call<number[]>('beat_clip_peaks', { clipId, buckets });
+  }
+  async gridSave(name: string, doc: string) {
+    await this.call<null>('grid_save', { name, doc });
+  }
+  gridLoad(name: string) {
+    return this.call<string>('grid_load', { name });
+  }
+  gridList() {
+    return this.call<string[]>('grid_list');
   }
 }
 

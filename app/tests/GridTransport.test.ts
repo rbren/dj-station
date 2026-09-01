@@ -30,7 +30,7 @@ const CLIPS = new Map([[CLIP.clipId, CLIP]]);
 function gridWith(over: Partial<GridState> = {}): GridState {
   return {
     ...emptyGrid(120),
-    rows: [placeClip({ id: 'row1', clipId: 'c1', placements: [] }, CLIP, 0)],
+    rows: [placeClip({ id: 'row1', clipId: 'c1', placements: [], levels: [] }, CLIP, 0)],
     ...over,
   };
 }
@@ -42,18 +42,21 @@ async function advance(secs: number) {
   await vi.advanceTimersByTimeAsync(secs * 1000);
 }
 
+/** A fake-timer transport, disposed after each test. Shared by every
+ *  block below so they all measure the same clock. */
+let transport: GridTransport;
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  transport = new GridTransport(source);
+});
+
+afterEach(() => {
+  transport.dispose();
+  vi.useRealTimers();
+});
+
 describe('GridTransport', () => {
-  let transport: GridTransport;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    transport = new GridTransport(source);
-  });
-
-  afterEach(() => {
-    transport.dispose();
-    vi.useRealTimers();
-  });
 
   it('is stopped, at the start, before anything is played', () => {
     expect(transport.status()).toEqual({ playing: false, column: 0 });
@@ -137,6 +140,86 @@ describe('GridTransport', () => {
   it('refuses to play after disposal', async () => {
     transport.dispose();
     await transport.play(gridWith(), CLIPS, 32);
+    expect(transport.playing).toBe(false);
+  });
+});
+
+// LIVE EDITING. The grid is playable while it is edited, which is the
+// point of a page like this: you place a clip and hear it come round.
+describe('GridTransport live editing', () => {
+  it('keeps playing, and keeps its place, when a clip is placed mid-play', async () => {
+    await transport.play(gridWith(), CLIPS, 32);
+    await advance(3);
+    const before = transport.status().column;
+    // Another copy, further down the grid than the playhead has reached.
+    const edited = gridWith({
+      rows: [placeClip(placeClip({ id: 'row1', clipId: 'c1', placements: [], levels: [] }, CLIP, 0), CLIP, 16)],
+    });
+    transport.update(edited, CLIPS, 32);
+    expect(transport.playing).toBe(true);
+    // The playhead did NOT jump: a placement is spliced into the pass in
+    // flight rather than re-cueing it.
+    expect(transport.status().column).toBeGreaterThanOrEqual(before);
+    expect(transport.status().column).toBeLessThan(before + 1);
+  });
+
+  // A tempo change cannot be spliced in — every start time in the pass
+  // is measured through the envelope — so it re-cues from where the
+  // playhead is rather than silently playing the old timing.
+  it('re-cues from the playhead when the tempo changes mid-play', async () => {
+    await transport.play(gridWith(), CLIPS, 32);
+    await advance(4);
+    const before = transport.status().column;
+    expect(before).toBeGreaterThan(1);
+    transport.update(gridWith({ tempo: setTempoPoint(emptyGrid(120).tempo, 0, 180) }), CLIPS, 32);
+    expect(transport.playing).toBe(true);
+    // It picks up where it was, not back at the top.
+    expect(transport.status().column).toBeGreaterThanOrEqual(before - 1);
+  });
+
+  it('follows a loop set mid-play instead of walking the whole grid', async () => {
+    await transport.play(gridWith(), CLIPS, 32);
+    await advance(1);
+    transport.update(gridWith({ loop: { start: 0, end: 4 } }), CLIPS, 32);
+    // Well past the 4-beat loop's 2 s: a transport still walking the
+    // whole grid would be far beyond column 4.
+    await advance(6);
+    expect(transport.playing).toBe(true);
+    expect(transport.status().column).toBeLessThan(4);
+  });
+
+  it('an edit while stopped changes nothing about being stopped', () => {
+    transport.update(gridWith(), CLIPS, 32);
+    expect(transport.playing).toBe(false);
+  });
+
+  // A stop the page asked for WINS over a re-cue still in flight —
+  // leaving the page is a stop, and the pending play must not undo it.
+  it('a stop during a re-cue stays stopped', async () => {
+    await transport.play(gridWith(), CLIPS, 32);
+    await advance(2);
+    transport.update(gridWith({ loop: { start: 0, end: 8 } }), CLIPS, 32);
+    transport.stop();
+    await advance(1);
+    expect(transport.playing).toBe(false);
+  });
+});
+
+describe('GridTransport pause', () => {
+  it('keeps the place, so playing again resumes there', async () => {
+    await transport.play(gridWith(), CLIPS, 32);
+    await advance(3);
+    const at = transport.pause();
+    expect(transport.playing).toBe(false);
+    expect(at).toBeGreaterThan(1);
+    // The place SURVIVES the pause: that is the whole difference from a
+    // stop, which leaves the next play to say where to start.
+    expect(transport.status().column).toBeCloseTo(at, 6);
+  });
+
+  it('seek parks the playhead while stopped', () => {
+    transport.seek(12);
+    expect(transport.status().column).toBe(12);
     expect(transport.playing).toBe(false);
   });
 });

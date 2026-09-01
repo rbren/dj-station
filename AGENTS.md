@@ -2414,10 +2414,68 @@ of the page.
   quiet like Clip/Library. The page stays MOUNTED and hides itself so the
   arrangement survives a tab switch, and stops its own playback when
   `active` goes false.
-- Deliberately absent for now: persistence (the arrangement lives in page
-  state only), per-row level/mute, engine routing, undo.
-- Tests: `app/tests/Grid.test.ts` (arithmetic), `GridTransport.test.ts`
-  (clock, fake timers), `GridView.test.tsx` (picker/placement/loop/tempo).
+- PITCH IS PRESERVED: a clip is TIME-STRETCHED to the grid's tempo, never
+  resampled. `beat_clip_audio` takes an optional `bpm` and runs the
+  existing WSOLA stretcher (`crates/dj-analysis/src/beats/warp.rs`
+  `render` over a single-segment `WarpMap`); the webview plays the buffer
+  at rate 1.0. `ScheduledClip` therefore carries `bpm`, NOT a playback
+  `rate` — a rate is what used to transpose every clip up with the tempo.
+  Tempos are quantized to whole bpm (`renderBpm`) so a ramp needs a
+  bounded number of renders, and buffers are cached keyed `clipId@bpm`.
+- A PLACED CLIP IS ONE BLOCK, drawn behind the cells (`.grid-clip`,
+  positioned over its span) with its waveform inside it
+  (`beat_clip_peaks`, a new command) and its ones marked as hairlines.
+  Only the block's two ends are rounded, so a clip reads as one thing.
+  The cells above stay the click targets and keep `data-kind`
+  (`empty|beat|one|lead`) plus `data-edge` (`start|mid|end|none`).
+- Bar lines sit on the LEFT of a bar's first beat, in the ruler and the
+  cells alike (`border-left`). On the right they fell between beats 1 and
+  2, which drew the first bar a beat short.
+- EVERY ROW HAS A LEVEL LINE through its middle: 1 = unity, `MAX_LEVEL` =
+  2, and a resting row draws a dimmed flat line and hands the player a
+  single unity point. cmd/ctrl+click writes a breakpoint (the gesture is
+  on the ROW, not the line — a 1 px line is not a hit target), drag moves
+  it, right-click removes it. The first point on a resting row brings a
+  unity point at beat 0 with it, so the line BENDS from the middle rather
+  than jumping. Levels reach the sound as a `GainNode` ramp per copy
+  (`ScheduledClip.levels`).
+- DRAG-SELECT across cells marks a rectangle (rows by id, columns as a
+  range); cmd+C copies the placements ANCHORED inside it, measured from
+  the selection's left edge, and cmd+V pastes at the PLAYHEAD's beat.
+  Paste replaces rather than toggles. Backspace clears the selection's
+  copies, Escape drops the selection. Placing stays on `onClick`, which
+  fires only when press and release share a cell.
+- KEYS (guarded by `isEditableTarget`, and off while a dialog is open):
+  space = play/pause, left/right = one beat, cmd+arrow = a bar,
+  ctrl+arrow = to the ends, cmd+C/V, Backspace, Escape.
+- THE GRID IS LIVE WHILE IT PLAYS. `GridTransport.update` takes a new
+  state after every edit: a new placement is spliced into the pass in
+  flight and fires on its own beat (copies are remembered per pass by
+  `rowId:start`, so nothing re-triggers). A TEMPO or LOOP change cannot
+  be spliced — every start time is measured through the envelope from the
+  pass's beginning — so it re-cues from the playhead. `#cueing` keeps
+  `playing` true across that async re-cue; an explicit `stop()` cancels
+  the cue and wins.
+- `pause()` keeps the place (`seek()` parks it while stopped); that is
+  the only difference from `stop()`.
+- SAVE / SAVE AS / OPEN / NEW: `grid_save`/`grid_load`/`grid_list` in
+  `beat_clip.rs` file JSON under `<data dir>/grids/<name>.json`, name-
+  validated by the patch rule. The document is the frontend's
+  (`toDocument`/`fromDocument`, version 1) and NAMES its clips by id
+  rather than embedding audio, so a re-cut clip is heard in every grid
+  that uses it. `fromDocument` defaults every missing field — an older
+  file still opens — and throws only for input that is not a grid at all.
+  New/Open warn when there is work to lose; `isEmptyGrid` is what New
+  makes, so it needs no warning.
+- The picker orders tracks by MEDIAN clip tempo, slowest first: the grid
+  runs at one master tempo, so how far a track must be stretched to sit
+  on it is the useful sort. Median, not mean — one half-time clip should
+  not drag its track's number down.
+- Deliberately absent for now: engine routing, undo, per-row mute.
+- Tests: `app/tests/Grid.test.ts` (arithmetic, levels, selection/paste,
+  the document), `GridTransport.test.ts` (clock, live edits, pause — fake
+  timers), `GridView.test.tsx` (picker order, placement, clip blocks,
+  levels, selection, files, keys).
 
 ## Manager
 

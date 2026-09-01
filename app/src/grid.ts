@@ -34,12 +34,29 @@ import { MAX_BPM, MIN_BPM } from './decks';
  *  first one still lands where the user clicked). */
 export type Placement = number;
 
+/** One point on a row's level line: the gain in force from `beat`. */
+export interface LevelPoint {
+  beat: number;
+  /** 0..=`MAX_LEVEL`, where 1 is unity — the line's resting middle. */
+  level: number;
+}
+
 export interface GridRow {
   /** Stable across re-orders and clip reloads; the layout is keyed by it. */
   id: string;
   clipId: string;
   placements: Placement[];
+  /** The row's level automation. EMPTY is the normal state and means
+   *  unity all the way across — the flat line drawn down the middle of
+   *  the row, which is why a row that has never been touched needs no
+   *  points to say what it does. */
+  levels: LevelPoint[];
 }
+
+/** The top of a row's level line. Unity sits at the MIDDLE of the row
+ *  (the line's default), so the line can be pushed up as far as it can
+ *  be pulled down — a row can be made louder, not only quieter. */
+export const MAX_LEVEL = 2;
 
 /** One master-tempo breakpoint: the tempo the grid runs at from `beat`. */
 export interface TempoPoint {
@@ -97,7 +114,12 @@ export function nextRowId(rows: readonly GridRow[]): string {
  *  that already has rows lands beside them, so a track's group stays one
  *  block and its title keeps being said once. */
 export function addRow(state: GridState, clip: BeatClipEntry): GridState {
-  const row: GridRow = { id: nextRowId(state.rows), clipId: clip.clipId, placements: [] };
+  const row: GridRow = {
+    id: nextRowId(state.rows),
+    clipId: clip.clipId,
+    placements: [],
+    levels: [],
+  };
   return { ...state, rows: [...state.rows, row] };
 }
 
@@ -292,6 +314,194 @@ export function clearTempo(tempo: GridTempo): GridTempo {
   return { ...tempo, points: [] };
 }
 
+// ---------------------------------------------------------------------------
+// Row level (the line drawn through each row)
+// ---------------------------------------------------------------------------
+
+export function clampLevel(level: number): number {
+  if (!Number.isFinite(level)) return 1;
+  return Math.min(MAX_LEVEL, Math.max(0, level));
+}
+
+/** The gain in force at `beat`. No points is unity everywhere — the flat
+ *  line down the middle — and outside the points the end values hold, so
+ *  a fade written at the end stays faded. */
+export function levelAt(row: GridRow, beat: number): number {
+  const points = [...row.levels].sort((a, b) => a.beat - b.beat);
+  if (points.length === 0) return 1;
+  if (beat <= points[0].beat) return points[0].level;
+  const last = points[points.length - 1];
+  if (beat >= last.beat) return last.level;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    if (beat <= b.beat) {
+      const span = b.beat - a.beat;
+      if (span <= 0) return b.level;
+      return a.level + ((b.level - a.level) * (beat - a.beat)) / span;
+    }
+  }
+  return last.level;
+}
+
+/** Add (or move, when one already sits there) a level point. The FIRST
+ *  point on a resting row would otherwise redefine the whole line by
+ *  itself — a single point holds its value everywhere — so it brings a
+ *  unity point at beat 0 with it, and the line bends from the middle
+ *  rather than jumping to the new value. */
+export function setLevelPoint(row: GridRow, beat: number, level: number): GridRow {
+  const at = Math.max(0, Math.round(beat));
+  const seeded =
+    row.levels.length === 0 && at > 0 ? [{ beat: 0, level: 1 }] : [...row.levels];
+  const kept = seeded.filter((p) => Math.abs(p.beat - at) > TEMPO_EPSILON);
+  return {
+    ...row,
+    levels: [...kept, { beat: at, level: clampLevel(level) }].sort((a, b) => a.beat - b.beat),
+  };
+}
+
+/** Move the level point nearest `fromBeat` — what a drag reports, since
+ *  the line renumbers itself whenever one point passes another. */
+export function moveLevelPoint(
+  row: GridRow,
+  fromBeat: number,
+  beat: number,
+  level: number,
+): GridRow {
+  return setLevelPoint(removeLevelPoint(row, fromBeat), beat, level);
+}
+
+export function removeLevelPoint(row: GridRow, beat: number): GridRow {
+  let best = -1;
+  for (let i = 0; i < row.levels.length; i += 1) {
+    if (best < 0 || Math.abs(row.levels[i].beat - beat) < Math.abs(row.levels[best].beat - beat))
+      best = i;
+  }
+  if (best < 0) return row;
+  return { ...row, levels: row.levels.filter((_, i) => i !== best) };
+}
+
+// ---------------------------------------------------------------------------
+// Selection and clipboard
+// ---------------------------------------------------------------------------
+
+/** A rectangle of the grid: some rows, some columns. Rows are held by
+ *  ID rather than index so a selection survives a row being added. */
+export interface GridSelection {
+  rowIds: string[];
+  columns: ColumnRange;
+}
+
+/** What a copy took: for each row, the placements inside the selection
+ *  measured FROM ITS LEFT EDGE, so a paste can land anywhere. */
+export interface GridClipboard {
+  rows: { clipId: string; offsets: number[] }[];
+  width: number;
+}
+
+/** The selection a drag from cell (rowA, colA) to (rowB, colB) makes:
+ *  every row between the two, and the columns they span. */
+export function selectionFromDrag(
+  rows: readonly GridRow[],
+  rowA: string,
+  colA: number,
+  rowB: string,
+  colB: number,
+): GridSelection | null {
+  const ia = rows.findIndex((r) => r.id === rowA);
+  const ib = rows.findIndex((r) => r.id === rowB);
+  if (ia < 0 || ib < 0) return null;
+  const [lo, hi] = ia <= ib ? [ia, ib] : [ib, ia];
+  return {
+    rowIds: rows.slice(lo, hi + 1).map((r) => r.id),
+    columns: loopFromDrag(colA, colB),
+  };
+}
+
+export function inSelection(sel: GridSelection | null, rowId: string, col: number): boolean {
+  if (!sel) return false;
+  return sel.rowIds.includes(rowId) && inRange(sel.columns, col);
+}
+
+/** A placement counts as inside a selection when the beat it is ANCHORED
+ *  by is: the anchor is where the user put the clip, so it is the part
+ *  of it the selection is really about. */
+function anchorOf(clip: BeatClipEntry, start: Placement): number {
+  return start + leadOne(clip);
+}
+
+export function copySelection(
+  state: GridState,
+  clips: ReadonlyMap<string, BeatClipEntry>,
+  sel: GridSelection,
+): GridClipboard {
+  const rows = sel.rowIds.flatMap((id) => {
+    const row = state.rows.find((r) => r.id === id);
+    const clip = row && clips.get(row.clipId);
+    if (!row || !clip) return [];
+    const offsets = row.placements
+      .filter((start) => inRange(sel.columns, anchorOf(clip, start)))
+      .map((start) => anchorOf(clip, start) - sel.columns.start);
+    return [{ clipId: row.clipId, offsets }];
+  });
+  return { rows, width: sel.columns.end - sel.columns.start };
+}
+
+/** Paste at `col` — the playhead's column, which is where the user can
+ *  see the music is. Each copied row goes back to a row playing the SAME
+ *  CLIP (the one it came from if it is still there), so a paste means
+ *  the same thing after the rows have been re-ordered. */
+export function pasteAt(
+  state: GridState,
+  clips: ReadonlyMap<string, BeatClipEntry>,
+  board: GridClipboard,
+  col: number,
+): GridState {
+  const used = new Set<string>();
+  const rows = state.rows.map((row) => row);
+  for (const copied of board.rows) {
+    const target = rows.find((r) => r.clipId === copied.clipId && !used.has(r.id));
+    const clip = clips.get(copied.clipId);
+    if (!target || !clip) continue;
+    used.add(target.id);
+    let next = target;
+    for (const offset of copied.offsets) next = placeAnchored(next, clip, col + offset);
+    rows[rows.indexOf(target)] = next;
+  }
+  return { ...state, rows };
+}
+
+/** Place a copy anchored at `col` WITHOUT the click's toggle: pasting
+ *  onto a beat that already plays should leave the clip there, not take
+ *  it away. */
+function placeAnchored(row: GridRow, clip: BeatClipEntry, col: number): GridRow {
+  const start = col - leadOne(clip);
+  const span = placementSpan(clip, start);
+  const kept = row.placements.filter((other) => {
+    const o = placementSpan(clip, other);
+    return o.end <= span.start || o.start >= span.end;
+  });
+  return { ...row, placements: [...kept, start].sort((a, b) => a - b) };
+}
+
+/** Take every placement anchored inside the selection away. */
+export function deleteSelection(
+  state: GridState,
+  clips: ReadonlyMap<string, BeatClipEntry>,
+  sel: GridSelection,
+): GridState {
+  const rows = state.rows.map((row) => {
+    if (!sel.rowIds.includes(row.id)) return row;
+    const clip = clips.get(row.clipId);
+    if (!clip) return row;
+    return {
+      ...row,
+      placements: row.placements.filter((start) => !inRange(sel.columns, anchorOf(clip, start))),
+    };
+  });
+  return { ...state, rows };
+}
+
 /** The pieces beat->time integrates over: the envelope between 0 and
  *  `upto`, cut at every breakpoint inside it. */
 function tempoSegments(tempo: GridTempo, upto: number) {
@@ -394,26 +604,35 @@ export function inRange(range: ColumnRange, col: number): boolean {
 // What a player has to do
 // ---------------------------------------------------------------------------
 
-/** One clip copy to sound: which clip, when it starts (seconds from the
- *  grid's beat 0), how far into the clip that is, and how fast it has to
- *  run to sit on the grid's beats. */
+/** One clip copy to sound: which clip, at which tempo, when it starts
+ *  (seconds from the range's beginning) and how much of it to play. */
 export interface ScheduledClip {
+  /** Identifies the copy across re-schedules, so a grid edited DURING
+   *  playback re-lays only what has not been heard yet. */
+  key: string;
   rowId: string;
   clipId: string;
-  /** Grid time the copy begins sounding. */
+  /** The tempo the copy's audio has to be RE-TIMED to (whole bpm, so a
+   *  ramp asks for a bounded number of renders). The player fetches the
+   *  clip stretched to this and plays it at rate 1.0 — the stretch keeps
+   *  the pitch, which resampling would not. Constant per copy: a copy
+   *  that straddles a ramp rides the tempo it started on, the honest
+   *  thing a fixed buffer can do. */
+  bpm: number;
+  /** Grid time the copy begins sounding, from the range's start. */
   atSecs: number;
-  /** Seconds INTO the clip that moment is — non-zero only for a copy
-   *  that starts before the grid does (a placement anchored so far left
-   *  that its head is off-grid) or before the play range begins. */
+  /** The copy's first beat, as a grid column — where its level is read
+   *  from, and what a paste or a selection measures it by. */
+  atBeat: number;
+  /** Seconds INTO the (re-timed) clip that moment is — non-zero only for
+   *  a copy cut into part-way, by the grid's edge or the range's. */
   offsetSecs: number;
-  /** Seconds of the clip to play; the copy is cut where the play range
-   *  ends so a loop never bleeds past its own edge. */
+  /** Seconds to play; the copy is cut where the play range ends so a
+   *  loop never bleeds past its own edge. */
   durationSecs: number;
-  /** Sample-rate scaling: the grid's tempo where the copy starts against
-   *  the tempo the clip was cut at. Constant per copy — a copy that
-   *  straddles a tempo ramp rides the tempo it started on, which is the
-   *  honest thing a fixed-rate buffer can do. */
-  rate: number;
+  /** The row's level over the copy, as `[secsFromCopyStart, gain]` — one
+   *  point for a resting row, more where the line bends under it. */
+  levels: [number, number][];
 }
 
 /** Every clip copy that sounds inside `range`, in start order. Placements
@@ -430,29 +649,124 @@ export function scheduleRange(
   for (const row of state.rows) {
     const clip = clips.get(row.clipId);
     if (!clip || clip.bpm <= 0) continue;
-    const clipSecsPerBeat = 60 / clip.bpm;
     for (const start of row.placements) {
       const span = placementSpan(clip, start);
       if (span.end <= range.start || span.start >= range.end) continue;
       const from = Math.max(span.start, range.start);
       const fromSecs = beatToSecs(state.tempo, from);
-      const rate = bpmAt(state.tempo, from) / clip.bpm;
-      // Where the grid is when the copy is cut in: its own beats, at its
-      // own tempo, scaled by nothing — the offset is a position in the
-      // clip's material.
-      const offsetSecs = Math.max(0, from - span.start) * clipSecsPerBeat;
+      const bpm = renderBpm(bpmAt(state.tempo, from));
+      // The copy's audio is re-timed to `bpm`, so a beat of it lasts a
+      // beat of the grid: the offset is that many of the grid's beats,
+      // not the clip's original ones.
+      const secsPerBeat = 60 / bpm;
+      const offsetSecs = Math.max(0, from - span.start) * secsPerBeat;
       const untilSecs = Math.min(beatToSecs(state.tempo, span.end), rangeEndSecs);
       const gridSecs = Math.max(0, untilSecs - fromSecs);
       if (gridSecs <= 0) continue;
       out.push({
+        key: `${row.id}:${start}`,
         rowId: row.id,
         clipId: row.clipId,
+        bpm,
         atSecs: fromSecs - rangeStartSecs,
+        atBeat: from,
         offsetSecs,
-        durationSecs: gridSecs * rate,
-        rate,
+        durationSecs: gridSecs,
+        levels: levelRamp(state, row, from, Math.min(span.end, range.end)),
       });
     }
   }
   return out.sort((a, b) => a.atSecs - b.atSecs);
+}
+
+/** Tempos are QUANTIZED before a stretch is asked for. Every distinct
+ *  value costs a WSOLA render and a cache slot, and a ramp passes
+ *  through a continuum of them; whole bpm is finer than anyone can hear
+ *  on one clip and leaves the cache a bounded, reusable set. */
+export function renderBpm(bpm: number): number {
+  return Math.round(clampBpm(bpm));
+}
+
+/** The row's level across one copy, as offsets in seconds from where the
+ *  copy starts. A resting row gives a single unity point (the flat line
+ *  down the middle); a row with automation gives the value at each end
+ *  plus every bend between, which the player ramps through. */
+function levelRamp(
+  state: GridState,
+  row: GridRow,
+  fromBeat: number,
+  toBeat: number,
+): [number, number][] {
+  const at = (beat: number): [number, number] => [
+    Math.max(0, beatToSecs(state.tempo, beat) - beatToSecs(state.tempo, fromBeat)),
+    levelAt(row, beat),
+  ];
+  if (row.levels.length === 0) return [[0, 1]];
+  const inside = row.levels
+    .map((p) => p.beat)
+    .filter((beat) => beat > fromBeat && beat < toBeat)
+    .sort((a, b) => a - b);
+  return [at(fromBeat), ...inside.map(at), at(toBeat)];
+}
+
+// ---------------------------------------------------------------------------
+// The document (Save / Save As / Open / New)
+// ---------------------------------------------------------------------------
+
+/** What a saved arrangement is on disk. The clips themselves are NOT in
+ *  here — a grid file points at library clips by id, the way a patch
+ *  points at them, so saving an arrangement never copies audio and a
+ *  re-cut clip is heard in every grid that uses it. */
+export interface GridDocument {
+  version: 1;
+  state: GridState;
+}
+
+export const GRID_DOC_VERSION = 1;
+
+export function toDocument(state: GridState): GridDocument {
+  return { version: GRID_DOC_VERSION, state };
+}
+
+/** Read a saved arrangement, filling in anything a file does not say.
+ *  Throws only for input that is not a grid file at all — a missing
+ *  field is a default, not an error, so a file saved by an older build
+ *  still opens. */
+export function fromDocument(raw: unknown): GridState {
+  const doc = raw as Partial<GridDocument> | null;
+  const state = doc?.state as Partial<GridState> | undefined;
+  if (!state || !Array.isArray(state.rows)) throw new Error('not a grid file');
+  const tempo = state.tempo ?? { bpm: 120, points: [] };
+  return {
+    rows: state.rows.map((row, i) => ({
+      id: row?.id ?? `row${i + 1}`,
+      clipId: String(row?.clipId ?? ''),
+      placements: Array.isArray(row?.placements) ? row.placements.map(Number) : [],
+      levels: Array.isArray(row?.levels)
+        ? row.levels.map((p) => ({ beat: Number(p.beat), level: clampLevel(Number(p.level)) }))
+        : [],
+    })),
+    tempo: {
+      bpm: clampBpm(Number(tempo.bpm ?? 120)),
+      points: Array.isArray(tempo.points)
+        ? tempo.points.map((p) => ({ beat: Number(p.beat), bpm: clampBpm(Number(p.bpm)) }))
+        : [],
+    },
+    beats: Math.max(1, Math.round(Number(state.beats ?? GRID_MIN_BEATS))),
+    loop: state.loop
+      ? { start: Number(state.loop.start), end: Number(state.loop.end) }
+      : null,
+  };
+}
+
+/** Is there anything in this grid worth warning about losing? A grid
+ *  with no rows and nothing written on it is what New makes, so it can
+ *  be replaced without asking. */
+export function isEmptyGrid(state: GridState): boolean {
+  return (
+    state.rows.length === 0 &&
+    state.tempo.points.length === 0 &&
+    state.loop === null &&
+    state.beats === GRID_MIN_BEATS
+  );
 }

@@ -27,6 +27,10 @@ function makeApi(status: BeatClipStatus): BeatClipApi {
     status: vi.fn().mockResolvedValue(status),
     delete: vi.fn().mockResolvedValue([]),
     audio: vi.fn().mockResolvedValue(null),
+    peaks: vi.fn().mockResolvedValue([]),
+    gridSave: vi.fn().mockResolvedValue(undefined),
+    gridLoad: vi.fn().mockResolvedValue(null),
+    gridList: vi.fn().mockResolvedValue([]),
   };
 }
 

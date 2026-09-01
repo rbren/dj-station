@@ -10,7 +10,18 @@ import {
   bpmAt,
   cellKind,
   clearRow,
+  copySelection,
+  deleteSelection,
   emptyGrid,
+  fromDocument,
+  isEmptyGrid,
+  levelAt,
+  moveLevelPoint,
+  pasteAt,
+  removeLevelPoint,
+  selectionFromDrag,
+  setLevelPoint,
+  toDocument,
   gridColumns,
   groupRows,
   leadOne,
@@ -43,7 +54,7 @@ function clip(over: Partial<BeatClipEntry> = {}): BeatClipEntry {
 }
 
 function row(over: Partial<GridRow> = {}): GridRow {
-  return { id: 'row1', clipId: 'c1', placements: [], ...over };
+  return { id: 'row1', clipId: 'c1', placements: [], levels: [], ...over };
 }
 
 describe('grid rows', () => {
@@ -249,27 +260,40 @@ describe('what the player is handed', () => {
   const c = clip({ beats: 4, bpm: 120, ones: [0] });
   const clips = new Map([['c1', c]]);
 
-  it('gives each copy its start, offset, length and rate', () => {
+  it('gives each copy its start, offset, length and tempo', () => {
     const state: GridState = {
       ...emptyGrid(120),
       rows: [placeClip(row(), c, 8)],
     };
     const [copy] = scheduleRange(state, clips, { start: 0, end: 32 });
     expect(copy.rowId).toBe('row1');
-    // 8 beats at 120 bpm = 4 s in, 4 beats = 2 s long, at its own tempo.
+    // 8 beats at 120 bpm = 4 s in, 4 beats = 2 s long.
     expect(copy.atSecs).toBeCloseTo(4, 6);
     expect(copy.offsetSecs).toBeCloseTo(0, 6);
     expect(copy.durationSecs).toBeCloseTo(2, 6);
-    expect(copy.rate).toBeCloseTo(1, 6);
+    expect(copy.bpm).toBe(120);
   });
 
-  it('runs a clip faster when the grid is faster than it was cut at', () => {
+  // THE PITCH RULE. A grid running faster than the clip was cut at asks
+  // for the clip RE-TIMED to the grid's tempo — a stretch the backend
+  // does with WSOLA — and plays it whole. It never asks for a playback
+  // rate, which is what used to transpose every clip on the grid up with
+  // the tempo.
+  it('asks for the clip at the GRID tempo rather than speeding it up', () => {
     const state: GridState = { ...emptyGrid(180), rows: [placeClip(row(), c, 0)] };
     const [copy] = scheduleRange(state, clips, { start: 0, end: 32 });
-    expect(copy.rate).toBeCloseTo(1.5, 6);
-    // The 4 clip-beats still take 4 grid beats — 4/3 s at 180 bpm — and
-    // the buffer has to cover 2 s of its own material to do it.
-    expect(copy.durationSecs).toBeCloseTo(2, 6);
+    expect(copy.bpm).toBe(180);
+    // 4 beats at 180 bpm is 4/3 s, and the re-timed audio is exactly
+    // that long: no rate scaling anywhere.
+    expect(copy.durationSecs).toBeCloseTo(4 / 3, 6);
+    expect(copy).not.toHaveProperty('rate');
+  });
+
+  it('quantizes the tempo it asks for, so a ramp needs finitely many renders', () => {
+    const tempo = { bpm: 120, points: [{ beat: 0, bpm: 120.4 }] };
+    const state: GridState = { ...emptyGrid(120), tempo, rows: [placeClip(row(), c, 0)] };
+    const [copy] = scheduleRange(state, clips, { start: 0, end: 32 });
+    expect(copy.bpm).toBe(120);
   });
 
   it('cuts a copy that starts before the range, and one that runs past it', () => {
@@ -293,5 +317,165 @@ describe('what the player is handed', () => {
   it('says nothing for a row whose clip is gone from the library', () => {
     const state: GridState = { ...emptyGrid(), rows: [placeClip(row(), c, 0)] };
     expect(scheduleRange(state, new Map(), { start: 0, end: 32 })).toEqual([]);
+  });
+});
+
+describe('the level line through a row', () => {
+  it('rests at unity everywhere until something is written on it', () => {
+    const r = row();
+    expect(levelAt(r, 0)).toBe(1);
+    expect(levelAt(r, 99)).toBe(1);
+  });
+
+  // A single point would otherwise redefine the WHOLE line — one point
+  // holds its value everywhere — so the first one brings a unity point
+  // at beat 0 and the line bends from the middle instead of jumping.
+  it('bends from the middle when the first point is written', () => {
+    const r = setLevelPoint(row(), 8, 0);
+    expect(r.levels).toEqual([
+      { beat: 0, level: 1 },
+      { beat: 8, level: 0 },
+    ]);
+    expect(levelAt(r, 0)).toBe(1);
+    expect(levelAt(r, 4)).toBeCloseTo(0.5, 6);
+    expect(levelAt(r, 8)).toBe(0);
+    // Past the last point the end value HOLDS: a fade stays faded.
+    expect(levelAt(r, 40)).toBe(0);
+  });
+
+  it('interpolates between points, and clamps what it is given', () => {
+    let r = setLevelPoint(row(), 0, 1);
+    r = setLevelPoint(r, 4, 99);
+    expect(r.levels[1].level).toBe(2);
+    expect(levelAt(r, 2)).toBeCloseTo(1.5, 6);
+    r = setLevelPoint(r, 4, -5);
+    expect(r.levels[1].level).toBe(0);
+  });
+
+  it('moves the point nearest a drag, and drops one on demand', () => {
+    let r = setLevelPoint(setLevelPoint(row(), 0, 1), 8, 0.25);
+    r = moveLevelPoint(r, 8, 12, 0.5);
+    expect(r.levels.map((p) => p.beat)).toEqual([0, 12]);
+    expect(levelAt(r, 12)).toBeCloseTo(0.5, 6);
+    r = removeLevelPoint(r, 12);
+    expect(r.levels.map((p) => p.beat)).toEqual([0]);
+  });
+
+  it('hands the player the level over each copy, so a fade is a ramp', () => {
+    const c = clip({ beats: 4, bpm: 120, ones: [0] });
+    const clips = new Map([['c1', c]]);
+    let r = placeClip(row(), c, 0);
+    r = setLevelPoint(r, 0, 1);
+    r = setLevelPoint(r, 4, 0);
+    const [copy] = scheduleRange({ ...emptyGrid(120), rows: [r] }, clips, { start: 0, end: 8 });
+    // Two seconds of clip at 120 bpm: unity at its head, silent at its
+    // tail, and the player ramps between them.
+    expect(copy.levels[0]).toEqual([0, 1]);
+    const [lastAt, lastLevel] = copy.levels[copy.levels.length - 1];
+    expect(lastAt).toBeCloseTo(2, 6);
+    expect(lastLevel).toBeCloseTo(0, 6);
+  });
+
+  it('gives a resting row one unity point rather than no envelope', () => {
+    const c = clip({ beats: 4, bpm: 120, ones: [0] });
+    const clips = new Map([['c1', c]]);
+    const state = { ...emptyGrid(120), rows: [placeClip(row(), c, 0)] };
+    const [copy] = scheduleRange(state, clips, { start: 0, end: 8 });
+    expect(copy.levels).toEqual([[0, 1]]);
+  });
+});
+
+describe('selection, copy and paste', () => {
+  const c = clip({ beats: 4, bpm: 120, ones: [1] });
+  const clips = new Map([['c1', c]]);
+
+  function twoRows(): GridState {
+    return {
+      ...emptyGrid(120),
+      rows: [
+        placeClip(row({ id: 'row1' }), c, 4),
+        placeClip(row({ id: 'row2', clipId: 'c1' }), c, 20),
+      ],
+    };
+  }
+
+  it('takes the rows between the two ends of a drag, in either direction', () => {
+    const state = twoRows();
+    const down = selectionFromDrag(state.rows, 'row1', 4, 'row2', 8);
+    expect(down?.rowIds).toEqual(['row1', 'row2']);
+    expect(down?.columns).toEqual({ start: 4, end: 9 });
+    // Dragging up selects the same rectangle.
+    const up = selectionFromDrag(state.rows, 'row2', 8, 'row1', 4);
+    expect(up).toEqual(down);
+  });
+
+  // A copy measures its clips from the selection's LEFT EDGE so it can
+  // land anywhere, and a clip belongs to a selection by its ANCHOR — the
+  // beat the user aimed at — not by every beat it covers.
+  it('copies by anchor, offset from the left edge, and pastes at a column', () => {
+    const state = twoRows();
+    const sel = selectionFromDrag(state.rows, 'row1', 4, 'row1', 7)!;
+    const board = copySelection(state, clips, sel);
+    // The clip is anchored at 4 and the selection starts at 4, so it
+    // sits at the left edge of what was copied.
+    expect(board.rows).toEqual([{ clipId: 'c1', offsets: [0] }]);
+    const pasted = pasteAt(state, clips, board, 12);
+    // Pasted at 12, the copy's own first one lands on 12 — so its body
+    // starts at 11, a beat earlier, exactly as a click there would.
+    expect(pasted.rows[0].placements).toContain(11);
+    expect(placementAt(pasted.rows[0], c, 12)).toBeGreaterThanOrEqual(0);
+  });
+
+  it('pasting over an existing copy leaves it there rather than toggling it off', () => {
+    const state = twoRows();
+    const sel = selectionFromDrag(state.rows, 'row1', 4, 'row1', 7)!;
+    const board = copySelection(state, clips, sel);
+    const pasted = pasteAt(state, clips, board, 5);
+    expect(pasted.rows[0].placements).toEqual([4]);
+  });
+
+  it('deletes every copy anchored inside a selection', () => {
+    const state = twoRows();
+    const sel = selectionFromDrag(state.rows, 'row1', 0, 'row2', 31)!;
+    const cleared = deleteSelection(state, clips, sel);
+    expect(cleared.rows.every((r) => r.placements.length === 0)).toBe(true);
+  });
+});
+
+describe('the grid document', () => {
+  const c = clip({ beats: 4, bpm: 120, ones: [0] });
+
+  it('round-trips a grid through save and open', () => {
+    let state: GridState = { ...emptyGrid(128), rows: [placeClip(row(), c, 8)] };
+    state = { ...state, loop: { start: 4, end: 20 }, beats: 64 };
+    state = { ...state, rows: [setLevelPoint(state.rows[0], 8, 0.5)] };
+    const reopened = fromDocument(JSON.parse(JSON.stringify(toDocument(state))));
+    expect(reopened).toEqual(state);
+  });
+
+  // A grid file NAMES its clips rather than carrying their audio, so it
+  // stays small and a re-cut clip is heard in every grid that uses it.
+  it('names the clips it uses rather than embedding them', () => {
+    const state: GridState = { ...emptyGrid(120), rows: [placeClip(row(), c, 0)] };
+    const json = JSON.stringify(toDocument(state));
+    expect(json).toContain('c1');
+    expect(json.length).toBeLessThan(500);
+  });
+
+  it('fills in what an older file does not say, and refuses what is not a grid', () => {
+    const sparse = fromDocument({ state: { rows: [{ clipId: 'c1' }] } });
+    expect(sparse.rows[0].placements).toEqual([]);
+    expect(sparse.rows[0].levels).toEqual([]);
+    expect(sparse.tempo.bpm).toBe(120);
+    expect(sparse.loop).toBeNull();
+    expect(() => fromDocument({ nope: true })).toThrow();
+    expect(() => fromDocument(null)).toThrow();
+  });
+
+  // What New makes needs no warning before it is replaced.
+  it('knows an untouched grid from one with work in it', () => {
+    expect(isEmptyGrid(emptyGrid())).toBe(true);
+    expect(isEmptyGrid({ ...emptyGrid(), rows: [row()] })).toBe(false);
+    expect(isEmptyGrid({ ...emptyGrid(), loop: { start: 0, end: 4 } })).toBe(false);
   });
 });

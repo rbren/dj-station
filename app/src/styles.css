@@ -6022,14 +6022,18 @@ body {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  padding-left: 2px;
   font-family: var(--font-mono);
   font-size: var(--fs-nano);
   color: var(--ink-dim);
-  border-right: 1px solid transparent;
+  /* The bar line goes on the LEFT of the bar's first beat: a bar STARTS
+     at its downbeat. On the right it fell between beats 1 and 2, which
+     drew bar 1 a beat short — the first bar looked cut off. */
+  border-left: 1px solid transparent;
 }
 .grid-ruler-cell[data-bar='true'] {
-  border-right-color: var(--line);
+  border-left-color: var(--line);
   color: var(--ink-muted);
 }
 .grid-ruler-cell[data-loop='true'] {
@@ -6049,36 +6053,115 @@ body {
 }
 .grid-cell {
   flex: none;
+  position: relative;
+  z-index: 2;
   height: 100%;
   padding: 0;
   box-sizing: border-box;
   border: none;
-  border-right: 1px solid var(--line);
-  background: var(--surface);
+  /* Beat lines on the LEFT, matching the ruler above, so a bar line is
+     the same line all the way down the page. */
+  border-left: 1px solid var(--line);
+  background: transparent;
   cursor: pointer;
 }
+.grid-row-cells {
+  position: relative;
+  background: var(--surface);
+}
 .grid-cell:hover {
-  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
 }
-/* The clip laid out on the row. A ONE is a downbeat the clip's own grid
-   marks; the LEAD one is the beat the placement is anchored by — the beat
-   sitting exactly where the click landed, so it wears the strongest of
-   the three colours. */
-.grid-cell[data-kind='beat'] {
+/* A PLACED CLIP IS ONE BLOCK, drawn behind the cells: the cells above it
+   only take clicks and mark the ones, so a 4-beat clip reads as a clip
+   and not as four adjacent squares. Only the block's two ENDS are
+   rounded, which is what makes it look contiguous. */
+.grid-clip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--wave) 55%, var(--canvas));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wave) 80%, var(--canvas));
+  pointer-events: none;
 }
+.grid-clip-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.grid-clip-wave polygon {
+  fill: color-mix(in srgb, var(--ink) 30%, transparent);
+}
+/* The ones INSIDE the block: a hairline at each downbeat the clip's own
+   grid marks, and a brighter one at the beat the placement is anchored
+   by — the beat that landed where the click did. */
+.grid-clip-one {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--loop) 85%, transparent);
+}
+.grid-clip-one[data-lead='true'] {
+  width: 3px;
+  background: var(--ok);
+  box-shadow: 0 0 4px var(--ok);
+}
+/* The cells still say what they are over, for the keyboard and for tests,
+   but the colour they add over the block is slight: the block is the
+   clip, and this is only emphasis on its downbeats. */
 .grid-cell[data-kind='one'] {
-  background: color-mix(in srgb, var(--loop) 70%, var(--canvas));
+  background: color-mix(in srgb, var(--loop) 25%, transparent);
 }
 .grid-cell[data-kind='lead'] {
-  background: color-mix(in srgb, var(--ok) 70%, var(--canvas));
-  box-shadow: inset 0 0 0 1px var(--ok);
+  background: color-mix(in srgb, var(--ok) 25%, transparent);
 }
 .grid-cell[data-loop='true'][data-kind='empty'] {
-  background: color-mix(in srgb, var(--loop) 12%, var(--surface));
+  background: color-mix(in srgb, var(--loop) 12%, transparent);
+}
+.grid-cell[data-selected='true'] {
+  background: color-mix(in srgb, var(--accent, var(--ok)) 25%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--ok)) 60%, transparent);
 }
 .grid-cell[data-now='true'] {
   box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+/* THE LEVEL LINE through a row: unity down the middle until someone
+   writes on it. It takes no pointer events except through its own
+   handler (cmd/ctrl+click), so the cells above stay clickable. */
+.grid-level {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.grid-level-svg {
+  width: 100%;
+  height: 100%;
+}
+.grid-level-svg polyline {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink) 35%, transparent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.grid-level[data-written='true'] .grid-level-svg polyline {
+  stroke: var(--ok);
+  stroke-width: 1.5;
+}
+.grid-level-point {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 1px var(--canvas);
 }
 .grid-playhead {
   position: absolute;
