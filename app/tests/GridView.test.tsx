@@ -11,6 +11,7 @@ import {
   GridView,
   grabBeats,
   loopEdgeAt,
+  zoomAnchor,
   zoomBy,
   MAX_ZOOM,
   MIN_ZOOM,
@@ -670,6 +671,51 @@ describe('grid zoom', () => {
   });
 });
 
+// ZOOMING ABOUT THE POINTER. The scroller is put back to
+// `beat * cellW - x` afterwards, so these two numbers are the whole of
+// whether a zoom holds still or throws the view sideways.
+describe('the zoom anchor', () => {
+  // Beat 0 sits at viewport x 222 when nothing is scrolled: the window's
+  // edge, the body's padding and the 210 px gutter.
+  const ORIGIN = 222;
+  /** The ruler's viewport left, which scrolls with the content. */
+  const rulerLeft = (scroll: number) => ORIGIN - scroll;
+
+  it('takes the beat under the pointer, unscrolled', () => {
+    expect(zoomAnchor(ORIGIN + 10 * 22, rulerLeft(0), 0, 22)).toEqual({ beat: 10, x: 220 });
+  });
+
+  it('takes the scroll OUT of the offset it holds', () => {
+    // The same beat, now scrolled to the very left of the lanes. Read as
+    // `contentX` — the old arithmetic — this would have been 220, and the
+    // zoom would have jumped the view by a bar.
+    expect(zoomAnchor(ORIGIN, rulerLeft(220), 220, 22)).toEqual({ beat: 10, x: 0 });
+  });
+
+  it('puts the beat back under the pointer at the new zoom', () => {
+    const clientX = ORIGIN + 100;
+    for (const scroll of [220, 517, 1000]) {
+      for (const next of [11, 33, 44]) {
+        const hold = zoomAnchor(clientX, rulerLeft(scroll), scroll, 22);
+        // What the effect does after the zoom lands.
+        const scrolled = hold.beat * next - hold.x;
+        expect(scrolled).toBeGreaterThanOrEqual(0);
+        // Where that beat ends up on screen: back under the pointer.
+        expect(ORIGIN - scrolled + hold.beat * next).toBeCloseTo(clientX, 6);
+      }
+    }
+  });
+
+  it('gives up gracefully at the left end, where there is no scroll to give', () => {
+    // Zoomed out with the grid already against its left edge, holding the
+    // pointer's beat would need a NEGATIVE scroll. The clamp wins and the
+    // view simply stays at the start — the one case a zoom cannot be
+    // perfectly still, and it is the browser's floor, not an error.
+    const hold = zoomAnchor(ORIGIN + 100, rulerLeft(0), 0, 22);
+    expect(hold.beat * 11 - hold.x).toBeLessThan(0);
+  });
+});
+
 describe('loop edges', () => {
   const loop = { start: 8, end: 16 };
 
@@ -970,5 +1016,123 @@ describe('Grid paint (CSS-level pin)', () => {
     expect(zOf('.grid-ruler')).toBeGreaterThan(zOf('.grid-cell'));
     // An opaque title blocks the grid scrolling under it.
     expect(rule('.grid-row-title')).toMatch(/background:\s*var\(--canvas\)/);
+  });
+});
+
+// A CLICK ON THE RULER AIMS THE PAGE: it says where playback starts and
+// where a paste lands. The gesture reached `seekTo` already and the
+// readout in the header moved, but on screen nothing did — which is the
+// only part the user can see.
+describe('the ruler click, end to end', () => {
+  /** Press and release on one column of the ruler: a click, not a drag. */
+  function clickRuler(col: number) {
+    const ruler = screen.getByTestId('grid-ruler');
+    fireEvent.mouseDown(ruler, { clientX: col * 22 });
+    fireEvent.mouseUp(ruler, { clientX: col * 22 });
+  }
+
+  /** Mark a loop over columns `from`..`to` inclusive. */
+  async function markLoop(from: number, to: number) {
+    const ruler = screen.getByTestId('grid-ruler');
+    fireEvent.mouseDown(ruler, { clientX: from * 22 });
+    fireEvent.mouseMove(document.body, { clientX: to * 22 });
+    fireEvent.mouseUp(document.body, { clientX: to * 22 });
+    await waitFor(() => expect(screen.getByTestId('grid-loop-handle-start')).toBeTruthy());
+  }
+
+  it('SHOWS the playhead where it was put, with the grid stopped', async () => {
+    show();
+    await addClip('h1', 'c1');
+    clickRuler(5);
+    // The playhead was drawn only while the grid was PLAYING, so aiming a
+    // stopped grid moved a marker nobody could see.
+    const head = await screen.findByTestId('grid-playhead');
+    expect(head.style.left).toBe(`${5 * 22}px`);
+    expect(head.getAttribute('data-playing')).toBe('false');
+    // …and the beat it sits on is lit, so a paste target is a column and
+    // not a hairline.
+    expect(screen.getByTestId('grid-now').style.left).toBe(`${5 * 22}px`);
+  });
+
+  it('puts the playhead OUTSIDE a marked loop when that is where the click was', async () => {
+    show();
+    await addClip('h1', 'c1');
+    await markLoop(0, 3);
+    clickRuler(20);
+    // The seek was clamped to the range being PLAYED, which is the loop:
+    // once a loop was marked the playhead could not leave it, so every
+    // click past it landed on its last beat.
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-position').textContent).toContain('beat 21/'),
+    );
+    expect(screen.getByTestId('grid-playhead').style.left).toBe(`${20 * 22}px`);
+    // The loop is untouched: a click aims the playhead, it does not edit.
+    expect(screen.getByTestId('grid-ruler-2').getAttribute('data-loop')).toBe('true');
+    expect(screen.getByTestId('grid-ruler-20').getAttribute('data-loop')).toBe('false');
+  });
+
+  it('seeks on a click that lands on a loop EDGE, without redrawing the loop', async () => {
+    show();
+    await addClip('h1', 'c1');
+    await markLoop(4, 11);
+    clickRuler(4);
+    // Pressing an edge takes hold of it, but taking hold of something and
+    // letting go without moving is still a click.
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-position').textContent).toContain('beat 5/'),
+    );
+    expect(screen.getByTestId('grid-ruler-4').getAttribute('data-loop')).toBe('true');
+    expect(screen.getByTestId('grid-ruler-11').getAttribute('data-loop')).toBe('true');
+    expect(screen.getByTestId('grid-ruler-12').getAttribute('data-loop')).toBe('false');
+  });
+
+  it('still trims the loop when the press on an edge is DRAGGED', async () => {
+    show();
+    await addClip('h1', 'c1');
+    await markLoop(4, 11);
+    const ruler = screen.getByTestId('grid-ruler');
+    fireEvent.mouseDown(ruler, { clientX: 4 * 22 });
+    fireEvent.mouseMove(document.body, { clientX: 8 * 22 });
+    fireEvent.mouseUp(document.body, { clientX: 8 * 22 });
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-ruler-4').getAttribute('data-loop')).toBe('false'),
+    );
+    expect(screen.getByTestId('grid-ruler-8').getAttribute('data-loop')).toBe('true');
+    expect(screen.getByTestId('grid-ruler-11').getAttribute('data-loop')).toBe('true');
+  });
+
+  it('parks the TRANSPORT there too, so play starts from the click', async () => {
+    const transport = new GridTransport(makeClips());
+    const seek = vi.spyOn(transport, 'seek');
+    const play = vi.spyOn(transport, 'play');
+    render(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
+    await screen.findByTestId('grid-ruler');
+
+    clickRuler(12);
+    await waitFor(() => expect(seek).toHaveBeenCalledWith(12));
+    // The page's marker and the transport's own place agree: a seek while
+    // STOPPED parks the playhead rather than only moving a highlight.
+    expect(transport.status().column).toBe(12);
+
+    fireEvent.keyDown(window, { key: ' ' });
+    expect(play).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.any(Number), 12);
+  });
+
+  it('pastes where the ruler was clicked, loop or no loop', async () => {
+    show();
+    await addClip('h1', 'c1');
+    fireEvent.click(screen.getByTestId('grid-cell-row1-0'));
+    await screen.findByTestId('grid-clip-row1-0');
+    fireEvent.mouseDown(screen.getByTestId('grid-cell-row1-0'));
+    fireEvent.mouseOver(screen.getByTestId('grid-cell-row1-3'));
+    fireEvent.mouseUp(screen.getByTestId('grid-cell-row1-3'));
+    fireEvent.keyDown(window, { key: 'c', metaKey: true });
+
+    await markLoop(0, 3);
+    clickRuler(20);
+    fireEvent.keyDown(window, { key: 'v', metaKey: true });
+    // The paste anchor is the playhead, so a playhead trapped inside the
+    // loop dropped the copy back on top of the original.
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-20')).toBeTruthy());
   });
 });

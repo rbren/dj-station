@@ -6249,6 +6249,11 @@ body {
   pointer-events: none;
   z-index: 4;
 }
+/* STOPPED, the playhead is still drawn — it is where playback will start
+   and where a paste lands — but quieter, because nothing is moving. */
+.grid-playhead[data-playing='false'] {
+  background: color-mix(in srgb, var(--ink) 55%, transparent);
+}
 /* The beat being played, lit across every row at once. Drawn here rather
    than marked on each cell so that the playhead moving does not re-render
    the grid — see GridRowCells. */
@@ -6259,6 +6264,9 @@ body {
   background: color-mix(in srgb, var(--ink) 14%, transparent);
   pointer-events: none;
   z-index: 3;
+}
+.grid-now[data-playing='false'] {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
 }
 
 /* The loop's edges, as handles. Wider than they look so they can be

@@ -2497,9 +2497,21 @@ of the page.
 - THE RULER: a drag marks the loop, a CLICK (press and release on one
   column) seeks the playhead there and marks nothing — it used to leave a
   one-beat loop behind. `loopDrag.moved` is what tells the two apart, and
-  it turns true only once the pointer has reached a different column;
-  grabbing an existing loop EDGE counts as moved from the press, so
-  trimming a loop never moves the playhead.
+  it turns true only once the pointer has reached a different column. A
+  press on a loop EDGE is not a drag either: it only chooses the pivot
+  (the loop's other end), so a click that happens to land on an edge
+  still seeks and leaves the loop alone.
+- THE PLAYHEAD IS DRAWN WHILE STOPPED, dimmed (`data-playing="false"` on
+  `.grid-playhead` and `.grid-now`). It is not a picture of the sound: it
+  is where play will start and where a paste lands, so a marker that
+  appeared only once the music ran made a click on the ruler look like it
+  had done nothing — which is exactly how it was reported.
+- A SEEK IS CLAMPED TO THE CURSOR'S RANGE, not to the loop. Stopped, the
+  playhead goes anywhere on the grid (`{0, columns}`): a loop is
+  something you mark on the music, not a pen the cursor is kept in, and
+  it is the paste anchor as well. PLAYING, it is clamped to `playRange` —
+  the transport cues inside the loop whatever it is asked for, so the
+  page would otherwise report a beat the sound is not on.
 - THE LOOP IS AN EDGE ON THE GRID, a wash only on the ruler. The ruler
   keeps `data-loop` per column; the cells carry `data-loop-edge`
   (`start|end|both|none`) and draw the loop's first column's LEFT border
@@ -2558,6 +2570,14 @@ of the page.
   take) and coalesced into one `requestAnimationFrame`, because a step
   per event is what made it feel clicky. Pinned by the zoom cases in
   `GridPerf.test.tsx` (`__pageRenderCount`, `__rowRenderCount`).
+- THE SCROLLPORT IS `.grid-body`, the element with the `overflow` —
+  `.grid-scroll` inside it is only the column the lanes sit in, and a
+  `scrollLeft` read or written there is silently nothing. The zoom holds
+  the pointer's beat still by putting that scroll back afterwards
+  (`zoomAnchor` -> `scrollLeft = beat * cellW - x`), measured against the
+  RULER, whose left edge is beat 0 at any scroll; `x` has the scroll
+  taken out of it, or a zoom on a scrolled grid throws the view sideways.
+  At the left end the clamp wins and the view simply stays put.
 - CHROME BEATS CONTENT, in z-order and in layout: `.grid-body` carries NO
   top padding (a sticky element sticks to the top of the scrollport's
   PADDING box, so the padding was a strip the rows peeked through above

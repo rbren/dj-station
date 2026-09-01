@@ -149,6 +149,28 @@ export function beatsWide(n: number): string {
   return `calc(var(${CELL_W_VAR}) * ${n})`;
 }
 
+/** The beat under the pointer and where to keep it, for a zoom about
+ *  that point. Measured against the RULER, which scrolls with the
+ *  content: its left edge IS beat 0, wherever the grid has been scrolled
+ *  to. `x` is that beat's offset from where beat 0 sits at scroll 0,
+ *  which is what the scroller is put back to afterwards
+ *  (`scrollLeft = beat * cellW - x`) — so it must have the scroll taken
+ *  out of it, or a zoom on a scrolled grid throws the view sideways. */
+export function zoomAnchor(
+  clientX: number,
+  rulerLeft: number,
+  scroll: number,
+  cellW: number,
+): { beat: number; x: number } {
+  const contentX = clientX - rulerLeft;
+  return { beat: contentX / cellW, x: contentX - scroll };
+}
+
+/** `col` held inside a range, on a column that is part of it. */
+export function clampTo(col: number, range: ColumnRange): number {
+  return Math.max(range.start, Math.min(col, range.end - 1));
+}
+
 /** How close to an edge counts as GRABBING it, in beats. A fixed pixel
  *  target would be most of a bar when zoomed out and invisible when
  *  zoomed in, so it is measured in beats and widened as they narrow. */
@@ -317,8 +339,9 @@ export function GridView(props: GridViewProps) {
   const cellW = GRID_CELL_W * zoom;
   const width = columns * cellW;
 
-  /** The scrolling box the grid lives in, and the beat a zoom should
-   *  hold still under the pointer. */
+  /** The scrolling box the grid lives in (`.grid-body`, the one with the
+   *  overflow), and the beat a zoom should hold still under the
+   *  pointer. */
   const scroller = useRef<HTMLDivElement | null>(null);
   const keepBeat = useRef<{ beat: number; x: number } | null>(null);
   const scrollLeft = useCallback(() => scroller.current?.scrollLeft ?? 0, []);
@@ -376,8 +399,7 @@ export function GridView(props: GridViewProps) {
       wheelDelta.current += e.deltaY;
       if (wheelAnchor.current === null) {
         const rect = ruler.current?.getBoundingClientRect() ?? { left: 0 };
-        const x = e.clientX - rect.left;
-        wheelAnchor.current = { beat: (x + scrollLeft()) / cellW, x };
+        wheelAnchor.current = zoomAnchor(e.clientX, rect.left, scrollLeft(), cellW);
       }
       if (zoomFrame.current !== null) return;
       zoomFrame.current = requestAnimationFrame(() => {
@@ -601,9 +623,12 @@ export function GridView(props: GridViewProps) {
   const play = useCallback(
     (from?: number) => {
       void transport.play(grid, byId, columns, from);
-      setPlayhead({ playing: true, column: from ?? range.start });
+      // The transport cues INSIDE the range it is about to play, so the
+      // page reports the beat the sound is really on rather than the one
+      // it was asked for.
+      setPlayhead({ playing: true, column: clampTo(from ?? range.start, range) });
     },
-    [transport, grid, byId, columns, range.start],
+    [transport, grid, byId, columns, range],
   );
 
   /** Pause keeps the place; the next play resumes from it. */
@@ -617,30 +642,34 @@ export function GridView(props: GridViewProps) {
     else play(playhead.column);
   }, [playhead.playing, playhead.column, pause, play]);
 
-  /** Move the playhead by whole beats, playing or not: a seek while the
-   *  music runs re-cues there, which is what a scrub means. */
-  const seekBy = useCallback(
-    (delta: number) => {
-      const at = Math.min(Math.max(playhead.column + delta, range.start), range.end - 1);
-      if (playhead.playing) play(at);
-      else {
-        transport.seek(at);
-        setPlayhead({ playing: false, column: at });
-      }
-    },
-    [playhead, range, play, transport],
+  /** Where the playhead may be put. While the grid PLAYS that is the
+   *  range being played — the transport cues inside the loop whatever it
+   *  is asked for, and the page must not claim a beat the sound is not
+   *  on. STOPPED, the playhead is a cursor: it goes wherever it is put,
+   *  loop or no loop, because it is also where a paste lands. A loop is
+   *  something you mark on the music, not a pen the cursor is kept in. */
+  const cursor = useMemo(
+    () => (playhead.playing ? range : { start: 0, end: Math.max(1, columns) }),
+    [playhead.playing, range, columns],
   );
 
+  /** Put the playhead on `col`, playing or not: a seek while the music
+   *  runs re-cues there, which is what a scrub means. */
   const seekTo = useCallback(
     (col: number) => {
-      const at = Math.min(Math.max(col, range.start), range.end - 1);
+      const at = clampTo(col, cursor);
       if (playhead.playing) play(at);
       else {
         transport.seek(at);
         setPlayhead({ playing: false, column: at });
       }
     },
-    [playhead.playing, range, play, transport],
+    [playhead.playing, cursor, play, transport],
+  );
+
+  const seekBy = useCallback(
+    (delta: number) => seekTo(playhead.column + delta),
+    [playhead.column, seekTo],
   );
 
   const copy = useCallback(() => {
@@ -735,23 +764,19 @@ export function GridView(props: GridViewProps) {
     (e: MouseEvent<HTMLElement>) => {
       if (e.button !== 0) return;
       const col = rulerCol(e.clientX);
-      // A press on a loop EDGE takes hold of that edge and leaves the
-      // other one where it is, so a loop can be stretched a beat at a
-      // time instead of being redrawn from scratch every time it is not
-      // quite right.
+      // A PRESS ALONE MARKS NOTHING, on a loop edge or anywhere else: the
+      // loop is only redrawn once the drag has reached another column, so
+      // a press and release on one column stays a CLICK — and a click on
+      // the ruler puts the playback there. Pressing an EDGE only chooses
+      // what the drag will pivot about, the loop's other end, so that a
+      // loop can be trimmed a beat at a time instead of being redrawn
+      // from scratch every time it is not quite right.
       const edge = loopEdgeAt(grid.loop, col, grabBeats(zoom));
-      if (edge && grid.loop) {
-        const anchor = edge === 'start' ? grid.loop.end - 1 : grid.loop.start;
-        loopDrag.current = { anchor, from: col, moved: true };
-        setGrid((prev) => ({ ...prev, loop: loopFromDrag(anchor, col) }), 'loop');
-        return;
-      }
-      // A PRESS ALONE MARKS NOTHING. The loop is drawn once the drag has
-      // reached another column; a press and release on one column is a
-      // CLICK, and a click on the ruler puts the playback there.
-      loopDrag.current = { anchor: col, from: col, moved: false };
+      const anchor =
+        edge && grid.loop ? (edge === 'start' ? grid.loop.end - 1 : grid.loop.start) : col;
+      loopDrag.current = { anchor, from: col, moved: false };
     },
-    [grid.loop, rulerCol, setGrid, zoom],
+    [grid.loop, rulerCol, zoom],
   );
 
   // THE LOOP DRAG BELONGS TO THE WINDOW, not to the ruler. Hung off the
@@ -1080,7 +1105,7 @@ export function GridView(props: GridViewProps) {
             className="decks-btn"
             data-testid="grid-paste"
             disabled={!board}
-            title={`Paste at the selection, or at the playhead (${MOD}V)`}
+            title={`Paste at the playhead — click the ruler to aim it (${MOD}V)`}
             onClick={paste}
           >
             Paste
@@ -1192,7 +1217,10 @@ export function GridView(props: GridViewProps) {
         </div>
       </header>
 
-      <div className="grid-body" data-testid="grid-body">
+      {/* THE SCROLLPORT. `.grid-scroll` inside it is only the column the
+          lanes live in — this is the box with `overflow: auto` on it, so
+          this is the only element whose `scrollLeft` means anything. */}
+      <div className="grid-body" data-testid="grid-body" ref={scroller}>
         <div className="grid-gutter">
           <div className="grid-gutter-head">master</div>
           <div className="grid-gutter-ruler">bar</div>
@@ -1253,7 +1281,7 @@ export function GridView(props: GridViewProps) {
           </div>
         </div>
 
-        <div className="grid-scroll" data-testid="grid-scroll" ref={scroller}>
+        <div className="grid-scroll" data-testid="grid-scroll">
           {/* ZOOM IS PUBLISHED HERE, once, as a CSS variable: everything
               below measures itself in beats off it, so a zoom re-lays the
               grid out without re-rendering a single row. */}
@@ -1375,21 +1403,25 @@ export function GridView(props: GridViewProps) {
             {/* THE MOVING PARTS, drawn once over the whole grid rather
                 than marked on every cell. This is what lets the rows be
                 memoised: the playhead can move sixteen times a second
-                without a single row re-rendering. */}
-            {playing && (
-              <>
-                <div
-                  className="grid-now"
-                  data-testid="grid-now"
-                  style={{ left: nowCol * cellW, width: cellW }}
-                />
-                <div
-                  className="grid-playhead"
-                  data-testid="grid-playhead"
-                  style={{ left: playhead.column * cellW }}
-                />
-              </>
-            )}
+                without a single row re-rendering.
+
+                DRAWN WHILE STOPPED TOO, dimmed. It is not only a picture
+                of the sound: it is where playback will start and where a
+                paste lands, so a marker that appeared only once the music
+                ran left a click on the ruler looking like it had done
+                nothing at all. */}
+            <div
+              className="grid-now"
+              data-testid="grid-now"
+              data-playing={playing ? 'true' : 'false'}
+              style={{ left: nowCol * cellW, width: cellW }}
+            />
+            <div
+              className="grid-playhead"
+              data-testid="grid-playhead"
+              data-playing={playing ? 'true' : 'false'}
+              style={{ left: playhead.column * cellW }}
+            />
           </div>
           {grid.rows.length === 0 && (
             <p className="empty-state" data-testid="grid-empty">
