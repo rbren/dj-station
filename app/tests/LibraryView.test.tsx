@@ -224,6 +224,7 @@ const CLIP_TAB_CLIP: BeatClipEntry = {
   beats: 4,
   stems: ['drums'],
   editable: true,
+  ones: [],
   sources: [{ trackHash: 'abc', title: 'Basement Loop', artist: 'Me' }],
 };
 
@@ -236,6 +237,7 @@ const ORPHAN_CLIP: BeatClipEntry = {
   beats: 8,
   stems: [],
   editable: true,
+  ones: [],
   sources: [{ trackHash: 'deadbeefcafe', title: null, artist: null }],
 };
 
@@ -247,6 +249,7 @@ const UNTRACKED_CLIP: BeatClipEntry = {
   beats: 2,
   stems: [],
   editable: false,
+  ones: [],
   sources: [],
 };
 
@@ -261,6 +264,7 @@ function mockClips(entries: BeatClipEntry[] = [CLIP_TAB_CLIP, ORPHAN_CLIP, UNTRA
       if (at >= 0) list.splice(at, 1);
       return Promise.resolve([...list]);
     }),
+    audio: vi.fn().mockResolvedValue(null),
   } satisfies BeatClipApi;
 }
 

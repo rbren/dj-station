@@ -34,6 +34,7 @@ import { ClipView, type ClipViewHandle } from './components/ClipView';
 import { beatClip, type BeatClipEntry, BEAT_CLIP_TYPE } from './beatClip';
 import { DecksView } from './components/DecksView';
 import { DecksV2View } from './components/DecksV2View';
+import { GridView } from './components/GridView';
 import { DECKS_HIDDEN_TYPES } from './decks';
 import { clipClient } from './clip';
 import { MODULE_DRAG_TYPE, ModulePicker, nextInstanceId } from './components/ModulePicker';
@@ -107,11 +108,11 @@ const WIRE_COLORS_KEY = 'dj-wire-colors';
 const LAST_WIRE_COLOR_KEY = 'dj-wire-last-color';
 const NUM_WIRE_COLORS = WIRE_COLORS.length;
 
-type View = 'rack' | 'library' | 'clip' | 'decks' | 'decks2';
+type View = 'rack' | 'library' | 'clip' | 'decks' | 'decks2' | 'grid';
 
 /** The page the engine plays for while `view` is the open tab: the Rack is
- *  the whole patch, the Decks page is its bank, and Library/Clip either
- *  make their own sound or none — so the engine goes quiet. */
+ *  the whole patch, the Decks page is its bank, and Library/Clip/Grid
+ *  either make their own sound or none — so the engine goes quiet. */
 function audioFocusForView(view: View): AudioFocus {
   if (view === 'rack') return 'rack';
   // Both deck pages drive banks in the decks workspace, so both open the
@@ -2086,6 +2087,13 @@ export default function App() {
             Decks V2
           </button>
           <button
+            className={view === 'grid' ? 'tab active' : 'tab'}
+            onClick={() => setView('grid')}
+            data-testid="tab-grid"
+          >
+            Grid
+          </button>
+          <button
             className={view === 'clip' ? 'tab active' : 'tab'}
             onClick={() => setView('clip')}
             data-testid="tab-clip"
@@ -2319,6 +2327,10 @@ export default function App() {
           part of it is deliberately parked for now). The bank keeps
           running unmounted, like the Decks tab's. */}
       {view === 'decks2' && <DecksV2View />}
+      {/* The Grid stays mounted so the arrangement survives a tab switch
+          (the Clip editor's arrangement); it hides itself and stops its
+          own playback while inactive. */}
+      <GridView clips={beatClip} active={view === 'grid'} />
       {view === 'library' && (
         <LibraryView
           client={library}

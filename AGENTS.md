@@ -2372,6 +2372,53 @@ of the page.
   round-trip + classic-bytes pin) and the `decks-v2-jump` E2E golden
   (sidecar grew `live_*` slot fields and `deck_transitions`).
 
+## The Grid page at a glance
+
+- A DAW-style ARRANGEMENT of saved beat clips, played IN THE WEBVIEW Ñ
+  not through the engine. It holds no engine state at all: rows point at
+  saved clips by id, and `beat_clip_audio` (new command, `beat_clip.rs`)
+  hands back a clip's LOOP as WAV bytes (bleed deliberately excluded)
+  which `GridTransport` decodes and schedules, the way the Clip page
+  auditions a render. Nothing about it touches `DecksState` or a patch.
+- One column is one BEAT OF THE GRID. A row is one loaded clip and
+  arrives EMPTY; clicking a cell PLACES the clip anchored on its first
+  one (`leadOne`), so a 4-beat clip whose one is beat 2, clicked at
+  column 10, fills 9..12. A placement's `start` can therefore be
+  negative Ñ the anchor is the musical fact, the left edge follows from
+  it. Clicking a filled cell removes that copy; a new copy displaces what
+  it overlaps (a row is ONE voice).
+- Clips expose their downbeats through `BeatClipEntry.ones` (new field,
+  from the clip's own cut-to-clip `BeatGrid`, empty for a clip filed
+  before the edit was kept Ñ `clip_ones` in `beat_clip.rs`, shared with
+  `render_clip`). Cells are `data-kind` `empty|beat|one|lead`.
+- MASTER TEMPO is breakpoint automation over beats, drawn with
+  `components/AutomationLane.tsx` Ñ the Clip page's level-lane grammar
+  generalized (click to add, drag to move, right-click to remove), keyed
+  on a point's POSITION not its index because the envelope re-sorts under
+  a drag. Beat<->time is therefore an INTEGRAL, not a division:
+  `beatToSecs`/`secsToBeat` in `src/grid.ts` use the log-mean closed form
+  for a linear ramp, so 120->240 over 4 beats is 60á4áln2/120 s, not the
+  average's 4/3.
+- `src/grid.ts` is PURE (rows/grouping/placement/tempo/loop/
+  `scheduleRange`); `src/gridTransport.ts` owns the sound. Passes are
+  scheduled on a 250 ms lookahead re-run every 100 ms so a loop wraps
+  seamlessly, and the playhead is DERIVED from the clock every poll
+  (never counted), so a slow frame cannot drift it off the sound. With no
+  AudioContext it falls back to `performance.now()` and plays silently Ñ
+  which is how the transport is tested headless.
+- Rows are GROUPED by source track and the title is drawn ONCE per group
+  (`groupRows`); the picker (`GridClipPicker`) lists TRACKS first, each
+  clickable directly (takes every clip cut from it, one row each) or
+  expandable to its clips.
+- App: view `'grid'`, tab label "Grid", audio focus falls through to
+  quiet like Clip/Library. The page stays MOUNTED and hides itself so the
+  arrangement survives a tab switch, and stops its own playback when
+  `active` goes false.
+- Deliberately absent for now: persistence (the arrangement lives in page
+  state only), per-row level/mute, engine routing, undo.
+- Tests: `app/tests/Grid.test.ts` (arithmetic), `GridTransport.test.ts`
+  (clock, fake timers), `GridView.test.tsx` (picker/placement/loop/tempo).
+
 ## Manager
 
 - 2026-08-30 â€” "change AGENTS.md to tell the agents to spend less time

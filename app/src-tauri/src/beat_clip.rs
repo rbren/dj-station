@@ -52,6 +52,10 @@ pub struct BeatClipEntry {
     /// its edit can (`BeatClipMeta.edit`); the older ones are audio and
     /// a name.
     pub editable: bool,
+    /// Which of its own beats its grid marks as ONES (downbeats),
+    /// ascending — what a surface lines the clip up by. Empty for a clip
+    /// whose grid marks none, and for one filed before the edit was kept.
+    pub ones: Vec<u32>,
     /// The tracks it points at, resolved against the library as it now
     /// stands. Empty when the clip records no source at all.
     pub sources: Vec<BeatClipSourceInfo>,
@@ -68,6 +72,18 @@ fn source_info(state: &AppState, track_hash: &str) -> BeatClipSourceInfo {
     }
 }
 
+/// Which beats a clip's own grid marks as ones. The grid a clip keeps is
+/// already cut to the clip (`BeatGrid::cut_to`), so its indices count the
+/// clip's beats; a clip filed without its edit, or tapped without marking
+/// a one, simply has none.
+fn clip_ones(meta: &dj_analysis::clip::BeatClipMeta) -> Vec<u32> {
+    meta.edit
+        .as_ref()
+        .and_then(|edit| edit.program.beat_grid.as_ref())
+        .map(|grid| grid.ones.iter().map(|&one| one as u32).collect())
+        .unwrap_or_default()
+}
+
 /// Every saved beat clip, oldest first — the one store, the one list.
 #[tauri::command(async)]
 pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
@@ -81,6 +97,7 @@ pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
                 .flat_map(|edit| edit.sources.iter())
                 .map(|source| source_info(&state, &source.track_hash))
                 .collect();
+            let ones = clip_ones(&meta);
             BeatClipEntry {
                 clip_id: meta.id,
                 name: meta.name,
@@ -90,6 +107,7 @@ pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
                 // A clip filed before the edit was kept says nothing about
                 // where it came from, and cannot be opened again.
                 editable: meta.edit.is_some(),
+                ones,
                 sources,
             }
         })
@@ -153,16 +171,7 @@ impl RenderedClip {
 pub fn render_clip(state: &AppState, clip_id: &str) -> CmdResult<RenderedClip> {
     let (meta, audio, bleed) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), clip_id)
         .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
-    // The ones are the grid's, and the grid a clip keeps is the one cut
-    // to the clip (`BeatGrid::cut_to`), so its indices already count the
-    // clip's own beats. A clip filed without its edit, or tapped without
-    // marking a one, simply has none.
-    let ones = meta
-        .edit
-        .as_ref()
-        .and_then(|edit| edit.program.beat_grid.as_ref())
-        .map(|grid| grid.ones.iter().map(|&one| one as u32).collect())
-        .unwrap_or_default();
+    let ones = clip_ones(&meta);
     Ok(RenderedClip {
         audio,
         bleed,
@@ -221,6 +230,20 @@ fn name_after_clip(engine: &mut Engine, instance: &str, clip_name: &str) -> Stri
         }
     }
     instance.to_string()
+}
+
+/// A saved clip's LOOP as WAV bytes, for a surface that plays clips in
+/// the webview rather than through the engine (the Grid page schedules
+/// them itself, the way the Clip page auditions a render). The bleed
+/// stays out: it is the seam of a looping player, and the grid lays
+/// clips out on a timeline instead of looping them.
+#[tauri::command(async)]
+pub fn beat_clip_audio(state: State<AppState>, clip_id: String) -> CmdResult<tauri::ipc::Response> {
+    let (_, audio, _) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
+        .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+    Ok(tauri::ipc::Response::new(dj_analysis::clip::wav16_bytes(
+        &audio,
+    )))
 }
 
 /// Clip + transport snapshot for the Beat Clip module panel.

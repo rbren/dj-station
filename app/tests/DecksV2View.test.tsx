@@ -121,6 +121,7 @@ const CLIPS: BeatClipEntry[] = [
     bpm: 120,
     stems: ['drums'],
     editable: true,
+    ones: [],
     sources: [{ trackHash: 'song-a', title: 'Basement Loop', artist: 'Me' }],
   },
   {
@@ -130,6 +131,7 @@ const CLIPS: BeatClipEntry[] = [
     bpm: 120,
     stems: [],
     editable: true,
+    ones: [],
     sources: [{ trackHash: 'song-a', title: 'Basement Loop', artist: 'Me' }],
   },
   {
@@ -139,6 +141,7 @@ const CLIPS: BeatClipEntry[] = [
     bpm: 120,
     stems: [],
     editable: true,
+    ones: [],
     sources: [{ trackHash: 'song-b', title: 'Roof Cut', artist: 'You' }],
   },
   {
@@ -148,6 +151,7 @@ const CLIPS: BeatClipEntry[] = [
     bpm: 120,
     stems: [],
     editable: false,
+    ones: [],
     sources: [],
   },
 ];
@@ -158,6 +162,7 @@ function makeClips(entries = CLIPS): BeatClipApi {
     load: vi.fn().mockResolvedValue(null),
     status: vi.fn().mockResolvedValue(null),
     delete: vi.fn().mockResolvedValue([]),
+    audio: vi.fn().mockResolvedValue(null),
   };
 }
 

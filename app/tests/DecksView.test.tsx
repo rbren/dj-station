@@ -131,6 +131,7 @@ const CLIPS: BeatClipEntry[] = [
     bpm: 120,
     stems: ['drums', 'bass'],
     editable: true,
+    ones: [],
     sources: [{ trackHash: 'abc123', title: 'Basement Loop', artist: 'Me' }],
   },
   {
@@ -140,6 +141,7 @@ const CLIPS: BeatClipEntry[] = [
     bpm: 120,
     stems: [],
     editable: false,
+    ones: [],
     // Cut from the same song as c1: the picker's clip level is what one
     // song holds, so the two have to share one.
     sources: [{ trackHash: 'abc123', title: 'Basement Loop', artist: 'Me' }],
@@ -152,6 +154,7 @@ const CLIPS: BeatClipEntry[] = [
     bpm: 174,
     stems: ['drums'],
     editable: true,
+    ones: [],
     sources: [{ trackHash: 'def456', title: 'Jungle Thing', artist: 'DJ X' }],
   },
 ];
@@ -162,6 +165,7 @@ function makeClips(entries = CLIPS): BeatClipApi {
     load: vi.fn().mockResolvedValue(null),
     status: vi.fn().mockResolvedValue(null),
     delete: vi.fn().mockResolvedValue([]),
+    audio: vi.fn().mockResolvedValue(null),
   };
 }
 

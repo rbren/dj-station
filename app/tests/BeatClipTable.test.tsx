@@ -23,6 +23,7 @@ function clip(over: Partial<BeatClipEntry> = {}): BeatClipEntry {
     beats: 8,
     stems: ['drums'],
     editable: true,
+    ones: [],
     sources: [{ trackHash: 'h1', title: 'Basement Loop', artist: 'Nadia' }],
     ...over,
   };

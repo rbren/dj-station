@@ -33,6 +33,10 @@ export interface BeatClipEntry {
   /** Can it be opened in the Clip page again? Only a clip filed with the
    *  edit behind it can. */
   editable: boolean;
+  /** Which of its own beats its grid marks as ONES, ascending. Empty for
+   *  a clip that marks none — a surface that lines clips up by their
+   *  downbeat has to cope with that. */
+  ones: number[];
   /** The tracks it points at, resolved against the library as it now
    *  stands. Empty when the clip records no source at all. */
   sources: BeatClipSourceInfo[];
@@ -83,6 +87,9 @@ export interface BeatClipApi {
   status(instance: string): Promise<BeatClipStatus | null>;
   /** Delete a saved clip. Resolves to the list as it now stands. */
   delete(clipId: string): Promise<BeatClipEntry[] | null>;
+  /** The clip's loop as WAV bytes, for a page that plays it in the
+   *  webview instead of through the engine (the Grid page). */
+  audio(clipId: string): Promise<ArrayBuffer | null>;
 }
 
 export class BeatClipClient extends IpcClient implements BeatClipApi {
@@ -97,6 +104,9 @@ export class BeatClipClient extends IpcClient implements BeatClipApi {
   }
   delete(clipId: string) {
     return this.call<BeatClipEntry[]>('beat_clip_delete', { clipId });
+  }
+  audio(clipId: string) {
+    return this.call<ArrayBuffer>('beat_clip_audio', { clipId });
   }
 }
 

@@ -112,6 +112,7 @@ const clipsApi: BeatClipApi = {
   load: vi.fn().mockResolvedValue(null),
   status: vi.fn().mockResolvedValue(null),
   delete: vi.fn().mockResolvedValue([]),
+  audio: vi.fn().mockResolvedValue(null),
 };
 
 function fakeRect(x: number, y: number, w = 18, h = 18): DOMRect {

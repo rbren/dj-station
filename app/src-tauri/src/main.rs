@@ -3126,6 +3126,7 @@ fn main() {
             beat_clip::beat_clip_list,
             beat_clip::beat_clip_delete,
             beat_clip::beat_clip_load,
+            beat_clip::beat_clip_audio,
             beat_clip::beat_clip_status,
             decks::decks_banks,
             decks::decks_ensure,

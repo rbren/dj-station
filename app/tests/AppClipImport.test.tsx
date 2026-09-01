@@ -27,6 +27,7 @@ const CLIP: BeatClipEntry = {
   beats: 4,
   stems: ['drums', 'bass'],
   editable: true,
+  ones: [],
   sources: [{ trackHash: 'abc123', title: 'Sunroom Take', artist: 'Me' }],
 };
 

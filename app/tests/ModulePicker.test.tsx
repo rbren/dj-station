@@ -609,6 +609,7 @@ describe('ModulePicker clips tab', () => {
       beats: 8,
       stems: ['vocals', 'drums', 'bass', 'other'],
       editable: true,
+      ones: [],
       sources: [{ trackHash: 'abc123', title: 'Night Bus Take', artist: 'Me' }],
     },
     {
@@ -618,6 +619,7 @@ describe('ModulePicker clips tab', () => {
       beats: 4,
       stems: ['drums', 'bass'],
       editable: false,
+      ones: [],
       sources: [],
     },
   ];
