@@ -2058,7 +2058,7 @@ of the page.
   model and the jack-name helpers `sendJack`/`returnJack`/`toneJack`/
   `CLOCK_JACK`) and `app/src/components/Decks{View,Slot,ClipPicker}.tsx`
   (the live/monitor device pickers sit in this page's top bar, one at
-  the end of each master fader row Ñ see the OUTPUT PICKERS bullet).
+  the end of each master fader row â€” see the OUTPUT PICKERS bullet).
   Backend: `app/src-tauri/src/decks.rs` over `Engine`'s `decks_*` API.
 - Tone knobs have TWO orders: `TONES` (`high, mid, low`) is canonical â€”
   CV jack indices, `tone_patched` and the Launch Control XL row mapping
@@ -2270,7 +2270,7 @@ of the page.
 
 ## The Grid page at a glance
 
-- A DAW-style ARRANGEMENT of saved beat clips, played IN THE WEBVIEW Ñ
+- A DAW-style ARRANGEMENT of saved beat clips, played IN THE WEBVIEW â€”
   not through the engine. It holds no engine state at all: rows point at
   saved clips by id, and `beat_clip_audio` (new command, `beat_clip.rs`)
   hands back a clip's LOOP as WAV bytes (bleed deliberately excluded)
@@ -2280,27 +2280,27 @@ of the page.
   arrives EMPTY; clicking a cell PLACES the clip anchored on its first
   one (`leadOne`), so a 4-beat clip whose one is beat 2, clicked at
   column 10, fills 9..12. A placement's `start` can therefore be
-  negative Ñ the anchor is the musical fact, the left edge follows from
+  negative â€” the anchor is the musical fact, the left edge follows from
   it. Clicking a filled cell removes that copy; a new copy displaces what
   it overlaps (a row is ONE voice).
 - Clips expose their downbeats through `BeatClipEntry.ones` (new field,
   from the clip's own cut-to-clip `BeatGrid`, empty for a clip filed
-  before the edit was kept Ñ `clip_ones` in `beat_clip.rs`, shared with
+  before the edit was kept â€” `clip_ones` in `beat_clip.rs`, shared with
   `render_clip`). Cells are `data-kind` `empty|beat|one|lead`.
 - MASTER TEMPO is breakpoint automation over beats, drawn with
-  `components/AutomationLane.tsx` Ñ the Clip page's level-lane grammar
+  `components/AutomationLane.tsx` â€” the Clip page's level-lane grammar
   generalized (click to add, drag to move, right-click to remove), keyed
   on a point's POSITION not its index because the envelope re-sorts under
   a drag. Beat<->time is therefore an INTEGRAL, not a division:
   `beatToSecs`/`secsToBeat` in `src/grid.ts` use the log-mean closed form
-  for a linear ramp, so 120->240 over 4 beats is 60á4áln2/120 s, not the
+  for a linear ramp, so 120->240 over 4 beats is 60Ã—4Ã—ln2/120 s, not the
   average's 4/3.
 - `src/grid.ts` is PURE (rows/grouping/placement/tempo/loop/
   `scheduleRange`); `src/gridTransport.ts` owns the sound. Passes are
   scheduled on a 250 ms lookahead re-run every 100 ms so a loop wraps
   seamlessly, and the playhead is DERIVED from the clock every poll
   (never counted), so a slow frame cannot drift it off the sound. With no
-  AudioContext it falls back to `performance.now()` and plays silently Ñ
+  AudioContext it falls back to `performance.now()` and plays silently â€”
   which is how the transport is tested headless.
 - Rows are GROUPED by source track and the title is drawn ONCE per group
   (`groupRows`); the picker (`GridClipPicker`) lists TRACKS first, each
