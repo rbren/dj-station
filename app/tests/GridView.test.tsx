@@ -466,7 +466,9 @@ describe('GridView files', () => {
     await screen.findByTestId('grid-view');
     fireEvent.click(screen.getByTestId('grid-open'));
     fireEvent.click(await screen.findByTestId('grid-open-friday set'));
-    await waitFor(() => expect(screen.getByTestId('grid-name').textContent).toContain('friday set'));
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-name').textContent).toContain('friday set'),
+    );
     // The opened grid's tempo and its placed clip are both on screen.
     expect((screen.getByTestId('grid-bpm') as HTMLInputElement).value).toBe('174');
     expect(screen.getByTestId('grid-clip-row1-2')).toBeTruthy();

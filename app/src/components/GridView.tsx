@@ -43,7 +43,6 @@ import {
   fromDocument,
   gridColumns,
   groupRows,
-  GRID_MIN_BEATS,
   inRange,
   inSelection,
   isEmptyGrid,
@@ -855,11 +854,7 @@ export function GridView(props: GridViewProps) {
                 <p className="file-dialog-empty">No saved grids yet.</p>
               )}
               {dialog.names.map((n) => (
-                <button
-                  data-testid={`grid-open-${n}`}
-                  key={n}
-                  onClick={() => void openNamed(n)}
-                >
+                <button data-testid={`grid-open-${n}`} key={n} onClick={() => void openNamed(n)}>
                   {n}
                 </button>
               ))}
@@ -949,13 +944,7 @@ export function levelFromPointer(
  *  writes on it. Purely a drawing — the gesture that writes on it lives
  *  on the row itself, because the cells have to stay clickable and a line
  *  a pixel thick is not a hit target. */
-function LevelLine({
-  row,
-  columns,
-}: {
-  row: GridState['rows'][number];
-  columns: number;
-}) {
+function LevelLine({ row, columns }: { row: GridState['rows'][number]; columns: number }) {
   const y = (level: number) => (1 - level / MAX_LEVEL) * 100;
   const points = [...row.levels].sort((a, b) => a.beat - b.beat);
   const x = (beat: number) => (beat / Math.max(1, columns)) * 100;
@@ -994,5 +983,3 @@ function LevelLine({
     </div>
   );
 }
-
-

@@ -57,7 +57,6 @@ afterEach(() => {
 });
 
 describe('GridTransport', () => {
-
   it('is stopped, at the start, before anything is played', () => {
     expect(transport.status()).toEqual({ playing: false, column: 0 });
   });
@@ -153,7 +152,13 @@ describe('GridTransport live editing', () => {
     const before = transport.status().column;
     // Another copy, further down the grid than the playhead has reached.
     const edited = gridWith({
-      rows: [placeClip(placeClip({ id: 'row1', clipId: 'c1', placements: [], levels: [] }, CLIP, 0), CLIP, 16)],
+      rows: [
+        placeClip(
+          placeClip({ id: 'row1', clipId: 'c1', placements: [], levels: [] }, CLIP, 0),
+          CLIP,
+          16,
+        ),
+      ],
     });
     transport.update(edited, CLIPS, 32);
     expect(transport.playing).toBe(true);

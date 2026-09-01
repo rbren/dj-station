@@ -351,8 +351,7 @@ export function levelAt(row: GridRow, beat: number): number {
  *  rather than jumping to the new value. */
 export function setLevelPoint(row: GridRow, beat: number, level: number): GridRow {
   const at = Math.max(0, Math.round(beat));
-  const seeded =
-    row.levels.length === 0 && at > 0 ? [{ beat: 0, level: 1 }] : [...row.levels];
+  const seeded = row.levels.length === 0 && at > 0 ? [{ beat: 0, level: 1 }] : [...row.levels];
   const kept = seeded.filter((p) => Math.abs(p.beat - at) > TEMPO_EPSILON);
   return {
     ...row,
@@ -753,9 +752,7 @@ export function fromDocument(raw: unknown): GridState {
         : [],
     },
     beats: Math.max(1, Math.round(Number(state.beats ?? GRID_MIN_BEATS))),
-    loop: state.loop
-      ? { start: Number(state.loop.start), end: Number(state.loop.end) }
-      : null,
+    loop: state.loop ? { start: Number(state.loop.start), end: Number(state.loop.end) } : null,
   };
 }
 
