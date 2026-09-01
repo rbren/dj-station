@@ -85,11 +85,6 @@ by every later call, so 1,000 tokens dropped early into a 300-call ticket costs
   `sed -n 'START,ENDp'` a window around it (or `file_editor view` with an
   explicit `view_range`). The files you will reach for are the big ones —
   `styles.css` 6.4k lines, `decks.rs` 3.1k, `ClipView.tsx` 2.3k.
-- NEVER `cat docs/agents-reference.md` (the detailed per-feature notes).
-  It is ~40k tokens and terminal output is clipped middle-out at 30k chars,
-  so you'd pay ~8k tokens for a copy with its middle missing.
-  `grep -n '^#'` it for the section list, then `sed -n` the sections you
-  need. This AGENTS.md is short by design; keep it that way.
 - READ A FILE ONCE. 60 % of all file-read tokens in that sample were re-reads of
   a file already read in the same conversation (one ticket opened
   `ClipView.test.tsx` 64 times). If you must look again, re-read the range, not
@@ -152,8 +147,7 @@ fails if it's missing.
 
 ## Conventions — the explicit rules
 
-Fine-grained per-feature detail is in `docs/agents-reference.md` (see the
-last section); these are the rules that must hold everywhere.
+These are the rules that must hold everywhere.
 
 - Frontend styling goes through the design tokens at the top of
   `app/src/styles.css` (`--fs-*`, `--canvas/--surface*/--line*`, inks,
@@ -251,9 +245,3 @@ last section); these are the rules that must hold everywhere.
 - **Chrome jacks**: real engine jacks rendered on a page's chrome (Decks
   strips/top bar) instead of a module panel.
 - **Choreo**: `builtin.choreo`, a beat-indexed multi-track timeline module.
-
-## Deep detail
-
-Per-feature engineering notes, the Decks/Decks V2/Grid page walkthroughs and
-the manager change log were moved to `docs/agents-reference.md` — grep it by
-section (`grep -n '^#'`), don't `cat` it.
