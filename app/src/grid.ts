@@ -28,6 +28,7 @@
 
 import type { BeatClipEntry } from './beatClip';
 import { MAX_BPM, MIN_BPM } from './decks';
+import { fxOrDefault, parseTrackFx, type TrackFx } from './gridFx';
 
 /** Where one copy of a row's clip sits: the grid column its OWN beat 0
  *  lands on. Negative means the clip begins before the grid does (its
@@ -51,6 +52,10 @@ export interface GridRow {
    *  the row, which is why a row that has never been touched needs no
    *  points to say what it does. */
   levels: LevelPoint[];
+  /** The row's effects rack (`gridFx.ts`), or ABSENT for a row nobody has
+   *  opened the modal on — the default rack is what an absent one plays
+   *  through, so an untouched row costs the document nothing. */
+  fx?: TrackFx;
 }
 
 /** The top of a row's level line. Unity sits at the MIDDLE of the row
@@ -785,8 +790,14 @@ export interface ScheduledClip {
    *  loop never bleeds past its own edge. */
   durationSecs: number;
   /** The row's level over the copy, as `[secsFromCopyStart, gain]` — one
-   *  point for a resting row, more where the line bends under it. */
+   *  point for a resting row, more where the line bends under it. The
+   *  row's rack baseline (`TrackFx.level`) is already in these numbers:
+   *  the automation is drawn AGAINST the baseline, so the two multiply
+   *  and the player has one gain to write. */
   levels: [number, number][];
+  /** Where the copy sits in the stereo field: −1 left … +1 right, off
+   *  the row's rack chrome. */
+  pan: number;
 }
 
 /** Every clip copy that sounds inside `range`, in start order. Placements
@@ -827,6 +838,7 @@ export function scheduleRange(
         offsetSecs,
         durationSecs: gridSecs,
         levels: levelRamp(state, row, from, Math.min(span.end, range.end)),
+        pan: fxOrDefault(row.fx).pan,
       });
     }
   }
@@ -842,20 +854,25 @@ export function renderBpm(bpm: number): number {
 }
 
 /** The row's level across one copy, as offsets in seconds from where the
- *  copy starts. A resting row gives a single unity point (the flat line
- *  down the middle); a row with automation gives the value at each end
- *  plus every bend between, which the player ramps through. */
+ *  copy starts. A resting row gives a single point (the flat line down
+ *  the middle); a row with automation gives the value at each end plus
+ *  every bend between, which the player ramps through.
+ *
+ *  The rack's Level knob is the BASELINE the line is read against, not
+ *  another gain downstream of it: turning it down halves a fade instead
+ *  of fading to half of what the fade wrote. */
 function levelRamp(
   state: GridState,
   row: GridRow,
   fromBeat: number,
   toBeat: number,
 ): [number, number][] {
+  const baseline = fxOrDefault(row.fx).level;
   const at = (beat: number): [number, number] => [
     Math.max(0, beatToSecs(state.tempo, beat) - beatToSecs(state.tempo, fromBeat)),
-    levelAt(row, beat),
+    levelAt(row, beat) * baseline,
   ];
-  if (row.levels.length === 0) return [[0, 1]];
+  if (row.levels.length === 0) return [[0, baseline]];
   const inside = row.levels
     .map((p) => p.beat)
     .filter((beat) => beat > fromBeat && beat < toBeat)
@@ -899,6 +916,7 @@ export function fromDocument(raw: unknown): GridState {
       levels: Array.isArray(row?.levels)
         ? row.levels.map((p) => ({ beat: Number(p.beat), level: clampLevel(Number(p.level)) }))
         : [],
+      fx: parseTrackFx(row?.fx),
     })),
     tempo: {
       bpm: clampBpm(Number(tempo.bpm ?? 120)),

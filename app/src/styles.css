@@ -6439,3 +6439,141 @@ body {
   font-size: var(--fs-nano);
   color: var(--ink-dim);
 }
+
+/* A row's effects rack: the button in the gutter, and the modal it
+   opens. The button is one of the row's plain gray controls until the
+   rack differs from the default one — then it carries --brand, which is
+   the only way an arrangement says a track is running effects. */
+.grid-row-fx {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: var(--fs-xs);
+  transition: color var(--dur-fast) var(--ease);
+}
+.grid-row-fx:hover {
+  color: var(--ink);
+}
+.grid-row-fx[data-modified='true'] {
+  color: var(--brand);
+}
+
+/* The overlay recipe every dialog shares, spelled out here rather than
+   taken from .file-dialog: that one styles every button under it, and
+   this one is full of module panels with buttons of their own. */
+.grid-fx {
+  width: min(1100px, 92vw);
+  height: min(760px, 88vh);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+.grid-fx-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.grid-fx-head h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid-fx-btn {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 4px 8px;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.grid-fx-btn:hover {
+  border-color: var(--line-strong);
+}
+/* The cable layer spans chrome AND rack, because a track's cables run
+   between the two — so this box is what the overlay measures against. */
+.grid-fx-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--canvas);
+}
+.grid-fx-chrome {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 1.25rem;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+  z-index: 11;
+}
+.grid-fx-port {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.grid-fx-jacks {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.grid-fx-legend {
+  font-size: var(--fs-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+.grid-fx-clock {
+  font-size: var(--fs-nano);
+  color: var(--ink-muted);
+}
+.grid-fx-knobs {
+  margin-left: auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+}
+.grid-fx-knob {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+.grid-fx-knob-label {
+  font-size: var(--fs-nano);
+  color: var(--ink-muted);
+}
+.grid-fx-rack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.grid-fx-missing {
+  display: inline-block;
+  margin: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--ink-dim);
+}

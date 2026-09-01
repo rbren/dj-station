@@ -2440,9 +2440,39 @@ of the page.
   the ruler), the ruler sits at z-index 5 and the pinned gutter at 6 —
   above the cells (2) and the level lines (3), which come after them in
   the DOM and used to paint straight over the row titles.
-- Deliberately absent for now: engine routing, per-row mute.
+- EVERY TRACK HAS AN EFFECTS RACK (`src/gridFx.ts` — pure state;
+  `components/GridFxModal.tsx` — the modal; the `fx` button in the row's
+  gutter). The rack belongs to THIS row of THIS grid, so it hangs off
+  `GridRow.fx` and travels in the document. It is the app's own rack:
+  real `ModulePanel`s over the engine's manifests, cables drawn by the
+  same `WireOverlay`, and the Rack page's patching grammar (arm an
+  output, click an input; shift+click unplugs; a click on a wired input
+  picks the cable up — `fxJackClick`). The panels are INERT (the picker's
+  `previewHandle`/`previewKnobs`, now exported from `ModulePicker`)
+  because the Grid plays its clips in the webview and there is no engine
+  graph behind these modules; only VALUES are stored (a knob POSITION
+  means nothing without a manifest, and a value put back to the
+  manifest's default stores nothing at all), and knob config / CV spread
+  are deliberately not persisted. Above the rack, chrome IS the track:
+  the grid's clock, the track's audio out and the way back in (L/R, mono
+  is just L), and Level / Pan / Wet. LEVEL IS THE BASELINE the row's
+  level automation is read against (`levelRamp` multiplies the two, so
+  turning it down halves a fade instead of fading to half of what the
+  fade wrote); Pan reaches the sound through a `StereoPannerNode` a
+  centred row never grows. The DEFAULT rack — EQ on the L path, a scope
+  between it and the way back, a clock multiplier at 2x driving an
+  unaimed LFO — is what an absent `fx` plays through, so an untouched row
+  costs the document nothing; `isTrackFxModified` is a COMPARISON against
+  it rather than a flag, which is what lights the row's button `--brand`
+  and lets it go gray again when the change is undone.
+- Deliberately absent for now: engine routing, per-row mute, and a track
+  rack that actually PROCESSES audio — Wetness is stored and the modules
+  are drawn, but nothing renders through them yet.
 - Tests: `app/tests/Grid.test.ts` (arithmetic, levels, selection/paste,
-  beat surgery, the history, the document), `GridTransport.test.ts`
+  beat surgery, the history, the document), `GridFx.test.tsx` (the
+  default rack, what counts as modified, patching, the Level and Pan the
+  player is handed, the document round trip, the button's colour and the
+  modal's chrome), `GridTransport.test.ts`
   (clock, live edits, pause — fake timers), `GridView.test.tsx` (picker
   order, placement, clip blocks, levels, selection across rows, the ruler
   gesture, beat surgery, undo, files, keys, and a CSS-LEVEL PIN over the

@@ -60,6 +60,27 @@ interface Pass {
   laid: Set<string>;
 }
 
+/** One clip copy in flight: the source, the gain the row's level is
+ *  written on, and the panner the row's rack chrome places it with
+ *  (absent where the webview has no StereoPannerNode, or where the row
+ *  sits centred and needs none). */
+interface Voice {
+  node: AudioBufferSourceNode;
+  gain: GainNode;
+  pan: StereoPannerNode | null;
+  pass: Pass;
+  key: string;
+  at: number;
+  endsAt: number;
+}
+
+/** Let a finished voice's nodes go. */
+function unplug(voice: Voice): void {
+  voice.node.disconnect();
+  voice.gain.disconnect();
+  voice.pan?.disconnect();
+}
+
 export interface GridPlayback {
   playing: boolean;
   /** Fractional column the playhead is on. */
@@ -77,14 +98,7 @@ export class GridTransport {
    *  Web Audio schedules a whole pass ahead of the sound, so a clip
    *  deleted (or a level re-drawn) after that point is already committed
    *  unless the node itself is revisited. */
-  #nodes: {
-    node: AudioBufferSourceNode;
-    gain: GainNode;
-    pass: Pass;
-    key: string;
-    at: number;
-    endsAt: number;
-  }[] = [];
+  #nodes: Voice[] = [];
   #timer: ReturnType<typeof setInterval> | null = null;
   #passes: Pass[] = [];
   /** The pass being scheduled next, or null once the last one is laid
@@ -241,14 +255,13 @@ export class GridTransport {
       clearInterval(this.#timer);
       this.#timer = null;
     }
-    for (const { node, gain } of this.#nodes) {
+    for (const voice of this.#nodes) {
       try {
-        node.stop();
+        voice.node.stop();
       } catch {
         // Already finished.
       }
-      node.disconnect();
-      gain.disconnect();
+      unplug(voice);
     }
     this.#nodes = [];
   }
@@ -329,10 +342,9 @@ export class GridTransport {
     this.#passes = this.#passes.filter(
       (p, i) => i === this.#passes.length - 1 || p.at + p.secs >= cutoff,
     );
-    this.#nodes = this.#nodes.filter(({ node, gain, endsAt }) => {
-      if (endsAt >= now) return true;
-      node.disconnect();
-      gain.disconnect();
+    this.#nodes = this.#nodes.filter((voice) => {
+      if (voice.endsAt >= now) return true;
+      unplug(voice);
       return false;
     });
   }
@@ -370,14 +382,21 @@ export class GridTransport {
       node.buffer = buffer;
       const gain = ctx.createGain();
       this.#writeLevels(gain, copy, at);
+      // A centred row needs no panner at all, so the ordinary grid keeps
+      // exactly the chain it had.
+      const pan = copy.pan !== 0 && ctx.createStereoPanner ? ctx.createStereoPanner() : null;
       node.connect(gain);
-      gain.connect(ctx.destination);
+      if (pan) {
+        pan.pan.value = copy.pan;
+        gain.connect(pan);
+        pan.connect(ctx.destination);
+      } else {
+        gain.connect(ctx.destination);
+      }
       node.start(at, offset, duration);
-      node.onended = () => {
-        node.disconnect();
-        gain.disconnect();
-      };
-      this.#nodes.push({ node, gain, pass, key: copy.key, at, endsAt: at + duration });
+      const voice: Voice = { node, gain, pan, pass, key: copy.key, at, endsAt: at + duration };
+      node.onended = () => unplug(voice);
+      this.#nodes.push(voice);
     }
   }
 
@@ -432,20 +451,22 @@ export class GridTransport {
       // the copy's own start, so past points simply take effect at once.
       voice.gain.gain.cancelScheduledValues(now);
       this.#writeLevels(voice.gain, copy, voice.at);
+      // A pan moved mid-note follows too, as far as the voice can: one
+      // that started centred has no panner to move.
+      if (voice.pan) voice.pan.pan.value = copy.pan;
       return true;
     });
   }
 
   /** Silence one voice, at `when` or as soon as possible. */
-  #drop(voice: { node: AudioBufferSourceNode; gain: GainNode }, when: number): void {
+  #drop(voice: Voice, when: number): void {
     try {
       voice.node.stop(when);
     } catch {
       // Already stopped, or never started: nothing to take back.
     }
     voice.node.onended = null;
-    voice.node.disconnect();
-    voice.gain.disconnect();
+    unplug(voice);
   }
 
   /** Write the row's level line onto a copy's gain: the first value is

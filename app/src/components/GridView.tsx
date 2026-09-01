@@ -101,10 +101,12 @@ import {
   redo as redoHistory,
   undo as undoHistory,
 } from '../gridHistory';
+import { fxOrDefault, isTrackFxModified, type TrackFx } from '../gridFx';
 import { GridTransport } from '../gridTransport';
 import { AutomationLane, type LanePoint } from './AutomationLane';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { GridClipPicker } from './GridClipPicker';
+import { GridFxModal } from './GridFxModal';
 
 /** Column width in px at 1×. The grid zooms about this. */
 export const GRID_CELL_W = 22;
@@ -265,6 +267,8 @@ export interface GridViewProps {
 
 type Dialog =
   | { kind: 'pick' }
+  /** A row's effects rack, open over the arrangement. */
+  | { kind: 'fx'; rowId: string }
   | { kind: 'saveAs'; name: string }
   | { kind: 'open'; names: string[] }
   | { kind: 'confirm'; message: string; proceed: () => void }
@@ -338,6 +342,9 @@ export function GridView(props: GridViewProps) {
   const range = useMemo(() => playRange(grid, columns), [grid, columns]);
   const cellW = GRID_CELL_W * zoom;
   const width = columns * cellW;
+  /** The row whose effects rack is open, read off the CURRENT grid: an
+   *  edit inside the modal must be what the modal draws next. */
+  const fxRow = dialog?.kind === 'fx' ? grid.rows.find((r) => r.id === dialog.rowId) : undefined;
 
   /** The scrolling box the grid lives in (`.grid-body`, the one with the
    *  overflow), and the beat a zoom should hold still under the
@@ -473,6 +480,22 @@ export function GridView(props: GridViewProps) {
     (picked: BeatClipEntry[]) => {
       setDialog(null);
       setGrid((prev) => picked.reduce((state, clip) => addRow(state, clip), prev));
+    },
+    [setGrid],
+  );
+
+  /** Write a row's effects rack back into the grid. A gesture name from
+   *  the modal (a knob drag, a panel being dragged) is namespaced by the
+   *  row, so two rows' drags never coalesce into one undo step. */
+  const setRowFx = useCallback(
+    (rowId: string, fx: TrackFx, gesture?: string) => {
+      setGrid(
+        (prev) => ({
+          ...prev,
+          rows: prev.rows.map((r) => (r.id === rowId ? { ...r, fx } : r)),
+        }),
+        gesture ? `fx:${rowId}:${gesture}` : undefined,
+      );
     },
     [setGrid],
   );
@@ -1243,6 +1266,18 @@ export function GridView(props: GridViewProps) {
                     <span className="grid-row-meta mono">
                       {clip ? `${clip.beats}b · ${fixed(clip.bpm, 0)}` : '—'}
                     </span>
+                    {/* GRAY LIKE THE REST until the rack has been
+                        changed, then BLUE: the button is the only place
+                        a row says it is running effects. */}
+                    <button
+                      className="grid-row-fx"
+                      data-testid={`grid-fx-${row.id}`}
+                      data-modified={isTrackFxModified(row.fx) ? 'true' : 'false'}
+                      title="Effects rack for this track"
+                      onClick={() => setDialog({ kind: 'fx', rowId: row.id })}
+                    >
+                      fx
+                    </button>
                     <button
                       className="grid-row-clear"
                       data-testid={`grid-clear-${row.id}`}
@@ -1443,6 +1478,17 @@ export function GridView(props: GridViewProps) {
 
       {dialog?.kind === 'pick' && (
         <GridClipPicker clips={clips} onPick={addClips} onClose={() => setDialog(null)} />
+      )}
+
+      {fxRow && (
+        <GridFxModal
+          title={byId.get(fxRow.clipId)?.name ?? fxRow.id}
+          fx={fxOrDefault(fxRow.fx)}
+          bpm={grid.tempo.bpm}
+          onChange={(next, gesture) => setRowFx(fxRow.id, next, gesture)}
+          onEditEnd={endEdit}
+          onClose={() => setDialog(null)}
+        />
       )}
 
       {dialog?.kind === 'saveAs' && (

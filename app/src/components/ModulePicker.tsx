@@ -131,7 +131,7 @@ const noop = () => {};
  *  their manifest defaults (custom UIs resolve both through paramValue,
  *  like the live handle in RackModule), taps read silence, nothing
  *  writes to the engine. */
-function previewHandle(m: Manifest): ModuleHandle {
+export function previewHandle(m: Manifest): ModuleHandle {
   return {
     paramValue: (id) => {
       const input = m.inputs.find((i) => i.id === id);
@@ -153,7 +153,7 @@ function previewHandle(m: Manifest): ModuleHandle {
 
 /** Knob states at each input's manifest default, so previews show panels
  *  the way they instantiate (not every knob slammed to its minimum). */
-function previewKnobs(m: Manifest): Record<string, KnobState> {
+export function previewKnobs(m: Manifest): Record<string, KnobState> {
   const knobs: Record<string, KnobState> = {};
   for (const input of m.inputs) {
     if (!input.knob) continue;
