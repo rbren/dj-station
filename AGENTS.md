@@ -240,6 +240,10 @@ last section); these are the rules that must hold everywhere.
 - **Grid page**: a DAW-style arrangement of saved beat clips played in the
   webview, not the engine; one column is one beat, with master-tempo
   breakpoint automation.
+- **Track rack**: the per-track effects rack opened from a Grid row —
+  its own rack scoped to that track in that grid, with chrome jacks for
+  clock/audio in-out plus Level, Pan and Wetness. Level/Pan reach the
+  sound; the modules themselves do not yet (Grid plays in the webview).
 - **Golden**: a checked-in E2E audio render (`tests/e2e_suite/`) pinned
   byte-for-byte.
 - **Macro**: a saved, non-nesting subgraph — global base definition plus a
