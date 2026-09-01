@@ -2273,9 +2273,21 @@ of the page.
 - A DAW-style ARRANGEMENT of saved beat clips, played IN THE WEBVIEW —
   not through the engine. It holds no engine state at all: rows point at
   saved clips by id, and `beat_clip_audio` (new command, `beat_clip.rs`)
-  hands back a clip's LOOP as WAV bytes (bleed deliberately excluded)
-  which `GridTransport` decodes and schedules, the way the Clip page
-  auditions a render. Nothing about it touches `DecksState` or a patch.
+  hands back a clip's LOOP as WAV bytes — the bleed stays out of them,
+  and comes over `beat_clip_bleed` a side at a time — which
+  `GridTransport` decodes and schedules, the way the Clip page auditions
+  a render. Nothing about it touches `DecksState` or a patch.
+- THE BLEED IS A SEAM'S BUSINESS on this page too. Two copies of a row
+  running straight into each other are two passes of one loop, so the
+  join is a seam: `scheduleRange` marks it per copy
+  (`ScheduledClip.bleed`, by SIDE) and the transport lays the right
+  bookend over the copy's head and the left one over its tail, on the
+  copy's own gain and panner. A run's own ends are not seams — first
+  pass no right bleed, last pass no left — the `ClipBleed::tap` rule; a
+  copy cut by the play range's edge drops the bleed at that end, since
+  the neighbour it would smooth into is not sounding. Bookends are
+  stretched with the loop and cached `clipId@bpm:side`, a side the clip
+  lacks being remembered as null so it is asked for once.
 - One column is one BEAT OF THE GRID. A row is one loaded clip and
   arrives EMPTY; clicking a cell PLACES the clip anchored on its first
   one (`leadOne`), so a 4-beat clip whose one is beat 2, clicked at

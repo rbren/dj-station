@@ -7,7 +7,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BeatClipEntry } from '../src/beatClip';
-import { emptyGrid, placeClip, setLevelPoint, setTempoPoint, type GridState } from '../src/grid';
+import {
+  emptyGrid,
+  placeClip,
+  setLevelPoint,
+  setTempoPoint,
+  type GridRow,
+  type GridState,
+} from '../src/grid';
 import { GridTransport } from '../src/gridTransport';
 
 function clip(over: Partial<BeatClipEntry> = {}): BeatClipEntry {
@@ -242,10 +249,20 @@ interface FakeVoice {
   startedAt: number;
   stoppedAt: number | null;
   gain: string[];
+  /** What `start` was told to play: seconds into the buffer, and how
+   *  many of them. A bleed bookend is a much shorter one than a loop,
+   *  which is how the two are told apart below. */
+  offset: number;
+  duration: number;
 }
 
 let voices: FakeVoice[] = [];
 let ctxTime = 0;
+
+/** A bleed bookend's bytes and the seconds they decode to — long enough
+ *  to place, far shorter than the 8 s the loop decodes to. */
+const BLEED_BYTES = 8;
+const BLEED_SECS = 0.25;
 
 class FakeParam {
   #log: string[];
@@ -276,7 +293,13 @@ function fakeContext() {
       return { gain: new FakeParam(log), log, connect() {}, disconnect() {} };
     }
     createBufferSource() {
-      const voice: FakeVoice = { startedAt: -1, stoppedAt: null, gain: [] };
+      const voice: FakeVoice = {
+        startedAt: -1,
+        stoppedAt: null,
+        gain: [],
+        offset: 0,
+        duration: 0,
+      };
       return {
         buffer: null,
         onended: null,
@@ -285,8 +308,10 @@ function fakeContext() {
           if (dest.log) voice.gain = dest.log;
         },
         disconnect() {},
-        start(at: number) {
+        start(at: number, offset = 0, duration = 0) {
           voice.startedAt = at;
+          voice.offset = offset;
+          voice.duration = duration;
           voices.push(voice);
         },
         stop(at?: number) {
@@ -294,8 +319,15 @@ function fakeContext() {
         },
       };
     }
-    decodeAudioData() {
-      return Promise.resolve({ duration: 8, length: 8 * 48000, sampleRate: 48000 });
+    // Loops and bleed bookends are asked for with different numbers of
+    // bytes, so the decode can hand each its own length.
+    decodeAudioData(bytes: ArrayBuffer) {
+      const duration = bytes.byteLength === BLEED_BYTES ? BLEED_SECS : 8;
+      return Promise.resolve({
+        duration,
+        length: duration * 48000,
+        sampleRate: 48000,
+      });
     }
     resume() {
       return Promise.resolve();
@@ -388,5 +420,112 @@ describe('GridTransport voices', () => {
     await settle();
 
     expect(voices.some((v) => v.gain.some((g) => g.includes('0.25')))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The bleed over a seam
+// ---------------------------------------------------------------------------
+
+// Two copies of a row running straight into each other are two passes of
+// one loop, and the join between them is a SEAM: the clip's right bleed
+// (the material that followed it in its track) goes over the head of the
+// second copy, its left bleed over the tail of the first. A run's own
+// ends are not seams — a first pass has nothing to carry in, a last pass
+// nothing to lean into — which is the rule the engine's player and the
+// Clip page's preview both follow.
+
+describe('GridTransport bleed', () => {
+  let audio: GridTransport;
+  let bleed: ReturnType<typeof vi.fn>;
+
+  function source(withBleed = true) {
+    bleed = vi.fn().mockResolvedValue(new ArrayBuffer(BLEED_BYTES));
+    const loops = { audio: vi.fn().mockResolvedValue(new ArrayBuffer(16)) };
+    return withBleed ? { ...loops, bleed } : loops;
+  }
+
+  /** A row playing one copy of the 4-beat clip at each of `cols`. */
+  function run(...cols: number[]): GridState {
+    const empty: GridRow = { id: 'row1', clipId: 'c1', placements: [], levels: [] };
+    return {
+      ...emptyGrid(120),
+      rows: [cols.reduce((row, col) => placeClip(row, CLIP, col), empty)],
+    };
+  }
+
+  /** The bookends that reached Web Audio, in start order. */
+  function bookends() {
+    return voices
+      .filter((v) => v.duration === BLEED_SECS)
+      .sort((a, b) => a.startedAt - b.startedAt);
+  }
+
+  function loops() {
+    return voices.filter((v) => v.duration === 2).map((v) => v.startedAt);
+  }
+
+  async function settle() {
+    await vi.advanceTimersByTimeAsync(200);
+  }
+
+  beforeEach(() => {
+    voices = [];
+    ctxTime = 0;
+    (window as unknown as { AudioContext: unknown }).AudioContext = fakeContext();
+    audio = new GridTransport(source());
+  });
+
+  afterEach(() => {
+    audio.dispose();
+    delete (window as unknown as { AudioContext?: unknown }).AudioContext;
+  });
+
+  it('lays each bookend on the seam it belongs to', async () => {
+    await audio.play(run(0, 4), CLIPS, 32);
+    await settle();
+
+    // 120 bpm: each copy is 2 s long, and the pass is cued 50 ms ahead.
+    expect(loops()).toEqual([0.05, 2.05]);
+    // The left bleed ENDS on the join and the right one starts there:
+    // the seam is overlaid from both sides, and neither the run's head
+    // nor its tail carries anything.
+    expect(bookends().map((v) => v.startedAt)).toEqual([2.05 - BLEED_SECS, 2.05]);
+    expect(bookends().map((v) => v.offset)).toEqual([0, 0]);
+  });
+
+  it('asks for each side a seam needs, once', async () => {
+    await audio.play(run(0, 4, 8), CLIPS, 32);
+    await settle();
+    // Three copies are two seams, and both of them want both bookends —
+    // at one tempo that is two renders, not four.
+    expect([...bleed.mock.calls].sort()).toEqual([
+      ['c1', 'left', 120],
+      ['c1', 'right', 120],
+    ]);
+  });
+
+  it('plays no bleed on a copy nothing runs into or out of', async () => {
+    await audio.play(run(8), CLIPS, 32);
+    await settle();
+    expect(bleed).not.toHaveBeenCalled();
+    expect(bookends()).toEqual([]);
+    expect(loops()).toHaveLength(1);
+  });
+
+  it('plays the run anyway where the clip was filed without bleed', async () => {
+    bleed.mockResolvedValue(null);
+    await audio.play(run(0, 4), CLIPS, 32);
+    await settle();
+    expect(bookends()).toEqual([]);
+    expect(loops()).toHaveLength(2);
+  });
+
+  it('plays the loops bare for a source that cannot hand bleed over', async () => {
+    audio.dispose();
+    audio = new GridTransport(source(false));
+    await audio.play(run(0, 4), CLIPS, 32);
+    await settle();
+    expect(voices.map((v) => v.duration)).toEqual([2, 2]);
   });
 });

@@ -3127,6 +3127,7 @@ fn main() {
             beat_clip::beat_clip_delete,
             beat_clip::beat_clip_load,
             beat_clip::beat_clip_audio,
+            beat_clip::beat_clip_bleed,
             beat_clip::beat_clip_peaks,
             beat_clip::grid_save,
             beat_clip::grid_load,

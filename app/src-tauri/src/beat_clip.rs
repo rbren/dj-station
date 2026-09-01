@@ -235,8 +235,9 @@ fn name_after_clip(engine: &mut Engine, instance: &str, clip_name: &str) -> Stri
 /// A saved clip's LOOP as WAV bytes, for a surface that plays clips in
 /// the webview rather than through the engine (the Grid page schedules
 /// them itself, the way the Clip page auditions a render). The bleed
-/// stays out: it is the seam of a looping player, and the grid lays
-/// clips out on a timeline instead of looping them.
+/// stays out of these bytes — it is overlaid where it is heard, never
+/// baked into the loop — and is asked for a side at a time through
+/// [`beat_clip_bleed`].
 ///
 /// `bpm` RE-TIMES the clip to that tempo before handing it over, and it
 /// does so by WSOLA (`beats::warp`), the same stretcher the Clip page's
@@ -252,6 +253,42 @@ pub fn beat_clip_audio(
 ) -> CmdResult<tauri::ipc::Response> {
     let (meta, audio, _) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
         .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+    let audio = match bpm {
+        Some(bpm) if bpm > 0.0 && meta.bpm > 0.0 => stretch_to_bpm(&audio, meta.bpm, bpm),
+        _ => audio,
+    };
+    Ok(tauri::ipc::Response::new(dj_analysis::clip::wav16_bytes(
+        &audio,
+    )))
+}
+
+/// One side of a saved clip's BLEED as WAV bytes, for the same webview
+/// player. `"right"` is the material that FOLLOWED the clip in its track
+/// (laid over the head of a pass, carrying the pass before it across the
+/// seam) and `"left"` the material that came before it (laid over a
+/// pass's tail) — the two halves of `playback::ClipBleed`, handed over
+/// apart from the loop because they are summed where they are heard.
+/// A side the clip was saved without answers with no bytes at all.
+///
+/// `bpm` re-times it with the SAME stretch the loop gets, so a bleed
+/// still meets the seam it belongs to once the grid's tempo has moved.
+#[tauri::command(async)]
+pub fn beat_clip_bleed(
+    state: State<AppState>,
+    clip_id: String,
+    side: String,
+    bpm: Option<f64>,
+) -> CmdResult<tauri::ipc::Response> {
+    let (meta, _, bleed) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
+        .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
+    let audio = match side.as_str() {
+        "left" => bleed.left,
+        "right" => bleed.right,
+        _ => return Err(CmdError::invalid(format!("bleed side: {side:?}"))),
+    };
+    let Some(audio) = audio else {
+        return Ok(tauri::ipc::Response::new(Vec::<u8>::new()));
+    };
     let audio = match bpm {
         Some(bpm) if bpm > 0.0 && meta.bpm > 0.0 => stretch_to_bpm(&audio, meta.bpm, bpm),
         _ => audio,

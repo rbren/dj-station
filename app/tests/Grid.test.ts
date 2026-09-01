@@ -326,6 +326,66 @@ describe('what the player is handed', () => {
   });
 });
 
+// THE BLEED IS A SEAM'S BUSINESS. A run of copies of the same clip is a
+// loop played pass by pass, and the joins between them are the seams the
+// clip's bookends were kept for: the RIGHT bleed (what followed the clip
+// in its track) belongs over a copy's head, the LEFT one over its tail.
+// The first pass has nothing to carry in and the last nothing to lean
+// into, which is the same rule the engine's player and the Clip page's
+// preview follow.
+describe('which copies meet a seam', () => {
+  const c = clip({ beats: 4, bpm: 120, ones: [0] });
+  const clips = new Map([['c1', c]]);
+  const range = { start: 0, end: 32 };
+
+  function copies(...cols: number[]) {
+    const r = cols.reduce((acc, col) => placeClip(acc, c, col), row());
+    const state: GridState = { ...emptyGrid(120), rows: [r] };
+    return scheduleRange(state, clips, range);
+  }
+
+  it('gives a lone copy no bleed at either end', () => {
+    expect(copies(8)[0].bleed).toEqual({ left: false, right: false });
+  });
+
+  it('bleeds across the joins of a run, but not off its ends', () => {
+    const run = copies(0, 4, 8);
+    expect(run.map((copy) => copy.bleed)).toEqual([
+      { left: true, right: false },
+      { left: true, right: true },
+      { left: false, right: true },
+    ]);
+  });
+
+  it('treats a gap as an end: copies that do not touch are two runs', () => {
+    // 0..3 and 12..15 — nothing runs into either of them.
+    expect(copies(0, 12).map((copy) => copy.bleed)).toEqual([
+      { left: false, right: false },
+      { left: false, right: false },
+    ]);
+  });
+
+  it('drops the bleed at an end the play range cuts', () => {
+    const r = [0, 4, 8].reduce((acc, col) => placeClip(acc, c, col), row());
+    const state: GridState = { ...emptyGrid(120), rows: [r] };
+    // A loop over the middle copy alone: neither neighbour sounds, so
+    // neither join is a seam this pass.
+    const [copy] = scheduleRange(state, clips, { start: 4, end: 8 });
+    expect(copy.bleed).toEqual({ left: false, right: false });
+  });
+
+  it('follows the clip length, not the bar', () => {
+    const long = clip({ beats: 8 });
+    const r = placeClip(placeClip(row(), long, 0), long, 8);
+    const state: GridState = { ...emptyGrid(120), rows: [r] };
+    const run = scheduleRange(state, new Map([['c1', long]]), range);
+    expect(run.map((copy) => copy.bleed)).toEqual([
+      { left: true, right: false },
+      { left: false, right: true },
+    ]);
+  });
+});
+
 describe('the level line through a row', () => {
   it('rests at unity everywhere until something is written on it', () => {
     const r = row();

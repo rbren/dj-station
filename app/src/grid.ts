@@ -905,6 +905,21 @@ export interface ScheduledClip {
   /** Where the copy sits in the stereo field: −1 left … +1 right, off
    *  the row's rack chrome. */
   pan: number;
+  /** Which of the clip's bleed bookends this copy sounds, by SIDE (see
+   *  `playback::ClipBleed`): `right` is the material that followed the
+   *  clip in its track, laid over this copy's HEAD; `left` is what came
+   *  before it, laid over its TAIL. Each is true only where the copy
+   *  meets a SEAM — another copy of the same row running straight into
+   *  it, or straight out of it, inside the range being played. A copy
+   *  nothing runs into is a first pass and drops the right bleed; one
+   *  nothing follows is a last pass and drops the left. */
+  bleed: ClipBleedEnds;
+}
+
+/** The seam ends of one copy — see `ScheduledClip.bleed`. */
+export interface ClipBleedEnds {
+  left: boolean;
+  right: boolean;
 }
 
 /** Every clip copy that sounds inside `range`, in start order. Placements
@@ -921,6 +936,8 @@ export function scheduleRange(
   for (const row of state.rows) {
     const clip = clips.get(row.clipId);
     if (!clip || clip.bpm <= 0) continue;
+    const beats = Math.max(1, clip.beats);
+    const placed = new Set(row.placements);
     for (const start of row.placements) {
       const span = placementSpan(clip, start);
       if (span.end <= range.start || span.start >= range.end) continue;
@@ -946,6 +963,13 @@ export function scheduleRange(
         durationSecs: gridSecs,
         levels: levelRamp(state, row, from, Math.min(span.end, range.end)),
         pan: fxOrDefault(row.fx).pan,
+        // A seam needs BOTH copies whole and inside the range: a copy cut
+        // by the range's edge has no neighbour on that side to smooth
+        // into, whatever the arrangement says.
+        bleed: {
+          right: span.start > range.start && placed.has(start - beats),
+          left: span.end < range.end && placed.has(start + beats),
+        },
       });
     }
   }

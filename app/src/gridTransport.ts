@@ -15,6 +15,11 @@
 // remembered by key (`rowId:start`), which is what keeps a re-schedule
 // from re-triggering something already sounding.
 //
+// A copy is not always ONE buffer: where two copies of a row run
+// straight into each other the join is a loop SEAM, and the clip's bleed
+// — the material it was cut out of, filed beside it — is overlaid across
+// it the way the Clip page's live preview and the engine's player do it.
+//
 // The playhead is DERIVED, never counted: the page asks `status()`, which
 // converts elapsed clock time back through the tempo envelope
 // (`secsToBeat`). Nothing accumulates, so a slow render or a backgrounded
@@ -25,7 +30,7 @@
 // so the page's controls, highlight and loop are all exercised headless.
 
 import { sharedContext } from './clipAudio';
-import type { BeatClipEntry } from './beatClip';
+import type { BeatClipEntry, BleedSide } from './beatClip';
 import {
   beatToSecs,
   playRange,
@@ -41,11 +46,17 @@ import {
 const LOOKAHEAD_SECS = 0.25;
 const SCHEDULE_MS = 100;
 
+const BLEED_SIDES: readonly BleedSide[] = ['right', 'left'];
+
 /** Where a clip's audio comes from. `bpm` asks for it RE-TIMED — the
  *  backend stretches it (WSOLA), so the grid's tempo can change without
  *  the pitch following it. */
 export interface GridAudioSource {
   audio(clipId: string, bpm?: number): Promise<ArrayBuffer | null>;
+  /** A clip's bleed, one bookend at a time and re-timed the same way.
+   *  Optional: a source that cannot hand it over simply plays the loops
+   *  bare, which is what the grid did before it asked. */
+  bleed?(clipId: string, side: BleedSide, bpm?: number): Promise<ArrayBuffer | null>;
 }
 
 interface Pass {
@@ -60,10 +71,11 @@ interface Pass {
   laid: Set<string>;
 }
 
-/** One clip copy in flight: the source, the gain the row's level is
- *  written on, and the panner the row's rack chrome places it with
- *  (absent where the webview has no StereoPannerNode, or where the row
- *  sits centred and needs none). */
+/** One buffer of a clip copy in flight: the source, the gain the row's
+ *  level is written on, and the panner the row's rack chrome places it
+ *  with (absent where the webview has no StereoPannerNode, or where the
+ *  row sits centred and needs none). A copy is usually one voice, and
+ *  two or three where its seams carry bleed. */
 interface Voice {
   node: AudioBufferSourceNode;
   gain: GainNode;
@@ -71,6 +83,12 @@ interface Voice {
   pass: Pass;
   key: string;
   at: number;
+  /** When the COPY starts, which is where its level line is read from
+   *  and what says whether it has been heard yet. A bleed voice starts
+   *  somewhere else (the left one late in the copy), so the two cannot
+   *  be the same number: judging a copy by its bleed's start would let
+   *  an edit re-lay something already sounding. */
+  copyAt: number;
   endsAt: number;
 }
 
@@ -91,6 +109,10 @@ export class GridTransport {
   #source: GridAudioSource;
   /** Decoded audio, keyed by clip AND the tempo it was stretched to. */
   #buffers = new Map<string, AudioBuffer>();
+  /** Decoded bleed bookends, keyed the same way plus the side. A clip
+   *  saved WITHOUT one is remembered as null, so it is asked for once
+   *  and not on every pass. */
+  #bleed = new Map<string, AudioBuffer | null>();
   /** Renders in flight, so a re-schedule does not ask twice. */
   #pending = new Set<string>();
   /** Every voice in flight. A node is remembered with the copy and pass
@@ -137,19 +159,33 @@ export class GridTransport {
     return `${clipId}@${bpm}`;
   }
 
-  /** Fetch and decode every (clip, tempo) the grid asks for, so a pass
-   *  can be scheduled without awaiting anything — an await between "it
-   *  is time" and `start(when)` is how a clip ends up late. */
+  #bleedKey(clipId: string, bpm: number, side: BleedSide): string {
+    return `${this.#key(clipId, bpm)}:${side}`;
+  }
+
+  /** Fetch and decode every (clip, tempo) the grid asks for — and the
+   *  bleed of every seam it holds — so a pass can be scheduled without
+   *  awaiting anything: an await between "it is time" and `start(when)`
+   *  is how a clip ends up late. */
   async prime(state: GridState, clips: ReadonlyMap<string, BeatClipEntry>): Promise<void> {
     const ctx = sharedContext();
     if (!ctx) return;
     const columns = Math.max(this.#columns, state.beats);
     const wanted = new Map<string, { clipId: string; bpm: number }>();
+    const bookends = new Map<string, { clipId: string; bpm: number; side: BleedSide }>();
     for (const copy of scheduleRange(state, clips, playRange(state, columns))) {
       wanted.set(this.#key(copy.clipId, copy.bpm), { clipId: copy.clipId, bpm: copy.bpm });
+      for (const side of BLEED_SIDES) {
+        if (!copy.bleed[side]) continue;
+        bookends.set(this.#bleedKey(copy.clipId, copy.bpm, side), {
+          clipId: copy.clipId,
+          bpm: copy.bpm,
+          side,
+        });
+      }
     }
-    await Promise.all(
-      [...wanted].map(async ([key, { clipId, bpm }]) => {
+    await Promise.all([
+      ...[...wanted].map(async ([key, { clipId, bpm }]) => {
         if (this.#buffers.has(key) || this.#pending.has(key)) return;
         this.#pending.add(key);
         try {
@@ -163,7 +199,23 @@ export class GridTransport {
           this.#pending.delete(key);
         }
       }),
-    );
+      ...[...bookends].map(async ([key, { clipId, bpm, side }]) => {
+        const fetch = this.#source.bleed;
+        if (!fetch || this.#bleed.has(key) || this.#pending.has(key)) return;
+        this.#pending.add(key);
+        try {
+          const bytes = await fetch.call(this.#source, clipId, side, bpm);
+          if (this.#disposed) return;
+          this.#bleed.set(key, bytes ? await ctx.decodeAudioData(bytes.slice(0)) : null);
+        } catch {
+          // A bookend that will not come or will not decode is a seam
+          // played bare — never a clip that does not sound.
+          this.#bleed.set(key, null);
+        } finally {
+          this.#pending.delete(key);
+        }
+      }),
+    ]);
   }
 
   /** Start at `fromColumn` (the range's start by default). Playing again
@@ -307,6 +359,7 @@ export class GridTransport {
     this.stop();
     this.#disposed = true;
     this.#buffers.clear();
+    this.#bleed.clear();
   }
 
   /** Lay down every pass that begins inside the lookahead, and top up the
@@ -378,25 +431,80 @@ export class GridTransport {
       const offset = Math.min(copy.offsetSecs, buffer.duration);
       const duration = Math.max(0, Math.min(copy.durationSecs, buffer.duration - offset));
       if (duration <= 0) continue;
-      const node = ctx.createBufferSource();
-      node.buffer = buffer;
-      const gain = ctx.createGain();
-      this.#writeLevels(gain, copy, at);
-      // A centred row needs no panner at all, so the ordinary grid keeps
-      // exactly the chain it had.
-      const pan = copy.pan !== 0 && ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-      node.connect(gain);
-      if (pan) {
-        pan.pan.value = copy.pan;
-        gain.connect(pan);
-        pan.connect(ctx.destination);
-      } else {
-        gain.connect(ctx.destination);
-      }
-      node.start(at, offset, duration);
-      const voice: Voice = { node, gain, pan, pass, key: copy.key, at, endsAt: at + duration };
-      node.onended = () => unplug(voice);
-      this.#nodes.push(voice);
+      this.#lay(ctx, pass, copy, buffer, { at, offset, duration, copyAt: at });
+      this.#layBleed(ctx, pass, copy, at);
+    }
+  }
+
+  /** One buffer under one copy, wired and started. */
+  #lay(
+    ctx: AudioContext,
+    pass: Pass,
+    copy: ScheduledClip,
+    buffer: AudioBuffer,
+    when: { at: number; offset: number; duration: number; copyAt: number },
+  ): void {
+    const node = ctx.createBufferSource();
+    node.buffer = buffer;
+    const gain = ctx.createGain();
+    this.#writeLevels(gain, copy, when.copyAt);
+    // A centred row needs no panner at all, so the ordinary grid keeps
+    // exactly the chain it had.
+    const pan = copy.pan !== 0 && ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    node.connect(gain);
+    if (pan) {
+      pan.pan.value = copy.pan;
+      gain.connect(pan);
+      pan.connect(ctx.destination);
+    } else {
+      gain.connect(ctx.destination);
+    }
+    node.start(when.at, when.offset, when.duration);
+    const voice: Voice = {
+      node,
+      gain,
+      pan,
+      pass,
+      key: copy.key,
+      at: when.at,
+      copyAt: when.copyAt,
+      endsAt: when.at + when.duration,
+    };
+    node.onended = () => unplug(voice);
+    this.#nodes.push(voice);
+  }
+
+  /** The bleed over a copy's seams: the RIGHT bookend (what followed the
+   *  clip in its track) laid over the copy's HEAD, carrying the copy
+   *  before it across the join, and the LEFT bookend (what came before
+   *  it) laid over its TAIL, leaning into the copy after it. Which ends
+   *  are seams at all is the grid's say (`ScheduledClip.bleed`): a first
+   *  pass plays no right bleed and a last one no left, exactly as in the
+   *  engine's player.
+   *
+   *  Material longer than the copy loses the end that hangs over the far
+   *  side of the seam, not the end that meets it — the same alignment
+   *  `mixInto` gives a bookend too long for its loop. The bleed rides the
+   *  copy's own level and pan: it is that copy coming in or going out,
+   *  not a voice of its own.
+   *
+   *  A bookend still being fetched is skipped rather than waited for: a
+   *  seam smoothed one pass late is a smaller fault than a clip that
+   *  misses its beat. */
+  #layBleed(ctx: AudioContext, pass: Pass, copy: ScheduledClip, at: number): void {
+    for (const side of BLEED_SIDES) {
+      if (!copy.bleed[side]) continue;
+      const buffer = this.#bleed.get(this.#bleedKey(copy.clipId, copy.bpm, side));
+      if (!buffer) continue;
+      const duration = Math.min(buffer.duration, copy.durationSecs);
+      if (duration <= 0) continue;
+      const head = side === 'right';
+      this.#lay(ctx, pass, copy, buffer, {
+        at: head ? at : at + copy.durationSecs - duration,
+        offset: head ? 0 : buffer.duration - duration,
+        duration,
+        copyAt: at,
+      });
     }
   }
 
@@ -433,7 +541,7 @@ export class GridTransport {
       const copies = wanted.get(voice.pass);
       if (!copies) return true;
       const copy = copies.get(voice.key);
-      const started = voice.at <= now;
+      const started = voice.copyAt <= now;
 
       if (!copy) {
         this.#drop(voice, started ? now : voice.at);
@@ -450,7 +558,7 @@ export class GridTransport {
       // Sounding: rewrite the level under it. Times are absolute from
       // the copy's own start, so past points simply take effect at once.
       voice.gain.gain.cancelScheduledValues(now);
-      this.#writeLevels(voice.gain, copy, voice.at);
+      this.#writeLevels(voice.gain, copy, voice.copyAt);
       // A pan moved mid-note follows too, as far as the voice can: one
       // that started centred has no panner to move.
       if (voice.pan) voice.pan.pan.value = copy.pan;

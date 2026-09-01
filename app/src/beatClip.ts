@@ -77,6 +77,10 @@ export interface BeatClipStatus {
   playing: boolean;
 }
 
+/** Which bookend of a clip's bleed: `right` is the material that
+ *  FOLLOWED the clip in its track, `left` the material before it. */
+export type BleedSide = 'left' | 'right';
+
 /** What the picker's Clips tab and the module panel need; the Tauri
  *  client below implements it and tests substitute a mock. */
 export interface BeatClipApi {
@@ -92,6 +96,11 @@ export interface BeatClipApi {
    *  for it RE-TIMED to that tempo, which is a stretch and not a resample
    *  — the clip keeps its pitch. */
   audio(clipId: string, bpm?: number): Promise<ArrayBuffer | null>;
+  /** One side of the clip's BLEED as WAV bytes, re-timed like the loop.
+   *  Null where the clip was saved without that side — and optional on
+   *  the interface, because a caller that only ever loops the clip
+   *  through the engine never asks for it. */
+  bleed?(clipId: string, side: BleedSide, bpm?: number): Promise<ArrayBuffer | null>;
   /** The clip's shape in `buckets` peaks, for drawing it on a grid. */
   peaks(clipId: string, buckets: number): Promise<number[] | null>;
   /** Save/open/list Grid arrangements. The document is JSON the frontend
@@ -116,6 +125,12 @@ export class BeatClipClient extends IpcClient implements BeatClipApi {
   }
   audio(clipId: string, bpm?: number) {
     return this.call<ArrayBuffer>('beat_clip_audio', { clipId, bpm });
+  }
+  async bleed(clipId: string, side: BleedSide, bpm?: number) {
+    // A side the clip has none of comes back as no bytes; that is not
+    // silence to decode, it is nothing to play.
+    const bytes = await this.call<ArrayBuffer>('beat_clip_bleed', { clipId, side, bpm });
+    return bytes && bytes.byteLength > 0 ? bytes : null;
   }
   peaks(clipId: string, buckets: number) {
     return this.call<number[]>('beat_clip_peaks', { clipId, buckets });
