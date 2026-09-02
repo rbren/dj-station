@@ -28,7 +28,7 @@
 
 import type { BeatClipEntry } from './beatClip';
 import { MAX_BPM, MIN_BPM } from './decks';
-import { fxOrDefault, parseTrackFx, type TrackFx } from './gridFx';
+import { fxOrDefault, fxRenderSpec, parseTrackFx, type TrackFx } from './gridFx';
 
 /** Where one copy of a row's clip sits: the grid column its OWN beat 0
  *  lands on. Negative means the clip begins before the grid does (its
@@ -894,6 +894,15 @@ export interface ScheduledClip {
   /** Where the copy sits in the stereo field: −1 left … +1 right, off
    *  the row's rack chrome. */
   pan: number;
+  /** The row's rack graph as a render spec (`fxRenderSpec`), or null for
+   *  the default graph. Non-null asks the player for a SECOND buffer —
+   *  the copy's audio rendered through the rack — to crossfade against
+   *  the dry one. */
+  fx: string | null;
+  /** The rack chrome's Wetness: 0 = the dry buffer alone, 1 = the rack's
+   *  render alone. Meaningless (and unused) while `fx` is null — the
+   *  default rack is neutral, so there is nothing to crossfade to. */
+  wet: number;
   /** Which of the clip's bleed bookends this copy sounds, by SIDE (see
    *  `playback::ClipBleed`). The bleed is the material either side of
    *  the clip in the track it was cut from, and on a TIMELINE it goes
@@ -935,6 +944,8 @@ export function scheduleRange(
   for (const row of state.rows) {
     const clip = clips.get(row.clipId);
     if (!clip || clip.bpm <= 0) continue;
+    const rowFx = fxOrDefault(row.fx);
+    const renderSpec = fxRenderSpec(row.fx);
     for (const start of row.placements) {
       const span = placementSpan(clip, start);
       if (span.end <= range.start || span.start >= range.end) continue;
@@ -959,7 +970,9 @@ export function scheduleRange(
         offsetSecs,
         durationSecs: gridSecs,
         levels: levelRamp(state, row, from, Math.min(span.end, range.end)),
-        pan: fxOrDefault(row.fx).pan,
+        pan: rowFx.pan,
+        fx: renderSpec,
+        wet: rowFx.wet,
         // Only the ends the copy actually PLAYS carry a bookend; an end
         // the range cuts off is not a moment the bleed can meet.
         bleed: { left: span.start >= range.start, right: span.end <= range.end },

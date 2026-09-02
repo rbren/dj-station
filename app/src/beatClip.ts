@@ -95,8 +95,10 @@ export interface BeatClipApi {
   /** The clip's loop as WAV bytes, for a page that plays it in the
    *  webview instead of through the engine (the Grid page). `bpm` asks
    *  for it RE-TIMED to that tempo, which is a stretch and not a resample
-   *  — the clip keeps its pitch. */
-  audio(clipId: string, bpm?: number): Promise<ArrayBuffer | null>;
+   *  — the clip keeps its pitch. `fx` asks for it rendered THROUGH a
+   *  track's effects rack (`fxRenderSpec`), after the stretch: the wet
+   *  buffer the grid crossfades against the dry one. */
+  audio(clipId: string, bpm?: number, fx?: string): Promise<ArrayBuffer | null>;
   /** One side of the clip's BLEED as WAV bytes, re-timed like the loop.
    *  Null where the clip was saved without that side — and optional on
    *  the interface, because a caller that only ever loops the clip
@@ -124,8 +126,8 @@ export class BeatClipClient extends IpcClient implements BeatClipApi {
   delete(clipId: string) {
     return this.call<BeatClipEntry[]>('beat_clip_delete', { clipId });
   }
-  audio(clipId: string, bpm?: number) {
-    return this.call<ArrayBuffer>('beat_clip_audio', { clipId, bpm });
+  audio(clipId: string, bpm?: number, fx?: string) {
+    return this.call<ArrayBuffer>('beat_clip_audio', { clipId, bpm, fx });
   }
   async bleed(clipId: string, side: BleedSide, bpm?: number) {
     // A side the clip has none of comes back as no bytes; that is not

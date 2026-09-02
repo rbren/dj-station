@@ -59,9 +59,12 @@ const BLEED_SIDES: readonly BleedSide[] = ['right', 'left'];
 
 /** Where a clip's audio comes from. `bpm` asks for it RE-TIMED — the
  *  backend stretches it (WSOLA), so the grid's tempo can change without
- *  the pitch following it. */
+ *  the pitch following it. `fx` asks for the stretched clip THROUGH a
+ *  row's effects rack (the render spec `fxRenderSpec` makes): the WET
+ *  buffer, sample-aligned with the dry one so the two can be
+ *  crossfaded. */
 export interface GridAudioSource {
-  audio(clipId: string, bpm?: number): Promise<ArrayBuffer | null>;
+  audio(clipId: string, bpm?: number, fx?: string): Promise<ArrayBuffer | null>;
   /** A clip's bleed, one bookend at a time and re-timed the same way.
    *  Optional: a source that cannot hand it over simply plays the loops
    *  bare, which is what the grid did before it asked. */
@@ -95,6 +98,14 @@ interface Voice {
   pan: StereoPannerNode | null;
   pass: Pass;
   key: string;
+  /** Which side of the rack's Wetness crossfade this voice carries: the
+   *  clip as stored (`dry` — bleed bookends ride this side too) or the
+   *  rack's render of it (`wet`). A copy with the default rack has only
+   *  a dry voice at full gain. */
+  side: 'dry' | 'wet';
+  /** The render spec the copy carried when the voice was laid, so a rack
+   *  edited DURING playback can tell which wet voices are stale. */
+  fx: string | null;
   at: number;
   /** When the COPY starts, which is where its level line is read from
    *  and what says whether it has been heard yet. A bleed voice starts
@@ -168,8 +179,11 @@ export class GridTransport {
     return ctx ? ctx.currentTime : performance.now() / 1000;
   }
 
-  #key(clipId: string, bpm: number): string {
-    return `${clipId}@${bpm}`;
+  /** A buffer's cache key: the clip, the tempo it was stretched to, and
+   *  — for a WET buffer — the rack graph it was rendered through, so an
+   *  edited rack is a different buffer, not a stale one. */
+  #key(clipId: string, bpm: number, fx?: string | null): string {
+    return fx ? `${clipId}@${bpm}!${fx}` : `${clipId}@${bpm}`;
   }
 
   #bleedKey(clipId: string, bpm: number, side: BleedSide): string {
@@ -202,10 +216,19 @@ export class GridTransport {
     const ctx = sharedContext();
     if (!ctx) return;
     const columns = Math.max(this.#columns, state.beats);
-    const wanted = new Map<string, { clipId: string; bpm: number }>();
+    const wanted = new Map<string, { clipId: string; bpm: number; fx?: string }>();
     const bookends = new Map<string, { clipId: string; bpm: number; side: BleedSide }>();
     for (const copy of scheduleRange(state, clips, over ?? playRange(state, columns))) {
       wanted.set(this.#key(copy.clipId, copy.bpm), { clipId: copy.clipId, bpm: copy.bpm });
+      if (copy.fx) {
+        // An effected copy needs its WET buffer too — the same clip
+        // rendered through the row's rack.
+        wanted.set(this.#key(copy.clipId, copy.bpm, copy.fx), {
+          clipId: copy.clipId,
+          bpm: copy.bpm,
+          fx: copy.fx,
+        });
+      }
       for (const side of BLEED_SIDES) {
         if (!copy.bleed[side]) continue;
         bookends.set(this.#bleedKey(copy.clipId, copy.bpm, side), {
@@ -216,11 +239,11 @@ export class GridTransport {
       }
     }
     await Promise.all([
-      ...[...wanted].map(async ([key, { clipId, bpm }]) => {
+      ...[...wanted].map(async ([key, { clipId, bpm, fx }]) => {
         if (this.#buffers.has(key) || this.#pending.has(key)) return;
         this.#pending.add(key);
         try {
-          const bytes = await this.#source.audio(clipId, bpm);
+          const bytes = await this.#source.audio(clipId, bpm, fx);
           if (!bytes || this.#disposed) return;
           this.#buffers.set(key, await ctx.decodeAudioData(bytes.slice(0)));
         } catch {
@@ -483,10 +506,11 @@ export class GridTransport {
         continue;
       }
       const buffer = this.#buffers.get(this.#key(copy.clipId, copy.bpm));
-      if (!buffer) {
-        // Its stretch is still rendering. Leave the copy UNMARKED so a
-        // later pump lays it down once the audio lands, as long as its
-        // moment has not passed by then.
+      const wet = copy.fx ? this.#buffers.get(this.#key(copy.clipId, copy.bpm, copy.fx)) : null;
+      if (!buffer || (copy.fx && !wet)) {
+        // Its stretch (or its rack render) is still rendering. Leave the
+        // copy UNMARKED so a later pump lays it down once the audio
+        // lands, as long as its moment has not passed by then.
         void this.prime(state, this.#clips, { start: pass.from, end: pass.to });
         continue;
       }
@@ -494,9 +518,33 @@ export class GridTransport {
       const offset = Math.min(copy.offsetSecs, buffer.duration);
       const duration = Math.max(0, Math.min(copy.durationSecs, buffer.duration - offset));
       if (duration <= 0) continue;
-      this.#lay(ctx, pass, copy, buffer, { at, offset, duration, copyAt: at });
+      // An effected copy is a PAIR of sample-aligned voices — the clip
+      // and the rack's render of it — whose gains split the row's level
+      // by Wetness. Both are always laid: a wetness ridden mid-note can
+      // then move between them (`#resync`) instead of missing a side.
+      this.#lay(ctx, pass, copy, buffer, 'dry', { at, offset, duration, copyAt: at });
+      if (wet) {
+        const wetDuration = Math.max(0, Math.min(copy.durationSecs, wet.duration - offset));
+        if (wetDuration > 0) {
+          this.#lay(ctx, pass, copy, wet, 'wet', {
+            at,
+            offset,
+            duration: wetDuration,
+            copyAt: at,
+          });
+        }
+      }
       this.#layBleed(ctx, pass, copy, at, now);
     }
+  }
+
+  /** How much of the row's level one voice carries: an effected copy
+   *  splits it across the crossfade, an ordinary one is all dry. A wet
+   *  voice whose copy has LOST its rack (reset to default mid-play) has
+   *  no side left to carry. */
+  #mix(copy: ScheduledClip, side: 'dry' | 'wet'): number {
+    if (!copy.fx) return side === 'dry' ? 1 : 0;
+    return side === 'dry' ? 1 - copy.wet : copy.wet;
   }
 
   /** One buffer under one copy, wired and started. */
@@ -505,12 +553,13 @@ export class GridTransport {
     pass: Pass,
     copy: ScheduledClip,
     buffer: AudioBuffer,
+    side: 'dry' | 'wet',
     when: { at: number; offset: number; duration: number; copyAt: number },
   ): void {
     const node = ctx.createBufferSource();
     node.buffer = buffer;
     const gain = ctx.createGain();
-    this.#writeLevels(gain, copy, when.copyAt, when.at);
+    this.#writeLevels(gain, copy, this.#mix(copy, side), when.copyAt, when.at);
     // A centred row needs no panner at all, so the ordinary grid keeps
     // exactly the chain it had.
     const pan = copy.pan !== 0 && ctx.createStereoPanner ? ctx.createStereoPanner() : null;
@@ -529,6 +578,8 @@ export class GridTransport {
       pan,
       pass,
       key: copy.key,
+      side,
+      fx: copy.fx,
       at: when.at,
       copyAt: when.copyAt,
       endsAt: when.at + when.duration,
@@ -566,7 +617,10 @@ export class GridTransport {
       const offset = start - from;
       const duration = buffer.duration - offset;
       if (duration <= 0) continue;
-      this.#lay(ctx, pass, copy, buffer, { at: start, offset, duration, copyAt: at });
+      // The bookend is material of the ORIGINAL clip, so it rides the
+      // dry side of the crossfade: a fully wet copy plays the rack's
+      // render alone, bleed and all.
+      this.#lay(ctx, pass, copy, buffer, 'dry', { at: start, offset, duration, copyAt: at });
     }
   }
 
@@ -617,10 +671,13 @@ export class GridTransport {
         voice.pass.laid.delete(voice.key);
         return false;
       }
-      // Sounding: rewrite the level under it. Times are absolute from
-      // the copy's own start, so past points simply take effect at once.
+      // Sounding: rewrite the level under it — and the Wetness split,
+      // so the crossfade knob is heard on notes already in the air. A
+      // wet voice whose GRAPH was edited keeps sounding the old render
+      // until the pass comes round again (a note in progress cannot be
+      // re-rendered), at the new wetness.
       voice.gain.gain.cancelScheduledValues(now);
-      this.#writeLevels(voice.gain, copy, voice.copyAt, voice.at);
+      this.#writeLevels(voice.gain, copy, this.#mix(copy, voice.side), voice.copyAt, voice.at);
       // A pan moved mid-note follows too, as far as the voice can: one
       // that started centred has no panner to move.
       if (voice.pan) voice.pan.pan.value = copy.pan;
@@ -648,10 +705,13 @@ export class GridTransport {
    *  so material that runs into a faded clip is faded too rather than
    *  sounding at unity until the beat arrives. A tail-out needs nothing
    *  — the line's last value is where the envelope has already left the
-   *  gain. */
-  #writeLevels(gain: GainNode, copy: ScheduledClip, at: number, from = at): void {
+   *  gain.
+   *
+   *  `mix` is the voice's share of the crossfade (`#mix`): the level line
+   *  is the ROW's, and the dry/wet pair splits every point of it. */
+  #writeLevels(gain: GainNode, copy: ScheduledClip, mix: number, at: number, from = at): void {
     const [first, ...rest] = copy.levels;
-    gain.gain.setValueAtTime(first ? first[1] : 1, Math.min(from, at));
-    for (const [secs, level] of rest) gain.gain.linearRampToValueAtTime(level, at + secs);
+    gain.gain.setValueAtTime((first ? first[1] : 1) * mix, Math.min(from, at));
+    for (const [secs, level] of rest) gain.gain.linearRampToValueAtTime(level * mix, at + secs);
   }
 }
