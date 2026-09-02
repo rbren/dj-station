@@ -921,7 +921,6 @@ dependencies = [
  "serde_json",
  "symphonia",
  "tempfile",
- "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -930,6 +929,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cpal",
+ "dj-analysis",
  "dj-module-sdk",
  "hound",
  "libc",
@@ -938,8 +938,6 @@ dependencies = [
  "rtrb",
  "serde",
  "serde_json",
- "symphonia",
- "thiserror 2.0.19",
  "wasmtime",
 ]
 
@@ -955,7 +953,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "symphonia",
- "thiserror 2.0.19",
  "ureq",
 ]
 

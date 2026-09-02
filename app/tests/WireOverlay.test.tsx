@@ -2,7 +2,7 @@
 // lines with the selected color, and re-measures when the DOM shifts
 // (e.g. a deck panel growing after async content loads).
 
-import { readFileSync } from 'node:fs';
+import { appCss } from './readStyles';
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { WIRE_COLORS, WireOverlay } from '../src/components/WireOverlay';
@@ -125,7 +125,7 @@ describe('wire overlay stacking (CSS-level pin)', () => {
   // paints past it), and stay click-through so jacks/knobs work.
   it('.wire-overlay renders above panels, unclipped, and click-through', () => {
     // vitest runs with app/ (the vite root) as cwd.
-    const css = readFileSync('src/styles.css', 'utf-8');
+    const css = appCss();
     const rule = /\.wire-overlay\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
     expect(rule).toMatch(/z-index:\s*[1-9]/);
     expect(rule).toMatch(/overflow:\s*visible/);

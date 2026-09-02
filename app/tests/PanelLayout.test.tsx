@@ -5,7 +5,7 @@
 
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { appCss } from './readStyles';
 import GridSeqUI from '../../extensions/grid_seq/ui-src/GridSeqUI';
 import StepSeqUI from '../../extensions/step_seq/ui-src/StepSeqUI';
 import { ModulePanel } from '../src/components/ModulePanel';
@@ -349,7 +349,7 @@ describe('step sequencer strip alignment', () => {
   it('styles.css sizes the strip and the input cells from the same tokens', () => {
     // vitest runs with the app directory as cwd. (A `?raw` import would
     // be nicer, but vitest's css handling returns '' for .css imports.)
-    const css = readFileSync('src/styles.css', 'utf8');
+    const css = appCss();
     const rule = (selector: string) => {
       const m = css.match(new RegExp(`\\${selector}\\s*{[^}]*}`));
       if (!m) throw new Error(`missing rule ${selector}`);
@@ -411,7 +411,7 @@ describe('grid sequencer row-output alignment', () => {
   });
 
   it('styles.css sizes the grid rows and the jack column from the same tokens', () => {
-    const css = readFileSync('src/styles.css', 'utf8');
+    const css = appCss();
     const rule = (selector: string) => {
       const m = css.match(new RegExp(`${selector.replace(/[.\s]/g, '\\$&')}\\s*{[^}]*}`));
       if (!m) throw new Error(`missing rule ${selector}`);
@@ -574,7 +574,7 @@ describe('control-surface output readouts', () => {
   });
 
   it('styles.css gives readout cells one fixed width so the rows line up', () => {
-    const css = readFileSync('src/styles.css', 'utf8');
+    const css = appCss();
     const rule = (selector: string) => {
       const m = css.match(new RegExp(`${selector.replace(/[.\s]/g, '\\$&')}\\s*{[^}]*}`));
       if (!m) throw new Error(`missing rule ${selector}`);

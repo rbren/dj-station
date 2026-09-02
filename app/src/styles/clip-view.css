@@ -1,0 +1,571 @@
+/* ---------------------------------------------------------------------
+   Clip page (ClipView): waveform editor over library tracks.
+   Appended as its own block so the page's styles stay self-contained.
+   --------------------------------------------------------------------- */
+
+.clip-view {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* The shell never scrolls, so the page scrolls itself (see .library). */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.clip-load {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.clip-load label,
+.clip-save label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+}
+
+.clip-load select,
+.clip-save input {
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  max-width: 380px;
+}
+
+.clip-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clip-empty {
+  color: var(--ink-dim);
+  max-width: 46em;
+}
+
+.clip-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clip-waveform {
+  width: 100%;
+  height: 160px;
+  background: #101216;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: text;
+  user-select: none;
+}
+
+/* The dB grid is painted into the background so an empty lane reads as a
+   scale rather than a rendering fault: the lane is a fixed 90px tall and
+   spans +6 dB (y=0) to -60 dB (y=90), so unity lands at 8px and the
+   fainter rules mark -12 / -24 / -36 / -48 dB. */
+.clip-level-lane {
+  width: 100%;
+  height: 90px;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 8px,
+      color-mix(in srgb, var(--ink-dim) 55%, transparent) 8px 9px,
+      transparent 9px
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 25px,
+      var(--line) 25px 26px,
+      transparent 26px 41px,
+      var(--line) 41px 42px,
+      transparent 42px 57px,
+      var(--line) 57px 58px,
+      transparent 58px 74px,
+      var(--line) 74px 75px,
+      transparent 75px
+    ),
+    var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: crosshair;
+}
+
+/* A flat line at unity with no breakpoints is the default, not a value
+   the user set: it says so by staying quiet. */
+.clip-level-lane:not(:has(.clip-level-point)) .clip-level-line {
+  stroke: var(--ink-dim);
+}
+
+/* The selection pane: the live half of the page. It is boxed and inset so
+   the two waveforms read as reference (above) and result (here) rather
+   than as two tracks of one timeline. */
+.clip-sel-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--brand);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.clip-sel-waveform {
+  height: 120px;
+  cursor: pointer;
+}
+
+/* The BEAT FLAGS above the selection's waveform: a triangle per beat,
+   pointing down at its marker. Hollow is an ordinary beat, filled is a
+   one — the same green the one's line is drawn in, so the flag and what
+   it marks read as one object. */
+.clip-sel-beat-flag {
+  fill: none;
+  stroke: var(--ink-dim);
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.clip-sel-beat-flag.is-one {
+  fill: var(--ok);
+  stroke: var(--ok);
+}
+
+.clip-sel-beat-flag:hover {
+  stroke: var(--ok);
+}
+
+.clip-sel-seam {
+  stroke: var(--ink-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* The selection and its two BOOKENDS: the bleed controls stand at the
+   edges the material they measure comes from, so the row reads as the
+   span with a little of the track either side of it.
+
+   A GRID, because the level lane below the waveform is drawn against the
+   same x-axis and has to line up with it to the pixel: the bookends take
+   an auto column each, the waveform takes the rest, and the lane spans
+   only the waveform's column. Laid out as two flex rows instead, the
+   lane would run the full width and every breakpoint would sit a bleed
+   control's width off the peak it was dropped on. */
+.clip-sel-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* Both lanes are pinned to the middle column by name rather than left
+   to auto-placement: the bookends are optional, and without them the
+   waveform would otherwise fall into column 1 and the lane into column
+   2 — the very misalignment this grid exists to prevent. An empty auto
+   column is zero wide, so the no-bleed case still fills the row. */
+.clip-sel-grid .clip-sel-waveform {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.clip-sel-grid .clip-level-lane {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+}
+
+.clip-bleed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 2px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+}
+
+/* The bookends take the outer columns, and only the first grid row:
+   the level lane below spans the middle column alone, so a bleed
+   control must not stretch down beside it. */
+.clip-sel-grid .clip-bleed-left {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.clip-sel-grid .clip-bleed-right {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.clip-bleed input {
+  width: 44px;
+  padding: 2px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* WHAT THE SPAN IS — beats, length, ends, tempo — in the pane's title
+   row: the one description of the selection, and the numbers the save
+   files. It takes the row's spare width so the controls beside it stay
+   at its right-hand end. */
+.clip-sel-title {
+  flex: 1;
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-sel-padded {
+  color: var(--ink-dim);
+}
+
+/* Material on its way, said quietly: what is loaded keeps playing. */
+.clip-sel-loading {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+}
+
+.clip-sel-empty {
+  color: var(--ink-dim);
+  max-width: 46em;
+}
+
+.clip-join {
+  stroke: var(--brand);
+  stroke-width: 2;
+  opacity: 0.5;
+}
+
+/* Beats tapped out with right-shift during playback: pending taps in the
+   cue colour, and the even grid they become as quiet hairlines. */
+.clip-tap-line {
+  stroke: var(--cue);
+  stroke-width: 2;
+  opacity: 0.9;
+}
+
+.clip-beat-line {
+  stroke: var(--ink-dim);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+
+/* The ONE: a beat marked with left-shift, drawn over its hairline so the
+   downbeat reads at a glance (and while tapping, the pending mark). */
+.clip-one-line {
+  stroke: var(--ok);
+  stroke-width: 2;
+  opacity: 0.9;
+}
+
+/* Stretch-correction sections of the tapped grid, washed over the
+   waveform: cue for slowed-down audio, brand for sped-up. The wash's
+   opacity carries the magnitude (set inline from the stretch ratio). */
+.clip-stretch-slower {
+  fill: var(--cue);
+}
+
+.clip-stretch-faster {
+  fill: var(--brand);
+}
+
+/* The grid toolbar: +/− span extensions, the correction-length slider
+   and the flam/stretch it leaves. */
+.clip-grid-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: var(--fs-s);
+}
+
+.clip-grid-label {
+  color: var(--ink-muted);
+}
+
+.clip-grid-extend {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.clip-grid-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clip-grid-section input[type='range'] {
+  width: 120px;
+}
+
+.clip-grid-seed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clip-grid-stats {
+  color: var(--ink-dim);
+}
+
+.clip-selection {
+  fill: color-mix(in srgb, var(--brand) 22%, transparent);
+  stroke: var(--brand);
+  stroke-width: 2;
+  /* Grabbing inside slides the selection along the audio (alt-drag takes
+     the audio with it), so the interior reads as draggable. */
+  cursor: grab;
+}
+
+/* The grab zone for either end of the selection: invisible, and only as
+   wide as startDrag's hit-test radius. It takes pointer events purely so
+   the cursor turns — mousedown still bubbles to the waveform, which does
+   the hit-testing, so it cannot swallow a click. */
+.clip-selection-handle {
+  fill: transparent;
+  cursor: ew-resize;
+}
+
+/* What you actually aim at: a hairline, kept 2px however far the viewBox
+   is stretched. It brightens with the pointer over the waveform so the
+   ends read as grabbable. */
+.clip-selection-edge {
+  stroke: #9dc0ff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.clip-waveform:hover .clip-selection-edge {
+  stroke: var(--ink);
+}
+
+.clip-grid {
+  stroke: #ffffff;
+  stroke-width: 1;
+  opacity: 0.05;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* Time ruler over the waveform. Marks are absolutely positioned by
+   percentage, so they follow the viewport without re-laying out. */
+.clip-ruler {
+  position: relative;
+  height: 18px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+
+.clip-tick {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 4px;
+  border-left: 1px solid #39404d;
+}
+
+.clip-tick-major {
+  height: 9px;
+  border-left-color: #5b6577;
+}
+
+.clip-tick-label {
+  position: absolute;
+  bottom: 8px;
+  left: 3px;
+  font-size: var(--fs-nano);
+  font-style: normal;
+  line-height: 1;
+  color: #8b94a6;
+  white-space: nowrap;
+}
+
+.clip-level-line {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.clip-level-point {
+  fill: var(--ok);
+  cursor: grab;
+}
+
+/* The page's one horizontal division: the source track and its grid
+   above, the selection being shaped below. */
+.clip-rule {
+  width: 100%;
+  height: 0;
+  margin: 2px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.clip-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.clip-load button,
+.clip-save button {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+/* Disabled is the shared treatment (opacity + no border); the local rule
+   only needs the dimmer ink. */
+.clip-load button:disabled,
+.clip-save button:disabled {
+  color: var(--ink-dim);
+  cursor: default;
+}
+
+/* The save landed: a tick, because the numbers it would repeat are the
+   ones already written over the selection. */
+.clip-save-done {
+  color: var(--ok);
+  font-size: var(--fs-lg);
+}
+
+/* The actions that produce a beat clip: the page's outcome, so they read
+   as the outcome. */
+.clip-save button.clip-save-button {
+  color: var(--canvas);
+  background: var(--brand);
+  border-color: var(--brand);
+  font-weight: 600;
+}
+
+.clip-save button.clip-save-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brand) 82%, #fff);
+  border-color: color-mix(in srgb, var(--brand) 82%, #fff);
+}
+
+.clip-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.clip-transport button {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.clip-transport button:disabled {
+  color: #5c626c;
+  cursor: default;
+}
+
+/* An engaged toggle looks the same everywhere: brand tint, brand edge —
+   the same recipe as .deck-btn.active. Green is left to "finished". */
+.clip-transport .clip-toggle-on {
+  background: color-mix(in srgb, var(--brand) 28%, var(--canvas));
+  border-color: color-mix(in srgb, var(--brand) 70%, var(--line-strong));
+}
+
+.clip-playhead-readout {
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  min-width: 72px;
+}
+
+.clip-zoom {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.clip-playhead {
+  stroke: #e5c07b;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.clip-stems {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.clip-stem-toggles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* On/off at a glance: a lit switch is in the mix, a dim one is dropped. */
+.clip-stem-toggles .clip-stem-on {
+  border-color: #3f6b52;
+  background: #24382c;
+  color: #b9e6c8;
+}
+
+.clip-stem-toggles .clip-stem-off {
+  color: var(--ink-dim);
+  text-decoration: line-through;
+}
+
+/* Stems on their way: a wait, not a warning. */
+.clip-stem-loading {
+  color: #c8b07d;
+  font-size: var(--fs-md);
+}
+
+.clip-stem-hint {
+  color: var(--ink-dim);
+  font-size: var(--fs-md);
+  max-width: 46em;
+}
+
+/* Which model made these stems: a footnote, not a control. */
+.clip-stem-model {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+}
+
+/* Most of what lands here is narration ("editing X", "loaded Y"), not
+   success: green is kept for states that actually completed. */
+.clip-status {
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+}
+
+.clip-error {
+  color: var(--fault);
+  font-size: var(--fs-md);
+}

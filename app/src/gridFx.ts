@@ -145,6 +145,33 @@ export function isTrackFxModified(fx: TrackFx | null | undefined): boolean {
   return JSON.stringify(canonical(fx)) !== JSON.stringify(canonical(defaultTrackFx()));
 }
 
+/** The GRAPH of a rack — modules (sans position) and wires — as the
+ *  backend render spec (`dj_engine::track_fx::TrackFxSpec`), or null for
+ *  a graph identical to the default rack's. Null is the "play dry"
+ *  answer: the default rack is audibly neutral (flat EQ on the L path),
+ *  so an untouched row costs no render and no second voice. Positions,
+ *  level, pan and wetness are all outside the graph on purpose — moving
+ *  a panel or riding the Wetness knob must not re-render audio. */
+export function fxRenderSpec(fx: TrackFx | null | undefined): string | null {
+  if (!fx) return null;
+  const graph = (f: TrackFx) =>
+    JSON.stringify({
+      modules: f.modules.map((m) => ({
+        id: m.id,
+        type: m.type,
+        values: Object.fromEntries(Object.entries(m.values).sort(([a], [b]) => a.localeCompare(b))),
+      })),
+      wires: f.wires.map((w) => ({
+        from_instance: w.from_instance,
+        from_jack: w.from_jack,
+        to_instance: w.to_instance,
+        to_jack: w.to_jack,
+      })),
+    });
+  const spec = graph(fx);
+  return spec === graph(defaultTrackFx()) ? null : spec;
+}
+
 /** The same rack written the same way twice, so two of them can be
  *  compared as text (key order is what a hand-built object gets wrong). */
 function canonical(fx: TrackFx): unknown {

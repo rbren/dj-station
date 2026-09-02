@@ -26,6 +26,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { engine } from '../engine';
 import { fixed } from '../format';
+import { moduleRect, rectsOverlap, resolvePush, spotInView, type Rect } from '../rackLayout';
 import {
   addFxModule,
   clampFxLevel,
@@ -49,7 +50,7 @@ import type { KnobConfig, Manifest, ModuleHandle } from '../types';
 import { previewUI } from './customUIs';
 import { Jack } from './Jack';
 import { Knob, mapPosition, positionForValue } from './Knob';
-import { ModulePanel } from './ModulePanel';
+import { GRID, ModulePanel } from './ModulePanel';
 import { ModulePicker, previewHandle, previewKnobs } from './ModulePicker';
 import { WireOverlay } from './WireOverlay';
 
@@ -57,10 +58,21 @@ const LEVEL_KNOB: KnobConfig = { style: 'continuous', min: 0, max: FX_LEVEL_MAX,
 const PAN_KNOB: KnobConfig = { style: 'continuous', min: -1, max: 1, curve: 'linear' };
 const WET_KNOB: KnobConfig = { style: 'continuous', min: 0, max: 1, curve: 'linear' };
 
-/** Where a module dropped from the picker lands: below the rack's own
- *  panels, on the coarse placement grid. */
-const DROP_X = 0;
-const DROP_STEP = 288;
+/** The modal's canvas opens ZOOMED OUT: half scale shows the default
+ *  rack whole, chrome to LFO, without a pan. The rack page's zoom range
+ *  applies here too. */
+const FX_ZOOM_DEFAULT = 0.5;
+const FX_ZOOM_MIN = 0.25;
+const FX_ZOOM_MAX = 2;
+const FX_ZOOM_STEP = 1.25;
+
+/** Dot-grid spacing under the canvas, doubled while it would moiré —
+ *  the rack page's own rule (`dotGridSize` in App). */
+function fxDotSize(zoom: number): number {
+  let size = GRID * zoom;
+  while (size < 12) size *= 2;
+  return size;
+}
 
 export interface GridFxModalProps {
   /** What the rack belongs to, said in the title. */
@@ -92,6 +104,82 @@ export function GridFxModal({
   const [picking, setPicking] = useState(false);
   const [fetched, setFetched] = useState<Manifest[]>([]);
   const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null);
+  const [rackEl, setRackEl] = useState<HTMLDivElement | null>(null);
+  const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null);
+  const [zoom, setZoom] = useState(FX_ZOOM_DEFAULT);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  // Overscroll pan, exactly the rack page's: wheel/trackpad scrolling
+  // over the canvas shifts it in any direction. Native non-passive
+  // listener so the modal never rubber-bands instead.
+  useEffect(() => {
+    if (!rackEl) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setPan((prev) => ({ x: prev.x - e.deltaX, y: prev.y - e.deltaY }));
+    };
+    rackEl.addEventListener('wheel', onWheel, { passive: false });
+    return () => rackEl.removeEventListener('wheel', onWheel);
+  }, [rackEl]);
+
+  const changeZoom = (direction: 1 | -1 | 0) => {
+    if (direction === 0) {
+      setZoom(FX_ZOOM_DEFAULT);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+    setZoom((prev) =>
+      Math.min(FX_ZOOM_MAX, Math.max(FX_ZOOM_MIN, prev * FX_ZOOM_STEP ** direction)),
+    );
+  };
+
+  /** A module's rack rect, measured from ITS OWN panel in this modal —
+   *  not `moduleRect`'s document-wide lookup, which could land on the
+   *  (hidden) Rack page panel of a same-named instance. */
+  const rectOf = (id: string, pos: { x: number; y: number }): Rect => {
+    const el = canvasEl?.querySelector<HTMLElement>(`[data-testid="module-${id}"]`);
+    return el
+      ? { x: pos.x, y: pos.y, w: el.offsetWidth || GRID * 4, h: el.offsetHeight || GRID * 2 }
+      : moduleRect(id, pos);
+  };
+
+  // Modules never overlap, here as on the rack page: a drag into an
+  // occupied spot pushes the dragged panel out to the nearest free
+  // grid spot along the drag's dominant axis (resolvePush), and a drag
+  // with nowhere to go simply stays put.
+  const movePanel = (id: string, x: number, y: number) => {
+    const m = fx.modules.find((mod) => mod.id === id);
+    if (!m || (x === m.x && y === m.y)) return;
+    const size = rectOf(id, { x, y });
+    const others = fx.modules.filter((o) => o.id !== id).map((o) => rectOf(o.id, o));
+    let target = { x, y };
+    if (others.some((o) => rectsOverlap({ ...target, w: size.w, h: size.h }, o))) {
+      const resolved = resolvePush(target, { x: m.x, y: m.y }, { w: size.w, h: size.h }, others);
+      if (!resolved) return;
+      target = resolved;
+    }
+    if (target.x === m.x && target.y === m.y) return;
+    onChange(moveFxModule(fx, id, target.x, target.y), `fx-move-${id}`);
+  };
+
+  /** Where a module from the picker lands: a free grid spot as close to
+   *  the middle of the VIEW as the view has room for (spotInView), so it
+   *  arrives where the user is looking whatever the pan and zoom. */
+  const dropModule = (typeId: string) => {
+    const size = { w: GRID * 4, h: GRID * 2 };
+    // A canvas not yet measured (or headless) still needs SOME room to
+    // place into: a nominal viewport keeps the spot search meaningful.
+    const view: Rect = {
+      x: rackEl ? -pan.x / zoom : 0,
+      y: rackEl ? -pan.y / zoom : 0,
+      w: (rackEl?.clientWidth ?? 0) / zoom || GRID * 16,
+      h: (rackEl?.clientHeight ?? 0) / zoom || GRID * 12,
+    };
+    const want = { x: view.x + view.w / 2 - size.w / 2, y: view.y + view.h / 2 - size.h / 2 };
+    const others = fx.modules.map((o) => rectOf(o.id, o));
+    const spot = spotInView(want, size, others, view);
+    onChange(addFxModule(fx, typeId, spot.x, spot.y));
+  };
 
   useEffect(() => {
     if (modules) return;
@@ -106,6 +194,19 @@ export function GridFxModal({
 
   const manifests = modules ?? fetched;
   const byType = useMemo(() => new Map(manifests.map((m) => [m.id, m] as const)), [manifests]);
+
+  // Cables that touch the chrome cross the pan/zoom boundary, so they are
+  // drawn by a screen-space overlay over the body; the rest live inside
+  // the transformed canvas and pan with it.
+  const [chromeWires, innerWires] = useMemo(() => {
+    const chrome = fx.wires.filter(
+      (w) => w.from_instance === FX_CHROME || w.to_instance === FX_CHROME,
+    );
+    const inner = fx.wires.filter(
+      (w) => w.from_instance !== FX_CHROME && w.to_instance !== FX_CHROME,
+    );
+    return [chrome, inner] as const;
+  }, [fx.wires]);
 
   // Escape drops an armed cable first, then closes: the modal is not
   // what a half-made wire wants taken away.
@@ -178,6 +279,34 @@ export function GridFxModal({
       <div className="grid-fx" role="dialog" aria-label={`Effects for ${title}`}>
         <div className="grid-fx-head">
           <h3>Effects — {title}</h3>
+          <div className="grid-fx-zoom" role="group" aria-label="Zoom">
+            <button
+              className="grid-fx-btn"
+              data-testid="grid-fx-zoom-out"
+              aria-label="Zoom out"
+              onClick={() => changeZoom(-1)}
+            >
+              −
+            </button>
+            {/* The readout doubles as "reset view": zoom back to the
+                opening scale and pan home. */}
+            <button
+              className="grid-fx-btn mono"
+              data-testid="grid-fx-zoom-reset"
+              aria-label="Reset view"
+              onClick={() => changeZoom(0)}
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              className="grid-fx-btn"
+              data-testid="grid-fx-zoom-in"
+              aria-label="Zoom in"
+              onClick={() => changeZoom(1)}
+            >
+              +
+            </button>
+          </div>
           <button
             className="grid-fx-btn"
             data-testid="grid-fx-add"
@@ -214,43 +343,85 @@ export function GridFxModal({
             </div>
           </div>
 
-          <div className="grid-fx-rack" data-testid="grid-fx-rack">
-            {fx.modules.map((m) => {
-              const manifest = byType.get(m.type);
-              if (!manifest) {
-                // No manifest (the engine is not there, or the module has
-                // been uninstalled): the rack still HOLDS it — say so,
-                // rather than quietly dropping what the user patched.
+          {/* An infinite canvas, the rack page's way: the panels live in
+              rack coordinates inside a translated+scaled surface, the
+              dot grid tracks the pan through background-position, and
+              wheel scrolling moves the camera. */}
+          <div
+            className="grid-fx-rack"
+            data-testid="grid-fx-rack"
+            ref={setRackEl}
+            style={{
+              backgroundPosition: `${pan.x}px ${pan.y}px`,
+              backgroundSize: `${fxDotSize(zoom)}px ${fxDotSize(zoom)}px`,
+            }}
+          >
+            <div
+              className="grid-fx-canvas"
+              data-testid="grid-fx-canvas"
+              ref={setCanvasEl}
+              style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: '0 0',
+              }}
+            >
+              {fx.modules.map((m) => {
+                const manifest = byType.get(m.type);
+                if (!manifest) {
+                  // No manifest (the engine is not there, or the module
+                  // has been uninstalled): the rack still HOLDS it — say
+                  // so, rather than quietly dropping what the user
+                  // patched.
+                  return (
+                    <div
+                      className="grid-fx-missing"
+                      key={m.id}
+                      data-testid={`grid-fx-missing-${m.id}`}
+                      style={{ left: m.x, top: m.y }}
+                    >
+                      {m.id} · {m.type}
+                    </div>
+                  );
+                }
                 return (
-                  <div
-                    className="grid-fx-missing"
+                  <FxPanel
                     key={m.id}
-                    data-testid={`grid-fx-missing-${m.id}`}
-                  >
-                    {m.id} · {m.type}
-                  </div>
+                    module={m}
+                    manifest={manifest}
+                    fx={fx}
+                    pending={pending}
+                    zoom={zoom}
+                    onMove={(x, y) => movePanel(m.id, x, y)}
+                    onChange={onChange}
+                    onEditEnd={onEditEnd}
+                    onJackClick={(kind, jack, shift) => jackClick(m.id, kind, jack, shift)}
+                  />
                 );
-              }
-              return (
-                <FxPanel
-                  key={m.id}
-                  module={m}
-                  manifest={manifest}
-                  fx={fx}
-                  pending={pending}
-                  onChange={onChange}
-                  onEditEnd={onEditEnd}
-                  onJackClick={(kind, jack, shift) => jackClick(m.id, kind, jack, shift)}
-                />
-              );
-            })}
+              })}
+              {/* Module-to-module cables, in rack coordinates: the CSS
+                  transform pans and zooms them for free. Cables that
+                  touch the CHROME cannot live here (the chrome does not
+                  pan), so they resolve to nothing in this layer and are
+                  drawn by the body overlay below — nothing twice. */}
+              <WireOverlay
+                wires={innerWires}
+                container={canvasEl}
+                zoom={zoom}
+                layoutKey={fx.modules.map((m) => `${m.id}@${m.x},${m.y}`).join('|')}
+              />
+            </div>
           </div>
 
+          {/* Chrome cables and the armed-cable preview, in screen space
+              over the whole body: one end is on the chrome, which does
+              not pan, so these re-measure when the camera moves (pan and
+              zoom are part of the layout key — the Decks page's chrome
+              overlay works the same way). */}
           <WireOverlay
-            wires={fx.wires}
+            wires={chromeWires}
             container={bodyEl}
             pending={pending ? { ...pending, color: 0 } : null}
-            layoutKey={fx.modules.map((m) => `${m.id}@${m.x},${m.y}`).join('|')}
+            layoutKey={`${fx.modules.map((m) => `${m.id}@${m.x},${m.y}`).join('|')}|${pan.x},${pan.y},${zoom}`}
           />
         </div>
       </div>
@@ -259,8 +430,7 @@ export function GridFxModal({
         <ModulePicker
           modules={manifests}
           onAdd={(typeId) => {
-            const y = fx.modules.length * DROP_STEP;
-            onChange(addFxModule(fx, typeId, DROP_X, y));
+            dropModule(typeId);
             setPicking(false);
           }}
           onClose={() => setPicking(false)}
@@ -276,6 +446,8 @@ function FxPanel({
   manifest,
   fx,
   pending,
+  zoom,
+  onMove,
   onChange,
   onEditEnd,
   onJackClick,
@@ -284,6 +456,8 @@ function FxPanel({
   manifest: Manifest;
   fx: TrackFx;
   pending: FxPending | null;
+  zoom: number;
+  onMove(x: number, y: number): void;
   onChange(next: TrackFx, gesture?: string): void;
   onEditEnd?(): void;
   onJackClick(kind: 'input' | 'output', jack: string, shift?: boolean): void;
@@ -320,7 +494,8 @@ function FxPanel({
       handle={handle}
       customUI={previewUI(manifest.id)}
       position={{ x: m.x, y: m.y }}
-      onMove={(x, y) => onChange(moveFxModule(fx, m.id, x, y), `fx-move-${m.id}`)}
+      zoom={zoom}
+      onMove={onMove}
       onMoveEnd={onEditEnd}
       onRemove={() => onChange(removeFxModule(fx, m.id))}
       onJackClick={onJackClick}

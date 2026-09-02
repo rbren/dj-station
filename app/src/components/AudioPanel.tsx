@@ -13,6 +13,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { audio as defaultAudio, type AudioApi, type AudioStatus } from '../audio';
 import { fixed, safeNumber } from '../format';
+import { usePoll } from '../usePoll';
 import type { Track } from '../library';
 import { peaksPath, WAVEFORM_VIEW_W } from './WaveformView';
 
@@ -107,16 +108,7 @@ export function AudioPanel(props: AudioPanelProps) {
     }
   }, [api, instanceId]);
 
-  useEffect(() => {
-    // First poll on a timeout (keeps setState out of the effect body per
-    // react-hooks/set-state-in-effect), then interval.
-    const initial = setTimeout(() => void poll(), 0);
-    const timer = setInterval(() => void poll(), props.pollMs ?? POLL_MS);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(timer);
-    };
-  }, [poll, props.pollMs]);
+  usePoll(poll, props.pollMs ?? POLL_MS);
 
   const duration = safeNumber(status?.duration_secs);
   const position = safeNumber(status?.position_secs);

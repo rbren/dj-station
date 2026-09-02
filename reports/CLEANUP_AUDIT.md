@@ -1,5 +1,38 @@
 # Cleanup audit — analysis only, nothing executed
 
+> **Execution status (2026-05-21).** P0 and everything the follow-up
+> session judged worth doing has landed on `main`:
+>
+> - **P0 Decks V2 deleted** — frontend, CSS, engine state, tauri
+>   commands, fixtures (`5ef8e21`).
+> - **P1.1 dead code** — dead symbols, orphan CSS, unused cargo deps
+>   (`41c4e7d`).
+> - **P1.2 one decoder** — `playback::decode_file` now delegates to
+>   `dj_analysis::decode_audio`; dj-engine drops its symphonia dep; all
+>   54 e2e goldens byte-identical (`18a5aca`).
+> - **P1.3 moot** — the shared Decks transport strip was only shared
+>   with V2, which no longer exists.
+> - **P1.4 done differently** — the two pickers share the dialog shell
+>   and the query matcher but *nothing else* (multi-add disclosure list
+>   vs. two-step keyboard flow); merging them would make a flag-driven
+>   fork. The real duplication — five copies of the words-split search
+>   filter — is now one `matchesQuery` in `src/search.ts` (`663e384`).
+> - **P2.6 main.rs split** — library/deck/choreo/macros modules;
+>   main.rs 3,163 → 2,042 lines, pure code motion (`96abf56`).
+> - **P2.7 styles.css split** — an `@import` index over `src/styles/`,
+>   cut on the file's own banners (`a7f0bac`). The 23 verbatim-dup rule
+>   bodies were *left alone*: nearly all pair unrelated pages, and
+>   comma-merging them would couple pages on a coincidence.
+> - **P3.11 usePoll** — the six identical panel poll effects
+>   (`39b940d`).
+>
+> **Deliberately deferred:** P2.5 (App.tsx split — 28 `useState` hooks
+> in one component; needs its own ticket with designed state
+> boundaries), P2.8 (row-layer/levelLane extractions — do alongside
+> feature work in those views), P3.9/10 (export hygiene — per-file when
+> touched), P3.12 (transport core — highest regression risk, only with
+> planned feature work).
+
 Audit of the whole tree (engine crates, extensions, frontend, Tauri shell)
 for dead code, duplication, oversized files and smells. Every claim below
 was measured on this checkout; numbers are exact where stated.

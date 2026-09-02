@@ -1,0 +1,220 @@
+/* ---- Choreography panel ------------------------------------------------ */
+
+.choreo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-micro);
+}
+
+.choreo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.choreo-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-dim);
+}
+
+.choreo-toolbar input[type='number'] {
+  width: 56px;
+}
+
+.choreo-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #0d0f12;
+}
+
+.choreo-timeline {
+  position: relative;
+}
+
+.choreo-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+}
+
+.choreo-row-dragover {
+  outline: 1px dashed var(--brand);
+  outline-offset: -1px;
+}
+
+/* Pinned name column: stays put while lanes scroll horizontally. */
+.choreo-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  flex: 0 0 116px;
+  width: 116px;
+  gap: 2px;
+  overflow: hidden;
+  background: var(--canvas);
+  border-right: 1px solid var(--line);
+}
+
+.choreo-label-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 2px 2px 0;
+}
+
+.choreo-drag-handle {
+  flex: 0 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: #4a5262;
+  user-select: none;
+}
+
+.choreo-name {
+  width: 72px;
+  font-size: var(--fs-micro);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink);
+}
+
+.choreo-name:focus {
+  border-color: #2f3541;
+}
+
+.choreo-kind {
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+
+.choreo-label-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.choreo-label-actions button {
+  font-size: var(--fs-micro);
+  padding: 0 4px;
+  line-height: 14px;
+}
+
+.choreo-note-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 2px;
+}
+
+.choreo-note-settings label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
+}
+
+.choreo-row-labels {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  text-align: right;
+}
+
+.choreo-row-labels span {
+  display: block;
+  line-height: 1;
+  padding-right: 2px;
+}
+
+.choreo-lane {
+  display: block;
+  flex: 0 0 auto;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.choreo-ruler {
+  height: 16px;
+}
+
+.choreo-ruler .choreo-label {
+  height: 16px;
+}
+
+.choreo-ruler-lane {
+  position: relative;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+}
+
+.choreo-ruler-num {
+  position: absolute;
+  top: 2px;
+  padding-left: 2px;
+  border-left: 1px solid #2f3541;
+}
+
+.choreo-grid-beat {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.choreo-grid-bar {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.choreo-grid-row {
+  stroke: #171b21;
+  stroke-width: 1;
+}
+
+.choreo-grid-octave {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.choreo-bool-on {
+  fill: var(--brand);
+}
+
+.choreo-zero {
+  stroke: var(--line-strong);
+  stroke-dasharray: 3 3;
+}
+
+.choreo-curve {
+  stroke: #4fc08d;
+  stroke-width: 1.5;
+}
+
+.choreo-note-on {
+  fill: #e0a34f;
+}
+
+.choreo-playhead {
+  position: absolute;
+  top: 16px;
+  bottom: 0;
+  z-index: 1;
+  background: rgba(90, 141, 238, 0.18);
+  border-left: 1px solid rgba(90, 141, 238, 0.7);
+  pointer-events: none;
+}
+
+.choreo-empty {
+  color: var(--ink-dim);
+  padding: 4px 2px;
+}

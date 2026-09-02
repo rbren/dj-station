@@ -2,9 +2,9 @@
 //! download jobs (thread per job, progress into a snapshot the UI polls —
 //! no event plumbing).
 //!
-//! Separation is the slowest thing the app does: `htdemucs_ft` is a bag of
-//! four models and runs for minutes on CPU. It must never block the UI
-//! thread, and it is nowhere near the RT thread.
+//! Separation is the slowest thing the app does: SCNet XL IHF runs for
+//! minutes on CPU. It must never block the UI thread, and it is nowhere
+//! near the RT thread.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,7 +16,8 @@ use dj_library::db::Library;
 
 use crate::decode::decode_audio;
 use crate::stems::{
-    ensure_stems_cancellable, stems_cached, stems_dir_for, CancelToken, StemSeparator,
+    cached_stems_for, ensure_stems_cancellable, stems_dir_for, CachedStems, CancelToken,
+    StemSeparator,
 };
 
 /// Finished jobs kept in the snapshot so the UI can report the outcome
@@ -39,8 +40,8 @@ pub enum StemJobState {
 pub struct StemJob {
     pub id: u64,
     pub track_id: i64,
-    /// Separator id (= model name for demucs), so the UI can tell which
-    /// backend produced a result.
+    /// Separator id (= the model name), so the UI can tell which backend
+    /// produced a result.
     pub backend: String,
     pub title: String,
     pub state: StemJobState,
@@ -86,7 +87,8 @@ impl StemJobs {
         self.separator.probe()
     }
 
-    /// Are this track's stems already on disk for our backend?
+    /// Are this track's stems already on disk (ours, or an earlier
+    /// model's — see [`cached_stems_for`])?
     pub fn cached(&self, track_id: i64) -> bool {
         match self.library.track(track_id) {
             Ok(track) => self.cached_content(&track.content_hash),
@@ -97,7 +99,14 @@ impl StemJobs {
     /// The same answer for a content hash already in hand — a caller
     /// walking the whole library needs no second row lookup per track.
     pub fn cached_content(&self, content_hash: &str) -> bool {
-        stems_cached(&self.dir(content_hash))
+        self.cache(content_hash).is_some()
+    }
+
+    /// The cached stems for a content hash, with the model that made
+    /// them: the app reports that per track, because it is not
+    /// necessarily the model it would use today.
+    pub fn cache(&self, content_hash: &str) -> Option<CachedStems> {
+        cached_stems_for(self.library.data_dir(), content_hash, self.separator.id())
     }
 
     /// Cached stem files for `track_id`, or `None` when not separated yet.
@@ -106,12 +115,8 @@ impl StemJobs {
         track_id: i64,
     ) -> Option<[std::path::PathBuf; crate::stems::N_STEMS]> {
         let track = self.library.track(track_id).ok()?;
-        let dir = self.dir(&track.content_hash);
-        stems_cached(&dir).then(|| crate::stems::stem_paths(&dir))
-    }
-
-    fn dir(&self, content_hash: &str) -> std::path::PathBuf {
-        stems_dir_for(self.library.data_dir(), content_hash, self.separator.id())
+        let cached = self.cache(&track.content_hash)?;
+        Some(crate::stems::stem_paths(&cached.dir))
     }
 
     /// Separate `track_id` in the background, returning the job id. A
@@ -157,8 +162,8 @@ impl StemJobs {
             let outcome = separate(&library, separator.as_ref(), track_id, &jobs, id, &cancel);
             cancels.lock().expect("stem cancels poisoned").remove(&id);
             update(&jobs, id, |job| {
-                // A killed run usually also reports an error (a demucs
-                // that was shot mid-model, say). The cancel is the real
+                // A killed run usually also reports an error (a model
+                // that was shot mid-inference, say). The cancel is the real
                 // story, so it wins.
                 if cancel.is_cancelled() {
                     job.state = StemJobState::Cancelled;
@@ -223,10 +228,12 @@ fn separate(
     cancel: &CancelToken,
 ) -> anyhow::Result<()> {
     let track = library.track(track_id)?;
-    let dir = stems_dir_for(library.data_dir(), &track.content_hash, separator.id());
-    if stems_cached(&dir) {
+    // Stems from an earlier model count: a model switch leaves what is
+    // already separated alone.
+    if cached_stems_for(library.data_dir(), &track.content_hash, separator.id()).is_some() {
         return Ok(());
     }
+    let dir = stems_dir_for(library.data_dir(), &track.content_hash, separator.id());
     update(jobs, id, |job| job.stage = "decoding".into());
     let audio = decode_audio(std::path::Path::new(&track.file_path))?;
     if cancel.is_cancelled() {

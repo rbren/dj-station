@@ -32,18 +32,23 @@ library's YouTube tab (`brew install yt-dlp`, `pipx install yt-dlp`, or your
 package manager). Nothing else needs it — without it the tab is still there
 and reports the missing binary when you search.
 
-Also optional: **[demucs](https://github.com/adefossez/demucs)**
-(`pipx install demucs`) for studio-quality stem separation. With it
+Also optional: **SCNet XL IHF** for studio-quality stem separation —
+`scripts/install-scnet.sh` provisions it under `custom/scnet/` (a venv with
+[MSST](https://github.com/ZFTurbo/Music-Source-Separation-Training) and
+torch, plus the ~214 MB checkpoint; pass `--cuda` for CUDA wheels). With it
 installed, tracks are separated on their own in the background — anything
 downloaded from YouTube first, then the rest of the library — so the Clip
 page can drop the vocals out of a track without anyone waiting on a model
-or pressing anything; it just reports whether the stems have landed.
-Without demucs the Clip page says so and the stem switches stay off; the
-decks' stem controls are unaffected (they use the built-in DSP band
-split). `DJ_AUTOSTEM=off|downloads|all` (default `all`) chooses what gets
-separated automatically, `DJ_DEMUCS_BIN` points at a specific binary,
-`DJ_DEMUCS_MODEL` picks another model (default `htdemucs_ft`) and
-`DJ_DEMUCS_ARGS` adds flags to every call (e.g. `--device cuda`).
+or pressing anything; it just reports whether the stems have landed, and
+which model made them. Without it the Clip page says so and the stem
+switches stay off; the decks' stem controls are unaffected (they use the
+built-in DSP band split). Tracks separated by an earlier model (the
+`htdemucs_ft` this replaced) keep those stems and are not redone.
+`DJ_AUTOSTEM=off|downloads|all` (default `all`) chooses what gets
+separated automatically, `DJ_SCNET_PYTHON` points at the interpreter,
+`DJ_SCNET_CONFIG` / `DJ_SCNET_CKPT` at the model files, `DJ_SCNET_MODEL`
+renames the cache key when they name a different model, and
+`DJ_SCNET_ARGS` adds flags to every call (e.g. `--device_ids 0`).
 
 ## State & saves — `custom/`
 
@@ -56,7 +61,8 @@ All persistent state lives in **`custom/` inside this checkout** (the repo
 | `custom/autosave/` | crash-recovery autosave of the live patch |
 | `custom/library.sqlite` | track DB, DJ metadata (cues/loops/grids), user macros, watch folders |
 | `custom/downloads/` | provider downloads |
-| `custom/stems/<hash>/` | FLAC stem-separation cache |
+| `custom/stems/<hash>/` | FLAC stem-separation cache (DSP flat, one subdirectory per model) |
+| `custom/scnet/` | stem model: MSST venv, config and checkpoint |
 
 Set **`DJ_STATION_DATA_DIR`** to put state somewhere else
 (`DJ_STATION_DATA` is honored as the older spelling). If no checkout can be
@@ -64,8 +70,8 @@ located — a packaged bundle, say — the app falls back to `custom/` under
 its working directory.
 
 `custom/` is tracked in git on purpose; its committed `.gitignore` excludes
-only machine-local churn (`stems/`, `downloads/`, `autosave/`, the SQLite
-WAL sidecars and the migration marker) — regenerable caches, not saves.
+only machine-local churn (`stems/`, `scnet/`, `downloads/`, `autosave/`,
+the SQLite WAL sidecars and the migration marker) — regenerable caches, not saves.
 
 **Migration.** The first launch that uses `custom/` **copies** the old
 platform data dir (`~/.local/share/dj-station`, `~/Library/Application
@@ -225,11 +231,12 @@ crates/
                    (onset + comb-filter tempo) and key detection
                    (chromagram + Krumhansl profiles); stem separation
                    behind a StemSeparator trait (deterministic HPSS-style
-                   band separator always available; optional ONNX Runtime
-                   backend — CoreML EP on macOS, CPU EP elsewhere — loads
-                   a model file when configured); background worker that
-                   drains the library's analysis queue; stems cached as
-                   FLAC keyed by content hash.
+                   band separator always available; SCNet XL IHF through
+                   MSST's inference CLI when installed; optional ONNX
+                   Runtime backend — CoreML EP on macOS, CPU EP elsewhere
+                   — loads a model file when configured); background
+                   worker that drains the library's analysis queue; stems
+                   cached as FLAC keyed by content hash and separator.
   dj-cli           Headless harness: create/render/run/save/load patches,
                    inject virtual MIDI, print telemetry.
 extensions/        WASM extensions (each folder: manifest.json + dsp.wasm +

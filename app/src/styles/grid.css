@@ -1,0 +1,758 @@
+/* ---------------------------------------------------------------------
+   THE GRID PAGE: rows of beat clips over one beat-indexed timeline, the
+   master tempo drawn above it. The title gutter is pinned and only the
+   timeline scrolls, so a row's name never leaves the row.
+   --------------------------------------------------------------------- */
+.grid-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--canvas);
+}
+.grid-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.grid-transport,
+.grid-tempo,
+.grid-loop-controls,
+.grid-length {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.grid-length {
+  margin-left: auto;
+}
+.grid-position {
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+}
+.grid-body {
+  --grid-row-h: 26px;
+  --grid-group-h: 22px;
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  min-height: 0;
+  overflow: auto;
+  /* NO PADDING AT THE TOP. A sticky element sticks to the top of the
+     SCROLLPORT's padding box, so a top padding here left a strip above
+     the ruler that the rows scrolled up through — the tracks peeking out
+     between the ruler and the page's chrome. The ruler is flush with the
+     chrome instead, and the breathing room goes below the grid.
+
+     NO PADDING ON THE LEFT EITHER, for the same reason turned sideways: a
+     sticky element sticks to the padding box, so an inset here left a
+     strip to the LEFT of the pinned gutter that the grid scrolled through
+     — the arrangement bleeding out past the track titles. The inset is
+     the gutter's own padding instead, which puts the same gap under an
+     opaque element. */
+  padding: 0 0.75rem 0.6rem 0;
+}
+
+/* The pinned gutter: the master lane's label, the ruler's, and one block
+   per track group — its title once, then its rows. */
+.grid-gutter {
+  position: sticky;
+  left: 0;
+  /* ABOVE EVERYTHING THE TIMELINE DRAWS. The cells (z-index 2) and the
+     level lines (3) come after the gutter in the DOM, so at an equal
+     z-index they painted straight over the row titles and the grid could
+     be read through them as it scrolled past. */
+  z-index: 6;
+  flex: none;
+  width: 210px;
+  /* The page's left inset, carried by the gutter so that the strip it
+     covers is opaque all the way to the edge of the scrollport. */
+  padding-left: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+.grid-gutter-head {
+  height: 96px; /* GRID_LANE_H */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 2px 0;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+/* THE TEMPO WINDOW'S HANDLES, at the two ends of the lane they open. */
+.grid-bpm-window {
+  display: flex;
+  gap: 2px;
+}
+.grid-bpm-wider {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-dim);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+  font-size: var(--fs-xs);
+  transition: color var(--dur-fast) var(--ease);
+}
+.grid-bpm-wider:hover:not(:disabled) {
+  color: var(--ink);
+}
+.grid-bpm-wider:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.grid-gutter-head-label {
+  font-family: var(--font-mono);
+}
+.grid-gutter-ruler {
+  height: var(--grid-row-h);
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+/* THE TRACK TITLE, said once for the whole group of its clips. */
+.grid-group-title {
+  height: var(--grid-group-h);
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+  border-top: 1px solid var(--line-strong);
+  background: var(--canvas);
+}
+.grid-group-name {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid-group-artist {
+  font-size: var(--fs-nano);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.grid-row-title {
+  height: var(--grid-row-h);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-left: 0.8rem;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--canvas);
+}
+.grid-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+}
+.grid-row-meta {
+  font-size: var(--fs-nano);
+  color: var(--ink-dim);
+}
+.grid-row-clear,
+.grid-row-eject {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: var(--fs-xs);
+}
+.grid-row-clear:hover:not(:disabled),
+.grid-row-eject:hover {
+  color: var(--ink);
+}
+.grid-row-clear:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.grid-adds {
+  padding: 0.5rem 0.5rem 0.5rem 0;
+}
+
+.grid-scroll {
+  flex: 1;
+  min-width: 0;
+}
+.grid-lanes {
+  position: relative;
+}
+
+/* The ruler: bar numbers, and the drag that marks the loop.
+
+   STICKY, so the beat numbers are still there fifty rows down. It sticks
+   to the top of `.grid-body`, which is the box that scrolls; the gutter
+   beside it sticks the same way so the two never come apart. */
+.grid-ruler {
+  position: sticky;
+  top: 0;
+  /* Over the cells and the level lines, which come later in the DOM. */
+  z-index: 5;
+  height: var(--grid-row-h);
+  display: flex;
+  align-items: stretch;
+  cursor: ew-resize;
+  user-select: none;
+  background: var(--canvas);
+  border-bottom: 1px solid var(--line-strong);
+}
+.grid-gutter-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 7;
+  background: var(--canvas);
+  border-bottom: 1px solid var(--line-strong);
+}
+.grid-ruler-cell {
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-nano);
+  color: var(--ink-dim);
+  /* The bar line goes on the LEFT of the bar's first beat: a bar STARTS
+     at its downbeat. On the right it fell between beats 1 and 2, which
+     drew bar 1 a beat short — the first bar looked cut off. */
+  border-left: 1px solid transparent;
+}
+.grid-ruler-cell[data-bar='true'] {
+  border-left-color: var(--line);
+  color: var(--ink-muted);
+}
+.grid-ruler-cell[data-loop='true'] {
+  background: color-mix(in srgb, var(--loop) 30%, transparent);
+  color: var(--ink);
+}
+
+.grid-group-spacer {
+  height: var(--grid-group-h);
+  border-top: 1px solid var(--line-strong);
+}
+.grid-row-cells {
+  height: var(--grid-row-h);
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+}
+/* THE BEATS BEFORE THE WINDOW, as one blank of their total width. Only
+   the columns on screen are in the DOM (see `columnWindow`); this is what
+   holds the drawn ones at the beat they belong to. */
+.grid-gap {
+  flex: none;
+}
+.grid-cell {
+  flex: none;
+  position: relative;
+  z-index: 2;
+  /* ONE BEAT WIDE, in the variable the lanes publish the zoom as. Set
+     here rather than per cell so that zooming re-lays the grid out
+     without React touching a single row. */
+  width: var(--grid-cell-w, 22px);
+  height: 100%;
+  padding: 0;
+  box-sizing: border-box;
+  border: none;
+  /* Beat lines on the LEFT, matching the ruler above, so a bar line is
+     the same line all the way down the page. */
+  border-left: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+}
+.grid-row-cells {
+  position: relative;
+  background: var(--surface);
+}
+.grid-cell:hover {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+/* A PLACED CLIP IS ONE BLOCK, drawn behind the cells: the cells above it
+   only take clicks and mark the ones, so a 4-beat clip reads as a clip
+   and not as four adjacent squares. Only the block's two ENDS are
+   rounded, which is what makes it look contiguous. */
+.grid-clip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--wave) 55%, var(--canvas));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wave) 80%, var(--canvas));
+  pointer-events: none;
+}
+.grid-clip-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.grid-clip-wave polygon {
+  fill: color-mix(in srgb, var(--ink) 30%, transparent);
+}
+/* The ones INSIDE the block: a hairline at each downbeat the clip's own
+   grid marks, and a brighter one at the beat the placement is anchored
+   by — the beat that landed where the click did. */
+.grid-clip-one {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--loop) 85%, transparent);
+}
+.grid-clip-one[data-lead='true'] {
+  width: 3px;
+  background: var(--ok);
+  box-shadow: 0 0 4px var(--ok);
+}
+/* The cells still say what they are over, for the keyboard and for tests,
+   but the colour they add over the block is slight: the block is the
+   clip, and this is only emphasis on its downbeats. */
+.grid-cell[data-kind='one'] {
+  background: color-mix(in srgb, var(--loop) 25%, transparent);
+}
+.grid-cell[data-kind='lead'] {
+  background: color-mix(in srgb, var(--ok) 25%, transparent);
+}
+/* AN EMPTY DOWNBEAT is still the beat you count from, so it carries a
+   faint wash of the same purple the ones inside a clip are marked with —
+   enough to read the bar lines while scanning, not enough to compete
+   with a placed clip. */
+.grid-cell[data-downbeat='true'][data-kind='empty'] {
+  background: color-mix(in srgb, var(--loop) 10%, transparent);
+}
+/* THE LOOP, on the grid, is TWO LINES. Washing every looped column in
+   purple tinted most of an arrangement and made the clips under it hard
+   to read; the ruler keeps its highlight (that is the loop's own strip)
+   and down here only the first and last columns are marked — with the
+   same bright purple the ruler's handles are drawn in. */
+.grid-cell[data-loop-edge='start'],
+.grid-cell[data-loop-edge='both'] {
+  border-left-color: var(--loop);
+  box-shadow: inset 1px 0 0 0 var(--loop);
+}
+.grid-cell[data-loop-edge='end'] {
+  box-shadow: inset -2px 0 0 0 var(--loop);
+}
+.grid-cell[data-loop-edge='both'] {
+  box-shadow:
+    inset 1px 0 0 0 var(--loop),
+    inset -2px 0 0 0 var(--loop);
+}
+.grid-cell[data-selected='true'] {
+  background: color-mix(in srgb, var(--accent, var(--ok)) 25%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--ok)) 60%, transparent);
+}
+.grid-cell[data-now='true'] {
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+/* THE LEVEL LINE through a row: unity down the middle until someone
+   writes on it. It takes no pointer events except through its own
+   handler (cmd/ctrl+click), so the cells above stay clickable. */
+.grid-level {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.grid-level-svg {
+  width: 100%;
+  height: 100%;
+}
+.grid-level-svg polyline {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink) 35%, transparent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+/* A WRITTEN LINE IS DRAWN LIKE A RESTING ONE — deliberately NO override
+   here. In the accent, at half a pixel more, it shouted over the clips it
+   belongs to; the automation is a line through a row of music, not the
+   loudest thing in the row. Only its handles are picked out, and only
+   enough to be found and grabbed. */
+.grid-level-point {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 55%, transparent);
+  box-shadow: 0 0 0 1px var(--canvas);
+}
+.grid-playhead {
+  position: absolute;
+  top: 96px; /* under the tempo lane */
+  bottom: 0;
+  width: 2px;
+  background: var(--ink);
+  pointer-events: none;
+  z-index: 4;
+}
+/* STOPPED, the playhead is still drawn — it is where playback will start
+   and where a paste lands — but quieter, because nothing is moving. */
+.grid-playhead[data-playing='false'] {
+  background: color-mix(in srgb, var(--ink) 55%, transparent);
+}
+/* The beat being played, lit across every row at once. Drawn here rather
+   than marked on each cell so that the playhead moving does not re-render
+   the grid — see GridRowCells. */
+.grid-now {
+  position: absolute;
+  top: 96px;
+  bottom: 0;
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+  pointer-events: none;
+  z-index: 3;
+}
+.grid-now[data-playing='false'] {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+/* The loop's edges, as handles. Wider than they look so they can be
+   grabbed; the drag itself is the ruler's. */
+.grid-loop-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--loop);
+  cursor: ew-resize;
+  pointer-events: none;
+  z-index: 2;
+}
+.grid-loop-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+.grid-ruler {
+  cursor: ew-resize;
+}
+
+.grid-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.grid-zoom-readout {
+  min-width: 3.2em;
+  text-align: right;
+  opacity: 0.75;
+  font-size: 0.85em;
+}
+
+/* The file menu, hung under the arrangement's name. */
+.grid-file {
+  position: relative;
+}
+.grid-file-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  margin-top: 2px;
+  min-width: 12rem;
+  display: flex;
+  flex-direction: column;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel, var(--canvas));
+  box-shadow: 0 6px 20px rgb(0 0 0 / 35%);
+}
+.grid-file-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.grid-file-item:hover,
+.grid-file-item:focus-visible {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.grid-file-key {
+  opacity: 0.5;
+}
+
+.grid-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+}
+
+/* The picker: tracks first, each expandable to the clips cut from it. */
+.grid-picker {
+  min-width: 460px;
+}
+.grid-picker-search {
+  width: 100%;
+  margin: 0.5rem 0;
+}
+.grid-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.grid-picker-track-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+.grid-picker-expand {
+  flex: none;
+  width: 24px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.grid-picker-track-pick {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.grid-picker-expand:hover,
+.grid-picker-track-pick:hover,
+.grid-picker-clip:hover {
+  border-color: var(--line-strong);
+}
+.grid-picker-title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.grid-picker-artist {
+  font-size: var(--fs-xs);
+  color: var(--ink-dim);
+}
+.grid-picker-count {
+  margin-left: auto;
+  font-size: var(--fs-nano);
+  color: var(--ink-dim);
+}
+.grid-picker-clips {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px 26px;
+}
+.grid-picker-clip {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.grid-picker-clip-name {
+  font-size: var(--fs-xs);
+}
+.grid-picker-clip-meta {
+  margin-left: auto;
+  font-size: var(--fs-nano);
+  color: var(--ink-dim);
+}
+
+/* A row's effects rack: the button in the gutter, and the modal it
+   opens. The button is one of the row's plain gray controls until the
+   rack differs from the default one — then it carries --brand, which is
+   the only way an arrangement says a track is running effects. */
+.grid-row-fx {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: var(--fs-xs);
+  transition: color var(--dur-fast) var(--ease);
+}
+.grid-row-fx:hover {
+  color: var(--ink);
+}
+.grid-row-fx[data-modified='true'] {
+  color: var(--brand);
+}
+
+/* The overlay recipe every dialog shares, spelled out here rather than
+   taken from .file-dialog: that one styles every button under it, and
+   this one is full of module panels with buttons of their own. */
+.grid-fx {
+  width: min(1100px, 92vw);
+  height: min(760px, 88vh);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+.grid-fx-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.grid-fx-head h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid-fx-btn {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 4px 8px;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.grid-fx-btn:hover {
+  border-color: var(--line-strong);
+}
+/* The cable layer spans chrome AND rack, because a track's cables run
+   between the two — so this box is what the overlay measures against. */
+.grid-fx-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--canvas);
+}
+.grid-fx-chrome {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 1.25rem;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+  z-index: 11;
+}
+.grid-fx-port {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.grid-fx-jacks {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.grid-fx-legend {
+  font-size: var(--fs-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+.grid-fx-clock {
+  font-size: var(--fs-nano);
+  color: var(--ink-muted);
+}
+.grid-fx-knobs {
+  margin-left: auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+}
+.grid-fx-knob {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+.grid-fx-knob-label {
+  font-size: var(--fs-nano);
+  color: var(--ink-muted);
+}
+/* An infinite canvas like the rack page's: the dot grid tracks the pan
+   through inline background-position/size, and the panels live inside
+   the translated+scaled .grid-fx-canvas. */
+.grid-fx-rack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background-image: radial-gradient(circle, #22262d 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.grid-fx-canvas {
+  position: absolute;
+  inset: 0;
+}
+.grid-fx-zoom {
+  display: flex;
+  gap: 2px;
+}
+.grid-fx-zoom .grid-fx-btn {
+  min-width: 2em;
+}
+.grid-fx-missing {
+  position: absolute;
+  padding: 0.4rem 0.6rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--ink-dim);
+}

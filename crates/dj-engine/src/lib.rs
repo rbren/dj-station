@@ -35,6 +35,8 @@ pub mod qwerty;
 pub mod registry;
 pub mod stretch;
 pub mod telemetry;
+pub mod track_fx;
+pub mod track_io;
 pub mod wasm_host;
 
 pub use builtin::{MidiMapKind, MidiOutEvent, MidiOutSink, MockMidiSink};

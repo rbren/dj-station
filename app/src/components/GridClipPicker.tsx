@@ -15,6 +15,7 @@
 import { useMemo, useState } from 'react';
 import { clipArtistNames, type BeatClipEntry } from '../beatClip';
 import { fixed } from '../format';
+import { matchesQuery } from '../search';
 
 export interface GridPickerTrack {
   key: string;
@@ -83,13 +84,10 @@ export function GridClipPicker({ clips, onPick, onClose }: GridClipPickerProps) 
 
   const tracks = useMemo(() => pickerTracks(clips), [clips]);
   const shown = useMemo(() => {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return tracks;
-    return tracks.filter((t) => {
-      const hay =
-        `${t.title} ${t.artist ?? ''} ${t.clips.map((c) => c.name).join(' ')}`.toLowerCase();
-      return words.every((w) => hay.includes(w));
-    });
+    if (!query.trim()) return tracks;
+    return tracks.filter((t) =>
+      matchesQuery(query, `${t.title} ${t.artist ?? ''} ${t.clips.map((c) => c.name).join(' ')}`),
+    );
   }, [tracks, query]);
 
   return (

@@ -1,0 +1,1124 @@
+/* ------------------------------------------------------------------ */
+/* Library view (M1)                                                  */
+/* ------------------------------------------------------------------ */
+
+/* One segmented control, not four loose pills: the group is the object,
+   and the active segment is filled rather than merely outlined. */
+.app-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.app-tabs .tab {
+  background: transparent;
+  color: var(--ink-dim);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 4px 14px;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
+.app-tabs .tab:hover:not(.active) {
+  color: var(--ink);
+  background: var(--surface-raised);
+  border-color: transparent;
+}
+
+.app-tabs .tab.active {
+  color: var(--ink);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--brand) 18%, var(--surface-raised));
+  border-color: color-mix(in srgb, var(--brand) 55%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.library {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* The shell no longer scrolls, so the library view scrolls itself. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.store-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.store-tab {
+  background: var(--surface);
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
+  border-radius: 6px 6px 0 0;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.store-tab.active {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.store-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.store-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+}
+
+.store-filter select {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+/* One content measure for the whole page, so a title and its
+   metadata are never 1400px apart on a wide window. */
+.library > * {
+  max-width: 1180px;
+}
+
+.library h2 {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 0.5rem 0 0;
+}
+
+.library h3 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin: 0.25rem 0 0;
+}
+
+.library-search {
+  display: flex;
+  gap: 8px;
+}
+
+.library-search input {
+  flex: 1;
+  max-width: 480px;
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.library-status {
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+}
+
+.library-errors {
+  color: var(--fault);
+  font-size: var(--fs-md);
+}
+
+/* Fair-use note: a footnote under the page, never a banner. */
+.library-fair-use {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  max-width: 60ch;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin: 0;
+}
+
+/* In-flight search indicator (provider searches shell out to yt-dlp and
+   can take seconds). */
+.search-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-dim);
+  font-size: var(--fs-md);
+}
+
+.search-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: search-spin 0.8s linear infinite;
+}
+
+@keyframes search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Downloads panel: the backend job queue (running + recently finished). */
+.download-queue ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.download-job {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: var(--fs-md);
+}
+
+.download-job-title {
+  flex: 1;
+}
+
+.download-job-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--brand);
+  font-size: var(--fs-md);
+}
+
+.download-bar {
+  width: 120px;
+  height: 6px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.download-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  transition: width 0.3s ease;
+}
+
+.tag-download-done {
+  color: var(--ok);
+}
+
+.tag-download-failed {
+  color: var(--fault);
+}
+
+.provider-results ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-results li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.result-title {
+  flex: 1;
+}
+
+/* Provider artwork (YouTube thumbnails, store covers). */
+.result-art {
+  width: 72px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: var(--surface-sunken);
+  flex: none;
+}
+
+.tag {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+}
+
+/* Where a track came from and what licence it carries are facts,
+   not states: they read in neutral ink so the analysis column is the only
+   coloured thing in the row. */
+.tag-source,
+.tag-license {
+  color: var(--ink-dim);
+}
+
+/* The track list is the thing a DJ scans: a scannable measure instead of
+   the full window width, a header row, row hover, and tabular figures for
+   the three columns that are numbers (length, BPM, key). */
+.library-tracks table {
+  width: 100%;
+  max-width: 1180px;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.library-tracks th,
+.library-tracks td {
+  text-align: left;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.library-tracks thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.library-tracks tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.library-tracks tbody tr {
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.library-tracks tbody tr:hover {
+  background: color-mix(in srgb, var(--brand) 7%, transparent);
+}
+
+/* Title first, everything else supporting. */
+.library-tracks tbody td:first-child {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.library-tracks tbody td:nth-child(2) {
+  color: var(--ink-muted);
+}
+
+.library-tracks tbody td:nth-child(3),
+.library-tracks tbody td:nth-child(4),
+.library-tracks tbody td:nth-child(5) {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+/* Title and artist are the two fields a row lets the user fix (an import
+   guesses them from a file name or a video title). They read as plain
+   table text and turn into an input on click; a dashed rule under the
+   pointer is the only hint that they are more than text. */
+.library-tracks .track-name {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 1px dashed transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: text;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.library-tracks tbody tr:hover .track-name,
+.library-tracks .track-name:focus-visible {
+  border-bottom-color: var(--line-strong);
+}
+
+.library-tracks .track-name-blank {
+  color: var(--ink-dim);
+  font-style: italic;
+}
+
+.library-tracks .track-name-input {
+  width: 100%;
+  min-width: 10ch;
+  font: inherit;
+  color: var(--ink);
+  background: var(--canvas);
+  border: 1px solid var(--brand-dim);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+/* The row's own action stays quiet until the row is under the pointer. */
+.library-tracks tbody td:last-child {
+  text-align: right;
+}
+
+/* Fills the shell below the header; the .rack-area child stretches to it
+   (min-height: 0 so the rack's minimum size can't re-inflate the row).
+   A COLUMN, because the Decks tab dresses the same canvas in chrome: the
+   tempo bar above the .rack-area and the strip row below it, placed by
+   flex `order` (the chrome renders before the canvas in the DOM so the
+   canvas element itself never reparents — a remount would reset every
+   panel). position: relative anchors the Decks chrome's screen-space
+   cable overlay. */
+.app-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-body > .rack-area {
+  order: 1;
+}
+
+.decks-bar {
+  order: 0;
+}
+
+.decks-dock,
+.decks-empty-bar {
+  order: 2;
+}
+
+/* Cmd+M module picker: a modal gallery of zoomed-out live module panels.
+   While an entry is being dragged toward the canvas, the whole modal goes
+   transparent to pointer events and nearly invisible, so the rack under it
+   shows through and receives the drop. */
+.module-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.module-picker-backdrop.module-picker-dragging {
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+/* Overlays arrive instead of appearing. Opacity only: nothing
+   moves, so nothing that measures a box can be surprised. The reduced
+   motion block at the top of the file turns this off. */
+.module-picker-backdrop,
+.file-dialog-backdrop,
+.docs-backdrop {
+  animation: overlay-in var(--dur-slow) var(--ease);
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Every overlay in the app shares one recipe: --scrim behind
+   it, --surface in front, --radius-lg corners, --shadow-overlay under. */
+.module-picker {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  width: min(1040px, calc(100vw - 64px));
+  /* Hug the list: a two-clip library should not open a 720px box. */
+  max-height: min(720px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-overlay);
+}
+
+.module-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.module-picker-header h2 {
+  font-size: var(--fs-lg);
+  margin: 0;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.module-picker-header .library-search {
+  flex: 1;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  padding: 6px 10px;
+  font-size: var(--fs-md);
+}
+
+.module-picker-header .library-search:focus {
+  border-color: var(--brand);
+}
+
+.module-picker-close {
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-size: var(--fs-lg);
+  padding: 4px 6px;
+}
+
+.module-picker-close:hover {
+  color: var(--ink);
+}
+
+/* Modules | Clips — the picker's two halves, above the category pills. */
+.picker-tabs {
+  display: flex;
+  gap: 18px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.picker-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.04em;
+  padding: 8px 2px;
+  text-transform: uppercase;
+}
+
+.picker-tab:hover {
+  color: var(--ink);
+}
+
+.picker-tab.active {
+  border-bottom-color: var(--brand);
+  color: var(--brand);
+}
+
+.picker-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.picker-category {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  padding: 4px 12px;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.picker-category:hover {
+  border-color: var(--brand);
+  color: var(--ink);
+}
+
+.picker-category.active {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+/* The Deprecated tag is not one of the categories: it sits at the far end
+   of the row, dashed, so the pills before it stay a list of places to look
+   and this one reads as the door to the retired ones. */
+.picker-tag {
+  margin-left: auto;
+  border-style: dashed;
+  color: var(--ink-muted);
+}
+
+.picker-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px 20px;
+}
+
+.picker-group-title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 14px 0 8px;
+}
+
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.picker-entry {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.picker-entry:hover {
+  border-color: var(--brand);
+}
+
+/* Where the keyboard is in the gallery: the entry ↑/↓ walked to and Enter
+   would add. The search box holds the real focus for the whole modal, so
+   this stands in for a focus ring — and reads louder than hover, which is
+   the same brand border without the tint. */
+.picker-entry.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface));
+}
+
+/* Fixed-height window on to the scaled-down panel: the panel keeps its
+   natural size and is scaled from the top-left, so the window crops tall
+   panels rather than squashing them. */
+/* The preview is a real panel clipped to a 150px window, so most
+   cards show a panel cut in half. Fading the bottom edge makes the cut
+   read as a decision rather than an accident. */
+.picker-preview {
+  height: 150px;
+  overflow: hidden;
+  padding: 8px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, var(--line) 1px, transparent 1px) 0 0 / 26px 26px,
+    var(--canvas);
+  mask-image: linear-gradient(to bottom, #000 72%, rgba(0, 0, 0, 0.15));
+}
+
+.picker-preview-panel {
+  transform-origin: 0 0;
+  width: max-content;
+}
+
+/* Composite macro preview: internal panels are absolutely positioned by
+   the definition's saved layout (like the rack), scale-to-fit. */
+.picker-preview-macro {
+  position: relative;
+}
+
+.picker-entry-caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.picker-entry-name {
+  font-weight: 600;
+  font-size: var(--fs-md);
+}
+
+.picker-entry-io,
+.library-empty {
+  font-size: var(--fs-xs);
+  color: var(--ink-dim);
+}
+
+/* Why a module nobody searched for is on screen: it came in under the
+   Deprecated tag. */
+.picker-entry-tag {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  font-size: var(--fs-micro);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+/* Infinite canvas viewport: the .rack inside is translated by the pan and
+   scaled by the zoom; this clips it and paints the dot grid itself (the
+   dots track pan/zoom via inline background-position/size, so the grid
+   never runs out no matter how far the canvas is panned). */
+.rack-area {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  /* No explicit height: the flex chain (.app > .app-body) sizes it to the
+     space under the header. min-* 0 so the .rack's own minimum size never
+     propagates out and scrolls the page. */
+  min-height: 0;
+  min-width: 0;
+  background-image: radial-gradient(circle, #22262d 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* The cable layer must paint above EVERY module panel: panels (and the
+   zoomed .rack wrapper's transform) create their own stacking contexts,
+   so rely on an explicit z-index rather than DOM order. `overflow:
+   visible` stops the SVG (which is sized to the rack-area's layout box,
+   not the zoomed rack's visual extent) from truncating cables at its
+   edge. pointer-events stays none so jacks/knobs under it remain
+   interactive. */
+.wire-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.wire-cable {
+  stroke: var(--cue);
+  stroke-width: 2.5;
+  fill: none;
+  opacity: 0.85;
+}
+
+/* Outputs live in a dashed box on a lighter shade of the panel gray
+   (convention: anything inside the dashed box is a source). Output
+   groups get a small caption and flow left-to-right. */
+.module-outputs {
+  border: 1px dashed var(--line-strong);
+  border-radius: 6px;
+  background: var(--line);
+  margin-top: 8px;
+  padding: 4px 8px 5px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 14px;
+}
+
+.output-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.output-group-title {
+  font-size: var(--fs-nano);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.output-group-jacks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 10px;
+}
+
+.output-group-grid {
+  display: grid;
+  column-gap: 10px;
+  row-gap: 3px;
+}
+
+/* Layouts with 'break' output groups stack them as rows (e.g. the QWERTY
+   module's keyboard rows, staggered with a per-group indent). A column
+   flex keeps the panel's intrinsic width at the widest row — a
+   flex-basis:100% wrap hack would still sum every row side by side when
+   the panel measures its content width. */
+.module-outputs-rows {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.module-outputs .jack {
+  width: auto;
+}
+
+/* ...except a surface readout, whose fixed cell width is what makes the
+   rows line up column-for-column (see .jack-with-readout). */
+.module-outputs .jack-with-readout {
+  width: 40px;
+}
+
+/* Inline output jack living inside an input group (layout cells with
+   `output: true`, e.g. the attenuverter's per-channel out at the foot of
+   its column). A subtle top rule separates it from the inputs above. */
+.output-cell {
+  border-top: 1px dashed var(--line-strong);
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+.wire-cable-pending {
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+/* Title-bar glyphs: quiet until pointed at, and padded to a target you
+   can actually hit rather than the size of the character. */
+.module-bypass-btn,
+.module-docs-btn,
+.module-remove {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.module-remove:hover {
+  color: var(--fault);
+  background: var(--line);
+}
+
+.module-docs-btn:hover {
+  color: var(--brand);
+  background: var(--line);
+}
+
+/* The leftmost glyph present carries the auto margin; the rest of the
+   cluster sits next to it. */
+.module-docs-btn ~ .module-remove,
+.module-bypass-btn ~ .module-docs-btn,
+.module-bypass-btn ~ .module-remove {
+  margin-left: 0;
+}
+
+.module-bypass-btn:hover {
+  color: var(--ink);
+  background: var(--line);
+}
+
+/* Engaged: the glyph itself is filled, so the toggle reads as "on" even
+   against the already-red bar. */
+.module-bypass-btn[aria-checked='true'] {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--bypass) 65%, transparent);
+}
+
+/* A bypassed module wears a dark red title bar: the signal is walking
+   straight through it. The word is there too — never colour alone. */
+.module-panel-bypassed {
+  border-top-color: color-mix(in srgb, var(--bypass) 85%, var(--line-strong));
+}
+
+.module-panel-bypassed .module-title {
+  background: var(--bypass);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--bypass) 60%, var(--ink));
+}
+
+.module-bypass-tag {
+  flex: none;
+  font-size: var(--fs-nano);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--ink) 45%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+}
+
+/* Save As / Open dialogs (driven by the native File menu). */
+.file-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.file-dialog {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  padding: 16px;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.file-dialog h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+
+.file-dialog input {
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: var(--fs-xs);
+}
+
+.file-dialog button {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 4px 8px;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.file-dialog button:hover {
+  border-color: var(--line-strong);
+}
+
+.file-dialog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.file-dialog-list button {
+  width: 100%;
+  text-align: left;
+}
+
+.file-dialog-empty {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+}
+
+.midi-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  margin-bottom: 8px;
+  font-size: var(--fs-md);
+}
+
+/* --- Launch Control XL: device light + ownership button -------------- */
+
+.launchcontrol-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
+}
+
+.launchcontrol-led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--line);
+  border: 1px solid var(--line-strong);
+}
+
+.launchcontrol-led-on {
+  background: var(--ok);
+  border-color: var(--ok);
+  box-shadow: 0 0 6px rgba(73, 209, 122, 0.7);
+}
+
+.launchcontrol-active {
+  padding: 2px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  background: #1b1f26;
+  color: #b8c0cc;
+  cursor: pointer;
+}
+
+.launchcontrol-active-on {
+  border-color: var(--ok);
+  color: var(--canvas);
+  background: var(--ok);
+}
+
+.launchcontrol-owner {
+  color: #6f7787;
+  font-style: italic;
+}
+
+/* --- Math module: the expression box and what it has to say ---------- */
+
+.math-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.math-expr {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+/* An expression that does not compile: the box says so and keeps the
+   text, because the last one that DID compile is still playing. */
+.math-expr-bad {
+  border-color: var(--fault);
+}
+
+.math-error,
+.math-hint {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.3;
+}
+
+.math-error {
+  color: var(--fault);
+}
+
+.math-hint {
+  color: var(--ink-dim);
+}
+
+/* --- QWERTY module: hint line above the keyboard-row jacks ----------- */
+
+.qwerty-panel {
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  margin-bottom: 6px;
+}
+
+.midi-empty {
+  color: var(--ink-dim);
+  margin: 2px 0;
+}
+
+.midi-mapping {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0;
+}
+
+.midi-mapping-name {
+  font-weight: 600;
+  min-width: 40px;
+}
+
+.midi-mapping-src {
+  color: var(--ink-dim);
+}
+
+.midi-key {
+  margin-left: auto;
+  background: var(--line);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+.midi-key-capture {
+  border-color: var(--cue);
+  color: var(--cue);
+}
+
+.midi-remove {
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-size: var(--fs-lg);
+}
+
+.midi-remove:hover {
+  color: #ff6b6b;
+}
+
+.midi-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.midi-add select,
+.midi-add input,
+.midi-add button {
+  background: var(--line);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 2px 4px;
+}
+
+.midi-add input {
+  width: 48px;
+}
+
+.midi-add button {
+  cursor: pointer;
+}
+
+.midi-add-preview {
+  color: var(--ink-dim);
+  min-width: 28px;
+}

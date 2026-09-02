@@ -1,0 +1,145 @@
+/* ------------------------------------------------------------------ */
+/* DJ Deck panel (M2)                                                  */
+/* ------------------------------------------------------------------ */
+
+.deck-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 340px;
+}
+
+.deck-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.deck-load-row select {
+  flex: 1;
+  min-width: 120px;
+  background: var(--surface-sunken);
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+/* During a mix these are the only numbers that matter, so they are
+   the loudest thing in the panel instead of the quietest. */
+.deck-time,
+.deck-bpm {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.deck-time {
+  font-size: var(--fs-xl);
+  color: var(--ink);
+}
+
+.deck-bpm {
+  font-size: var(--fs-lg);
+  color: var(--ink-muted);
+}
+
+.waveform {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.waveform-strip {
+  width: 100%;
+  height: 52px;
+  background: #0b0e12;
+  border: 1px solid #222b36;
+  border-radius: 4px;
+  cursor: crosshair;
+}
+
+.waveform-strip[data-testid='waveform-zoom'] {
+  height: 36px;
+}
+
+.waveform-peaks {
+  fill: var(--wave);
+  opacity: 0.85;
+}
+
+.waveform-playhead {
+  stroke: var(--cue);
+  stroke-width: 3;
+}
+
+.waveform-cue {
+  stroke: var(--ok);
+  stroke-width: 2;
+}
+
+.waveform-cue-label {
+  fill: #4fd47a;
+  font-size: var(--fs-xs);
+}
+
+.waveform-loop {
+  fill: var(--loop);
+  opacity: 0.18;
+}
+
+.waveform-loop.enabled {
+  opacity: 0.38;
+}
+
+.deck-btn,
+.deck-cue {
+  background: var(--surface-raised);
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.deck-btn.active {
+  background: color-mix(in srgb, var(--brand) 28%, var(--canvas));
+  border-color: color-mix(in srgb, var(--brand) 70%, var(--line-strong));
+}
+
+/* An empty cue is quiet in ink, not in opacity: dimming the whole button
+   took its border with it, and these are pressed mid-mix. */
+.deck-cue {
+  min-width: 32px;
+  padding: 5px 8px;
+  text-align: center;
+  color: var(--ink-dim);
+}
+
+.deck-cue.set {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ok) 22%, var(--canvas));
+  border-color: var(--ok);
+}
+
+.deck-sync {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+}
+
+.deck-sync select {
+  background: var(--surface-sunken);
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.deck-saved-loop {
+  border-color: var(--loop);
+}

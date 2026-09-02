@@ -376,4 +376,60 @@ describe('the effects modal', () => {
     const [next] = onChange.mock.calls[onChange.mock.calls.length - 1];
     expect((next as TrackFx).pan).toBeGreaterThan(0);
   });
+
+  it('opens zoomed out, and the buttons move the camera', () => {
+    showModal(defaultTrackFx());
+    expect(screen.getByTestId('grid-fx-zoom-reset').textContent).toBe('50%');
+    const canvas = screen.getByTestId('grid-fx-canvas');
+    expect(canvas.style.transform).toContain('scale(0.5)');
+    fireEvent.click(screen.getByTestId('grid-fx-zoom-in'));
+    expect(canvas.style.transform).toContain('scale(0.625)');
+    fireEvent.click(screen.getByTestId('grid-fx-zoom-reset'));
+    expect(canvas.style.transform).toContain('scale(0.5)');
+  });
+
+  it('pushes a dragged panel out of a neighbour instead of overlapping it', () => {
+    const onChange = showModal(defaultTrackFx());
+    // eq1 sits at (0,0) and scope1 at (384,0); headless panels measure as
+    // the nominal 4×2-cell footprint (192×96). Screen deltas are HALVED
+    // by the 0.5 zoom, so 192px of mouse is 384 rack px — exactly onto
+    // scope1, whence the push-out slides the EQ past it.
+    fireEvent.mouseDown(screen.getByTestId('module-header-eq1'), {
+      button: 0,
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.mouseMove(window, { clientX: 192, clientY: 0 });
+    fireEvent.mouseUp(window);
+    const [next] = onChange.mock.calls[onChange.mock.calls.length - 1];
+    const eq = (next as TrackFx).modules.find((m) => m.id === 'eq1')!;
+    expect(eq.y).toBe(0);
+    expect(eq.x).toBe(576);
+  });
+
+  it('lands a module from the picker on a free spot in view', () => {
+    const onChange = showModal(defaultTrackFx());
+    fireEvent.click(screen.getByTestId('grid-fx-add'));
+    fireEvent.click(screen.getByTestId(`library-add-${FX_EQ}`));
+    const [next] = onChange.mock.calls[onChange.mock.calls.length - 1];
+    const added = (next as TrackFx).modules[4];
+    expect(added.type).toBe(FX_EQ);
+    // Clear of all four default panels (nominal 192×96 footprints)…
+    const rect = { x: added.x, y: added.y, w: 192, h: 96 };
+    for (const m of defaultTrackFx().modules) {
+      const other = { x: m.x, y: m.y, w: 192, h: 96 };
+      const apart =
+        rect.x + rect.w <= other.x ||
+        other.x + other.w <= rect.x ||
+        rect.y + rect.h <= other.y ||
+        other.y + other.h <= rect.y;
+      expect(apart).toBe(true);
+    }
+    // …and inside the (nominal, headless) viewport rather than off past
+    // the canvas edge.
+    expect(rect.x).toBeGreaterThanOrEqual(0);
+    expect(rect.y).toBeGreaterThanOrEqual(0);
+    expect(rect.x + rect.w).toBeLessThanOrEqual(768);
+    expect(rect.y + rect.h).toBeLessThanOrEqual(576);
+  });
 });

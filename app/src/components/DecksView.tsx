@@ -55,6 +55,7 @@
 // meanwhile. Unticked, the write goes out whole, as it always did.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePoll } from '../usePoll';
 import type { AudioOutputsApi } from '../audioOutputs';
 import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '../beatClip';
 import {
@@ -262,15 +263,7 @@ export function DecksView(props: DecksViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, clipApi, active]);
 
-  useEffect(() => {
-    if (!active || !bank) return;
-    const first = setTimeout(() => void poll(), 0);
-    const timer = setInterval(() => void poll(), props.pollMs ?? POLL_MS);
-    return () => {
-      clearTimeout(first);
-      clearInterval(timer);
-    };
-  }, [active, bank, poll, props.pollMs]);
+  usePoll(poll, props.pollMs ?? POLL_MS, active && bank !== null);
 
   const addBank = useCallback(async () => {
     setBusy(true);

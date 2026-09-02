@@ -3,7 +3,7 @@
 // clip by its one, the master tempo lane, the loop drag and the
 // transport.
 
-import { readFileSync } from 'node:fs';
+import { appCss } from './readStyles';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
@@ -1230,7 +1230,7 @@ describe('GridView selection across rows', () => {
 // DOM. They are read out of the stylesheet instead, the way the app
 // shell's layout is (`AppShellLayout.test.tsx`).
 describe('Grid paint (CSS-level pin)', () => {
-  const css = readFileSync('src/styles.css', 'utf-8');
+  const css = appCss();
   /** The bodies of every rule whose selector list matches `pattern`. */
   const rules = (pattern: RegExp): string[] =>
     [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]

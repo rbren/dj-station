@@ -82,7 +82,7 @@ const clipMock = {
   saveBeatClip: vi.fn(async () => null),
   stemStatus: vi.fn(async (trackId: number) => ({
     track_id: trackId,
-    backend: 'htdemucs_ft',
+    backend: 'scnet_xl_ihf',
     state: 'ready',
     stage: null,
     detail: null,
