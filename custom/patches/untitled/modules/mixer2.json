@@ -1,16 +1,6 @@
 {
-  "ext": "macro.mix-out",
+  "ext": "com.dj.mixer",
   "knobs": {
-    "channel_offset": {
-      "position": 4.5474735e-13,
-      "atten": 1.0,
-      "offset": 0.0
-    },
-    "hysteresis": {
-      "position": 0.22413793,
-      "atten": 1.0,
-      "offset": 0.0
-    },
     "in1_l": {
       "position": 0.0,
       "atten": 1.0,
@@ -72,7 +62,7 @@
       "offset": 0.0
     },
     "lvl1": {
-      "position": 0.0,
+      "position": 0.8,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -106,8 +96,33 @@
       "atten": 1.0,
       "offset": 0.0
     },
-    "mute": {
-      "position": 4.5474735e-13,
+    "mute1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mute2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mute3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mute4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mute5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mute6": {
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -141,18 +156,33 @@
       "atten": 1.0,
       "offset": 0.0
     },
-    "right_scope_hysteresis": {
-      "position": 0.22413793,
+    "solo1": {
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "right_scope_window": {
-      "position": 0.5,
+    "solo2": {
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     },
-    "window": {
-      "position": 0.5,
+    "solo3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "solo4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "solo5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "solo6": {
+      "position": 0.0,
       "atten": 1.0,
       "offset": 0.0
     }
