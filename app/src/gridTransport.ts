@@ -1,13 +1,17 @@
 // The Grid page's transport: it plays a `GridState` through Web Audio and
 // answers where the playhead is.
 //
-// A PASS is one walk of the play range. Passes are scheduled AHEAD of
-// time (a 250 ms lookahead, re-run on a 100 ms timer) rather than fired
-// by a timer at the moment each clip should sound: a setTimeout lands
-// whenever the main thread gets round to it, which on a beat grid is
-// audible, while `AudioBufferSourceNode.start(when)` lands on the audio
-// clock exactly. That is also what makes a loop seamless — the next
-// pass's first clip is already scheduled while the current one plays.
+// A PASS is one walk of the play range — except the FIRST, which walks
+// from wherever the play was cued to the range's end, so a cursor parked
+// outside the loop is played FROM rather than jumped away from.
+//
+// Passes are scheduled AHEAD of time (a 250 ms lookahead, re-run on a
+// 100 ms timer) rather than fired by a timer at the moment each clip
+// should sound: a setTimeout lands whenever the main thread gets round
+// to it, which on a beat grid is audible, while
+// `AudioBufferSourceNode.start(when)` lands on the audio clock exactly.
+// That is also what makes a loop seamless — the next pass's first clip
+// is already scheduled while the current one plays.
 //
 // The grid is LIVE: `update` hands in a new state mid-play and the
 // transport lays down whatever the edit added, so placing a clip while
@@ -70,6 +74,10 @@ interface Pass {
   /** Column it begins on — the range's start, except for a first pass
    *  resumed part-way through. */
   from: number;
+  /** Column it runs to. Normally the loop's end; a FIRST pass cued from
+   *  past the loop runs to the end of the grid instead, and only then
+   *  falls into the loop. */
+  to: number;
   secs: number;
   /** Keys of the copies already laid down for this pass, so a live edit
    *  re-schedules only what is new. */
@@ -186,13 +194,17 @@ export class GridTransport {
    *  bleed either side of every copy — so a pass can be scheduled
    *  without awaiting anything: an await between "it is time" and
    *  `start(when)` is how a clip ends up late. */
-  async prime(state: GridState, clips: ReadonlyMap<string, BeatClipEntry>): Promise<void> {
+  async prime(
+    state: GridState,
+    clips: ReadonlyMap<string, BeatClipEntry>,
+    over?: ColumnRange,
+  ): Promise<void> {
     const ctx = sharedContext();
     if (!ctx) return;
     const columns = Math.max(this.#columns, state.beats);
     const wanted = new Map<string, { clipId: string; bpm: number }>();
     const bookends = new Map<string, { clipId: string; bpm: number; side: BleedSide }>();
-    for (const copy of scheduleRange(state, clips, playRange(state, columns))) {
+    for (const copy of scheduleRange(state, clips, over ?? playRange(state, columns))) {
       wanted.set(this.#key(copy.clipId, copy.bpm), { clipId: copy.clipId, bpm: copy.bpm });
       for (const side of BLEED_SIDES) {
         if (!copy.bleed[side]) continue;
@@ -238,7 +250,13 @@ export class GridTransport {
   }
 
   /** Start at `fromColumn` (the range's start by default). Playing again
-   *  while playing re-cues rather than layering. */
+   *  while playing re-cues rather than layering.
+   *
+   *  A CURSOR OUTSIDE THE LOOP IS PLAYED FROM, not jumped away from: the
+   *  first pass runs from wherever it is cued to the loop's end and the
+   *  loop takes over there, so a lead-in before the loop is heard once
+   *  and then the loop repeats. Cued from PAST the loop, the first pass
+   *  runs to the end of the grid before falling into it. */
   async play(
     state: GridState,
     clips: ReadonlyMap<string, BeatClipEntry>,
@@ -255,16 +273,25 @@ export class GridTransport {
     this.#columns = columns;
     this.#range = range;
     this.#looping = state.loop !== null;
-    await this.prime(state, clips);
+    const from = Math.max(0, Math.min(fromColumn ?? range.start, columns - 1e-9));
+    // Cued past the loop there is no loop end ahead, so the lead-in runs
+    // to the end of the grid; the loop still takes over after it.
+    const to = from < range.end ? range.end : columns;
+    // The lead-in's clips are primed as well as the loop's: material the
+    // loop never reaches still has to be there when it is played through.
+    await Promise.all([
+      this.prime(state, clips, { start: from, end: to }),
+      this.prime(state, clips),
+    ]);
     // A stop while the audio was being fetched wins: it cleared the cue
     // this play was arming, so there is nothing left to start.
     if (this.#disposed || (cued && !this.#cueing)) return;
-    const from = Math.min(Math.max(fromColumn ?? range.start, range.start), range.end - 1e-9);
     this.#playing = true;
     this.#next = {
       at: this.#now() + 0.05,
       from,
-      secs: rangeSecs(state.tempo, { start: from, end: range.end }),
+      to,
+      secs: rangeSecs(state.tempo, { start: from, end: to }),
       laid: new Set(),
     };
     this.#pump();
@@ -295,7 +322,9 @@ export class GridTransport {
       range.end !== this.#range.end;
     if (recue) {
       const at = this.#at;
-      const from = at >= range.start && at < range.end ? at : range.start;
+      // Anywhere on the grid keeps its place, loop or no loop: a lead-in
+      // before the loop is a place the transport can be.
+      const from = at >= 0 && at < columns ? at : range.start;
       this.#cueing = true;
       void this.play(state, clips, columns, from).finally(() => {
         this.#cueing = false;
@@ -373,7 +402,7 @@ export class GridTransport {
     const pass = [...this.#passes].reverse().find((p) => now >= p.at) ?? this.#passes[0] ?? null;
     if (!pass) return { playing: true, column: this.#at };
     if (now >= pass.at + pass.secs && this.#next === null) {
-      this.#at = this.#range.end;
+      this.#at = pass.to;
       // Running out ends a re-cue in flight the way a stop does — there
       // is nothing left to carry on with — but it does NOT cut what is
       // still sounding: the last copy's tail-out is meant to hang over
@@ -384,7 +413,7 @@ export class GridTransport {
     }
     const within = Math.max(0, Math.min(now - pass.at, pass.secs));
     const secs = beatToSecs(this.#state.tempo, pass.from) + within;
-    this.#at = Math.min(secsToBeat(this.#state.tempo, secs), this.#range.end);
+    this.#at = Math.min(secsToBeat(this.#state.tempo, secs), pass.to);
     return { playing: true, column: this.#at };
   }
 
@@ -409,6 +438,7 @@ export class GridTransport {
         ? {
             at: pass.at + pass.secs,
             from: this.#range.start,
+            to: this.#range.end,
             secs: rangeSecs(state.tempo, this.#range),
             laid: new Set(),
           }
@@ -441,7 +471,7 @@ export class GridTransport {
     const now = ctx.currentTime;
     for (const copy of scheduleRange(state, this.#clips, {
       start: pass.from,
-      end: this.#range.end,
+      end: pass.to,
     })) {
       if (pass.laid.has(copy.key)) continue;
       const at = pass.at + copy.atSecs;
@@ -457,7 +487,7 @@ export class GridTransport {
         // Its stretch is still rendering. Leave the copy UNMARKED so a
         // later pump lays it down once the audio lands, as long as its
         // moment has not passed by then.
-        void this.prime(state, this.#clips);
+        void this.prime(state, this.#clips, { start: pass.from, end: pass.to });
         continue;
       }
       pass.laid.add(copy.key);
@@ -562,7 +592,7 @@ export class GridTransport {
       const copies = new Map<string, ScheduledClip>();
       for (const copy of scheduleRange(state, this.#clips, {
         start: pass.from,
-        end: this.#range.end,
+        end: pass.to,
       })) {
         copies.set(copy.key, copy);
       }

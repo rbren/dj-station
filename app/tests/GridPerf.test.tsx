@@ -50,19 +50,20 @@ function api(): BeatClipApi {
   };
 }
 
-/** A grid document with `ROWS` rows, each holding a few placements. */
-function bigDoc(): string {
+/** A grid document: `rows` rows, each holding a few placements, over
+ *  `beats` columns. */
+function bigDoc(rows = ROWS, beats = BEATS): string {
   return JSON.stringify({
     version: 1,
     state: {
-      rows: CLIPS.map((c, i) => ({
+      rows: CLIPS.slice(0, rows).map((c, i) => ({
         id: `row${i + 1}`,
         clipId: c.clipId,
         placements: [i % 16, (i % 16) + 16],
         levels: [],
       })),
       tempo: { bpm: 120, points: [] },
-      beats: BEATS,
+      beats,
       barBeats: 4,
       loop: null,
     },
@@ -70,16 +71,16 @@ function bigDoc(): string {
 }
 
 /** Load the big arrangement through Open, the way a user would. */
-async function renderBig() {
+async function renderBig(rows = ROWS, beats = BEATS) {
   const clipApi = api();
   (clipApi.gridList as ReturnType<typeof vi.fn>).mockResolvedValue(['big']);
-  (clipApi.gridLoad as ReturnType<typeof vi.fn>).mockResolvedValue(bigDoc());
+  (clipApi.gridLoad as ReturnType<typeof vi.fn>).mockResolvedValue(bigDoc(rows, beats));
   render(<GridView clips={clipApi} pollMs={1000000} active />);
   await screen.findByTestId('grid-view');
   fireEvent.click(screen.getByTestId('grid-name'));
   fireEvent.click(screen.getByTestId('grid-open'));
   fireEvent.click(await screen.findByTestId('grid-open-big'));
-  await waitFor(() => expect(screen.getByTestId('grid-cells-row50')).toBeTruthy());
+  await waitFor(() => expect(screen.getByTestId(`grid-cells-row${rows}`)).toBeTruthy());
 }
 
 beforeEach(() => {
@@ -199,5 +200,163 @@ describe('Grid zoom performance', () => {
     // a zoom.
     expect(screen.getByTestId('grid-clip-row1-0')).toBe(block);
     expect(block.style.width).toBe('calc(var(--grid-cell-w) * 4)');
+  });
+
+  it('leaves a SIDEWAYS flick to the scrollport instead of zooming on it', async () => {
+    await renderBig();
+    const ruler = screen.getByTestId('grid-ruler');
+
+    // A trackpad swipe across the ruler is never purely horizontal.
+    // Taking its stray deltaY as a zoom meant every scroll sideways
+    // zoomed a little AND put the scroll back where the zoom's anchor
+    // said — the grid lurching about under the pointer.
+    for (let i = 0; i < 10; i += 1) fireEvent.wheel(ruler, { deltaX: -120, deltaY: -6 });
+    // Shift+wheel is the same gesture with a mouse.
+    fireEvent.wheel(ruler, { deltaY: -100, shiftKey: true });
+    await new Promise((done) => requestAnimationFrame(() => done(null)));
+
+    expect(screen.getByTestId('grid-zoom').textContent).toBe('100%');
+  });
+});
+
+// SCROLLING SIDEWAYS is the other gesture over the whole geometry, and it
+// is the one a set is read through. A few hundred beats of fifty rows is
+// tens of thousands of cells; drawn whole, the webview gives up
+// compositing the scroll and repaints the lot every frame, which is what
+// "janky, and it jumps about" is. Only the columns on screen are in the
+// DOM, rounded out to whole blocks — so what is counted here is that an
+// ordinary scroll costs NOTHING, that a flick costs one pass over the
+// rows rather than one per event, and that the window really does follow
+// the box.
+describe('Grid scroll performance', () => {
+  const CELL = 22;
+  /** Beats a window is snapped to — `WINDOW_BLOCK` in the view. */
+  const BLOCK = 32;
+  /** A wide arrangement. The row count is not what this is about, the
+   *  BEAT count is; eight rows keep the first render (before the box has
+   *  been measured, when the whole grid is drawn) cheap. */
+  const WIDE_ROWS = 8;
+  const WIDE_BEATS = 512;
+  /** A scrollport 30 beats wide, which jsdom will never lay out itself. */
+  const VIEW = 30 * CELL;
+
+  /** Let everything the load set off (the peaks fetch above all) land, so
+   *  what is counted next is the scroll and nothing else. */
+  const settle = () => new Promise((done) => setTimeout(done, 30));
+  /** One animation frame — what a coalesced scroll waits for. */
+  const frame = () => new Promise((done) => requestAnimationFrame(() => done(null)));
+
+  /** Give the scrollport a width, and a way to scroll it. jsdom has no
+   *  layout, so these are the only two numbers the window is measured
+   *  off — exactly the two a browser would have supplied. */
+  function scrollport(width: number): (px: number) => void {
+    const box = screen.getByTestId('grid-body');
+    let left = 0;
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => width });
+    Object.defineProperty(box, 'scrollLeft', {
+      configurable: true,
+      get: () => left,
+      set: (v: number) => {
+        left = v;
+      },
+    });
+    return (px: number) => {
+      box.scrollLeft = px;
+      fireEvent.scroll(box);
+    };
+  }
+
+  it('draws only the columns the scrollport is over', async () => {
+    await renderBig(WIDE_ROWS, WIDE_BEATS);
+    const to = scrollport(VIEW);
+    to(0);
+
+    // At the left end: what is on screen plus a block of slack past it,
+    // and nothing at all of the four hundred beats further on.
+    await waitFor(() => expect(screen.queryByTestId('grid-cell-row1-300')).toBeNull());
+    expect(screen.getByTestId('grid-cell-row1-0')).toBeTruthy();
+    expect(screen.getByTestId(`grid-cell-row1-${2 * BLOCK - 1}`)).toBeTruthy();
+    // The ruler is windowed with the rows, or the bar numbers would come
+    // away from the columns they belong to.
+    expect(screen.queryByTestId(`grid-ruler-${2 * BLOCK}`)).toBeNull();
+
+    // Scrolled into the middle of the set, the middle is what is drawn.
+    to(200 * CELL);
+    await waitFor(() => expect(screen.getByTestId('grid-cell-row1-200')).toBeTruthy());
+    expect(screen.getByTestId('grid-ruler-200')).toBeTruthy();
+    expect(screen.queryByTestId('grid-cell-row1-0')).toBeNull();
+    // …and so is the clip block back there, waveform and all.
+    expect(screen.queryByTestId('grid-clip-row1-0')).toBeNull();
+  });
+
+  it('costs NOTHING to scroll inside the columns already drawn', async () => {
+    await renderBig(WIDE_ROWS, WIDE_BEATS);
+    const to = scrollport(VIEW);
+    to(200 * CELL);
+    // Waiting for the WINDOW, not for a column: until the box has been
+    // measured the whole grid is drawn, so beat 200 is there already and
+    // beat 0 going away is what says the scroll has been answered.
+    await waitFor(() => expect(screen.queryByTestId('grid-cell-row1-0')).toBeNull());
+    await settle();
+    __rowRenderCount.reset();
+    __pageRenderCount.reset();
+
+    // Twenty events over a couple of hundred pixels: the same block, so
+    // the same columns, so nothing to draw again.
+    for (let i = 0; i < 20; i += 1) to(200 * CELL + i * 10);
+    await frame();
+
+    expect(__rowRenderCount.get()).toBe(0);
+    // The page itself is offered the window it already has, which React
+    // answers with at most one bail-out render of this component alone —
+    // never a pass over the grid.
+    expect(__pageRenderCount.get()).toBeLessThanOrEqual(1);
+  });
+
+  it('coalesces a flick into one pass over the rows, not one per event', async () => {
+    await renderBig(WIDE_ROWS, WIDE_BEATS);
+    const to = scrollport(VIEW);
+    to(200 * CELL);
+    // Waiting for the WINDOW, not for a column: until the box has been
+    // measured the whole grid is drawn, so beat 200 is there already and
+    // beat 0 going away is what says the scroll has been answered.
+    await waitFor(() => expect(screen.queryByTestId('grid-cell-row1-0')).toBeNull());
+    await settle();
+    __rowRenderCount.reset();
+    __pageRenderCount.reset();
+
+    // A trackpad flick: thirty events between two frames, carrying the
+    // view a few blocks along.
+    for (let i = 0; i < 30; i += 1) to(200 * CELL + i * 100);
+    await waitFor(() => expect(screen.getByTestId('grid-cell-row1-330')).toBeTruthy());
+
+    // One measure, one window, one draw of each row — not thirty.
+    expect(__pageRenderCount.get()).toBeLessThanOrEqual(2);
+    expect(__rowRenderCount.get()).toBeLessThanOrEqual(WIDE_ROWS);
+  });
+
+  it('holds the window still while the playhead moves through it', async () => {
+    await renderBig(WIDE_ROWS, WIDE_BEATS);
+    const to = scrollport(VIEW);
+    to(200 * CELL);
+    // Waiting for the WINDOW, not for a column: until the box has been
+    // measured the whole grid is drawn, so beat 200 is there already and
+    // beat 0 going away is what says the scroll has been answered.
+    await waitFor(() => expect(screen.queryByTestId('grid-cell-row1-0')).toBeNull());
+    await settle();
+    __rowRenderCount.reset();
+
+    // The playhead is one overlay over the whole grid, so it moves
+    // without touching the window or the rows drawn in it — the scroll
+    // does not get to jump because something started playing.
+    act(() => {
+      screen.getByTestId('grid-play').click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(__rowRenderCount.get()).toBe(0);
+    expect(screen.getByTestId('grid-cell-row1-200')).toBeTruthy();
   });
 });

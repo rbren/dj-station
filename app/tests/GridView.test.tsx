@@ -1271,6 +1271,11 @@ describe('Grid paint (CSS-level pin)', () => {
     // A sticky child sticks to the top of the scrollport's padding box, so
     // ANY top padding here is a strip the rows show through.
     expect(rule('.grid-body')).toMatch(/padding:\s*0 /);
+    // …and NO left padding either: that strip is outside the pinned
+    // gutter, and the arrangement bled through it past the track titles.
+    // The inset is the gutter's own padding, which is opaque.
+    expect(rule('.grid-body')).toMatch(/padding:\s*0 [^;]* 0;/);
+    expect(rule('.grid-gutter')).toMatch(/padding-left:/);
     const zOf = (selector: string) => Number(/z-index:\s*(\d+)/.exec(rule(selector))?.[1]);
     // Both come BEFORE the cells and the level lines in the DOM, so they
     // need the higher z-index to cover them rather than be painted over.
@@ -1379,6 +1384,28 @@ describe('the ruler click, end to end', () => {
 
     fireEvent.keyDown(window, { key: ' ' });
     expect(play).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.any(Number), 12);
+  });
+
+  it('PLAYS from a cursor outside the loop rather than jumping to its start', async () => {
+    const transport = new GridTransport(makeClips());
+    const play = vi.spyOn(transport, 'play');
+    render(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
+    await screen.findByTestId('grid-ruler');
+
+    await markLoop(8, 15);
+    clickRuler(2);
+    fireEvent.keyDown(window, { key: ' ' });
+
+    // The beat the cursor is on is what is played from: the lead-in is
+    // heard once and the loop takes over at its end. Clamping the cue
+    // into the loop is what made play jump away from the cursor.
+    expect(play).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.any(Number), 2);
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-position').textContent).toContain('beat 3/'),
+    );
+    // The transport agrees: the sound really is before the loop, so the
+    // readout is not a marker drawn somewhere the music is not.
+    expect(transport.status().column).toBeLessThan(8);
   });
 
   it('pastes where the ruler was clicked, loop or no loop', async () => {

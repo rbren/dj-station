@@ -38,6 +38,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -151,6 +152,41 @@ export const CELL_W_VAR = '--grid-cell-w';
 /** `n` beats, as a CSS length that follows the zoom. */
 export function beatsWide(n: number): string {
   return `calc(var(${CELL_W_VAR}) * ${n})`;
+}
+
+/** How many beats the rendered window is snapped out to.
+ *
+ *  ONLY WHAT IS ON SCREEN IS IN THE DOM. A set is a few hundred beats and
+ *  fifty rows, which is tens of thousands of cells — enough that the
+ *  webview stops scrolling on the compositor and repaints the lot every
+ *  frame, which is exactly what a janky horizontal scroll is. The window
+ *  is rounded out to whole blocks and carries a block of slack on each
+ *  side, so scrolling costs nothing at all until it crosses a boundary,
+ *  and there is always a block of grid drawn past the edge of the view to
+ *  scroll into. */
+export const WINDOW_BLOCK = 32;
+
+/** The columns worth drawing: what a scrollport `width` px wide, scrolled
+ *  to `scroll`, has on screen at `cellW` a beat — rounded out to blocks.
+ *
+ *  The gutter is pinned over the first ~200 px of the scrollport, so the
+ *  beat at `scroll / cellW` is the leftmost one anybody can see and the
+ *  right edge is an over-estimate by the gutter's width. A width of 0 is
+ *  a box nothing has measured yet (the first render, or jsdom): the whole
+ *  grid is drawn rather than nothing at all. */
+export function columnWindow(
+  scroll: number,
+  width: number,
+  cellW: number,
+  columns: number,
+): ColumnRange {
+  if (width <= 0 || cellW <= 0) return { start: 0, end: columns };
+  const first = Math.floor(Math.max(0, scroll) / cellW / WINDOW_BLOCK) - 1;
+  const last = Math.ceil((Math.max(0, scroll) + width) / cellW / WINDOW_BLOCK) + 1;
+  return {
+    start: Math.max(0, first * WINDOW_BLOCK),
+    end: Math.min(columns, last * WINDOW_BLOCK),
+  };
 }
 
 /** The beat under the pointer and where to keep it, for a zoom about
@@ -428,13 +464,52 @@ export function GridView(props: GridViewProps) {
   );
 
   // After a zoom, put the beat that was under the pointer back under it.
-  useEffect(() => {
+  // BEFORE THE FRAME IS PAINTED, not after: a plain effect runs once the
+  // new geometry is already on screen, so every notch of the zoom showed
+  // one frame of the grid thrown sideways and then snapped back.
+  useLayoutEffect(() => {
     const hold = keepBeat.current;
     const box = scroller.current;
     keepBeat.current = null;
     if (!hold || !box) return;
     box.scrollLeft = Math.max(0, hold.beat * cellW - hold.x);
   }, [cellW]);
+
+  /** The columns actually drawn — see `columnWindow`. */
+  const [visible, setVisible] = useState<ColumnRange>({ start: 0, end: columns });
+  const measureWindow = useCallback(() => {
+    const box = scroller.current;
+    const next = columnWindow(box?.scrollLeft ?? 0, box?.clientWidth ?? 0, cellW, columns);
+    setVisible((prev) => (prev.start === next.start && prev.end === next.end ? prev : next));
+  }, [cellW, columns]);
+
+  // The window follows the box: its size (a zoom, a resized page) and how
+  // far it has been scrolled. Measured in a LAYOUT effect so the columns a
+  // zoom brings into view are there in the frame the zoom lands in.
+  useLayoutEffect(measureWindow, [measureWindow]);
+  useEffect(() => {
+    window.addEventListener('resize', measureWindow);
+    return () => window.removeEventListener('resize', measureWindow);
+  }, [measureWindow]);
+
+  // SCROLLING IS COALESCED TO A FRAME, like the zoom: a scroll fires far
+  // faster than the screen refreshes and most of those events do not move
+  // the window at all, so they are answered once per frame and the answer
+  // is usually "the same columns as before".
+  const scrollFrame = useRef<number | null>(null);
+  const onScroll = useCallback(() => {
+    if (scrollFrame.current !== null) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = null;
+      measureWindow();
+    });
+  }, [measureWindow]);
+  useEffect(
+    () => () => {
+      if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    },
+    [],
+  );
 
   // ZOOMING IS COALESCED TO A FRAME. A trackpad fires wheel events far
   // faster than the screen refreshes, and a React state update per event
@@ -468,7 +543,21 @@ export function GridView(props: GridViewProps) {
   );
 
   const onRulerWheel = useCallback(
-    (e: { deltaY: number; clientX: number; preventDefault(): void }) => {
+    (e: {
+      deltaX?: number;
+      deltaY: number;
+      shiftKey?: boolean;
+      clientX: number;
+      preventDefault(): void;
+    }) => {
+      // A SIDEWAYS GESTURE SCROLLS, it does not zoom. A trackpad swipe is
+      // never purely horizontal, so taking any deltaY as a zoom meant
+      // that scrolling across the ruler zoomed a little on every event
+      // AND put the scroll back where the zoom's anchor said — the grid
+      // lurching about under the pointer. Shift+wheel is the same
+      // gesture with a mouse. Both are left to the scrollport, which
+      // needs the event UNPREVENTED to act on it.
+      if (e.shiftKey || Math.abs(e.deltaX ?? 0) > Math.abs(e.deltaY)) return;
       if (e.deltaY === 0) return;
       e.preventDefault();
       wheelDelta.current += e.deltaY;
@@ -764,15 +853,19 @@ export function GridView(props: GridViewProps) {
     [setGrid],
   );
 
+  /** Where the playhead may be put: anywhere on the grid, playing or
+   *  not. A loop is something marked ON the music, not a pen the cursor
+   *  is kept in — play from before it and the lead-in is heard once
+   *  before the loop takes over, which is also the transport's rule. */
+  const cursor = useMemo(() => ({ start: 0, end: Math.max(1, columns) }), [columns]);
+
   const play = useCallback(
     (from?: number) => {
-      void transport.play(grid, byId, columns, from);
-      // The transport cues INSIDE the range it is about to play, so the
-      // page reports the beat the sound is really on rather than the one
-      // it was asked for.
-      setPlayhead({ playing: true, column: clampTo(from ?? range.start, range) });
+      const at = clampTo(from ?? range.start, cursor);
+      void transport.play(grid, byId, columns, at);
+      setPlayhead({ playing: true, column: at });
     },
-    [transport, grid, byId, columns, range],
+    [transport, grid, byId, columns, range, cursor],
   );
 
   /** Pause keeps the place; the next play resumes from it. */
@@ -785,17 +878,6 @@ export function GridView(props: GridViewProps) {
     if (playhead.playing) pause();
     else play(playhead.column);
   }, [playhead.playing, playhead.column, pause, play]);
-
-  /** Where the playhead may be put. While the grid PLAYS that is the
-   *  range being played — the transport cues inside the loop whatever it
-   *  is asked for, and the page must not claim a beat the sound is not
-   *  on. STOPPED, the playhead is a cursor: it goes wherever it is put,
-   *  loop or no loop, because it is also where a paste lands. A loop is
-   *  something you mark on the music, not a pen the cursor is kept in. */
-  const cursor = useMemo(
-    () => (playhead.playing ? range : { start: 0, end: Math.max(1, columns) }),
-    [playhead.playing, range, columns],
-  );
 
   /** Put the playhead on `col`, playing or not: a seek while the music
    *  runs re-cues there, which is what a scrub means. */
@@ -1395,7 +1477,7 @@ export function GridView(props: GridViewProps) {
       {/* THE SCROLLPORT. `.grid-scroll` inside it is only the column the
           lanes live in — this is the box with `overflow: auto` on it, so
           this is the only element whose `scrollLeft` means anything. */}
-      <div className="grid-body" data-testid="grid-body" ref={scroller}>
+      <div className="grid-body" data-testid="grid-body" ref={scroller} onScroll={onScroll}>
         <div className="grid-gutter">
           {/* THE TEMPO LANE'S WINDOW, opened from its two ends. The lane
               shows ±15 bpm around the grid's tempo, which is where a set
@@ -1584,20 +1666,26 @@ export function GridView(props: GridViewProps) {
                 if (grid.loop) setRulerMenu({ x: e.clientX, y: e.clientY });
               }}
             >
-              {Array.from({ length: columns }, (_, col) => (
-                <span
-                  className="grid-ruler-cell"
-                  data-testid={`grid-ruler-${col}`}
-                  data-bar={col % grid.barBeats === 0 ? 'true' : 'false'}
-                  data-loop={inRange(range, col) && grid.loop ? 'true' : 'false'}
-                  key={col}
-                  style={{ width: beatsWide(1) }}
-                >
-                  {col % grid.barBeats === 0 && cellW * grid.barBeats >= 18
-                    ? col / grid.barBeats + 1
-                    : ''}
-                </span>
-              ))}
+              {/* The beats before the window, as one blank of their
+                  width — see `columnWindow`. */}
+              <span className="grid-gap" style={{ width: beatsWide(visible.start) }} />
+              {Array.from({ length: Math.max(0, visible.end - visible.start) }, (_, i) => {
+                const col = visible.start + i;
+                return (
+                  <span
+                    className="grid-ruler-cell"
+                    data-testid={`grid-ruler-${col}`}
+                    data-bar={col % grid.barBeats === 0 ? 'true' : 'false'}
+                    data-loop={inRange(range, col) && grid.loop ? 'true' : 'false'}
+                    key={col}
+                    style={{ width: beatsWide(1) }}
+                  >
+                    {col % grid.barBeats === 0 && cellW * grid.barBeats >= 18
+                      ? col / grid.barBeats + 1
+                      : ''}
+                  </span>
+                );
+              })}
               {/* The loop's edges, as handles you can take hold of. */}
               {grid.loop && (
                 <>
@@ -1626,6 +1714,7 @@ export function GridView(props: GridViewProps) {
                     row={row}
                     clip={byId.get(row.clipId)}
                     columns={columns}
+                    visible={visible}
                     barBeats={grid.barBeats}
                     peaks={peaks[row.clipId] ?? EMPTY_PEAKS}
                     loop={grid.loop ? range : null}
@@ -1901,6 +1990,8 @@ interface RowCellsProps {
   row: GridRow;
   clip: BeatClipEntry | undefined;
   columns: number;
+  /** The columns to draw — see `columnWindow`. */
+  visible: ColumnRange;
   barBeats: number;
   peaks: readonly number[];
   /** The play range, when a loop is set — else null. */
@@ -1931,11 +2022,15 @@ interface RowCellsProps {
  *  The cell handlers are the row's, not the cell's: one set of four
  *  closures per row rather than four per cell, with the column read back
  *  off the target. At fifty rows and three hundred columns that is the
- *  difference between 200 closures per render and 60,000. */
+ *  difference between 200 closures per render and 60,000.
+ *
+ *  Only the columns in `visible` are drawn, behind a blank of whatever
+ *  the ones before them are worth — see `columnWindow`. */
 const GridRowCells = memo(function GridRowCells({
   row,
   clip,
   columns,
+  visible,
   barBeats,
   peaks,
   loop,
@@ -2013,6 +2108,10 @@ const GridRowCells = memo(function GridRowCells({
       {clip &&
         row.placements.map((start) => {
           const span = placementSpan(clip, start);
+          // Off the window: not drawn at all. A clip block carries a
+          // waveform of a couple of hundred points, and a set's worth of
+          // them is what the scroll was rasterising every frame.
+          if (span.end <= visible.start || span.start >= visible.end) return null;
           return (
             <div
               className="grid-clip"
@@ -2035,7 +2134,11 @@ const GridRowCells = memo(function GridRowCells({
 
       <LevelLine row={row} columns={columns} />
 
-      {Array.from({ length: columns }, (_, col) => {
+      {/* The beats before the window, as one blank of their width. */}
+      <span className="grid-gap" style={{ width: beatsWide(visible.start) }} />
+
+      {Array.from({ length: Math.max(0, visible.end - visible.start) }, (_, i) => {
+        const col = visible.start + i;
         const kind = clip ? cellKind(row, clip, col) : 'empty';
         const hit = clip ? placementAt(row, clip, col) : -1;
         const span = hit >= 0 && clip ? placementSpan(clip, row.placements[hit]) : null;

@@ -5934,8 +5934,15 @@ body {
      SCROLLPORT's padding box, so a top padding here left a strip above
      the ruler that the rows scrolled up through — the tracks peeking out
      between the ruler and the page's chrome. The ruler is flush with the
-     chrome instead, and the breathing room goes below the grid. */
-  padding: 0 0.75rem 0.6rem;
+     chrome instead, and the breathing room goes below the grid.
+
+     NO PADDING ON THE LEFT EITHER, for the same reason turned sideways: a
+     sticky element sticks to the padding box, so an inset here left a
+     strip to the LEFT of the pinned gutter that the grid scrolled through
+     — the arrangement bleeding out past the track titles. The inset is
+     the gutter's own padding instead, which puts the same gap under an
+     opaque element. */
+  padding: 0 0.75rem 0.6rem 0;
 }
 
 /* The pinned gutter: the master lane's label, the ruler's, and one block
@@ -5950,6 +5957,9 @@ body {
   z-index: 6;
   flex: none;
   width: 210px;
+  /* The page's left inset, carried by the gutter so that the strip it
+     covers is opaque all the way to the edge of the scrollport. */
+  padding-left: 0.75rem;
   display: flex;
   flex-direction: column;
   background: var(--canvas);
@@ -6134,6 +6144,12 @@ body {
   display: flex;
   align-items: stretch;
   border-bottom: 1px solid var(--line);
+}
+/* THE BEATS BEFORE THE WINDOW, as one blank of their total width. Only
+   the columns on screen are in the DOM (see `columnWindow`); this is what
+   holds the drawn ones at the beat they belong to. */
+.grid-gap {
+  flex: none;
 }
 .grid-cell {
   flex: none;

@@ -117,6 +117,37 @@ describe('GridTransport', () => {
     expect(later.column).toBeLessThan(8);
   });
 
+  // A CURSOR OUTSIDE THE LOOP IS A PLACE TO PLAY FROM. Cueing there used
+  // to be clamped into the loop, so putting the playhead before a loop
+  // and hitting play jumped straight to the loop's start and the lead-in
+  // was never heard.
+  it('plays the lead-in before a loop, and only then falls into it', async () => {
+    // Loop 8..12, cued at the top of the grid: 4 s of lead-in at 120 bpm.
+    await transport.play(gridWith({ loop: { start: 8, end: 12 } }), CLIPS, 32, 0);
+    await advance(1);
+    const early = transport.status().column;
+    expect(early).toBeGreaterThan(0);
+    expect(early).toBeLessThan(8);
+    // Six seconds in, the lead-in is over and the loop has it.
+    await advance(5);
+    const later = transport.status();
+    expect(later.playing).toBe(true);
+    expect(later.column).toBeGreaterThanOrEqual(8);
+    expect(later.column).toBeLessThan(12);
+  });
+
+  it('cued PAST the loop, plays out the grid and then loops', async () => {
+    // Loop 0..4 with the cursor at beat 12 of 16: the tail is 2 s, and
+    // there is no loop end ahead to fall into until the grid runs out.
+    await transport.play(gridWith({ beats: 16, loop: { start: 0, end: 4 } }), CLIPS, 16, 12);
+    await advance(1);
+    expect(transport.status().column).toBeGreaterThan(12);
+    await advance(2.5);
+    const later = transport.status();
+    expect(later.playing).toBe(true);
+    expect(later.column).toBeLessThan(4);
+  });
+
   it('stop parks the playhead and plays nothing more', async () => {
     await transport.play(gridWith(), CLIPS, 32);
     await advance(2);
