@@ -725,15 +725,31 @@
   font-size: var(--fs-nano);
   color: var(--ink-muted);
 }
+/* An infinite canvas like the rack page's: the dot grid tracks the pan
+   through inline background-position/size, and the panels live inside
+   the translated+scaled .grid-fx-canvas. */
 .grid-fx-rack {
   position: relative;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow: hidden;
+  background-image: radial-gradient(circle, #22262d 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.grid-fx-canvas {
+  position: absolute;
+  inset: 0;
+}
+.grid-fx-zoom {
+  display: flex;
+  gap: 2px;
+}
+.grid-fx-zoom .grid-fx-btn {
+  min-width: 2em;
 }
 .grid-fx-missing {
-  display: inline-block;
-  margin: 0.5rem;
+  position: absolute;
   padding: 0.4rem 0.6rem;
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-sm);
