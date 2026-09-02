@@ -64,7 +64,11 @@ fn the_default_rack_returns_the_track() {
     // close enough to the input that full-wet playback of an untouched
     // rack is not a sound change.
     assert_eq!(out.len(), 1, "L-only rack renders mono");
-    assert_eq!(out[0].len(), input.len(), "sample-aligned with the dry buffer");
+    assert_eq!(
+        out[0].len(),
+        input.len(),
+        "sample-aligned with the dry buffer"
+    );
     let (r_in, r_out) = (rms(&input), rms(&out[0]));
     assert!(
         (r_out - r_in).abs() < r_in * 0.1,
@@ -95,7 +99,10 @@ fn a_rack_returning_nothing_renders_silence() {
     .unwrap();
     assert!(!spec.returns_audio());
     let out = render_track_fx_clip(registry(), &spec, &[tone()], SR as f32, 120.0).unwrap();
-    assert!(rms(&out[0]) < 1e-6, "nothing wired back to the chrome is silence");
+    assert!(
+        rms(&out[0]) < 1e-6,
+        "nothing wired back to the chrome is silence"
+    );
 }
 
 #[test]
@@ -105,9 +112,15 @@ fn a_stereo_clip_through_the_default_rack_keeps_both_sides() {
     let l = tone();
     let r: Vec<f32> = tone().iter().map(|s| -s).collect(); // cancels in a sum
     let out = render(&fx_json(""), &[l.clone(), l.clone()]);
-    assert!((rms(&out[0]) - rms(&l)).abs() < rms(&l) * 0.1, "L==R sums to itself");
+    assert!(
+        (rms(&out[0]) - rms(&l)).abs() < rms(&l) * 0.1,
+        "L==R sums to itself"
+    );
     let cancelled = render(&fx_json(""), &[l, r]);
-    assert!(rms(&cancelled[0]) < 1e-3, "out-of-phase sides sum to silence");
+    assert!(
+        rms(&cancelled[0]) < 1e-3,
+        "out-of-phase sides sum to silence"
+    );
 }
 
 /// The whole path a saved arrangement takes to be heard: a small grid FILE
@@ -186,7 +199,10 @@ fn a_small_grid_file_renders_to_sound_and_fx_change_it() {
     };
 
     let plain = play(&grid_file(None));
-    assert!(rms(&plain) > 0.05, "a grid file with a placed clip makes sound");
+    assert!(
+        rms(&plain) > 0.05,
+        "a grid file with a placed clip makes sound"
+    );
 
     let cut = play(&grid_file(Some(&fx_json(EQ_CUT))));
     assert!(rms(&cut) > 0.0, "an effected row still sounds");

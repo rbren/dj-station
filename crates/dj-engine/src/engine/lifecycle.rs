@@ -123,9 +123,6 @@ fn named_output(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
 struct LiveDeps {
     slot: Arc<Mutex<Option<Box<EngineCore>>>>,
     callbacks: Arc<AtomicU64>,
-    samples: Arc<AtomicU64>,
-    peak_bits: Arc<std::sync::atomic::AtomicU32>,
-    starved: Arc<AtomicU64>,
     xruns: Arc<AtomicU64>,
     block: usize,
     channels: usize,
@@ -212,28 +209,19 @@ fn build_live(
 ) -> std::result::Result<cpal::Stream, String> {
     use cpal::traits::DeviceTrait;
     let slot = deps.slot.clone();
-    let (callbacks, samples, peak_bits, starved, xruns) = (
-        deps.callbacks.clone(),
-        deps.samples.clone(),
-        deps.peak_bits.clone(),
-        deps.starved.clone(),
-        deps.xruns.clone(),
-    );
+    let (callbacks, xruns) = (deps.callbacks.clone(), deps.xruns.clone());
     let (block, channels, block_secs) = (deps.block, deps.channels, deps.block_secs);
     let mut leftover: Vec<f32> = Vec::with_capacity(block * channels);
     let data_cb = move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
         callbacks.fetch_add(1, Ordering::Relaxed);
-        samples.fetch_add(out.len() as u64, Ordering::Relaxed);
         let mut guard = match slot.try_lock() {
             Ok(g) => g,
             Err(_) => {
-                starved.fetch_add(1, Ordering::Relaxed);
                 out.fill(0.0);
                 return;
             }
         };
         let Some(core) = guard.as_mut() else {
-            starved.fetch_add(1, Ordering::Relaxed);
             out.fill(0.0);
             return;
         };
@@ -260,15 +248,6 @@ fn build_live(
             out[written..written + n].copy_from_slice(&leftover[..n]);
             leftover.drain(..n);
             written += n;
-        }
-        // Track the peak sample per report interval (racy max is fine for
-        // a debug readout; no locks/allocation).
-        let mut peak = 0.0f32;
-        for &s in out.iter() {
-            peak = peak.max(s.abs());
-        }
-        if peak > f32::from_bits(peak_bits.load(Ordering::Relaxed)) {
-            peak_bits.store(peak.to_bits(), Ordering::Relaxed);
         }
         let budget = block_secs * (out.len() as f64 / (block * channels) as f64);
         if t0.elapsed().as_secs_f64() > budget {
@@ -638,26 +617,14 @@ impl Engine {
         let stop_thread = stop.clone();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::result::Result<(), String>>();
 
-        // Debug counters for the periodic level report (updated lock-free
-        // from the audio callback, printed by the supervisor loop below).
         let deps = LiveDeps {
             slot: slot.clone(),
             callbacks: Arc::new(AtomicU64::new(0)),
-            samples: Arc::new(AtomicU64::new(0)),
-            peak_bits: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            starved: Arc::new(AtomicU64::new(0)),
             xruns: self.xruns.clone(),
             block,
             channels,
             block_secs,
         };
-        let (dbg_callbacks, dbg_samples, dbg_peak_bits, dbg_starved) = (
-            deps.callbacks.clone(),
-            deps.samples.clone(),
-            deps.peak_bits.clone(),
-            deps.starved.clone(),
-        );
-        let xruns_report = self.xruns.clone();
 
         // A quarter second of slack on the ring between the two streams
         // absorbs the drift between two devices on their own clocks.
@@ -690,9 +657,6 @@ impl Engine {
                 };
                 let mut next_try = Instant::now() + DEVICE_RETRY;
                 let mut silent_deadline = Instant::now();
-                let mut last_report = Instant::now();
-                let mut last_callbacks = 0u64;
-                let mut last_samples = 0u64;
                 while !stop_thread.load(Ordering::Relaxed) {
                     let now = Instant::now();
                     if let Some(session) = open.as_mut() {
@@ -734,7 +698,6 @@ impl Engine {
                             Ok(session) => {
                                 publish(&status, session.status.clone());
                                 open = Some(session);
-                                last_report = Instant::now();
                             }
                             Err(e) => publish(
                                 &status,
@@ -754,30 +717,6 @@ impl Engine {
                         continue;
                     }
                     std::thread::sleep(Duration::from_millis(20));
-                    // Periodic debug report: proves whether the device is
-                    // pulling audio (callbacks > 0) and whether the graph
-                    // is producing signal (peak > 0). A running stream
-                    // with peak 0.000 means the patch renders silence
-                    // (e.g. the demo patch's VCA gate never opened).
-                    if last_report.elapsed() >= Duration::from_secs(2) {
-                        let cbs = dbg_callbacks.load(Ordering::Relaxed);
-                        let samples = dbg_samples.load(Ordering::Relaxed);
-                        let peak = f32::from_bits(dbg_peak_bits.swap(0, Ordering::Relaxed));
-                        let starved = dbg_starved.load(Ordering::Relaxed);
-                        eprintln!(
-                            "[dj-audio] cpal report: callbacks +{} ({} total), \
-                             samples +{}, peak {:.4}, starved {}, xruns {}",
-                            cbs - last_callbacks,
-                            cbs,
-                            samples - last_samples,
-                            peak,
-                            starved,
-                            xruns_report.load(Ordering::Relaxed),
-                        );
-                        last_callbacks = cbs;
-                        last_samples = samples;
-                        last_report = Instant::now();
-                    }
                 }
                 eprintln!("[dj-audio] stop requested, dropping cpal streams");
                 drop(open);
