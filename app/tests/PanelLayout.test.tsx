@@ -292,6 +292,14 @@ describe('ModulePanel with layouts', () => {
     expect(group).toBeTruthy();
     expect(group!.querySelector('[data-jack="att1:input:in"]')).toBeTruthy();
   });
+
+  // The class is generated (`input-group-${kind}`), so it reads as an
+  // orphan rule; without it every column group flows as a wide row.
+  it('styles.css stacks column groups so their strips stay narrow', () => {
+    const rule = appCss().match(/\.input-group-column \.input-group-cells\s*{[^}]*}/);
+    expect(rule).toBeTruthy();
+    expect(rule![0]).toContain('flex-direction: column');
+  });
 });
 
 // The playhead strip (custom StepSeqUI) must line up with the per-step

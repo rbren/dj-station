@@ -81,6 +81,10 @@ house style — why-focused design commentary (ClipView's header, decks.rs)
   `clip-regions`, `clip-sel-peaks-bleed-left/right`, `grid-bpm-here`,
   `grid-loop-readout`, `param-name`, `input-cell-hfader`,
   `input-group-column`. ~40–70 CSS lines; verify each before deleting.
+  (`input-cell-hfader` and `input-group-column` are NOT orphans — both
+  are reached through a template-literal class name; deleting the latter
+  flattened every mixer/attenuverter column into a wide row and it is
+  back, pinned by a PanelLayout test.)
 - **Export hygiene, not deletions**: 169 exported symbols in `app/src`
   are never imported outside their own file (mostly `*Props` interfaces
   and constants exported "just in case"), and a further **61 exports are
