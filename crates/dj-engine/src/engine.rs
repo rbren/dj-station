@@ -47,6 +47,7 @@ mod math_api;
 mod midi;
 mod qwerty_api;
 mod rename;
+mod track_io_api;
 
 pub use rename::normalize_module_name;
 
@@ -469,6 +470,9 @@ pub struct Engine {
     /// Control-side state per Beat Clip node (clip handoff + the binding
     /// the loaded audio came from).
     beat_clips: HashMap<usize, BeatClipControl>,
+    /// Control-side state per Track I/O node (buffer handoff for the
+    /// track-rack offline render).
+    track_ios: HashMap<usize, crate::track_io::TrackIoControl>,
     /// Control-side state per DJ Deck node (M2).
     decks: HashMap<usize, DeckControl>,
     /// Control-side state per Decks BANK node (the Decks tab's eight clip
@@ -601,6 +605,7 @@ impl Engine {
             playback_garbage: HashMap::new(),
             audios: HashMap::new(),
             beat_clips: HashMap::new(),
+            track_ios: HashMap::new(),
             decks: HashMap::new(),
             clip_decks: HashMap::new(),
             audio_focus: AudioFocus::default(),
@@ -924,7 +929,8 @@ impl Engine {
                 | BuiltinKind::BeatClip
                 | BuiltinKind::Decks
                 | BuiltinKind::Deck
-                | BuiltinKind::Math,
+                | BuiltinKind::Math
+                | BuiltinKind::TrackIo,
             ) => Err(anyhow!("{ext_id} modules are created via add_module")),
             None => {
                 let ext = self
@@ -999,6 +1005,7 @@ impl Engine {
         let mut playback_plumbing = None;
         let mut audio_ctl = None;
         let mut beat_clip_ctl = None;
+        let mut track_io_ctl = None;
         let mut deck_ctl = None;
         let mut decks_ctl = None;
         let module: Box<dyn HostModule> = match BuiltinKind::from_ext_id(ext_id) {
@@ -1096,6 +1103,16 @@ impl Engine {
                     garbage_tx,
                     self.config.sample_rate,
                     shared,
+                ))
+            }
+            Some(BuiltinKind::TrackIo) => {
+                let (tx, rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(PLAYBACK_QUEUE_CAP);
+                track_io_ctl = Some(crate::track_io::TrackIoControl::new(tx, garbage_rx));
+                Box::new(crate::track_io::TrackIoModule::new(
+                    rx,
+                    garbage_tx,
+                    self.config.sample_rate,
                 ))
             }
             Some(BuiltinKind::Decks) => {
@@ -1297,6 +1314,9 @@ impl Engine {
         if let Some(ctl) = beat_clip_ctl {
             self.beat_clips.insert(idx, ctl);
         }
+        if let Some(ctl) = track_io_ctl {
+            self.track_ios.insert(idx, ctl);
+        }
         if let Some(ctl) = deck_ctl {
             self.decks.insert(idx, ctl);
         }
@@ -1381,6 +1401,7 @@ impl Engine {
         self.playback_garbage.remove(&slot);
         self.audios.remove(&slot);
         self.beat_clips.remove(&slot);
+        self.track_ios.remove(&slot);
         self.decks.remove(&slot);
         self.clip_decks.remove(&slot);
         // Other decks sync-locked to this one lose their master.

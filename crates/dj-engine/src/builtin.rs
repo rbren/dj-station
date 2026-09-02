@@ -33,6 +33,7 @@ pub enum BuiltinKind {
     Decks,
     Crossfader,
     Math,
+    TrackIo,
 }
 
 impl BuiltinKind {
@@ -52,6 +53,7 @@ impl BuiltinKind {
             crate::decks::DECKS_ID => Some(BuiltinKind::Decks),
             crate::mixer::CROSSFADER_ID => Some(BuiltinKind::Crossfader),
             crate::math::MATH_ID => Some(BuiltinKind::Math),
+            crate::track_io::TRACK_IO_ID => Some(BuiltinKind::TrackIo),
             _ => None,
         }
     }
@@ -81,6 +83,7 @@ impl BuiltinKind {
             BuiltinKind::Decks => crate::decks::DECKS_ID,
             BuiltinKind::Crossfader => crate::mixer::CROSSFADER_ID,
             BuiltinKind::Math => crate::math::MATH_ID,
+            BuiltinKind::TrackIo => crate::track_io::TRACK_IO_ID,
         }
     }
 
@@ -100,6 +103,7 @@ impl BuiltinKind {
             BuiltinKind::Decks => crate::decks::decks_manifest(),
             BuiltinKind::Crossfader => crate::mixer::crossfader_manifest(),
             BuiltinKind::Math => crate::math::math_manifest(),
+            BuiltinKind::TrackIo => crate::track_io::track_io_manifest(),
         }
     }
 }

@@ -245,17 +245,45 @@ fn name_after_clip(engine: &mut Engine, instance: &str, clip_name: &str) -> Stri
 /// make it 180 would take its pitch up a fifth with it; a grid whose
 /// master tempo transposes every clip on it is not a grid anyone can
 /// write music on. The webview then plays what comes back at rate 1.0.
+///
+/// `fx` asks for the clip THROUGH a Grid track's effects rack instead:
+/// the row's `TrackFx` JSON, rendered offline by `dj_engine::track_fx`
+/// AFTER the stretch (so it processes exactly the samples the dry path
+/// plays, and the webview's Wetness knob can crossfade the two buffers
+/// sample-for-sample).
 #[tauri::command(async)]
 pub fn beat_clip_audio(
     state: State<AppState>,
     clip_id: String,
     bpm: Option<f64>,
+    fx: Option<String>,
 ) -> CmdResult<tauri::ipc::Response> {
     let (meta, audio, _) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
         .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
     let audio = match bpm {
         Some(bpm) if bpm > 0.0 && meta.bpm > 0.0 => stretch_to_bpm(&audio, meta.bpm, bpm),
         _ => audio,
+    };
+    let audio = match fx.as_deref() {
+        None | Some("") => audio,
+        Some(json) => {
+            let spec = dj_engine::track_fx::TrackFxSpec::from_json(json)
+                .map_err(|e| CmdError::invalid(format!("fx: {e}")))?;
+            let registry = state.engine.lock().unwrap().registry.clone();
+            let tempo = bpm.filter(|b| *b > 0.0).unwrap_or(meta.bpm);
+            let channels = dj_engine::track_fx::render_track_fx_clip(
+                registry,
+                &spec,
+                &audio.channels,
+                audio.sample_rate as f32,
+                tempo,
+            )
+            .map_err(|e| CmdError::invalid(format!("fx render: {e}")))?;
+            AudioData {
+                channels,
+                sample_rate: audio.sample_rate,
+            }
+        }
     };
     Ok(tauri::ipc::Response::new(dj_analysis::clip::wav16_bytes(
         &audio,

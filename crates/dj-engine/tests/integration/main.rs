@@ -50,6 +50,7 @@ mod qwerty;
 mod rename;
 mod scope;
 mod telemetry;
+mod track_fx;
 mod undo;
 mod wire_summing;
 mod workspaces;
