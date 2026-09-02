@@ -2011,6 +2011,29 @@ describe('ClipView', () => {
     expect(screen.getByTestId('clip-stem-other').getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('names the model a track was separated by, old ones included', async () => {
+    const clip = clipMock({
+      stemStatus: vi.fn(async (trackId: number) => ({
+        track_id: trackId,
+        backend: 'scnet_xl_ihf',
+        // Separated before the app moved to SCNet: those stems are kept,
+        // so the page says which model they came from.
+        separator: 'htdemucs_ft',
+        state: 'ready' as const,
+        stage: null,
+        detail: null,
+        pending: 0,
+      })),
+    });
+    render(<ClipView clip={clip} library={libraryMock()} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('clip-stem-model').textContent).toBe('htdemucs_ft'),
+    );
+    expect(screen.getByTestId('clip-stem-model').getAttribute('title')).toMatch(/scnet_xl_ihf/);
+    // Ready is ready: the switches work whoever separated the track.
+    expect(screen.getByTestId('clip-stem-vocals')).toHaveProperty('disabled', false);
+  });
+
   it('leaves the stem switches alone until the separation lands', async () => {
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({

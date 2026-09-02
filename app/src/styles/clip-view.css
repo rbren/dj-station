@@ -551,6 +551,13 @@
   max-width: 46em;
 }
 
+/* Which model made these stems: a footnote, not a control. */
+.clip-stem-model {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+}
+
 /* Most of what lands here is narration ("editing X", "loaded Y"), not
    success: green is kept for states that actually completed. */
 .clip-status {

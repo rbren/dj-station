@@ -1913,6 +1913,19 @@ export function ClipView({
             );
           })}
         </div>
+        {stemsReady && picked?.separator && (
+          <span
+            className="clip-stem-model"
+            data-testid="clip-stem-model"
+            title={
+              picked.separator === picked.backend
+                ? 'The model these stems came from'
+                : `Separated by ${picked.separator}, before the app moved to ${picked.backend} — kept rather than redone`
+            }
+          >
+            {picked.separator}
+          </span>
+        )}
         {stemsReady ? null : picked?.state === 'loading' ? (
           <span className="clip-stem-loading" data-testid="clip-stem-loading">
             Stems are loading…{picked.stage ? ` (${picked.stage})` : ''}
