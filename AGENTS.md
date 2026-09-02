@@ -247,8 +247,10 @@ These are the rules that must hold everywhere.
   breakpoint automation.
 - **Track rack**: the per-track effects rack opened from a Grid row —
   its own rack scoped to that track in that grid, with chrome jacks for
-  clock/audio in-out plus Level, Pan and Wetness. Level/Pan reach the
-  sound; the modules themselves do not yet (Grid plays in the webview).
+  clock/audio in-out plus Level, Pan and Wetness. The rack is rendered
+  offline by the engine (`dj-engine/src/track_fx.rs`) and the Grid player
+  crossfades that wet buffer against the dry clip by Wetness; bleed
+  bookends ride the dry side.
 - **Golden**: a checked-in E2E audio render (`tests/e2e_suite/`) pinned
   byte-for-byte.
 - **Macro**: a saved, non-nesting subgraph — global base definition plus a
