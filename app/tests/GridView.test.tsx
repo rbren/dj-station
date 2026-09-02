@@ -359,6 +359,40 @@ describe('GridView', () => {
   });
 });
 
+// CLIPS ARE MADE AND EDITED ON ANOTHER PAGE, so everything the grid
+// holds about them was true when it last had the tab. Coming back to it
+// re-reads the store.
+describe('coming back to the grid tab', () => {
+  it('picks up a clip filed while it was away, and forgets the audio of one that was edited', async () => {
+    const clips = makeClips([clip({ rev: 'r1' }), clip({ clipId: 'c3', rev: 'r1' })]);
+    const transport = new GridTransport(clips);
+    const forget = vi.spyOn(transport, 'forget');
+    const page = (active: boolean) => (
+      <GridView clips={clips} pollMs={NO_POLL} transport={transport} active={active} />
+    );
+    const { rerender } = render(page(true));
+    await waitFor(() => expect(clips.list).toHaveBeenCalledTimes(1));
+
+    // Away on the Clip page: 'c1' is saved over — same id, new take —
+    // and a clip that did not exist before is filed.
+    vi.mocked(clips.list).mockResolvedValue([
+      clip({ rev: 'r2' }),
+      clip({ clipId: 'c3', rev: 'r1' }),
+      clip({ clipId: 'c2', name: 'chorus stack', rev: 'r1' }),
+    ]);
+    rerender(page(false));
+    rerender(page(true));
+
+    // The edited clip's decodes go, so the next pass fetches the take
+    // that was just saved; the one that did not move keeps its audio.
+    await waitFor(() => expect(forget).toHaveBeenCalledWith(['c1']));
+    // …and the new clip is in the picker without restarting the app.
+    fireEvent.click(screen.getByTestId('grid-add'));
+    fireEvent.click(await screen.findByTestId('grid-picker-expand-h1'));
+    expect(screen.getByTestId('grid-picker-clip-c2')).toBeTruthy();
+  });
+});
+
 // The picker is ordered by TEMPO, slowest first: the grid runs at one
 // master tempo, so how far a track has to be stretched to sit on it is
 // the useful thing to sort by.

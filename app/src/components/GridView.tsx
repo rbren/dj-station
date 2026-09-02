@@ -430,15 +430,39 @@ export function GridView(props: GridViewProps) {
 
   useEffect(() => () => transport.dispose(), [transport]);
 
+  /** The revision each clip was at when the store was last read. An edit
+   *  keeps the clip's id, so this is the only thing that says the audio
+   *  behind a row has moved. */
+  const clipRevs = useRef(new Map<string, string>());
+
+  // CLIPS ARE MADE AND EDITED ON ANOTHER PAGE, so the store is re-read
+  // every time the grid becomes the open tab — a clip saved while the
+  // grid was away belongs in the picker without restarting the app. And
+  // everything held ABOUT a clip whose revision has moved is dropped
+  // with it: its decoded audio in the transport and its peaks here, both
+  // keyed by an id the edit did not change.
   useEffect(() => {
+    if (!active) return;
     let live = true;
     void clipApi.list().then((list) => {
-      if (live && list) setClips(list);
+      if (!live || !list) return;
+      const revs = clipRevs.current;
+      const edited = list
+        .filter((c) => revs.has(c.clipId) && revs.get(c.clipId) !== (c.rev ?? ''))
+        .map((c) => c.clipId);
+      clipRevs.current = new Map(list.map((c) => [c.clipId, c.rev ?? '']));
+      if (edited.length > 0) {
+        transport.forget(edited);
+        setPeaks((prev) =>
+          Object.fromEntries(Object.entries(prev).filter(([id]) => !edited.includes(id))),
+        );
+      }
+      setClips(list);
     });
     return () => {
       live = false;
     };
-  }, [clipApi]);
+  }, [active, clipApi, transport]);
 
   const byId = useMemo(() => new Map(clips.map((c) => [c.clipId, c])), [clips]);
   const columns = useMemo(() => gridColumns(grid, byId), [grid, byId]);

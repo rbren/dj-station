@@ -59,6 +59,11 @@ pub struct BeatClipEntry {
     /// The tracks it points at, resolved against the library as it now
     /// stands. Empty when the clip records no source at all.
     pub sources: Vec<BeatClipSourceInfo>,
+    /// How far the clip's files have been rewritten
+    /// ([`dj_analysis::clip::beat_clip_rev`]). A clip EDITED keeps its
+    /// id, so this is what tells a surface holding the clip's decoded
+    /// audio that what it holds is last time's clip.
+    pub rev: String,
 }
 
 /// What a source hash answers to today. A track that is gone answers with
@@ -98,6 +103,7 @@ pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
                 .map(|source| source_info(&state, &source.track_hash))
                 .collect();
             let ones = clip_ones(&meta);
+            let rev = dj_analysis::clip::beat_clip_rev(data_dir, &meta.id);
             BeatClipEntry {
                 clip_id: meta.id,
                 name: meta.name,
@@ -109,6 +115,7 @@ pub fn beat_clip_list(state: State<AppState>) -> CmdResult<Vec<BeatClipEntry>> {
                 editable: meta.edit.is_some(),
                 ones,
                 sources,
+                rev,
             }
         })
         .collect())

@@ -41,6 +41,12 @@ export interface BeatClipEntry {
   /** The tracks it points at, resolved against the library as it now
    *  stands. Empty when the clip records no source at all. */
   sources: BeatClipSourceInfo[];
+  /** How far the clip's files have been rewritten. A clip EDITED on the
+   *  Clip page keeps its id, so nothing else here says its audio has
+   *  moved: a surface holding a decode of the clip re-reads it when this
+   *  changes. Only the store reports it — an entry a caller builds
+   *  itself says nothing and reads as unchanged. */
+  rev?: string;
 }
 
 /** Which clip a module is bound to. The patch persists this, never the

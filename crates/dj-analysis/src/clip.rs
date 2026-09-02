@@ -1008,6 +1008,37 @@ pub fn read_beat_clips(data_dir: &Path) -> Vec<BeatClipMeta> {
         .collect()
 }
 
+/// How far a clip's files have been REWRITTEN: an opaque fingerprint of
+/// its record and its loop, `""` for a clip that is not filed.
+///
+/// A revision of a clip keeps its id — that is what lets every binding
+/// that names it survive the edit — so an id alone is NOT enough to key
+/// a decode by. A surface that holds a clip's audio (the Grid page's
+/// transport) watches this instead, and a clip saved again is a
+/// different buffer rather than a stale one.
+pub fn beat_clip_rev(data_dir: &Path, clip_id: &str) -> String {
+    let dir = beat_clips_dir(data_dir);
+    // Write time AND size, rsync's cheap fingerprint. A file's write time
+    // is only as fine as the kernel's coarse clock (milliseconds), so two
+    // saves inside one tick are told apart by what they wrote instead;
+    // hashing the audio would be exact, and costs a read of every clip in
+    // the store on every listing.
+    let stamp = |name: String| -> Option<String> {
+        let meta = std::fs::metadata(dir.join(name)).ok()?;
+        let at = meta
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?;
+        Some(format!("{}.{}", at.as_nanos(), meta.len()))
+    };
+    [format!("{clip_id}.json"), format!("{clip_id}.flac")]
+        .into_iter()
+        .filter_map(stamp)
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 /// Fold every legacy second label into its clip's name, on disk. Runs
 /// once at startup; a clip already migrated (or filed since) is left
 /// alone, so it is idempotent and cheap. Returns how many were rewritten.

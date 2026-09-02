@@ -9,10 +9,10 @@
 
 use dj_analysis::beats::detect::DspTracker;
 use dj_analysis::clip::{
-    beats_from_taps, clips_dir, delete_beat_clip, load_beat_clip, migrate_beat_clips, pad_to_beats,
-    peaks, program_duration_secs, read_beat_clips, render_clip, save_beat_clip, update_beat_clip,
-    warp_time_secs, wav16_bytes, write_clip, BeatClipEdit, BeatClipSource, BeatGrid, BleedAudio,
-    ClipEq, ClipEqBand, ClipProgram, ClipRegion, LevelPoint,
+    beat_clip_rev, beats_from_taps, clips_dir, delete_beat_clip, load_beat_clip,
+    migrate_beat_clips, pad_to_beats, peaks, program_duration_secs, read_beat_clips, render_clip,
+    save_beat_clip, update_beat_clip, warp_time_secs, wav16_bytes, write_clip, BeatClipEdit,
+    BeatClipSource, BeatGrid, BleedAudio, ClipEq, ClipEqBand, ClipProgram, ClipRegion, LevelPoint,
 };
 use dj_analysis::AudioData;
 use std::path::{Path, PathBuf};
@@ -759,6 +759,48 @@ fn saving_an_open_clip_again_revises_it_in_place() {
         &BleedAudio::default()
     )
     .is_err());
+}
+
+#[test]
+fn a_revised_clip_reports_a_new_revision() {
+    let tmp = tempfile::tempdir().unwrap();
+    let clip = save_beat_clip(
+        tmp.path(),
+        "chorus stack",
+        &tone(220.0, 2.0),
+        120.0,
+        4,
+        vec!["drums".into()],
+        None,
+        &BleedAudio::default(),
+    )
+    .unwrap();
+
+    // The revision is what a surface caching the clip's audio keys it by,
+    // so a store nobody has written to has to answer with the same thing
+    // twice.
+    let filed = beat_clip_rev(tmp.path(), &clip.id);
+    assert!(!filed.is_empty());
+    assert_eq!(beat_clip_rev(tmp.path(), &clip.id), filed);
+
+    // Saving over it keeps the id — and moves the revision, which is the
+    // only way anything holding last take's audio can learn to drop it.
+    update_beat_clip(
+        tmp.path(),
+        &clip.id,
+        "chorus stack",
+        &tone(330.0, 1.0),
+        120.0,
+        2,
+        vec!["drums".into()],
+        None,
+        &BleedAudio::default(),
+    )
+    .unwrap();
+    assert_ne!(beat_clip_rev(tmp.path(), &clip.id), filed);
+
+    // A clip that was never filed has no revision at all.
+    assert_eq!(beat_clip_rev(tmp.path(), "b99"), "");
 }
 
 #[test]

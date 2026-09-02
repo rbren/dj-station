@@ -186,6 +186,12 @@ These are the rules that must hold everywhere.
 - Every new module/engine feature ships with a serialized-patch E2E golden
   audio case (`crates/dj-engine/tests/e2e_suite/`). Existing goldens stay
   byte-identical unless intentionally regenerated and documented.
+- A beat clip EDITED is filed under the id it already had, so an id alone
+  cannot key a decode of it: `beat_clip_list` reports a `rev` per clip
+  (`dj_analysis::clip::beat_clip_rev`) and a surface holding clip audio
+  (the Grid page: `GridTransport.forget`) drops what it holds when that
+  moves. The Grid re-reads the store every time it becomes the open tab —
+  clips are made on another page.
 - DJ metadata (hot cues, saved loops, beatgrids, stems) is canonical in the
   library DB / analysis cache, NOT the patch: patches persist only the
   track path and per-module params, and the app layer re-applies metadata

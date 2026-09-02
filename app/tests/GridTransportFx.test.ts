@@ -157,3 +157,34 @@ describe('the Wetness crossfade', () => {
     expect(wetVoices().at(-1)?.gain.value).toBe(0.25);
   });
 });
+
+// A clip EDITED on the Clip page is filed under the id it already had,
+// so the transport's decodes — keyed by that id and a tempo — would go
+// on playing the take before the edit for as long as the app is open.
+describe('a clip saved over', () => {
+  it('is fetched again once the page says its audio has moved', async () => {
+    await transport.play(gridWith(), CLIPS, 32);
+    expect(source.audio).toHaveBeenCalledTimes(1);
+
+    // Played again, the decode already in hand is what sounds: nothing
+    // has changed, and re-fetching every pass is what the cache is for.
+    transport.stop();
+    await transport.play(gridWith(), CLIPS, 32);
+    expect(source.audio).toHaveBeenCalledTimes(1);
+
+    // Told the clip has been re-saved, it drops what it holds and the
+    // next pass plays the new take.
+    transport.stop();
+    transport.forget(['c1']);
+    await transport.play(gridWith(), CLIPS, 32);
+    expect(source.audio).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves the clips that did not move alone', async () => {
+    await transport.play(gridWith(), CLIPS, 32);
+    transport.stop();
+    transport.forget(['c9']);
+    await transport.play(gridWith(), CLIPS, 32);
+    expect(source.audio).toHaveBeenCalledTimes(1);
+  });
+});

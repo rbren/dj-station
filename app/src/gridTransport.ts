@@ -440,6 +440,25 @@ export class GridTransport {
     return { playing: true, column: this.#at };
   }
 
+  /** Drop every decode of these clips — the loop at each tempo, its wet
+   *  renders and its bookends — so the next `prime` fetches them again.
+   *
+   *  A clip EDITED keeps its id (that is what makes the rows pointing at
+   *  it survive the edit), so the cache key cannot tell the new audio
+   *  from the old on its own: the page, which is what learns a clip has
+   *  been re-saved, says so here. */
+  forget(clipIds: Iterable<string>): void {
+    for (const clipId of clipIds) {
+      const prefix = `${clipId}@`;
+      for (const key of this.#buffers.keys()) {
+        if (key.startsWith(prefix)) this.#buffers.delete(key);
+      }
+      for (const key of this.#bleed.keys()) {
+        if (key.startsWith(prefix)) this.#bleed.delete(key);
+      }
+    }
+  }
+
   dispose(): void {
     this.stop();
     this.#disposed = true;
