@@ -5,7 +5,7 @@
 // Download providers pull straight into the library (in the background —
 // see the job poll below), DeepLink providers open the store page.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   filterClips,
   sortClips,
@@ -256,7 +256,9 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
       if (q) {
         setQueue(q);
         const wasActive = active;
-        active = q.current !== null || q.queued.length > 0;
+        // Stem separation counts as work in flight: the rows it holds in
+        // "analyzing" have to flip over on their own when it finishes.
+        active = q.current !== null || q.queued.length > 0 || (q.stems_pending?.length ?? 0) > 0;
         if (active || wasActive) await refreshTracks('');
       }
     };
@@ -369,10 +371,29 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
     clipSort,
   );
 
-  const pending = queue ? queue.queued.length + (queue.current !== null ? 1 : 0) : 0;
-  const analyzed = queue?.counts['done'] ?? 0;
+  // Tracks the backend has analyzed but is still separating stems for.
+  // The DB calls them "done"; the library does not, until the stems are
+  // there — so they count as pending here and read "analyzing" in their
+  // row, and nothing can be cut from them yet.
+  const separating = useMemo(() => new Set(queue?.stems_pending ?? []), [queue]);
+  const pending =
+    (queue ? queue.queued.length + (queue.current !== null ? 1 : 0) : 0) + separating.size;
+  const analyzed = Math.max(0, (queue?.counts['done'] ?? 0) - separating.size);
   const failed = queue?.counts['failed'] ?? 0;
   const total = queue ? Object.values(queue.counts).reduce((a, b) => a + b, 0) : 0;
+
+  /** What a row says its analysis is doing: separation is part of it. */
+  const trackStatus = useCallback(
+    (t: Track) =>
+      t.analysis_status === 'done' && separating.has(t.id) ? 'analyzing' : t.analysis_status,
+    [separating],
+  );
+  /** A track still being worked on cannot be opened in the Clip editor:
+   *  its stems — half of what the editor cuts from — are not there yet. */
+  const clipBlocked = useCallback(
+    (t: Track) => trackStatus(t) === 'queued' || trackStatus(t) === 'analyzing',
+    [trackStatus],
+  );
 
   const active = providers.find((p) => p.id === tab) ?? null;
 
@@ -766,12 +787,15 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
                     {clips && <ClipCount count={clipsOf(t).length} onOpen={() => showClipsOf(t)} />}
                     <td>
                       <span
-                        className={`tag tag-analysis tag-analysis-${t.analysis_status}`}
+                        className={`tag tag-analysis tag-analysis-${trackStatus(t)}`}
                         data-testid="analysis-status"
+                        data-tip={
+                          separating.has(t.id) ? 'separating this track’s stems' : undefined
+                        }
                       >
-                        {t.analysis_status}
+                        {trackStatus(t)}
                       </span>
-                      {(t.analysis_status === 'done' || t.analysis_status === 'failed') && (
+                      {(trackStatus(t) === 'done' || trackStatus(t) === 'failed') && (
                         <button
                           className="analyze-button"
                           data-testid="analyze-button"
@@ -786,7 +810,12 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
                       <td>
                         <button
                           data-testid="library-edit"
-                          data-tip="cut a beat clip from this track in the Clip page"
+                          disabled={clipBlocked(t)}
+                          data-tip={
+                            clipBlocked(t)
+                              ? 'still analyzing — the Clip page opens once its stems are separated'
+                              : 'cut a beat clip from this track in the Clip page'
+                          }
                           onClick={() => onEdit(t)}
                         >
                           Clip

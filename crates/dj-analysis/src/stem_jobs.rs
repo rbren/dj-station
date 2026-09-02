@@ -89,9 +89,15 @@ impl StemJobs {
     /// Are this track's stems already on disk for our backend?
     pub fn cached(&self, track_id: i64) -> bool {
         match self.library.track(track_id) {
-            Ok(track) => stems_cached(&self.dir(&track.content_hash)),
+            Ok(track) => self.cached_content(&track.content_hash),
             Err(_) => false,
         }
+    }
+
+    /// The same answer for a content hash already in hand — a caller
+    /// walking the whole library needs no second row lookup per track.
+    pub fn cached_content(&self, content_hash: &str) -> bool {
+        stems_cached(&self.dir(content_hash))
     }
 
     /// Cached stem files for `track_id`, or `None` when not separated yet.

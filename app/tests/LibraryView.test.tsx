@@ -332,7 +332,9 @@ describe('LibraryView', () => {
 
   it('hands a track to the clip editor, and only offers to when it can', async () => {
     const onEdit = vi.fn();
-    const { unmount } = render(<LibraryView client={mockClient()} onEdit={onEdit} />);
+    const ready: Track = { ...LOCAL_TRACK, analysis_status: 'done' };
+    const client = mockClient({ tracks: vi.fn().mockResolvedValue([ready]) });
+    const { unmount } = render(<LibraryView client={client} onEdit={onEdit} />);
     await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
     // The button says what it makes: a clip, cut in the Clip page.
     expect(screen.getByTestId('library-edit').textContent).toBe('Clip');
@@ -344,6 +346,46 @@ describe('LibraryView', () => {
     render(<LibraryView client={mockClient()} />);
     await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
     expect(screen.queryByTestId('library-edit')).toBeNull();
+  });
+
+  it('stays "analyzing" while stems separate, and blocks the Clip editor until they land', async () => {
+    const onEdit = vi.fn();
+    // Beats and key are in — the DB row says "done" — but separation is
+    // still running for this track, which the queue snapshot reports.
+    const beatsDone: Track = { ...LOCAL_TRACK, analysis_status: 'done', bpm: 120 };
+    const separating = mockClient({
+      tracks: vi.fn().mockResolvedValue([beatsDone]),
+      analysisStatus: vi
+        .fn()
+        .mockResolvedValue({ current: null, queued: [], counts: { done: 1 }, stems_pending: [1] }),
+    });
+    const { unmount } = render(<LibraryView client={separating} onEdit={onEdit} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('analysis-status').textContent).toBe('analyzing'),
+    );
+    // Nothing to re-run while it is still working.
+    expect(screen.queryByTestId('analyze-button')).toBeNull();
+    expect(screen.getByTestId('analysis-progress').textContent).toContain('Analyzing 1 track');
+    expect(screen.getByTestId('analysis-progress').textContent).toContain('(0/1 done');
+
+    const edit = screen.getByTestId('library-edit') as HTMLButtonElement;
+    expect(edit.disabled).toBe(true);
+    expect(edit.getAttribute('data-tip')).toContain('once its stems are separated');
+    fireEvent.click(edit);
+    expect(onEdit).not.toHaveBeenCalled();
+
+    // Separation finished: the row is done and the editor opens.
+    unmount();
+    const ready = mockClient({
+      tracks: vi.fn().mockResolvedValue([beatsDone]),
+      analysisStatus: vi
+        .fn()
+        .mockResolvedValue({ current: null, queued: [], counts: { done: 1 }, stems_pending: [] }),
+    });
+    render(<LibraryView client={ready} onEdit={onEdit} />);
+    await waitFor(() => expect(screen.getByTestId('analysis-status').textContent).toBe('done'));
+    fireEvent.click(screen.getByTestId('library-edit'));
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
   });
 
   it('renames a track from its row, title and artist alike', async () => {

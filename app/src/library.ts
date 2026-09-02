@@ -98,6 +98,9 @@ export interface AnalysisQueue {
   queued: number[];
   /** Track counts by analysis status (queued/analyzing/done/failed). */
   counts: Record<string, number>;
+  /** Tracks whose beat/key analysis is done but whose stems are still
+   *  separating — still "analyzing" as far as the library is concerned. */
+  stems_pending?: number[];
 }
 
 /** What LibraryView needs; the Tauri-backed client below implements it and

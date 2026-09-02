@@ -17,7 +17,7 @@ use dj_engine::{
 };
 use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
@@ -2530,6 +2530,11 @@ struct AnalysisQueueSnapshot {
     queued: Vec<i64>,
     /// Track counts by analysis status.
     counts: BTreeMap<String, usize>,
+    /// Tracks whose beat/key analysis is over but whose stems are still
+    /// separating. The Library keeps calling these "analyzing" and will
+    /// not open the Clip editor for them: half a track's material is
+    /// still missing until its stems land.
+    stems_pending: Vec<i64>,
 }
 
 #[tauri::command]
@@ -2543,14 +2548,22 @@ fn analysis_status(state: State<AppState>) -> CmdResult<AnalysisQueueSnapshot> {
         .map(|t| t.id)
         .filter(|id| Some(*id) != current)
         .collect();
+    let separating: HashSet<i64> = state.auto_stems.pending_tracks().into_iter().collect();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut stems_pending = Vec::new();
     for t in state.library.tracks().map_err(err)? {
+        // Only tracks the DB already calls "done" go in, so the two ways
+        // of being unfinished never count the same track twice.
+        if t.analysis_status == "done" && separating.contains(&t.id) {
+            stems_pending.push(t.id);
+        }
         *counts.entry(t.analysis_status).or_default() += 1;
     }
     Ok(AnalysisQueueSnapshot {
         current,
         queued,
         counts,
+        stems_pending,
     })
 }
 

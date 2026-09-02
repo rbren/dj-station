@@ -877,6 +877,19 @@ fn downloaded_tracks_are_separated_without_anyone_asking() {
         ),
         "a download should be on its way to having stems"
     );
+    // The same answer for the whole library in one call — what the
+    // Library view keeps calling "analyzing" (and refuses to open the
+    // Clip editor for). One separation runs at a time, so the second
+    // download is still on the list while the first one is worked on.
+    let waiting = service.pending_tracks();
+    assert!(
+        waiting.contains(&tracks[1].id),
+        "a download without stems should read as still coming"
+    );
+    assert!(
+        !waiting.contains(&tracks[2].id),
+        "a local file nothing will separate must never read as pending"
+    );
 
     wait_until("both downloads separated", 60, || {
         jobs.cached(tracks[0].id) && jobs.cached(tracks[1].id)
@@ -901,6 +914,10 @@ fn downloaded_tracks_are_separated_without_anyone_asking() {
 
     // The service settles instead of spinning: the queue empties.
     wait_until("the queue to drain", 10, || service.status().pending == 0);
+    assert!(
+        service.pending_tracks().is_empty(),
+        "nothing is waiting on stems any more: separated or never coming"
+    );
 }
 
 /// Stems are the expensive thing here, so they must survive the app

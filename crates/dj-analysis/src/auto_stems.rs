@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use dj_library::Library;
+use dj_library::{Library, Track};
 
 use crate::stem_jobs::{StemJobState, StemJobs};
 
@@ -226,7 +226,35 @@ impl AutoStemService {
     /// Where one track stands. This is what the Clip page renders, so it
     /// answers for tracks the service will never touch too.
     pub fn track_stems(&self, track_id: i64) -> TrackStems {
-        if self.jobs.cached(track_id) {
+        match self.library.track(track_id) {
+            Ok(track) => self.stems_of(&track),
+            Err(e) => TrackStems::Unavailable {
+                detail: format!("track {track_id} is not in the library: {e:#}"),
+            },
+        }
+    }
+
+    /// Every track whose stems are still coming, in library order. The
+    /// Library view keeps calling these "analyzing": analysis is not
+    /// really over for a track until its stems are on disk.
+    pub fn pending_tracks(&self) -> Vec<i64> {
+        let tracks = match self.library.tracks() {
+            Ok(tracks) => tracks,
+            Err(e) => {
+                eprintln!("[auto-stems] reading the library failed: {e:#}");
+                return Vec::new();
+            }
+        };
+        tracks
+            .iter()
+            .filter(|t| matches!(self.stems_of(t), TrackStems::Loading { .. }))
+            .map(|t| t.id)
+            .collect()
+    }
+
+    /// Where a track stands, given the row already in hand.
+    fn stems_of(&self, track: &Track) -> TrackStems {
+        if self.jobs.cached_content(&track.content_hash) {
             return TrackStems::Ready;
         }
         if self.scope == AutoStemScope::Off {
@@ -237,14 +265,14 @@ impl AutoStemService {
         // A track outside the scope is not "loading": nothing is coming
         // for it, and saying otherwise would leave the editor waiting on
         // a separation that will never be queued.
-        let source = self.library.track(track_id).map(|t| t.source);
-        if source.is_ok_and(|s| !self.scope.wants(&s)) {
+        if !self.scope.wants(&track.source) {
             return TrackStems::Unavailable {
                 detail: format!(
                     "automatic stem separation covers downloaded tracks ({ENV_AUTOSTEM}=downloads)"
                 ),
             };
         }
+        let track_id = track.id;
         let failed = {
             let failures = self
                 .shared
