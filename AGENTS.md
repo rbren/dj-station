@@ -149,12 +149,26 @@ fails if it's missing.
 
 These are the rules that must hold everywhere.
 
-- Frontend styling goes through the design tokens at the top of
-  `app/src/styles.css` (`--fs-*`, `--canvas/--surface*/--line*`, inks,
+- Frontend styling goes through the design tokens in
+  `app/src/styles/base.css` (`--fs-*`, `--canvas/--surface*/--line*`, inks,
   `--brand/--cue/--ok/--fault`, `--shadow-*`, `--dur-*`). Do not add a fresh
   hex literal or font-size when a token fits. Motion is colour/opacity only
   and must survive the `prefers-reduced-motion` block. `DESIGN_OVERHAUL.md`
   tracks the remaining design work — update it there, not in code comments.
+  `styles.css` is only an `@import` index over `src/styles/` (one file per
+  page/feature, cascade order = import order); tests that pin CSS rules
+  read it through `app/tests/readStyles.ts`'s `appCss()`.
+- House frontend helpers — reuse, don't re-roll: `src/search.ts
+  matchesQuery` for every search-box filter, `src/usePoll.ts usePoll` for
+  panel status polling, `src/format.ts fixed` for number display.
+- Audio decoding has ONE implementation: `dj_analysis::decode_audio`
+  (symphonia). `dj-engine`'s `playback::decode_file` re-shapes its output;
+  never add a second symphonia pipeline.
+- Tauri IPC commands live in per-domain files under `app/src-tauri/src/`
+  (`library.rs`, `deck.rs`, `decks.rs`, `choreo.rs`, `macros.rs`,
+  `clip.rs`, `beat_clip.rs`, `launch_control.rs`); `main.rs` keeps only
+  the shell: AppState, undo/patch plumbing, rack graph edits, audio
+  device commands. New commands go in the matching domain file.
 - ALL persistent state roots in ONE directory resolved by
   `dj_library::paths` (`custom/` in the repo checkout, overridable with
   `DJ_STATION_DATA_DIR`). New state goes UNDER that dir — never a fresh
