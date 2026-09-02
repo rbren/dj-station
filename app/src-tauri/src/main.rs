@@ -5,19 +5,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod beat_clip;
+mod deck;
+mod choreo;
 mod clip;
 mod decks;
 mod launch_control;
+mod macros;
+mod library;
 
 use dj_engine::{
     AudioFocus, AudioOutputs, Backend, CaptureWindow, Engine, EngineConfig, ExtensionRegistry,
-    JackTelemetry, KnobConfig, KnobStyle, MacroDef, MacroInterface, MacroJack, MacroLibrary,
-    MacroStore, Manifest, MidiMapKind, PatchDoc, UndoHistory, WireStyle, Workspace,
-    MACROS_DIR_NAME,
+    JackTelemetry, KnobConfig, KnobStyle, Manifest, MidiMapKind, PatchDoc, UndoHistory, WireStyle,
+    Workspace,
 };
-use dj_library::{AcquisitionHub, Library, ProviderInfo, Query, Track, TrackResult};
+use dj_library::{AcquisitionHub, Library};
 use serde::Serialize;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
@@ -329,7 +332,7 @@ fn restore_doc(state: &State<AppState>, engine: &mut Engine, doc: &PatchDoc) -> 
             .iter()
             .any(|n| n.instance_id == instance && n.is_deck())
         {
-            apply_deck_metadata(state, engine, &instance)?;
+            deck::apply_deck_metadata(state, engine, &instance)?;
         }
     }
     // Beat Clip modules and Decks slots apply_doc recreated hold a
@@ -795,82 +798,6 @@ fn engine_wires(state: State<AppState>) -> CmdResult<Vec<WireSnapshot>> {
         .collect())
 }
 
-#[derive(Serialize)]
-struct MacroGroup {
-    /// Top-level macro instance id (the UI's bounding-box label anchor).
-    instance: String,
-    macro_id: String,
-    name: String,
-    /// Concrete engine nodes expanded under this instance (nested macros
-    /// flattened) — the members of the bounding box.
-    members: Vec<String>,
-}
-
-/// Macro instance groupings for the rack's bounding-box overlay. Only
-/// top-level instances are reported; nested macros are part of their
-/// owner's box.
-#[tauri::command]
-fn macro_groups(state: State<AppState>) -> CmdResult<Vec<MacroGroup>> {
-    let engine = engine_lock(&state)?;
-    Ok(engine
-        .macro_instances()
-        .iter()
-        .filter(|(iid, _)| !iid.contains('/'))
-        .map(|(iid, mi)| {
-            let prefix = format!("{iid}/");
-            MacroGroup {
-                instance: iid.clone(),
-                macro_id: mi.macro_id.clone(),
-                name: engine
-                    .macros
-                    .get(&mi.macro_id)
-                    .map(|d| d.name.clone())
-                    .unwrap_or_else(|| mi.macro_id.clone()),
-                members: engine
-                    .nodes
-                    .iter()
-                    .filter(|n| n.instance_id.starts_with(&prefix))
-                    .map(|n| n.instance_id.clone())
-                    .collect(),
-            }
-        })
-        .collect())
-}
-
-/// Right-click "Break Macro": the instance's expanded internal modules
-/// become ordinary top-level modules in place (wires, DSP state and
-/// positions survive); the macro definition stays in the library. Returns
-/// old id -> new id so the frontend can remap positions.
-#[tauri::command]
-fn break_macro(state: State<AppState>, instance: String) -> CmdResult<BTreeMap<String, String>> {
-    let mut engine = patch_edit(&state, EditKey::BreakMacro(&instance))?;
-    engine.break_macro(&instance).map_err(err)
-}
-
-/// Saved definition layout for a macro: relative rack positions for the
-/// concrete nodes a fresh instance expands to (empty for macros saved
-/// before positions were recorded).
-#[tauri::command]
-fn macro_layout(
-    state: State<AppState>,
-    macro_id: String,
-) -> CmdResult<BTreeMap<String, (f32, f32)>> {
-    let engine = engine_lock(&state)?;
-    engine.macro_layout(&macro_id).map_err(err)
-}
-
-/// What a fresh instance of a macro expands to, for the module picker's
-/// composite thumbnail: concrete internal nodes with their manifests,
-/// definition-saved knobs and relative positions.
-#[tauri::command]
-fn macro_preview(
-    state: State<AppState>,
-    macro_id: String,
-) -> CmdResult<Vec<dj_engine::MacroPreviewNode>> {
-    let engine = engine_lock(&state)?;
-    engine.macro_preview(&macro_id).map_err(err)
-}
-
 #[tauri::command]
 fn add_module(
     state: State<AppState>,
@@ -1042,186 +969,6 @@ fn remove_midi_led_mapping(
     let mut engine = patch_edit(&state, EditKey::LedRemove(&instance, &name))?;
     engine
         .remove_midi_led_mapping(&instance, &name)
-        .map_err(err)
-}
-
-/// Everything the choreography panel needs per poll: the timeline plus
-/// the live playhead beat.
-#[derive(serde::Serialize)]
-struct ChoreoStatus {
-    beats: usize,
-    tracks: Vec<dj_engine::ChoreoTrack>,
-    playhead: i64,
-}
-
-#[tauri::command]
-fn choreo_status(state: State<AppState>, instance: String) -> CmdResult<ChoreoStatus> {
-    let engine = engine_lock(&state)?;
-    let st = engine.choreo(&instance).map_err(err)?;
-    Ok(ChoreoStatus {
-        beats: st.beats,
-        tracks: st.tracks.clone(),
-        playhead: engine.choreo_playhead(&instance).map_err(err)?,
-    })
-}
-
-#[tauri::command]
-fn choreo_set_beats(state: State<AppState>, instance: String, beats: usize) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ChoreoBeats(&instance))?;
-    engine.choreo_set_beats(&instance, beats).map_err(err)
-}
-
-/// Add a track ("boolean" | "continuous" | "note"); it materializes as
-/// one (or two, for note tracks) output jacks.
-#[tauri::command]
-fn choreo_add_track(
-    state: State<AppState>,
-    instance: String,
-    name: String,
-    kind: String,
-) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ChoreoTrackAdd(&instance, &name))?;
-    engine
-        .choreo_add_track(&instance, &name, &kind)
-        .map(|_| ())
-        .map_err(err)
-}
-
-/// Remove a track. Wires from its jack(s) are disconnected first
-/// (restoring auto wire-style knobs), which needs the engine stopped.
-#[tauri::command]
-fn choreo_remove_track(state: State<AppState>, instance: String, track: usize) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ChoreoTrackRemove(&instance, track))?;
-    let jacks: Vec<String> = {
-        let st = engine.choreo(&instance).map_err(err)?;
-        let t = st
-            .tracks
-            .get(track)
-            .ok_or_else(|| CmdError::not_found(format!("no track {track}")))?;
-        (t.jack..t.jack + t.data.jack_count())
-            .map(|j| format!("t{j}"))
-            .collect()
-    };
-    let doomed: Vec<(String, String, String)> = engine
-        .wire_specs()
-        .iter()
-        .filter(|w| {
-            engine.nodes[w.from_node].instance_id == instance
-                && jacks.contains(&engine.output_jack_name(w.from_node, w.from_jack))
-        })
-        .map(|w| {
-            (
-                engine.output_jack_name(w.from_node, w.from_jack),
-                engine.nodes[w.to_node].instance_id.clone(),
-                engine.nodes[w.to_node].manifest.inputs[w.to_jack]
-                    .id
-                    .clone(),
-            )
-        })
-        .collect();
-    if doomed.is_empty() {
-        return engine.choreo_remove_track(&instance, track).map_err(err);
-    }
-    for (from_jack, to_instance, to_jack) in &doomed {
-        engine
-            .disconnect(&instance, from_jack, to_instance, to_jack)
-            .map_err(err)?;
-        if let Ok(k) = engine.knob_state(to_instance, to_jack) {
-            if k.config
-                .as_ref()
-                .is_some_and(|c| c.style == KnobStyle::Wire)
-            {
-                engine
-                    .set_knob_config(to_instance, to_jack, None)
-                    .map_err(err)?;
-            }
-        }
-    }
-    engine.choreo_remove_track(&instance, track).map_err(err)
-}
-
-#[tauri::command]
-fn choreo_rename_track(
-    state: State<AppState>,
-    instance: String,
-    track: usize,
-    name: String,
-) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ChoreoTrackRename(&instance, track))?;
-    engine
-        .choreo_rename_track(&instance, track, &name)
-        .map_err(err)
-}
-
-/// Reorder tracks (display order only; jacks stay with their tracks).
-#[tauri::command]
-fn choreo_move_track(
-    state: State<AppState>,
-    instance: String,
-    from: usize,
-    to: usize,
-) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ChoreoTrackMove(&instance))?;
-    engine.choreo_move_track(&instance, from, to).map_err(err)
-}
-
-#[tauri::command]
-fn choreo_set_bool(
-    state: State<AppState>,
-    instance: String,
-    track: usize,
-    beat: usize,
-    on: bool,
-) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ChoreoData(&instance, track))?;
-    engine
-        .choreo_set_bool(&instance, track, beat, on)
-        .map_err(err)
-}
-
-/// Write a run of continuous values from `start` (drag paints batch).
-#[tauri::command]
-fn choreo_set_values(
-    state: State<AppState>,
-    instance: String,
-    track: usize,
-    start: usize,
-    values: Vec<f32>,
-) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ChoreoData(&instance, track))?;
-    engine
-        .choreo_set_values(&instance, track, start, &values)
-        .map_err(err)
-}
-
-/// Set or clear the note at a beat (`degree`/`velocity` together; None
-/// clears).
-#[tauri::command]
-fn choreo_set_note(
-    state: State<AppState>,
-    instance: String,
-    track: usize,
-    beat: usize,
-    note: Option<dj_engine::NoteStep>,
-) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ChoreoData(&instance, track))?;
-    engine
-        .choreo_set_note(&instance, track, beat, note)
-        .map_err(err)
-}
-
-#[tauri::command]
-fn choreo_set_note_settings(
-    state: State<AppState>,
-    instance: String,
-    track: usize,
-    octaves: u8,
-    scale: String,
-    base_note: u8,
-) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ChoreoTrackSettings(&instance, track))?;
-    engine
-        .choreo_set_note_settings(&instance, track, octaves, &scale, base_note)
         .map_err(err)
 }
 
@@ -1722,7 +1469,7 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     // macro the patch didn't use — e.g. break the last instance, quit,
     // restart: the autosave restore came up knowing no macros at all.
     let doc = PatchDoc::read(dir).map_err(err)?;
-    *engine = Engine::from_doc_with_macros(&doc, registry, store_macro_library()).map_err(err)?;
+    *engine = Engine::from_doc_with_macros(&doc, registry, macros::store_macro_library()).map_err(err)?;
     // Decks: re-apply library-stored DJ metadata (cues/loops/beatgrids)
     // for every loaded deck track (PRD §7 — metadata survives across
     // patches via the library DB, not the patch files).
@@ -1733,7 +1480,7 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
         .map(|n| n.instance_id.clone())
         .collect();
     for instance in deck_instances {
-        apply_deck_metadata(state, &mut engine, &instance)?;
+        deck::apply_deck_metadata(state, &mut engine, &instance)?;
     }
     // Beat Clip modules and Decks slots: the patch names the clip, the
     // app assembles it.
@@ -1749,70 +1496,6 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     Ok(warnings)
 }
 
-/// The global macro store: `<data_dir>/macros/`, a sibling of `patches/`.
-fn macro_store() -> MacroStore {
-    MacroStore::new(dj_library::default_data_dir().join(MACROS_DIR_NAME))
-}
-
-/// Every published macro, as an engine-side `MacroLibrary`. A store that
-/// cannot be read is logged and treated as empty — a broken definition
-/// file must not stop the app from opening a patch.
-fn store_macro_library() -> MacroLibrary {
-    match macro_store().load() {
-        Ok(lib) => lib,
-        Err(e) => {
-            eprintln!("[dj-macros] loading the macro store failed: {e:#}");
-            MacroLibrary::default()
-        }
-    }
-}
-
-fn persist_macro(def: &MacroDef) -> CmdResult<()> {
-    macro_store().save(def).map_err(err)
-}
-
-/// One-shot migration to the global macro store, run at startup: patches
-/// that embedded one shared definition per macro id get per-instance
-/// copies, and macros left in the retired `macros` DB table move into the
-/// store. Idempotent, and never fatal — a failure just leaves the old
-/// state in place.
-fn migrate_macros_to_store(library: &Library) {
-    let store = macro_store();
-    match library.legacy_macros() {
-        Ok(rows) => {
-            let mut moved = 0;
-            for row in &rows {
-                match serde_json::from_str::<MacroDef>(&row.definition) {
-                    Ok(def) => match store.save(&def) {
-                        Ok(()) => moved += 1,
-                        Err(e) => eprintln!("[dj-macros] storing {}: {e:#}", row.id),
-                    },
-                    Err(e) => eprintln!("[dj-macros] bad stored definition for {}: {e}", row.id),
-                }
-            }
-            if moved == rows.len() && !rows.is_empty() {
-                if let Err(e) = library.drop_legacy_macros() {
-                    eprintln!("[dj-macros] dropping the legacy macros table: {e:#}");
-                } else {
-                    println!("[dj-macros] moved {moved} macro(s) out of the library DB");
-                }
-            }
-        }
-        Err(e) => eprintln!("[dj-macros] reading the legacy macros table: {e:#}"),
-    }
-    match store.import_patch_macros(&patches_dir()) {
-        Ok(report) if report.is_empty() => {}
-        Ok(report) => println!(
-            "[dj-macros] migrated {} patch instance(s) to per-instance copies; \
-             published {} macro(s) ({} duplicate definition(s) collapsed)",
-            report.instances.len(),
-            report.bases.len(),
-            report.deduped
-        ),
-        Err(e) => eprintln!("[dj-macros] migrating patch macros: {e:#}"),
-    }
-}
-
 /// Load a patch from an arbitrary directory. Patches are self-contained
 /// (each macro instance carries its own definition), so this is a plain
 /// load; the macro store only seeds the bases for the picker.
@@ -1820,312 +1503,6 @@ fn migrate_macros_to_store(library: &Library) {
 #[tauri::command]
 fn load_patch(state: State<AppState>, dir: String) -> CmdResult<Vec<String>> {
     load_patch_dir(&state, Path::new(&dir))
-}
-
-#[derive(Serialize)]
-struct MacroInfo {
-    id: String,
-    name: String,
-}
-
-/// Macros available for instantiation (the global store, PRD §6).
-#[tauri::command]
-fn list_macros(state: State<AppState>) -> CmdResult<Vec<MacroInfo>> {
-    let engine = engine_lock(&state)?;
-    Ok(engine
-        .macros
-        .list()
-        .into_iter()
-        .map(|d| MacroInfo {
-            id: d.id.clone(),
-            name: d.name.clone(),
-        })
-        .collect())
-}
-
-/// Auto-derived macro interface for a rack selection: boundary wires are
-/// promoted (required for a valid collapse); every other input jack of a
-/// selected module that isn't wired inside the selection is promoted too,
-/// so instances keep their knobs. External ids prefer the bare jack id and
-/// fall back to `<node>_<jack>` on collision.
-fn auto_interface(engine: &Engine, selection: &[String]) -> MacroInterface {
-    let sel: std::collections::BTreeSet<&str> = selection.iter().map(|s| s.as_str()).collect();
-    let doc = engine.snapshot("collapse");
-    let mut interface = MacroInterface::default();
-    let mut in_ids = std::collections::BTreeSet::new();
-    let mut out_ids = std::collections::BTreeSet::new();
-    let mut internally_wired = std::collections::BTreeSet::new();
-
-    let promote_in = |interface: &mut MacroInterface,
-                      ids: &mut std::collections::BTreeSet<String>,
-                      node: &str,
-                      jack: &str| {
-        if interface
-            .inputs
-            .iter()
-            .any(|j| j.node == node && j.jack == jack)
-        {
-            return;
-        }
-        let id = if ids.insert(jack.to_string()) {
-            jack.to_string()
-        } else {
-            let id = format!("{node}_{jack}");
-            ids.insert(id.clone());
-            id
-        };
-        interface.inputs.push(MacroJack {
-            id,
-            node: node.to_string(),
-            jack: jack.to_string(),
-        });
-    };
-    let promote_out = |interface: &mut MacroInterface,
-                       ids: &mut std::collections::BTreeSet<String>,
-                       node: &str,
-                       jack: &str| {
-        if interface
-            .outputs
-            .iter()
-            .any(|j| j.node == node && j.jack == jack)
-        {
-            return;
-        }
-        let id = if ids.insert(jack.to_string()) {
-            jack.to_string()
-        } else {
-            let id = format!("{node}_{jack}");
-            ids.insert(id.clone());
-            id
-        };
-        interface.outputs.push(MacroJack {
-            id,
-            node: node.to_string(),
-            jack: jack.to_string(),
-        });
-    };
-
-    // Boundary wires first — these promotions are mandatory.
-    for (src, wf) in &doc.wires {
-        for w in &wf.wires {
-            let src_in = sel.contains(src.as_str());
-            let dst_in = sel.contains(w.to.as_str());
-            if src_in && dst_in {
-                internally_wired.insert((w.to.clone(), w.to_jack.clone()));
-            } else if dst_in {
-                promote_in(&mut interface, &mut in_ids, &w.to, &w.to_jack);
-            } else if src_in {
-                promote_out(&mut interface, &mut out_ids, src, &w.from_jack);
-            }
-        }
-    }
-    // Remaining jacks of the selected modules (macro instances included —
-    // macros nest, so a selected macro's external jacks promote the same
-    // way as a plain module's).
-    for id in selection {
-        let (inputs, outputs): (Vec<String>, Vec<String>) =
-            if let Some(n) = engine.nodes.iter().find(|n| &n.instance_id == id) {
-                (
-                    n.manifest.inputs.iter().map(|j| j.id.clone()).collect(),
-                    n.manifest.outputs.iter().map(|o| o.id.clone()).collect(),
-                )
-            } else if let Some(m) = engine
-                .macro_instances()
-                .get(id)
-                .and_then(|mi| engine.macro_manifest(&mi.macro_id))
-            {
-                (
-                    m.inputs.iter().map(|j| j.id.clone()).collect(),
-                    m.outputs.iter().map(|o| o.id.clone()).collect(),
-                )
-            } else {
-                continue;
-            };
-        for jack in inputs {
-            if !internally_wired.contains(&(id.clone(), jack.clone())) {
-                promote_in(&mut interface, &mut in_ids, id, &jack);
-            }
-        }
-        for jack in outputs {
-            promote_out(&mut interface, &mut out_ids, id, &jack);
-        }
-    }
-    interface
-}
-
-/// Collapse the selected rack modules into a new macro (PRD §6). Returns
-/// the new instance's id; the definition lands in the user library DB.
-/// `positions` carries each selected module's rack position so the
-/// definition remembers the arrangement (stored relative to the group's
-/// top-left corner).
-///
-/// The outcome is either the new instance id, or — when a macro with the
-/// same name already exists and `overwrite` wasn't set — the existing
-/// definition's info so the UI can ask before clobbering it.
-#[derive(Serialize)]
-struct CollapseOutcome {
-    instance: Option<String>,
-    conflict: Option<MacroInfo>,
-}
-
-#[tauri::command]
-fn collapse_macro(
-    state: State<AppState>,
-    selection: Vec<String>,
-    name: String,
-    positions: Option<BTreeMap<String, (f32, f32)>>,
-    overwrite: Option<bool>,
-) -> CmdResult<CollapseOutcome> {
-    if selection.is_empty() {
-        return Err(CmdError::invalid("empty selection"));
-    }
-    let mut engine = engine_lock(&state)?;
-    let slug: String = name
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect();
-    // Same name ⇒ same id (the id IS the name's slug): saving under an
-    // existing name means overwriting that macro, which needs the caller's
-    // explicit consent. Checked before record_edit so a declined overwrite
-    // leaves no phantom undo entry.
-    let macro_id = format!("macro.{slug}");
-    let existing = engine.macros.get(&macro_id).cloned();
-    if let Some(old) = &existing {
-        if overwrite != Some(true) {
-            return Ok(CollapseOutcome {
-                instance: None,
-                conflict: Some(MacroInfo {
-                    id: old.id.clone(),
-                    name: old.name.clone(),
-                }),
-            });
-        }
-    }
-    record_edit(&state, &engine, &EditKey::CollapseMacro);
-    let taken: std::collections::BTreeSet<String> = engine
-        .nodes
-        .iter()
-        .map(|nd| nd.instance_id.clone())
-        .collect();
-    let mut instance = slug.clone();
-    let mut k = 2;
-    while taken.contains(&instance) {
-        instance = format!("{slug}-{k}");
-        k += 1;
-    }
-    let interface = auto_interface(&engine, &selection);
-    let sel_refs: Vec<&str> = selection.iter().map(|s| s.as_str()).collect();
-    let mut def = with_stopped(&mut engine, |e| {
-        if existing.is_some() {
-            e.recollapse_macro(&sel_refs, &instance, &macro_id, &name, interface)
-                .map_err(err)
-        } else {
-            e.collapse_to_macro(&sel_refs, &instance, &macro_id, &name, interface)
-                .map_err(err)
-        }
-    })?;
-    // Remember the arrangement: positions normalized to the group's
-    // top-left corner so a fresh instance lays out the same shape anywhere.
-    if let Some(positions) = positions {
-        let x0 = positions
-            .values()
-            .map(|p| p.0)
-            .fold(f32::INFINITY, f32::min);
-        let y0 = positions
-            .values()
-            .map(|p| p.1)
-            .fold(f32::INFINITY, f32::min);
-        let rel: BTreeMap<String, (f32, f32)> = positions
-            .into_iter()
-            .filter(|(id, _)| def.modules.contains_key(id))
-            .map(|(id, (x, y))| (id, (x - x0, y - y0)))
-            .collect();
-        if !rel.is_empty() {
-            def = engine.set_macro_positions(&macro_id, rel).map_err(err)?;
-        }
-    }
-    persist_macro(&def)?;
-    Ok(CollapseOutcome {
-        instance: Some(instance),
-        conflict: None,
-    })
-}
-
-/// *Pull latest* on one macro instance: replace its private copy of the
-/// definition with the current published one and re-expand it. DESTRUCTIVE
-/// — every edit made inside this instance is discarded — so the UI warns
-/// first. Returns the wires the new interface could not keep (empty when
-/// the instance already matched the base, which is a no-op).
-#[tauri::command]
-fn pull_macro_instance(state: State<AppState>, instance: String) -> CmdResult<Vec<String>> {
-    let mut engine = patch_edit(&state, EditKey::PullMacro(&instance))?;
-    let mut warnings = Vec::new();
-    with_stopped(&mut engine, |e| {
-        warnings = e.pull_macro_instance(&instance).map_err(err)?;
-        Ok(())
-    })?;
-    for w in &warnings {
-        eprintln!("[dj-macros] pull {instance}: {w}");
-    }
-    Ok(warnings)
-}
-
-/// *Save macro*: publish this instance's current state as the macro's new
-/// definition. Other instances keep what they have until they pull.
-/// Returns false when nothing had changed.
-#[tauri::command]
-fn save_macro_instance(state: State<AppState>, instance: String) -> CmdResult<bool> {
-    let mut engine = engine_lock(&state)?;
-    let Some(def) = engine.save_macro_instance(&instance).map_err(err)? else {
-        return Ok(false);
-    };
-    persist_macro(&def)?;
-    Ok(true)
-}
-
-/// *Reset to defaults*: discard local edits inside one instance, back to
-/// the copy of the definition it was adopted with. Undoable.
-#[tauri::command]
-fn reset_macro_instance(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = patch_edit(&state, EditKey::ResetMacro(&instance))?;
-    with_stopped(&mut engine, |e| {
-        e.reset_macro_instance(&instance).map_err(err)
-    })
-}
-
-/// Rename a published macro (stable id, display name only). Library
-/// state, not patch state (so not undoable, like [`delete_macro`]):
-/// instances keep their own copies, so this only retitles the base.
-#[tauri::command]
-fn rename_macro(state: State<AppState>, macro_id: String, name: String) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    let def = engine.rename_macro(&macro_id, &name).map_err(err)?;
-    persist_macro(&def)
-}
-
-/// Delete a macro from the global store. Refused while any rack instance
-/// still uses it (break or delete the instances first) — a live instance
-/// with no base couldn't re-publish or be pulled again. Not undoable: the
-/// definition is library state, not patch state (like DJ metadata).
-#[tauri::command]
-fn delete_macro(state: State<AppState>, macro_id: String) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    if let Some(mi) = engine
-        .macro_instances()
-        .iter()
-        .find(|(_, mi)| mi.macro_id == macro_id)
-    {
-        return Err(CmdError::invalid(format!(
-            "macro is in use by instance {:?} — break or delete it first",
-            mi.0
-        )));
-    }
-    engine
-        .unregister_macro(&macro_id)
-        .ok_or_else(|| CmdError::invalid(format!("unknown macro {macro_id:?}")))?;
-    macro_store().remove(&macro_id).map_err(err)?;
-    Ok(())
 }
 
 #[tauri::command]
@@ -2269,504 +1646,6 @@ fn engine_stop(state: State<AppState>) -> CmdResult<()> {
     engine.stop().map_err(err)
 }
 
-// ---------------------------------------------------------------------------
-// Library + acquisition (M1)
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-fn library_tracks(state: State<AppState>) -> CmdResult<Vec<Track>> {
-    state.library.tracks().map_err(err)
-}
-
-#[tauri::command]
-fn library_search(state: State<AppState>, text: String) -> CmdResult<Vec<Track>> {
-    state.library.search(&text).map_err(err)
-}
-
-/// Enabled acquisition providers with their UI filter specs (per-store
-/// search tabs).
-#[tauri::command]
-fn providers(state: State<AppState>) -> CmdResult<Vec<ProviderInfo>> {
-    Ok(state.hub.providers_info())
-}
-
-/// Search one store, with that store's filter selections. Runs on a
-/// worker thread (`async`): a provider search is a network round-trip, and
-/// the YouTube one spawns yt-dlp — neither may block the main thread.
-#[tauri::command(async)]
-fn search_provider(
-    state: State<AppState>,
-    provider: String,
-    text: String,
-    filters: BTreeMap<String, String>,
-) -> CmdResult<Vec<TrackResult>> {
-    let mut q = Query::new(&text);
-    q.filters = filters;
-    state.hub.search_provider(&provider, &q).map_err(err)
-}
-
-#[tauri::command]
-fn import_track(state: State<AppState>, path: String) -> CmdResult<Track> {
-    state
-        .library
-        .import_file(&PathBuf::from(path), dj_library::ImportOptions::default())
-        .map(|o| o.track().clone())
-        .map_err(err)
-}
-
-/// Rename a track (Library page): title and artist only — everything
-/// else about the row is derived from the file or the analysis.
-#[tauri::command]
-fn set_track_names(
-    state: State<AppState>,
-    track_id: i64,
-    title: String,
-    artist: String,
-) -> CmdResult<Track> {
-    state
-        .library
-        .set_track_names(track_id, &title, &artist)
-        .map_err(err)
-}
-
-/// Delete a track and everything the app derived from it: the row with
-/// its DJ metadata (cues, loops, beatgrid, tags, crate membership), the
-/// stem cache keyed by its content, the Clip page's decoded copy, and the
-/// audio file itself when the app owns it (a provider download or a
-/// rendered clip — a file in the user's own folders always stays).
-///
-/// It does NOT chase the references pointing AT the track: a beat clip's
-/// source and a saved patch's deck each name a track that may already be
-/// gone, and each degrades on its own (a clip keeps its audio and says
-/// its source is unknown, a patch load warns and comes up without the
-/// track).
-#[tauri::command]
-fn delete_track(state: State<AppState>, track_id: i64) -> CmdResult<dj_library::DeletedTrack> {
-    // A separation in flight would write stems back into the cache we are
-    // about to remove, so stop it before the row goes.
-    state.stems.cancel_track(track_id);
-    let deleted = state.library.delete_track(track_id).map_err(err)?;
-    state.clips.forget(track_id);
-    let hash = &deleted.track.content_hash;
-    if let Err(e) = dj_analysis::remove_stems(state.library.data_dir(), hash) {
-        eprintln!("[dj-analysis] removing stems for {hash}: {e:#}");
-    }
-    Ok(deleted)
-}
-
-#[derive(Serialize)]
-struct RekordboxImportSummary {
-    imported: usize,
-    duplicates: usize,
-}
-
-/// Import a rekordbox XML export (M4, PRD §8.1): tracks, beatgrids, hot
-/// cues, and loops land in the library DB; existing tracks (by path) skip.
-#[tauri::command]
-fn import_rekordbox(state: State<AppState>, path: String) -> CmdResult<RekordboxImportSummary> {
-    let report = state
-        .library
-        .import_rekordbox_xml(Path::new(&path))
-        .map_err(err)?;
-    Ok(RekordboxImportSummary {
-        imported: report.imported.len(),
-        duplicates: report.duplicates.len(),
-    })
-}
-
-/// Start acquiring a result in the background and return the job id. The
-/// transfer never runs on this thread: yt-dlp fetches take seconds to
-/// minutes, and even HTTP downloads would stall the window.
-#[tauri::command]
-fn start_download(state: State<AppState>, result: TrackResult) -> CmdResult<u64> {
-    Ok(state.downloads.start(result))
-}
-
-/// Snapshot of running/recent download jobs (polled by the library view).
-#[tauri::command]
-fn download_jobs(state: State<AppState>) -> CmdResult<Vec<dj_library::DownloadJob>> {
-    Ok(state.downloads.jobs())
-}
-
-/// Deep-link acquisition: resolves the store URL, opens it in the system
-/// browser, and returns it (M1: iTunes purchases land via the watch folder).
-#[tauri::command]
-fn open_store_page(state: State<AppState>, result: TrackResult) -> CmdResult<String> {
-    state
-        .hub
-        .open_deep_link(&result, |url| {
-            open::that_detached(url).map_err(anyhow::Error::from)
-        })
-        .map_err(err)
-}
-
-/// Open a web URL in the system's default browser (never in the app's
-/// webview). Restricted to http(s) so IPC can't be used to launch
-/// arbitrary local files/schemes.
-#[tauri::command]
-fn open_external(url: String) -> CmdResult<()> {
-    if !url.starts_with("https://") && !url.starts_with("http://") {
-        return Err(CmdError::invalid(format!(
-            "refusing to open non-http(s) URL: {url}"
-        )));
-    }
-    open::that_detached(&url).map_err(err)
-}
-
-#[tauri::command]
-fn add_watch_folder(state: State<AppState>, path: String) -> CmdResult<()> {
-    state
-        .library
-        .add_watch_folder(&PathBuf::from(path))
-        .map_err(err)
-}
-
-#[tauri::command]
-fn watch_folders(state: State<AppState>) -> CmdResult<Vec<String>> {
-    Ok(state
-        .library
-        .watch_folders()
-        .map_err(err)?
-        .into_iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect())
-}
-
-/// Load a library track into a Playback module instance.
-#[tauri::command]
-fn playback_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResult<()> {
-    let track = state.library.track(track_id).map_err(err)?;
-    let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
-    engine
-        .playback_load(&instance, &PathBuf::from(track.file_path))
-        .map_err(err)
-}
-
-/// Load a library track into an Audio module instance. The track's tempo
-/// comes from the library (canonical, like deck beatgrids): the module
-/// adopts it on the BPM input and resets speed to 1x.
-#[tauri::command]
-fn audio_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResult<()> {
-    let track = state.library.track(track_id).map_err(err)?;
-    let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
-    engine
-        .audio_load(&instance, &PathBuf::from(track.file_path), track.bpm)
-        .map_err(err)
-}
-
-/// Track + transport + tempo snapshot for the Audio module panel.
-#[tauri::command]
-fn audio_status(
-    state: State<AppState>,
-    instance: String,
-) -> CmdResult<dj_engine::audio::AudioStatus> {
-    let engine = engine_lock(&state)?;
-    engine.audio_status(&instance).map_err(err)
-}
-
-/// Waveform overview peaks (0..=1) of an Audio module's track.
-#[tauri::command]
-fn audio_waveform(state: State<AppState>, instance: String, buckets: usize) -> CmdResult<Vec<f32>> {
-    let engine = engine_lock(&state)?;
-    engine
-        .audio_waveform(&instance, buckets.min(20_000))
-        .map_err(err)
-}
-
-// ---------------------------------------------------------------------------
-// DJ Deck (M2). The library DB is the canonical store for cues/loops/
-// beatgrids (PRD §7): every set is written through to the library, and
-// loading a track (or a patch) re-applies the stored metadata.
-// ---------------------------------------------------------------------------
-
-/// Library row id for the track loaded in a deck, if it's a library track.
-fn deck_library_track(state: &AppState, engine: &Engine, instance: &str) -> Option<Track> {
-    let path = engine.deck_track(instance).ok()??;
-    state.library.track_by_path(Path::new(&path)).ok()?
-}
-
-/// Re-apply a track's library metadata (beatgrid, cues, first saved loop)
-/// to a deck. Used after deck_load and after patch load.
-fn apply_deck_metadata(state: &AppState, engine: &mut Engine, instance: &str) -> CmdResult<()> {
-    let Some(track) = deck_library_track(state, engine, instance) else {
-        return Ok(());
-    };
-    if let Some(grid) = state.library.track_beatgrid(track.id).map_err(err)? {
-        engine
-            .deck_set_beatgrid(instance, grid.bpm, grid.anchor_secs)
-            .map_err(err)?;
-    }
-    for cue in state.library.track_cues(track.id).map_err(err)? {
-        engine
-            .deck_set_cue(instance, cue.slot as usize, Some(cue.position_secs))
-            .map_err(err)?;
-    }
-    if let Some(l) = state.library.track_loops(track.id).map_err(err)?.first() {
-        engine
-            .deck_set_loop(instance, l.start_secs, l.end_secs)
-            .map_err(err)?;
-    }
-    // Cached stems (M3, keyed by content hash) auto-load with the track.
-    // Best-effort: a missing/failed stem cache must not break deck load.
-    let dir = dj_analysis::stems_dir(state.library.data_dir(), &track.content_hash);
-    if dj_analysis::stems_cached(&dir) {
-        if let Err(e) = engine.deck_load_stems(instance, &dj_analysis::stem_paths(&dir)) {
-            eprintln!("[dj-analysis] loading stems for {instance}: {e:#}");
-        }
-    }
-    Ok(())
-}
-
-/// Analysis queue snapshot for the Library view (M3).
-#[derive(Serialize)]
-struct AnalysisQueueSnapshot {
-    /// Track currently being analyzed, if any.
-    current: Option<i64>,
-    /// Track ids still waiting (queue order).
-    queued: Vec<i64>,
-    /// Track counts by analysis status.
-    counts: BTreeMap<String, usize>,
-    /// Tracks whose beat/key analysis is over but whose stems are still
-    /// separating. The Library keeps calling these "analyzing" and will
-    /// not open the Clip editor for them: half a track's material is
-    /// still missing until its stems land.
-    stems_pending: Vec<i64>,
-}
-
-#[tauri::command]
-fn analysis_status(state: State<AppState>) -> CmdResult<AnalysisQueueSnapshot> {
-    let current = state.analysis.current_track();
-    let queued: Vec<i64> = state
-        .library
-        .analysis_queue()
-        .map_err(err)?
-        .into_iter()
-        .map(|t| t.id)
-        .filter(|id| Some(*id) != current)
-        .collect();
-    let separating: HashSet<i64> = state.auto_stems.pending_tracks().into_iter().collect();
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    let mut stems_pending = Vec::new();
-    for t in state.library.tracks().map_err(err)? {
-        // Only tracks the DB already calls "done" go in, so the two ways
-        // of being unfinished never count the same track twice.
-        if t.analysis_status == "done" && separating.contains(&t.id) {
-            stems_pending.push(t.id);
-        }
-        *counts.entry(t.analysis_status).or_default() += 1;
-    }
-    Ok(AnalysisQueueSnapshot {
-        current,
-        queued,
-        counts,
-        stems_pending,
-    })
-}
-
-/// Queue (or re-queue) analysis for a track; the background worker picks
-/// it up. Stems already cached for the same content are reused.
-#[tauri::command]
-fn analyze_track(state: State<AppState>, track_id: i64) -> CmdResult<()> {
-    state.library.requeue_analysis(track_id).map_err(err)
-}
-
-/// Load the cached stems for the deck's current track (e.g. after
-/// analysis finished while the track was already loaded).
-#[tauri::command]
-fn deck_load_stems(state: State<AppState>, instance: String) -> CmdResult<bool> {
-    let mut engine = engine_lock(&state)?;
-    let Some(track) = deck_library_track(&state, &engine, &instance) else {
-        return Ok(false);
-    };
-    let dir = dj_analysis::stems_dir(state.library.data_dir(), &track.content_hash);
-    if !dj_analysis::stems_cached(&dir) {
-        return Ok(false);
-    }
-    engine
-        .deck_load_stems(&instance, &dj_analysis::stem_paths(&dir))
-        .map_err(err)?;
-    Ok(true)
-}
-
-#[tauri::command]
-fn deck_clear_stems(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine.deck_clear_stems(&instance).map_err(err)
-}
-
-/// Write the deck's current beatgrid through to the library.
-fn persist_deck_grid(state: &AppState, engine: &Engine, instance: &str) -> CmdResult<()> {
-    if let (Some(track), Ok(Some((bpm, anchor)))) = (
-        deck_library_track(state, engine, instance),
-        engine.deck_beatgrid(instance),
-    ) {
-        state
-            .library
-            .set_track_beatgrid(track.id, bpm, anchor)
-            .map_err(err)?;
-    }
-    Ok(())
-}
-
-/// Load a library track into a deck and re-apply its DJ metadata.
-#[tauri::command]
-fn deck_load(state: State<AppState>, instance: String, track_id: i64) -> CmdResult<()> {
-    let track = state.library.track(track_id).map_err(err)?;
-    let mut engine = patch_edit(&state, EditKey::Track(&instance))?;
-    engine
-        .deck_load(&instance, &PathBuf::from(track.file_path))
-        .map_err(err)?;
-    apply_deck_metadata(&state, &mut engine, &instance)
-}
-
-#[tauri::command]
-fn deck_status(state: State<AppState>, instance: String) -> CmdResult<dj_engine::deck::DeckStatus> {
-    let engine = engine_lock(&state)?;
-    engine.deck_status(&instance).map_err(err)
-}
-
-/// Waveform overview peaks (0..=1), `buckets` values.
-#[tauri::command]
-fn deck_waveform(state: State<AppState>, instance: String, buckets: usize) -> CmdResult<Vec<f32>> {
-    let engine = engine_lock(&state)?;
-    engine
-        .deck_waveform(&instance, buckets.min(20_000))
-        .map_err(err)
-}
-
-#[tauri::command]
-fn deck_seek(state: State<AppState>, instance: String, position: f64) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine.deck_seek(&instance, position).map_err(err)
-}
-
-/// Set (Some) or clear (None) a hot cue; written through to the library.
-#[tauri::command]
-fn deck_set_cue(
-    state: State<AppState>,
-    instance: String,
-    slot: usize,
-    position: Option<f64>,
-) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine
-        .deck_set_cue(&instance, slot, position)
-        .map_err(err)?;
-    if let Some(track) = deck_library_track(&state, &engine, &instance) {
-        match position {
-            Some(pos) => state
-                .library
-                .set_track_cue(track.id, slot as u8, pos, "")
-                .map_err(err)?,
-            None => state
-                .library
-                .clear_track_cue(track.id, slot as u8)
-                .map_err(err)?,
-        }
-    }
-    Ok(())
-}
-
-/// Set the active loop region (transient until saved).
-#[tauri::command]
-fn deck_set_loop(state: State<AppState>, instance: String, start: f64, end: f64) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine.deck_set_loop(&instance, start, end).map_err(err)
-}
-
-#[tauri::command]
-fn deck_loop_enable(state: State<AppState>, instance: String, enabled: bool) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine.deck_loop_enable(&instance, enabled).map_err(err)
-}
-
-#[tauri::command]
-fn deck_loop_halve(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine.deck_loop_halve(&instance).map_err(err)
-}
-
-#[tauri::command]
-fn deck_loop_double(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine.deck_loop_double(&instance).map_err(err)
-}
-
-/// Save the current loop region as a named library loop for the track.
-#[tauri::command]
-fn deck_save_loop(state: State<AppState>, instance: String, name: String) -> CmdResult<i64> {
-    let engine = engine_lock(&state)?;
-    let status = engine.deck_status(&instance).map_err(err)?;
-    let (Some(start), Some(end)) = (status.loop_start_secs, status.loop_end_secs) else {
-        return Err(CmdError::invalid("no loop region set"));
-    };
-    let track = deck_library_track(&state, &engine, &instance)
-        .ok_or_else(|| CmdError::not_found("deck track is not in the library"))?;
-    state
-        .library
-        .add_track_loop(track.id, &name, start, end)
-        .map_err(err)
-}
-
-/// Saved loops for the deck's current track.
-#[tauri::command]
-fn deck_saved_loops(
-    state: State<AppState>,
-    instance: String,
-) -> CmdResult<Vec<dj_library::SavedLoop>> {
-    let engine = engine_lock(&state)?;
-    match deck_library_track(&state, &engine, &instance) {
-        Some(track) => state.library.track_loops(track.id).map_err(err),
-        None => Ok(Vec::new()),
-    }
-}
-
-#[tauri::command]
-fn deck_set_beatgrid(
-    state: State<AppState>,
-    instance: String,
-    bpm: f64,
-    anchor: f64,
-) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine
-        .deck_set_beatgrid(&instance, bpm, anchor)
-        .map_err(err)?;
-    persist_deck_grid(&state, &engine, &instance)
-}
-
-/// Tap tempo at the live playhead; the resulting grid persists.
-#[tauri::command]
-fn deck_tap_tempo(state: State<AppState>, instance: String) -> CmdResult<Option<(f64, f64)>> {
-    let mut engine = engine_lock(&state)?;
-    let grid = engine.deck_tap_tempo(&instance).map_err(err)?;
-    persist_deck_grid(&state, &engine, &instance)?;
-    Ok(grid)
-}
-
-/// Nudge the beatgrid anchor by `delta` seconds.
-#[tauri::command]
-fn deck_nudge_beatgrid(state: State<AppState>, instance: String, delta: f64) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine.deck_nudge_beatgrid(&instance, delta).map_err(err)?;
-    persist_deck_grid(&state, &engine, &instance)
-}
-
-/// Re-anchor the beatgrid at the current playhead.
-#[tauri::command]
-fn deck_anchor_here(state: State<AppState>, instance: String) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine.deck_anchor_here(&instance).map_err(err)?;
-    persist_deck_grid(&state, &engine, &instance)
-}
-
-/// Beat-sync a deck to another deck (None clears sync).
-#[tauri::command]
-fn deck_sync(state: State<AppState>, instance: String, master: Option<String>) -> CmdResult<()> {
-    let mut engine = engine_lock(&state)?;
-    engine.deck_sync(&instance, master.as_deref()).map_err(err)
-}
-
 fn extension_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
@@ -2808,8 +1687,8 @@ fn main() {
     // carried into it, in place, before anything lists them.
     dj_analysis::clip::migrate_beat_clips(&data_dir);
     // Published macros are instantiable from the start (PRD §6).
-    migrate_macros_to_store(&library);
-    for def in store_macro_library().defs.into_values() {
+    macros::migrate_macros_to_store(&library);
+    for def in macros::store_macro_library().defs.into_values() {
         engine.register_macro(def);
     }
     let watcher =
@@ -3043,17 +1922,17 @@ fn main() {
             load_patch_by_name,
             current_patch,
             load_patch,
-            list_macros,
-            collapse_macro,
-            rename_macro,
-            delete_macro,
-            pull_macro_instance,
-            save_macro_instance,
-            reset_macro_instance,
-            macro_groups,
-            macro_layout,
-            macro_preview,
-            break_macro,
+            macros::list_macros,
+            macros::collapse_macro,
+            macros::rename_macro,
+            macros::delete_macro,
+            macros::pull_macro_instance,
+            macros::save_macro_instance,
+            macros::reset_macro_instance,
+            macros::macro_groups,
+            macros::macro_layout,
+            macros::macro_preview,
+            macros::break_macro,
             inject_midi,
             qwerty_key,
             launch_control::launchcontrol_status,
@@ -3062,16 +1941,16 @@ fn main() {
             remove_midi_mapping,
             add_midi_led_mapping,
             remove_midi_led_mapping,
-            choreo_status,
-            choreo_set_beats,
-            choreo_add_track,
-            choreo_remove_track,
-            choreo_rename_track,
-            choreo_move_track,
-            choreo_set_bool,
-            choreo_set_values,
-            choreo_set_note,
-            choreo_set_note_settings,
+            choreo::choreo_status,
+            choreo::choreo_set_beats,
+            choreo::choreo_add_track,
+            choreo::choreo_remove_track,
+            choreo::choreo_rename_track,
+            choreo::choreo_move_track,
+            choreo::choreo_set_bool,
+            choreo::choreo_set_values,
+            choreo::choreo_set_note,
+            choreo::choreo_set_note_settings,
             math_status,
             math_set_expr,
             hands_feed,
@@ -3085,44 +1964,44 @@ fn main() {
             audio_outputs,
             set_audio_outputs,
             set_audio_focus,
-            library_tracks,
-            library_search,
-            providers,
-            search_provider,
-            import_track,
-            set_track_names,
-            delete_track,
-            import_rekordbox,
-            start_download,
-            download_jobs,
-            open_store_page,
-            open_external,
-            add_watch_folder,
-            watch_folders,
-            playback_load,
-            audio_load,
-            audio_status,
-            audio_waveform,
-            deck_load,
-            deck_status,
-            deck_waveform,
-            deck_seek,
-            deck_set_cue,
-            deck_set_loop,
-            deck_loop_enable,
-            deck_loop_halve,
-            deck_loop_double,
-            deck_save_loop,
-            deck_saved_loops,
-            deck_set_beatgrid,
-            deck_tap_tempo,
-            deck_nudge_beatgrid,
-            deck_anchor_here,
-            deck_sync,
-            analysis_status,
-            analyze_track,
-            deck_load_stems,
-            deck_clear_stems,
+            library::library_tracks,
+            library::library_search,
+            library::providers,
+            library::search_provider,
+            library::import_track,
+            library::set_track_names,
+            library::delete_track,
+            library::import_rekordbox,
+            library::start_download,
+            library::download_jobs,
+            library::open_store_page,
+            library::open_external,
+            library::add_watch_folder,
+            library::watch_folders,
+            library::playback_load,
+            library::audio_load,
+            library::audio_status,
+            library::audio_waveform,
+            deck::deck_load,
+            deck::deck_status,
+            deck::deck_waveform,
+            deck::deck_seek,
+            deck::deck_set_cue,
+            deck::deck_set_loop,
+            deck::deck_loop_enable,
+            deck::deck_loop_halve,
+            deck::deck_loop_double,
+            deck::deck_save_loop,
+            deck::deck_saved_loops,
+            deck::deck_set_beatgrid,
+            deck::deck_tap_tempo,
+            deck::deck_nudge_beatgrid,
+            deck::deck_anchor_here,
+            deck::deck_sync,
+            deck::analysis_status,
+            deck::analyze_track,
+            deck::deck_load_stems,
+            deck::deck_clear_stems,
             clip::clip_load_source,
             clip::clip_render_preview,
             clip::clip_preview_audio,
