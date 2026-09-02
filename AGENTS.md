@@ -158,6 +158,10 @@ These are the rules that must hold everywhere.
   `styles.css` is only an `@import` index over `src/styles/` (one file per
   page/feature, cascade order = import order); tests that pin CSS rules
   read it through `app/tests/readStyles.ts`'s `appCss()`.
+- Never delete a CSS rule because a literal grep for its class name finds no
+  use. Class names are built from template literals (e.g. ModulePanel's
+  `input-group-${group.kind}`, `input-cell-hfader`); grep the fragments
+  before calling a selector orphaned.
 - House frontend helpers — reuse, don't re-roll: `src/search.ts
   matchesQuery` for every search-box filter, `src/usePoll.ts usePoll` for
   panel status polling, `src/format.ts fixed` for number display.
