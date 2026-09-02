@@ -484,6 +484,81 @@ describe('ClipTransport', () => {
     expect(transport.playhead).toBe(120);
   });
 
+  // A window boundary used to be a whole render — backend, WAV encode,
+  // IPC — started at the instant the audio ran out, which is why linear
+  // playback fell into a hole at exactly one window (60 s) and again at
+  // every multiple of it.
+  describe('the window boundary', () => {
+    beforeEach(async () => {
+      world.durationSecs = 180;
+      transport.play(0, null);
+      await flush();
+      world.finishRender();
+      await flush();
+    });
+
+    it('fetches the next window before the boundary, so running out costs no render', async () => {
+      // Far from the boundary, nothing is fetched.
+      (world.element as { currentTime: number }).currentTime = 20;
+      world.emit('timeupdate');
+      await flush();
+      expect(world.renders).toHaveLength(1);
+
+      // Near it, the next window is rendered UNDER the one playing.
+      (world.element as { currentTime: number }).currentTime = 55;
+      world.emit('timeupdate');
+      await flush();
+      expect(world.renders[1]).toMatchObject({ start: 60, len: 60 });
+      world.finishRender();
+      await flush();
+      expect(transport.loaded).toMatchObject({ start: 0, end: 60 });
+
+      // The boundary itself: the swap is SYNCHRONOUS — no render, and no
+      // await between the audio ending and the next window playing.
+      world.emit('ended');
+      expect(world.renders).toHaveLength(2);
+      expect(transport.loaded).toMatchObject({ start: 60, end: 120 });
+      expect(transport.playhead).toBe(60);
+      expect(world.elementPlaying).toBe(true);
+      expect(world.peak).toBe(1);
+    });
+
+    it('waits on the fetch in flight rather than asking for the same window twice', async () => {
+      (world.element as { currentTime: number }).currentTime = 58;
+      world.emit('timeupdate');
+      await flush();
+      expect(world.renders).toHaveLength(2);
+
+      // The boundary arrives before the prefetch lands: it is the same
+      // window, so it is waited on, not asked for again.
+      world.emit('ended');
+      await flush();
+      expect(world.renders).toHaveLength(2);
+      world.finishRender();
+      await flush();
+      expect(transport.loaded).toMatchObject({ start: 60, end: 120 });
+      expect(transport.playing).toBe(true);
+      expect(world.peak).toBe(1);
+    });
+
+    it('throws away what it fetched ahead when the timeline changes under it', async () => {
+      (world.element as { currentTime: number }).currentTime = 55;
+      world.emit('timeupdate');
+      await flush();
+      world.finishRender();
+      await flush();
+      expect(world.renders).toHaveLength(2);
+
+      transport.invalidate();
+      transport.play(60, null);
+      await flush();
+      // Those bytes are a render of the edit as it was: the window is
+      // fetched again rather than played out of the old one.
+      expect(world.renders).toHaveLength(3);
+      expect(world.renders[2]).toMatchObject({ start: 60, len: 60 });
+    });
+  });
+
   it('follows the element while it plays and parks the playhead on pause', async () => {
     transport.play(0, null);
     await flush();

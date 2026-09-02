@@ -36,6 +36,13 @@
 //      DOES (`advanceTo`); a command that puts the playhead somewhere
 //      (`setPlayhead`) never triggers a wrap, or pausing near the end of
 //      a loop starts the loop again.
+//   7. A CHAIN IS FETCHED BEFORE IT IS NEEDED. Anything longer than one
+//      window plays as windows chained end to end, and asking for the
+//      next one only once the current has ENDED buys a render, a WAV
+//      encode and an IPC hop of silence at every boundary — audibly, a
+//      hole at the one-minute mark of any linear playback. The next
+//      window is rendered while the current one still plays, so reaching
+//      the boundary is a src swap with no await in it at all.
 //
 // Timing values are injected so tests can drive the same code with short
 // debounces.
@@ -85,10 +92,24 @@ export interface TransportOptions {
   tickMs?: number;
   /** Debounce before re-rendering the playing window after a tone edit. */
   toneDelayMs?: number;
+  /** How far before the end of a window its successor is fetched. Must
+   *  comfortably exceed a render + IPC round trip. */
+  prefetchSecs?: number;
 }
 
 /** The one thing that may be making sound. */
 type Source = { kind: 'loop'; handle: LoopHandle } | { kind: 'element'; el: HTMLAudioElement };
+
+/** A window fetched ahead of the boundary that will need it. */
+interface Ahead {
+  start: number;
+  end: number;
+  /** The render, so a boundary reached before it lands waits on it
+   *  instead of asking for the same window a second time. */
+  fetch: Promise<ArrayBuffer | null>;
+  /** What it rendered to, once it has landed. */
+  bytes: ArrayBuffer | null;
+}
 
 const EPS = 1e-3;
 
@@ -97,6 +118,7 @@ export class ClipTransport {
   private readonly windowSecs: number;
   private readonly tickMs: number;
   private readonly toneDelayMs: number;
+  private readonly prefetchSecs: number;
 
   /** Bumped by every command. Async work started under an older epoch has
    *  been superseded and must not touch anything. */
@@ -111,6 +133,10 @@ export class ClipTransport {
   private prepared: PreparedLoop | null = null;
   /** The range the transport has been asked to loop, if any. */
   private loopRange: Range | null = null;
+  /** The window AFTER the one playing, fetched before the boundary. Only
+   *  ever used for the exact span it was fetched for, and thrown away
+   *  whenever what it holds stops being the edit. */
+  private ahead: Ahead | null = null;
   private playingNow = false;
   private playheadNow = 0;
 
@@ -129,6 +155,7 @@ export class ClipTransport {
     this.windowSecs = opts.windowSecs ?? 60;
     this.tickMs = opts.tickMs ?? 50;
     this.toneDelayMs = opts.toneDelayMs ?? 350;
+    this.prefetchSecs = Math.min(opts.prefetchSecs ?? 10, this.windowSecs / 2);
   }
 
   // --- what the view reads -------------------------------------------
@@ -309,6 +336,10 @@ export class ClipTransport {
   private reload(): void {
     const w = this.win;
     if (this.disposed || !this.playingNow || !w) return;
+    // Whatever was fetched ahead is a render of the material this call is
+    // replacing, so playing it at the boundary would put the old sound
+    // back.
+    this.dropAhead();
     const range = this.loopRange;
     const live = () => this.position();
     if (range) void this.begin(w.start, range, 0, live);
@@ -358,6 +389,83 @@ export class ClipTransport {
   private drop(): void {
     this.win = null;
     this.prepared = null;
+    this.dropAhead();
+  }
+
+  // --- the window after it ---------------------------------------------
+  //
+  // A CHAIN IS FETCHED BEFORE IT IS NEEDED (invariant 7). A render is a
+  // round trip to the backend and back with a whole window of WAV in it;
+  // starting one at the instant the current window ends puts all of that
+  // in the middle of the audio, which is what a linear play heard as a
+  // hole at exactly `windowSecs`.
+
+  /** Forget anything fetched ahead: it is a render of an edit that may no
+   *  longer be the one playing. The render itself cannot be cancelled —
+   *  it lands on a slot nobody is holding any more and is dropped. */
+  private dropAhead(): void {
+    this.ahead = null;
+  }
+
+  /** The window `ranOut` (or a wrap) will ask for next, or null when this
+   *  window is the last thing playback will play. Mirrors the choices
+   *  `begin` makes, so what is fetched is what will be asked for. */
+  private nextWindow(w: PlayWindow): Range | null {
+    const duration = this.host.duration();
+    const range = this.loopRange;
+    if (range) {
+      const lo = Math.max(0, range.start);
+      const hi = Math.min(duration, range.end);
+      // A range that fits one buffer never chains: it wraps inside the
+      // source that holds it.
+      if (hi - lo <= this.windowSecs) return null;
+      const from = w.end < hi - 0.01 ? w.end : lo;
+      return { start: from, end: Math.min(hi, from + this.windowSecs) };
+    }
+    if (w.end >= duration - 0.01) return null;
+    return { start: w.end, end: Math.min(duration, w.end + this.windowSecs) };
+  }
+
+  /** Playback has got to `at`: fetch the next window if the boundary is
+   *  close enough that a render started now would land before it. */
+  private maybePrefetch(at: number): void {
+    const w = this.win;
+    // A source that wraps itself never reaches a boundary to chain over.
+    if (this.disposed || !this.playingNow || !w || w.loop) return;
+    // Outside the window means it is not the one this position belongs to
+    // (a wrap has just swapped it): its boundary is a window away.
+    if (at < w.start || at > w.end + EPS) return;
+    if (at < w.end - this.prefetchSecs) return;
+    const next = this.nextWindow(w);
+    if (!next) return;
+    if (this.ahead && this.sameSpan(this.ahead, next)) return;
+    const entry: Ahead = {
+      start: next.start,
+      end: next.end,
+      bytes: null,
+      fetch: this.host.render(next.start, next.end - next.start),
+    };
+    this.ahead = entry;
+    void entry.fetch.then((bytes) => {
+      // Superseded (the edit changed, or playback went somewhere else):
+      // the slot belongs to someone else now and these bytes are stale.
+      if (this.ahead === entry) entry.bytes = bytes;
+    });
+  }
+
+  /** The audio fetched ahead for exactly `[start, end)`, taken out of the
+   *  slot. Bytes when the render has landed — the boundary then costs no
+   *  await at all — or the render still in flight, which is at worst the
+   *  wait the transport used to take every time. */
+  private takeAhead(start: number, end: number): ArrayBuffer | Promise<ArrayBuffer | null> | null {
+    const ahead = this.ahead;
+    if (!ahead || !this.sameSpan(ahead, { start, end })) return null;
+    this.ahead = null;
+    return ahead.bytes ?? ahead.fetch;
+  }
+
+  private sameSpan(a: Range, b: Range): boolean {
+    return Math.abs(a.start - b.start) < EPS && Math.abs(a.end - b.end) < EPS;
   }
 
   /** Play the window in hand from `within`, starting a source if none is
@@ -498,7 +606,12 @@ export class ClipTransport {
     if (seekWithin > 0) within = seekWithin;
     within = Math.max(0, Math.min(within, end - start - EPS));
 
-    const bytes = await this.host.render(start, end - start);
+    // Already in hand? Then nothing is awaited between here and the
+    // source starting, and the boundary this call is answering costs no
+    // silence at all.
+    const ahead = this.takeAhead(start, end);
+    const bytes =
+      ahead instanceof ArrayBuffer ? ahead : await (ahead ?? this.host.render(start, end - start));
     if (this.stale(epoch) || !bytes) return;
     if (resumeAt) {
       // The old source has been playing all through the render: enter the
@@ -722,6 +835,7 @@ export class ClipTransport {
     const from = this.playheadNow;
     this.setPlayhead(at);
     this.wrapAt(from, at);
+    this.maybePrefetch(at);
   }
 
   /** Loop by CROSSING the right-hand edge, not by jumping to the left one.
