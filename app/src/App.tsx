@@ -33,7 +33,6 @@ import { LibraryView } from './components/LibraryView';
 import { ClipView, type ClipViewHandle } from './components/ClipView';
 import { beatClip, type BeatClipEntry, BEAT_CLIP_TYPE } from './beatClip';
 import { DecksView } from './components/DecksView';
-import { DecksV2View } from './components/DecksV2View';
 import { GridView } from './components/GridView';
 import { DECKS_HIDDEN_TYPES } from './decks';
 import { clipClient } from './clip';
@@ -108,7 +107,7 @@ const WIRE_COLORS_KEY = 'dj-wire-colors';
 const LAST_WIRE_COLOR_KEY = 'dj-wire-last-color';
 const NUM_WIRE_COLORS = WIRE_COLORS.length;
 
-type View = 'rack' | 'library' | 'clip' | 'decks' | 'decks2' | 'grid';
+type View = 'rack' | 'library' | 'clip' | 'decks' | 'grid';
 
 /** The page the engine plays for while `view` is the open tab: the Rack is
  *  the whole patch, the Decks page is its bank, and Library/Clip/Grid
@@ -117,7 +116,7 @@ function audioFocusForView(view: View): AudioFocus {
   if (view === 'rack') return 'rack';
   // Both deck pages drive banks in the decks workspace, so both open the
   // same gate.
-  if (view === 'decks' || view === 'decks2') return 'decks';
+  if (view === 'decks') return 'decks';
   return 'silent';
 }
 
@@ -125,7 +124,7 @@ function audioFocusForView(view: View): AudioFocus {
  *  other tab the Rack's — the canvas is only on screen on those two, and
  *  the app-global file shortcuts keep meaning the rack patch elsewhere. */
 function workspaceForView(view: View): Workspace {
-  return view === 'decks' || view === 'decks2' ? 'decks' : 'rack';
+  return view === 'decks' ? 'decks' : 'rack';
 }
 
 /** A node's workspace; absent means 'rack' (the wire-format default). */
@@ -2080,13 +2079,6 @@ export default function App() {
             Decks
           </button>
           <button
-            className={view === 'decks2' ? 'tab active' : 'tab'}
-            onClick={() => setView('decks2')}
-            data-testid="tab-decks2"
-          >
-            Decks V2
-          </button>
-          <button
             className={view === 'grid' ? 'tab active' : 'tab'}
             onClick={() => setView('grid')}
             data-testid="tab-grid"
@@ -2323,10 +2315,6 @@ export default function App() {
           </div>
         </div>
       )}
-      {/* Decks V2: its own page, no rack canvas underneath (the rack
-          part of it is deliberately parked for now). The bank keeps
-          running unmounted, like the Decks tab's. */}
-      {view === 'decks2' && <DecksV2View />}
       {/* The Grid stays mounted so the arrangement survives a tab switch
           (the Clip editor's arrangement); it hides itself and stops its
           own playback while inactive. */}

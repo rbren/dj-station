@@ -17,8 +17,8 @@
 use super::*;
 use crate::decks::{
     cycle_beats, led_for, return_jack, send_jack, tone_jack, DeckArm, DeckSlotState,
-    DeckSlotStatus, DeckTransition, DecksCmd, DecksState, DecksStatus, MasterBus, SlotControl,
-    EQ_MAX, IN_BPM, LEVEL_MAX, MAX_TAIL_BEATS, MOMENTARY_RELEASE_SECS, SLOTS, SURFACE_PARAM,
+    DeckSlotStatus, DecksCmd, DecksState, DecksStatus, MasterBus, SlotControl, EQ_MAX, IN_BPM,
+    LEVEL_MAX, MAX_TAIL_BEATS, MOMENTARY_RELEASE_SECS, SLOTS, SURFACE_PARAM,
 };
 use crate::launch_control::{jack_index, row, BUTTON_GATE_VOLTS};
 use crate::playback::{ClipAudio, ClipBleed};
@@ -67,14 +67,6 @@ impl Engine {
                 phase: s.phase,
             },
         );
-        // The V2 live side rides along with every slot write — cheap, and
-        // it keeps one path however the slot was edited.
-        let live = DecksCmd::LiveMix {
-            slot: slot as u8,
-            level: s.live_level,
-            mute: s.live_mute,
-            phase: s.live_phase,
-        };
         // The surface's lamps show mute and monitor, so any write to a
         // slot leaves them owing an update.
         ctl.leds_dirty[slot] = true;
@@ -83,9 +75,6 @@ impl Engine {
             .map_err(|_| anyhow!("too many pending deck edits"))?;
         ctl.tx
             .push(timing)
-            .map_err(|_| anyhow!("too many pending deck edits"))?;
-        ctl.tx
-            .push(live)
             .map_err(|_| anyhow!("too many pending deck edits"))?;
         Ok(())
     }
@@ -373,7 +362,6 @@ impl Engine {
             s.high = d.high;
             s.wet = d.wet;
             s.insert_monitor = d.insert_monitor;
-            s.live_level = d.live_level;
             // The shift is what LINES THE CLIP UP, and what the decks are
             // lined up by is their ONE beats: the clip sits so its first
             // one falls on the bank's beat 0, so two clips that mark
@@ -386,12 +374,6 @@ impl Engine {
             // room.
             s.mute = false;
             s.monitor = true;
-            // The V2 live side starts OUT of the room — a new row shows
-            // up in the monitor — and lined up where the load put the
-            // clip; its fader, like the classic one, is the slot's own
-            // and stays where the user left it.
-            s.live_mute = true;
-            s.live_phase = s.phase;
         }
         ctl.tx
             .push(DecksCmd::Load {
@@ -447,8 +429,6 @@ impl Engine {
         s.phase = 0;
         s.ratio = 1.0;
         s.mute = true;
-        s.live_mute = true;
-        s.live_phase = 0;
         ctl.tx
             .push(DecksCmd::Load {
                 slot: slot as u8,
@@ -571,104 +551,6 @@ impl Engine {
         })
     }
 
-    /// Make (or unmake) this bank a V2 one — two arrangements of the same
-    /// slots on one clock ([`DecksState::v2`]). Patch state, like the
-    /// masters: a V2 bank restored from a patch is still a V2 bank.
-    pub fn decks_set_v2(&mut self, instance_id: &str, on: bool) -> Result<()> {
-        let node = self.decks_node(instance_id)?;
-        let ctl = self.clip_decks.get_mut(&node).unwrap();
-        ctl.state.v2 = on;
-        ctl.tx
-            .push(DecksCmd::V2 { on })
-            .map_err(|_| anyhow!("too many pending deck edits"))
-    }
-
-    /// One of the LIVE side's controls in a V2 bank — its own fader or
-    /// mute. The classic [`Engine::decks_set_control`] writes the monitor
-    /// arrangement; this is the only way into the room's copy short of a
-    /// transition commit.
-    pub fn decks_set_live_control(
-        &mut self,
-        instance_id: &str,
-        slot: usize,
-        control: SlotControl,
-        value: f32,
-    ) -> Result<()> {
-        let node = self.decks_node(instance_id)?;
-        anyhow::ensure!(
-            matches!(control, SlotControl::Level | SlotControl::Mute),
-            "the live side has only a fader and a mute (got {control:?})"
-        );
-        self.write_slot(node, slot, |s| match control {
-            SlotControl::Level => s.live_level = value.clamp(0.0, LEVEL_MAX),
-            _ => s.live_mute = value >= 1.0,
-        })
-    }
-
-    /// Shift the LIVE side of a slot along the bank's grid, in whole
-    /// beats — wrapped inside one loop length exactly like the monitor
-    /// side's [`Engine::decks_set_phase`].
-    pub fn decks_set_live_phase(
-        &mut self,
-        instance_id: &str,
-        slot: usize,
-        phase: i32,
-    ) -> Result<()> {
-        let node = self.decks_node(instance_id)?;
-        self.write_slot(node, slot, |s| {
-            let len = s.length_beats() as i32;
-            s.live_phase = if len > 0 { phase.rem_euclid(len) } else { 0 };
-        })
-    }
-
-    /// Hand the bank's pending transition to the RT thread — the clock is
-    /// what decides when it takes effect. Every ask carries a serial,
-    /// published back once the transition has FIRED
-    /// ([`crate::decks::DecksShared::transition_fired`]).
-    fn push_transition(&mut self, node: usize, mode: DeckTransition) -> Result<()> {
-        let ctl = self.clip_decks.get_mut(&node).unwrap();
-        ctl.transition = mode;
-        ctl.transition_serial += 1;
-        let serial = ctl.transition_serial;
-        ctl.tx
-            .push(DecksCmd::Transition { mode, serial })
-            .map_err(|_| anyhow!("too many pending deck edits"))
-    }
-
-    /// ARM a jump or crossfade on a V2 bank: the next time the bank's
-    /// cycle comes round (the live loop's right edge), the live pair
-    /// moves onto the monitor arrangement — at the seam for a jump, over
-    /// one whole cycle for a crossfade. [`DeckTransition::None`] takes a
-    /// pending one back (and fades an uncommitted blend home). Transport,
-    /// like a deck's queue/drop: not an undoable edit, never persisted.
-    pub fn decks_transition(&mut self, instance_id: &str, mode: DeckTransition) -> Result<()> {
-        let node = self.decks_node(instance_id)?;
-        self.push_transition(node, mode)
-    }
-
-    /// FINISH a fired transition: copy the monitor arrangement into the
-    /// live side (level, mute and shift, per slot) and put the blend back
-    /// to rest — inaudible, because the two sides are identical from the
-    /// moment the copy lands. Resolves to whether anything was owed: the
-    /// page polls, so a commit can race a second poll.
-    pub fn decks_transition_commit(&mut self, instance_id: &str) -> Result<bool> {
-        let node = self.decks_node(instance_id)?;
-        let ctl = self.clip_decks.get_mut(&node).unwrap();
-        if !ctl.transition_done() {
-            return Ok(false);
-        }
-        for s in &mut ctl.state.slots {
-            s.live_level = s.level;
-            s.live_mute = s.mute;
-            s.live_phase = s.phase;
-        }
-        for slot in 0..SLOTS {
-            self.push_slot(node, slot)?;
-        }
-        self.push_transition(node, DeckTransition::None)?;
-        Ok(true)
-    }
-
     /// The bank's control state, for the patch.
     pub fn decks_state(&self, instance_id: &str) -> Result<DecksState> {
         let node = self.decks_node(instance_id)?;
@@ -700,17 +582,6 @@ impl Engine {
             ctl.state = state;
         }
         self.push_master(node)?;
-        // Whether the bank is V2 rides in the state; a restored bank owes
-        // no transition — like an arm, a pending jump dies with the
-        // session that asked for it.
-        let on = self.clip_decks[&node].state.v2;
-        self.clip_decks
-            .get_mut(&node)
-            .unwrap()
-            .tx
-            .push(DecksCmd::V2 { on })
-            .map_err(|_| anyhow!("too many pending deck edits"))?;
-        self.push_transition(node, DeckTransition::None)?;
         for slot in 0..SLOTS {
             self.push_slot(node, slot)?;
             // A restored bank comes back UNARMED: the mute in the patch is
@@ -787,10 +658,6 @@ impl Engine {
                 playing: ctl.shared.slot_playing(i),
                 output_level: ctl.shared.slot_output_level(i),
                 arm: ctl.live_arm(i),
-                live_level: s.live_level,
-                live_mute: s.live_mute,
-                live_phase: s.live_phase,
-                live_lead_one: s.lead_one_at(s.live_phase),
             })
             .collect();
         Ok(DecksStatus {
@@ -802,10 +669,6 @@ impl Engine {
             surface_connected: self.launchcontrol_connected(),
             master_live: ctl.state.master_live,
             master_monitor: ctl.state.master_monitor,
-            v2: ctl.state.v2,
-            transition: ctl.transition,
-            transition_done: ctl.transition_done(),
-            xfade: ctl.shared.xfade(),
             slots,
         })
     }

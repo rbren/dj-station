@@ -5,9 +5,7 @@
 // nearest the bank's own — scrolled to the middle of the dialog and
 // already picked, so the first thing under the hand is the thing most
 // likely to fit, and ↑/↓ walk to something slower or faster from there.
-// That is why the bank's tempo is a prop: without one (the V2 page, which
-// adds a clip to a grid rather than to a running deck) the dialog is the
-// flat clip list it has always been.
+// That is why the bank's tempo is a prop.
 //
 // The clip level is the Library page's clip table, in a dialog: same
 // columns, same sort, same stem filters — because it is the same list —
@@ -33,10 +31,9 @@ export interface DecksClipPickerProps {
   /** Which deck the clip is for (1-based, for the title). */
   deck: number;
   clips: BeatClipEntry[];
-  /** The bank's tempo. Given, the dialog opens on the songs, ordered by
-   *  tempo and aimed at the one nearest this; absent, it opens straight
-   *  on the clips. */
-  bankBpm?: number;
+  /** The bank's tempo: the dialog opens on the songs, ordered by tempo
+   *  and aimed at the one nearest this. */
+  bankBpm: number;
   onPick(clip: BeatClipEntry): void;
   onClose(): void;
 }
@@ -57,10 +54,9 @@ export function DecksClipPicker({ deck, clips, bankBpm, onPick, onClose }: Decks
   const search = useRef<HTMLInputElement>(null);
   const rows = useRef<HTMLDivElement>(null);
 
-  const songs = useMemo(() => (bankBpm === undefined ? [] : songsByBpm(clips)), [bankBpm, clips]);
-  /** On the songs, or past them? A dialog with no tempo to sort by never
-   *  shows them at all. */
-  const picking = bankBpm !== undefined && song === null ? 'song' : 'clip';
+  const songs = useMemo(() => songsByBpm(clips), [clips]);
+  /** On the songs, or past them? */
+  const picking = song === null ? 'song' : 'clip';
 
   const shownSongs = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -81,7 +77,7 @@ export function DecksClipPicker({ deck, clips, bankBpm, onPick, onClose }: Decks
   // what the bank is playing, of whatever the search has left. Derived
   // rather than remembered, so narrowing the songs re-aims at the most
   // likely one instead of parking on the top row.
-  const home = picking === 'song' ? Math.max(0, songNearestBpm(shownSongs, bankBpm ?? 0)) : 0;
+  const home = picking === 'song' ? Math.max(0, songNearestBpm(shownSongs, bankBpm)) : 0;
   // ↑/↓ walk from there, clamped to the list.
   const active = Math.min(index ?? home, Math.max(length - 1, 0));
 
@@ -149,7 +145,7 @@ export function DecksClipPicker({ deck, clips, bankBpm, onPick, onClose }: Decks
             <>
               Load a clip into deck {deck}{' '}
               <span className="decks-song-note" data-testid="decks-song-note">
-                — the song first, by tempo around {fixed(bankBpm ?? 0, 1)} bpm
+                — the song first, by tempo around {fixed(bankBpm, 1)} bpm
               </span>
             </>
           ) : song ? (

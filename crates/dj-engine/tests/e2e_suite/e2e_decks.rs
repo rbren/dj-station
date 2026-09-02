@@ -17,10 +17,9 @@
 //! --test e2e_suite decks` (or `./scripts/regen-goldens.sh`).
 
 use crate::common::e2e::{
-    case_dir, check_case, regen, write_case_tone, write_events, DeckTransitionSpec, DecksSlotSpec,
-    EventsFile, TrackLoadSpec,
+    case_dir, check_case, regen, write_case_tone, write_events, DecksSlotSpec, EventsFile,
+    TrackLoadSpec,
 };
-use dj_engine::decks::DeckTransition;
 use dj_engine::{Engine, EngineConfig};
 
 fn regen_decks_bank_two_clips() {
@@ -104,81 +103,7 @@ fn slot_defaults() -> DecksSlotSpec {
         tail: None,
         phase: None,
         arm: None,
-        live_level: None,
-        live_mute: None,
-        live_phase: None,
     }
-}
-
-/// `decks-v2-jump`: a V2 bank's two arrangements and the jump between
-/// them. A two-beat 220 Hz clip is the LIVE side (audible in the room),
-/// a four-beat 330 Hz one is the MONITOR side, and a jump is armed — so
-/// for the first cycle (four beats, the lcm) the room loops the 220 Hz
-/// clip, and on the cycle's right edge it moves onto the monitor
-/// arrangement: the 330 Hz clip from its top. The golden pins the V2
-/// mixing path (per-side fader/mute), the seam the clock fires on and
-/// the blend's de-click ramp.
-fn regen_decks_v2_jump() {
-    let dir = case_dir("decks-v2-jump");
-    // One second = two beats at 120 BPM.
-    write_case_tone(&dir.join("two-beat.wav"), 220.0, 1.0);
-    write_case_tone(&dir.join("four-beat.wav"), 330.0, 2.0);
-
-    let mut e = Engine::new(EngineConfig::default(), crate::common::registry()).unwrap();
-    e.add_module("bank1", "builtin.decks").unwrap();
-    e.add_module("out1", "builtin.audio_out").unwrap();
-    e.set_knob_value("bank1", "bpm", 120.0).unwrap();
-    e.connect("bank1", "audio_l", "out1", "l").unwrap();
-    e.connect("bank1", "audio_r", "out1", "r").unwrap();
-    // V2 is patch state, so it rides in the case's patch; the jump is
-    // transport and rides in the sidecar.
-    e.decks_set_v2("bank1", true).unwrap();
-
-    e.save_patch(&dir.join("patch"), "e2e-decks-v2-jump")
-        .unwrap();
-    write_events(
-        &dir,
-        &EventsFile {
-            seconds: 4.0,
-            tracks: vec![
-                TrackLoadSpec {
-                    instance: "bank1".into(),
-                    file: "two-beat.wav".into(),
-                    bpm: Some(120.0),
-                    slot: Some(0),
-                },
-                TrackLoadSpec {
-                    instance: "bank1".into(),
-                    file: "four-beat.wav".into(),
-                    bpm: Some(120.0),
-                    slot: Some(1),
-                },
-            ],
-            deck_slots: vec![
-                DecksSlotSpec {
-                    instance: "bank1".into(),
-                    slot: 0,
-                    // The room's copy: live side open, monitor side out.
-                    mute: Some(true),
-                    live_mute: Some(false),
-                    ..slot_defaults()
-                },
-                DecksSlotSpec {
-                    instance: "bank1".into(),
-                    slot: 1,
-                    // What is being prepared: monitor side open at half.
-                    level: Some(0.5),
-                    mute: Some(false),
-                    ..slot_defaults()
-                },
-            ],
-            deck_transitions: vec![DeckTransitionSpec {
-                instance: "bank1".into(),
-                mode: DeckTransition::Jump,
-            }],
-            ..EventsFile::default()
-        },
-    );
 }
 
 /// `decks-ratio-double`: two decks playing the SAME two-beat clip on one
@@ -563,12 +488,4 @@ fn decks_arm_drop() {
         regen_decks_arm_drop();
     }
     check_case("decks-arm-drop");
-}
-
-#[test]
-fn decks_v2_jump() {
-    if regen() {
-        regen_decks_v2_jump();
-    }
-    check_case("decks-v2-jump");
 }

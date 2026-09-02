@@ -228,9 +228,6 @@ These are the rules that must hold everywhere.
   monitor, not live).
 - **Cycle / seam**: the bank's whole loop (`cycle_beats` = lcm of loaded
   loop lengths); the seam is where it wraps.
-- **Decks V2**: a decks bank flagged `v2` playing TWO arrangements of its
-  slots — an editable monitor side and a live side; jump/crossfade
-  transitions fire on the cycle seam and commit monitor → live.
 - **Grid page**: a DAW-style arrangement of saved beat clips played in the
   webview, not the engine; one column is one beat, with master-tempo
   breakpoint automation.

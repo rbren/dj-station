@@ -43,10 +43,6 @@ function slotFixture(slot: number): DeckSlotStatus {
     playing: false,
     output_level: 0,
     arm: 'none',
-    live_level: 1,
-    live_mute: true,
-    live_phase: 0,
-    live_lead_one: null,
   };
 }
 
@@ -59,10 +55,6 @@ const STATUS: DecksStatus = {
   surface_connected: false,
   master_live: 1,
   master_monitor: 1,
-  v2: false,
-  transition: 'none',
-  transition_done: false,
-  xfade: 0,
   slots: Array.from({ length: 8 }, (_, i) => slotFixture(i)),
 };
 

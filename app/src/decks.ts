@@ -81,11 +81,6 @@ export const WET_MAX = 1;
  *  its clip out first. */
 export type DeckArm = 'none' | 'queue' | 'drop';
 
-/** How a V2 bank moves the monitor arrangement into the room (mirrors
- *  `DeckTransition`): a jump swaps at the cycle seam, a crossfade blends
- *  over one whole cycle from it. */
-export type DeckTransition = 'none' | 'jump' | 'crossfade';
-
 /** The bank's own jacks, by name (mirrors `decks_manifest`). A deck's
  *  SEND carries its audio out to the rack summed to mono and its RETURN
  *  brings the rack's answer back — one cable each way; the three tone
@@ -169,15 +164,6 @@ export interface DeckSlotStatus {
   /** A queue or drop the bank's clock is still holding; the mute above is
    *  already where the deck is going. */
   arm: DeckArm;
-  /** V2 banks: the LIVE side's own mix and shift — the classic fields
-   *  above are the monitor arrangement there. At their defaults on a
-   *  classic bank. */
-  live_level: number;
-  live_mute: boolean;
-  live_phase: number;
-  /** The one beat the live side is lined up by; null when the clip marks
-   *  no ones. */
-  live_lead_one: number | null;
 }
 
 export interface DecksStatus {
@@ -197,14 +183,6 @@ export interface DecksStatus {
   master_live: number;
   /** The fader on the monitor pair. */
   master_monitor: number;
-  /** Whether this bank plays two arrangements (the Decks V2 page's). */
-  v2: boolean;
-  /** The jump/crossfade still armed or mid-fade; 'none' once committed. */
-  transition: DeckTransition;
-  /** The armed transition has fired and the commit copy is owed. */
-  transition_done: boolean;
-  /** How far the live pair is blended onto the monitor arrangement. */
-  xfade: number;
   slots: DeckSlotStatus[];
 }
 
