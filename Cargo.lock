@@ -595,7 +595,6 @@ dependencies = [
  "serde_json",
  "symphonia",
  "tempfile",
- "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -604,7 +603,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dj-engine",
- "serde_json",
 ]
 
 [[package]]
@@ -625,7 +623,6 @@ dependencies = [
  "serde_json",
  "symphonia",
  "tempfile",
- "thiserror 2.0.19",
  "wasmtime",
 ]
 
@@ -644,7 +641,6 @@ dependencies = [
  "sha2",
  "symphonia",
  "tempfile",
- "thiserror 2.0.19",
  "ureq 2.12.1",
 ]
 

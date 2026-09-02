@@ -918,13 +918,6 @@ export function appendSource(
   ]);
 }
 
-export function removeRegion(program: ClipProgram, index: number): ClipProgram {
-  return withRegions(
-    program,
-    program.regions.filter((_, i) => i !== index),
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Level automation (output timeline, dB breakpoints)
 // ---------------------------------------------------------------------------

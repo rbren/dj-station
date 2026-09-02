@@ -491,11 +491,6 @@ body {
   gap: var(--cell-gap);
 }
 
-.input-group-column .input-group-cells {
-  flex-direction: column;
-  align-items: center;
-}
-
 .input-group-grid .input-group-cells {
   display: grid;
   justify-items: center;
@@ -949,11 +944,6 @@ body {
    reversed, flagged in the legacy warning orange. */
 .knob-spread path.knob-spread-reversed {
   stroke: var(--cue);
-}
-
-.param-name {
-  font-size: var(--fs-xs);
-  color: var(--ink-dim);
 }
 
 .knob-config-menu {
@@ -4198,17 +4188,6 @@ body {
   stroke: var(--ok);
 }
 
-/* The BLEED regions extend the selection's waveform either side of the
-   loop. They are drawn beside it, never over it: the overlaying is what
-   playback does, and a picture of the sum would hide which piece a level
-   move is about to change. Dimmer, so the loop still reads as the clip
-   and the bookends as what leans on it. */
-.clip-sel-peaks-bleed-left,
-.clip-sel-peaks-bleed-right {
-  fill: var(--ink-dim);
-  opacity: 0.75;
-}
-
 .clip-sel-seam {
   stroke: var(--ink-dim);
   stroke-width: 1;
@@ -4614,35 +4593,6 @@ body {
   color: var(--ink-dim);
   font-size: var(--fs-md);
   max-width: 46em;
-}
-
-/* Sized to its content rather than stretched: six columns across the
-   whole window put every number miles from the name it belongs to. */
-.clip-regions {
-  align-self: flex-start;
-  min-width: 620px;
-  border-collapse: collapse;
-  font-size: var(--fs-md);
-}
-
-.clip-regions th,
-.clip-regions td {
-  text-align: left;
-  padding: 3px 16px 3px 0;
-  color: var(--ink-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.clip-regions td:nth-child(2) {
-  color: var(--ink);
-}
-
-.clip-regions th {
-  color: var(--ink-dim);
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
 }
 
 /* Most of what lands here is narration ("editing X", "loaded Y"), not
@@ -5629,9 +5579,7 @@ body {
 .grid-length {
   margin-left: auto;
 }
-.grid-position,
-.grid-bpm-here,
-.grid-loop-readout {
+.grid-position {
   font-size: var(--fs-xs);
   color: var(--ink-muted);
 }

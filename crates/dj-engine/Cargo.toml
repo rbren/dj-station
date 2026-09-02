@@ -19,7 +19,6 @@ midi-hw = ["dep:midir"]
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
-thiserror.workspace = true
 wasmtime = { version = "37", default-features = false, features = ["cranelift", "runtime", "parallel-compilation"] }
 rtrb = "0.3"
 libloading = "0.8"

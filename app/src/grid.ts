@@ -97,8 +97,6 @@ export interface GridState {
 }
 
 export const GRID_MIN_BEATS = 32;
-/** One click of the "longer" button — a phrase, not a beat. */
-export const GRID_GROW_BEATS = 16;
 export const DEFAULT_BAR_BEATS = 4;
 export const MIN_BAR = 1;
 export const MAX_BAR = 32;
@@ -331,10 +329,6 @@ export function removeTempoPoint(tempo: GridTempo, beat: number): GridTempo {
   return { ...tempo, points: tempo.points.filter((_, i) => i !== best) };
 }
 
-export function clearTempo(tempo: GridTempo): GridTempo {
-  return { ...tempo, points: [] };
-}
-
 // ---------------------------------------------------------------------------
 // Row level (the line drawn through each row)
 // ---------------------------------------------------------------------------
@@ -436,11 +430,6 @@ export function selectionFromDrag(
     rowIds: rows.slice(lo, hi + 1).map((r) => r.id),
     columns: loopFromDrag(colA, colB),
   };
-}
-
-export function inSelection(sel: GridSelection | null, rowId: string, col: number): boolean {
-  if (!sel) return false;
-  return sel.rowIds.includes(rowId) && inRange(sel.columns, col);
 }
 
 /** One row's share of a selection: the columns, or null when the row is

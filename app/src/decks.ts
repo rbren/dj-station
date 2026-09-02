@@ -17,8 +17,6 @@ export const DECKS_TYPE = 'builtin.decks';
  *  skipped. */
 export const DECKS_HIDDEN_TYPES = new Set([DECKS_TYPE, 'builtin.audio_out', 'builtin.monitor_out']);
 
-export const DECK_SLOTS = 8;
-
 /** Full scale of a tone control: 0 kills the band, 1 is flat, 2 is +6 dB
  *  (mirrors `EQ_MAX` in crates/dj-engine/src/decks.rs). */
 export const EQ_MAX = 2;

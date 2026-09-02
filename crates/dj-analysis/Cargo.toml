@@ -16,7 +16,6 @@ onnx = ["dep:ort"]
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
-thiserror.workspace = true
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "isomp4", "flac", "wav", "pcm", "aiff"] }
 rustfft = "6"
 flacenc = { version = "0.4", default-features = false }
