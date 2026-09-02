@@ -16,8 +16,8 @@ use dj_library::db::Library;
 
 use crate::decode::decode_audio;
 use crate::stems::{
-    cached_stems_for, ensure_stems_cancellable, stems_dir_for, CachedStems, CancelToken,
-    StemSeparator,
+    cached_stems_for, choose_separator, chosen_separator, ensure_stems_cancellable, stems_dir_for,
+    CachedStems, CancelToken, StemSeparator,
 };
 
 /// Finished jobs kept in the snapshot so the UI can report the outcome
@@ -58,7 +58,9 @@ impl StemJob {
 /// Runs [`StemSeparator`] work off the UI thread, one job per track.
 pub struct StemJobs {
     library: Arc<Library>,
-    separator: Arc<dyn StemSeparator>,
+    /// The models this app can separate with, the default first. A track
+    /// runs on its own pick when it has one ([`choose_separator`]).
+    separators: Vec<Arc<dyn StemSeparator>>,
     jobs: Arc<Mutex<Vec<StemJob>>>,
     /// Stop signals for the jobs still running, by job id.
     cancels: Arc<Mutex<HashMap<u64, Arc<CancelToken>>>>,
@@ -66,25 +68,62 @@ pub struct StemJobs {
 }
 
 impl StemJobs {
-    pub fn new(library: Arc<Library>, separator: Arc<dyn StemSeparator>) -> Self {
+    /// `separators` is the menu, default first — it must not be empty.
+    pub fn new(library: Arc<Library>, separators: Vec<Arc<dyn StemSeparator>>) -> Self {
+        assert!(!separators.is_empty(), "stem jobs need a separator");
         StemJobs {
             library,
-            separator,
+            separators,
             jobs: Arc::new(Mutex::new(Vec::new())),
             cancels: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(1),
         }
     }
 
-    /// The backend these jobs run on.
+    /// The backend a track runs on unless it says otherwise.
     pub fn backend(&self) -> &str {
-        self.separator.id()
+        self.separators[0].id()
     }
 
-    /// Can the backend run on this machine? `Err` carries an install
-    /// hint — a missing external tool is a reported state, never a panic.
+    /// Every model that can be picked, default first.
+    pub fn backends(&self) -> Vec<String> {
+        self.separators.iter().map(|s| s.id().to_string()).collect()
+    }
+
+    /// The separator that would run for this content: the track's own
+    /// pick when it has one and we know it, else the default. A pick for
+    /// a model this build does not have falls back rather than stranding
+    /// the track — the id may come from another machine's data dir.
+    fn separator_for(&self, content_hash: &str) -> &Arc<dyn StemSeparator> {
+        chosen_separator(self.library.data_dir(), content_hash)
+            .and_then(|id| self.separators.iter().find(|s| s.id() == id))
+            .unwrap_or(&self.separators[0])
+    }
+
+    /// Separate this track with `separator_id` from now on: it goes back
+    /// to "analyzing" until that model has produced its stems (unless it
+    /// already has, in which case they are simply what the track plays).
+    ///
+    /// Any run in flight for the track is abandoned — it is separating
+    /// with the model that was just replaced.
+    pub fn choose(&self, track_id: i64, separator_id: &str) -> anyhow::Result<()> {
+        if !self.separators.iter().any(|s| s.id() == separator_id) {
+            anyhow::bail!(
+                "unknown stem model {separator_id:?} (have {})",
+                self.backends().join(", ")
+            );
+        }
+        let track = self.library.track(track_id)?;
+        choose_separator(self.library.data_dir(), &track.content_hash, separator_id)?;
+        self.cancel_track(track_id);
+        Ok(())
+    }
+
+    /// Can the default backend run on this machine? `Err` carries an
+    /// install hint — a missing external tool is a reported state, never
+    /// a panic.
     pub fn probe(&self) -> anyhow::Result<()> {
-        self.separator.probe()
+        self.separators[0].probe()
     }
 
     /// Are this track's stems already on disk (ours, or an earlier
@@ -106,7 +145,17 @@ impl StemJobs {
     /// them: the app reports that per track, because it is not
     /// necessarily the model it would use today.
     pub fn cache(&self, content_hash: &str) -> Option<CachedStems> {
-        cached_stems_for(self.library.data_dir(), content_hash, self.separator.id())
+        cached_stems_for(self.library.data_dir(), content_hash, self.backend())
+    }
+
+    /// The model behind this content's stems: the one that made them, or,
+    /// while they are still coming, the one that will. This is what the
+    /// Library shows per track.
+    pub fn model_for(&self, content_hash: &str) -> String {
+        match self.cache(content_hash) {
+            Some(cached) => cached.separator,
+            None => self.separator_for(content_hash).id().to_string(),
+        }
     }
 
     /// Cached stem files for `track_id`, or `None` when not separated yet.
@@ -131,15 +180,16 @@ impl StemJobs {
             return existing.id;
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let title = self
-            .library
-            .track(track_id)
-            .map(|t| t.title)
-            .unwrap_or_default();
+        let track = self.library.track(track_id).ok();
+        let title = track.as_ref().map(|t| t.title.clone()).unwrap_or_default();
+        let separator = match &track {
+            Some(track) => Arc::clone(self.separator_for(&track.content_hash)),
+            None => Arc::clone(&self.separators[0]),
+        };
         jobs.push(StemJob {
             id,
             track_id,
-            backend: self.separator.id().to_string(),
+            backend: separator.id().to_string(),
             title,
             state: StemJobState::Running,
             stage: "queued".into(),
@@ -155,7 +205,6 @@ impl StemJobs {
             .insert(id, Arc::clone(&cancel));
 
         let library = Arc::clone(&self.library);
-        let separator = Arc::clone(&self.separator);
         let jobs = Arc::clone(&self.jobs);
         let cancels = Arc::clone(&self.cancels);
         std::thread::spawn(move || {

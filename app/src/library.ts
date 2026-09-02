@@ -101,6 +101,11 @@ export interface AnalysisQueue {
   /** Tracks whose beat/key analysis is done but whose stems are still
    *  separating — still "analyzing" as far as the library is concerned. */
   stems_pending?: number[];
+  /** The stem model behind each track (or the one separating it now), by
+   *  track id. */
+  stem_models?: Record<string, string>;
+  /** The stem models to choose from, the default first. */
+  stem_backends?: string[];
 }
 
 /** What LibraryView needs; the Tauri-backed client below implements it and
@@ -138,6 +143,8 @@ export interface LibraryClientApi {
   analysisStatus(): Promise<AnalysisQueue | null>;
   /** Queue (or re-run) analysis for a track. */
   analyzeTrack(trackId: number): Promise<void | null>;
+  /** Separate one track with another stem model from now on. */
+  setStemModel(trackId: number, model: string): Promise<void | null>;
 }
 
 export class LibraryClient extends IpcClient implements LibraryClientApi {
@@ -191,6 +198,9 @@ export class LibraryClient extends IpcClient implements LibraryClientApi {
   }
   analyzeTrack(trackId: number) {
     return this.call<void>('analyze_track', { trackId });
+  }
+  setStemModel(trackId: number, model: string) {
+    return this.call<void>('set_stem_model', { trackId, model });
   }
 }
 

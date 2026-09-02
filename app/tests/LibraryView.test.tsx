@@ -301,8 +301,15 @@ function mockClient(overrides: Partial<LibraryClientApi> = {}): LibraryClientApi
     openStorePage: vi.fn().mockResolvedValue(ITUNES_RESULT.deep_link_url),
     openExternal: vi.fn().mockResolvedValue(undefined),
     playbackLoad: vi.fn().mockResolvedValue(undefined),
-    analysisStatus: vi.fn().mockResolvedValue({ current: null, queued: [], counts: {} }),
+    analysisStatus: vi.fn().mockResolvedValue({
+      current: null,
+      queued: [],
+      counts: {},
+      stem_models: { 1: 'htdemucs_ft' },
+      stem_backends: ['htdemucs_ft', 'scnet_xl_ihf'],
+    }),
     analyzeTrack: vi.fn().mockResolvedValue(undefined),
+    setStemModel: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -386,6 +393,72 @@ describe('LibraryView', () => {
     await waitFor(() => expect(screen.getByTestId('analysis-status').textContent).toBe('done'));
     fireEvent.click(screen.getByTestId('library-edit'));
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+  });
+
+  it('names the model behind a row\u2019s stems and separates again when another is picked', async () => {
+    // Separated by the default model, and offered the slower better one.
+    const statuses = [
+      {
+        current: null,
+        queued: [],
+        counts: { done: 1 },
+        stems_pending: [],
+        stem_models: { 1: 'htdemucs_ft' },
+        stem_backends: ['htdemucs_ft', 'scnet_xl_ihf'],
+      },
+      // What the backend says once the pick has been made: the track is
+      // separating again, with the model it was given.
+      {
+        current: null,
+        queued: [],
+        counts: { done: 1 },
+        stems_pending: [1],
+        stem_models: { 1: 'scnet_xl_ihf' },
+        stem_backends: ['htdemucs_ft', 'scnet_xl_ihf'],
+      },
+    ];
+    let picked = false;
+    const client = mockClient({
+      tracks: vi.fn().mockResolvedValue([{ ...LOCAL_TRACK, analysis_status: 'done', bpm: 120 }]),
+      analysisStatus: vi.fn().mockImplementation(() => Promise.resolve(statuses[picked ? 1 : 0])),
+      setStemModel: vi.fn().mockImplementation(() => {
+        picked = true;
+        return Promise.resolve(undefined);
+      }),
+    });
+    render(<LibraryView client={client} />);
+    const picker = (await screen.findByTestId('stem-model')) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe('htdemucs_ft'));
+    expect([...picker.options].map((o) => o.value)).toEqual(['htdemucs_ft', 'scnet_xl_ihf']);
+    expect(screen.getByTestId('analysis-status').textContent).toBe('done');
+
+    fireEvent.change(picker, { target: { value: 'scnet_xl_ihf' } });
+    await waitFor(() => expect(client.setStemModel).toHaveBeenCalledWith(1, 'scnet_xl_ihf'));
+    // Back to work: the row says so without waiting for the next poll.
+    await waitFor(() =>
+      expect(screen.getByTestId('analysis-status').textContent).toBe('analyzing'),
+    );
+    expect((screen.getByTestId('stem-model') as HTMLSelectElement).value).toBe('scnet_xl_ihf');
+  });
+
+  it('keeps offering the model a track was separated by, even one this build dropped', async () => {
+    const client = mockClient({
+      analysisStatus: vi.fn().mockResolvedValue({
+        current: null,
+        queued: [],
+        counts: { done: 1 },
+        stem_models: { 1: 'htdemucs' },
+        stem_backends: ['htdemucs_ft', 'scnet_xl_ihf'],
+      }),
+    });
+    render(<LibraryView client={client} />);
+    const picker = (await screen.findByTestId('stem-model')) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe('htdemucs'));
+    expect([...picker.options].map((o) => o.value)).toEqual([
+      'htdemucs',
+      'htdemucs_ft',
+      'scnet_xl_ihf',
+    ]);
   });
 
   it('renames a track from its row, title and artist alike', async () => {

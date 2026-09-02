@@ -1,6 +1,8 @@
-//! SCNet XL IHF stem separation (PRD §8.2): the app's production stem
-//! model, replacing the `htdemucs_ft` demucs CLI it used before (SDR 10.09
-//! vs 9.0 on MUSDB18, and better on everything but bass).
+//! SCNet XL IHF stem separation (PRD §8.2): the best stems the app can
+//! make (SDR 10.09 vs `htdemucs_ft`'s 9.0 on MUSDB18, and better on
+//! everything but bass) — and the slowest, several times demucs' runtime
+//! on CPU, which is why it is picked per track rather than being the
+//! default (see [`DemucsSeparator`](crate::demucs::DemucsSeparator)).
 //!
 //! Unlike [`BandSeparator`](crate::stems::BandSeparator) (pure DSP, always
 //! available) and `OnnxSeparator` (needs a hand-exported `.onnx` graph),
@@ -32,7 +34,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::decode::{decode_audio, AudioData};
-use crate::stems::{CancelToken, StemSeparator, Stems, N_STEMS, STEM_NAMES};
+use crate::stems::{
+    conform_to_source, tool_failure, CancelToken, StemSeparator, Stems, N_STEMS, STEM_NAMES,
+};
 
 /// Override the Python interpreter that can `import inference` (MSST).
 pub const ENV_SCNET_PYTHON: &str = "DJ_SCNET_PYTHON";
@@ -224,15 +228,6 @@ fn default_python(home: &Path) -> String {
     DEFAULT_PYTHON.to_string()
 }
 
-fn tool_failure(bin: &str, stderr: &[u8], status: std::process::ExitStatus) -> String {
-    let text = String::from_utf8_lossy(stderr);
-    let detail = text
-        .lines()
-        .rfind(|l| !l.trim().is_empty())
-        .unwrap_or("no output");
-    format!("{bin} failed ({status}): {detail}")
-}
-
 /// Locate the four stems MSST wrote under `out_dir`.
 ///
 /// Its default template puts them in a per-track subdirectory
@@ -282,48 +277,6 @@ fn stem_files(out_dir: &Path) -> Result<[PathBuf; N_STEMS]> {
     paths
         .try_into()
         .map_err(|_| anyhow!("SCNet returned the wrong number of stems"))
-}
-
-/// Fit a decoded stem back onto the source's timebase: the model works at
-/// its config's rate (44.1 kHz), so a 48 kHz track comes back resampled
-/// and a frame or two short/long. The [`StemSeparator`] contract is that
-/// stems line up with the input sample-for-sample (the deck plays them
-/// against it).
-fn conform(stem: AudioData, sample_rate: u32, frames: usize, channels: usize) -> AudioData {
-    let src_frames = stem.frames();
-    let ratio = stem.sample_rate as f64 / sample_rate as f64;
-    let out = (0..channels)
-        .map(|c| {
-            let chan = match stem.channels.get(c) {
-                Some(chan) => chan,
-                // Mono model output feeding a stereo track.
-                None => match stem.channels.first() {
-                    Some(first) => first,
-                    None => return vec![0.0; frames],
-                },
-            };
-            (0..frames)
-                .map(|i| {
-                    if src_frames == 0 {
-                        return 0.0;
-                    }
-                    if stem.sample_rate == sample_rate {
-                        return chan.get(i).copied().unwrap_or(0.0);
-                    }
-                    let pos = i as f64 * ratio;
-                    let k = pos.floor() as usize;
-                    let frac = (pos - k as f64) as f32;
-                    let a = chan[k.min(src_frames - 1)];
-                    let b = chan[(k + 1).min(src_frames - 1)];
-                    a + (b - a) * frac
-                })
-                .collect()
-        })
-        .collect();
-    AudioData {
-        channels: out,
-        sample_rate,
-    }
 }
 
 impl StemSeparator for ScnetSeparator {
@@ -389,7 +342,7 @@ impl StemSeparator for ScnetSeparator {
         let mut decoded = Vec::with_capacity(N_STEMS);
         for (path, name) in paths.iter().zip(STEM_NAMES) {
             let stem = decode_audio(path).with_context(|| format!("reading the {name} stem"))?;
-            decoded.push(conform(stem, audio.sample_rate, frames, channels));
+            decoded.push(conform_to_source(stem, audio.sample_rate, frames, channels));
         }
         let stems: [AudioData; N_STEMS] = decoded
             .try_into()

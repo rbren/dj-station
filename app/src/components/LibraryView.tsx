@@ -181,6 +181,48 @@ function SourceTag({ source }: { source: string }) {
   );
 }
 
+/** Which model separated a track, and the choice of another one.
+ *
+ *  The models a build knows come from the backend, but the one a track
+ *  used may not be among them (an older app's model, whose stems are
+ *  still perfectly good), so the current value is always offered. */
+function StemModelPicker({
+  model,
+  models,
+  separating,
+  onPick,
+}: {
+  model: string;
+  models: string[];
+  separating: boolean;
+  onPick: (model: string) => void;
+}) {
+  if (!model) {
+    return <span data-testid="stem-model-none">—</span>;
+  }
+  const options = models.includes(model) ? models : [model, ...models];
+  return (
+    <select
+      className="stem-model"
+      data-testid="stem-model"
+      aria-label="Stem model"
+      value={model}
+      data-tip={
+        separating
+          ? `separating with ${model} — pick another model to separate again`
+          : `separated by ${model} — pick another model to separate again`
+      }
+      onChange={(e) => onPick(e.target.value)}
+    >
+      {options.map((m) => (
+        <option key={m} value={m}>
+          {m}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** The tracks on this machine — everything a clip can be cut from. */
 const SOURCES_TAB = 'sources';
 /** Every saved beat clip. */
@@ -277,6 +319,19 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
       await refreshTracks('');
     },
     [client, refreshTracks],
+  );
+
+  // Separate a track with a different model. The queue is re-read at once
+  // rather than at the next poll: the row is supposed to read "analyzing"
+  // as an answer to the click.
+  const restem = useCallback(
+    async (t: Track, model: string) => {
+      await client.setStemModel(t.id, model);
+      setStatus(`Separating “${t.title}” with ${model}`);
+      const q = await client.analysisStatus();
+      if (q) setQueue(q);
+    },
+    [client],
   );
 
   // Rename one field of a track. The list is not re-read: the backend
@@ -381,6 +436,11 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
   const analyzed = Math.max(0, (queue?.counts['done'] ?? 0) - separating.size);
   const failed = queue?.counts['failed'] ?? 0;
   const total = queue ? Object.values(queue.counts).reduce((a, b) => a + b, 0) : 0;
+
+  /** The models a track can be separated with, the default first. */
+  const stemBackends = useMemo(() => queue?.stem_backends ?? [], [queue]);
+  /** The model behind a row's stems, or the one currently making them. */
+  const stemModel = useCallback((t: Track) => queue?.stem_models?.[String(t.id)] ?? '', [queue]);
 
   /** What a row says its analysis is doing: separation is part of it. */
   const trackStatus = useCallback(
@@ -751,6 +811,7 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
                   <th>Source</th>
                   <th>License</th>
                   {clips && <th>Clips</th>}
+                  <th>Stems</th>
                   <th>Analysis</th>
                   {onEdit && <th />}
                   <th />
@@ -785,6 +846,14 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
                       <LicenseTag kind={t.license.kind} />
                     </td>
                     {clips && <ClipCount count={clipsOf(t).length} onOpen={() => showClipsOf(t)} />}
+                    <td>
+                      <StemModelPicker
+                        model={stemModel(t)}
+                        models={stemBackends}
+                        separating={separating.has(t.id)}
+                        onPick={(model) => void restem(t, model)}
+                      />
+                    </td>
                     <td>
                       <span
                         className={`tag tag-analysis tag-analysis-${trackStatus(t)}`}

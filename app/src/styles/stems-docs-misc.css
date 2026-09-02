@@ -46,6 +46,19 @@
   cursor: pointer;
 }
 
+/* Which model stemmed a row, and the way to ask for another one: a
+   reading first, a control second, so it stays as quiet as the tags
+   beside it. */
+.stem-model {
+  background: transparent;
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
 /* Library › Beat Clips: the saved clips, and the way from a source row
    to the ones cut from it. */
 

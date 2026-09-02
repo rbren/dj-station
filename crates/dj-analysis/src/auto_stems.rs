@@ -108,6 +108,17 @@ impl AutoStemSettings {
     }
 }
 
+/// One row of [`AutoStemService::stem_report`]: what the Library shows
+/// about a track's stems.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackStemReport {
+    pub track_id: i64,
+    /// The model behind the stems, or the one that is making them.
+    pub model: String,
+    /// Still separating (the Library reads this as "analyzing").
+    pub pending: bool,
+}
+
 /// What the Clip page needs to know about one track's stems.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrackStems {
@@ -140,6 +151,11 @@ struct Availability {
 struct Shared {
     /// Tracks somebody is waiting on, served before the backfill scan.
     wanted: Mutex<VecDeque<i64>>,
+    /// Tracks known to have their stems: a library scan is a handful of
+    /// stat calls per track, and the answer only changes when we separate
+    /// one — or when somebody picks a different model for it, which is
+    /// why this is shared with the service rather than owned by its loop.
+    done: Mutex<HashSet<i64>>,
     failures: Mutex<HashMap<i64, Failure>>,
     availability: Mutex<Availability>,
     /// Track being separated right now, or -1.
@@ -178,6 +194,7 @@ impl AutoStemService {
     pub fn start(library: Arc<Library>, jobs: Arc<StemJobs>, settings: AutoStemSettings) -> Self {
         let shared = Arc::new(Shared {
             wanted: Mutex::new(VecDeque::new()),
+            done: Mutex::new(HashSet::new()),
             failures: Mutex::new(HashMap::new()),
             availability: Mutex::new(Availability {
                 ok: false,
@@ -225,6 +242,36 @@ impl AutoStemService {
         }
     }
 
+    /// Separate `track_id` with `model` instead of whatever it uses now,
+    /// and put it back at the head of the queue. Until that model's stems
+    /// exist the track reads "analyzing" again, which is the whole point:
+    /// picking a model is asking for the wait.
+    ///
+    /// Nothing is deleted — the stems it had stay on disk, so switching
+    /// back is instant.
+    pub fn restem(&self, track_id: i64, model: &str) -> anyhow::Result<()> {
+        self.jobs.choose(track_id, model)?;
+        self.shared
+            .done
+            .lock()
+            .expect("auto-stem state poisoned")
+            .remove(&track_id);
+        // A model that failed three times on another track's watch must
+        // not veto this one: the user asked again, with a new model.
+        self.shared
+            .failures
+            .lock()
+            .expect("auto-stem state poisoned")
+            .remove(&track_id);
+        self.want(track_id);
+        Ok(())
+    }
+
+    /// Every model that can be picked, the default first.
+    pub fn backends(&self) -> Vec<String> {
+        self.jobs.backends()
+    }
+
     /// Where one track stands. This is what the Clip page renders, so it
     /// answers for tracks the service will never touch too.
     pub fn track_stems(&self, track_id: i64) -> TrackStems {
@@ -236,10 +283,12 @@ impl AutoStemService {
         }
     }
 
-    /// Every track whose stems are still coming, in library order. The
-    /// Library view keeps calling these "analyzing": analysis is not
-    /// really over for a track until its stems are on disk.
-    pub fn pending_tracks(&self) -> Vec<i64> {
+    /// Every track's stem model and whether its stems are still coming,
+    /// in library order — one pass for what the Library view renders per
+    /// row (the model behind the stems, and "analyzing" while they are
+    /// not there yet: analysis is not really over for a track until its
+    /// stems are on disk).
+    pub fn stem_report(&self) -> Vec<TrackStemReport> {
         let tracks = match self.library.tracks() {
             Ok(tracks) => tracks,
             Err(e) => {
@@ -249,8 +298,11 @@ impl AutoStemService {
         };
         tracks
             .iter()
-            .filter(|t| matches!(self.stems_of(t), TrackStems::Loading { .. }))
-            .map(|t| t.id)
+            .map(|t| TrackStemReport {
+                track_id: t.id,
+                model: self.jobs.model_for(&t.content_hash),
+                pending: matches!(self.stems_of(t), TrackStems::Loading { .. }),
+            })
             .collect()
     }
 
@@ -355,14 +407,10 @@ fn run(
     settings: &AutoStemSettings,
     stop: &AtomicBool,
 ) {
-    // Tracks known to have stems already: a library scan is a handful of
-    // stat calls per track, and the answer for a finished track never
-    // changes while we run.
-    let mut done: HashSet<i64> = HashSet::new();
     let mut probed: Option<Instant> = None;
 
     while !stop.load(Ordering::Relaxed) {
-        let Some(track_id) = next_track(library, jobs, shared, settings, &mut done) else {
+        let Some(track_id) = next_track(library, jobs, shared, settings) else {
             nap(settings.poll_interval, stop);
             continue;
         };
@@ -370,7 +418,7 @@ fn run(
             nap(settings.poll_interval, stop);
             continue;
         }
-        separate(jobs, shared, settings, stop, track_id, &mut done);
+        separate(jobs, shared, settings, stop, track_id);
     }
 }
 
@@ -421,13 +469,12 @@ fn next_track(
     jobs: &StemJobs,
     shared: &Shared,
     settings: &AutoStemSettings,
-    done: &mut HashSet<i64>,
 ) -> Option<i64> {
     // Requests stay queued until they no longer need doing, so a second
     // one behind the pick is not forgotten.
     let wanted: Vec<i64> = {
         let mut queue = shared.wanted.lock().expect("auto-stem queue poisoned");
-        queue.retain(|id| needs_stems(jobs, shared, settings, done, *id));
+        queue.retain(|id| needs_stems(jobs, shared, settings, *id));
         queue.iter().copied().collect()
     };
     let tracks: Vec<Candidate> = match library.tracks() {
@@ -444,7 +491,7 @@ fn next_track(
         }
     };
     let (pick, pending) = next_in_line(&wanted, &tracks, settings.scope, |id| {
-        needs_stems(jobs, shared, settings, done, id)
+        needs_stems(jobs, shared, settings, id)
     });
     shared.pending.store(pending, Ordering::Relaxed);
     pick
@@ -454,14 +501,18 @@ fn needs_stems(
     jobs: &StemJobs,
     shared: &Shared,
     settings: &AutoStemSettings,
-    done: &mut HashSet<i64>,
     track_id: i64,
 ) -> bool {
-    if done.contains(&track_id) {
+    if shared
+        .done
+        .lock()
+        .expect("auto-stem state poisoned")
+        .contains(&track_id)
+    {
         return false;
     }
     if jobs.cached(track_id) {
-        done.insert(track_id);
+        mark_done(shared, track_id);
         return false;
     }
     let failures = shared.failures.lock().expect("auto-stem state poisoned");
@@ -524,7 +575,6 @@ fn separate(
     settings: &AutoStemSettings,
     stop: &AtomicBool,
     track_id: i64,
-    done: &mut HashSet<i64>,
 ) {
     shared.current.store(track_id, Ordering::Relaxed);
     let id = jobs.start(track_id);
@@ -562,7 +612,7 @@ fn separate(
         }
         _ => {
             if jobs.cached(track_id) {
-                done.insert(track_id);
+                mark_done(shared, track_id);
                 shared
                     .failures
                     .lock()
@@ -571,6 +621,14 @@ fn separate(
             }
         }
     }
+}
+
+fn mark_done(shared: &Shared, track_id: i64) {
+    shared
+        .done
+        .lock()
+        .expect("auto-stem state poisoned")
+        .insert(track_id);
 }
 
 /// Sleep in slices so stopping stays responsive.

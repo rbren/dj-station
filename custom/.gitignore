@@ -2,7 +2,9 @@
 # patches, the library DB and user macros travel with the checkout.
 # Only machine-local caches and scratch are ignored:
 stems/
-# The stem model: MSST venv + a 214 MB checkpoint (scripts/install-scnet.sh).
+# The stem models: a demucs venv (scripts/install-demucs.sh) and an MSST
+# venv + 214 MB checkpoint (scripts/install-scnet.sh).
+demucs/
 scnet/
 downloads/
 clips/

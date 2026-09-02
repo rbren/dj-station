@@ -55,8 +55,9 @@ struct AppState {
     analysis: dj_analysis::AnalysisWorker,
     /// Decoded sources for the Clip page's offline editor.
     clips: clip::ClipCache,
-    /// Stem separation (PRD §8.2): SCNet XL IHF via the external MSST
-    /// inference CLI, one background thread per job.
+    /// Stem separation (PRD §8.2): `htdemucs_ft` via the external demucs
+    /// CLI, or SCNet XL IHF for a track that picked it. One background
+    /// thread per job.
     stems: Arc<dj_analysis::StemJobs>,
     /// Keeps the stem cache filled by itself — every downloaded track,
     /// history included — so the Clip page never has to ask for one.
@@ -1702,16 +1703,23 @@ fn main() {
     // dj-analysis (CoreML EP on macOS, CPU EP elsewhere).
     let analysis =
         dj_analysis::start_worker(library.clone(), dj_analysis::AnalysisSettings::default());
-    // Stems: SCNet XL IHF through the external MSST inference CLI
-    // (`scripts/install-scnet.sh`). The tooling is optional — nothing
-    // here fails at startup if it is absent, the Clip page just reports
-    // it (see `clip_stem_backend`). The service behind them separates
+    // Stems: `htdemucs_ft` through the external demucs CLI by default,
+    // SCNet XL IHF (MSST, `scripts/install-scnet.sh`) for tracks that ask
+    // for it — demucs is several times faster, which is what a whole
+    // library wants, and SCNet separates better, which is what one track
+    // being worked on may want. Both tools are optional: nothing here
+    // fails at startup if they are absent, the Clip page just reports it
+    // (see `clip_stem_backend`). The service behind them separates
     // downloads on its own, one at a time, backfilling everything a
     // previous run never got to.
-    let separator = dj_analysis::ScnetSeparator::from_env_in(library.data_dir());
     let stems = Arc::new(dj_analysis::StemJobs::new(
         library.clone(),
-        Arc::new(separator),
+        vec![
+            Arc::new(dj_analysis::DemucsSeparator::from_env_in(
+                library.data_dir(),
+            )),
+            Arc::new(dj_analysis::ScnetSeparator::from_env_in(library.data_dir())),
+        ],
     ));
     let auto_stems = dj_analysis::AutoStemService::start(
         library.clone(),
@@ -2002,6 +2010,7 @@ fn main() {
             deck::deck_sync,
             deck::analysis_status,
             deck::analyze_track,
+            deck::set_stem_model,
             deck::deck_load_stems,
             deck::deck_clear_stems,
             clip::clip_load_source,

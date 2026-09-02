@@ -1,6 +1,6 @@
 //! Stem separation (PRD §8.2, M3): vocals / drums / bass / other.
 //!
-//! [`StemSeparator`] is the pluggable interface. Three implementations:
+//! [`StemSeparator`] is the pluggable interface. Four implementations:
 //!
 //! - [`BandSeparator`] (this module): a deterministic pure-DSP fallback
 //!   that always works offline. Harmonic/percussive separation (HPSS via
@@ -11,9 +11,15 @@
 //!   unity per time-frequency bin, so the four stems sum to the original
 //!   signal exactly (energy conservation) and the ISTFT is the only
 //!   source of (tiny) reconstruction error.
+//! - [`DemucsSeparator`](crate::demucs::DemucsSeparator) (`src/demucs.rs`):
+//!   the default model, `htdemucs_ft` through the external demucs CLI —
+//!   the faster of the two model backends, which is why a library gets
+//!   separated with it unless a track is asked to use another.
 //! - [`ScnetSeparator`](crate::scnet::ScnetSeparator) (`src/scnet.rs`):
-//!   the production model, SCNet XL IHF through MSST's inference CLI.
-//!   Optional tooling — without it the app reports stems as unavailable.
+//!   SCNet XL IHF through MSST's inference CLI. Slower, and better
+//!   (MUSDB18 SDR 10.09 vs 9.0) — picked per track.
+//!   Both are optional tooling: without it the app reports stems as
+//!   unavailable rather than failing.
 //! - `OnnxSeparator` (`src/onnx.rs`, `--features onnx`): a demucs-class
 //!   model via ONNX Runtime, CoreML execution provider on macOS / CPU
 //!   elsewhere. Production quality arrives by dropping in real weights;
@@ -391,6 +397,68 @@ fn median(v: &mut [f32]) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Shared by the separators that shell out to a model CLI (demucs, SCNet).
+// ---------------------------------------------------------------------------
+
+/// One line of user-facing blame for a tool that exited non-zero: the last
+/// thing it said, which for a Python CLI is the exception.
+pub(crate) fn tool_failure(bin: &str, stderr: &[u8], status: ExitStatus) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let detail = text
+        .lines()
+        .rfind(|l| !l.trim().is_empty())
+        .unwrap_or("no output");
+    format!("{bin} failed ({status}): {detail}")
+}
+
+/// Fit a decoded stem back onto the source's timebase: the models work at
+/// their own rate (44.1 kHz), so a 48 kHz track comes back resampled and a
+/// frame or two short/long. The [`StemSeparator`] contract is that stems
+/// line up with the input sample-for-sample (the deck plays them against
+/// it).
+pub(crate) fn conform_to_source(
+    stem: AudioData,
+    sample_rate: u32,
+    frames: usize,
+    channels: usize,
+) -> AudioData {
+    let src_frames = stem.frames();
+    let ratio = stem.sample_rate as f64 / sample_rate as f64;
+    let out = (0..channels)
+        .map(|c| {
+            let chan = match stem.channels.get(c) {
+                Some(chan) => chan,
+                // Mono model output feeding a stereo track.
+                None => match stem.channels.first() {
+                    Some(first) => first,
+                    None => return vec![0.0; frames],
+                },
+            };
+            (0..frames)
+                .map(|i| {
+                    if src_frames == 0 {
+                        return 0.0;
+                    }
+                    if stem.sample_rate == sample_rate {
+                        return chan.get(i).copied().unwrap_or(0.0);
+                    }
+                    let pos = i as f64 * ratio;
+                    let k = pos.floor() as usize;
+                    let frac = (pos - k as f64) as f32;
+                    let a = chan[k.min(src_frames - 1)];
+                    let b = chan[(k + 1).min(src_frames - 1)];
+                    a + (b - a) * frac
+                })
+                .collect()
+        })
+        .collect();
+    AudioData {
+        channels: out,
+        sample_rate,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // FLAC storage + content-hash cache (PRD §8.2)
 // ---------------------------------------------------------------------------
 
@@ -430,6 +498,33 @@ pub struct CachedStems {
     pub dir: PathBuf,
 }
 
+/// File in a track's stem directory naming the model the user picked for
+/// it, when that is not the app's default.
+const CHOSEN_FILE: &str = "chosen-model";
+
+/// The model this track was asked to use, if somebody picked one.
+pub fn chosen_separator(data_dir: &Path, content_hash: &str) -> Option<String> {
+    let raw = std::fs::read_to_string(stems_dir(data_dir, content_hash).join(CHOSEN_FILE)).ok()?;
+    let id = raw.trim().to_string();
+    (!id.is_empty()).then_some(id)
+}
+
+/// Pick the model for one track: from here on it is the only one whose
+/// stems count for it, so a track with another model's stems on disk
+/// needs separating again (which is what puts it back in the Library's
+/// "analyzing").
+///
+/// Written next to the stems rather than into the library DB because it
+/// belongs to the content hash, exactly like the caches it selects
+/// between: two library rows for the same audio share both.
+pub fn choose_separator(data_dir: &Path, content_hash: &str, separator_id: &str) -> Result<()> {
+    let dir = stems_dir(data_dir, content_hash);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let path = dir.join(CHOSEN_FILE);
+    std::fs::write(&path, format!("{separator_id}\n"))
+        .with_context(|| format!("writing {}", path.display()))
+}
+
 /// The stems a track already has for `separator_id`, or failing that from
 /// ANOTHER model.
 ///
@@ -439,6 +534,10 @@ pub struct CachedStems {
 /// default (`htdemucs_ft`) keeps serving those stems — under its own name,
 /// which is what the UI reports as the model behind them.
 ///
+/// A track with a model of its own ([`choose_separator`]) is the
+/// exception: asking for a model is asking to hear it, so only that
+/// model's stems count and the track separates again if it has none.
+///
 /// Only model backends take part: the DSP fallback's flat cache is never
 /// served to a model (and vice versa), the invariant [`stems_dir_for`]
 /// exists for.
@@ -447,6 +546,15 @@ pub fn cached_stems_for(
     content_hash: &str,
     separator_id: &str,
 ) -> Option<CachedStems> {
+    if separator_id != DEFAULT_SEPARATOR_ID {
+        if let Some(chosen) = chosen_separator(data_dir, content_hash) {
+            let dir = stems_dir_for(data_dir, content_hash, &chosen);
+            return stems_cached(&dir).then_some(CachedStems {
+                separator: chosen,
+                dir,
+            });
+        }
+    }
     let own = stems_dir_for(data_dir, content_hash, separator_id);
     if stems_cached(&own) {
         return Some(CachedStems {

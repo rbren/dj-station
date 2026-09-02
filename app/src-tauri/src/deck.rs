@@ -13,14 +13,22 @@ use tauri::State;
 use crate::{engine_lock, err, patch_edit, AppState, CmdError, CmdResult, EditKey};
 
 /// Library row id for the track loaded in a deck, if it's a library track.
-pub(crate) fn deck_library_track(state: &AppState, engine: &Engine, instance: &str) -> Option<Track> {
+pub(crate) fn deck_library_track(
+    state: &AppState,
+    engine: &Engine,
+    instance: &str,
+) -> Option<Track> {
     let path = engine.deck_track(instance).ok()??;
     state.library.track_by_path(Path::new(&path)).ok()?
 }
 
 /// Re-apply a track's library metadata (beatgrid, cues, first saved loop)
 /// to a deck. Used after deck_load and after patch load.
-pub(crate) fn apply_deck_metadata(state: &AppState, engine: &mut Engine, instance: &str) -> CmdResult<()> {
+pub(crate) fn apply_deck_metadata(
+    state: &AppState,
+    engine: &mut Engine,
+    instance: &str,
+) -> CmdResult<()> {
     let Some(track) = deck_library_track(state, engine, instance) else {
         return Ok(());
     };
@@ -64,6 +72,11 @@ pub(crate) struct AnalysisQueueSnapshot {
     /// not open the Clip editor for them: half a track's material is
     /// still missing until its stems land.
     stems_pending: Vec<i64>,
+    /// The stem model behind each track (or the one separating it now),
+    /// by track id — the Library shows and lets you change it per row.
+    stem_models: BTreeMap<i64, String>,
+    /// The models to choose from, the default first.
+    stem_backends: Vec<String>,
 }
 
 #[tauri::command]
@@ -77,7 +90,14 @@ pub(crate) fn analysis_status(state: State<AppState>) -> CmdResult<AnalysisQueue
         .map(|t| t.id)
         .filter(|id| Some(*id) != current)
         .collect();
-    let separating: HashSet<i64> = state.auto_stems.pending_tracks().into_iter().collect();
+    let report = state.auto_stems.stem_report();
+    let separating: HashSet<i64> = report
+        .iter()
+        .filter(|r| r.pending)
+        .map(|r| r.track_id)
+        .collect();
+    let stem_models: BTreeMap<i64, String> =
+        report.into_iter().map(|r| (r.track_id, r.model)).collect();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut stems_pending = Vec::new();
     for t in state.library.tracks().map_err(err)? {
@@ -93,7 +113,21 @@ pub(crate) fn analysis_status(state: State<AppState>) -> CmdResult<AnalysisQueue
         queued,
         counts,
         stems_pending,
+        stem_models,
+        stem_backends: state.auto_stems.backends(),
     })
+}
+
+/// Separate `track_id` with another model from now on. The track goes
+/// back to "analyzing" until that model's stems exist — unless it made
+/// them before, since nothing is ever thrown away.
+#[tauri::command]
+pub(crate) fn set_stem_model(
+    state: State<AppState>,
+    track_id: i64,
+    model: String,
+) -> CmdResult<()> {
+    state.auto_stems.restem(track_id, &model).map_err(err)
 }
 
 /// Queue (or re-queue) analysis for a track; the background worker picks
@@ -128,7 +162,11 @@ pub(crate) fn deck_clear_stems(state: State<AppState>, instance: String) -> CmdR
 }
 
 /// Write the deck's current beatgrid through to the library.
-pub(crate) fn persist_deck_grid(state: &AppState, engine: &Engine, instance: &str) -> CmdResult<()> {
+pub(crate) fn persist_deck_grid(
+    state: &AppState,
+    engine: &Engine,
+    instance: &str,
+) -> CmdResult<()> {
     if let (Some(track), Ok(Some((bpm, anchor)))) = (
         deck_library_track(state, engine, instance),
         engine.deck_beatgrid(instance),
@@ -160,7 +198,11 @@ pub(crate) fn deck_status(state: State<AppState>, instance: String) -> CmdResult
 
 /// Waveform overview peaks (0..=1), `buckets` values.
 #[tauri::command]
-pub(crate) fn deck_waveform(state: State<AppState>, instance: String, buckets: usize) -> CmdResult<Vec<f32>> {
+pub(crate) fn deck_waveform(
+    state: State<AppState>,
+    instance: String,
+    buckets: usize,
+) -> CmdResult<Vec<f32>> {
     let engine = engine_lock(&state)?;
     engine
         .deck_waveform(&instance, buckets.min(20_000))
@@ -202,13 +244,22 @@ pub(crate) fn deck_set_cue(
 
 /// Set the active loop region (transient until saved).
 #[tauri::command]
-pub(crate) fn deck_set_loop(state: State<AppState>, instance: String, start: f64, end: f64) -> CmdResult<()> {
+pub(crate) fn deck_set_loop(
+    state: State<AppState>,
+    instance: String,
+    start: f64,
+    end: f64,
+) -> CmdResult<()> {
     let mut engine = engine_lock(&state)?;
     engine.deck_set_loop(&instance, start, end).map_err(err)
 }
 
 #[tauri::command]
-pub(crate) fn deck_loop_enable(state: State<AppState>, instance: String, enabled: bool) -> CmdResult<()> {
+pub(crate) fn deck_loop_enable(
+    state: State<AppState>,
+    instance: String,
+    enabled: bool,
+) -> CmdResult<()> {
     let mut engine = engine_lock(&state)?;
     engine.deck_loop_enable(&instance, enabled).map_err(err)
 }
@@ -227,7 +278,11 @@ pub(crate) fn deck_loop_double(state: State<AppState>, instance: String) -> CmdR
 
 /// Save the current loop region as a named library loop for the track.
 #[tauri::command]
-pub(crate) fn deck_save_loop(state: State<AppState>, instance: String, name: String) -> CmdResult<i64> {
+pub(crate) fn deck_save_loop(
+    state: State<AppState>,
+    instance: String,
+    name: String,
+) -> CmdResult<i64> {
     let engine = engine_lock(&state)?;
     let status = engine.deck_status(&instance).map_err(err)?;
     let (Some(start), Some(end)) = (status.loop_start_secs, status.loop_end_secs) else {
@@ -270,7 +325,10 @@ pub(crate) fn deck_set_beatgrid(
 
 /// Tap tempo at the live playhead; the resulting grid persists.
 #[tauri::command]
-pub(crate) fn deck_tap_tempo(state: State<AppState>, instance: String) -> CmdResult<Option<(f64, f64)>> {
+pub(crate) fn deck_tap_tempo(
+    state: State<AppState>,
+    instance: String,
+) -> CmdResult<Option<(f64, f64)>> {
     let mut engine = engine_lock(&state)?;
     let grid = engine.deck_tap_tempo(&instance).map_err(err)?;
     persist_deck_grid(&state, &engine, &instance)?;
@@ -279,7 +337,11 @@ pub(crate) fn deck_tap_tempo(state: State<AppState>, instance: String) -> CmdRes
 
 /// Nudge the beatgrid anchor by `delta` seconds.
 #[tauri::command]
-pub(crate) fn deck_nudge_beatgrid(state: State<AppState>, instance: String, delta: f64) -> CmdResult<()> {
+pub(crate) fn deck_nudge_beatgrid(
+    state: State<AppState>,
+    instance: String,
+    delta: f64,
+) -> CmdResult<()> {
     let mut engine = engine_lock(&state)?;
     engine.deck_nudge_beatgrid(&instance, delta).map_err(err)?;
     persist_deck_grid(&state, &engine, &instance)
@@ -295,7 +357,11 @@ pub(crate) fn deck_anchor_here(state: State<AppState>, instance: String) -> CmdR
 
 /// Beat-sync a deck to another deck (None clears sync).
 #[tauri::command]
-pub(crate) fn deck_sync(state: State<AppState>, instance: String, master: Option<String>) -> CmdResult<()> {
+pub(crate) fn deck_sync(
+    state: State<AppState>,
+    instance: String,
+    master: Option<String>,
+) -> CmdResult<()> {
     let mut engine = engine_lock(&state)?;
     engine.deck_sync(&instance, master.as_deref()).map_err(err)
 }

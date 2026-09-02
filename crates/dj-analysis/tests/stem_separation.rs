@@ -284,21 +284,22 @@ fn cached_stems_decode_back_to_the_same_audio() {
 }
 
 // ---------------------------------------------------------------------------
-// scnet_xl_ihf backend (external MSST `inference` CLI) + background jobs
+// Model backends (the demucs CLI, MSST's `inference` CLI) + background jobs
 // ---------------------------------------------------------------------------
 //
-// No torch, no MSST and no checkpoint: the plumbing runs against a fake
-// interpreter script that records its argv and writes prepared stem WAVs,
-// so CI never depends on the model files (AGENTS.md). Installing them is
-// `scripts/install-scnet.sh`, and every test here is about what the app
-// does with or without them.
+// No demucs, no torch, no MSST and no checkpoint: the plumbing runs
+// against fake CLI scripts that record their argv and write prepared stem
+// WAVs, so CI never depends on the model files (AGENTS.md). Installing
+// them is `pipx install demucs` / `scripts/install-scnet.sh`, and every
+// test here is about what the app does with or without them.
 
-use dj_analysis::scnet::{ScnetSeparator, DEFAULT_MODEL, ENV_SCNET_PYTHON};
+use dj_analysis::demucs::{DemucsSeparator, DEFAULT_MODEL as DEMUCS_MODEL};
+use dj_analysis::scnet::{ScnetSeparator, DEFAULT_MODEL as SCNET_MODEL, ENV_SCNET_PYTHON};
 use dj_analysis::{cached_stems_for, stems_dir_for};
 
-/// The separator id a previous release of the app used, and whose stems
+/// A separator id no build of this app offers any more, and whose stems
 /// are still on disk in the wild.
-const LEGACY_MODEL: &str = "htdemucs_ft";
+const LEGACY_MODEL: &str = "htdemucs";
 
 /// Stereo tone at an explicit rate.
 fn tone(freq: f64, secs: f64, sr: u32) -> AudioData {
@@ -410,6 +411,59 @@ fn fake_scnet(dir: &std::path::Path, stem_secs: f64) -> (ScnetSeparator, std::pa
     )
 }
 
+/// A fake `demucs` honouring the real CLI's file contract:
+/// `<--out>/<-n model>/<track>/{vocals,drums,bass,other}.wav`. Each stem is
+/// a distinct tone so the read-back order can be checked. Returns the
+/// (script, argv log) paths.
+#[cfg(unix)]
+fn fake_demucs(dir: &std::path::Path, stem_secs: f64) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Demucs always emits 44.1 kHz, whatever the input's rate is.
+    let stems_src = dir.join("prepared");
+    std::fs::create_dir_all(&stems_src).unwrap();
+    for (i, name) in dj_analysis::STEM_NAMES.iter().enumerate() {
+        let freq = 220.0 * (i + 1) as f64;
+        write_wav(
+            &stems_src.join(format!("{name}.wav")),
+            &tone(freq, stem_secs, 44_100),
+        );
+    }
+
+    let argv_log = dir.join("argv.txt");
+    let script = dir.join("fake-demucs");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = "--help" ]; then echo "usage: demucs"; exit 0; fi
+# printf, not echo: the argv starts with `-n`, which echo would eat.
+# Appended, so the log doubles as a count of model runs.
+printf '%s\n' "$*" >> '{argv}'
+out=""; model=""; prev=""
+for arg in "$@"; do
+  case "$prev" in
+    --out) out="$arg" ;;
+    -n) model="$arg" ;;
+  esac
+  prev="$arg"
+done
+dir="$out/$model/input"
+mkdir -p "$dir"
+for s in vocals drums bass other; do
+  cp '{src}'/$s.wav "$dir/$s.wav"
+done
+echo "Separating track" >&2
+"#,
+            argv = argv_log.display(),
+            src = stems_src.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (script, argv_log)
+}
+
 #[test]
 fn stem_cache_is_keyed_by_backend_so_models_never_collide() {
     let data = std::path::Path::new("/data");
@@ -418,9 +472,13 @@ fn stem_cache_is_keyed_by_backend_so_models_never_collide() {
         stems_dir_for(data, "hash1", "band"),
         dj_analysis::stems_dir(data, "hash1")
     );
-    // Every model gets its own subdirectory.
-    let scnet = stems_dir_for(data, "hash1", DEFAULT_MODEL);
+    // Every model gets its own subdirectory, so the two the app offers
+    // can both hold stems for the same track.
+    let scnet = stems_dir_for(data, "hash1", SCNET_MODEL);
     assert_eq!(scnet, data.join("stems").join("hash1").join("scnet_xl_ihf"));
+    let demucs = stems_dir_for(data, "hash1", DEMUCS_MODEL);
+    assert_eq!(demucs, data.join("stems").join("hash1").join("htdemucs_ft"));
+    assert_ne!(scnet, demucs);
     assert_ne!(scnet, stems_dir_for(data, "hash1", LEGACY_MODEL));
     assert_ne!(scnet, stems_dir_for(data, "hash1", "band"));
 }
@@ -441,27 +499,24 @@ fn stems_from_an_earlier_model_are_kept_and_named() {
 
     // A track separated by the model the app used to run.
     seed(&stems_dir_for(data, "hash1", LEGACY_MODEL));
-    let cached = cached_stems_for(data, "hash1", DEFAULT_MODEL).expect("legacy stems count");
+    let cached = cached_stems_for(data, "hash1", SCNET_MODEL).expect("legacy stems count");
     assert_eq!(cached.separator, LEGACY_MODEL, "the model is the metadata");
     assert_eq!(cached.dir, stems_dir_for(data, "hash1", LEGACY_MODEL));
 
     // Once the current model has separated it too, its own stems win.
-    seed(&stems_dir_for(data, "hash1", DEFAULT_MODEL));
-    let cached = cached_stems_for(data, "hash1", DEFAULT_MODEL).unwrap();
-    assert_eq!(cached.separator, DEFAULT_MODEL);
+    seed(&stems_dir_for(data, "hash1", SCNET_MODEL));
+    let cached = cached_stems_for(data, "hash1", SCNET_MODEL).unwrap();
+    assert_eq!(cached.separator, SCNET_MODEL);
 
     // The DSP fallback and the models stay strangers in both directions:
     // a track with only band stems is not separated as far as a model is
     // concerned, and the DSP path never picks up a model's.
     seed(&stems_dir_for(data, "hash2", "band"));
-    assert_eq!(cached_stems_for(data, "hash2", DEFAULT_MODEL), None);
+    assert_eq!(cached_stems_for(data, "hash2", SCNET_MODEL), None);
     assert_eq!(cached_stems_for(data, "hash1", "band"), None);
 
     // Nothing separated at all is nothing to serve.
-    assert_eq!(
-        cached_stems_for(data, "never-separated", DEFAULT_MODEL),
-        None
-    );
+    assert_eq!(cached_stems_for(data, "never-separated", SCNET_MODEL), None);
 }
 
 /// The same, end to end: the service reports a track separated by the old
@@ -520,7 +575,7 @@ fn a_track_stemmed_by_the_previous_model_is_not_separated_again() {
 fn removing_a_tracks_stems_takes_every_backends_cache() {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path();
-    for backend in ["band", DEFAULT_MODEL] {
+    for backend in ["band", DEMUCS_MODEL, SCNET_MODEL] {
         let dir = stems_dir_for(data, "hash1", backend);
         std::fs::create_dir_all(&dir).unwrap();
         for p in stem_paths(&dir) {
@@ -533,7 +588,8 @@ fn removing_a_tracks_stems_takes_every_backends_cache() {
 
     dj_analysis::remove_stems(data, "hash1").unwrap();
     assert!(!stems_dir_for(data, "hash1", "band").exists());
-    assert!(!stems_dir_for(data, "hash1", DEFAULT_MODEL).exists());
+    assert!(!stems_dir_for(data, "hash1", DEMUCS_MODEL).exists());
+    assert!(!stems_dir_for(data, "hash1", SCNET_MODEL).exists());
     assert!(other.exists());
     // A track that was never separated deletes just as cleanly.
     dj_analysis::remove_stems(data, "never-separated").unwrap();
@@ -548,6 +604,129 @@ fn the_stem_model_is_scnet_xl_ihf() {
     );
     assert_eq!(sep.model(), "scnet_xl_ihf");
     assert_eq!(sep.id(), "scnet_xl_ihf", "the model keys the stem cache");
+}
+
+#[cfg(unix)]
+#[test]
+fn tracks_are_separated_by_demucs_unless_they_ask_for_scnet() {
+    let tmp = tempfile::tempdir().unwrap();
+    let library = std::sync::Arc::new(dj_library::Library::open(tmp.path()).unwrap());
+    let work = tempfile::tempdir().unwrap();
+    // A directory each: the fakes log their runs to `<dir>/argv.txt`.
+    let (script, _) = fake_demucs(&subdir(work.path(), "demucs"), 1.0);
+    let (scnet, _) = fake_scnet(&subdir(work.path(), "scnet"), 1.0);
+    let jobs = both_jobs(library, &script, scnet);
+
+    assert_eq!(
+        jobs.backend(),
+        "htdemucs_ft",
+        "a library is separated by the fast model"
+    );
+    assert_eq!(jobs.backends(), vec!["htdemucs_ft", "scnet_xl_ihf"]);
+}
+
+/// Picking a model for one track: it separates again with that one, and
+/// coming back to the first is free, because nothing is thrown away.
+#[cfg(unix)]
+#[test]
+fn a_track_given_another_model_is_separated_again_with_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (library, tracks) = library_of(tmp.path(), &["youtube"]);
+    let track = &tracks[0];
+    let work = tempfile::tempdir().unwrap();
+    // A directory each: the fakes log their runs to `<dir>/argv.txt`.
+    let (script, demucs_log) = fake_demucs(&subdir(work.path(), "demucs"), 1.0);
+    let (scnet, scnet_log) = fake_scnet(&subdir(work.path(), "scnet"), 1.0);
+    let jobs = both_jobs(library.clone(), &script, scnet);
+
+    let id = jobs.start(track.id);
+    wait_until("the default model to separate it", 30, || {
+        jobs.jobs().iter().any(|j| j.id == id && !j.is_running())
+    });
+    assert!(jobs.cached(track.id));
+    assert_eq!(jobs.model_for(&track.content_hash), DEMUCS_MODEL);
+    assert_eq!(model_runs(&demucs_log), 1);
+
+    // Asked for the better model: the demucs stems no longer count for
+    // this track, which is what puts it back into "analyzing".
+    jobs.choose(track.id, SCNET_MODEL).unwrap();
+    assert!(!jobs.cached(track.id), "the new model has not run yet");
+    assert_eq!(jobs.model_for(&track.content_hash), SCNET_MODEL);
+
+    let id = jobs.start(track.id);
+    wait_until("the chosen model to separate it", 30, || {
+        jobs.jobs().iter().any(|j| j.id == id && !j.is_running())
+    });
+    assert_eq!(model_runs(&scnet_log), 1, "the chosen model ran");
+    let cached = jobs.cache(&track.content_hash).expect("stems");
+    assert_eq!(cached.separator, SCNET_MODEL);
+    assert_eq!(
+        cached.dir,
+        stems_dir_for(library.data_dir(), &track.content_hash, SCNET_MODEL)
+    );
+
+    // Back to the first model: its stems were kept, so there is nothing
+    // to run.
+    jobs.choose(track.id, DEMUCS_MODEL).unwrap();
+    assert!(jobs.cached(track.id), "the earlier stems are still there");
+    assert_eq!(jobs.model_for(&track.content_hash), DEMUCS_MODEL);
+    assert_eq!(model_runs(&demucs_log), 1, "nothing was separated twice");
+
+    // A model this build does not have is refused rather than stranding
+    // the track on stems that will never come.
+    let err = jobs.choose(track.id, "hifi-mystery").expect_err("refused");
+    assert!(format!("{err:#}").contains("hifi-mystery"));
+    assert_eq!(jobs.model_for(&track.content_hash), DEMUCS_MODEL);
+}
+
+/// End to end: the Library's own view of it. A track told to use another
+/// model reads as separating again — with the new model's name — until
+/// that model's stems land.
+#[cfg(unix)]
+#[test]
+fn choosing_a_model_puts_the_track_back_into_analyzing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (library, tracks) = library_of(tmp.path(), &["youtube"]);
+    let track = tracks[0].clone();
+    let work = tempfile::tempdir().unwrap();
+    // A directory each: the fakes log their runs to `<dir>/argv.txt`.
+    let (script, _) = fake_demucs(&subdir(work.path(), "demucs"), 1.0);
+    let (scnet, scnet_log) = fake_scnet(&subdir(work.path(), "scnet"), 1.0);
+    let jobs = both_jobs(library.clone(), &script, scnet);
+    let service = dj_analysis::AutoStemService::start(
+        library,
+        jobs.clone(),
+        auto_settings(dj_analysis::AutoStemScope::All),
+    );
+    let row = |service: &dj_analysis::AutoStemService| {
+        service
+            .stem_report()
+            .into_iter()
+            .find(|r| r.track_id == track.id)
+            .expect("the track is in the report")
+    };
+
+    wait_until("the default model to separate it", 60, || {
+        !row(&service).pending
+    });
+    assert_eq!(row(&service).model, DEMUCS_MODEL);
+
+    service.restem(track.id, SCNET_MODEL).unwrap();
+    let asked = row(&service);
+    assert!(asked.pending, "the row goes back to analyzing at once");
+    assert_eq!(asked.model, SCNET_MODEL, "under the model it now wants");
+
+    wait_until("the chosen model to separate it", 60, || {
+        !row(&service).pending
+    });
+    assert_eq!(row(&service).model, SCNET_MODEL);
+    assert_eq!(model_runs(&scnet_log), 1);
+    assert_eq!(
+        service.track_stems(track.id),
+        dj_analysis::TrackStems::Ready {
+            separator: SCNET_MODEL.to_string()
+        }
+    );
 }
 
 #[cfg(unix)]
@@ -704,7 +883,7 @@ fn stem_jobs_separate_in_the_background_and_cache_under_the_backend() {
 
     let work = tempfile::tempdir().unwrap();
     let (sep, _) = fake_scnet(work.path(), 1.0);
-    let jobs = StemJobs::new(library.clone(), Arc::new(sep));
+    let jobs = StemJobs::new(library.clone(), vec![Arc::new(sep)]);
 
     assert_eq!(jobs.backend(), "scnet_xl_ihf");
     assert!(!jobs.cached(track.id), "nothing separated yet");
@@ -719,7 +898,7 @@ fn stem_jobs_separate_in_the_background_and_cache_under_the_backend() {
     // Cached under the model's own directory, leaving the DSP cache (which
     // the deck auto-loads) alone.
     assert!(jobs.cached(track.id));
-    let dir = stems_dir_for(library.data_dir(), &track.content_hash, DEFAULT_MODEL);
+    let dir = stems_dir_for(library.data_dir(), &track.content_hash, SCNET_MODEL);
     assert!(stems_cached(&dir), "no stems in {}", dir.display());
     assert!(
         !stems_cached(&dj_analysis::stems_dir(
@@ -758,7 +937,7 @@ fn a_stem_job_failure_is_reported_not_panicked() {
         .clone();
 
     // The machine has no MSST installed.
-    let jobs = StemJobs::new(library.clone(), Arc::new(no_scnet()));
+    let jobs = StemJobs::new(library.clone(), vec![Arc::new(no_scnet())]);
     let id = jobs.start(track.id);
 
     let t0 = Instant::now();
@@ -846,7 +1025,7 @@ fn cancelling_a_stem_job_kills_the_run_and_leaves_the_track_separable() {
 
     let work = tempfile::tempdir().unwrap();
     let (hanging, pidfile) = hanging_scnet(work.path());
-    let jobs = StemJobs::new(library.clone(), Arc::new(hanging));
+    let jobs = StemJobs::new(library.clone(), vec![Arc::new(hanging)]);
 
     let id = jobs.start(track.id);
     wait_for("the model started", || pidfile.is_file());
@@ -877,7 +1056,7 @@ fn cancelling_a_stem_job_kills_the_run_and_leaves_the_track_separable() {
     // And the track is left separable — nothing half-written in the way.
     let work2 = tempfile::tempdir().unwrap();
     let (sep, _) = fake_scnet(work2.path(), 1.0);
-    let jobs = StemJobs::new(library.clone(), Arc::new(sep));
+    let jobs = StemJobs::new(library.clone(), vec![Arc::new(sep)]);
     let again = jobs.start(track.id);
     wait_for("the re-run finished", || {
         !jobs.jobs().iter().any(|j| j.id == again && j.is_running())
@@ -901,7 +1080,7 @@ fn cancelling_nothing_says_so() {
 
     let tmp = tempfile::tempdir().unwrap();
     let library = Arc::new(Library::open(tmp.path()).unwrap());
-    let jobs = StemJobs::new(library, Arc::new(no_scnet()));
+    let jobs = StemJobs::new(library, vec![Arc::new(no_scnet())]);
     assert!(!jobs.cancel_track(1), "no job, nothing to stop");
 }
 
@@ -988,13 +1167,40 @@ fn auto_settings(scope: dj_analysis::AutoStemScope) -> dj_analysis::AutoStemSett
 }
 
 #[cfg(unix)]
+fn subdir(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let path = dir.join(name);
+    std::fs::create_dir_all(&path).unwrap();
+    path
+}
+
+/// The app's real menu: demucs first (the default), SCNet behind it,
+/// both faked.
+#[cfg(unix)]
+fn both_jobs(
+    library: std::sync::Arc<dj_library::Library>,
+    demucs_script: &std::path::Path,
+    scnet: ScnetSeparator,
+) -> std::sync::Arc<dj_analysis::StemJobs> {
+    std::sync::Arc::new(dj_analysis::StemJobs::new(
+        library,
+        vec![
+            std::sync::Arc::new(DemucsSeparator::with_bin(
+                &demucs_script.to_string_lossy(),
+                DEMUCS_MODEL,
+            )),
+            std::sync::Arc::new(scnet),
+        ],
+    ))
+}
+
+#[cfg(unix)]
 fn scnet_jobs(
     library: std::sync::Arc<dj_library::Library>,
     separator: ScnetSeparator,
 ) -> std::sync::Arc<dj_analysis::StemJobs> {
     std::sync::Arc::new(dj_analysis::StemJobs::new(
         library,
-        std::sync::Arc::new(separator),
+        vec![std::sync::Arc::new(separator)],
     ))
 }
 
@@ -1031,7 +1237,12 @@ fn downloaded_tracks_are_separated_without_anyone_asking() {
     // Library view keeps calling "analyzing" (and refuses to open the
     // Clip editor for). One separation runs at a time, so the second
     // download is still on the list while the first one is worked on.
-    let waiting = service.pending_tracks();
+    let waiting: Vec<i64> = service
+        .stem_report()
+        .into_iter()
+        .filter(|r| r.pending)
+        .map(|r| r.track_id)
+        .collect();
     assert!(
         waiting.contains(&tracks[1].id),
         "a download without stems should read as still coming"
@@ -1046,7 +1257,7 @@ fn downloaded_tracks_are_separated_without_anyone_asking() {
     });
     let ready = |id| {
         TrackStems::Ready {
-            separator: DEFAULT_MODEL.to_string(),
+            separator: SCNET_MODEL.to_string(),
         } == service.track_stems(id)
     };
     assert!(
@@ -1073,7 +1284,7 @@ fn downloaded_tracks_are_separated_without_anyone_asking() {
     // The service settles instead of spinning: the queue empties.
     wait_until("the queue to drain", 10, || service.status().pending == 0);
     assert!(
-        service.pending_tracks().is_empty(),
+        service.stem_report().iter().all(|r| !r.pending),
         "nothing is waiting on stems any more: separated or never coming"
     );
 }
@@ -1103,7 +1314,7 @@ fn stems_written_by_one_run_are_reused_by_the_next() {
     } // dropping the service stops it, as quitting the app would
 
     assert_eq!(model_runs(&argv_log), 1);
-    let stem_dir = stems_dir_for(library.data_dir(), &tracks[0].content_hash, DEFAULT_MODEL);
+    let stem_dir = stems_dir_for(library.data_dir(), &tracks[0].content_hash, SCNET_MODEL);
     let written: Vec<std::time::SystemTime> = stem_paths(&stem_dir)
         .iter()
         .map(|p| std::fs::metadata(p).unwrap().modified().unwrap())

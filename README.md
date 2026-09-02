@@ -32,23 +32,29 @@ library's YouTube tab (`brew install yt-dlp`, `pipx install yt-dlp`, or your
 package manager). Nothing else needs it — without it the tab is still there
 and reports the missing binary when you search.
 
-Also optional: **SCNet XL IHF** for studio-quality stem separation —
-`scripts/install-scnet.sh` provisions it under `custom/scnet/` (a venv with
+Also optional: a **stem separation model**, in two flavours.
+`scripts/install-demucs.sh` provisions `htdemucs_ft` (the demucs CLI) under
+`custom/demucs/`, and `scripts/install-scnet.sh` provisions **SCNet XL
+IHF** under `custom/scnet/` (a venv with
 [MSST](https://github.com/ZFTurbo/Music-Source-Separation-Training) and
-torch, plus the ~214 MB checkpoint; pass `--cuda` for CUDA wheels). With it
-installed, tracks are separated on their own in the background — anything
-downloaded from YouTube first, then the rest of the library — so the Clip
-page can drop the vocals out of a track without anyone waiting on a model
-or pressing anything; it just reports whether the stems have landed, and
-which model made them. Without it the Clip page says so and the stem
-switches stay off; the decks' stem controls are unaffected (they use the
-built-in DSP band split). Tracks separated by an earlier model (the
-`htdemucs_ft` this replaced) keep those stems and are not redone.
+torch, plus the ~214 MB checkpoint; both take `--cuda` for CUDA wheels).
+Demucs is the default because it is much the faster; SCNet separates
+better (MUSDB18 SDR 10.09 vs 9.0) and is picked per track from the
+Library's **Stems** column, which names the model behind each track's
+stems — changing it puts the track back into "analyzing" until the new
+model has run, and nothing is thrown away, so switching back is instant.
+With a model installed, tracks are separated on their own in the
+background — anything downloaded from YouTube first, then the rest of the
+library — so the Clip page can drop the vocals out of a track without
+anyone waiting on a model or pressing anything. Without one the Clip page
+says so and the stem switches stay off; the decks' stem controls are
+unaffected (they use the built-in DSP band split). Tracks separated by a
+model that is no longer on the menu keep those stems and are not redone.
 `DJ_AUTOSTEM=off|downloads|all` (default `all`) chooses what gets
-separated automatically, `DJ_SCNET_PYTHON` points at the interpreter,
-`DJ_SCNET_CONFIG` / `DJ_SCNET_CKPT` at the model files, `DJ_SCNET_MODEL`
-renames the cache key when they name a different model, and
-`DJ_SCNET_ARGS` adds flags to every call (e.g. `--device_ids 0`).
+separated automatically, `DJ_DEMUCS_BIN` / `DJ_DEMUCS_MODEL` /
+`DJ_DEMUCS_ARGS` point demucs elsewhere, and `DJ_SCNET_PYTHON`,
+`DJ_SCNET_CONFIG` / `DJ_SCNET_CKPT`, `DJ_SCNET_MODEL` and `DJ_SCNET_ARGS`
+(e.g. `--device_ids 0`) do the same for SCNet.
 
 ## State & saves — `custom/`
 
@@ -62,6 +68,7 @@ All persistent state lives in **`custom/` inside this checkout** (the repo
 | `custom/library.sqlite` | track DB, DJ metadata (cues/loops/grids), user macros, watch folders |
 | `custom/downloads/` | provider downloads |
 | `custom/stems/<hash>/` | FLAC stem-separation cache (DSP flat, one subdirectory per model) |
+| `custom/demucs/` | stem model: demucs venv (`htdemucs_ft`, the default) |
 | `custom/scnet/` | stem model: MSST venv, config and checkpoint |
 
 Set **`DJ_STATION_DATA_DIR`** to put state somewhere else
@@ -70,7 +77,7 @@ located — a packaged bundle, say — the app falls back to `custom/` under
 its working directory.
 
 `custom/` is tracked in git on purpose; its committed `.gitignore` excludes
-only machine-local churn (`stems/`, `scnet/`, `downloads/`, `autosave/`,
+only machine-local churn (`stems/`, `demucs/`, `scnet/`, `downloads/`, `autosave/`,
 the SQLite WAL sidecars and the migration marker) — regenerable caches, not saves.
 
 **Migration.** The first launch that uses `custom/` **copies** the old
@@ -231,8 +238,9 @@ crates/
                    (onset + comb-filter tempo) and key detection
                    (chromagram + Krumhansl profiles); stem separation
                    behind a StemSeparator trait (deterministic HPSS-style
-                   band separator always available; SCNet XL IHF through
-                   MSST's inference CLI when installed; optional ONNX
+                   band separator always available; htdemucs_ft through
+                   the demucs CLI and SCNet XL IHF through MSST's
+                   inference CLI when installed, per track; optional ONNX
                    Runtime backend — CoreML EP on macOS, CPU EP elsewhere
                    — loads a model file when configured); background
                    worker that drains the library's analysis queue; stems
