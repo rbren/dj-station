@@ -1,0 +1,644 @@
+/* ------------------------------------------------------------------ */
+/* M3: stems + analysis                                                */
+/* ------------------------------------------------------------------ */
+
+.deck-stem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.deck-stem input[type='range'] {
+  width: 56px;
+  accent-color: var(--wave);
+}
+
+.deck-btn.muted {
+  color: #5a636e;
+  border-color: #3a2a2a;
+  background: #1a1214;
+}
+
+.analysis-progress {
+  font-size: var(--fs-sm);
+  color: var(--cue);
+}
+
+.tag-analysis-done {
+  color: var(--ok);
+}
+
+.tag-analysis-failed {
+  color: var(--fault);
+}
+
+.tag-analysis-queued,
+.tag-analysis-analyzing {
+  color: var(--cue);
+}
+
+.analyze-button {
+  margin-left: 6px;
+  background: transparent;
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Library › Beat Clips: the saved clips, and the way from a source row
+   to the ones cut from it. */
+
+.track-clip-count {
+  text-align: right;
+}
+
+.link-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--brand);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.clip-source-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-muted);
+}
+
+/* THE CLIP TABLE (`BeatClipTable`), in both places clips are listed: the
+   Beat Clips tab and the deck bank's load dialog. Same measure, weights
+   and hover as the track table above — it is the same kind of list, and
+   the two only differ in what a row lets you do. */
+.beat-clip-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.beat-clip-table th,
+.beat-clip-table td {
+  text-align: left;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* The header cell is padded by its button instead, so the whole cell
+   sorts. */
+.beat-clip-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  background: var(--surface-raised);
+}
+
+/* A column title IS the control that sorts by it. */
+.beat-clip-table .clip-sort {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 7px 12px;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.beat-clip-table .clip-sort:hover {
+  color: var(--ink);
+}
+
+.beat-clip-table th[aria-sort='ascending'] .clip-sort,
+.beat-clip-table th[aria-sort='descending'] .clip-sort {
+  color: var(--brand);
+}
+
+.beat-clip-table tbody tr {
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.beat-clip-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.beat-clip-table tbody tr:hover {
+  background: color-mix(in srgb, var(--brand) 7%, transparent);
+}
+
+/* Picking one: the row the keyboard is on, the same brand edge the
+   module picker's rows wear. */
+.beat-clip-table-picking tbody tr {
+  cursor: pointer;
+}
+
+.beat-clip-table-picking tbody tr[aria-selected='true'] {
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--brand);
+}
+
+.beat-clip-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* A clip can name more than one source, so both name columns lay their
+   entries out as a wrapping row — on a div INSIDE the cell
+   (`.beat-clip-names`), never on the td: display:flex on a td takes it
+   out of the table layout and the columns slide out from under their
+   headers. */
+.beat-clip-track,
+.beat-clip-artist {
+  color: var(--ink-muted);
+}
+
+.beat-clip-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.beat-clip-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+/* Everything that is not a name takes only the width it needs, so the
+   three columns a DJ reads get the rest of the measure. */
+.beat-clip-num,
+.beat-clip-stems,
+.beat-clip-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* Edit and Delete are ONE gesture apart, side by side at the end of the
+   row rather than stacked into a second line of table. */
+.beat-clip-actions {
+  text-align: right;
+}
+
+.beat-clip-actions .row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Stem tags as FILTERS: the same chips the rows wear (`.stem-tag`,
+   printed short — VOX/DRM/BAS/OTH), as toggles under the search box.
+   Each selected part narrows the list to clips containing it; ALL
+   clears the lot. A pressed chip borrows the active row's border. */
+.clip-stem-filter {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+}
+
+.stem-filter-tags {
+  align-items: center;
+  display: flex;
+  gap: 3px;
+}
+
+/* Named through their row so a dialog's own button styling
+   (`.file-dialog button`) cannot outweigh them: these are chips. */
+.stem-filter-tags .stem-filter-tag {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.stem-filter-tags .stem-filter-tag[aria-pressed='true'] {
+  border-color: var(--brand);
+  color: var(--ink);
+}
+
+/* A pointer that no longer resolves, or was never recorded: said in the
+   row rather than left blank, since the clip itself is still good. */
+.clip-source-missing,
+.clip-source-none {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+/* Collapse-to-macro (M4, PRD §6) */
+
+/* Selected modules get a bright, unmissable border (multi-select for
+   copy/paste/delete/collapse-to-macro). */
+.module-panel-selected {
+  /* Inset outline: the highlight lives entirely within the panel's own
+     bounds, so flush neighbours can never paint over it (an outward
+     outline was hidden by adjacent modules). The z-index lifts the glow
+     above later siblings without touching layout. */
+  outline: 3px solid var(--brand);
+  outline-offset: -3px;
+  box-shadow: 0 0 12px 2px rgba(77, 216, 255, 0.55);
+  z-index: 1;
+}
+
+/* Macro bounding box: a labeled dashed frame around an expanded macro
+   instance's member panels. The box itself is pointer-transparent (wiring
+   and panel drags pass through); only the name tab takes the pointer
+   (drag = move group, right-click = macro menu). */
+.macro-box {
+  position: absolute;
+  border: 2px dashed rgba(143, 127, 224, 0.65);
+  border-radius: 8px;
+  background: rgba(143, 127, 224, 0.05);
+  pointer-events: none;
+}
+
+/* The macro's name tab, styled as a full-width title bar to match module
+   title bars. Its height must equal MACRO_LABEL_H in rackLayout.ts (the
+   space macroBoxRect reserves above the member panels). */
+.macro-box-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 44px;
+  padding: 0 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: #2a2454;
+  border-bottom: 1px solid rgba(143, 127, 224, 0.65);
+  border-radius: 6px 6px 0 0;
+  color: #cdc4ff;
+  /* Same proportion of its 44px bar as .module-title's of its 56px. */
+  font-size: var(--fs-title);
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+}
+
+.macro-box-label:active {
+  cursor: grabbing;
+}
+
+.macro-box-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.macro-box-instance {
+  color: #8f86c9;
+  font-weight: 400;
+  font-size: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Marquee select: the swept rectangle shown while dragging on the rack
+   background. Lives inside the zoomed .rack (rack coordinates); inert to
+   the pointer so the drag keeps flowing to the window listeners. */
+.marquee {
+  position: absolute;
+  border: 1px solid var(--brand);
+  background: rgba(77, 216, 255, 0.12);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.collapse-macro-btn {
+  background: var(--cue);
+  color: var(--canvas);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.collapse-macro-form {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.collapse-macro-form input {
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.collapse-macro-form button {
+  background: transparent;
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+/* MIDI LED feedback (M4, PRD §7.1) */
+
+.midi-leds {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.midi-leds-title {
+  display: block;
+  font-size: var(--fs-micro);
+  color: var(--ink-muted);
+  margin-bottom: 2px;
+}
+
+/* --- Error surfaces ---------------------------------------------------
+   Every error surface is --fault mixed into the canvas: the same red at
+   three strengths (tint, edge, text) rather than five hand-picked reds. */
+
+.error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  background: color-mix(in srgb, var(--fault) 16%, var(--canvas));
+  border-bottom: 1px solid color-mix(in srgb, var(--fault) 40%, var(--canvas));
+  font-size: var(--fs-md);
+}
+
+.error-banner-list {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.error-banner-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.1rem 0;
+}
+
+.error-context {
+  color: color-mix(in srgb, var(--fault) 60%, #fff);
+  font-family: var(--font-mono);
+  flex: none;
+}
+
+.error-message {
+  flex: 1;
+  color: color-mix(in srgb, var(--fault) 18%, var(--ink));
+  word-break: break-word;
+}
+
+.error-dismiss,
+.error-clear {
+  background: none;
+  border: none;
+  color: color-mix(in srgb, var(--fault) 80%, var(--ink-dim));
+  cursor: pointer;
+  flex: none;
+}
+
+.error-card,
+.module-panel-error {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--fault) 40%, var(--canvas));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fault) 12%, var(--canvas));
+  color: color-mix(in srgb, var(--fault) 18%, var(--ink));
+  font-size: var(--fs-md);
+  max-width: 320px;
+}
+
+.error-card-message {
+  font-family: var(--font-mono);
+  color: color-mix(in srgb, var(--fault) 60%, #fff);
+  word-break: break-word;
+}
+
+.module-error-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* Right-click context menu (ContextMenu.tsx) — replaces the suppressed
+   browser/Tauri menu everywhere in the app. */
+.context-menu {
+  position: fixed;
+  z-index: 300;
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 5px 10px;
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu-item:hover:not(:disabled) {
+  background: #2e3440;
+}
+
+.context-menu-item:disabled {
+  color: #5b626e;
+  cursor: default;
+}
+
+.context-menu-hint {
+  font-size: var(--fs-nano);
+  color: #5b626e;
+  font-style: italic;
+}
+
+/* Submenu (module presets): the parent row is a flex item like any other
+   button, with its flyout positioned against it. */
+.context-menu-sub {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.context-menu-arrow {
+  color: var(--ink-dim);
+}
+
+.context-menu-flyout {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-left: 2px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* In-app module documentation (DocsPanel.tsx). */
+.docs-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 250;
+}
+
+.docs-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  width: min(680px, 90vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.docs-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.docs-header h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+
+.docs-type-id {
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+  font-weight: normal;
+}
+
+.docs-category {
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
+.docs-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.docs-close:hover {
+  color: var(--ink);
+}
+
+.docs-body {
+  padding: 12px 16px 16px;
+  overflow-y: auto;
+  font-size: var(--fs-xs);
+  color: #b8bfca;
+}
+
+.docs-summary {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+
+.docs-section h4 {
+  margin: 12px 0 4px;
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+.docs-jacks {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.docs-jacks td {
+  padding: 4px 8px 4px 0;
+  vertical-align: top;
+  border-top: 1px solid var(--line);
+  line-height: 1.4;
+}
+
+.docs-jack-name {
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.docs-jack-name code {
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
+}
+
+.docs-jack-control {
+  white-space: nowrap;
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
+}
+
+.docs-examples {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.6;
+}

@@ -1,0 +1,894 @@
+/* ------------------------------------------------------------------ */
+/* Decks tab: eight clips on one clock                                 */
+/* ------------------------------------------------------------------ */
+
+/* The Decks page is CHROME around the rack canvas: the wrapper melts away
+   (display: contents) so the tempo bar, the strip row and the cable
+   overlay become flex items of .app-body, placed around .rack-area by the
+   `order` rules next to it. */
+.decks-view {
+  display: contents;
+}
+
+/* The screen-space cable layer for wires that touch the bank's chrome
+   jacks: covers the whole .app-body (chrome AND canvas), above both, so a
+   cable from a strip to a module is never clipped at the canvas edge. */
+.decks-chrome-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+/* The no-bank offer sits where the strips would: a bar under the canvas,
+   not a page of its own. */
+.decks-empty-bar {
+  flex: none;
+  margin: 0;
+  padding: 1rem;
+  text-align: center;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.decks-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+/* The tempo is the one number that drives everything else on the page,
+   so it is the biggest thing on it — and it is ONE control in one unit,
+   so the number and its slider stack under a single label. The clock the
+   two of them run stands beside the stack. */
+.decks-tempo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.decks-tempo-stack {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+
+.decks-tempo-label {
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.decks-bpm {
+  width: 5.5ch;
+  font-size: var(--fs-2xl);
+  padding: 2px 4px;
+  text-align: right;
+}
+
+.decks-tempo-slider {
+  width: 160px;
+}
+
+/* How the bank gets to a new tempo, beside the box that asks for one:
+   the tick that turns the walk on, and under it the rate it walks at. */
+.decks-smooth {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+}
+
+.decks-smooth-tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.decks-smooth-rate {
+  width: 5ch;
+  font-size: var(--fs-sm);
+  padding: 1px 3px;
+  text-align: right;
+}
+
+/* Where the bank IS while it walks to where it was sent: quieter and
+   smaller than the number that sent it, because it is a reading and not
+   a control. */
+.decks-bpm-actual {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+}
+
+.decks-bpm-actual-label {
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.decks-bpm-actual-value {
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+}
+
+.decks-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
+}
+
+.decks-beat {
+  color: var(--ink);
+  font-size: var(--fs-md);
+}
+
+/* A parked count is not a count: a stopped bank's beat reads as quietly
+   as the rest of the readout around it. */
+.decks-beat[data-state='stopped'] {
+  color: var(--ink-dim);
+}
+
+/* Where the bank comes out: the live pair over the monitor pair, each a
+   row of its own so the two read as the two destinations they are. */
+.decks-outs {
+  display: grid;
+  gap: 2px;
+}
+
+.decks-out {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.decks-out-label {
+  width: 6ch;
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* The cue row is the headphones, in the same amber a monitored deck
+   lights up in. */
+.decks-out[data-bus='monitor'] .decks-out-label {
+  color: var(--cue);
+}
+
+.decks-master {
+  width: 110px;
+}
+
+.decks-master-value {
+  width: 4ch;
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  text-align: right;
+}
+
+/* Which hardware the pair plays out of, at the end of its row: the fader
+   says how loud, the select says where. The note only appears when the
+   engine has something to say (a device left, nothing could be opened),
+   and wears --cue because it is "look here", not a fault. */
+.audio-output-select {
+  max-width: 150px;
+  font-size: var(--fs-xs);
+}
+
+.decks-outs[data-state='adrift'] .audio-output-select {
+  border-color: color-mix(in srgb, var(--cue) 55%, var(--line-strong));
+}
+
+.audio-output-note {
+  color: var(--cue);
+  font-size: var(--fs-xs);
+  max-width: 36ch;
+}
+
+.decks-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+/* Whether the hardware is driving the bank, in the same pill language as
+   the engine's own status. */
+.decks-surface {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+}
+
+.decks-surface::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentcolor;
+  box-shadow: 0 0 6px currentcolor;
+}
+
+.decks-surface[data-state='on'] {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--line-strong));
+}
+
+.decks-surface[data-state='waiting'] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line-strong));
+}
+
+.decks-btn.is-on {
+  background: color-mix(in srgb, var(--brand) 28%, var(--canvas));
+  border-color: color-mix(in srgb, var(--brand) 70%, var(--line-strong));
+}
+
+/* The transport's lit half is the bank RUNNING, so it takes the same
+   green a playing strip is tinted with rather than the brand tint. */
+.decks-btn-start.is-on {
+  background: color-mix(in srgb, var(--ok) 26%, var(--canvas));
+  border-color: color-mix(in srgb, var(--ok) 70%, var(--line-strong));
+}
+
+/* Monitor sends the deck to the headphones instead of the room, so it
+   gets the "cue" amber rather than the brand tint. */
+.decks-btn-monitor.is-on {
+  background: color-mix(in srgb, var(--cue) 26%, var(--canvas));
+  border-color: color-mix(in srgb, var(--cue) 70%, var(--line-strong));
+}
+
+.decks-add {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 7px 14px;
+}
+
+/* The strip dock: the bottom band of chrome, whose height the user owns.
+   An explicit inline height (clamped in DecksView, persisted in
+   localStorage) with `flex: none`, so every pixel it gives up goes to the
+   .rack-area above it; collapsed it is only its own bar. */
+.decks-dock {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
+  /* The same ceiling the drag clamps to, so a height saved on a taller
+     window can never swallow the canvas on a shorter one. */
+  max-height: 70%;
+  border-top: 1px solid var(--line);
+  background: var(--surface-sunken);
+}
+
+.decks-dock[data-collapsed='true'] {
+  height: auto;
+}
+
+/* The bar is the handle AND the switch: the label toggles, the grip to
+   its right resizes. */
+.decks-dock-bar {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  gap: 8px;
+  height: 18px;
+}
+
+.decks-dock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.decks-dock-toggle:hover {
+  color: var(--ink);
+}
+
+.decks-dock-chevron {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentcolor;
+}
+
+.decks-dock[data-collapsed='true'] .decks-dock-chevron {
+  transform: rotate(-90deg);
+}
+
+.decks-dock-summary {
+  align-self: center;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+}
+
+/* Grabbing anywhere along the top edge resizes; the ruled line is drawn
+   in the middle of a target tall enough to hit. */
+.decks-dock-grip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.decks-dock-grip::before {
+  content: '';
+  flex: 1;
+  height: 2px;
+  margin-right: 8px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.decks-dock-grip:hover::before,
+.decks-dock.is-resizing .decks-dock-grip::before {
+  background: var(--brand);
+}
+
+/* While the handle is held the pointer must not land on a fader it
+   dragged past. */
+.decks-dock.is-resizing .decks-strips {
+  pointer-events: none;
+}
+
+/* Eight strips filling the dock. Sized so the whole bank is on screen at
+   once; below that width the strips keep their minimum and the row
+   scrolls (the cable overlay re-measures on scroll). */
+.decks-strips {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(156px, 1fr);
+  gap: 8px;
+  padding: 0 10px 10px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* A deck's OUTPUT, as light: --deck-level (0..1, set by DecksSlot from
+   the engine's exponentially weighted second of what this deck put out)
+   greens the strip up while it plays and lets it fade back to its own
+   black when the deck is muted, dropped or on a silent beat. The
+   BACKGROUND takes only a small share of --ok, because the strip's
+   dimmest ink has to stay readable on it; the border and the inner glow
+   carry the loud end. Colour only — the transition is answered by the
+   prefers-reduced-motion block at the top of this file, and the reading
+   itself is data, so it survives with no motion at all. */
+.decks-slot {
+  --deck-level: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--ok) calc(var(--deck-level) * 12%), var(--surface));
+  border: 1px solid color-mix(in srgb, var(--ok) calc(var(--deck-level) * 55%), var(--line));
+  border-radius: var(--radius);
+  box-shadow:
+    var(--shadow-panel),
+    inset 0 0 calc(var(--deck-level) * 20px)
+      color-mix(in srgb, var(--ok) calc(var(--deck-level) * 20%), transparent);
+  transition:
+    background-color var(--dur-slow) var(--ease),
+    border-color var(--dur-slow) var(--ease),
+    box-shadow var(--dur-slow) var(--ease);
+}
+
+/* An empty deck stays a deck — same box, quieter ink — so the bank does
+   not change shape as clips come and go. It can still be lit: a wired
+   return makes even an empty slot a channel for the rack. */
+.decks-slot-empty {
+  background: color-mix(in srgb, var(--ok) calc(var(--deck-level) * 12%), var(--surface-sunken));
+}
+
+.decks-slot-head {
+  display: flex;
+  align-items: baseline;
+}
+
+/* Project ABOVE clip and nothing else on either line — the strip is a
+   column 156 px wide, so the title is a legend, not a heading, and it is
+   plain text: clicking it loads a clip, but a box around it would read as
+   somewhere to type. */
+.decks-slot-name {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  text-align: left;
+  padding: 0;
+  background: none;
+  border: 0;
+  font-size: var(--fs-nano);
+  color: var(--ink-muted);
+}
+
+.decks-slot-name:hover:not(:disabled) {
+  background: none;
+  border: 0;
+  color: var(--ink);
+}
+
+/* Each line truncates on its own, so a long project name costs the
+   clip's own name nothing. */
+.decks-slot-project,
+.decks-slot-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* The project is context; the clip is what the deck is holding. */
+.decks-slot-project {
+  color: var(--ink-dim);
+}
+
+.decks-slot-clip {
+  color: var(--ink);
+}
+
+.decks-slot-empty .decks-slot-name {
+  color: var(--ink-dim);
+}
+
+/* Stem tags and eject share a line: taking the clip out is the smallest
+   move on the strip, so its button matches a tag rather than a control. */
+.decks-slot-tags {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.decks-slot-eject {
+  flex: none;
+  margin-left: auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: var(--ink-dim);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+
+/* Source tempo and stretch — what letting this clip in costs, one line.
+   The clip's length is the lamp row below it. */
+.decks-slot-tempo {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+}
+
+/* The BPM half of that line is a button — it sets the deck's ratio to
+   the bank's grid — so it reads as the text it replaced until it is
+   hovered, and wears the brand ink while the deck is off that grid. */
+.decks-slot-bpm {
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.decks-slot-bpm:hover:not(:disabled) {
+  border: 0;
+  background: none;
+  color: var(--ink);
+}
+
+.decks-slot-bpm.is-ratioed {
+  color: var(--brand);
+}
+
+/* The ratio menu itself: a portal (the strip row scrolls), so it carries
+   its own surface rather than inheriting the strip's. */
+.decks-ratio-menu {
+  position: fixed;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.decks-ratio-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-muted);
+  font-size: var(--fs-nano);
+  text-align: left;
+}
+
+.decks-ratio-item:hover:not(:disabled) {
+  border: 0;
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+
+.decks-ratio-item.is-on {
+  color: var(--brand);
+}
+
+.decks-ratio-hint {
+  color: var(--ink-dim);
+}
+
+.decks-slot-note {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  line-height: 1.35;
+}
+
+.decks-slot-missing {
+  color: var(--fault);
+}
+
+.decks-beats-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The loop's total, silence included, as a bare number beside the field —
+   the lamps say where the loop is, the number says how long it is when
+   they are too small to count. */
+.decks-beats-count {
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The beat lamps live in a FIELD of fixed size (4:1): how many across,
+   how big and how far apart are `beatGridLayout` in decks.ts, handed down
+   as the custom properties below, so a clip of any length costs the strip
+   the same height and nothing under the grid moves when one clip replaces
+   another. The lamps start at the strip's left edge like the lines above
+   them and sit in the middle of the field's height. */
+.decks-beats {
+  display: grid;
+  grid-template-columns: repeat(var(--beat-cols, 1), var(--beat-cell, 0));
+  gap: var(--beat-gap, 0);
+  align-content: center;
+  justify-content: start;
+  width: var(--beat-field-w);
+  max-width: 100%;
+  height: var(--beat-field-h);
+}
+
+.decks-beat-dot {
+  width: var(--beat-cell);
+  height: var(--beat-cell);
+  border-radius: clamp(0px, calc(var(--beat-cell) / 4), 2px);
+  background: var(--line);
+}
+
+/* Silence hung on the end is still part of the loop, so it is drawn —
+   as an outline, because nothing sounds there. The ring thins with the
+   lamp, so a 2 px one keeps a hole and stays the quieter of the two. */
+.decks-beat-tail {
+  background: transparent;
+  box-shadow: inset 0 0 0 min(1px, calc(var(--beat-cell) / 3)) var(--line-strong);
+}
+
+/* The clip's ONE beats — the downbeats its grid marks — so the row shows
+   where the phrase turns over and not just how long the loop is. The one
+   the deck is LINED UP BY is green: a load puts the clip's first one on
+   the bank's downbeat, and a shift hands the green to whichever one comes
+   round there instead. Both sit below `.on` in specificity, so the
+   playhead still reads over them as it passes. */
+.decks-beat-one {
+  background: var(--loop);
+}
+
+.decks-beat-lead-one {
+  background: var(--ok);
+}
+
+.decks-beat-dot.on {
+  background: var(--brand);
+}
+
+.decks-beat-tail.on {
+  background: var(--brand-dim);
+}
+
+.decks-tone {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.decks-tone-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+/* A tone control that has been wired into the rack no longer cuts its
+   band, so its jack lights the way a live output does. */
+.decks-tone-jack.is-patched .jack-name {
+  color: var(--cue);
+}
+
+/* A deck's own send and return — the patch points at the very top of the
+   strip, where the cables from the canvas arrive. */
+.decks-slot-io {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* An arrow names each socket: up is the deck's audio leaving, down is the
+   rack's answer coming back. */
+.decks-io-label {
+  color: var(--ink-dim);
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
+
+/* The insert's wetness knob and its cue button sit at the end of the
+   patch row, pushed away from the sockets they belong to so the two
+   cables and the two controls read as two things. */
+.decks-io-wet {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+/* The knob carries no text label (the dial's aria-label and hover
+   tooltip name it), so it draws smaller than the panel knobs. */
+.decks-io-wet .knob {
+  width: 24px;
+  height: 24px;
+}
+
+.decks-io-wet .knob-dial {
+  width: 20px;
+  height: 20px;
+}
+
+.decks-io-wet .knob-pointer {
+  height: 6px;
+  transform-origin: 50% 6px;
+}
+
+/* The bank's clock, up in the bar with the beat it counts. */
+.decks-clock-jack {
+  display: inline-flex;
+  align-items: center;
+}
+
+.decks-mix {
+  display: flex;
+  gap: 8px;
+}
+
+/* Unity on a deck's level fader is the MIDDLE of its travel (above it is
+   boost), so the track carries a mark there — the same thing a dial says
+   by pointing straight up. */
+.decks-mix .fader-v .fader-track::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -5px;
+  right: -5px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.decks-mix-side {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.decks-btn {
+  padding: 3px 6px;
+  font-size: var(--fs-xs);
+}
+
+/* A one-letter switch: square, because it says one thing (M = cue this
+   deck's insert into the monitor) and has no room to say it twice. */
+.decks-btn-square {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 1;
+  text-align: center;
+}
+
+/* Mute + monitor on one row, queue + drop on the next: two pairs the
+   thumb reads as "now" and "on the beat". */
+.decks-btn-row {
+  display: flex;
+  gap: 4px;
+}
+
+.decks-btn-row .decks-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+/* An armed queue/drop is a promise the bank's clock is holding, so it
+   waits in the warning amber and breathes until the beat takes it. The
+   pulse is colour/opacity only; with motion off it rests as a steady
+   tint, which still says "armed". */
+.decks-btn-arm.is-armed {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 22%, var(--canvas));
+  border-color: color-mix(in srgb, var(--warn) 65%, var(--line-strong));
+  animation: decks-arm-pulse 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes decks-arm-pulse {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0.55;
+  }
+}
+
+/* Add/remove a beat: a label, two nudge buttons and the count between
+   them, so the number the buttons change is the number you are reading.
+   Fixed columns rather than a flex row, so the two steppers' buttons
+   stand in the same places however wide their labels and counts run. */
+.decks-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.4rem 2.5ch 1.4rem;
+  align-items: center;
+  gap: 3px;
+}
+
+/* SIL's label is a word; SFT's is a BUTTON too — tap it on the beat the
+   deck should start on — so the rule has to survive being one and still
+   read as the label beside it, not as a third stepper button. */
+.decks-step-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--ink-dim);
+  font-size: var(--fs-nano);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* The only sign it is pressable; the tooltip says what for. */
+.decks-step-label:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.decks-step button:not(.decks-step-label) {
+  padding: 0;
+  line-height: 1.6;
+  font-size: var(--fs-xs);
+}
+
+.decks-step-value {
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+
+/* Wide enough for the clip table's six columns (the Library page's own
+   list, in a dialog) without the two name columns fighting over a line. */
+.decks-clip-dialog {
+  width: min(1040px, 94vw);
+  max-height: min(720px, 88vh);
+}
+
+/* The table is the only part of the dialog allowed to grow: it scrolls
+   within the bounded dialog so the search box and Cancel stay in reach
+   however many clips there are. */
+.decks-clip-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The SONG level of the deck's load dialog: one row per song, in tempo
+   order. It is scrolled to put the song nearest the bank's tempo in the
+   middle, so the list needs real height — a short one would have no
+   middle to scroll to. */
+.decks-song-rows {
+  max-height: 50vh;
+}
+
+.decks-song-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 60px 60px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.decks-song-row.is-active {
+  background: var(--surface-raised);
+  border-color: var(--brand);
+}
+
+.decks-song-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decks-song-artist,
+.decks-song-count {
+  color: var(--ink-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decks-song-bpm {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.decks-song-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-dim);
+}

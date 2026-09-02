@@ -1,0 +1,130 @@
+/* ------------------------------------------------------------------ */
+/* Beat Clip panel + the picker's Clips tab                            */
+/* ------------------------------------------------------------------ */
+
+.beat-clip-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.beat-clip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.beat-clip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.beat-clip-beats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.beat-clip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #22303c;
+}
+
+.beat-clip-dot.on {
+  background: #4fd6c8;
+}
+
+/* A clip has no panel to preview: the Clips tab lists rows instead of
+   rendering tiles, so a long shelf of clips stays scannable. */
+.picker-clip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* WHAT A CLIP IS MADE OF (`StemTags`), wherever one is offered: the
+   picker's Clips tab, the Beat Clip panel, the builder's own list. Quiet
+   by design — these are a property of the row, not a call to action, so
+   they read as one muted chip each rather than four colours. */
+.stem-tags {
+  display: inline-flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+/* Abbreviated to three letters (VOX/DRM/BAS/OTH) where the column is too
+   narrow to spell them out, and held to ONE line: a wrapped tag row in a
+   deck strip pushes the knobs under it out of the dock. */
+.stem-tags-short {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.stem-tag {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink-muted);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.picker-clip-row {
+  align-items: baseline;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: grid;
+  /* The clip's name, the project it came from and what it is made of
+     belong together; only the two numeric columns are pushed right. */
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto auto;
+  gap: 4px 14px;
+  padding: 7px 10px;
+}
+
+.picker-clip-row.active {
+  background: var(--surface);
+  border-color: var(--brand);
+}
+
+.picker-clip-name {
+  color: var(--ink);
+  font-size: var(--fs-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-clip-project {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-clip-beats {
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.picker-clip-bpm {
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  min-width: 5.5em;
+  text-align: right;
+}
