@@ -18,13 +18,15 @@ midi-hw = ["dep:midir"]
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+# One decode pipeline for the whole app lives in dj-analysis
+# (`decode_audio`); `playback::decode_file` re-shapes its output.
+dj-analysis = { path = "../dj-analysis" }
 anyhow.workspace = true
 wasmtime = { version = "37", default-features = false, features = ["cranelift", "runtime", "parallel-compilation"] }
 rtrb = "0.3"
 libloading = "0.8"
 dj-module-sdk = { path = "../dj-module-sdk" }
 hound = "3.5"
-symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "isomp4", "flac", "wav", "pcm", "aiff"] }
 cpal = { version = "0.16", optional = true }
 midir = { version = "0.10", optional = true }
 
@@ -58,6 +60,3 @@ tempfile = "3"
 # For the M2 deck <-> library round-trip acceptance test (cues/loops/grids
 # persist in the library and reappear in a fresh patch).
 dj-library = { path = "../dj-library" }
-# For the M3 analysis -> deck sync integration test (auto-beatgrids drive
-# deck sync with no manual grid adjustment).
-dj-analysis = { path = "../dj-analysis" }
