@@ -326,14 +326,15 @@ describe('what the player is handed', () => {
   });
 });
 
-// THE BLEED IS A SEAM'S BUSINESS. A run of copies of the same clip is a
-// loop played pass by pass, and the joins between them are the seams the
-// clip's bookends were kept for: the RIGHT bleed (what followed the clip
-// in its track) belongs over a copy's head, the LEFT one over its tail.
-// The first pass has nothing to carry in and the last nothing to lean
-// into, which is the same rule the engine's player and the Clip page's
-// preview follow.
-describe('which copies meet a seam', () => {
+// A COPY BRINGS ITS BOOKENDS WITH IT. The bleed is the material either
+// side of the clip in the track it was cut from, and the grid is a
+// timeline, so it goes back where it came from: the left bookend ends on
+// the copy's first beat, the right one starts where its last beat ends.
+// A copy alone is heard as lead-in, clip, tail-out; copies running back
+// to back put one's tail-out and the next one's lead-in on the join,
+// which is the overlay a looping player makes of its seam. Only an end
+// the play range CUTS goes without.
+describe('which ends of a copy carry bleed', () => {
   const c = clip({ beats: 4, bpm: 120, ones: [0] });
   const clips = new Map([['c1', c]]);
   const range = { start: 0, end: 32 };
@@ -344,44 +345,46 @@ describe('which copies meet a seam', () => {
     return scheduleRange(state, clips, range);
   }
 
-  it('gives a lone copy no bleed at either end', () => {
-    expect(copies(8)[0].bleed).toEqual({ left: false, right: false });
+  it('gives a lone copy both bookends', () => {
+    expect(copies(8)[0].bleed).toEqual({ left: true, right: true });
   });
 
-  it('bleeds across the joins of a run, but not off its ends', () => {
-    const run = copies(0, 4, 8);
-    expect(run.map((copy) => copy.bleed)).toEqual([
-      { left: true, right: false },
+  it('gives every copy of a run the same, joins and ends alike', () => {
+    // Three copies back to back: six bookends, four of which fall on the
+    // two joins (a tail-out and a lead-in each) and two on the run's own
+    // ends.
+    expect(copies(0, 4, 8).map((copy) => copy.bleed)).toEqual([
       { left: true, right: true },
-      { left: false, right: true },
+      { left: true, right: true },
+      { left: true, right: true },
     ]);
   });
 
-  it('treats a gap as an end: copies that do not touch are two runs', () => {
-    // 0..3 and 12..15 — nothing runs into either of them.
-    expect(copies(0, 12).map((copy) => copy.bleed)).toEqual([
-      { left: false, right: false },
-      { left: false, right: false },
-    ]);
+  it('drops the bookend at an end the play range cuts', () => {
+    const state: GridState = { ...emptyGrid(120), rows: [placeClip(row(), c, 4)] };
+    // 4..7 played through 5..7: it starts part-way in and stops short,
+    // so neither beat the bleed is measured from is sounding.
+    expect(scheduleRange(state, clips, { start: 5, end: 7 })[0].bleed).toEqual({
+      left: false,
+      right: false,
+    });
+    // Cut at the head only: the copy still ends where it means to.
+    expect(scheduleRange(state, clips, { start: 5, end: 32 })[0].bleed).toEqual({
+      left: false,
+      right: true,
+    });
   });
 
-  it('drops the bleed at an end the play range cuts', () => {
-    const r = [0, 4, 8].reduce((acc, col) => placeClip(acc, c, col), row());
+  // A LOOP'S SEAM IS A JOIN LIKE ANY OTHER. A copy that ends on the
+  // loop's last beat keeps its right bookend — the player starts it
+  // where the copy ends, which is where the next time round begins — and
+  // one that starts on the loop's first beat keeps its left.
+  it('keeps the bookends of a copy that meets the loop edge', () => {
+    const r = placeClip(placeClip(row(), c, 0), c, 4);
     const state: GridState = { ...emptyGrid(120), rows: [r] };
-    // A loop over the middle copy alone: neither neighbour sounds, so
-    // neither join is a seam this pass.
-    const [copy] = scheduleRange(state, clips, { start: 4, end: 8 });
-    expect(copy.bleed).toEqual({ left: false, right: false });
-  });
-
-  it('follows the clip length, not the bar', () => {
-    const long = clip({ beats: 8 });
-    const r = placeClip(placeClip(row(), long, 0), long, 8);
-    const state: GridState = { ...emptyGrid(120), rows: [r] };
-    const run = scheduleRange(state, new Map([['c1', long]]), range);
-    expect(run.map((copy) => copy.bleed)).toEqual([
-      { left: true, right: false },
-      { left: false, right: true },
+    expect(scheduleRange(state, clips, { start: 0, end: 8 }).map((copy) => copy.bleed)).toEqual([
+      { left: true, right: true },
+      { left: true, right: true },
     ]);
   });
 });

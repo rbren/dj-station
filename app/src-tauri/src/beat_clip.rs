@@ -264,11 +264,11 @@ pub fn beat_clip_audio(
 
 /// One side of a saved clip's BLEED as WAV bytes, for the same webview
 /// player. `"right"` is the material that FOLLOWED the clip in its track
-/// (laid over the head of a pass, carrying the pass before it across the
-/// seam) and `"left"` the material that came before it (laid over a
-/// pass's tail) — the two halves of `playback::ClipBleed`, handed over
-/// apart from the loop because they are summed where they are heard.
-/// A side the clip was saved without answers with no bytes at all.
+/// and `"left"` what ran into it — the two halves of
+/// `playback::ClipBleed`, handed over apart from the loop because they
+/// are summed where they are heard: over the seam by a looping player,
+/// either side of the copy by a timeline (the Grid page). A side the
+/// clip was saved without answers with no bytes at all.
 ///
 /// `bpm` re-times it with the SAME stretch the loop gets, so a bleed
 /// still meets the seam it belongs to once the grid's tempo has moved.

@@ -906,17 +906,27 @@ export interface ScheduledClip {
    *  the row's rack chrome. */
   pan: number;
   /** Which of the clip's bleed bookends this copy sounds, by SIDE (see
-   *  `playback::ClipBleed`): `right` is the material that followed the
-   *  clip in its track, laid over this copy's HEAD; `left` is what came
-   *  before it, laid over its TAIL. Each is true only where the copy
-   *  meets a SEAM — another copy of the same row running straight into
-   *  it, or straight out of it, inside the range being played. A copy
-   *  nothing runs into is a first pass and drops the right bleed; one
-   *  nothing follows is a last pass and drops the left. */
+   *  `playback::ClipBleed`). The bleed is the material either side of
+   *  the clip in the track it was cut from, and on a TIMELINE it goes
+   *  back where it came from: the `left` bookend ENDS on the copy's
+   *  first beat, the `right` one STARTS where its last beat ends.
+   *
+   *  That one rule covers both readings of a bleed. Where two copies of
+   *  a row run straight into each other the two bookends land on the
+   *  join — the left one over the tail of the copy before it, the right
+   *  one over the head of the copy after — which is exactly the overlay
+   *  a looping player makes of its seam, and no copy ever carries its
+   *  own right bleed at its head or its own left bleed at its tail.
+   *  Where a copy stands alone they are simply its lead-in and its
+   *  tail-out.
+   *
+   *  False for an end the play RANGE cuts: the beat the bookend is
+   *  measured from is not being played, so there is nothing to lead into
+   *  or out of. */
   bleed: ClipBleedEnds;
 }
 
-/** The seam ends of one copy — see `ScheduledClip.bleed`. */
+/** The bleed ends of one copy — see `ScheduledClip.bleed`. */
 export interface ClipBleedEnds {
   left: boolean;
   right: boolean;
@@ -936,8 +946,6 @@ export function scheduleRange(
   for (const row of state.rows) {
     const clip = clips.get(row.clipId);
     if (!clip || clip.bpm <= 0) continue;
-    const beats = Math.max(1, clip.beats);
-    const placed = new Set(row.placements);
     for (const start of row.placements) {
       const span = placementSpan(clip, start);
       if (span.end <= range.start || span.start >= range.end) continue;
@@ -963,13 +971,9 @@ export function scheduleRange(
         durationSecs: gridSecs,
         levels: levelRamp(state, row, from, Math.min(span.end, range.end)),
         pan: fxOrDefault(row.fx).pan,
-        // A seam needs BOTH copies whole and inside the range: a copy cut
-        // by the range's edge has no neighbour on that side to smooth
-        // into, whatever the arrangement says.
-        bleed: {
-          right: span.start > range.start && placed.has(start - beats),
-          left: span.end < range.end && placed.has(start + beats),
-        },
+        // Only the ends the copy actually PLAYS carry a bookend; an end
+        // the range cuts off is not a moment the bleed can meet.
+        bleed: { left: span.start >= range.start, right: span.end <= range.end },
       });
     }
   }

@@ -250,10 +250,12 @@ interface FakeVoice {
   stoppedAt: number | null;
   gain: string[];
   /** What `start` was told to play: seconds into the buffer, and how
-   *  many of them. A bleed bookend is a much shorter one than a loop,
-   *  which is how the two are told apart below. */
+   *  many of them. */
   offset: number;
   duration: number;
+  /** How long the buffer under it is — a bleed bookend decodes to much
+   *  less than a loop, which is how the two are told apart below. */
+  bufferSecs: number;
 }
 
 let voices: FakeVoice[] = [];
@@ -299,9 +301,12 @@ function fakeContext() {
         gain: [],
         offset: 0,
         duration: 0,
+        bufferSecs: 0,
       };
       return {
-        buffer: null,
+        set buffer(buffer: { duration: number }) {
+          voice.bufferSecs = buffer.duration;
+        },
         onended: null,
         playbackRate: { value: 1 },
         connect(dest: { log?: string[] }) {
@@ -424,16 +429,16 @@ describe('GridTransport voices', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The bleed over a seam
+// The bleed either side of a copy
 // ---------------------------------------------------------------------------
 
-// Two copies of a row running straight into each other are two passes of
-// one loop, and the join between them is a SEAM: the clip's right bleed
-// (the material that followed it in its track) goes over the head of the
-// second copy, its left bleed over the tail of the first. A run's own
-// ends are not seams — a first pass has nothing to carry in, a last pass
-// nothing to lean into — which is the rule the engine's player and the
-// Clip page's preview both follow.
+// The bleed goes back where the material came from: the left bookend
+// ENDS on a copy's first beat, the right one STARTS where its last beat
+// ends. A copy on its own is heard as lead-in, clip, tail-out. Two
+// copies back to back put the first one's tail-out and the second one's
+// lead-in ON the join — which is precisely the overlay a looping player
+// makes of its seam, and why no copy ever carries its own right bleed at
+// its head or its own left bleed at its tail.
 
 describe('GridTransport bleed', () => {
   let audio: GridTransport;
@@ -457,12 +462,13 @@ describe('GridTransport bleed', () => {
   /** The bookends that reached Web Audio, in start order. */
   function bookends() {
     return voices
-      .filter((v) => v.duration === BLEED_SECS)
+      .filter((v) => v.bufferSecs === BLEED_SECS)
       .sort((a, b) => a.startedAt - b.startedAt);
   }
 
+  /** Where the clips themselves were started. */
   function loops() {
-    return voices.filter((v) => v.duration === 2).map((v) => v.startedAt);
+    return voices.filter((v) => v.bufferSecs === 8).map((v) => v.startedAt);
   }
 
   async function settle() {
@@ -481,36 +487,89 @@ describe('GridTransport bleed', () => {
     delete (window as unknown as { AudioContext?: unknown }).AudioContext;
   });
 
-  it('lays each bookend on the seam it belongs to', async () => {
-    await audio.play(run(0, 4), CLIPS, 32);
+  it('plays a lone copy as lead-in, clip, tail-out', async () => {
+    // Column 8 at 120 bpm is 4 s in, and the pass is cued 50 ms ahead.
+    await audio.play(run(8), CLIPS, 32);
     await settle();
-
-    // 120 bpm: each copy is 2 s long, and the pass is cued 50 ms ahead.
-    expect(loops()).toEqual([0.05, 2.05]);
-    // The left bleed ENDS on the join and the right one starts there:
-    // the seam is overlaid from both sides, and neither the run's head
-    // nor its tail carries anything.
-    expect(bookends().map((v) => v.startedAt)).toEqual([2.05 - BLEED_SECS, 2.05]);
+    expect(loops()).toEqual([4.05]);
+    // The left bookend ENDS where the clip begins; the right one starts
+    // where it ends.
+    expect(bookends().map((v) => v.startedAt)).toEqual([4.05 - BLEED_SECS, 4.05 + 2]);
     expect(bookends().map((v) => v.offset)).toEqual([0, 0]);
   });
 
-  it('asks for each side a seam needs, once', async () => {
+  it('puts a tail-out and a lead-in on the join between two copies', async () => {
+    await audio.play(run(4, 8), CLIPS, 32);
+    await settle();
+    expect(loops()).toEqual([2.05, 4.05]);
+    // Lead-in, then the join carrying the first copy's tail-out and the
+    // second's lead-in at once, then the tail-out of the run.
+    for (const [i, at] of [1.8, 3.8, 4.05, 6.05].entries()) {
+      expect(bookends()[i].startedAt).toBeCloseTo(at, 6);
+    }
+    expect(bookends()).toHaveLength(4);
+  });
+
+  it('trims a lead-in that reaches back before the clock, rather than dropping it', async () => {
+    // A copy on the very first beat is cued 50 ms out, so only the last
+    // 50 ms of its quarter-second lead-in can still be played.
+    await audio.play(run(0), CLIPS, 32);
+    await settle();
+    const [lead] = bookends();
+    expect(lead.startedAt).toBe(0);
+    expect(lead.offset).toBeCloseTo(BLEED_SECS - 0.05, 6);
+    expect(lead.duration).toBeCloseTo(0.05, 6);
+  });
+
+  it('asks for each side once, however many copies want it', async () => {
     await audio.play(run(0, 4, 8), CLIPS, 32);
     await settle();
-    // Three copies are two seams, and both of them want both bookends —
-    // at one tempo that is two renders, not four.
+    // Three copies, six bookends — but at one tempo that is two renders,
+    // not six.
     expect([...bleed.mock.calls].sort()).toEqual([
       ['c1', 'left', 120],
       ['c1', 'right', 120],
     ]);
   });
 
-  it('plays no bleed on a copy nothing runs into or out of', async () => {
-    await audio.play(run(8), CLIPS, 32);
+  // A LOOP'S WRAP IS A JOIN LIKE ANY OTHER. The last copy's tail-out
+  // starts where the loop comes round, over the head of the next time
+  // through, and the first copy's lead-in of that next pass reaches back
+  // over the tail of this one — which is why a pass has to be committed
+  // a lead-in before it begins, not merely a lookahead.
+  it('carries the bleed across the wrap of a loop', async () => {
+    const state = { ...run(0), loop: { start: 0, end: 4 } };
+    await audio.play(state, CLIPS, 32);
     await settle();
-    expect(bleed).not.toHaveBeenCalled();
-    expect(bookends()).toEqual([]);
-    expect(loops()).toHaveLength(1);
+    // The loop is 2 s: pass one at 0.05, pass two at 2.05.
+    ctxTime = 1.7;
+    await settle();
+
+    expect(loops()).toEqual([0.05, 2.05]);
+    // Pass one's tail-out lands on the wrap, and pass two's lead-in
+    // reaches back before it — the two sides of the join, whole, neither
+    // of them trimmed.
+    const wrap = bookends().filter((v) => v.startedAt > 1 && v.startedAt < 3);
+    expect(wrap.map((v) => v.startedAt)).toEqual([2.05 - BLEED_SECS, 2.05]);
+    expect(wrap.map((v) => v.offset)).toEqual([0, 0]);
+  });
+
+  // A play that runs off the end of the arrangement is not a STOP: the
+  // tail-out of the last copy hangs over that end by design, and cutting
+  // it would take back the very thing it is there for. A stop the page
+  // asks for still cuts.
+  it('lets the last tail-out ring out past the end of a one-shot play', async () => {
+    await audio.play(run(0), CLIPS, 4);
+    await settle();
+    const tail = bookends().at(-1)!;
+    expect(tail.startedAt).toBeCloseTo(2.05, 6);
+
+    ctxTime = 2.1;
+    expect(audio.status()).toEqual({ playing: false, column: 4 });
+    expect(tail.stoppedAt).toBeNull();
+
+    audio.stop();
+    expect(tail.stoppedAt).not.toBeNull();
   });
 
   it('plays the run anyway where the clip was filed without bleed', async () => {
@@ -526,6 +585,6 @@ describe('GridTransport bleed', () => {
     audio = new GridTransport(source(false));
     await audio.play(run(0, 4), CLIPS, 32);
     await settle();
-    expect(voices.map((v) => v.duration)).toEqual([2, 2]);
+    expect(voices.map((v) => v.bufferSecs)).toEqual([8, 8]);
   });
 });
