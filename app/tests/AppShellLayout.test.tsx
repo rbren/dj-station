@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { appCss } from './readStyles';
 import { describe, expect, it } from 'vitest';
 
 // jsdom doesn't do layout, so pin the stylesheet directly (the
@@ -12,7 +12,7 @@ describe('app shell layout (CSS-level pin)', () => {
   // of EVERY rule whose selector list contains the exact selector (the
   // shell declarations are split across a grouped height rule and the
   // standalone ones).
-  const css = readFileSync('src/styles.css', 'utf-8');
+  const css = appCss();
   const rule = (selector: string): string => {
     const bodies = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
       .filter((m) => m[1].split(',').some((s) => s.trim().split('\n').pop()?.trim() === selector))

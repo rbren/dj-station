@@ -10,6 +10,7 @@
 //     cmd/ctrl+click then vertical drag sets that note's velocity.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePoll } from '../usePoll';
 import { forwardCycle } from '../../../extensions/ui-lib/stepFollower';
 import { useStepFollowers } from '../../../extensions/ui-lib/useStepFollower';
 import type { ChoreoStatus, ChoreoTrack, NoteStep } from '../engine';
@@ -336,14 +337,7 @@ export function ChoreoPanel({ instance, api, onChanged, pollMs = 100 }: ChoreoPa
     if (s && !disposedRef.current) setStatus(s);
   }, [api, instance]);
 
-  useEffect(() => {
-    const initial = setTimeout(() => void refresh(), 0);
-    const t = setInterval(() => void refresh(), pollMs);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(t);
-    };
-  }, [refresh, pollMs]);
+  usePoll(refresh, pollMs);
 
   const changed = useCallback(() => {
     void refresh();

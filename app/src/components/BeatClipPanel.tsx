@@ -8,9 +8,10 @@
 // what the frontend guesses; a module still waiting for its first clock
 // edge says so, because silence with no explanation reads as broken.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { beatClip as defaultApi, type BeatClipApi, type BeatClipStatus } from '../beatClip';
 import { fixed } from '../format';
+import { usePoll } from '../usePoll';
 import { StemTags } from './StemTags';
 
 const POLL_MS = 100;
@@ -31,16 +32,7 @@ export function BeatClipPanel(props: BeatClipPanelProps) {
     if (st) setStatus(st);
   }, [api, instanceId]);
 
-  useEffect(() => {
-    // First poll on a timeout (keeps setState out of the effect body per
-    // react-hooks/set-state-in-effect), then interval.
-    const initial = setTimeout(() => void poll(), 0);
-    const timer = setInterval(() => void poll(), props.pollMs ?? POLL_MS);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(timer);
-    };
-  }, [poll, props.pollMs]);
+  usePoll(poll, props.pollMs ?? POLL_MS);
 
   const beats = status?.beats ?? 0;
   const beat = status?.beat ?? -1;

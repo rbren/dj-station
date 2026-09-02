@@ -9,6 +9,7 @@
 // module currently holds the controller.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePoll } from '../usePoll';
 import type { LaunchControlStatus } from '../engine';
 
 /** IPC surface the panel needs; RackModule adapts EngineClient onto this. */
@@ -44,14 +45,7 @@ export function LaunchControlPanel({ instance, api, pollMs = 500 }: LaunchContro
     if (s && !disposedRef.current) setStatus(s);
   }, [api, instance]);
 
-  useEffect(() => {
-    const initial = setTimeout(() => void refresh(), 0);
-    const t = setInterval(() => void refresh(), pollMs);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(t);
-    };
-  }, [refresh, pollMs]);
+  usePoll(refresh, pollMs);
 
   const connected = status?.connected ?? false;
   const active = status?.active ?? false;

@@ -2,7 +2,7 @@
 // what the controls send, and what the page does when there is no bank
 // (or no clips) yet.
 
-import { readFileSync } from 'node:fs';
+import { appCss } from './readStyles';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { DecksView } from '../src/components/DecksView';
@@ -403,7 +403,7 @@ describe('DecksView', () => {
 
   it('styles.css draws the header as plain text, two lines, both ellipsized', () => {
     // vitest runs with the app directory as cwd (see PanelLayout.test.tsx).
-    const css = readFileSync('src/styles.css', 'utf8');
+    const css = appCss();
     const rule = (selector: RegExp) => {
       const m = css.match(new RegExp(`${selector.source}\\s*{[^}]*}`));
       if (!m) throw new Error(`missing rule ${selector.source}`);

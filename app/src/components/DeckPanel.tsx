@@ -7,6 +7,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { deck as defaultDeck, type DeckApi, type DeckStatus, type SavedLoop } from '../deck';
 import { fixed, safeNumber } from '../format';
+import { usePoll } from '../usePoll';
 import type { Track } from '../library';
 import type { ModuleHandle } from '../types';
 import { WaveformView, WAVEFORM_VIEW_W, zoomWindow } from './WaveformView';
@@ -144,16 +145,7 @@ export function DeckPanel(props: DeckPanelProps) {
     }
   }, [api, instanceId, refreshMeta]);
 
-  useEffect(() => {
-    // First poll on a microtask-ish timeout (keeps setState out of the
-    // effect body per react-hooks/set-state-in-effect), then interval.
-    const initial = setTimeout(() => void poll(), 0);
-    const timer = setInterval(() => void poll(), props.pollMs ?? POLL_MS);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(timer);
-    };
-  }, [poll, props.pollMs]);
+  usePoll(poll, props.pollMs ?? POLL_MS);
 
   const cues = status?.cues ?? Array<number | null>(8).fill(null);
   const playing = status?.playing ?? false;
