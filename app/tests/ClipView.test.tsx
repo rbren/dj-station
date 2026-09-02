@@ -127,7 +127,7 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
     ),
     openBeatClip: vi.fn(async () => null),
     stemBackend: vi.fn(async () => ({
-      backend: 'htdemucs_ft',
+      backend: 'scnet_xl_ihf',
       available: true,
       detail: null,
       stems: ['vocals', 'drums', 'bass', 'other'],
@@ -137,7 +137,7 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
     // Tests about the wait say so themselves.
     stemStatus: vi.fn(async (trackId: number) => ({
       track_id: trackId,
-      backend: 'htdemucs_ft',
+      backend: 'scnet_xl_ihf',
       state: 'ready' as const,
       stage: null,
       detail: null,
@@ -1828,7 +1828,7 @@ describe('ClipView', () => {
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
-        backend: 'htdemucs_ft',
+        backend: 'scnet_xl_ihf',
         state: ready ? ('ready' as const) : ('loading' as const),
         stage: ready ? null : 'separating',
         detail: null,
@@ -1929,7 +1929,7 @@ describe('ClipView', () => {
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
-        backend: 'htdemucs_ft',
+        backend: 'scnet_xl_ihf',
         state: 'ready' as const,
         stage: null,
         detail: null,
@@ -1947,7 +1947,7 @@ describe('ClipView', () => {
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
-        backend: 'htdemucs_ft',
+        backend: 'scnet_xl_ihf',
         state: 'ready' as const,
         stage: null,
         detail: null,
@@ -1982,7 +1982,7 @@ describe('ClipView', () => {
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
-        backend: 'htdemucs_ft',
+        backend: 'scnet_xl_ihf',
         state: 'ready' as const,
         stage: null,
         detail: null,
@@ -2015,7 +2015,7 @@ describe('ClipView', () => {
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
-        backend: 'htdemucs_ft',
+        backend: 'scnet_xl_ihf',
         state: 'loading' as const,
         stage: 'separating',
         detail: null,
@@ -2030,17 +2030,17 @@ describe('ClipView', () => {
   });
 
   it('explains itself when the separation tooling is missing', async () => {
-    const detail = 'demucs was not found on PATH — pip install demucs';
+    const detail = 'the SCNet XL IHF checkpoint is missing — run scripts/install-scnet.sh';
     const clip = clipMock({
       stemBackend: vi.fn(async () => ({
-        backend: 'htdemucs_ft',
+        backend: 'scnet_xl_ihf',
         available: false,
         detail,
         stems: ['vocals', 'drums', 'bass', 'other'],
       })),
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
-        backend: 'htdemucs_ft',
+        backend: 'scnet_xl_ihf',
         state: 'unavailable' as const,
         stage: null,
         detail,
@@ -2049,7 +2049,7 @@ describe('ClipView', () => {
     });
     render(<ClipView clip={clip} library={libraryMock()} />);
     await waitFor(() =>
-      expect(screen.getByTestId('clip-stem-hint').textContent).toContain('pip install demucs'),
+      expect(screen.getByTestId('clip-stem-hint').textContent).toContain('install-scnet.sh'),
     );
     // Nothing claims stems are on their way, and there is nothing to press.
     expect(screen.queryByTestId('clip-stem-loading')).toBeNull();
@@ -2061,10 +2061,10 @@ describe('ClipView', () => {
     const clip = clipMock({
       stemStatus: vi.fn(async (trackId: number) => ({
         track_id: trackId,
-        backend: 'htdemucs_ft',
+        backend: 'scnet_xl_ihf',
         state: 'failed' as const,
         stage: null,
-        detail: 'demucs failed (exit status: 1): torch.cuda.OutOfMemoryError',
+        detail: 'python failed (exit status: 1): torch.OutOfMemoryError',
         pending: 0,
       })),
     });

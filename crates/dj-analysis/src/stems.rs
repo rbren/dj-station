@@ -1,6 +1,6 @@
 //! Stem separation (PRD §8.2, M3): vocals / drums / bass / other.
 //!
-//! [`StemSeparator`] is the pluggable interface. Two implementations:
+//! [`StemSeparator`] is the pluggable interface. Three implementations:
 //!
 //! - [`BandSeparator`] (this module): a deterministic pure-DSP fallback
 //!   that always works offline. Harmonic/percussive separation (HPSS via
@@ -11,7 +11,10 @@
 //!   unity per time-frequency bin, so the four stems sum to the original
 //!   signal exactly (energy conservation) and the ISTFT is the only
 //!   source of (tiny) reconstruction error.
-//! - `OnnxSeparator` (`src/onnx.rs`, `--features onnx`): htdemucs-class
+//! - [`ScnetSeparator`](crate::scnet::ScnetSeparator) (`src/scnet.rs`):
+//!   the production model, SCNet XL IHF through MSST's inference CLI.
+//!   Optional tooling — without it the app reports stems as unavailable.
+//! - `OnnxSeparator` (`src/onnx.rs`, `--features onnx`): a demucs-class
 //!   model via ONNX Runtime, CoreML execution provider on macOS / CPU
 //!   elsewhere. Production quality arrives by dropping in real weights;
 //!   the fallback keeps every feature testable without them.
@@ -68,7 +71,7 @@ pub struct Stems(pub [AudioData; N_STEMS]);
 /// A stem separation backend. Implementations must be deterministic for a
 /// given input and preserve length/sample rate.
 pub trait StemSeparator: Send + Sync {
-    /// Short id that keys the stem cache ("band", "onnx", "htdemucs_ft").
+    /// Short id that keys the stem cache ("band", "onnx", "scnet_xl_ihf").
     /// Model-backed separators return the model name so two models never
     /// share a cache directory (see [`stems_dir_for`]).
     fn id(&self) -> &str;
@@ -95,7 +98,7 @@ pub trait StemSeparator: Send + Sync {
 }
 
 /// A stop signal for one separation, plus the child process (if any) that
-/// is doing the work. Cancelling kills that child: a demucs run is
+/// is doing the work. Cancelling kills that child: a model run is
 /// minutes of another program's time and nothing inside it is watching a
 /// flag of ours.
 #[derive(Debug, Default)]
@@ -406,7 +409,7 @@ pub const DEFAULT_SEPARATOR_ID: &str = "band";
 /// Where one *backend's* stems live. The DSP fallback keeps the flat
 /// `<data_dir>/stems/<hash>/` layout; every other backend gets its own
 /// subdirectory `<data_dir>/stems/<hash>/<separator id>/`, so asking for
-/// `htdemucs_ft` can never be served the DSP stems that the import-time
+/// `scnet_xl_ihf` can never be served the DSP stems that the import-time
 /// analysis pass already wrote (and vice versa).
 pub fn stems_dir_for(data_dir: &Path, content_hash: &str, separator_id: &str) -> PathBuf {
     let base = stems_dir(data_dir, content_hash);
@@ -415,6 +418,68 @@ pub fn stems_dir_for(data_dir: &Path, content_hash: &str, separator_id: &str) ->
     } else {
         base.join(separator_id)
     }
+}
+
+/// A track's cached stems, and which separator produced them — the
+/// directory name IS that metadata, so it needs no sidecar file and is
+/// true of caches written before this existed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedStems {
+    /// Separator id (the model, e.g. `scnet_xl_ihf`).
+    pub separator: String,
+    pub dir: PathBuf,
+}
+
+/// The stems a track already has for `separator_id`, or failing that from
+/// ANOTHER model.
+///
+/// Switching the app's model must not re-separate a library: minutes of
+/// work per track, and the stems on disk are perfectly good. So the
+/// current separator's cache wins, and a track separated by a previous
+/// default (`htdemucs_ft`) keeps serving those stems — under its own name,
+/// which is what the UI reports as the model behind them.
+///
+/// Only model backends take part: the DSP fallback's flat cache is never
+/// served to a model (and vice versa), the invariant [`stems_dir_for`]
+/// exists for.
+pub fn cached_stems_for(
+    data_dir: &Path,
+    content_hash: &str,
+    separator_id: &str,
+) -> Option<CachedStems> {
+    let own = stems_dir_for(data_dir, content_hash, separator_id);
+    if stems_cached(&own) {
+        return Some(CachedStems {
+            separator: separator_id.to_string(),
+            dir: own,
+        });
+    }
+    if separator_id == DEFAULT_SEPARATOR_ID {
+        return None;
+    }
+    // Newest first, so a machine that has been through several models
+    // serves the most recent separation.
+    let mut others: Vec<(std::time::SystemTime, String, PathBuf)> =
+        std::fs::read_dir(stems_dir(data_dir, content_hash))
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir() && stems_cached(&e.path()))
+            .map(|e| {
+                let modified = e
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                (
+                    modified,
+                    e.file_name().to_string_lossy().into_owned(),
+                    e.path(),
+                )
+            })
+            .collect();
+    others.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    let (_, separator, dir) = others.into_iter().next()?;
+    Some(CachedStems { separator, dir })
 }
 
 /// Drop a track's whole stem cache — every backend's, since the qualified

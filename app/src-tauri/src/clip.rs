@@ -309,7 +309,7 @@ pub fn clip_load_source(
 /// shows the reason and disables the isolate action.
 #[derive(Debug, Serialize)]
 pub struct ClipStemBackend {
-    /// Separator id — the model name for demucs, e.g. `htdemucs_ft`.
+    /// Separator id — the model name, e.g. `scnet_xl_ihf`.
     backend: String,
     available: bool,
     /// Install hint / failure reason when `available` is false.
@@ -324,6 +324,10 @@ pub struct ClipStemBackend {
 pub struct ClipStemStatus {
     track_id: i64,
     backend: String,
+    /// The model that actually produced this track's stems, once they
+    /// exist. Usually `backend`, but a track separated before a model
+    /// switch keeps (and reports) the older one.
+    separator: Option<String>,
     /// `ready` | `loading` | `failed` | `unavailable`.
     state: &'static str,
     /// What the separation is doing, while it is this track's turn.
@@ -364,16 +368,17 @@ pub fn clip_stem_backend(state: State<AppState>) -> ClipStemBackend {
 #[tauri::command(async)]
 pub fn clip_stem_status(state: State<AppState>, track_id: i64) -> ClipStemStatus {
     state.auto_stems.want(track_id);
-    let (stem_state, stage, detail) = match state.auto_stems.track_stems(track_id) {
-        TrackStems::Ready => ("ready", None, None),
-        TrackStems::Loading { stage } => ("loading", stage, None),
-        TrackStems::Failed { detail } => ("failed", None, Some(detail)),
-        TrackStems::Unavailable { detail } => ("unavailable", None, Some(detail)),
+    let (stem_state, separator, stage, detail) = match state.auto_stems.track_stems(track_id) {
+        TrackStems::Ready { separator } => ("ready", Some(separator), None, None),
+        TrackStems::Loading { stage } => ("loading", None, stage, None),
+        TrackStems::Failed { detail } => ("failed", None, None, Some(detail)),
+        TrackStems::Unavailable { detail } => ("unavailable", None, None, Some(detail)),
     };
     let service = state.auto_stems.status();
     ClipStemStatus {
         track_id,
         backend: service.backend,
+        separator,
         state: stem_state,
         stage,
         detail,

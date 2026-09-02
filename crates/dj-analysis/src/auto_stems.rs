@@ -13,9 +13,9 @@
 //!   ([`stems_dir_for`](crate::stems::stems_dir_for)), so a restart picks
 //!   up where it left off instead of redoing minutes of work.
 //!
-//! One separation runs at a time. Demucs saturates the CPU by itself, and
-//! a backfill of a hundred tracks that spawned a hundred models would take
-//! the machine down with it.
+//! One separation runs at a time. The model saturates the CPU by itself,
+//! and a backfill of a hundred tracks that spawned a hundred models would
+//! take the machine down with it.
 //!
 //! Nothing here is fast, and nothing here is on the UI thread — the loop
 //! owns its own thread and the work happens in [`StemJobs`], which spawns
@@ -67,7 +67,7 @@ pub struct AutoStemSettings {
     /// How long to wait after finding nothing to do before looking again.
     pub poll_interval: Duration,
     /// How often to re-check for the separator's tooling once it is known
-    /// to be missing (installing demucs shouldn't need a restart).
+    /// to be missing (installing the model shouldn't need a restart).
     pub probe_interval: Duration,
     /// Give up on a track after this many failed separations, so one
     /// broken file can't spin the loop forever.
@@ -111,8 +111,10 @@ impl AutoStemSettings {
 /// What the Clip page needs to know about one track's stems.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrackStems {
-    /// Separated and on disk: the stem mixer can be used.
-    Ready,
+    /// Separated and on disk: the stem mixer can be used. `separator` is
+    /// the model that produced them, which is not always the one the app
+    /// would run today — a model switch leaves earlier stems in place.
+    Ready { separator: String },
     /// Not yet, but it is coming. `stage` is the running job's stage when
     /// this is the track being worked on.
     Loading { stage: Option<String> },
@@ -147,7 +149,7 @@ struct Shared {
 }
 
 /// Handle to the service thread; dropping it stops the loop and abandons
-/// the separation in flight (rather than leaving a demucs behind).
+/// the separation in flight (rather than leaving a model run behind).
 pub struct AutoStemService {
     library: Arc<Library>,
     jobs: Arc<StemJobs>,
@@ -254,8 +256,10 @@ impl AutoStemService {
 
     /// Where a track stands, given the row already in hand.
     fn stems_of(&self, track: &Track) -> TrackStems {
-        if self.jobs.cached_content(&track.content_hash) {
-            return TrackStems::Ready;
+        if let Some(cached) = self.jobs.cache(&track.content_hash) {
+            return TrackStems::Ready {
+                separator: cached.separator,
+            };
         }
         if self.scope == AutoStemScope::Off {
             return TrackStems::Unavailable {

@@ -6,14 +6,15 @@
 //!   the M2 deck.
 //! - **Musical key** ([`key`]): chromagram + Krumhansl-Schmuckler key
 //!   profiles over 24 major/minor keys.
-//! - **Stems** ([`stems`]): a [`stems::StemSeparator`] trait with two
+//! - **Stems** ([`stems`]): a [`stems::StemSeparator`] trait with three
 //!   implementations — a deterministic pure-DSP fallback
 //!   ([`stems::BandSeparator`], HPSS + frequency-band/stereo-center masks,
-//!   energy-conserving) that always works offline, and an ONNX-Runtime
-//!   backend ([`onnx`], `--features onnx`) that loads an htdemucs-class
-//!   model from a configurable path (CoreML execution provider on macOS,
-//!   CPU elsewhere). Stems are cached as FLAC in app storage, keyed by the
-//!   track's content hash.
+//!   energy-conserving) that always works offline, the production model
+//!   ([`scnet`], SCNet XL IHF through MSST's inference CLI), and an
+//!   ONNX-Runtime backend ([`onnx`], `--features onnx`) that loads a
+//!   demucs-class model from a configurable path (CoreML execution
+//!   provider on macOS, CPU elsewhere). Stems are cached as FLAC in app
+//!   storage, keyed by the track's content hash and the separator id.
 //! - **Beat analysis** ([`beats`]): the headless beat pipeline behind the
 //!   Clip page — beat detection (`beat_this` when installed, a
 //!   deterministic DSP tracker otherwise), least-squares grid fit and the
@@ -36,8 +37,8 @@ pub mod auto_stems;
 pub mod beats;
 pub mod clip;
 pub mod decode;
-pub mod demucs;
 pub mod key;
+pub mod scnet;
 pub mod stem_jobs;
 pub mod stems;
 pub mod stft;
@@ -53,12 +54,12 @@ pub use auto_stems::{
 };
 pub use clip::{render_clip, ClipEq, ClipProgram, ClipRegion, LevelPoint};
 pub use decode::{decode_audio, AudioData};
-pub use demucs::DemucsSeparator;
+pub use scnet::ScnetSeparator;
 pub use stem_jobs::{StemJob, StemJobState, StemJobs};
 pub use stems::{
-    ensure_stems, ensure_stems_cancellable, mix_stems, remove_stems, stem_paths, stem_union,
-    stems_cached, stems_dir, stems_dir_for, BandSeparator, CancelToken, StemSeparator, Stems,
-    DEFAULT_SEPARATOR_ID, N_STEMS, STEM_NAMES,
+    cached_stems_for, ensure_stems, ensure_stems_cancellable, mix_stems, remove_stems, stem_paths,
+    stem_union, stems_cached, stems_dir, stems_dir_for, BandSeparator, CachedStems, CancelToken,
+    StemSeparator, Stems, DEFAULT_SEPARATOR_ID, N_STEMS, STEM_NAMES,
 };
 pub use worker::{start_worker, AnalysisSettings, AnalysisWorker};
 

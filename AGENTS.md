@@ -207,8 +207,9 @@ These are the rules that must hold everywhere.
   track degrade on their own.
 - Provider smoke tests gate on env keys and treat empty-string env vars as
   unset (CI injects unconfigured secrets as `""`). Optional heavy tooling
-  (ONNX models, demucs) is skip-not-fail: CI never depends on model files,
-  and missing tooling is a reported state, never a panic.
+  (ONNX models, the SCNet stem model) is skip-not-fail: CI never depends on
+  model files — stem tests run against a fake CLI script — and missing
+  tooling is a reported state, never a panic.
 - Native (dylib) modules are UNSANDBOXED trusted code in their own cargo
   workspace under `extensions/`; CI lints them separately.
 - Macros: global base definitions live in the macro store; every instance
@@ -232,8 +233,11 @@ These are the rules that must hold everywhere.
   spans, metadata never baked into the loop), overlaid on the pass a clip
   comes in on or drops out of.
 - **Stems**: separated sources (vocals/drums/…) cached as FLAC under
-  `<data_dir>/stems/<hash>/`, keyed by separator id; patches persist only
-  the stem gains.
+  `<data_dir>/stems/<hash>/`, keyed by separator id — the DSP fallback
+  flat, every model in its own subdirectory (`scnet_xl_ihf`, and the
+  `htdemucs_ft` that came before it). That directory name IS the per-track
+  record of which model made them, and stems an older model wrote are
+  served rather than redone. Patches persist only the stem gains.
 - **Deck / bank**: `builtin.decks` — eight beat clips (decks/slots) on ONE
   clock and one shared beat position; clips are stretched to the bank
   tempo, never pitched. The Decks page is its chrome.

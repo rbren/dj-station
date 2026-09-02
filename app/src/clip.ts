@@ -132,7 +132,7 @@ export type StemName = (typeof STEM_NAMES)[number];
 /** Which separation backend the shell is configured with, and whether its
  *  tooling is actually installed on this machine. */
 export interface ClipStemBackend {
-  /** Separator id — the model name for demucs, e.g. "htdemucs_ft". */
+  /** Separator id — the model name, e.g. "scnet_xl_ihf". */
   backend: string;
   available: boolean;
   /** Install hint / failure reason when `available` is false. */
@@ -148,6 +148,10 @@ export type StemState = 'ready' | 'loading' | 'failed' | 'unavailable';
 export interface ClipStemStatus {
   track_id: number;
   backend: string;
+  /** The model that produced this track's stems, once they exist. Usually
+   *  `backend`, but a track separated before a model switch keeps — and
+   *  reports — the older one. */
+  separator?: string | null;
   state: StemState;
   /** What the separation is doing, while it is this track's turn. */
   stage: string | null;
@@ -162,7 +166,9 @@ export interface ClipStemStatus {
  *  Every one of these is a wait or a reason, never an instruction: there
  *  is no button to press, because separation happens on its own. */
 export function stemWait(status: ClipStemStatus | null, backend: ClipStemBackend | null): string {
-  if (status?.state === 'ready') return 'Stems are ready';
+  if (status?.state === 'ready') {
+    return status.separator ? `Stems are ready (${status.separator})` : 'Stems are ready';
+  }
   if (status && (status.state === 'failed' || status.state === 'unavailable')) {
     return status.detail ?? 'These stems are unavailable';
   }

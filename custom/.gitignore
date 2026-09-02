@@ -2,6 +2,8 @@
 # patches, the library DB and user macros travel with the checkout.
 # Only machine-local caches and scratch are ignored:
 stems/
+# The stem model: MSST venv + a 214 MB checkpoint (scripts/install-scnet.sh).
+scnet/
 downloads/
 clips/
 beat-clips/
