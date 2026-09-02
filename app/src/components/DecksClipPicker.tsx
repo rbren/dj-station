@@ -25,6 +25,7 @@ import {
 } from '../beatClip';
 import { type StemName } from '../clip';
 import { fixed } from '../format';
+import { matchesQuery } from '../search';
 import { BeatClipTable, ClipStemFilter } from './BeatClipTable';
 
 export interface DecksClipPickerProps {
@@ -59,12 +60,8 @@ export function DecksClipPicker({ deck, clips, bankBpm, onPick, onClose }: Decks
   const picking = song === null ? 'song' : 'clip';
 
   const shownSongs = useMemo(() => {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return songs;
-    return songs.filter((s) => {
-      const hay = `${s.title} ${s.artist ?? ''}`.toLowerCase();
-      return words.every((w) => hay.includes(w));
-    });
+    if (!query.trim()) return songs;
+    return songs.filter((s) => matchesQuery(query, `${s.title} ${s.artist ?? ''}`));
   }, [songs, query]);
 
   const shownClips = useMemo(

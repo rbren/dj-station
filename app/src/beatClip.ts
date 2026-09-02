@@ -5,6 +5,7 @@
 // headless (tests inject a mock).
 
 import { IpcClient } from './ipc';
+import { matchesQuery } from './search';
 
 /** The rack module a clip is imported as. */
 export const BEAT_CLIP_TYPE = 'builtin.beat_clip';
@@ -288,14 +289,12 @@ export interface ClipFilter {
 }
 
 export function filterClips(clips: BeatClipEntry[], filter: ClipFilter): BeatClipEntry[] {
-  const words = (filter.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
   const artist = filter.artist?.toLowerCase();
   return clips.filter((c) => {
     if (filter.stems && !filter.stems.every((s) => c.stems.includes(s))) return false;
     if (filter.trackHash && !c.sources.some((s) => s.trackHash === filter.trackHash)) return false;
     if (artist && !clipArtistNames(c).some((a) => a.toLowerCase() === artist)) return false;
-    if (words.length === 0) return true;
-    const hay = [c.name, ...clipTrackNames(c), ...clipArtistNames(c)].join(' ').toLowerCase();
-    return words.every((w) => hay.includes(w));
+    const hay = [c.name, ...clipTrackNames(c), ...clipArtistNames(c)].join(' ');
+    return matchesQuery(filter.query ?? '', hay);
   });
 }

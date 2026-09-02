@@ -9,6 +9,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BEAT_CLIP_TYPE, clipSourceLabel, type BeatClipEntry } from '../beatClip';
+import { matchesQuery } from '../search';
 import { StemTags } from './StemTags';
 import { engine, type MacroPreviewNode } from '../engine';
 import { loadJson, saveJson } from '../rackStore';
@@ -65,12 +66,8 @@ function loadTab(): PickerTab {
 
 /** Clips whose name or source matches every term of `query`. */
 export function filterClips(clips: BeatClipEntry[], query: string): BeatClipEntry[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return clips;
-  return clips.filter((c) => {
-    const haystack = `${c.name} ${clipSourceLabel(c)}`.toLowerCase();
-    return terms.every((t) => haystack.includes(t));
-  });
+  if (!query.trim()) return clips;
+  return clips.filter((c) => matchesQuery(query, `${c.name} ${clipSourceLabel(c)}`));
 }
 
 function categoryOf(m: Manifest): string {
@@ -91,12 +88,8 @@ export function taggedModules(modules: Manifest[], selected: string | null): Man
 /** Modules whose name, id or category matches every whitespace-separated
  *  term of `query` (case-insensitive). An empty query matches everything. */
 export function filterModules(modules: Manifest[], query: string): Manifest[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return modules;
-  return modules.filter((m) => {
-    const haystack = `${m.name} ${m.id} ${categoryOf(m)}`.toLowerCase();
-    return terms.every((t) => haystack.includes(t));
-  });
+  if (!query.trim()) return modules;
+  return modules.filter((m) => matchesQuery(query, `${m.name} ${m.id} ${categoryOf(m)}`));
 }
 
 /** Group modules by category, ordered by CATEGORY_ORDER then alphabetically. */
