@@ -31,6 +31,7 @@ import {
   selectionEdgeAt,
   setLevelPoint,
   SILENCE_DB,
+  slideRange,
   smoothWarp,
   stretchBands,
   tapGrid,
@@ -552,6 +553,26 @@ describe('the grid covers only what was tapped (or extended)', () => {
     expect(nearestBeat(grid, 0.9)).toBe(1);
     expect(nearestBeat(grid, 5)).toBe(5);
     expect(nearestBeat(grid, 0.2)).toBe(0.2);
+  });
+
+  it('slides a selection by beats, not seconds', () => {
+    // Uneven grid: beat spans of 0.5, 1.0 and 1.5 s.
+    const uneven = { times: [1, 1.5, 2.5, 4], bpm: 60, period: 1, phase: 1, beats: 4 };
+    const base = { start: 1, end: 1.5 }; // one beat, 0.5 s wide
+    // Landed near the second beat it is still ONE BEAT — 1.0 s now…
+    expect(slideRange(uneven, base, { start: 1.6, end: 2.1 }, 10)).toEqual({
+      start: 1.5,
+      end: 2.5,
+    });
+    // …and near the third, 1.5 s.
+    expect(slideRange(uneven, base, { start: 2.4, end: 2.9 }, 10)).toEqual({ start: 2.5, end: 4 });
+    // A two-beat span slid past the grid's end pins onto its last beats.
+    expect(slideRange(uneven, { start: 1, end: 2.5 }, { start: 3.6, end: 5.1 }, 10)).toEqual({
+      start: 1.5,
+      end: 4,
+    });
+    // Off the grid entirely the count means nothing: the length is kept.
+    expect(slideRange(uneven, base, { start: 6, end: 6.5 }, 10)).toEqual({ start: 6, end: 6.5 });
   });
 
   it('counts the beats a selection covers, fractionally off the grid', () => {

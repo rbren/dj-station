@@ -95,6 +95,7 @@ import {
   regionSpans,
   removeLevelPoint,
   setLevelPoint,
+  slideRange,
   sourceLabel,
   sourceRef,
   stemLabel,
@@ -1633,10 +1634,7 @@ export function ClipView({
     return {
       seek: (secs, free) => (free ? secs : clampT(nearestBeat(grid, secs))),
       range: (r) => quantizeRange(grid, r, duration),
-      slide: (r) => {
-        const start = clampT(nearestBeat(grid, r.start));
-        return { start, end: start + (r.end - r.start) };
-      },
+      slide: (r, base) => slideRange(grid, base, r, duration),
     };
   }, [duration, grid]);
 
@@ -1960,7 +1958,15 @@ export function ClipView({
             loop={loop || sel !== null}
             onTogglePlay={togglePlay}
             onStop={stop}
-            onToggleLoop={() => setLoop((v) => !v)}
+            // A selection always loops, so with one in hand the Loop
+            // button's only job is to let it go — it is the deselect.
+            onToggleLoop={() => {
+              if (sel) {
+                setSelection(null);
+                setLoop(false);
+              } else setLoop((v) => !v);
+            }}
+            loopTitle={sel ? 'Clear the selection (a selection always loops)' : undefined}
             onSeek={seek}
             onSelectionSlid={onSelectionSlid}
             snap={snap}

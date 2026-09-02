@@ -927,6 +927,35 @@ describe('ClipView', () => {
     expect(screen.getAllByTestId('clip-sel-one-line')).toHaveLength(1);
   });
 
+  it('slides a selection keeping its BEAT count, not its seconds', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    const play = screen.getByTestId('clip-play');
+    fireEvent.click(play);
+    await waitFor(() => expect(play.textContent).toBe('❚❚'));
+    tapAt(1.0);
+    tapAt(1.6);
+    tapAt(2.2);
+    tapAt(3.0);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4));
+
+    // One beat, 1.6–2.2 s: 0.6 s wide here.
+    select(1.6, 2.2);
+    expect(selTitle()).toContain('Selected 1 beat ');
+    expect(selTitle()).toContain('0:01.60–0:02.20');
+
+    // Slid one beat over it is STILL one beat — 2.2–3.0 s, 0.8 s wide —
+    // re-snapped to the grid's boundaries rather than 0.6 s of clock
+    // laid down at 2.2.
+    const wave = sizeTimeline('clip-waveform');
+    fireEvent.mouseDown(wave, { clientX: 190 });
+    fireEvent.mouseMove(window, { clientX: 250 });
+    fireEvent.mouseUp(window);
+    expect(selTitle()).toContain('Selected 1 beat ');
+    expect(selTitle()).toContain('0:02.20–0:03.00');
+  });
+
   it('makes a beat a one, and an ordinary beat again, from its flag', async () => {
     const clip = clipMock();
     await openTrack(clip);
@@ -1337,11 +1366,10 @@ describe('ClipView', () => {
     await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('▶'));
   });
 
-  it('loops the selection when loop is armed', async () => {
+  it('loops the selection with nothing armed', async () => {
     const clip = clipMock();
     await openTrack(clip);
     select(2, 6);
-    fireEvent.click(screen.getByTestId('clip-loop'));
     fireEvent.click(screen.getByTestId('clip-play'));
     await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 4));
     const audio = screen.getByTestId('clip-audio') as HTMLAudioElement;
@@ -1378,7 +1406,6 @@ describe('ClipView', () => {
     const clip = clipMock();
     await openTrack(clip);
     select(2, 6);
-    fireEvent.click(screen.getByTestId('clip-loop'));
     fireEvent.click(screen.getByTestId('clip-play'));
 
     // The selection loops on a buffer source (which wraps at a sample
@@ -1398,7 +1425,6 @@ describe('ClipView', () => {
     const clip = clipMock();
     await openTrack(clip);
     select(2, 6);
-    fireEvent.click(screen.getByTestId('clip-loop'));
     fireEvent.click(screen.getByTestId('clip-play'));
     const audio = screen.getByTestId('clip-audio') as HTMLAudioElement;
     await waitFor(() => expect(audio.loop).toBe(true));
@@ -1408,7 +1434,6 @@ describe('ClipView', () => {
     const clip = clipMock();
     await openTrack(clip);
     select(2, 6);
-    fireEvent.click(screen.getByTestId('clip-loop'));
     fireEvent.click(screen.getByTestId('clip-play'));
     await waitFor(() => expect(clip.previewAudio).toHaveBeenCalledWith(expect.anything(), 2, 4));
     const audio = screen.getByTestId('clip-audio') as HTMLAudioElement;
@@ -1434,12 +1459,25 @@ describe('ClipView', () => {
     await waitFor(() => expect(audio.loop).toBe(true));
     expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
 
-    // A selection always loops, so clearing it is what carries on
-    // linearly — the Loop button only decides the no-selection case.
+    // A selection always loops, so the Loop button doubles as the
+    // deselect: clicking it lets the selection go and playback carries
+    // on linearly.
     fireEvent.click(screen.getByTestId('clip-loop'));
-    fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(audio.loop).toBe(false));
     expect(screen.getByTestId('clip-play').textContent).toBe('❚❚');
+  });
+
+  it('clicking Loop with a selection clears it — the deselect', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    select(2, 6);
+    expect(selTitle()).toContain('0:02.00–0:06.00');
+
+    // The click lets the selection go; it does NOT arm the whole-clip
+    // loop under the hand — the button reads dark after.
+    fireEvent.click(screen.getByTestId('clip-loop'));
+    expect(screen.queryByTestId('clip-sel-title')).toBeNull();
+    expect(screen.getByTestId('clip-loop').getAttribute('aria-pressed')).toBe('false');
   });
 
   // The reported jam: "several seconds before the audio changes". Tone
@@ -1679,7 +1717,6 @@ describe('ClipView', () => {
       const clip = clipMock();
       await openTrack(clip);
       select(2, 6);
-      fireEvent.click(screen.getByTestId('clip-loop'));
 
       const play = screen.getByTestId('clip-play');
       for (let i = 0; i < 8; i++) fireEvent.click(play);
@@ -1696,7 +1733,6 @@ describe('ClipView', () => {
       const clip = clipMock();
       await openTrack(clip);
       select(2, 6);
-      fireEvent.click(screen.getByTestId('clip-loop'));
       fireEvent.click(screen.getByTestId('clip-play'));
       await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
 
@@ -1721,7 +1757,6 @@ describe('ClipView', () => {
       fireEvent.click(screen.getByTestId('clip-open-track'));
       await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
       select(2, 6);
-      fireEvent.click(screen.getByTestId('clip-loop'));
       fireEvent.click(screen.getByTestId('clip-play'));
       await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
 
@@ -1741,7 +1776,6 @@ describe('ClipView', () => {
       fireEvent.click(screen.getByTestId('clip-open-track'));
       await waitFor(() => expect(screen.getByTestId('clip-waveform')).toBeTruthy());
       select(2, 6);
-      fireEvent.click(screen.getByTestId('clip-loop'));
       fireEvent.click(screen.getByTestId('clip-play'));
 
       await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
@@ -1754,7 +1788,6 @@ describe('ClipView', () => {
       const clip = clipMock();
       await openTrack(clip);
       select(2, 6);
-      fireEvent.click(screen.getByTestId('clip-loop'));
       fireEvent.click(screen.getByTestId('clip-play'));
       await waitFor(() => expect(liveLoops(starts)).toHaveLength(1));
 

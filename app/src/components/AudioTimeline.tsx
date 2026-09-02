@@ -88,9 +88,10 @@ export interface TimelineSnap {
    *  Bypassed while ⌘/ctrl is held, which is how an end is dragged off
    *  the grid onto a pickup or short of a tail. */
   range?(r: Range): Range;
-  /** Snap a slid selection (keep length, move by whole beats, say).
+  /** Snap a slid selection (keep the BASE's beat count and re-snap to the
+   *  grid, say — `base` is the selection the drag started from).
    *  ⌘/ctrl frees this one too. */
-  slide?(r: Range): Range;
+  slide?(r: Range, base: Range): Range;
 }
 
 /** A drag on the waveform. Sweeping a new selection and dragging one end
@@ -346,7 +347,7 @@ export function AudioTimeline({
           Math.max(-drag.base.start, t - drag.anchor),
         );
         const slid = { start: drag.base.start + delta, end: drag.base.end + delta };
-        const snapped = free || !snap?.slide ? slid : snap.slide(slid);
+        const snapped = free || !snap?.slide ? slid : snap.slide(slid, drag.base);
         drag.delta = snapped.start - drag.base.start;
         onSelectionChange(snapped);
       }

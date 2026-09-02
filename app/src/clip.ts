@@ -1028,6 +1028,32 @@ export function resizeSelection(
   return { start: Math.min(anchor, moved), end: Math.max(anchor, moved) };
 }
 
+/** Slide a selection to `to`, keeping its BEAT COUNT rather than its
+ *  seconds: the span re-snaps to the grid's actual boundaries, so its
+ *  duration changes where the grid's spacing does. Where the count has
+ *  nothing to say — a freed sub-beat selection, or a landing spot the
+ *  grid does not reach — the time length is kept instead, the start
+ *  still snapping to the nearest beat where there is one. */
+export function slideRange(
+  grid: ClipGrid,
+  base: TimeRange,
+  to: TimeRange,
+  duration: number,
+): TimeRange {
+  const ts = grid.times;
+  const last = ts.length - 1;
+  if (last >= 1 && grid.period > 0) {
+    const beats = Math.round(beatSpan(grid, base.start, base.end));
+    const i = Math.round(beatIndexAt(grid, to.start));
+    if (beats >= 1 && beats <= last && i >= 0 && i <= last) {
+      const at = Math.min(last - beats, i);
+      return { start: ts[at], end: ts[at + beats] };
+    }
+  }
+  const start = Math.min(Math.max(0, nearestBeat(grid, to.start)), Math.max(0, duration));
+  return { start, end: start + (to.end - to.start) };
+}
+
 // ---------------------------------------------------------------------------
 // Time ruler
 // ---------------------------------------------------------------------------
