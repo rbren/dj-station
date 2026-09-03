@@ -137,7 +137,7 @@ jobs:
           ./target/release/dj-cli render /tmp/dj-demo /tmp/dj-demo.wav --seconds 2 --extensions extensions
 
   stress:
-    name: Realtime stress (rt_safety + perf_m4, 600s equivalent)
+    name: Realtime stress (rt_safety + perf_m4 incl. Rack/Grid/Clip render benches)
     runs-on: ubuntu-latest
     env:
       # Full 10-minute-equivalent offline stress run (PRD M0 acceptance;
@@ -171,4 +171,47 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
+      # `npm test` ends with `npm run test:perf` — the Rack/Grid/Clip perf
+      # suites on their ordinary fixtures. That is the gate every push
+      # gets; `perf` below is the same suites made unreasonable.
       - run: cd app && npm ci && npm test
+
+  perf:
+    name: Perf gate (heavy fixtures, Rack/Grid/Clip, UI + audio)
+    # Only on main, and never on a PR: the heavy fixtures are minutes of
+    # work, and a perf number measured on a runner that is also building
+    # three other jobs is worth less than the minutes it costs. Every push
+    # still gets the normal-size perf suites (`frontend` and `stress`);
+    # this job is the one that runs them at four times the size, where a
+    # regression that only shows up under load has nowhere to hide.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      # Bigger fixtures on both sides of the IPC boundary: 48-module rack
+      # patches, 100x384 arrangements, 30-minute clips, 202-module engine
+      # graphs. See reports/PERF_BASELINES.md.
+      DJ_PERF_HEAVY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-ci
+          workspaces: |
+            .
+            extensions
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: UI rendering benchmarks (Rack, Grid, Clip)
+        run: cd app && npm ci && npm run test:perf
+      - name: Audio rendering benchmarks (Rack, Grid, Clip)
+        # `--test-threads=1`: these measure throughput, and four of them
+        # sharing two cores would measure each other.
+        run: cargo test -p dj-engine --release --test perf_m4 perf_ui -- --test-threads=1 --nocapture

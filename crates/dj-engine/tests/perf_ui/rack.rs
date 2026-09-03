@@ -86,17 +86,16 @@ fn a_big_rack_renders_far_faster_than_realtime() {
     let peak = probe[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
     assert!(peak > 0.0, "rack fixture is silent");
 
-    let (_, t) = render(
-        &format!("rack render ({modules} modules)"),
-        secs,
-        || render_seconds(&mut engine, secs),
-    );
+    let (_, t) = render(&format!("rack render ({modules} modules)"), secs, || {
+        render_seconds(&mut engine, secs)
+    });
 
-    // Measured at ~3.5x realtime for 62 modules on the development box
-    // (reports/PERF_BASELINES.md). The floor is a third of that: a patch
-    // this size must stay realtime-capable even on a runner sharing its
-    // cores with three other jobs.
-    expect_throughput(&t, 1.2);
+    // Measured at ~3.2x realtime for 62 modules, and ~1.1x for the 202 of
+    // the heavy fixture (reports/PERF_BASELINES.md) — a rack that big is
+    // near the edge of what one core can play, which is worth knowing.
+    // The floors are a third and a quarter of those, so what trips them is
+    // a threefold slowdown rather than a busy two-core runner.
+    expect_throughput(&t, sized(1.2, 0.25));
     assert_eq!(engine.xrun_count(), 0, "xruns during the offline render");
     // Instantiating a module is wasmtime work, and a patch load does it
     // once per module — ~60 ms each today, so a 62-module patch takes

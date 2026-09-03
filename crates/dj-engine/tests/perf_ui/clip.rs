@@ -93,7 +93,9 @@ fn program(secs: f64, regions: usize) -> ClipProgram {
 fn render_edit(secs: f64, regions: usize) -> dj_analysis::clip::ClipRenderProfile {
     let src = source(secs);
     let (audio, profile) = render_clip_profiled(&[&src], &program(secs, regions)).unwrap();
-    let peak = audio.channels[0].iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+    let peak = audio.channels[0]
+        .iter()
+        .fold(0.0f32, |m, &x| m.max(x.abs()));
     assert!(peak > 0.0, "the clip render is silent");
     profile
 }
@@ -138,9 +140,11 @@ fn an_edit_scales_with_its_length_not_its_square() {
     let (_, small) = render(&format!("clip render ({secs}s)"), secs, || {
         render_edit(secs, regions)
     });
-    let (_, big) = render(&format!("clip render ({}s)", secs * 2.0), secs * 2.0, || {
-        render_edit(secs * 2.0, regions)
-    });
+    let (_, big) = render(
+        &format!("clip render ({}s)", secs * 2.0),
+        secs * 2.0,
+        || render_edit(secs * 2.0, regions),
+    );
 
     // Every stage is a pass (or a fixed number of passes) over the
     // material: twice the audio is twice the work. A splice that copied

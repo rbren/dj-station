@@ -99,6 +99,15 @@ Actions (`.github/workflows/ci.yml`) as separate build / lint / test jobs.
 E2E audio golden files live in `crates/dj-engine/tests/e2e/`; regenerate
 them after an intentional DSP change with `./scripts/regen-goldens.sh`.
 
+**Performance.** The Rack, Grid and Clip pages are benchmarked on both
+sides of the IPC boundary — how long they take to DRAW (`cd app && npm run
+test:perf`, jsdom) and how fast they RENDER AUDIO (`cargo test -p dj-engine
+--release --test perf_m4 perf_ui`, reported as a multiple of realtime).
+Both run in CI on every push; `DJ_PERF_HEAVY=1` blows the fixtures up to
+the size the main-only `perf` job uses. Measured figures, the instrumented
+pipeline stages each bench attributes its time to, and how to move a
+threshold: [`reports/PERF_BASELINES.md`](reports/PERF_BASELINES.md).
+
 ## Library & acquisition (M1)
 
 The sound library lives in the single data directory described under
