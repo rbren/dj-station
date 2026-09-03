@@ -157,7 +157,6 @@ function makeClips(entries = CLIPS): BeatClipApi {
     load: vi.fn().mockResolvedValue(null),
     status: vi.fn().mockResolvedValue(null),
     delete: vi.fn().mockResolvedValue([]),
-    audio: vi.fn().mockResolvedValue(null),
     peaks: vi.fn().mockResolvedValue([]),
     gridSave: vi.fn().mockResolvedValue(undefined),
     gridLoad: vi.fn().mockResolvedValue(null),

@@ -17,12 +17,13 @@
 //! replaced programs go back on a garbage ring for an off-RT drop. What
 //! the patch keeps is what every module keeps — its knobs.
 //!
-//! EVERYTHING IS IN TRANSPORT-RELATIVE BEATS. Beat 0 is the start of the
-//! play range, `loop_beats` is its length, and `start_beat` is where a
-//! start parks (the cue). The app rotates the document's absolute columns
-//! into that space when it compiles, so the module needs to know nothing
-//! about grid columns, bars or tempo automation — the [`crate::clock`]
-//! module owns the tempo, and this one only counts its edges.
+//! EVERYTHING IS IN ABSOLUTE BEATS — the Grid document's own columns.
+//! `loop_start`/`loop_end` are the play range and `start_beat` is where a
+//! start parks (the cue), all counted from the arrangement's beat 0, so
+//! nothing has to be rotated into a range and the page's playhead is the
+//! clock's position as it stands. The module still needs to know nothing
+//! about bars or tempo automation: the [`crate::clock`] module owns the
+//! tempo, and this one only counts its edges.
 //!
 //! THE CLOCK OWNS PHASE, exactly as in [`crate::beat_clip`]: an edge IS a
 //! beat boundary, and between edges the position is interpolated from the
@@ -94,7 +95,7 @@ pub struct LevelPoint {
 /// pass, and the loop it all sits in.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct GridTrackProgram {
-    /// Beats (transport-relative) the clip's own beat 0 lands on, sorted.
+    /// Grid columns the clip's own beat 0 lands on, sorted.
     #[serde(default)]
     pub copies: Vec<f64>,
     /// The row's level line; empty is unity all the way across.

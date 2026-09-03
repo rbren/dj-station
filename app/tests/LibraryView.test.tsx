@@ -264,7 +264,6 @@ function mockClips(entries: BeatClipEntry[] = [CLIP_TAB_CLIP, ORPHAN_CLIP, UNTRA
       if (at >= 0) list.splice(at, 1);
       return Promise.resolve([...list]);
     }),
-    audio: vi.fn().mockResolvedValue(null),
     peaks: vi.fn().mockResolvedValue([]),
     gridSave: vi.fn().mockResolvedValue(undefined),
     gridLoad: vi.fn().mockResolvedValue(null),

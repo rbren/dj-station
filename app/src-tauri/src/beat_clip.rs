@@ -239,92 +239,6 @@ fn name_after_clip(engine: &mut Engine, instance: &str, clip_name: &str) -> Stri
     instance.to_string()
 }
 
-/// A saved clip's LOOP as WAV bytes, for a surface that plays clips in
-/// the webview rather than through the engine (the Grid page schedules
-/// them itself, the way the Clip page auditions a render).
-///
-/// `bpm` RE-TIMES the clip to that tempo before handing it over, and it
-/// does so by WSOLA (`beats::warp`), the same stretcher the Clip page's
-/// warp uses — NOT by resampling. Playing a 120 bpm clip at 1.5× rate to
-/// make it 180 would take its pitch up a fifth with it; a grid whose
-/// master tempo transposes every clip on it is not a grid anyone can
-/// write music on. The webview then plays what comes back at rate 1.0.
-///
-/// `fx` asks for the clip THROUGH a Grid track's effects rack instead:
-/// the row's `TrackFx` JSON, rendered offline by `dj_engine::track_fx`
-/// AFTER the stretch (so it processes exactly the samples the dry path
-/// plays, and the webview's Wetness knob can crossfade the two buffers
-/// sample-for-sample).
-///
-/// `with_bleed` asks for the whole CAPTURE instead of the loop alone —
-/// lead-in, loop, tail-out, one buffer a player takes its bookends out
-/// of by offset rather than fetching, decoding and stretching three
-/// times. The response is then FRAMED: sixteen bytes of little-endian
-/// `f64` lead-in and tail-out seconds, then the WAV. Seconds and not
-/// frames because `decodeAudioData` resamples to the context's rate, so
-/// a frame count would not survive the trip. Each piece is stretched on
-/// its own, exactly as when they were three requests: WSOLA slides
-/// material by up to its search radius, so one pass over the join would
-/// leave the loop's first beat some milliseconds off the offset the
-/// caller is told to play from.
-#[tauri::command(async)]
-pub fn beat_clip_audio(
-    state: State<AppState>,
-    clip_id: String,
-    bpm: Option<f64>,
-    fx: Option<String>,
-    with_bleed: Option<bool>,
-) -> CmdResult<tauri::ipc::Response> {
-    let (meta, audio, bleed) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
-        .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
-    let retime = |audio: &AudioData| match bpm {
-        Some(bpm) if bpm > 0.0 && meta.bpm > 0.0 => stretch_to_bpm(audio, meta.bpm, bpm),
-        _ => audio.clone(),
-    };
-    let audio = retime(&audio);
-    let audio = match fx.as_deref() {
-        None | Some("") => audio,
-        Some(json) => {
-            let spec = dj_engine::track_fx::TrackFxSpec::from_json(json)
-                .map_err(|e| CmdError::invalid(format!("fx: {e}")))?;
-            let registry = state.engine.lock().unwrap().registry.clone();
-            let tempo = bpm.filter(|b| *b > 0.0).unwrap_or(meta.bpm);
-            let channels = dj_engine::track_fx::render_track_fx_clip(
-                registry,
-                &spec,
-                &audio.channels,
-                audio.sample_rate as f32,
-                tempo,
-            )
-            .map_err(|e| CmdError::invalid(format!("fx render: {e}")))?;
-            AudioData {
-                channels,
-                sample_rate: audio.sample_rate,
-            }
-        }
-    };
-    if with_bleed != Some(true) {
-        return Ok(tauri::ipc::Response::new(dj_analysis::clip::wav16_bytes(
-            &audio,
-        )));
-    }
-    // An effected buffer is the RACK's render of the loop, which the
-    // webview crossfades against the dry one; the bookends ride the dry
-    // side, so a wet capture is the loop and two empty bookends.
-    let bare = matches!(fx.as_deref(), None | Some(""));
-    let side = |audio: Option<AudioData>| audio.filter(|_| bare).map(|a| retime(&a));
-    let (left, right) = (side(bleed.left), side(bleed.right));
-    let mut bytes = Vec::new();
-    for piece in [&left, &right] {
-        let secs = piece.as_ref().map(|a| a.duration_secs()).unwrap_or(0.0);
-        bytes.extend_from_slice(&secs.to_le_bytes());
-    }
-    bytes.extend_from_slice(&dj_analysis::clip::wav16_bytes(
-        &dj_analysis::clip::join_capture(left.as_ref(), &audio, right.as_ref()),
-    ));
-    Ok(tauri::ipc::Response::new(bytes))
-}
-
 /// A clip's waveform, as one peak per BEAT-fraction: `buckets` samples
 /// of its shape, for a surface that draws the clip inside the cells it
 /// occupies (the Grid page). Peaks rather than audio because that is all
@@ -338,8 +252,8 @@ pub fn beat_clip_peaks(state: State<AppState>, clip_id: String, buckets: usize) 
 
 /// Saved Grid arrangements: `grids/<name>.json` beside the patches. An
 /// arrangement is JSON the frontend owns end to end (`GridDocument`) —
-/// the backend only files it, because nothing here plays it: the grid is
-/// scheduled in the webview.
+/// the backend only files it. What PLAYS it is the engine session the
+/// page syncs the same document into ([`crate::grid`]).
 fn grids_dir() -> std::path::PathBuf {
     dj_library::default_data_dir().join("grids")
 }
@@ -389,25 +303,6 @@ pub fn grid_list() -> CmdResult<Vec<String>> {
     }
     names.sort();
     Ok(names)
-}
-
-/// Re-time `audio` from `from_bpm` to `to_bpm`, keeping its pitch. The
-/// map is a single linear segment — one constant ratio over the whole
-/// clip — so the beats stay evenly spaced; WSOLA does the rest.
-fn stretch_to_bpm(audio: &AudioData, from_bpm: f64, to_bpm: f64) -> AudioData {
-    let ratio = from_bpm / to_bpm;
-    // A ratio this close to 1 is below what WSOLA would change anyway,
-    // and re-rendering it would only cost the clip a round trip through
-    // the overlap-add.
-    if (ratio - 1.0).abs() < 1e-4 {
-        return audio.clone();
-    }
-    let src_secs = audio.duration_secs();
-    let out_secs = src_secs * ratio;
-    let map = dj_analysis::beats::WarpMap {
-        points: vec![(0.0, 0.0), (src_secs, out_secs)],
-    };
-    dj_analysis::beats::warp::render(audio, &map, out_secs)
 }
 
 /// Clip + transport snapshot for the Beat Clip module panel.

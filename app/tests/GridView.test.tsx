@@ -21,7 +21,7 @@ import {
   MIN_ZOOM,
 } from '../src/components/GridView';
 import { median, pickerTracks } from '../src/components/GridClipPicker';
-import { GridTransport } from '../src/gridTransport';
+import { EngineGridPlayer } from '../src/gridEngine';
 
 function clip(over: Partial<BeatClipEntry> = {}): BeatClipEntry {
   return {
@@ -62,7 +62,6 @@ function makeClips(entries = CLIPS): BeatClipApi {
     load: vi.fn().mockResolvedValue(null),
     status: vi.fn().mockResolvedValue(null),
     delete: vi.fn().mockResolvedValue([]),
-    audio: vi.fn().mockResolvedValue(null),
     peaks: vi.fn().mockResolvedValue([]),
     gridSave: vi.fn().mockResolvedValue(undefined),
     gridLoad: vi.fn().mockResolvedValue(null),
@@ -306,7 +305,7 @@ describe('GridView', () => {
   // PAUSE KEEPS THE PLACE. That is the whole difference from a stop: the
   // beat readout does not jump back to the top of the range.
   it('pauses where the playhead is rather than rewinding', async () => {
-    const transport = new GridTransport(makeClips());
+    const transport = new EngineGridPlayer();
     vi.spyOn(transport, 'pause').mockReturnValue(9);
     render(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
     await screen.findByTestId('grid-view');
@@ -320,7 +319,7 @@ describe('GridView', () => {
   // SPACE is play/pause and the arrows walk the playhead, the way every
   // editor with a transport works.
   it('takes space and the arrows as transport keys', async () => {
-    const transport = new GridTransport(makeClips());
+    const transport = new EngineGridPlayer();
     const play = vi.spyOn(transport, 'play');
     const seek = vi.spyOn(transport, 'seek');
     render(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
@@ -334,7 +333,7 @@ describe('GridView', () => {
   // A typed field owns the keyboard while it has focus: space in the bpm
   // box is a space, not a transport command.
   it('leaves the transport keys alone while a field is focused', async () => {
-    const transport = new GridTransport(makeClips());
+    const transport = new EngineGridPlayer();
     const play = vi.spyOn(transport, 'play');
     render(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
     const bpm = await screen.findByTestId('grid-bpm');
@@ -344,7 +343,7 @@ describe('GridView', () => {
   });
 
   it('stops when the tab is left', async () => {
-    const transport = new GridTransport(makeClips());
+    const transport = new EngineGridPlayer();
     const stop = vi.spyOn(transport, 'stop');
     const { rerender } = render(
       <GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />,
@@ -365,7 +364,7 @@ describe('GridView', () => {
 describe('coming back to the grid tab', () => {
   it('picks up a clip filed while it was away, and forgets the audio of one that was edited', async () => {
     const clips = makeClips([clip({ rev: 'r1' }), clip({ clipId: 'c3', rev: 'r1' })]);
-    const transport = new GridTransport(clips);
+    const transport = new EngineGridPlayer();
     const forget = vi.spyOn(transport, 'forget');
     const page = (active: boolean) => (
       <GridView clips={clips} pollMs={NO_POLL} transport={transport} active={active} />
@@ -700,7 +699,7 @@ describe('what a drag does to the sound', () => {
    *  state per finished edit, not one per pointer move. */
   function withSpy() {
     const clips = makeClips();
-    const transport = new GridTransport(clips);
+    const transport = new EngineGridPlayer();
     const update = vi.spyOn(transport, 'update');
     show(clips, { transport });
     return update;
@@ -712,7 +711,7 @@ describe('what a drag does to the sound', () => {
   // playback carries on underneath it.
   it('hands the loop over under the pointer, without re-cueing', async () => {
     const clips = makeClips();
-    const transport = new GridTransport(clips);
+    const transport = new EngineGridPlayer();
     const update = vi.spyOn(transport, 'update');
     const play = vi.spyOn(transport, 'play');
     const stop = vi.spyOn(transport, 'stop');
@@ -1414,7 +1413,7 @@ describe('the ruler click, end to end', () => {
   });
 
   it('parks the TRANSPORT there too, so play starts from the click', async () => {
-    const transport = new GridTransport(makeClips());
+    const transport = new EngineGridPlayer();
     const seek = vi.spyOn(transport, 'seek');
     const play = vi.spyOn(transport, 'play');
     render(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
@@ -1431,7 +1430,7 @@ describe('the ruler click, end to end', () => {
   });
 
   it('PLAYS from a cursor outside the loop rather than jumping to its start', async () => {
-    const transport = new GridTransport(makeClips());
+    const transport = new EngineGridPlayer();
     const play = vi.spyOn(transport, 'play');
     render(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
     await screen.findByTestId('grid-ruler');

@@ -20,9 +20,11 @@
 // envelopes: the tempo one is integrated for every beat->time conversion
 // below, so a ramp plays in tune with the grid rather than drifting.
 //
-// PLAYBACK is the webview's, not the engine's (`GridTransport`), and the
-// grid stays LIVE while it sounds: placing a clip mid-play is heard on
-// its next beat. Dragging across the ruler marks a loop and CLICKING it
+// PLAYBACK IS THE ENGINE'S (`gridEngine.ts`): the arrangement is synced
+// into a clock module and one Grid Track module per row, which play it
+// against the audio clock, and the page reads its playhead back off that
+// clock. The grid stays LIVE while it sounds — placing a clip mid-play is
+// heard on its next beat, because the edit is just the next sync. Dragging across the ruler marks a loop and CLICKING it
 // puts the playhead there; dragging across the cells marks a selection of
 // any n x m rectangle, which copies and pastes at the playhead. Both
 // drags belong to the WINDOW, so a pointer that wanders off the strip or
@@ -105,7 +107,7 @@ import {
   undo as undoHistory,
 } from '../gridHistory';
 import { fxOrDefault, isTrackFxModified, type TrackFx } from '../gridFx';
-import { GridTransport } from '../gridTransport';
+import { EngineGridPlayer, type GridPlayer } from '../gridEngine';
 import { makeRenderCounter } from '../perf';
 import { AutomationLane, type LanePoint } from './AutomationLane';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
@@ -336,8 +338,8 @@ export interface GridViewProps {
   /** The page polls the playhead only while it is the open tab. */
   active?: boolean;
   pollMs?: number;
-  /** Substituted in tests; the real one plays through Web Audio. */
-  transport?: GridTransport;
+  /** Substituted in tests; the real one plays through the engine. */
+  transport?: GridPlayer;
 }
 
 type Dialog =
@@ -401,10 +403,7 @@ export function GridView(props: GridViewProps) {
     playing: false,
     column: 0,
   });
-  const transport = useMemo(
-    () => props.transport ?? new GridTransport(clipApi),
-    [props.transport, clipApi],
-  );
+  const transport = useMemo(() => props.transport ?? new EngineGridPlayer(), [props.transport]);
   /** The loop drag in flight: the edge held STILL, and whether the
    *  pointer has moved off the column it was pressed on. */
   const loopDrag = useRef<{ anchor: number; from: number; moved: boolean } | null>(null);

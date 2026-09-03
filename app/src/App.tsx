@@ -110,13 +110,15 @@ const NUM_WIRE_COLORS = WIRE_COLORS.length;
 type View = 'rack' | 'library' | 'clip' | 'decks' | 'grid';
 
 /** The page the engine plays for while `view` is the open tab: the Rack is
- *  the whole patch, the Decks page is its bank, and Library/Clip/Grid
- *  either make their own sound or none — so the engine goes quiet. */
+ *  the whole patch, the Decks page its bank, the Grid page its session
+ *  (the clock and rows the arrangement is playing through), and Library
+ *  and Clip make their own sound or none — so the engine goes quiet. */
 function audioFocusForView(view: View): AudioFocus {
   if (view === 'rack') return 'rack';
   // Both deck pages drive banks in the decks workspace, so both open the
   // same gate.
   if (view === 'decks') return 'decks';
+  if (view === 'grid') return 'grid';
   return 'silent';
 }
 

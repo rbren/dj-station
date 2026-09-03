@@ -272,37 +272,37 @@ fn clock_program(doc: &GridSyncDoc, start_beat: f64) -> ClockProgram {
 
 /// Play from `from` (a grid column), or hold where the transport is.
 ///
-/// A start re-parks the whole session: the clock's start beat and every
-/// row's are written first, then the transport is restarted, and the
-/// clock's own reset pulse is what re-arms the rows — one moment, on the
-/// audio clock, for the clock and every row it feeds.
+/// A cued start re-parks the whole session: the clock's start beat and
+/// every row's are written first, then the transport is restarted, and
+/// the clock's own reset pulse is what re-arms the rows — one moment, on
+/// the audio clock, for the clock and every row it feeds. `start_bpm` is
+/// the tempo the cue sits at (the page reads it off the same envelope it
+/// draws), which is what lets a row come in on the first beat instead of
+/// spending one measuring the clock.
 #[tauri::command(async)]
 pub fn grid_transport(
     state: State<AppState>,
     playing: bool,
     from: Option<f64>,
-    doc: Option<GridSyncDoc>,
+    start_bpm: Option<f64>,
 ) -> CmdResult<()> {
     let mut engine = engine_lock(&state)?;
     if engine.nodes.iter().all(|n| n.instance_id != CLOCK) {
         // Nothing has been synced yet: there is no session to run.
         return Ok(());
     }
-    if let (Some(doc), Some(from)) = (&doc, from) {
-        let mut clock = clock_program(doc, from);
-        // The tempo the cue sits at, so every row comes in ON the first
-        // beat instead of sitting one out to measure what the app
-        // already knows (`GridTrackProgram::start_bpm`).
-        let start_bpm = clock.bpm_at(from, doc.bpm);
-        clock.start_beat = from;
-        engine.clock_set_program(CLOCK, clock).map_err(err)?;
-        let rows: Vec<String> = doc.rows.iter().map(|r| row_instance(&r.id)).collect();
+    if let Some(from) = from {
+        engine.clock_set_start(CLOCK, from).map_err(err)?;
+        let rows: Vec<String> = engine
+            .nodes
+            .iter()
+            .filter(|n| n.ext_id == GRID_TRACK_ID && n.workspace == Workspace::Grid)
+            .map(|n| n.instance_id.clone())
+            .collect();
         for instance in rows {
-            let Ok(mut program) = engine.grid_track_program(&instance) else {
-                continue;
-            };
+            let mut program = engine.grid_track_program(&instance).map_err(err)?;
             program.start_beat = from;
-            program.start_bpm = start_bpm;
+            program.start_bpm = start_bpm.unwrap_or(0.0);
             engine
                 .grid_track_set_program(&instance, program)
                 .map_err(err)?;

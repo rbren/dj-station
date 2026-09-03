@@ -14,7 +14,7 @@ import type {
 
 /** Which page the engine is playing for (`AudioFocus` in
  *  `crates/dj-engine/src/engine.rs`). ONE PAGE SOUNDS AT A TIME. */
-export type AudioFocus = 'rack' | 'decks' | 'silent';
+export type AudioFocus = 'rack' | 'decks' | 'grid' | 'silent';
 
 /** Subscribe to native File-menu actions
  *  ("saved" | "save-as" | "open" | "request-new").

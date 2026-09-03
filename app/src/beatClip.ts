@@ -84,24 +84,6 @@ export interface BeatClipStatus {
   playing: boolean;
 }
 
-/** Which bookend of a clip's bleed: `right` is the material that
- *  FOLLOWED the clip in its track, `left` the material before it. */
-export type BleedSide = 'left' | 'right';
-
-/** A clip's whole captured area as one buffer to decode, with the two
- *  bookends measured off it: the loop is what lies between `leadSecs`
- *  from the start and `tailSecs` from the end. A clip saved without
- *  bleed is a capture with both at 0. */
-export interface ClipCapture {
-  bytes: ArrayBuffer;
-  leadSecs: number;
-  tailSecs: number;
-}
-
-/** The frame the backend puts in front of a capture's WAV: two
- *  little-endian `f64` seconds (`beat_clip_audio`, `withBleed`). */
-const CAPTURE_HEADER = 16;
-
 /** What the picker's Clips tab and the module panel need; the Tauri
  *  client below implements it and tests substitute a mock. */
 export interface BeatClipApi {
@@ -112,19 +94,6 @@ export interface BeatClipApi {
   status(instance: string): Promise<BeatClipStatus | null>;
   /** Delete a saved clip. Resolves to the list as it now stands. */
   delete(clipId: string): Promise<BeatClipEntry[] | null>;
-  /** The clip's loop as WAV bytes, for a page that plays it in the
-   *  webview instead of through the engine (the Grid page). `bpm` asks
-   *  for it RE-TIMED to that tempo, which is a stretch and not a resample
-   *  — the clip keeps its pitch. `fx` asks for it rendered THROUGH a
-   *  track's effects rack (`fxRenderSpec`), after the stretch: the wet
-   *  buffer the grid crossfades against the dry one. */
-  audio(clipId: string, bpm?: number, fx?: string): Promise<ArrayBuffer | null>;
-  /** The clip's whole CAPTURE — lead-in, loop, tail-out, as it is filed
-   *  — re-timed like the loop, with the seconds that say where the loop
-   *  begins and ends inside it. Optional on the interface, because a
-   *  caller that only ever loops the clip through the engine never asks
-   *  for it. */
-  capture?(clipId: string, bpm?: number): Promise<ClipCapture | null>;
   /** The clip's shape in `buckets` peaks, for drawing it on a grid. */
   peaks(clipId: string, buckets: number): Promise<number[] | null>;
   /** Save/open/list Grid arrangements. The document is JSON the frontend
@@ -146,23 +115,6 @@ export class BeatClipClient extends IpcClient implements BeatClipApi {
   }
   delete(clipId: string) {
     return this.call<BeatClipEntry[]>('beat_clip_delete', { clipId });
-  }
-  audio(clipId: string, bpm?: number, fx?: string) {
-    return this.call<ArrayBuffer>('beat_clip_audio', { clipId, bpm, fx });
-  }
-  async capture(clipId: string, bpm?: number): Promise<ClipCapture | null> {
-    const framed = await this.call<ArrayBuffer>('beat_clip_audio', {
-      clipId,
-      bpm,
-      withBleed: true,
-    });
-    if (!framed || framed.byteLength <= CAPTURE_HEADER) return null;
-    const header = new DataView(framed, 0, CAPTURE_HEADER);
-    return {
-      bytes: framed.slice(CAPTURE_HEADER),
-      leadSecs: header.getFloat64(0, true),
-      tailSecs: header.getFloat64(8, true),
-    };
   }
   peaks(clipId: string, buckets: number) {
     return this.call<number[]>('beat_clip_peaks', { clipId, buckets });

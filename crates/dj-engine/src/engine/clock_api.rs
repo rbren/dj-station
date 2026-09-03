@@ -42,6 +42,14 @@ impl Engine {
         Ok((*self.clocks[&node].program).clone())
     }
 
+    /// Move the cue — where a restart parks — leaving the rest of the
+    /// program as it is. What a seek writes.
+    pub fn clock_set_start(&mut self, instance_id: &str, beat: f64) -> Result<()> {
+        let mut program = self.clock_program(instance_id)?;
+        program.start_beat = beat;
+        self.clock_set_program(instance_id, program)
+    }
+
     /// Run or hold the transport. `restart` parks it on the program's
     /// start beat first — play-from-the-top rather than resume.
     pub fn clock_transport(
