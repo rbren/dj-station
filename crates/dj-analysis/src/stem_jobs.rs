@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -208,8 +209,10 @@ impl StemJobs {
         let jobs = Arc::clone(&self.jobs);
         let cancels = Arc::clone(&self.cancels);
         std::thread::spawn(move || {
+            let started = Instant::now();
             let outcome = separate(&library, separator.as_ref(), track_id, &jobs, id, &cancel);
             cancels.lock().expect("stem cancels poisoned").remove(&id);
+            let secs = started.elapsed().as_secs_f64();
             update(&jobs, id, |job| {
                 // A killed run usually also reports an error (a model
                 // that was shot mid-inference, say). The cancel is the real
@@ -217,16 +220,19 @@ impl StemJobs {
                 if cancel.is_cancelled() {
                     job.state = StemJobState::Cancelled;
                     job.stage = "cancelled".into();
+                    println!("[stems] {:?}: cancelled after {secs:.1}s", job.title);
                     return;
                 }
                 match &outcome {
                     Ok(()) => {
                         job.state = StemJobState::Done;
                         job.stage = "done".into();
+                        println!("[stems] {:?}: done in {secs:.1}s total", job.title);
                     }
                     Err(e) => {
                         job.state = StemJobState::Failed;
                         job.stage = "failed".into();
+                        println!("[stems] {:?}: failed after {secs:.1}s: {e:#}", job.title);
                         job.error = Some(format!("{e:#}"));
                     }
                 }
@@ -279,17 +285,46 @@ fn separate(
     let track = library.track(track_id)?;
     // Stems from an earlier model count: a model switch leaves what is
     // already separated alone.
-    if cached_stems_for(library.data_dir(), &track.content_hash, separator.id()).is_some() {
+    if let Some(cached) = cached_stems_for(library.data_dir(), &track.content_hash, separator.id())
+    {
+        println!(
+            "[stems] {:?} (track {track_id}): already separated by {} at {}",
+            track.title,
+            cached.separator,
+            cached.dir.display()
+        );
         return Ok(());
     }
     let dir = stems_dir_for(library.data_dir(), &track.content_hash, separator.id());
+    println!(
+        "[stems] separating {:?} (track {track_id}) with {}",
+        track.title,
+        separator.id()
+    );
     update(jobs, id, |job| job.stage = "decoding".into());
+    let t = Instant::now();
     let audio = decode_audio(std::path::Path::new(&track.file_path))?;
+    println!(
+        "[stems] {:?}: decoded {:.1}s of audio in {:.2}s",
+        track.title,
+        audio.frames() as f64 / f64::from(audio.sample_rate.max(1)),
+        t.elapsed().as_secs_f64()
+    );
     if cancel.is_cancelled() {
         return Ok(());
     }
     update(jobs, id, |job| job.stage = "separating".into());
+    let t = Instant::now();
     ensure_stems_cancellable(&dir, &audio, separator, cancel)?;
+    if !cancel.is_cancelled() {
+        println!(
+            "[stems] {:?}: {} separated in {:.1}s -> {}",
+            track.title,
+            separator.id(),
+            t.elapsed().as_secs_f64(),
+            dir.display()
+        );
+    }
     Ok(())
 }
 
