@@ -799,6 +799,10 @@ impl Engine {
         for ctl in self.beat_clips.values_mut() {
             while ctl.garbage_rx.pop().is_ok() {}
         }
+        for ctl in self.clocks.values_mut() {
+            while ctl.garbage_rx.pop().is_ok() {}
+        }
+        self.drain_grid_track_garbage();
     }
 }
 

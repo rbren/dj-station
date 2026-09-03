@@ -17,6 +17,7 @@ mod e2e_choreo;
 mod e2e_decks;
 mod e2e_effects;
 mod e2e_golden;
+mod e2e_grid;
 mod e2e_hands;
 mod e2e_launch_control;
 mod e2e_math;

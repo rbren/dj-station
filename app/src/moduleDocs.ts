@@ -1294,6 +1294,60 @@ export const MODULE_DOCS: Record<string, ModuleDoc> = {
       'A continuous track wired to filter cutoff sweeps builds across the song.',
     ],
   },
+  'builtin.clock': {
+    summary:
+      'The transport a patch hangs off: a tempo, a run switch and a beat ' +
+      'position the module owns. It pulses once per beat, ramps its ' +
+      'phase across each one, and pulses Reset the moment the transport ' +
+      'starts so everything downstream parks together. Given a tempo ' +
+      'LANE (breakpoints over beats, which is how the Grid page drives ' +
+      'it) the tempo ramps as an integral instead of stepping, and a ' +
+      'loop length makes the position wrap where a play range ends.',
+    inputs: {
+      bpm: 'Tempo, where no lane says otherwise.',
+      run: 'High runs the clock; low holds it where it is.',
+      reset: 'Rising edge parks the position back on the start beat.',
+    },
+    outputs: {
+      clock: 'One pulse per beat.',
+      reset: 'One pulse when the transport starts \u2014 wire it to what should re-arm.',
+      phase: '0\u201310 V ramp across the current beat.',
+    },
+    examples: [
+      'Clock \u2192 beat clip: a clip locked to the patch tempo.',
+      'Clock \u2192 clock multiplier \u2192 step sequencer for sixteenths.',
+    ],
+  },
+  'builtin.grid_track': {
+    summary:
+      'One row of the Grid page as a module: a beat clip, the sequence ' +
+      'of places it is laid on the timeline, and the controls that mix ' +
+      'it \u2014 played against a clock. Level, Pan and Wetness are ' +
+      'ordinary jacks, so a row can be modulated or MIDI-mapped like ' +
+      'anything else, and the Send/Return pair is the row\u2019s effects ' +
+      'rack: what comes back is crossfaded against the dry clip by ' +
+      'Wetness. The arrangement itself belongs to the Grid document.',
+    inputs: {
+      clock: 'Rising edge is a beat of the grid.',
+      reset: 'Rising edge parks the row on the play range\u2019s start beat.',
+      bpm: 'The tempo the clip\u2019s audio was rendered at (set by the loader).',
+      level: 'Row gain; the level line is read against it.',
+      pan: '\u22121 left \u2026 +1 right (dead centre is unity on both).',
+      wet: 'How much of the return is heard; ignored with nothing patched back.',
+      ret_l: 'Audio back from the row\u2019s rack.',
+      ret_r: 'Audio back from the row\u2019s rack.',
+    },
+    outputs: {
+      audio_l: 'The row as it is heard.',
+      audio_r: 'The row as it is heard.',
+      send_l: 'The row\u2019s dry audio, for its rack.',
+      send_r: 'The row\u2019s dry audio, for its rack.',
+    },
+    examples: [
+      'Clock \u2192 grid track \u2192 audio out: one row of an arrangement.',
+      'Send \u2192 filter \u2192 return, Wetness at 0.5: the row half-effected.',
+    ],
+  },
   'builtin.hands': {
     summary:
       'Hand-tracking CV outputs, fed by the Camera module\u2019s tracker ' +

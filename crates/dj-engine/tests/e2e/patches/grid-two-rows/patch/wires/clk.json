@@ -1,0 +1,24 @@
+{
+  "wires": [
+    {
+      "from_jack": "clock",
+      "to": "row1",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "clock",
+      "to": "row2",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "reset",
+      "to": "row1",
+      "to_jack": "reset"
+    },
+    {
+      "from_jack": "reset",
+      "to": "row2",
+      "to_jack": "reset"
+    }
+  ]
+}

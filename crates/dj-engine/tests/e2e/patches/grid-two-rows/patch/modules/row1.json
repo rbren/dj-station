@@ -1,0 +1,46 @@
+{
+  "ext": "builtin.grid_track",
+  "knobs": {
+    "bpm": {
+      "position": 0.35714287,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "clock": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "level": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ret_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ret_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "wet": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

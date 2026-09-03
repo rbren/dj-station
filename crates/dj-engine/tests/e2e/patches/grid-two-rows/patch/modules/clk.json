@@ -1,0 +1,21 @@
+{
+  "ext": "builtin.clock",
+  "knobs": {
+    "bpm": {
+      "position": 0.42857143,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "run": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

@@ -35,8 +35,10 @@ use crate::wasm_host::WasmRuntime;
 mod audio_api;
 mod beat_clip_api;
 mod choreo_api;
+mod clock_api;
 mod deck_api;
 mod decks_api;
+mod grid_api;
 mod hands_api;
 mod hot_reload;
 mod launch_control_api;
@@ -470,6 +472,10 @@ pub struct Engine {
     /// Control-side state per Beat Clip node (clip handoff + the binding
     /// the loaded audio came from).
     beat_clips: HashMap<usize, BeatClipControl>,
+    /// Control-side state per Clock node (tempo lane + transport).
+    clocks: HashMap<usize, crate::clock::ClockControl>,
+    /// Control-side state per Grid Track node (program + clip handoff).
+    grid_tracks: HashMap<usize, crate::grid_track::GridTrackControl>,
     /// Control-side state per Track I/O node (buffer handoff for the
     /// track-rack offline render).
     track_ios: HashMap<usize, crate::track_io::TrackIoControl>,
@@ -605,6 +611,8 @@ impl Engine {
             playback_garbage: HashMap::new(),
             audios: HashMap::new(),
             beat_clips: HashMap::new(),
+            clocks: HashMap::new(),
+            grid_tracks: HashMap::new(),
             track_ios: HashMap::new(),
             decks: HashMap::new(),
             clip_decks: HashMap::new(),
@@ -921,6 +929,8 @@ impl Engine {
             Some(
                 BuiltinKind::Midi
                 | BuiltinKind::Choreo
+                | BuiltinKind::Clock
+                | BuiltinKind::GridTrack
                 | BuiltinKind::Qwerty
                 | BuiltinKind::LaunchControl
                 | BuiltinKind::Hands
@@ -1001,6 +1011,8 @@ impl Engine {
         let mut qwerty_plumbing = None;
         let mut launch_control_plumbing = None;
         let mut choreo_ctl = None;
+        let mut clock_ctl = None;
+        let mut grid_track_ctl = None;
         let mut math_ctl = None;
         let mut playback_plumbing = None;
         let mut audio_ctl = None;
@@ -1049,6 +1061,39 @@ impl Engine {
                     garbage_tx,
                     shared,
                     self.config.sample_rate,
+                ))
+            }
+            Some(BuiltinKind::Clock) => {
+                let (tx, rx) = rtrb::RingBuffer::new(crate::clock::CLOCK_QUEUE_CAP);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(crate::clock::CLOCK_QUEUE_CAP);
+                let shared = Arc::new(crate::clock::ClockShared::default());
+                clock_ctl = Some(crate::clock::ClockControl::new(
+                    tx,
+                    garbage_rx,
+                    shared.clone(),
+                ));
+                Box::new(crate::clock::ClockRtModule::new(
+                    rx,
+                    garbage_tx,
+                    self.config.sample_rate,
+                    shared,
+                ))
+            }
+            Some(BuiltinKind::GridTrack) => {
+                let cap = crate::grid_track::GRID_TRACK_QUEUE_CAP;
+                let (tx, rx) = rtrb::RingBuffer::new(cap);
+                let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(cap);
+                let shared = Arc::new(crate::grid_track::GridTrackShared::default());
+                grid_track_ctl = Some(crate::grid_track::GridTrackControl::new(
+                    tx,
+                    garbage_rx,
+                    shared.clone(),
+                ));
+                Box::new(crate::grid_track::GridTrackRtModule::new(
+                    rx,
+                    garbage_tx,
+                    self.config.sample_rate,
+                    shared,
                 ))
             }
             Some(BuiltinKind::Math) => {
@@ -1304,6 +1349,12 @@ impl Engine {
         if let Some(ctl) = math_ctl {
             self.maths.insert(idx, ctl);
         }
+        if let Some(ctl) = clock_ctl {
+            self.clocks.insert(idx, ctl);
+        }
+        if let Some(ctl) = grid_track_ctl {
+            self.grid_tracks.insert(idx, ctl);
+        }
         if let Some((tx, garbage_rx)) = playback_plumbing {
             self.playback_producers.insert(idx, tx);
             self.playback_garbage.insert(idx, garbage_rx);
@@ -1396,6 +1447,8 @@ impl Engine {
         self.qwerty_producers.remove(&slot);
         self.launch_control_producers.remove(&slot);
         self.choreos.remove(&slot);
+        self.clocks.remove(&slot);
+        self.grid_tracks.remove(&slot);
         self.maths.remove(&slot);
         self.playback_producers.remove(&slot);
         self.playback_garbage.remove(&slot);

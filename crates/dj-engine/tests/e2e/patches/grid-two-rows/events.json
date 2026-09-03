@@ -1,0 +1,57 @@
+{
+  "seconds": 2.5,
+  "midi": [],
+  "grid_tracks": [
+    {
+      "instance": "row1",
+      "file": "two-beat.wav",
+      "bpm": 120.0,
+      "program": {
+        "copies": [
+          0.0,
+          2.0
+        ],
+        "levels": [],
+        "clip_beats": 2.0,
+        "loop_beats": 4.0,
+        "start_beat": 0.0
+      }
+    },
+    {
+      "instance": "row2",
+      "file": "one-beat.wav",
+      "bpm": 120.0,
+      "program": {
+        "copies": [
+          1.0,
+          3.0
+        ],
+        "levels": [
+          {
+            "beat": 0.0,
+            "level": 1.0
+          },
+          {
+            "beat": 4.0,
+            "level": 0.2
+          }
+        ],
+        "clip_beats": 1.0,
+        "loop_beats": 4.0,
+        "start_beat": 0.0
+      }
+    }
+  ],
+  "clocks": [
+    {
+      "instance": "clk",
+      "program": {
+        "points": [],
+        "start_beat": 0.0,
+        "loop_beats": 4.0,
+        "looping": true
+      },
+      "running": true
+    }
+  ]
+}

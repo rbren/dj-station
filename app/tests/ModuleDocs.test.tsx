@@ -30,6 +30,8 @@ const BUILTIN_IDS = [
   'builtin.qwerty',
   'builtin.hands',
   'builtin.math',
+  'builtin.clock',
+  'builtin.grid_track',
   'builtin.deck',
   'builtin.playback',
   'builtin.audio',

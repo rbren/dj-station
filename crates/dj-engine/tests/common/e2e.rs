@@ -134,6 +134,32 @@ pub struct LaunchControlEventSpec {
     pub data: [u8; 3],
 }
 
+/// A Clock node's program and whether the harness presses play. Like a
+/// Decks bank's transport, running is not patch state — a clock is
+/// restored stopped — and the tempo lane belongs to whatever document
+/// drives it (a Grid arrangement), so both live in the sidecar.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClockSpec {
+    pub instance: String,
+    #[serde(default)]
+    pub program: dj_engine::clock::ClockProgram,
+    #[serde(default)]
+    pub running: bool,
+}
+
+/// A Grid Track node: the clip its row plays (case-relative, with the
+/// tempo it was rendered at) and the program the Grid document compiles
+/// for it.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GridTrackSpec {
+    pub instance: String,
+    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
+    #[serde(default)]
+    pub program: dj_engine::grid_track::GridTrackProgram,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EventsFile {
     pub seconds: f32,
@@ -151,6 +177,10 @@ pub struct EventsFile {
     pub deck_slots: Vec<DecksSlotSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hands: Vec<HandsTraceSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grid_tracks: Vec<GridTrackSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clocks: Vec<ClockSpec>,
     /// Audio focus for the whole render ("rack" is the engine default;
     /// "decks"/"silent" gate by workspace tag) — how a golden pins the
     /// per-page gating of the workspace tags a patch carries.
@@ -329,6 +359,25 @@ fn render_case(case: &str) -> PathBuf {
     // that makes a rendered bank anything but silence.
     for instance in engine.decks_nodes() {
         engine.decks_set_running(&instance, true).unwrap();
+    }
+    // Rows before clocks: a row that has its clip and its program when
+    // the transport starts comes in on the first beat, exactly as the
+    // Grid page loads a document before it presses play.
+    for t in &events.grid_tracks {
+        engine
+            .grid_track_load_file(&t.instance, &case_dir.join(&t.file), t.bpm.unwrap_or(120.0))
+            .unwrap();
+        engine
+            .grid_track_set_program(&t.instance, t.program.clone())
+            .unwrap();
+    }
+    for c in &events.clocks {
+        engine
+            .clock_set_program(&c.instance, c.program.clone())
+            .unwrap();
+        if c.running {
+            engine.clock_transport(&c.instance, true, true).unwrap();
+        }
     }
     for ev in &events.midi {
         engine.inject_midi(&ev.instance, ev.frame, ev.data).unwrap();
