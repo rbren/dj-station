@@ -204,10 +204,11 @@ These are the rules that must hold everywhere.
   byte-identical unless intentionally regenerated and documented.
 - A beat clip EDITED is filed under the id it already had, so an id alone
   cannot key a decode of it: `beat_clip_list` reports a `rev` per clip
-  (`dj_analysis::clip::beat_clip_rev`) and a surface holding clip audio
-  (the Grid page: `GridTransport.forget`) drops what it holds when that
-  moves. The Grid re-reads the store every time it becomes the open tab —
-  clips are made on another page.
+  (`dj_analysis::clip::beat_clip_rev`) and anything holding clip audio is
+  keyed by `clip@rev`, so a re-cut clip is re-loaded rather than re-used
+  (the Grid session sends the rev with every sync). The Grid re-reads the
+  store every time it becomes the open tab — clips are made on another
+  page.
 - A track is not clip-editable until BOTH analysis and stem separation are
   done: the Library keeps reporting "analyzing" and blocks its Clip/edit
   entry point while a stem job for that track is still in flight.
@@ -285,15 +286,19 @@ These are the rules that must hold everywhere.
   monitor, not live).
 - **Cycle / seam**: the bank's whole loop (`cycle_beats` = lcm of loaded
   loop lengths); the seam is where it wraps.
-- **Grid page**: a DAW-style arrangement of saved beat clips played in the
-  webview, not the engine; one column is one beat, with master-tempo
-  breakpoint automation.
+- **Grid page**: a DAW-style arrangement of saved beat clips; one column
+  is one beat, with master-tempo breakpoint automation. It is PLAYED BY
+  THE ENGINE: the page syncs its document into a Grid SESSION — one
+  `builtin.clock` and one `builtin.grid_track` per row, in the `grid`
+  workspace (`app/src-tauri/src/grid.rs`, `app/src/gridEngine.ts`) — and
+  reads its playhead off that clock. The session is not part of any
+  patch; the arrangement is its own document (`grids/<name>.json`).
 - **Track rack**: the per-track effects rack opened from a Grid row —
   its own rack scoped to that track in that grid, with chrome jacks for
-  clock/audio in-out plus Level, Pan and Wetness. The rack is rendered
-  offline by the engine (`dj-engine/src/track_fx.rs`) and the Grid player
-  crossfades that wet buffer against the dry clip by Wetness; bleed
-  bookends ride the dry side.
+  clock/audio in-out plus Level, Pan and Wetness. Level and Pan are the
+  row module's own knobs; the rack itself is NOT yet compiled into the
+  Grid session (`reports/EVERYTHING_IS_A_MODULE.md`), so a row plays dry
+  whatever its Wetness says — the module's insert-return rule.
 - **Golden**: a checked-in E2E audio render (`tests/e2e_suite/`) pinned
   byte-for-byte.
 - **Macro**: a saved, non-nesting subgraph — global base definition plus a

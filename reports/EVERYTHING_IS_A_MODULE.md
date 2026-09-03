@@ -279,3 +279,68 @@ golden re-verified byte-identical (it deletes a render path).
 3. **How much Grid behaviour is negotiable** in the port — e.g. is
    "first pass plays from the parked cursor" a rule to preserve exactly?
 4. **Clip page in or out?** S7 is a ticket-sized piece of work on its own.
+
+## 7. What landed (execution log)
+
+The plan above was executed as far as S6. Deviations from it are recorded
+here rather than rewritten above, so the reasoning and the outcome can be
+read against each other.
+
+- **S0 (`ModuleState` trait) — NOT done, and dropped for now.** It buys
+  uniformity for the IPC layer, not for the audio spec, and the two
+  modules added here needed nothing from it: a clock's lane and a row's
+  arrangement are PROGRAMS shipped over a ring, not patch state, so they
+  never touch the `ModuleFile` typed fields S0 was meant to generalize.
+  Doing it would have moved patch-facing code (and risked golden bytes)
+  for no behaviour. It stays worth doing on its own, when a fifth
+  module-with-state arrives.
+- **S1 `builtin.clock` + S4 `builtin.grid_track`** — landed together
+  (`965a812`): the two new native modules, their manifests, picker
+  entries, unit tests and the `grid-two-rows` golden. Bypass routes are
+  manifest-declared, programs ride the SPSC ring as `Arc`s with a
+  garbage return ring, and both modules allocate nothing on the RT
+  thread.
+- **S2 `builtin.automation`** — NOT done as a separate module. The Grid's
+  master tempo is breakpoint automation, but the only consumer it has is
+  the clock, and the clock already reads its own lane (a `ClockProgram`)
+  so that a tempo RAMP is integrated exactly rather than sampled per
+  block. A generic automation module would have to hand the clock a
+  sampled CV, which is strictly worse for the one case that exists.
+  Deferred until a second consumer wants an envelope.
+- **S3 + S5 + S6 collapsed into two slices**, because the intermediate
+  states were less safe than the move itself: a
+  webview scheduling audio against an engine clock it polls over IPC is
+  a THIRD timing model to keep correct, and a "default OFF" port means
+  two live playback paths whose divergence is only visible by ear.
+  - *The backend* — `Workspace::Grid` / `AudioFocus::Grid`, the
+    Grid session (`app/src-tauri/src/grid.rs`) that `grid_sync` keeps in
+    step with the document, transport/playhead commands, and integration
+    tests for cueing, focus gating, a live edit under a running
+    transport, the play range wrapping, and the session staying out of
+    saved patches. Clock and row programs were re-cut to speak ABSOLUTE
+    grid columns here (`loop_start`/`loop_end`), which is what lets the
+    page's playhead be the clock's own position.
+  - *The frontend* — `app/src/gridEngine.ts` (document to sync
+    payload, engine-polled playhead), and the deletion of
+    `GridTransport`, its two test files, and the offline clip-audio path
+    that fed it (`beat_clip_audio` with its stretch, capture framing and
+    rack render, plus `BeatClipApi.audio`/`capture`). Nothing in a
+    webview plays audio any more.
+
+### Known gaps
+
+1. **A row's effects RACK is not compiled into the session.** The row
+   module has `send_l/r` and `ret_l/r` and a Wetness knob, and Level and
+   Pan are live, but nothing builds the rack's modules inside the grid
+   workspace yet — so a row plays dry whatever its Wetness says (the
+   module's own insert rule: wetness means nothing when nothing came
+   back). The Track Rack modal still edits and stores the rack; it is
+   simply not heard. This is the next slice, and it is the one that pays
+   off the offline-render deletion: `dj-engine/src/track_fx.rs` and
+   `track_io` can go once a rack is a live insert.
+2. **Sends and returns aside, the session is flat**: rows go straight to
+   an audio out. Per-row monitor/live routing (the Decks distinction) is
+   not modelled.
+3. **The Clip page (C1-C3) is untouched**, as scoped: its three EQ
+   implementations and its webview transport remain a ticket of their
+   own.
