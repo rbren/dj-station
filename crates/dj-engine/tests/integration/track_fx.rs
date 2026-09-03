@@ -59,7 +59,7 @@ fn render(fx: &str, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
 #[test]
 fn the_default_rack_returns_the_track() {
     let input = tone();
-    let out = render(&fx_json(""), &[input.clone()]);
+    let out = render(&fx_json(""), std::slice::from_ref(&input));
     // Default rack = flat EQ + scope thru on the L path: mono out, and
     // close enough to the input that full-wet playback of an untouched
     // rack is not a sound change.
