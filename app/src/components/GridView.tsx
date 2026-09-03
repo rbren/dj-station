@@ -106,6 +106,7 @@ import {
 } from '../gridHistory';
 import { fxOrDefault, isTrackFxModified, type TrackFx } from '../gridFx';
 import { GridTransport } from '../gridTransport';
+import { makeRenderCounter } from '../perf';
 import { AutomationLane, type LanePoint } from './AutomationLane';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { GridClipPicker } from './GridClipPicker';
@@ -1980,37 +1981,13 @@ function LevelLine({ row, columns }: { row: GridState['rows'][number]; columns: 
 
 /** How many times a row has drawn itself. Read by the performance tests,
  *  which are the only thing standing between this page and the crawl it
- *  had at fifty clips. Counted from an effect rather than from the render
- *  body: a render that React throws away never reaches the screen and
- *  should not be counted as work the user paid for. */
-export const __rowRenderCount = {
-  n: 0,
-  get(): number {
-    return this.n;
-  },
-  bump(): void {
-    this.n += 1;
-  },
-  reset(): void {
-    this.n = 0;
-  },
-};
+ *  had at fifty clips. */
+export const __rowRenderCount = makeRenderCounter();
 
 /** How many times the PAGE has drawn itself. What the zoom performance
  *  tests count: a wheel spun through thirty events must cost one render
  *  per frame, not one per event. */
-export const __pageRenderCount = {
-  n: 0,
-  get(): number {
-    return this.n;
-  },
-  bump(): void {
-    this.n += 1;
-  },
-  reset(): void {
-    this.n = 0;
-  },
-};
+export const __pageRenderCount = makeRenderCounter();
 
 interface RowCellsProps {
   row: GridRow;

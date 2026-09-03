@@ -7,11 +7,19 @@
 //
 // These are counted, not timed. A wall-clock budget on a shared CI box
 // measures the box; counting renders measures the code.
+//
+// The last describe in this file is the exception, and it is deliberate:
+// a count cannot see an arrangement that still renders ONCE and takes a
+// second doing it. Those tests time the same fixtures against
+// calibration-scaled budgets with several times the measured cost in
+// headroom, and prefer scaling assertions (which cancel the box out) to
+// absolute ones — see tests/perfHarness.ts.
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
 import { GridView, __pageRenderCount, __rowRenderCount } from '../src/components/GridView';
+import { bench, expectWithinBudget, heavy } from './perfHarness';
 
 const ROWS = 50;
 // The ROW COUNT is what these tests are about, so it stays at a real
@@ -34,7 +42,13 @@ function clips(n: number): BeatClipEntry[] {
   }));
 }
 
-const CLIPS = clips(ROWS);
+/** Rows in the TIMED arrangement below — a real set, and on the CI perf
+ *  job (`DJ_PERF_HEAVY=1`) an unreasonable one. */
+const PERF_ROWS = heavy(ROWS, 100);
+/** Beats in the timed arrangement. */
+const PERF_BEATS = heavy(128, 384);
+
+const CLIPS = clips(Math.max(ROWS, PERF_ROWS));
 
 function api(): BeatClipApi {
   return {
@@ -359,4 +373,115 @@ describe('Grid scroll performance', () => {
     expect(__rowRenderCount.get()).toBe(0);
     expect(screen.getByTestId('grid-cell-row1-200')).toBeTruthy();
   });
+});
+
+// TIMED, not counted — the exception this file's header explains. The
+// counts above pin how MUCH of the page is re-rendered; these pin what a
+// render of a big arrangement COSTS, which is the other half of "the page
+// dragged at fifty clips". Budgets are calibration-scaled and carry
+// several times the measured cost (tests/perfHarness.ts); the scaling
+// assertion is the one that really matters, because the box cancels out
+// of a ratio.
+describe('Grid rendering cost', () => {
+  const CELL = 22;
+  /** A scrollport 30 beats wide, as in the scroll suite above. */
+  const VIEW = 30 * CELL;
+  /** Rows for the SCROLL benches: the beat count is what those are about,
+   *  and eight rows keep the first (unwindowed) render cheap. */
+  const SCROLL_ROWS = 8;
+  const SCROLL_BEATS = heavy(512, 1024);
+  /** Mounting a big arrangement several times over is seconds of work,
+   *  well past vitest's 5 s default. */
+  const TIMEOUT = heavy(120_000, 300_000);
+
+  const settle = () => new Promise((done) => setTimeout(done, 30));
+
+  function scrollport(width: number): (px: number) => void {
+    const box = screen.getByTestId('grid-body');
+    let left = 0;
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => width });
+    Object.defineProperty(box, 'scrollLeft', {
+      configurable: true,
+      get: () => left,
+      set: (v: number) => {
+        left = v;
+      },
+    });
+    return (px: number) => {
+      box.scrollLeft = px;
+      fireEvent.scroll(box);
+    };
+  }
+
+  it(
+    'opens a big arrangement',
+    async () => {
+      const stats = await bench(
+        `grid open ${PERF_ROWS}x${PERF_BEATS}`,
+        () => renderBig(PERF_ROWS, PERF_BEATS),
+        { runs: 3, teardown: () => cleanup() },
+      );
+      expectWithinBudget(stats, heavy(6_000, 20_000));
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'scrolls at a cost set by the WINDOW, not by the arrangement',
+    async () => {
+      let to: (px: number) => void = () => {};
+      /** A flick across a few blocks, from beat 200. */
+      const flick = async () => {
+        for (let i = 0; i < 30; i += 1) to(200 * CELL + i * 100);
+        await waitFor(() => expect(screen.getByTestId('grid-cell-row1-330')).toBeTruthy());
+      };
+      const open = (beats: number) => async () => {
+        await renderBig(SCROLL_ROWS, beats);
+        to = scrollport(VIEW);
+        to(200 * CELL);
+        await waitFor(() => expect(screen.queryByTestId('grid-cell-row1-0')).toBeNull());
+        await settle();
+      };
+      const opts = { runs: 2, teardown: () => cleanup() };
+      const short = await bench(`grid flick over ${SCROLL_BEATS} beats`, flick, {
+        ...opts,
+        setup: open(SCROLL_BEATS),
+      });
+      const long = await bench(`grid flick over ${SCROLL_BEATS * 2} beats`, flick, {
+        ...opts,
+        setup: open(SCROLL_BEATS * 2),
+      });
+
+      // Only the columns under the scrollport are in the DOM, so a flick
+      // over twice as long an arrangement is the SAME work. Anything near
+      // ×2 means the windowing has been lost and the whole set is being
+      // drawn again — the state the window was added to get out of.
+      const grew = long.median / Math.max(short.median, 0.5);
+      console.log(`[perf] flick cost at ×2 beats: ×${grew.toFixed(2)}`);
+      expect(grew).toBeLessThanOrEqual(1.6);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'answers a burst of zoom events inside a frame',
+    async () => {
+      const stats = await bench(
+        'grid zoom burst (30 wheel events)',
+        async () => {
+          const ruler = screen.getByTestId('grid-ruler');
+          for (let i = 0; i < 30; i += 1) fireEvent.wheel(ruler, { deltaY: -10 });
+          await waitFor(() => expect(screen.getByTestId('grid-zoom').textContent).toBe('152%'));
+        },
+        { runs: 3, setup: () => renderBig(PERF_ROWS, PERF_BEATS), teardown: () => cleanup() },
+      );
+
+      // The zoom is a CSS variable and the burst is coalesced into one
+      // frame (both counted above), so what is left is one render of the
+      // page chrome — small, and roughly constant whatever is laid out
+      // below it.
+      expectWithinBudget(stats, heavy(1_200, 3_000));
+    },
+    TIMEOUT,
+  );
 });

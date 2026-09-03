@@ -12,6 +12,7 @@
 
 import { useLayoutEffect, useState } from 'react';
 import type { WireSnapshot } from '../engine';
+import { timed } from '../perf';
 
 /** The 8 selectable wire colors; index 0 is the default. */
 export const WIRE_COLORS = [
@@ -37,17 +38,33 @@ interface Cable {
   y2: number;
 }
 
+function jackKey(instance: string, kind: 'output' | 'input', jack: string): string {
+  return `${instance}:${kind}:${jack}`;
+}
+
+/** Every jack socket under `root`, by its `data-jack` key.
+ *
+ *  ONE pass over the DOM per measure. Looking each socket up with its own
+ *  `querySelector` walks the whole rack subtree per wire END, which is
+ *  quadratic in the patch size — measured at 176 ms per measure on a
+ *  16-module fixture (`tests/RackPerf.test.tsx`), and a measure runs on
+ *  every module add, drag and panel resize. */
+function jackSockets(root: HTMLElement): Map<string, HTMLElement> {
+  const map = new Map<string, HTMLElement>();
+  for (const el of root.querySelectorAll<HTMLElement>('[data-jack]')) {
+    const key = el.dataset.jack;
+    if (key !== undefined) map.set(key, el);
+  }
+  return map;
+}
+
 function jackCenter(
-  root: HTMLElement,
+  el: HTMLElement | undefined,
   origin: DOMRect,
   zoom: number,
-  instance: string,
-  kind: 'output' | 'input',
-  jack: string,
 ): { x: number; y: number } | null {
-  const el = root.querySelector(`[data-jack="${instance}:${kind}:${jack}"]`);
   if (!el) return null;
-  const r = (el as HTMLElement).getBoundingClientRect();
+  const r = el.getBoundingClientRect();
   // Screen px → unzoomed rack coordinates (the container is scaled by
   // `zoom` around origin 0 0, so its own rect already includes the pan).
   return {
@@ -139,32 +156,44 @@ export function WireOverlay({
   const pendingStart =
     pending && container
       ? jackCenter(
-          container,
+          container.querySelector<HTMLElement>(
+            `[data-jack="${jackKey(pending.instance, pending.kind, pending.jack)}"]`,
+          ) ?? undefined,
           container.getBoundingClientRect(),
           zoom,
-          pending.instance,
-          pending.kind,
-          pending.jack,
         )
       : null;
 
   useLayoutEffect(() => {
     if (!container) return;
     let raf = 0;
-    const measure = () => {
-      const origin = container.getBoundingClientRect();
-      const next: Cable[] = [];
-      for (const w of wires) {
-        const a = jackCenter(container, origin, zoom, w.from_instance, 'output', w.from_jack);
-        const b = jackCenter(container, origin, zoom, w.to_instance, 'input', w.to_jack);
-        if (a && b) {
-          next.push({ key: wireKey(w), x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+    // One forced layout per wire end, so this is the rack's dearest
+    // stage on a big patch — timed under `rack.wireMeasure` for the perf
+    // suites and the stress HUD.
+    const measure = () =>
+      timed('rack.wireMeasure', () => {
+        const origin = container.getBoundingClientRect();
+        const sockets = jackSockets(container);
+        const next: Cable[] = [];
+        for (const w of wires) {
+          const a = jackCenter(
+            sockets.get(jackKey(w.from_instance, 'output', w.from_jack)),
+            origin,
+            zoom,
+          );
+          const b = jackCenter(
+            sockets.get(jackKey(w.to_instance, 'input', w.to_jack)),
+            origin,
+            zoom,
+          );
+          if (a && b) {
+            next.push({ key: wireKey(w), x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+          }
         }
-      }
-      // Only update state on real changes so observer-triggered measures
-      // don't loop through our own SVG re-render.
-      setCables((prev) => (cablesEqual(prev, next) ? prev : next));
-    };
+        // Only update state on real changes so observer-triggered measures
+        // don't loop through our own SVG re-render.
+        setCables((prev) => (cablesEqual(prev, next) ? prev : next));
+      });
     const schedule = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(measure);

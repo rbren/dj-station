@@ -8,11 +8,17 @@
 //    plus "long" frames > 1.5× the measured vsync interval);
 //  - PerformanceObserver 'longtask' entries (Chrome): blocking tasks >50ms;
 //  - React <Profiler onRender> commits forwarded via onCommit(): commits/s
-//    and React ms/s show how much of the frame budget React consumes.
+//    and React ms/s show how much of the frame budget React consumes;
+//  - the instrumented render-pipeline phases from src/perf.ts (the cable
+//    measure, the peaks path build, …): the dearest few per second, which
+//    is what turns "React spent 40 ms" into a place to look.
 
 import type { ProfilerOnRenderCallback } from 'react';
+import { perfPhases, resetPerfPhases, setPerfEnabled } from '../perf';
 
 const WINDOW_MS = 1000;
+/** Instrumented phases shown per refresh, dearest first. */
+const HUD_PHASES = 3;
 
 export interface PerfHud {
   onCommit: ProfilerOnRenderCallback;
@@ -66,6 +72,18 @@ export function installPerfHud(subtitle: string): PerfHud {
     po = null; // longtask unsupported (Firefox/WebKit) — HUD row shows n/a
   }
 
+  // The instrumented stages of the render pipeline (src/perf.ts): which
+  // of them the second's milliseconds went into, which is the difference
+  // between "the page is slow" and "the cable measure is slow".
+  setPerfEnabled(true);
+
+  const phaseLines = () =>
+    Object.entries(perfPhases())
+      .sort((a, b) => b[1].ms - a[1].ms)
+      .slice(0, HUD_PHASES)
+      .map(([label, p]) => `  ${label} ${p.ms.toFixed(1)}ms/s ×${p.calls}\n`)
+      .join('');
+
   const render = () => {
     const sorted = [...frames].sort((a, b) => a - b);
     const vsync = percentile(sorted, 0.5) || 16.7;
@@ -79,8 +97,10 @@ export function installPerfHud(subtitle: string): PerfHud {
       `longtask ${po ? `${longTasks}/s  ${longTaskMs.toFixed(0)}ms/s` : 'n/a'}\n` +
       `react    ${commits} commits/s  ${reactMs.toFixed(1)}ms/s` +
       `  max ${maxCommitMs.toFixed(1)}ms\n` +
+      phaseLines() +
       (status ? `${status}\n` : '') +
       `keys: [t]elemetry pause  [l]og`;
+    resetPerfPhases();
     frames = [];
     commits = 0;
     reactMs = 0;
@@ -102,6 +122,7 @@ export function installPerfHud(subtitle: string): PerfHud {
     dispose() {
       if (disposed) return;
       disposed = true;
+      setPerfEnabled(false);
       cancelAnimationFrame(raf);
       clearInterval(interval);
       po?.disconnect();

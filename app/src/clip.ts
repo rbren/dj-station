@@ -10,6 +10,7 @@
 // `warp_time_secs`).
 
 import { IpcClient } from './ipc';
+import { timed } from './perf';
 
 /** An even beat grid: the two numbers a tempo is, and how far it runs.
  *  Twin: `Grid` in `dj_analysis::beats`. */
@@ -282,6 +283,14 @@ export function programDuration(program: ClipProgram): number {
  *  still sitting there — for as long as the debounce plus the render
  *  take. */
 export function programPeaks(
+  program: ClipProgram,
+  sources: readonly { peaks: number[]; duration_secs: number }[],
+  buckets: number,
+): number[] {
+  return timed('clip.programPeaks', () => programPeaksImpl(program, sources, buckets));
+}
+
+function programPeaksImpl(
   program: ClipProgram,
   sources: readonly { peaks: number[]; duration_secs: number }[],
   buckets: number,
