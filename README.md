@@ -70,6 +70,16 @@ false`); if you turn it on, generate the full multi-format set (`.ico`,
 `app/` (the CLI is not a repo dependency) and list the results in
 `bundle.icon`.
 
+**Linux dock/taskbar caveat:** the embedded PNG only sets the per-window
+icon. GNOME (especially on Wayland) ignores that and resolves the
+dock/alt-tab icon via the window's app-id (`dj-station`, from the binary
+name) → an installed `.desktop` file → its `Icon=`. Running the bare
+binary via `./run.sh` installs neither, so you get the generic "exec"
+square. Fix without bundling: install the icon as
+`~/.local/share/icons/hicolor/512x512/apps/dj-station.png` plus a
+`~/.local/share/applications/dj-station.desktop` with `Icon=dj-station`
+and `StartupWMClass=dj-station`.
+
 ## State & saves — `custom/`
 
 All persistent state lives in **`custom/` inside this checkout** (the repo
