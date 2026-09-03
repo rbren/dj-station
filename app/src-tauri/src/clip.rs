@@ -556,6 +556,49 @@ fn span_of(rendered: &AudioData, start_secs: f64, end_secs: f64) -> CmdResult<(f
     Ok((a, b))
 }
 
+/// Cached beat detections for a library track. These are produced by the
+/// background analysis worker, so opening the Clip editor has no tracker work.
+#[tauri::command(async)]
+pub fn clip_track_beats(
+    state: State<AppState>,
+    track_id: i64,
+) -> CmdResult<Option<dj_analysis::TrackBeatAnalysis>> {
+    let track = state.library.track(track_id).map_err(err)?;
+    dj_analysis::load_track_beats(state.library.data_dir(), &track.content_hash).map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn clip_select_track_beat_seed(
+    state: State<AppState>,
+    track_id: i64,
+    seed: String,
+) -> CmdResult<dj_analysis::TrackBeatAnalysis> {
+    let track = state.library.track(track_id).map_err(err)?;
+    dj_analysis::select_track_seed(state.library.data_dir(), &track.content_hash, &seed).map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn clip_set_downbeat_ratio(
+    state: State<AppState>,
+    track_id: i64,
+    ratio: usize,
+) -> CmdResult<dj_analysis::TrackBeatAnalysis> {
+    let track = state.library.track(track_id).map_err(err)?;
+    dj_analysis::set_downbeat_ratio(state.library.data_dir(), &track.content_hash, ratio).map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn clip_toggle_track_downbeat(
+    state: State<AppState>,
+    track_id: i64,
+    seed: String,
+    index: usize,
+) -> CmdResult<dj_analysis::TrackBeatAnalysis> {
+    let track = state.library.track(track_id).map_err(err)?;
+    dj_analysis::toggle_track_downbeat(state.library.data_dir(), &track.content_hash, &seed, index)
+        .map_err(err)
+}
+
 /// Render the selected span to `<data_dir>/beat-clips/`, cut to exactly
 /// `beats` whole beats at `bpm` — the numbers the save row showed, so
 /// selecting two beats files two (a fractional tail is silence-filled,

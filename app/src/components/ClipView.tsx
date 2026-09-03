@@ -117,8 +117,11 @@ import {
   type ClipSourceRef,
   type ClipStemBackend,
   type ClipStemStatus,
+  bestTrackBeatSeed,
+  trackBeatGrid,
   type ClipTapSeed,
   type TapStats,
+  type TrackBeatAnalysis,
   type WarpPoint,
   DEFAULT_WARP_SMOOTHING,
   SILENCE_DB,
@@ -504,6 +507,8 @@ export function ClipView({
   const [correctOn, setCorrectOn] = useState(false);
   /** The last tap commit, regenerable (see TapSession). */
   const [tapSession, setTapSession] = useState<TapSession | null>(null);
+  /** Full-track seed detections produced during library analysis. */
+  const [trackBeats, setTrackBeats] = useState<TrackBeatAnalysis | null>(null);
   /** The measured tempo of an untapped span, keyed by what it measured
    *  so a new selection or edit simply outdates it. */
   const [detected, setDetected] = useState<{
@@ -657,6 +662,7 @@ export function ClipView({
     sectionBeats,
     smoothing,
     correctOn,
+    trackBeats,
     sel,
     liveOn,
   });
@@ -670,6 +676,7 @@ export function ClipView({
       sectionBeats,
       smoothing,
       correctOn,
+      trackBeats,
       sel,
       liveOn,
     };
@@ -705,6 +712,26 @@ export function ClipView({
     setOneTaps([]);
     const prev = live.current.program;
     void (async () => {
+      const cached = live.current.trackBeats;
+      const trackId = live.current.request.sources[0]?.track_id;
+      const pickedSeed = cached ? bestTrackBeatSeed(cached, rawTaps) : null;
+      if (trackId !== undefined && pickedSeed) {
+        try {
+          const updated = await live.current.clip.selectTrackBeatSeed(trackId, pickedSeed);
+          const grid = updated ? trackBeatGrid(updated) : null;
+          if (live.current.program !== prev || !grid) return;
+          setPast((h) => [...h.slice(-HISTORY_DEPTH), prev]);
+          setFuture([]);
+          setProgram({ ...prev, warp: [], beat_grid: grid });
+          setTapSession(null);
+          setTrackBeats(updated);
+          setSelection((cur) => (cur ? quantizeRange(grid, cur, programDuration(prev)) : cur));
+          setStatus(`Selected ${pickedSeed} from your playback taps`);
+          return;
+        } catch {
+          // A missing or stale cache falls through to the tap-span path.
+        }
+      }
       let beats = rawTaps;
       let seeds: ClipTapSeed[] = [];
       let seed: string | null = null;
@@ -879,6 +906,7 @@ export function ClipView({
    *  are dropped with it (see `dropGrid`), one undo step for the lot. */
   const applyTimeline = useCallback(
     (edit: (p: ClipProgram, at: (t: number) => number) => ClipProgram) => {
+      setTrackBeats(null);
       apply((p) => {
         const { warp, warp_smoothing } = p;
         return edit(dropGrid(p), (t) => warpSource(warp, t, warp_smoothing));
@@ -1009,6 +1037,48 @@ export function ClipView({
     [regenerate, tapSession, tunable],
   );
 
+  /** Replace the source overlay with persisted analysis metadata. */
+  const applyTrackBeats = useCallback((analysis: TrackBeatAnalysis) => {
+    const grid = trackBeatGrid(analysis);
+    if (!grid) return;
+    setTrackBeats(analysis);
+    setTapSession(null);
+    setProgram((present) => ({ ...present, warp: [], beat_grid: grid }));
+    setSelection((current) =>
+      current ? quantizeRange(grid, current, programDuration(live.current.program)) : current,
+    );
+  }, []);
+
+  const pickTrackSeed = useCallback(
+    async (seed: string) => {
+      const trackId = sources[0]?.track_id;
+      if (trackId === undefined) return;
+      const analysis = await clip.selectTrackBeatSeed(trackId, seed);
+      if (analysis) applyTrackBeats(analysis);
+    },
+    [applyTrackBeats, clip, sources],
+  );
+
+  const changeDownbeatRatio = useCallback(
+    async (ratio: number) => {
+      const trackId = sources[0]?.track_id;
+      if (trackId === undefined) return;
+      const analysis = await clip.setDownbeatRatio(trackId, Math.max(1, Math.round(ratio) || 1));
+      if (analysis) applyTrackBeats(analysis);
+    },
+    [applyTrackBeats, clip, sources],
+  );
+
+  const toggleTrackDownbeat = useCallback(
+    async (index: number) => {
+      const trackId = sources[0]?.track_id;
+      if (trackId === undefined || !trackBeats) return;
+      const analysis = await clip.toggleTrackDownbeat(trackId, trackBeats.selectedSeed, index);
+      if (analysis) applyTrackBeats(analysis);
+    },
+    [applyTrackBeats, clip, sources, trackBeats],
+  );
+
   /** Open a track: the page edits ONE source, so this starts the edit
    *  over rather than adding a lane to the one in hand. */
   const loadTrack = useCallback(
@@ -1016,6 +1086,7 @@ export function ClipView({
       const stems = stemsWanted;
       setBusy(true);
       setError(null);
+      setTrackBeats(null);
       try {
         const source = await clip.loadSource(trackId, stems, MIN_BUCKETS);
         if (!source) {
@@ -1030,8 +1101,14 @@ export function ClipView({
           );
           return;
         }
+        const analysis = await clip.trackBeats(trackId);
+        const grid = analysis ? trackBeatGrid(analysis) : null;
         setSources([source]);
-        setProgram(appendSource(emptyProgram(), 0, source.duration_secs));
+        setProgram({
+          ...appendSource(emptyProgram(), 0, source.duration_secs),
+          beat_grid: grid,
+        });
+        setTrackBeats(analysis);
         setPast([]);
         setFuture([]);
         setSelection(null);
@@ -1264,6 +1341,7 @@ export function ClipView({
         setPast([]);
         setFuture([]);
         setTapSession(null);
+        setTrackBeats(null);
         setVp(null);
         setSelection({ start: open.startSecs, end: open.endSecs });
         bleedEdges.current = { start: open.startSecs, end: open.endSecs };
@@ -2090,7 +2168,17 @@ export function ClipView({
                       x2={xOf(t)}
                       y1={0}
                       y2={WAVE_H}
-                    />
+                      onMouseDown={
+                        trackBeats
+                          ? (event) => {
+                              event.stopPropagation();
+                              void toggleTrackDownbeat(grid.times.indexOf(t));
+                            }
+                          : undefined
+                      }
+                    >
+                      {trackBeats && <title>Click to restart downbeats here</title>}
+                    </line>
                   ))}
                 {grid &&
                   gridOneTimes(grid, vpStart, vpEnd).map((t, i) => (
@@ -2102,8 +2190,16 @@ export function ClipView({
                       x2={xOf(t)}
                       y1={0}
                       y2={WAVE_H}
+                      onMouseDown={
+                        trackBeats
+                          ? (event) => {
+                              event.stopPropagation();
+                              void toggleTrackDownbeat(grid.times.indexOf(t));
+                            }
+                          : undefined
+                      }
                     >
-                      <title>the one</title>
+                      <title>{trackBeats ? 'Click to restart downbeats here' : 'the one'}</title>
                     </line>
                   ))}
                 {taps.map((t, i) => (
@@ -2135,6 +2231,37 @@ export function ClipView({
           {grid && (
             <div className="clip-grid-tools" data-testid="clip-grid-tools">
               <span className="clip-grid-label">Beat grid</span>
+              {trackBeats && (
+                <>
+                  <label className="clip-grid-seed">
+                    <span>Seed</span>
+                    <select
+                      data-testid="clip-track-grid-seed"
+                      value={trackBeats.selectedSeed}
+                      onChange={(event) => void pickTrackSeed(event.target.value)}
+                      title="Choose one of the full-track detector seeds"
+                    >
+                      {trackBeats.seeds.map((seed) => (
+                        <option key={seed.seed} value={seed.seed}>
+                          {seed.seed} · {fixed(seed.bpm, 1)} BPM
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="clip-grid-section">
+                    <span>Downbeat ratio</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      data-testid="clip-downbeat-ratio"
+                      value={trackBeats.downbeatRatio}
+                      onChange={(event) => void changeDownbeatRatio(Number(event.target.value))}
+                      title="Mark every Nth beat as a downbeat; clicking a beat restarts its count"
+                    />
+                  </label>
+                </>
+              )}
               <span
                 className="clip-grid-extend"
                 role="group"

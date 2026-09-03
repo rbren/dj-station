@@ -1166,6 +1166,56 @@ export interface ClipTapSeed {
   fit: number;
 }
 
+/** One full-track detector seed, persisted by library analysis. */
+export interface TrackBeatSeed {
+  seed: string;
+  bpm: number;
+  times: number[];
+  /** Explicit user downbeat anchors; the remaining ones are derived. */
+  downbeats?: number[];
+  /** All derived downbeat indices for this seed. */
+  ones?: number[];
+}
+
+/** Cached complete-track beat analysis, available before the editor opens. */
+export interface TrackBeatAnalysis {
+  tracker: string;
+  selectedSeed: string;
+  downbeatRatio: number;
+  seeds: TrackBeatSeed[];
+}
+
+/** Turn the currently selected persisted seed into the editor's grid. */
+export function trackBeatGrid(analysis: TrackBeatAnalysis): ClipGrid | null {
+  const seed = analysis.seeds.find((candidate) => candidate.seed === analysis.selectedSeed);
+  if (!seed || seed.times.length < 2 || seed.bpm <= 0) return null;
+  const ones = seed.ones?.filter((index) => index >= 0 && index < seed.times.length) ?? [];
+  return {
+    bpm: seed.bpm,
+    period: 60 / seed.bpm,
+    phase: seed.times[0],
+    beats: seed.times.length,
+    times: seed.times,
+    ...(ones.length ? { ones } : {}),
+  };
+}
+
+/** Select the cached seed whose beats are closest to the player's taps. */
+export function bestTrackBeatSeed(
+  analysis: TrackBeatAnalysis,
+  taps: readonly number[],
+): string | null {
+  if (taps.length < 2) return null;
+  const candidates = analysis.seeds.filter((seed) => seed.times.length >= 2 && seed.bpm > 0);
+  if (!candidates.length) return null;
+  const miss = (seed: TrackBeatSeed) =>
+    taps.reduce(
+      (sum, tap) => sum + Math.min(...seed.times.map((time) => Math.abs(time - tap))),
+      0,
+    ) / taps.length;
+  return candidates.reduce((best, seed) => (miss(seed) < miss(best) ? seed : best)).seed;
+}
+
 /** A saved beat clip taken back apart for the editor
  *  (`clip_open_beat_clip`): the edit it was cut with, its sources
  *  resolved to the library rows that hold that audio TODAY, and the span
@@ -1216,6 +1266,15 @@ export interface ClipClientApi {
    *  let the taps choose among its seeds — the measured beat times the
    *  grid is built from (the taps themselves when nothing fits). */
   tapBeats(request: ClipRequest, taps: number[]): Promise<ClipTapBeats | null>;
+  /** Full-track beat detections already persisted during library analysis. */
+  trackBeats(trackId: number): Promise<TrackBeatAnalysis | null>;
+  selectTrackBeatSeed(trackId: number, seed: string): Promise<TrackBeatAnalysis | null>;
+  setDownbeatRatio(trackId: number, ratio: number): Promise<TrackBeatAnalysis | null>;
+  toggleTrackDownbeat(
+    trackId: number,
+    seed: string,
+    index: number,
+  ): Promise<TrackBeatAnalysis | null>;
   /** Render a span as a beat clip, cut to exactly `beats` whole beats at
    *  `bpm` (the save row's numbers). The edit is filed with it — the
    *  sources by the hash of their audio, the program's timestamps, the
@@ -1260,6 +1319,18 @@ export class ClipClient extends IpcClient implements ClipClientApi {
   }
   tapBeats(request: ClipRequest, taps: number[]) {
     return this.call<ClipTapBeats>('clip_tap_beats', { request, taps });
+  }
+  trackBeats(trackId: number) {
+    return this.call<TrackBeatAnalysis>('clip_track_beats', { trackId });
+  }
+  selectTrackBeatSeed(trackId: number, seed: string) {
+    return this.call<TrackBeatAnalysis>('clip_select_track_beat_seed', { trackId, seed });
+  }
+  setDownbeatRatio(trackId: number, ratio: number) {
+    return this.call<TrackBeatAnalysis>('clip_set_downbeat_ratio', { trackId, ratio });
+  }
+  toggleTrackDownbeat(trackId: number, seed: string, index: number) {
+    return this.call<TrackBeatAnalysis>('clip_toggle_track_downbeat', { trackId, seed, index });
   }
   saveBeatClip(
     request: ClipRequest,

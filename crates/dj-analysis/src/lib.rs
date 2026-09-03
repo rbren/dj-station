@@ -47,6 +47,7 @@ pub mod stems;
 pub mod stft;
 pub mod tempo;
 pub mod testset;
+pub mod track_beats;
 pub mod worker;
 
 #[cfg(feature = "onnx")]
@@ -66,6 +67,10 @@ pub use stems::{
     mix_stems, remove_stems, stem_paths, stem_union, stems_cached, stems_dir, stems_dir_for,
     stems_need_migration, BandSeparator, CachedStems, CancelToken, StemSeparator, Stems,
     DEFAULT_SEPARATOR_ID, LEGACY_STEM_EXT, N_STEMS, STEM_EXT, STEM_NAMES,
+};
+pub use track_beats::{
+    analyze_track_beats, load_track_beats, select_track_seed, set_downbeat_ratio,
+    toggle_track_downbeat, TrackBeatAnalysis, TrackBeatSeed,
 };
 pub use worker::{start_worker, AnalysisSettings, AnalysisWorker};
 

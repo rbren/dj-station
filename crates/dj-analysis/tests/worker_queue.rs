@@ -5,7 +5,9 @@
 
 use dj_analysis::testset::synth_labeled_track;
 use dj_analysis::worker::{analyze_track_now, start_worker, AnalysisSettings};
-use dj_analysis::{stems_cached, stems_dir, AudioData, BandSeparator, StemSeparator, Stems};
+use dj_analysis::{
+    load_track_beats, stems_cached, stems_dir, AudioData, BandSeparator, StemSeparator, Stems,
+};
 use dj_library::{ImportOptions, ImportOutcome, Library};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -94,6 +96,15 @@ fn import_auto_queues_and_results_land_in_the_db() {
     // Auto-beatgrid landed as track metadata (the deck re-applies it).
     let grid = library.track_beatgrid(track.id).unwrap().expect("no grid");
     assert!(grid.bpm > 0.0);
+
+    // The Clip page can immediately reuse the full-track detections: no
+    // opening-time tracker pass, and every available seed was kept.
+    let full = load_track_beats(library.data_dir(), &track.content_hash)
+        .unwrap()
+        .expect("full-track beat cache");
+    assert_eq!(full.downbeat_ratio, 4);
+    assert!(!full.seeds.is_empty());
+    assert!(full.seeds.iter().all(|seed| seed.times.len() >= 4));
 
     // Stems cached as FLAC under the content-hashed dir.
     let dir = stems_dir(library.data_dir(), &track.content_hash);

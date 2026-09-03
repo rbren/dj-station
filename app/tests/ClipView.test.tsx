@@ -8,7 +8,13 @@ import { createRef, StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClipView, type ClipViewHandle } from '../src/components/ClipView';
-import type { ClipClientApi, ClipProgram, ClipRequest, ClipSource } from '../src/clip';
+import type {
+  ClipClientApi,
+  ClipProgram,
+  ClipRequest,
+  ClipSource,
+  TrackBeatAnalysis,
+} from '../src/clip';
 import { closeAudio } from '../src/clipAudio';
 import type { LibraryClientApi, Track } from '../src/library';
 
@@ -60,6 +66,32 @@ const HEARD = {
   ],
 };
 
+const TRACK_BEATS: TrackBeatAnalysis = {
+  tracker: 'beat_this/final0+final1+final2',
+  selectedSeed: 'final0',
+  downbeatRatio: 4,
+  seeds: [
+    {
+      seed: 'final0',
+      bpm: 120,
+      times: Array.from({ length: 20 }, (_, i) => i * 0.5),
+      ones: [0, 4, 8, 12, 16],
+    },
+    {
+      seed: 'final1',
+      bpm: 60,
+      times: Array.from({ length: 10 }, (_, i) => i),
+      ones: [0, 4, 8],
+    },
+    {
+      seed: 'final2',
+      bpm: 120,
+      times: Array.from({ length: 20 }, (_, i) => i * 0.5 + 0.1),
+      ones: [0, 4, 8, 12, 16],
+    },
+  ],
+};
+
 function libraryMock(): LibraryClientApi {
   return {
     tracks: vi.fn(async () => [TRACK, OTHER]),
@@ -103,6 +135,10 @@ function clipMock(overrides: Partial<ClipClientApi> = {}): ClipClientApi {
       detail: '',
       seeds: [],
     })),
+    trackBeats: vi.fn(async () => null),
+    selectTrackBeatSeed: vi.fn(async () => null),
+    setDownbeatRatio: vi.fn(async () => null),
+    toggleTrackDownbeat: vi.fn(async () => null),
     saveBeatClip: vi.fn(
       async (
         _r: ClipRequest,
@@ -435,6 +471,61 @@ describe('ClipView', () => {
       'Basement Loop (clip)',
     );
   });
+
+  it('overlays cached full-track seeds, uses playback taps to choose one, and restarts downbeats', async () => {
+    let analysis = structuredClone(TRACK_BEATS);
+    const clip = clipMock({
+      trackBeats: vi.fn(async () => analysis),
+      selectTrackBeatSeed: vi.fn(async (_trackId: number, seed: string) => {
+        analysis = { ...analysis, selectedSeed: seed };
+        return analysis;
+      }),
+      setDownbeatRatio: vi.fn(async (_trackId: number, ratio: number) => {
+        analysis = { ...analysis, downbeatRatio: ratio };
+        return analysis;
+      }),
+      toggleTrackDownbeat: vi.fn(async (_trackId: number, seed: string, index: number) => {
+        analysis = {
+          ...analysis,
+          seeds: analysis.seeds.map((candidate) =>
+            candidate.seed === seed
+              ? { ...candidate, downbeats: [index], ones: [0, 4, index, index + 4] }
+              : candidate,
+          ),
+        };
+        return analysis;
+      }),
+    });
+    await openTrack(clip);
+
+    expect(clip.trackBeats).toHaveBeenCalledWith(TRACK.id);
+    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(20);
+    expect(screen.getAllByTestId('clip-one-line')).toHaveLength(5);
+    expect((screen.getByTestId('clip-downbeat-ratio') as HTMLInputElement).value).toBe('4');
+
+    fireEvent.change(screen.getByTestId('clip-track-grid-seed'), { target: { value: 'final1' } });
+    await waitFor(() => expect(clip.selectTrackBeatSeed).toHaveBeenCalledWith(TRACK.id, 'final1'));
+    expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(10);
+
+    fireEvent.change(screen.getByTestId('clip-downbeat-ratio'), { target: { value: '3' } });
+    await waitFor(() => expect(clip.setDownbeatRatio).toHaveBeenCalledWith(TRACK.id, 3));
+    fireEvent.mouseDown(screen.getAllByTestId('clip-beat-line')[5]);
+    await waitFor(() =>
+      expect(clip.toggleTrackDownbeat).toHaveBeenCalledWith(TRACK.id, 'final1', 5),
+    );
+    await waitFor(() => expect(screen.getAllByTestId('clip-one-line')).toHaveLength(4));
+
+    fireEvent.click(screen.getByTestId('clip-play'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
+    tapAt(1.02);
+    tapAt(2.01);
+    tapAt(2.98);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() =>
+      expect(clip.selectTrackBeatSeed).toHaveBeenLastCalledWith(TRACK.id, 'final0'),
+    );
+    expect(clip.tapBeats).not.toHaveBeenCalled();
+  }, 10000);
 
   it('drag-selects a range and shows it in the selection pane', async () => {
     await openTrack(clipMock());

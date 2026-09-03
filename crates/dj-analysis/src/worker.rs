@@ -20,6 +20,7 @@ use dj_library::{Library, Track};
 
 use crate::decode::decode_audio;
 use crate::stems::{ensure_stems, stems_dir, BandSeparator, StemSeparator};
+use crate::track_beats::analyze_track_beats;
 
 pub struct AnalysisSettings {
     pub poll_interval: Duration,
@@ -126,6 +127,13 @@ pub fn analyze_track_now(
     library.set_analysis_status(track.id, "analyzing")?;
     let audio = decode_audio(Path::new(&track.file_path))?;
     let result = crate::analyze_audio(&audio)?;
+    let tracker = crate::beats::detect::default_tracker();
+    analyze_track_beats(
+        library.data_dir(),
+        &track.content_hash,
+        &audio,
+        tracker.as_ref(),
+    )?;
     library.set_track_analysis(track.id, result.bpm, &result.key)?;
     library.set_track_beatgrid(track.id, result.bpm, result.anchor_secs)?;
     if settings.compute_stems {
