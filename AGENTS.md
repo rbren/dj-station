@@ -252,6 +252,11 @@ These are the rules that must hold everywhere.
   else; commands flow control→RT, readouts come back via shared atomics.
 - **Beat grid**: a track's analyzed beat positions; its **ones** are the
   downbeats. **Lead one**: the first one, the anchor clips align by.
+- **Full-track beat cache**: library analysis persists every detector seed by
+  source content hash. The Clip page loads this cache immediately; its selected
+  seed, 4-beat default downbeat ratio, and explicit anchors derive the displayed
+  downbeats. A later manual anchor restarts the derived count from that beat.
+
 - **Beat clip**: a whole-beat loop cut from a track on the **Clip page**
   and saved to the library, carrying its own cut-to-clip beat grid and
   rendered audio; it never overwrites its source track.
