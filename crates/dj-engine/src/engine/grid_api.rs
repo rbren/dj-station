@@ -78,6 +78,12 @@ impl Engine {
         self.grid_track_load(instance_id, None, audio, bpm)
     }
 
+    /// The program a row is running.
+    pub fn grid_track_program(&self, instance_id: &str) -> Result<GridTrackProgram> {
+        let node = self.grid_track_node(instance_id)?;
+        Ok((*self.grid_tracks[&node].program).clone())
+    }
+
     /// The clip a row is holding audio for, if any.
     pub fn grid_track_clip(&self, instance_id: &str) -> Result<Option<String>> {
         let node = self.grid_track_node(instance_id)?;

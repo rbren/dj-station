@@ -61,7 +61,7 @@ fn regen_grid_two_rows() {
                     program: GridTrackProgram {
                         copies: vec![0.0, 2.0],
                         clip_beats: 2.0,
-                        loop_beats: 4.0,
+                        loop_end: 4.0,
                         ..GridTrackProgram::default()
                     },
                 },
@@ -82,7 +82,7 @@ fn regen_grid_two_rows() {
                             },
                         ],
                         clip_beats: 1.0,
-                        loop_beats: 4.0,
+                        loop_end: 4.0,
                         ..GridTrackProgram::default()
                     },
                 },
@@ -90,7 +90,7 @@ fn regen_grid_two_rows() {
             clocks: vec![ClockSpec {
                 instance: "clk".into(),
                 program: ClockProgram {
-                    loop_beats: 4.0,
+                    loop_end: 4.0,
                     looping: true,
                     ..ClockProgram::default()
                 },

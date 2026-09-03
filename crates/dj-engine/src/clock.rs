@@ -76,11 +76,15 @@ pub struct ClockProgram {
     /// Where a start (or a `reset` edge) parks the position.
     #[serde(default)]
     pub start_beat: f64,
-    /// Length of the loop, in beats; 0 means the clock free-runs.
+    /// The beat the loop runs back to. Beats are ABSOLUTE — a Grid page
+    /// counts columns from the start of its arrangement, not from
+    /// wherever its play range happens to begin — so a range is a pair.
     #[serde(default)]
-    pub loop_beats: f64,
-    /// Wrap at `loop_beats` (true) or stop there (false). Ignored while
-    /// `loop_beats` is 0.
+    pub loop_start: f64,
+    /// The beat the loop ends on; `loop_end <= loop_start` free-runs.
+    #[serde(default)]
+    pub loop_end: f64,
+    /// Wrap at `loop_end` (true) or stop there (false).
     #[serde(default)]
     pub looping: bool,
 }
@@ -90,7 +94,8 @@ impl Default for ClockProgram {
         ClockProgram {
             points: Vec::new(),
             start_beat: 0.0,
-            loop_beats: 0.0,
+            loop_start: 0.0,
+            loop_end: 0.0,
             looping: true,
         }
     }
@@ -369,7 +374,8 @@ impl HostModule for ClockRtModule {
         let bpm_in = &inputs[IN_BPM];
         let run_in = &inputs[IN_RUN];
         let reset_in = &inputs[IN_RESET];
-        let loop_beats = self.program.loop_beats;
+        let (loop_start, loop_end) = (self.program.loop_start, self.program.loop_end);
+        let looping = loop_end > loop_start;
         for s in 0..frames {
             if reset_in[s] >= 1.0 && self.last_reset_in < 1.0 {
                 self.restart();
@@ -397,14 +403,14 @@ impl HostModule for ClockRtModule {
             if self.running {
                 let before = self.pos;
                 self.pos += bpm / 60.0 / self.engine_rate as f64;
-                if loop_beats > 0.0 && self.pos >= loop_beats {
+                if looping && self.pos >= loop_end {
                     if self.program.looping {
-                        self.pos -= loop_beats;
+                        self.pos -= loop_end - loop_start;
                         // The wrap lands ON a beat of the loop, so the
                         // pass after it comes in with a pulse of its own.
                         self.clock_left = self.pulse_len;
                     } else {
-                        self.pos = loop_beats;
+                        self.pos = loop_end;
                         self.running = false;
                         self.run_cmd = false;
                     }
@@ -536,7 +542,7 @@ mod tests {
     fn a_loop_wraps_and_a_one_shot_stops() {
         let (mut tx, mut m, shared) = module(48_000.0);
         tx.push(ClockCmd::Program(Arc::new(ClockProgram {
-            loop_beats: 4.0,
+            loop_end: 4.0,
             looping: true,
             ..ClockProgram::default()
         })))
@@ -552,7 +558,7 @@ mod tests {
 
         let (mut tx, mut m, shared) = module(48_000.0);
         tx.push(ClockCmd::Program(Arc::new(ClockProgram {
-            loop_beats: 4.0,
+            loop_end: 4.0,
             looping: false,
             ..ClockProgram::default()
         })))

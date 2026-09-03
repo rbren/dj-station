@@ -13,7 +13,8 @@
         ],
         "levels": [],
         "clip_beats": 2.0,
-        "loop_beats": 4.0,
+        "loop_start": 0.0,
+        "loop_end": 4.0,
         "start_beat": 0.0
       }
     },
@@ -37,7 +38,8 @@
           }
         ],
         "clip_beats": 1.0,
-        "loop_beats": 4.0,
+        "loop_start": 0.0,
+        "loop_end": 4.0,
         "start_beat": 0.0
       }
     }
@@ -48,7 +50,8 @@
       "program": {
         "points": [],
         "start_beat": 0.0,
-        "loop_beats": 4.0,
+        "loop_start": 0.0,
+        "loop_end": 4.0,
         "looping": true
       },
       "running": true

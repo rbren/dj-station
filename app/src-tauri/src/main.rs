@@ -5,13 +5,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod beat_clip;
-mod deck;
 mod choreo;
 mod clip;
+mod deck;
 mod decks;
+mod grid;
 mod launch_control;
-mod macros;
 mod library;
+mod macros;
 
 use dj_engine::{
     AudioFocus, AudioOutputs, Backend, CaptureWindow, Engine, EngineConfig, ExtensionRegistry,
@@ -79,9 +80,13 @@ fn deck_patches_dir() -> PathBuf {
 
 /// Where a workspace's named patches live.
 fn workspace_patches_dir(ws: Workspace) -> PathBuf {
-    match ws {
-        Workspace::Rack => patches_dir(),
-        Workspace::Decks => deck_patches_dir(),
+    // The Grid session is not a SAVED workspace (its arrangement is a
+    // document of its own), so it never reaches any of these; Rack is
+    // the harmless answer if it ever did.
+    if ws == Workspace::Decks {
+        deck_patches_dir()
+    } else {
+        patches_dir()
     }
 }
 
@@ -96,9 +101,10 @@ fn ws_arg(workspace: Option<&str>) -> CmdResult<Workspace> {
 }
 
 fn other_workspace(ws: Workspace) -> Workspace {
-    match ws {
-        Workspace::Rack => Workspace::Decks,
-        Workspace::Decks => Workspace::Rack,
+    if ws == Workspace::Decks {
+        Workspace::Rack
+    } else {
+        Workspace::Decks
     }
 }
 
@@ -262,9 +268,10 @@ fn record_edit(state: &State<AppState>, engine: &Engine, key: &EditKey) {
 /// so the dirty comparison ignores patch renames, and a failure to lock is
 /// never allowed to block the save/load/new itself.
 fn ws_index(ws: Workspace) -> usize {
-    match ws {
-        Workspace::Rack => 0,
-        Workspace::Decks => 1,
+    if ws == Workspace::Decks {
+        1
+    } else {
+        0
     }
 }
 
@@ -1358,9 +1365,10 @@ fn valid_patch_name(name: &str) -> bool {
 
 /// The current-patch-name cell for a workspace.
 fn ws_name(state: &AppState, ws: Workspace) -> &Mutex<String> {
-    match ws {
-        Workspace::Rack => &state.patch_name,
-        Workspace::Decks => &state.deck_patch_name,
+    if ws == Workspace::Decks {
+        &state.deck_patch_name
+    } else {
+        &state.patch_name
     }
 }
 
@@ -1470,7 +1478,8 @@ fn load_patch_dir(state: &State<AppState>, dir: &Path) -> CmdResult<Vec<String>>
     // macro the patch didn't use — e.g. break the last instance, quit,
     // restart: the autosave restore came up knowing no macros at all.
     let doc = PatchDoc::read(dir).map_err(err)?;
-    *engine = Engine::from_doc_with_macros(&doc, registry, macros::store_macro_library()).map_err(err)?;
+    *engine =
+        Engine::from_doc_with_macros(&doc, registry, macros::store_macro_library()).map_err(err)?;
     // Decks: re-apply library-stored DJ metadata (cues/loops/beatgrids)
     // for every loaded deck track (PRD §7 — metadata survives across
     // patches via the library DB, not the patch files).
@@ -1873,10 +1882,7 @@ fn main() {
                     .lock()
                     .map(|n| n.clone())
                     .unwrap_or_else(|_| "untitled".into());
-                let ws_str = match ws {
-                    Workspace::Rack => None,
-                    Workspace::Decks => Some("decks".to_string()),
-                };
+                let ws_str = (ws == Workspace::Decks).then(|| "decks".to_string());
                 if let Err(e) = save_patch_as(app.state::<AppState>(), name, ws_str) {
                     eprintln!("[dj-station] save failed: {e}");
                 } else {
@@ -2027,6 +2033,10 @@ fn main() {
             beat_clip::beat_clip_load,
             beat_clip::beat_clip_audio,
             beat_clip::beat_clip_peaks,
+            grid::grid_sync,
+            grid::grid_transport,
+            grid::grid_status,
+            grid::grid_teardown,
             beat_clip::grid_save,
             beat_clip::grid_load,
             beat_clip::grid_list,

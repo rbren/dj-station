@@ -84,6 +84,9 @@ pub enum AudioFocus {
     Rack,
     /// The Decks page: only what a decks bank feeds reaches the outputs.
     Decks,
+    /// The Grid page: only the grid workspace (its clock and its rows)
+    /// and what they feed.
+    Grid,
     /// A page that makes its own sound (Clip) or none at all (Library):
     /// the engine holds its tongue.
     Silent,
@@ -104,10 +107,14 @@ pub enum Workspace {
     #[default]
     Rack,
     Decks,
+    /// The Grid page's session: the clock and the row modules the open
+    /// arrangement is playing through. Rebuilt from the Grid document
+    /// rather than restored from a patch, which is why nothing saves it.
+    Grid,
 }
 
 impl Workspace {
-    /// serde skip helper: only Decks tags are ever written.
+    /// serde skip helper: only non-Rack tags are ever written.
     pub fn is_rack(&self) -> bool {
         *self == Workspace::Rack
     }
@@ -679,21 +686,28 @@ impl Engine {
             AudioFocus::Rack => {
                 let mut open = vec![1.0; slots];
                 for (slot, info) in self.nodes.iter_slots() {
-                    if info.workspace == Workspace::Decks {
+                    if info.workspace != Workspace::Rack {
                         open[slot] = 0.0;
                     }
                 }
                 open
             }
             AudioFocus::Silent => vec![0.0; slots],
-            AudioFocus::Decks => {
+            AudioFocus::Decks | AudioFocus::Grid => {
+                let page = if self.audio_focus == AudioFocus::Decks {
+                    Workspace::Decks
+                } else {
+                    Workspace::Grid
+                };
                 let mut open = vec![0.0; slots];
                 let mut queue: Vec<usize> = self
                     .nodes
                     .iter_slots()
                     .filter(|(_, info)| {
-                        info.workspace == Workspace::Decks
-                            || BuiltinKind::from_ext_id(&info.ext_id) == Some(BuiltinKind::Decks)
+                        info.workspace == page
+                            || (page == Workspace::Decks
+                                && BuiltinKind::from_ext_id(&info.ext_id)
+                                    == Some(BuiltinKind::Decks))
                     })
                     .map(|(slot, _)| slot)
                     .collect();

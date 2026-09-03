@@ -30,6 +30,7 @@ mod decks;
 mod display_units;
 mod envelope;
 mod graph_edit;
+mod grid;
 mod hands;
 mod launch_control;
 mod live_edit;

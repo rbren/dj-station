@@ -104,12 +104,25 @@ pub struct GridTrackProgram {
     /// says how long a copy is).
     #[serde(default)]
     pub clip_beats: f64,
-    /// The play range's length; 0 means the row never wraps.
+    /// The beat the play range runs back to (beats are ABSOLUTE grid
+    /// columns, as in [`crate::clock::ClockProgram`]).
     #[serde(default)]
-    pub loop_beats: f64,
+    pub loop_start: f64,
+    /// The beat the play range ends on; `loop_end <= loop_start` never
+    /// wraps.
+    #[serde(default)]
+    pub loop_end: f64,
     /// Where a reset parks the position (the cue).
     #[serde(default)]
     pub start_beat: f64,
+    /// The tempo the transport is expected to come in at, if the app
+    /// knows it. A row measures its beat from the clock's edges, which
+    /// takes two of them — and a Grid whose first beat is silent while
+    /// the row works out what it was already told is not the Grid
+    /// anyone drew. 0 falls back to measuring (a row patched under a
+    /// clock nobody has described).
+    #[serde(default)]
+    pub start_bpm: f64,
 }
 
 impl GridTrackProgram {
@@ -508,7 +521,8 @@ impl HostModule for GridTrackRtModule {
         let wet_in = &inputs[IN_WET];
         let insert = mask & ((1 << IN_RET_L) | (1 << IN_RET_R)) != 0;
         let clip_beats = self.program.clip_beats;
-        let loop_beats = self.program.loop_beats;
+        let (loop_start, loop_end) = (self.program.loop_start, self.program.loop_end);
+        let looping = loop_end > loop_start;
         let lead_beats = self.lead_beats();
         let tail_beats = self.tail_beats();
         let clip_frames = self
@@ -530,24 +544,26 @@ impl HostModule for GridTrackRtModule {
 
             self.since_clock += 1.0;
             if clock[s] >= 1.0 && self.last_clock < 1.0 {
-                let measured = self.seen_edge
-                    && self.since_clock <= MAX_INTERVAL_SECS * self.engine_rate
-                    && clip_beats > 0.0;
-                self.interval = if measured {
-                    self.since_clock.max(2.0)
-                } else {
-                    0.0
-                };
+                if self.seen_edge && self.since_clock <= MAX_INTERVAL_SECS * self.engine_rate {
+                    self.interval = self.since_clock.max(2.0);
+                } else if self.interval <= 0.0 && self.program.start_bpm > 0.0 {
+                    self.interval =
+                        (60.0 / self.program.start_bpm * self.engine_rate as f64) as f32;
+                }
+                // A transport stopped and started again keeps the beat it
+                // last measured, so only the very first start of a
+                // session leans on the seed.
                 self.since_clock = 0.0;
                 self.seen_edge = true;
-                if !measured {
+                let ready = self.interval > 0.0 && clip_beats > 0.0;
+                if !ready {
                     self.rearm();
                 } else if self.started {
                     self.anchor += 1.0;
-                    if loop_beats > 0.0 && self.anchor >= loop_beats {
+                    if looping && self.anchor >= loop_end {
                         // The seam: the pass starts over and nothing
                         // carries across it.
-                        self.anchor -= loop_beats;
+                        self.anchor -= loop_end - loop_start;
                         self.pos = self.anchor;
                         self.silence();
                         self.reindex();
@@ -794,7 +810,7 @@ mod tests {
             GridTrackProgram {
                 copies: vec![2.0],
                 clip_beats: 2.0,
-                loop_beats: 8.0,
+                loop_end: 8.0,
                 ..GridTrackProgram::default()
             },
         );
@@ -826,7 +842,7 @@ mod tests {
                     },
                 ],
                 clip_beats: 2.0,
-                loop_beats: 8.0,
+                loop_end: 8.0,
                 ..GridTrackProgram::default()
             },
         );
@@ -837,6 +853,23 @@ mod tests {
         assert!(peaks[3] > 1.0 && peaks[3] < peaks[1] * 0.5, "{peaks:?}");
     }
 
+    #[test]
+    fn a_seeded_row_comes_in_on_the_transports_first_beat() {
+        let mut h = Harness::new(
+            1.0,
+            GridTrackProgram {
+                copies: vec![0.0],
+                clip_beats: 2.0,
+                loop_end: 4.0,
+                start_bpm: 120.0,
+                ..GridTrackProgram::default()
+            },
+        );
+        let peaks = h.beats(3);
+        assert!(peaks[0] > 0.01, "the first beat sounds: {peaks:?}");
+        assert!(peaks[1] > 0.01, "and the second: {peaks:?}");
+        assert!(peaks[2] < 0.01, "the copy is two beats long: {peaks:?}");
+    }
     #[test]
     fn silence_without_a_program_or_a_clip() {
         let mut h = Harness::new(1.0, GridTrackProgram::default());
