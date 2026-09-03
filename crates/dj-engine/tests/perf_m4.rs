@@ -16,6 +16,11 @@
 //!      on the audio thread in steady state).
 
 mod common;
+/// The per-surface audio-render benchmarks (Rack / Grid / Clip) ride in
+/// this target rather than in one of their own: a dj-engine test binary
+/// costs a full wasmtime link, and these want the same quiet CI job the
+/// PRD stress does. See `perf_ui/mod.rs`.
+mod perf_ui;
 
 use dj_engine::{Engine, EngineConfig, MidiMapKind};
 use std::alloc::{GlobalAlloc, Layout, System};

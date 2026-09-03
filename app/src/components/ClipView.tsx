@@ -136,6 +136,7 @@ import { logError } from '../errors';
 import { isEditableTarget } from '../fileShortcuts';
 import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
+import { makeRenderCounter } from '../perf';
 import { AudioTimeline, viewSpan, type TimelineSnap } from './AudioTimeline';
 import { ClipSelectionPane } from './ClipSelectionPane';
 import { WAVEFORM_VIEW_W as W } from './WaveformView';
@@ -388,6 +389,11 @@ export interface ClipViewHandle {
   openClip: (clipId: string) => void;
 }
 
+/** How many times the Clip page has drawn itself — what its performance
+ *  suite counts, the way the Grid's does: a page holding a long track's
+ *  peaks must not redraw itself on every mouse move of a selection. */
+export const __clipRenderCount = makeRenderCounter();
+
 export function ClipView({
   clip,
   library,
@@ -396,6 +402,10 @@ export function ClipView({
   detectDelayMs = DETECT_DELAY_MS,
   ref,
 }: ClipViewProps) {
+  useEffect(() => {
+    __clipRenderCount.bump();
+  });
+
   const [tracks, setTracks] = useState<Track[]>([]);
   const [pick, setPick] = useState<number | null>(null);
   const [sources, setSources] = useState<ClipSource[]>([]);

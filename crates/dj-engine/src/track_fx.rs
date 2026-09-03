@@ -118,6 +118,45 @@ pub fn render_track_fx(
     sample_rate: f32,
     bpm: f64,
 ) -> Result<Vec<Vec<f32>>> {
+    render_track_fx_profiled(registry, spec, input, sample_rate, bpm).map(|(out, _)| out)
+}
+
+/// Where the time went in one track-FX render, in milliseconds.
+///
+/// A Grid row's wet buffer is one engine BUILD (instantiate every module
+/// in the rack, wire it, hand it the track) plus one offline RENDER, and
+/// the two scale with different things — the build with the rack's size,
+/// the render with the clip's length. A grid of fifty rows pays the build
+/// fifty times, so knowing which half is dear is the whole question.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TrackFxProfile {
+    pub frames: usize,
+    /// Engine construction, module instantiation and wiring.
+    pub build_ms: f64,
+    /// The offline render itself.
+    pub render_ms: f64,
+    pub total_ms: f64,
+}
+
+impl TrackFxProfile {
+    pub fn summary(&self) -> String {
+        format!(
+            "{:.1}ms total: build {:.1}ms, render {:.1}ms ({} frames)",
+            self.total_ms, self.build_ms, self.render_ms, self.frames
+        )
+    }
+}
+
+/// [`render_track_fx`], with the build/render split reported.
+pub fn render_track_fx_profiled(
+    registry: ExtensionRegistry,
+    spec: &TrackFxSpec,
+    input: &[Vec<f32>],
+    sample_rate: f32,
+    bpm: f64,
+) -> Result<(Vec<Vec<f32>>, TrackFxProfile)> {
+    let start = std::time::Instant::now();
+    let mut profile = TrackFxProfile::default();
     let frames = input.first().map(|c| c.len()).unwrap_or(0);
     anyhow::ensure!(frames > 0, "empty input");
     let stereo_out = spec
@@ -167,14 +206,20 @@ pub fn render_track_fx(
         sample_rate,
     });
     engine.track_io_load(CHROME_IO, track)?;
+    profile.build_ms = start.elapsed().as_secs_f64() * 1e3;
 
+    let t_render = std::time::Instant::now();
     let rendered = engine.render_offline(frames)?;
+    profile.render_ms = t_render.elapsed().as_secs_f64() * 1e3;
     let channels = if stereo_out { 2 } else { 1 };
-    Ok(rendered
+    let out: Vec<Vec<f32>> = rendered
         .into_iter()
         .take(channels)
         .map(|ch| ch.iter().map(|s| s / SIGNAL_MAX).collect())
-        .collect())
+        .collect();
+    profile.frames = frames;
+    profile.total_ms = start.elapsed().as_secs_f64() * 1e3;
+    Ok((out, profile))
 }
 
 /// `render_track_fx` for a caller holding a mono-or-stereo clip: collapses
@@ -189,6 +234,17 @@ pub fn render_track_fx_clip(
     sample_rate: f32,
     bpm: f64,
 ) -> Result<Vec<Vec<f32>>> {
+    render_track_fx_clip_profiled(registry, spec, channels, sample_rate, bpm).map(|(out, _)| out)
+}
+
+/// [`render_track_fx_clip`], with the build/render split reported.
+pub fn render_track_fx_clip_profiled(
+    registry: ExtensionRegistry,
+    spec: &TrackFxSpec,
+    channels: &[Vec<f32>],
+    sample_rate: f32,
+    bpm: f64,
+) -> Result<(Vec<Vec<f32>>, TrackFxProfile)> {
     let taps_right = spec
         .wires
         .iter()
@@ -199,8 +255,8 @@ pub fn render_track_fx_clip(
             .zip(&channels[1])
             .map(|(l, r)| (l + r) * 0.5)
             .collect();
-        render_track_fx(registry, spec, &[mono], sample_rate, bpm)
+        render_track_fx_profiled(registry, spec, &[mono], sample_rate, bpm)
     } else {
-        render_track_fx(registry, spec, channels, sample_rate, bpm)
+        render_track_fx_profiled(registry, spec, channels, sample_rate, bpm)
     }
 }

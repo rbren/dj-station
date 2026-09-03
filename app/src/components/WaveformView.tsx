@@ -12,6 +12,7 @@
 // re-render resets the mutations to the freshly-sampled truth.
 
 import type { MouseEvent as ReactMouseEvent } from 'react';
+import { timed } from '../perf';
 
 /** viewBox width — all x positions are fractions of this. Exported for
  *  DeckPanel's rAF extrapolation, which computes in the same units. */
@@ -61,6 +62,10 @@ const MAX_PATH_STEPS = W;
  *  bucket per column rather than sampling one and aliasing the rest — a
  *  peak display that misses the peaks is worse than a coarse one. */
 export function peaksPath(peaks: number[], from: number, to: number, height: number): string {
+  return timed('waveform.peaksPath', () => peaksPathImpl(peaks, from, to, height));
+}
+
+function peaksPathImpl(peaks: number[], from: number, to: number, height: number): string {
   const n = peaks.length;
   if (n === 0 || to <= from) return '';
   const mid = height / 2;

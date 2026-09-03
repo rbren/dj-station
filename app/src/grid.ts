@@ -29,6 +29,7 @@
 import type { BeatClipEntry } from './beatClip';
 import { MAX_BPM, MIN_BPM } from './decks';
 import { fxOrDefault, fxRenderSpec, parseTrackFx, type TrackFx } from './gridFx';
+import { timed } from './perf';
 
 /** Where one copy of a row's clip sits: the grid column its OWN beat 0
  *  lands on. Negative means the clip begins before the grid does (its
@@ -250,6 +251,10 @@ export function cellKind(row: GridRow, clip: BeatClipEntry, col: number): CellKi
 /** How wide the grid has to be: what the user asked for, and never less
  *  than what is laid out on it. */
 export function gridColumns(state: GridState, clips: ReadonlyMap<string, BeatClipEntry>): number {
+  return timed('grid.gridColumns', () => gridColumnsImpl(state, clips));
+}
+
+function gridColumnsImpl(state: GridState, clips: ReadonlyMap<string, BeatClipEntry>): number {
   let end = state.beats;
   for (const row of state.rows) {
     const clip = clips.get(row.clipId);

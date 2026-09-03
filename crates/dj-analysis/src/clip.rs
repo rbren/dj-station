@@ -424,11 +424,59 @@ fn apply_level(channels: &mut [Vec<f32>], level: &[LevelPoint], sr: u32) {
     }
 }
 
+/// Where the time went in one [`render_clip`] call, in milliseconds.
+///
+/// The stages are the render's own shape, so a slow render is
+/// attributable without a profiler: a clip is cut out of its sources
+/// (`material`), the pieces are crossfaded together (`splice`), and the
+/// result is toned (`eq`), levelled (`level`) and stretched (`warp`).
+/// Filled by [`render_clip_profiled`]; the perf suite prints it
+/// (`crates/dj-engine/tests/perf_ui/clip.rs`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ClipRenderProfile {
+    pub frames: usize,
+    pub material_ms: f64,
+    pub splice_ms: f64,
+    pub eq_ms: f64,
+    pub level_ms: f64,
+    pub warp_ms: f64,
+    pub total_ms: f64,
+}
+
+impl ClipRenderProfile {
+    /// The stages, dearest first — one line for a test to print.
+    pub fn summary(&self) -> String {
+        let mut stages = [
+            ("material", self.material_ms),
+            ("splice", self.splice_ms),
+            ("eq", self.eq_ms),
+            ("level", self.level_ms),
+            ("warp", self.warp_ms),
+        ];
+        stages.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let parts: Vec<String> = stages
+            .iter()
+            .map(|(name, ms)| format!("{name} {ms:.1}ms"))
+            .collect();
+        format!("{:.1}ms total: {}", self.total_ms, parts.join(", "))
+    }
+}
+
 /// Render a clip program against its decoded sources.
 ///
 /// `sources[i]` backs every region whose `source` is `i`. Offline and
 /// deterministic; runs on a worker thread, never the RT thread.
 pub fn render_clip(sources: &[&AudioData], program: &ClipProgram) -> Result<AudioData> {
+    render_clip_profiled(sources, program).map(|(audio, _)| audio)
+}
+
+/// [`render_clip`], with a per-stage timing breakdown.
+pub fn render_clip_profiled(
+    sources: &[&AudioData],
+    program: &ClipProgram,
+) -> Result<(AudioData, ClipRenderProfile)> {
+    let start = std::time::Instant::now();
+    let mut profile = ClipRenderProfile::default();
     ensure!(!sources.is_empty(), "clip render: no sources");
     ensure!(!program.regions.is_empty(), "clip render: no regions");
     let sample_rate = sources[0].sample_rate;
@@ -440,6 +488,7 @@ pub fn render_clip(sources: &[&AudioData], program: &ClipProgram) -> Result<Audi
         .unwrap_or(1)
         .max(1);
 
+    let t_material = std::time::Instant::now();
     let mut pieces = Vec::with_capacity(program.regions.len());
     for region in &program.regions {
         let src = sources
@@ -452,23 +501,35 @@ pub fn render_clip(sources: &[&AudioData], program: &ClipProgram) -> Result<Audi
         );
         pieces.push(region_material(src, region, sample_rate, n_ch));
     }
+    profile.material_ms = t_material.elapsed().as_secs_f64() * 1e3;
 
     let crossfade_frames = ((program.crossfade_ms.max(0.0) / 1000.0) * sample_rate as f64) as usize;
+    let t_splice = std::time::Instant::now();
     let mut channels = splice(pieces, n_ch, crossfade_frames);
+    profile.splice_ms = t_splice.elapsed().as_secs_f64() * 1e3;
     ensure!(
         !channels[0].is_empty(),
         "clip render: the edit is empty (all regions are zero-length)"
     );
+    let t_eq = std::time::Instant::now();
     apply_eq(&mut channels, &program.eq, sample_rate);
+    profile.eq_ms = t_eq.elapsed().as_secs_f64() * 1e3;
+    let t_level = std::time::Instant::now();
     apply_level(&mut channels, &program.level, sample_rate);
-    apply_warp(
+    profile.level_ms = t_level.elapsed().as_secs_f64() * 1e3;
+    let t_warp = std::time::Instant::now();
+    let rendered = apply_warp(
         AudioData {
             channels,
             sample_rate,
         },
         &program.warp,
         program.warp_smoothing,
-    )
+    )?;
+    profile.warp_ms = t_warp.elapsed().as_secs_f64() * 1e3;
+    profile.frames = rendered.frames();
+    profile.total_ms = start.elapsed().as_secs_f64() * 1e3;
+    Ok((rendered, profile))
 }
 
 /// Sub-segments an eased section is approximated with. The map stays
