@@ -67,7 +67,7 @@ All persistent state lives in **`custom/` inside this checkout** (the repo
 | `custom/autosave/` | crash-recovery autosave of the live patch |
 | `custom/library.sqlite` | track DB, DJ metadata (cues/loops/grids), user macros, watch folders |
 | `custom/downloads/` | provider downloads |
-| `custom/stems/<hash>/` | FLAC stem-separation cache (DSP flat, one subdirectory per model) |
+| `custom/stems/<hash>/` | AAC stem-separation cache (DSP flat, one subdirectory per model); FLAC caches from older builds are converted in the background |
 | `custom/demucs/` | stem model: demucs venv (`htdemucs_ft`, the default) |
 | `custom/scnet/` | stem model: MSST venv, config and checkpoint |
 
@@ -257,7 +257,7 @@ crates/
                    Runtime backend — CoreML EP on macOS, CPU EP elsewhere
                    — loads a model file when configured); background
                    worker that drains the library's analysis queue; stems
-                   cached as FLAC keyed by content hash and separator.
+                   cached as AAC keyed by content hash and separator.
   dj-cli           Headless harness: create/render/run/save/load patches,
                    inject virtual MIDI, print telemetry.
 extensions/        WASM extensions (each folder: manifest.json + dsp.wasm +

@@ -33,6 +33,13 @@ impl AudioData {
     }
 }
 
+/// A bare AAC stream (`.aac`), whose "length" is only ever a guess.
+fn is_adts(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("aac"))
+}
+
 /// Decode an audio file fully into memory (analysis runs off-line on
 /// worker threads, PRD §8.2).
 pub fn decode_audio(path: &Path) -> Result<AudioData> {
@@ -71,7 +78,16 @@ pub fn decode_audio(path: &Path) -> Result<AudioData> {
     // FLAC frames are fixed-size, so the last one is zero-padded past the
     // declared length; a rendered clip must decode back to exactly what
     // was written, so trust the container's frame count when it has one.
-    let declared_frames = track.codec_params.n_frames;
+    //
+    // An ADTS stream (the stem cache: `stems::STEM_EXT`) is the exception.
+    // It carries no length at all, so symphonia ESTIMATES one from the
+    // average frame size — and a variable-bitrate stream makes that
+    // estimate short, which would cut real audio off the end of every
+    // file whose frames grow towards the finish. A guess is not a
+    // declaration: decode the whole stream instead.
+    let declared_frames = (!is_adts(path))
+        .then_some(track.codec_params.n_frames)
+        .flatten();
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .with_context(|| format!("creating decoder for {}", path.display()))?;

@@ -50,8 +50,8 @@ pub(crate) fn apply_deck_metadata(
     // Cached stems (M3, keyed by content hash) auto-load with the track.
     // Best-effort: a missing/failed stem cache must not break deck load.
     let dir = dj_analysis::stems_dir(state.library.data_dir(), &track.content_hash);
-    if dj_analysis::stems_cached(&dir) {
-        if let Err(e) = engine.deck_load_stems(instance, &dj_analysis::stem_paths(&dir)) {
+    if let Some(paths) = dj_analysis::cached_stem_paths(&dir) {
+        if let Err(e) = engine.deck_load_stems(instance, &paths) {
             eprintln!("[dj-analysis] loading stems for {instance}: {e:#}");
         }
     }
@@ -146,12 +146,10 @@ pub(crate) fn deck_load_stems(state: State<AppState>, instance: String) -> CmdRe
         return Ok(false);
     };
     let dir = dj_analysis::stems_dir(state.library.data_dir(), &track.content_hash);
-    if !dj_analysis::stems_cached(&dir) {
+    let Some(paths) = dj_analysis::cached_stem_paths(&dir) else {
         return Ok(false);
-    }
-    engine
-        .deck_load_stems(&instance, &dj_analysis::stem_paths(&dir))
-        .map_err(err)?;
+    };
+    engine.deck_load_stems(&instance, &paths).map_err(err)?;
     Ok(true)
 }
 

@@ -106,7 +106,7 @@ impl Engine {
         };
         let mut decoded = Vec::with_capacity(crate::deck::N_STEMS);
         for (path, stem) in paths.iter().zip(crate::deck::STEM_IDS) {
-            let data = decode_file(path)
+            let data = crate::playback::decode_stem_file(path)
                 .map_err(|e| anyhow!("decoding {stem} stem {}: {e}", path.display()))?;
             anyhow::ensure!(
                 data.sample_rate == track_sr,

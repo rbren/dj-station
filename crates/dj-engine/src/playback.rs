@@ -221,11 +221,22 @@ impl TrackData {
 /// same error tolerance, and the FLAC declared-length truncation), only
 /// re-shaped into the RT-side `TrackData`.
 pub fn decode_file(path: &Path) -> Result<TrackData> {
-    let audio = dj_analysis::decode_audio(path)?;
-    Ok(TrackData {
+    Ok(shape(dj_analysis::decode_audio(path)?))
+}
+
+/// [`decode_file`] for a file out of the stem cache, which is written in
+/// a lossy format whose encoder delay `dj_analysis::decode_stem` takes
+/// back off — a stem that started a few milliseconds late would no longer
+/// line up with its track.
+pub fn decode_stem_file(path: &Path) -> Result<TrackData> {
+    Ok(shape(dj_analysis::decode_stem(path)?))
+}
+
+fn shape(audio: dj_analysis::AudioData) -> TrackData {
+    TrackData {
         channels: audio.channels,
         sample_rate: audio.sample_rate as f32,
-    })
+    }
 }
 
 /// The RT-side playback module. Receives decoded tracks over an SPSC ring;

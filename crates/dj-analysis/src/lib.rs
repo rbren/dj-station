@@ -61,10 +61,11 @@ pub use demucs::DemucsSeparator;
 pub use scnet::ScnetSeparator;
 pub use stem_jobs::{StemJob, StemJobState, StemJobs};
 pub use stems::{
-    cached_stems_for, choose_separator, chosen_separator, ensure_stems, ensure_stems_cancellable,
+    cached_stem_paths, cached_stems_for, choose_separator, chosen_separator, decode_stem,
+    ensure_stems, ensure_stems_cancellable, legacy_stem_paths, migrate_stems, migrate_stems_for,
     mix_stems, remove_stems, stem_paths, stem_union, stems_cached, stems_dir, stems_dir_for,
-    BandSeparator, CachedStems, CancelToken, StemSeparator, Stems, DEFAULT_SEPARATOR_ID, N_STEMS,
-    STEM_NAMES,
+    stems_need_migration, BandSeparator, CachedStems, CancelToken, StemSeparator, Stems,
+    DEFAULT_SEPARATOR_ID, LEGACY_STEM_EXT, N_STEMS, STEM_EXT, STEM_NAMES,
 };
 pub use worker::{start_worker, AnalysisSettings, AnalysisWorker};
 

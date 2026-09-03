@@ -262,16 +262,21 @@ These are the rules that must hold everywhere.
   through `load_beat_clip`. Clips written before that (no `loopSpan`,
   bleed in `<id>-bleed-{l,r}.flac` sidecars) still read, and are folded
   into one file the next time they are saved.
-- **Stems**: separated sources (vocals/drums/…) cached as FLAC under
-  `<data_dir>/stems/<hash>/`, keyed by separator id — the DSP fallback
-  flat, every model in its own subdirectory (`htdemucs_ft`, the fast
-  default, and `scnet_xl_ihf`, the better one). That directory name IS the
+- **Stems**: separated sources (vocals/drums/…) cached under
+  `<data_dir>/stems/<hash>/` as AAC-LC in ADTS (`vocals.aac`, …:
+  `dj_analysis::stems::STEM_EXT`, read back through `decode_stem`, which
+  drops the encoder priming so a stem still lines up with its track), and
+  keyed by separator id — the DSP fallback flat, every model in its own
+  subdirectory (`htdemucs_ft`, the fast default, and `scnet_xl_ihf`, the
+  better one). That directory name IS the
   per-track record of which model made them, and stems any other model
   wrote are served rather than redone. A track can be told to use a
   particular model (a `chosen-model` file beside its stems, set from the
   Library's Stems column); from then on only that model's stems count for
   it, so it separates again — but nothing is ever deleted, and switching
-  back is instant. Patches persist only the stem gains.
+  back is instant. Patches persist only the stem gains. Caches written as
+  FLAC (what stems used to be) still read and are converted in the
+  background by the same auto-stem queue, a track at a time, resumably.
 - **Deck / bank**: `builtin.decks` — eight beat clips (decks/slots) on ONE
   clock and one shared beat position; clips are stretched to the bank
   tempo, never pitched. The Decks page is its chrome.

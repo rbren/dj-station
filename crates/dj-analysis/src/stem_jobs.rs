@@ -17,8 +17,9 @@ use dj_library::db::Library;
 
 use crate::decode::decode_audio;
 use crate::stems::{
-    cached_stems_for, choose_separator, chosen_separator, ensure_stems_cancellable, stems_dir_for,
-    CachedStems, CancelToken, StemSeparator,
+    cached_stems_for, choose_separator, chosen_separator, ensure_stems_cancellable,
+    migrate_stems_for, stems_dir_for, stems_need_migration, CachedStems, CancelToken,
+    StemSeparator,
 };
 
 /// Finished jobs kept in the snapshot so the UI can report the outcome
@@ -166,7 +167,17 @@ impl StemJobs {
     ) -> Option<[std::path::PathBuf; crate::stems::N_STEMS]> {
         let track = self.library.track(track_id).ok()?;
         let cached = self.cache(&track.content_hash)?;
-        Some(crate::stems::stem_paths(&cached.dir))
+        crate::stems::cached_stem_paths(&cached.dir)
+    }
+
+    /// Does this track hold stems in the format they used to be written
+    /// in? Those are work for this queue too — converted, never separated
+    /// again ([`migrate_stems_for`]).
+    pub fn needs_migration(&self, track_id: i64) -> bool {
+        match self.library.track(track_id) {
+            Ok(track) => stems_need_migration(self.library.data_dir(), &track.content_hash),
+            Err(_) => false,
+        }
     }
 
     /// Separate `track_id` in the background, returning the job id. A
@@ -293,7 +304,7 @@ fn separate(
             cached.separator,
             cached.dir.display()
         );
-        return Ok(());
+        return convert(library, &track, jobs, id);
     }
     let dir = stems_dir_for(library.data_dir(), &track.content_hash, separator.id());
     println!(
@@ -325,6 +336,35 @@ fn separate(
             dir.display()
         );
     }
+    Ok(())
+}
+
+/// Bring a track's stems into the current format — the migration of
+/// everything separated before it changed.
+///
+/// It rides this queue rather than a pass of its own because a queue is
+/// exactly what it needs: off the UI thread, one track at a time, resumed
+/// from disk after a quit, and reported through the same job snapshot.
+/// Converting is seconds against a separation's minutes, so a backfill
+/// scan that finds a hundred old caches is not a hundred model runs.
+fn convert(
+    library: &Library,
+    track: &dj_library::db::Track,
+    jobs: &Mutex<Vec<StemJob>>,
+    id: u64,
+) -> anyhow::Result<()> {
+    if !stems_need_migration(library.data_dir(), &track.content_hash) {
+        return Ok(());
+    }
+    update(jobs, id, |job| job.stage = "converting".into());
+    let t = Instant::now();
+    let converted = migrate_stems_for(library.data_dir(), &track.content_hash)?;
+    println!(
+        "[stems] {:?}: converted {converted} stem file(s) to {} in {:.1}s",
+        track.title,
+        crate::stems::STEM_EXT,
+        t.elapsed().as_secs_f64()
+    );
     Ok(())
 }
 

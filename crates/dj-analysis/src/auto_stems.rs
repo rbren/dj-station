@@ -9,6 +9,9 @@
 //! - every track downloaded from a provider (YouTube) is separated;
 //! - a scan at startup BACKFILLS history — tracks downloaded before this
 //!   existed, and tracks whose separation was interrupted by a quit;
+//! - the same scan CONVERTS stems written in the format the cache used
+//!   to use ([`migrate_stems`](crate::stems::migrate_stems)); nothing is
+//!   separated twice for it, and it resumes after a quit like the rest;
 //! - the results live in the on-disk stem cache
 //!   ([`stems_dir_for`](crate::stems::stems_dir_for)), so a restart picks
 //!   up where it left off instead of redoing minutes of work.
@@ -414,7 +417,10 @@ fn run(
             nap(settings.poll_interval, stop);
             continue;
         };
-        if !probe_ok(jobs, shared, settings, &mut probed) {
+        // Converting an old cache runs no model, so it must not wait on
+        // the tooling probe: a machine that no longer has demucs still
+        // has to be able to migrate the stems it separated when it did.
+        if !jobs.needs_migration(track_id) && !probe_ok(jobs, shared, settings, &mut probed) {
             nap(settings.poll_interval, stop);
             continue;
         }
@@ -512,6 +518,13 @@ fn needs_stems(
         return false;
     }
     if jobs.cached(track_id) {
+        // Stems written in the old format are still work for this queue:
+        // the job converts them instead of separating (`StemJobs`), which
+        // is how a library separated before the format changed is
+        // migrated — in the background, a track at a time.
+        if jobs.needs_migration(track_id) {
+            return true;
+        }
         mark_done(shared, track_id);
         return false;
     }

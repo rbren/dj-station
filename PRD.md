@@ -228,7 +228,7 @@ control lives there now.
 ### 8.2 Analysis pipeline (native, background workers)
 - **BPM / key / beatgrid:** Essentia models (or comparable open-source, e.g. madmom-style beat tracking ported/bound to Rust via ONNX).
 - **Stems:** demucs (htdemucs) via ONNX Runtime with CoreML execution provider. Target: ≤ 1× realtime on M4 for stemming; BPM/key near-instant.
-- Results cached per track (content-hashed); stems stored as FLAC alongside originals in app storage.
+- Results cached per track (content-hashed); stems stored as AAC (lossy: they are a derived cache, four files per track) alongside originals in app storage.
 - UI: per-track analysis status; batch queue with progress.
 
 ### 8.3 Search & acquisition

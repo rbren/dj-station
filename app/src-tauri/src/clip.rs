@@ -164,8 +164,8 @@ impl ClipCache {
 /// Decode a source — a library track, or one of its cached stems — using
 /// (and filling) the cache.
 ///
-/// A stem source reads the FLAC that separation already wrote; it never
-/// runs separation itself, because that takes minutes and belongs on a
+/// A stem source reads what separation already wrote; it never runs
+/// separation itself, because that takes minutes and belongs on a
 /// [`StemJobs`](dj_analysis::StemJobs) thread (see `clip_stem_separate`).
 fn source_audio(state: &AppState, source: &ClipSourceRef) -> CmdResult<Arc<AudioData>> {
     let source = source.normalized()?;
@@ -186,7 +186,7 @@ fn source_audio(state: &AppState, source: &ClipSourceRef) -> CmdResult<Arc<Audio
         })?;
         let parts = indices
             .iter()
-            .map(|i| decode(&paths[*i], &track.title))
+            .map(|i| decode_stem(&paths[*i], &track.title))
             .collect::<CmdResult<Vec<_>>>()?;
         let refs: Vec<&AudioData> = parts.iter().map(|a| a.as_ref()).collect();
         Arc::new(dj_analysis::mix_stems(&refs).map_err(|e| err(e.to_string()))?)
@@ -197,6 +197,14 @@ fn source_audio(state: &AppState, source: &ClipSourceRef) -> CmdResult<Arc<Audio
 
 fn decode(path: &std::path::Path, title: &str) -> CmdResult<Arc<AudioData>> {
     dj_analysis::decode_audio(path)
+        .map(Arc::new)
+        .map_err(|e| err(format!("decoding {title}: {e}")))
+}
+
+/// The same for a file out of the stem cache, whose format carries an
+/// encoder delay that `dj_analysis::decode_stem` takes off.
+fn decode_stem(path: &std::path::Path, title: &str) -> CmdResult<Arc<AudioData>> {
+    dj_analysis::decode_stem(path)
         .map(Arc::new)
         .map_err(|e| err(format!("decoding {title}: {e}")))
 }

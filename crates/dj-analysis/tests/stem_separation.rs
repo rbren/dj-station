@@ -2,8 +2,9 @@
 //! - energy conservation: the four stems sum back to the original signal;
 //! - component separation on a synthetic mix with known parts;
 //! - determinism;
-//! - FLAC cache: compute-if-missing keyed by content hash (cache hits do
-//!   not invoke the separator and are near-instant).
+//! - the stem cache: compute-if-missing keyed by content hash (cache hits
+//!   do not invoke the separator and are near-instant), its lossy format,
+//!   and the migration of caches written in the old one.
 
 use dj_analysis::{
     ensure_stems, mix_stems, stem_paths, stem_union, stems_cached, AudioData, BandSeparator,
@@ -256,6 +257,42 @@ fn stem_cache_hit_is_instant_and_does_not_recompute() {
     );
 }
 
+/// RMS of the difference over the frames both signals have.
+fn rms_diff(a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len().min(b.len());
+    (a[..n]
+        .iter()
+        .zip(&b[..n])
+        .map(|(x, y)| ((x - y) as f64) * ((x - y) as f64))
+        .sum::<f64>()
+        / n.max(1) as f64)
+        .sqrt()
+}
+
+/// The shift (in samples) that lines `decoded` up best with `reference`.
+fn best_offset(reference: &[f32], decoded: &[f32], search: isize) -> isize {
+    let start = search as usize;
+    let window = 8192.min(reference.len().saturating_sub(start));
+    let mut best = (f64::MAX, 0isize);
+    for off in -search..=search {
+        let from = (start as isize + off) as usize;
+        if from + window > decoded.len() {
+            continue;
+        }
+        let e = rms_diff(
+            &reference[start..start + window],
+            &decoded[from..from + window],
+        );
+        if e < best.0 {
+            best = (e, off);
+        }
+    }
+    best.1
+}
+
+/// The stem cache is lossy (AAC-LC), so a decoded stem is not the samples
+/// that went in — but it is the same audio, and the file is a fraction of
+/// the FLAC it replaced.
 #[test]
 fn cached_stems_decode_back_to_the_same_audio() {
     let tmp = tempfile::tempdir().unwrap();
@@ -264,23 +301,174 @@ fn cached_stems_decode_back_to_the_same_audio() {
     let Stems(stems) = BandSeparator.separate(&audio).unwrap();
     dj_analysis::stems::write_stems(&dir, &Stems(stems.clone())).unwrap();
     for (i, p) in stem_paths(&dir).iter().enumerate() {
-        let decoded = dj_analysis::decode_audio(p).unwrap();
+        assert_eq!(p.extension().unwrap(), dj_analysis::STEM_EXT);
+        let decoded = dj_analysis::decode_stem(p).unwrap();
         assert_eq!(decoded.sample_rate, SR);
         assert_eq!(decoded.channels.len(), 2);
-        // The encoder zero-pads the final FLAC block; content must match
-        // for all real frames and the padding must be silent.
-        assert!(decoded.frames() >= audio.frames());
-        assert!(decoded.frames() < audio.frames() + 4096);
+        // The encoder pads the tail out to a whole block: every real
+        // frame is there, and what follows is past the end of the track.
+        assert!(
+            decoded.frames() >= audio.frames() && decoded.frames() < audio.frames() + 8192,
+            "stem {i}: {} frames decoded for {} written",
+            decoded.frames(),
+            audio.frames()
+        );
         for ch in 0..2 {
-            // 16-bit quantization tolerance.
-            for (a, b) in decoded.channels[ch].iter().zip(&stems[i].channels[ch]) {
-                assert!((a - b).abs() < 2.0 / 32768.0 + 1e-4);
-            }
-            for &a in &decoded.channels[ch][audio.frames()..] {
-                assert_eq!(a, 0.0);
-            }
+            let level = rms(&stems[i].channels[ch]).max(1e-3);
+            let err = rms_diff(&decoded.channels[ch], &stems[i].channels[ch]);
+            assert!(
+                err < 0.25 * level,
+                "stem {i} ch{ch}: error {err} against level {level}"
+            );
         }
+
+        // Smaller is the whole point of the change.
+        let flac = dir.join("as.flac");
+        dj_analysis::stems::write_flac(&flac, &stems[i]).unwrap();
+        let (small, large) = (
+            std::fs::metadata(p).unwrap().len(),
+            std::fs::metadata(&flac).unwrap().len(),
+        );
+        assert!(
+            small * 2 < large,
+            "stem {i}: {small} bytes of {} against {large} of flac",
+            dj_analysis::STEM_EXT
+        );
     }
+}
+
+/// A stem that came back a few milliseconds late would no longer line up
+/// with its track's beat grid: the AAC encoder's priming delay has to be
+/// taken back off on the way in.
+#[test]
+fn a_cached_stem_starts_where_it_was_written() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("s");
+    let (audio, _) = fixture(1.0);
+    let Stems(stems) = BandSeparator.separate(&audio).unwrap();
+    dj_analysis::stems::write_stems(&dir, &Stems(stems.clone())).unwrap();
+
+    // The drums stem, because it is the broadband one: a sine lines up
+    // with itself every period, and would say nothing about the offset.
+    let decoded = dj_analysis::decode_stem(&stem_paths(&dir)[1]).unwrap();
+    let off = best_offset(&stems[1].channels[0], &decoded.channels[0], 4096);
+    assert!(
+        off.abs() <= 1,
+        "the decoded stem sits {off} samples off where it was written"
+    );
+}
+
+/// Fill a stems directory the way a release before the format change
+/// did: four FLAC files.
+fn seed_legacy(dir: &std::path::Path, stems: &[AudioData; 4]) {
+    std::fs::create_dir_all(dir).unwrap();
+    for (audio, path) in stems.iter().zip(dj_analysis::legacy_stem_paths(dir)) {
+        dj_analysis::stems::write_flac(&path, audio).unwrap();
+    }
+}
+
+/// Stems written before the cache changed format are read as they are and
+/// converted in place — never separated again, which is the minutes this
+/// migration exists to save.
+#[test]
+fn legacy_stems_are_read_and_converted_in_place() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("s");
+    let (audio, _) = fixture(0.5);
+    let Stems(stems) = BandSeparator.separate(&audio).unwrap();
+    seed_legacy(&dir, &stems);
+
+    // A FLAC cache is a cache.
+    assert!(stems_cached(&dir));
+    assert_eq!(
+        dj_analysis::cached_stem_paths(&dir).unwrap(),
+        dj_analysis::legacy_stem_paths(&dir)
+    );
+
+    assert_eq!(dj_analysis::migrate_stems(&dir).unwrap(), 4);
+    assert_eq!(
+        dj_analysis::cached_stem_paths(&dir).unwrap(),
+        stem_paths(&dir)
+    );
+    for p in dj_analysis::legacy_stem_paths(&dir) {
+        assert!(!p.exists(), "{} outlived the conversion", p.display());
+    }
+    // Same audio on the other side of it.
+    let decoded = dj_analysis::decode_stem(&stem_paths(&dir)[1]).unwrap();
+    let level = rms(&stems[1].channels[0]).max(1e-3);
+    assert!(rms_diff(&decoded.channels[0], &stems[1].channels[0]) < 0.25 * level);
+
+    // Nothing left to do, and saying so costs nothing.
+    assert_eq!(dj_analysis::migrate_stems(&dir).unwrap(), 0);
+}
+
+/// A conversion is interruptible: whatever a quit lands in the middle of,
+/// the directory it leaves is still a readable cache and the next run
+/// finishes the job.
+#[test]
+fn an_interrupted_conversion_resumes_rather_than_re_separating() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("s");
+    let (audio, _) = fixture(0.5);
+    let Stems(stems) = BandSeparator.separate(&audio).unwrap();
+    seed_legacy(&dir, &stems);
+
+    // Quit after two stems: half the directory is converted.
+    let current = stem_paths(&dir);
+    let legacy = dj_analysis::legacy_stem_paths(&dir);
+    dj_analysis::stems::write_stems(&dir, &Stems(stems.clone())).unwrap();
+    for p in legacy.iter().take(2) {
+        std::fs::remove_file(p).unwrap();
+    }
+    for p in current.iter().skip(2) {
+        std::fs::remove_file(p).unwrap();
+    }
+    assert!(stems_cached(&dir), "half converted is still separated");
+    let mixed = dj_analysis::cached_stem_paths(&dir).unwrap();
+    assert_eq!(mixed[0], current[0]);
+    assert_eq!(mixed[3], legacy[3]);
+
+    assert_eq!(
+        dj_analysis::migrate_stems(&dir).unwrap(),
+        2,
+        "only the rest"
+    );
+    assert_eq!(dj_analysis::cached_stem_paths(&dir).unwrap(), current);
+
+    // A quit between "wrote the new file" and "dropped the old one"
+    // leaves both. The next run drops the old one and re-encodes nothing.
+    let before = std::fs::read(&current[0]).unwrap();
+    dj_analysis::stems::write_flac(&legacy[0], &stems[2]).unwrap();
+    assert_eq!(dj_analysis::migrate_stems(&dir).unwrap(), 0);
+    assert!(!legacy[0].exists());
+    assert_eq!(std::fs::read(&current[0]).unwrap(), before);
+}
+
+/// The whole track migrates, not just the cache that happens to be
+/// serving it: every model's directory under the content hash.
+#[test]
+fn every_models_cache_is_converted_for_a_track() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path();
+    let (audio, _) = fixture(0.25);
+    let Stems(stems) = BandSeparator.separate(&audio).unwrap();
+    let band = dj_analysis::stems_dir_for(data, "hash1", "band");
+    let model = dj_analysis::stems_dir_for(data, "hash1", "htdemucs_ft");
+    seed_legacy(&band, &stems);
+    seed_legacy(&model, &stems);
+
+    assert!(dj_analysis::stems_need_migration(data, "hash1"));
+    assert!(!dj_analysis::stems_need_migration(data, "hash2"));
+    assert_eq!(dj_analysis::migrate_stems_for(data, "hash1").unwrap(), 8);
+    assert!(!dj_analysis::stems_need_migration(data, "hash1"));
+    for dir in [&band, &model] {
+        assert_eq!(
+            dj_analysis::cached_stem_paths(dir).unwrap(),
+            stem_paths(dir)
+        );
+    }
+    // A track nobody ever separated is not an error to migrate.
+    assert_eq!(dj_analysis::migrate_stems_for(data, "hash2").unwrap(), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1517,6 +1705,59 @@ exit 1
     // max_attempts is 2 here: it stops there rather than hammering.
     std::thread::sleep(std::time::Duration::from_millis(400));
     assert_eq!(model_runs(&runs), 2, "retried past max_attempts");
+}
+
+/// The headline of the migration: a library separated before the cache
+/// changed format is converted by the SAME background service that
+/// separates — in the background, without running a model again.
+#[cfg(unix)]
+#[test]
+fn the_stem_service_converts_caches_written_in_the_old_format() {
+    use dj_analysis::{AutoStemScope, AutoStemService, TrackStems};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let (library, tracks) = library_of(tmp.path(), &["youtube"]);
+    let work = tempfile::tempdir().unwrap();
+    // A model that would take a minute if it ever ran — it must not.
+    let (sep, argv_log) = fake_scnet(work.path(), 1.0);
+    let jobs = scnet_jobs(library.clone(), sep);
+
+    // What an older release left on disk for this track.
+    let dir = stems_dir_for(library.data_dir(), &tracks[0].content_hash, SCNET_MODEL);
+    let (audio, _) = fixture(0.5);
+    let Stems(stems) = BandSeparator.separate(&audio).unwrap();
+    seed_legacy(&dir, &stems);
+    assert!(jobs.cached(tracks[0].id), "old stems are stems");
+    assert!(jobs.needs_migration(tracks[0].id));
+
+    let service = AutoStemService::start(library, jobs.clone(), auto_settings(AutoStemScope::All));
+    wait_until("the old cache to be converted", 30, || {
+        !jobs.needs_migration(tracks[0].id)
+    });
+
+    for p in stem_paths(&dir) {
+        assert!(p.is_file(), "missing {}", p.display());
+    }
+    for p in dj_analysis::legacy_stem_paths(&dir) {
+        assert!(!p.exists(), "{} outlived the conversion", p.display());
+    }
+    assert_eq!(
+        jobs.cached_paths(tracks[0].id).unwrap(),
+        stem_paths(&dir),
+        "the converted files are what gets served"
+    );
+    assert_eq!(
+        service.track_stems(tracks[0].id),
+        TrackStems::Ready {
+            separator: SCNET_MODEL.to_string()
+        }
+    );
+    assert_eq!(model_runs(&argv_log), 0, "converting is not separating");
+
+    // And the queue settles: a converted track is not asked for again.
+    wait_until("the service to settle", 10, || {
+        service.status().pending == 0
+    });
 }
 
 /// What a clip made of these parts CONTAINS. Empty is the whole mix,

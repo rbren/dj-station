@@ -25,8 +25,12 @@
 //!   elsewhere. Production quality arrives by dropping in real weights;
 //!   the fallback keeps every feature testable without them.
 //!
-//! Stems are cached as FLAC under `<data_dir>/stems/<content_hash>/`
-//! (PRD §8.2: per-track content-hashed caching, FLAC in app storage).
+//! Stems are cached under `<data_dir>/stems/<content_hash>/` (PRD §8.2:
+//! per-track content-hashed caching), as AAC-LC in an ADTS stream
+//! ([`STEM_EXT`]) — a derived cache four files deep per track, where
+//! lossless was paying several times the source's size for audio nobody
+//! masters from. Caches written as FLAC still read, and are converted in
+//! the background by the same queue that separates ([`migrate_stems`]).
 
 use anyhow::{Context, Result};
 use rustfft::num_complex::Complex;
@@ -634,23 +638,106 @@ pub fn mix_stems(parts: &[&AudioData]) -> Result<AudioData> {
     })
 }
 
-/// The four stem FLAC paths inside a stems directory, [`STEM_NAMES`] order.
+/// Extension the stem cache is written in: AAC-LC in an ADTS stream.
+///
+/// Stems are a DERIVED cache — four files per track, each as long as the
+/// track — so lossless FLAC cost about five times what the source did for
+/// audio nobody masters from. AAC-LC is the lossy format the app already
+/// decodes everywhere (symphonia, one pipeline: `decode_audio`), and ADTS
+/// is the container that needs no muxer: a stream of self-describing
+/// frames, which is also why a half-written one is recognisable.
+pub const STEM_EXT: &str = "aac";
+
+/// What stems were written in before [`STEM_EXT`]. Still read (a library
+/// is migrated in the background, not on the way past), never written.
+pub const LEGACY_STEM_EXT: &str = "flac";
+
+/// AAC bitrate mode for stems: FDK's highest VBR setting (~192 kbit/s
+/// stereo), a quarter of 16-bit FLAC on this material and transparent
+/// enough for stem work.
+const STEM_BITRATE_MODE: fdk_aac::enc::BitRate = fdk_aac::enc::BitRate::VbrVeryHigh;
+
+/// Priming samples an AAC-LC decoder emits before the first real sample.
+/// Checked against what the encoder reports on every write, so a future
+/// FDK with a different codec delay fails loudly instead of quietly
+/// shifting every stem in the cache by a few milliseconds.
+const AAC_PRIMING_FRAMES: usize = 2048;
+
+/// Channels a stem is stored with. AAC-LC here is mono or stereo, which
+/// is all the app plays: the deck and the clip renderer read channel 0
+/// and 1 and ignore the rest.
+const MAX_STEM_CHANNELS: usize = 2;
+
+/// The four stem paths inside a stems directory, [`STEM_NAMES`] order —
+/// where a separation WRITES. Reading takes [`cached_stem_paths`], which
+/// also finds stems written in the old format.
 pub fn stem_paths(dir: &Path) -> [PathBuf; N_STEMS] {
-    std::array::from_fn(|i| dir.join(format!("{}.flac", STEM_NAMES[i])))
+    std::array::from_fn(|i| dir.join(format!("{}.{STEM_EXT}", STEM_NAMES[i])))
+}
+
+/// The same four paths in the format stems used to be written in.
+pub fn legacy_stem_paths(dir: &Path) -> [PathBuf; N_STEMS] {
+    std::array::from_fn(|i| dir.join(format!("{}.{LEGACY_STEM_EXT}", STEM_NAMES[i])))
+}
+
+/// A file that exists and holds something.
+///
+/// Emptiness matters as much as absence, because both are what an
+/// interrupted separation leaves behind. Missing files are the obvious
+/// case (a quit between stems). Empty ones are the nastier case:
+/// `write_stems` renames each stem into place, and a rename that outlived
+/// its data through a power cut leaves a 0-byte file that a presence
+/// check would trust forever.
+fn has_content(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() > 0)
+}
+
+/// The four stem files to READ from a stems directory: each stem in the
+/// current format, or failing that the one it was written in before.
+/// `None` when any of the four is missing (or empty), i.e. when this is
+/// not a cache at all and the track separates again.
+///
+/// Per stem rather than per directory on purpose: a migration
+/// ([`migrate_stems`]) that was interrupted leaves some stems converted
+/// and some not, and that half-and-half directory is still a perfectly
+/// good separation — losing it would cost minutes of model time.
+pub fn cached_stem_paths(dir: &Path) -> Option<[PathBuf; N_STEMS]> {
+    let current = stem_paths(dir);
+    let legacy = legacy_stem_paths(dir);
+    let mut out: [PathBuf; N_STEMS] = Default::default();
+    for i in 0..N_STEMS {
+        if has_content(&current[i]) {
+            out[i] = current[i].clone();
+        } else if has_content(&legacy[i]) {
+            out[i] = legacy[i].clone();
+        } else {
+            return None;
+        }
+    }
+    Some(out)
 }
 
 /// True when all four stems are cached AND none of them is empty.
-///
-/// Both halves matter, because both are what an interrupted separation
-/// leaves behind. Missing files are the obvious case (a quit between
-/// stems). Empty ones are the nastier case: `write_stems` renames each
-/// stem into place, and a rename that outlived its data through a power
-/// cut leaves a 0-byte file that a presence check would trust forever.
-/// Either way the answer is no, and the track is separated again.
 pub fn stems_cached(dir: &Path) -> bool {
-    stem_paths(dir)
-        .iter()
-        .all(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.len() > 0))
+    cached_stem_paths(dir).is_some()
+}
+
+/// Decode one cached stem.
+///
+/// The one thing a stem needs over [`decode_audio`](crate::decode_audio):
+/// an AAC decoder emits [`AAC_PRIMING_FRAMES`] of encoder delay before the
+/// first real sample, and a stem that starts a few milliseconds late is a
+/// stem that no longer lines up with its track's beat grid. Trailing
+/// padding is left alone — it is silence past the end of the track, which
+/// nothing plays.
+pub fn decode_stem(path: &Path) -> Result<AudioData> {
+    let mut audio = crate::decode::decode_audio(path)?;
+    if path.extension().and_then(|e| e.to_str()) == Some(STEM_EXT) {
+        for ch in &mut audio.channels {
+            ch.drain(..AAC_PRIMING_FRAMES.min(ch.len()));
+        }
+    }
+    Ok(audio)
 }
 
 /// Compute-if-missing stem cache: returns `true` if stems were computed,
@@ -680,22 +767,181 @@ pub fn ensure_stems_cancellable(
     Ok(true)
 }
 
-/// Write the four stems as 16-bit FLAC (via a tmp-file rename so a
-/// half-written cache never looks complete).
+/// Write the four stems (via a tmp-file rename so a half-written cache
+/// never looks complete).
 pub fn write_stems(dir: &Path, stems: &Stems) -> Result<()> {
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let paths = stem_paths(dir);
     for (audio, path) in stems.0.iter().zip(&paths) {
-        let tmp = path.with_extension("flac.tmp");
-        write_flac(&tmp, audio)?;
-        std::fs::rename(&tmp, path)
-            .with_context(|| format!("finalizing stem {}", path.display()))?;
+        write_stem(path, audio)?;
     }
     Ok(())
 }
 
-/// Encode audio as 16-bit FLAC (the stem cache and rendered clips).
-pub(crate) fn write_flac(path: &Path, audio: &AudioData) -> Result<()> {
+/// Write one stem file, atomically.
+fn write_stem(path: &Path, audio: &AudioData) -> Result<()> {
+    let tmp = path.with_extension(format!("{STEM_EXT}.tmp"));
+    write_aac(&tmp, audio)?;
+    std::fs::rename(&tmp, path).with_context(|| format!("finalizing stem {}", path.display()))
+}
+
+/// Bring one stems directory into the current format: every stem still in
+/// the old one is re-encoded and the old file dropped. Returns how many
+/// stems were converted (0 = nothing to do).
+///
+/// Safe to interrupt and safe to repeat, which is what a background
+/// migration of a whole library needs:
+///
+/// - a stem is converted through a tmp file and a rename, so the new file
+///   never exists half-written;
+/// - the old file is deleted only once the new one is in place, so a
+///   crash in between leaves BOTH — and the next run just deletes the old
+///   one, since the new one is already there;
+/// - a directory that is part converted still reads
+///   ([`cached_stem_paths`]), so nothing is ever re-separated because a
+///   migration stopped halfway.
+pub fn migrate_stems(dir: &Path) -> Result<usize> {
+    let current = stem_paths(dir);
+    let legacy = legacy_stem_paths(dir);
+    let mut converted = 0;
+    for i in 0..N_STEMS {
+        if !has_content(&legacy[i]) {
+            continue;
+        }
+        if !has_content(&current[i]) {
+            let audio = crate::decode::decode_audio(&legacy[i])
+                .with_context(|| format!("reading {} to convert it", legacy[i].display()))?;
+            write_stem(&current[i], &audio)?;
+            converted += 1;
+        }
+        std::fs::remove_file(&legacy[i])
+            .with_context(|| format!("removing {}", legacy[i].display()))?;
+    }
+    Ok(converted)
+}
+
+/// Does any stem under this content hash still need converting? One
+/// `stat` per stem per model directory, which is what the background
+/// service asks per track.
+pub fn stems_need_migration(data_dir: &Path, content_hash: &str) -> bool {
+    stem_dirs(data_dir, content_hash)
+        .iter()
+        .any(|dir| legacy_stem_paths(dir).iter().any(|p| has_content(p)))
+}
+
+/// Convert every model's stems for one track, the flat DSP cache and each
+/// model subdirectory alike ([`stems_dir_for`]). Nothing is separated
+/// here: this only re-encodes what is already on disk.
+pub fn migrate_stems_for(data_dir: &Path, content_hash: &str) -> Result<usize> {
+    let mut converted = 0;
+    for dir in stem_dirs(data_dir, content_hash) {
+        converted += migrate_stems(&dir)?;
+    }
+    Ok(converted)
+}
+
+/// Every directory that can hold one track's stems: the flat one and its
+/// per-model children.
+fn stem_dirs(data_dir: &Path, content_hash: &str) -> Vec<PathBuf> {
+    let base = stems_dir(data_dir, content_hash);
+    let mut dirs = vec![base.clone()];
+    dirs.extend(
+        std::fs::read_dir(&base)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir()),
+    );
+    dirs
+}
+
+/// Encode audio as AAC-LC in an ADTS stream (the stem cache).
+///
+/// The input is padded with silence before the flush so the encoder's own
+/// delay cannot swallow the last frames of real audio; the delay it adds
+/// at the FRONT is taken back off by [`decode_stem`].
+fn write_aac(path: &Path, audio: &AudioData) -> Result<()> {
+    use fdk_aac::enc::{AudioObjectType, ChannelMode, Encoder, EncoderParams, Transport};
+
+    let frames = audio.frames();
+    anyhow::ensure!(frames > 0, "encoding {}: no audio", path.display());
+    let n_ch = audio.channels.len().clamp(1, MAX_STEM_CHANNELS);
+    let encoder = Encoder::new(EncoderParams {
+        bit_rate: STEM_BITRATE_MODE,
+        sample_rate: audio.sample_rate,
+        transport: Transport::Adts,
+        channels: if n_ch == 1 {
+            ChannelMode::Mono
+        } else {
+            ChannelMode::Stereo
+        },
+        audio_object_type: AudioObjectType::Mpeg4LowComplexity,
+    })
+    .map_err(|e| anyhow::anyhow!("aac encoder for {}: {e}", path.display()))?;
+    let info = encoder
+        .info()
+        .map_err(|e| anyhow::anyhow!("aac encoder info: {e}"))?;
+    let block = info.frameLength as usize;
+    anyhow::ensure!(
+        info.nDelay as usize == AAC_PRIMING_FRAMES && block > 0,
+        "aac encoder reports {} samples of delay in {}-sample blocks, not {AAC_PRIMING_FRAMES}",
+        info.nDelay,
+        block
+    );
+
+    let mut pcm = vec![0i16; frames.next_multiple_of(block) * n_ch];
+    for i in 0..frames {
+        for (c, ch) in audio.channels[..n_ch].iter().enumerate() {
+            pcm[i * n_ch + c] = (ch[i].clamp(-1.0, 1.0) * 32767.0).round() as i16;
+        }
+    }
+
+    // Blocks that must come out for the last real sample to be in one of
+    // them, once the priming the decoder drops is accounted for.
+    let wanted = (frames + AAC_PRIMING_FRAMES).div_ceil(block);
+    let silence = vec![0i16; block * n_ch];
+    let mut out = vec![0u8; info.maxOutBufBytes as usize];
+    let mut adts = Vec::with_capacity(pcm.len() / 8);
+    let mut pos = 0;
+    let mut blocks = 0;
+    // The encoder answers a block behind itself, so feeding the audio is
+    // not enough to get all of it back: silence is pushed through until
+    // it has emitted everything the real samples are in. (FDK's own
+    // end-of-stream flush is not reachable through this binding.)
+    let mut calls = 0;
+    while pos < pcm.len() || blocks < wanted {
+        calls += 1;
+        anyhow::ensure!(
+            calls <= wanted + 16,
+            "aac encoder stopped emitting frames for {}",
+            path.display()
+        );
+        let chunk = if pos < pcm.len() {
+            &pcm[pos..pos + block * n_ch]
+        } else {
+            &silence[..]
+        };
+        let encoded = encoder
+            .encode(chunk, &mut out)
+            .map_err(|e| anyhow::anyhow!("aac encode of {}: {e}", path.display()))?;
+        anyhow::ensure!(
+            encoded.input_consumed > 0,
+            "aac encoder took nothing of {}",
+            path.display()
+        );
+        pos = (pos + encoded.input_consumed).min(pcm.len());
+        if encoded.output_size > 0 {
+            adts.extend_from_slice(&out[..encoded.output_size]);
+            blocks += 1;
+        }
+    }
+    std::fs::write(path, &adts).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Encode audio as 16-bit FLAC: rendered clips (see `clip.rs`), and the
+/// format the stem cache is migrated OFF ([`migrate_stems`]).
+pub fn write_flac(path: &Path, audio: &AudioData) -> Result<()> {
     use flacenc::bitsink::ByteSink;
     use flacenc::component::BitRepr;
     use flacenc::error::Verify;
