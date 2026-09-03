@@ -1,0 +1,24 @@
+{
+  "wires": [
+    {
+      "from_jack": "out",
+      "to": "clockmul6",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "out",
+      "to": "drumsequ1",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "out",
+      "to": "lfo5",
+      "to_jack": "clock"
+    },
+    {
+      "from_jack": "out",
+      "to": "noise1",
+      "to_jack": "clock"
+    }
+  ]
+}

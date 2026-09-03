@@ -1,0 +1,47 @@
+{
+  "ext": "com.dj.reverb",
+  "knobs": {
+    "damping": {
+      "position": 0.7133333,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "decay": {
+      "position": 0.46,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "diffusion": {
+      "position": 0.2,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "freeze": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0,
+      "wire_style": "override"
+    },
+    "in_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mix": {
+      "position": 0.6666667,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "size": {
+      "position": 0.67333335,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

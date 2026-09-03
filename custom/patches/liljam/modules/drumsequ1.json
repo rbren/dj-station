@@ -1,0 +1,391 @@
+{
+  "ext": "macro.drum-sequence",
+  "knobs": {
+    "clock": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "damping": {
+      "position": 0.4,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "decay": {
+      "position": 0.7,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "diffusion": {
+      "position": 0.7,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "freeze": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "freq1": {
+      "position": 0.20037292,
+      "atten": 0.13333334,
+      "offset": 0.0
+    },
+    "freq2": {
+      "position": 0.4356891,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "freq3": {
+      "position": 0.6922398,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "freq4": {
+      "position": 0.86854374,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gain1": {
+      "position": 0.78000003,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gain2": {
+      "position": 0.6935484,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gain3": {
+      "position": 0.5241935,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "gain4": {
+      "position": 0.3548387,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "hat_decay": {
+      "position": 0.7248783,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "hat_tone": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "hat_tune": {
+      "position": 0.64,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in1_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in2_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in3_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in4_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in4_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in5_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in5_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in6_l": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in6_r": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "kick_decay": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "kick_tone": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "kick_tune": {
+      "position": 0.7266667,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "level": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl1": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl2": {
+      "position": 0.62,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl3": {
+      "position": 0.6,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl4": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl5": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "lvl6": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "master": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mix": {
+      "position": 0.35,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mode": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan1": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan2": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan3": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan4": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan5": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pan6": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "q1": {
+      "position": 0.15308803,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "q2": {
+      "position": 0.39308804,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "q3": {
+      "position": 0.39344078,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "q4": {
+      "position": 0.39308804,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata6": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata7": {
+      "position": 0.0019531548,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "rata8": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb6": {
+      "position": 0.5000076,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb7": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "ratb8": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "reset": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row1": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row6": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row7": {
+      "position": 0.3352865,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "row8": {
+      "position": 0.06666667,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "size": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "snare_decay": {
+      "position": 0.8419865,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "snare_tone": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "snare_tune": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

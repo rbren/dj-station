@@ -2,7 +2,7 @@
   "wires": [
     {
       "from_jack": "bi",
-      "to": "attenuve1",
+      "to": "synth21",
       "to_jack": "in"
     }
   ]

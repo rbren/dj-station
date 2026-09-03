@@ -1,9 +1,0 @@
-{
-  "wires": [
-    {
-      "from_jack": "out",
-      "to": "adsr1",
-      "to_jack": "release"
-    }
-  ]
-}

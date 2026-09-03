@@ -2,8 +2,8 @@
   "wires": [
     {
       "from_jack": "bi",
-      "to": "attenuve1",
-      "to_jack": "in"
+      "to": "basicsyn1",
+      "to_jack": "gate"
     }
   ]
 }

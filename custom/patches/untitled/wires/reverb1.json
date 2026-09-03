@@ -1,0 +1,14 @@
+{
+  "wires": [
+    {
+      "from_jack": "out_l",
+      "to": "mixer81",
+      "to_jack": "in3_l"
+    },
+    {
+      "from_jack": "out_r",
+      "to": "mixer81",
+      "to_jack": "in3_r"
+    }
+  ]
+}

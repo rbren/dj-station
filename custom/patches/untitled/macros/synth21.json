@@ -1,0 +1,2031 @@
+{
+  "def": {
+    "id": "macro.synth-2",
+    "name": "Synth 2",
+    "modules": {
+      "filter": {
+        "ext": "com.dj.filter",
+        "knobs": {
+          "cutoff": {
+            "position": 0.5833333,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "drive": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "res": {
+            "position": 0.15,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "topology": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "gate": {
+        "ext": "com.dj.alias",
+        "knobs": {
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "note": {
+        "ext": "com.dj.alias",
+        "knobs": {
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "note_env": {
+        "ext": "com.dj.adsr",
+        "name": "note env",
+        "knobs": {
+          "attack": {
+            "position": 0.006660666,
+            "atten": 0.060006,
+            "offset": 0.023342334
+          },
+          "decay": {
+            "position": 0.047278736,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "gate": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "release": {
+            "position": 0.01990199,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "retrig": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "sustain": {
+            "position": 0.3809524,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "note_filter": {
+        "ext": "com.dj.attenuverter1",
+        "name": "note filter",
+        "knobs": {
+          "atten": {
+            "position": 0.42,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "offset": {
+            "position": 0.5065,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "out": {
+        "ext": "com.dj.vca",
+        "knobs": {
+          "cv": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "pitch_match": {
+        "ext": "com.dj.attenuverter1",
+        "name": "pitch match",
+        "knobs": {
+          "atten": {
+            "position": 0.44,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "offset": {
+            "position": 0.3865,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "sine": {
+        "ext": "com.dj.oscillator",
+        "knobs": {
+          "fm": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pitch": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "sync": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "waveform": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble": {
+        "ext": "com.dj.lfo",
+        "knobs": {
+          "clock": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "phase": {
+            "position": 0.25,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pw": {
+            "position": 0.49999997,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "rate": {
+            "position": 0.5874057,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "ratio": {
+            "position": 0.4375,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "reset": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "shape": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble_env": {
+        "ext": "com.dj.adsr",
+        "name": "warble env",
+        "knobs": {
+          "attack": {
+            "position": 0.018570064,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "decay": {
+            "position": 0.04903467,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "gate": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "release": {
+            "position": 0.01990199,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "retrig": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "sustain": {
+            "position": 0.52380955,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble_filter": {
+        "ext": "com.dj.attenuverter1",
+        "name": "warble filter",
+        "knobs": {
+          "atten": {
+            "position": 0.645,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "offset": {
+            "position": 0.6265,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble_mix": {
+        "ext": "com.dj.mixer",
+        "name": "warble mix",
+        "knobs": {
+          "in1_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in1_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in2_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in2_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in3_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in3_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in4_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in4_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in5_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in5_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in6_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in6_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl1": {
+            "position": 0.86,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl2": {
+            "position": 0.82,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl3": {
+            "position": 0.8,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl4": {
+            "position": 0.8,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl5": {
+            "position": 0.8,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl6": {
+            "position": 0.8,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "master": {
+            "position": 1.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan1": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan2": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan3": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan4": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan5": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan6": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble_vca": {
+        "ext": "com.dj.vca",
+        "name": "warble vca",
+        "knobs": {
+          "cv": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      }
+    },
+    "wires": {
+      "filter": {
+        "wires": [
+          {
+            "from_jack": "lp",
+            "to": "out",
+            "to_jack": "in"
+          }
+        ]
+      },
+      "gate": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "note_env",
+            "to_jack": "gate"
+          },
+          {
+            "from_jack": "out",
+            "to": "warble_env",
+            "to_jack": "gate"
+          }
+        ]
+      },
+      "note": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "pitch_match",
+            "to_jack": "in"
+          },
+          {
+            "from_jack": "out",
+            "to": "sine",
+            "to_jack": "pitch"
+          }
+        ]
+      },
+      "note_env": {
+        "wires": [
+          {
+            "from_jack": "env",
+            "to": "note_filter",
+            "to_jack": "in"
+          },
+          {
+            "from_jack": "env",
+            "to": "out",
+            "to_jack": "cv"
+          }
+        ]
+      },
+      "note_filter": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "warble_mix",
+            "to_jack": "in2_l"
+          }
+        ]
+      },
+      "pitch_match": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "filter",
+            "to_jack": "cutoff"
+          }
+        ]
+      },
+      "sine": {
+        "wires": [
+          {
+            "from_jack": "audio",
+            "to": "filter",
+            "to_jack": "in"
+          }
+        ]
+      },
+      "warble": {
+        "wires": [
+          {
+            "from_jack": "bi",
+            "to": "warble_vca",
+            "to_jack": "in"
+          }
+        ]
+      },
+      "warble_env": {
+        "wires": [
+          {
+            "from_jack": "env",
+            "to": "warble_vca",
+            "to_jack": "cv"
+          }
+        ]
+      },
+      "warble_filter": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "warble_mix",
+            "to_jack": "in1_l"
+          }
+        ]
+      },
+      "warble_mix": {
+        "wires": [
+          {
+            "from_jack": "out_l",
+            "to": "filter",
+            "to_jack": "cutoff"
+          }
+        ]
+      },
+      "warble_vca": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "warble_filter",
+            "to_jack": "in"
+          }
+        ]
+      }
+    },
+    "interface": {
+      "inputs": [
+        {
+          "id": "in",
+          "node": "gate",
+          "jack": "in"
+        },
+        {
+          "id": "note_in",
+          "node": "note",
+          "jack": "in"
+        },
+        {
+          "id": "retrig",
+          "node": "warble_env",
+          "jack": "retrig"
+        },
+        {
+          "id": "attack",
+          "node": "warble_env",
+          "jack": "attack"
+        },
+        {
+          "id": "decay",
+          "node": "warble_env",
+          "jack": "decay"
+        },
+        {
+          "id": "sustain",
+          "node": "warble_env",
+          "jack": "sustain"
+        },
+        {
+          "id": "release",
+          "node": "warble_env",
+          "jack": "release"
+        },
+        {
+          "id": "note_env_retrig",
+          "node": "note_env",
+          "jack": "retrig"
+        },
+        {
+          "id": "note_env_attack",
+          "node": "note_env",
+          "jack": "attack"
+        },
+        {
+          "id": "note_env_decay",
+          "node": "note_env",
+          "jack": "decay"
+        },
+        {
+          "id": "note_env_sustain",
+          "node": "note_env",
+          "jack": "sustain"
+        },
+        {
+          "id": "note_env_release",
+          "node": "note_env",
+          "jack": "release"
+        },
+        {
+          "id": "res",
+          "node": "filter",
+          "jack": "res"
+        },
+        {
+          "id": "drive",
+          "node": "filter",
+          "jack": "drive"
+        },
+        {
+          "id": "topology",
+          "node": "filter",
+          "jack": "topology"
+        },
+        {
+          "id": "rate",
+          "node": "warble",
+          "jack": "rate"
+        },
+        {
+          "id": "shape",
+          "node": "warble",
+          "jack": "shape"
+        },
+        {
+          "id": "pw",
+          "node": "warble",
+          "jack": "pw"
+        },
+        {
+          "id": "clock",
+          "node": "warble",
+          "jack": "clock"
+        },
+        {
+          "id": "ratio",
+          "node": "warble",
+          "jack": "ratio"
+        },
+        {
+          "id": "reset",
+          "node": "warble",
+          "jack": "reset"
+        },
+        {
+          "id": "phase",
+          "node": "warble",
+          "jack": "phase"
+        },
+        {
+          "id": "in1_r",
+          "node": "warble_mix",
+          "jack": "in1_r"
+        },
+        {
+          "id": "lvl1",
+          "node": "warble_mix",
+          "jack": "lvl1"
+        },
+        {
+          "id": "pan1",
+          "node": "warble_mix",
+          "jack": "pan1"
+        },
+        {
+          "id": "in2_r",
+          "node": "warble_mix",
+          "jack": "in2_r"
+        },
+        {
+          "id": "lvl2",
+          "node": "warble_mix",
+          "jack": "lvl2"
+        },
+        {
+          "id": "pan2",
+          "node": "warble_mix",
+          "jack": "pan2"
+        },
+        {
+          "id": "in3_l",
+          "node": "warble_mix",
+          "jack": "in3_l"
+        },
+        {
+          "id": "in3_r",
+          "node": "warble_mix",
+          "jack": "in3_r"
+        },
+        {
+          "id": "lvl3",
+          "node": "warble_mix",
+          "jack": "lvl3"
+        },
+        {
+          "id": "pan3",
+          "node": "warble_mix",
+          "jack": "pan3"
+        },
+        {
+          "id": "in4_l",
+          "node": "warble_mix",
+          "jack": "in4_l"
+        },
+        {
+          "id": "in4_r",
+          "node": "warble_mix",
+          "jack": "in4_r"
+        },
+        {
+          "id": "lvl4",
+          "node": "warble_mix",
+          "jack": "lvl4"
+        },
+        {
+          "id": "pan4",
+          "node": "warble_mix",
+          "jack": "pan4"
+        },
+        {
+          "id": "in5_l",
+          "node": "warble_mix",
+          "jack": "in5_l"
+        },
+        {
+          "id": "in5_r",
+          "node": "warble_mix",
+          "jack": "in5_r"
+        },
+        {
+          "id": "lvl5",
+          "node": "warble_mix",
+          "jack": "lvl5"
+        },
+        {
+          "id": "pan5",
+          "node": "warble_mix",
+          "jack": "pan5"
+        },
+        {
+          "id": "in6_l",
+          "node": "warble_mix",
+          "jack": "in6_l"
+        },
+        {
+          "id": "in6_r",
+          "node": "warble_mix",
+          "jack": "in6_r"
+        },
+        {
+          "id": "lvl6",
+          "node": "warble_mix",
+          "jack": "lvl6"
+        },
+        {
+          "id": "pan6",
+          "node": "warble_mix",
+          "jack": "pan6"
+        },
+        {
+          "id": "master",
+          "node": "warble_mix",
+          "jack": "master"
+        },
+        {
+          "id": "fm",
+          "node": "sine",
+          "jack": "fm"
+        },
+        {
+          "id": "sync",
+          "node": "sine",
+          "jack": "sync"
+        },
+        {
+          "id": "waveform",
+          "node": "sine",
+          "jack": "waveform"
+        },
+        {
+          "id": "atten",
+          "node": "warble_filter",
+          "jack": "atten"
+        },
+        {
+          "id": "offset",
+          "node": "warble_filter",
+          "jack": "offset"
+        },
+        {
+          "id": "note_filter_atten",
+          "node": "note_filter",
+          "jack": "atten"
+        },
+        {
+          "id": "note_filter_offset",
+          "node": "note_filter",
+          "jack": "offset"
+        },
+        {
+          "id": "pitch_match_atten",
+          "node": "pitch_match",
+          "jack": "atten"
+        },
+        {
+          "id": "pitch_match_offset",
+          "node": "pitch_match",
+          "jack": "offset"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "node": "out",
+          "jack": "out"
+        },
+        {
+          "id": "env",
+          "node": "warble_env",
+          "jack": "env"
+        },
+        {
+          "id": "note_env_env",
+          "node": "note_env",
+          "jack": "env"
+        },
+        {
+          "id": "note_out",
+          "node": "note",
+          "jack": "out"
+        },
+        {
+          "id": "lp",
+          "node": "filter",
+          "jack": "lp"
+        },
+        {
+          "id": "bp",
+          "node": "filter",
+          "jack": "bp"
+        },
+        {
+          "id": "hp",
+          "node": "filter",
+          "jack": "hp"
+        },
+        {
+          "id": "notch",
+          "node": "filter",
+          "jack": "notch"
+        },
+        {
+          "id": "bi",
+          "node": "warble",
+          "jack": "bi"
+        },
+        {
+          "id": "uni",
+          "node": "warble",
+          "jack": "uni"
+        },
+        {
+          "id": "shifted",
+          "node": "warble",
+          "jack": "shifted"
+        },
+        {
+          "id": "out_l",
+          "node": "warble_mix",
+          "jack": "out_l"
+        },
+        {
+          "id": "out_r",
+          "node": "warble_mix",
+          "jack": "out_r"
+        },
+        {
+          "id": "audio",
+          "node": "sine",
+          "jack": "audio"
+        },
+        {
+          "id": "warble_vca_out",
+          "node": "warble_vca",
+          "jack": "out"
+        },
+        {
+          "id": "warble_filter_out",
+          "node": "warble_filter",
+          "jack": "out"
+        },
+        {
+          "id": "note_filter_out",
+          "node": "note_filter",
+          "jack": "out"
+        },
+        {
+          "id": "pitch_match_out",
+          "node": "pitch_match",
+          "jack": "out"
+        },
+        {
+          "id": "gate_out",
+          "node": "gate",
+          "jack": "out"
+        }
+      ],
+      "params": []
+    },
+    "positions": {
+      "filter": [
+        192.0,
+        192.0
+      ],
+      "gate": [
+        0.0,
+        240.0
+      ],
+      "note": [
+        0.0,
+        48.0
+      ],
+      "note_env": [
+        528.0,
+        144.0
+      ],
+      "note_filter": [
+        96.0,
+        624.0
+      ],
+      "out": [
+        912.0,
+        144.0
+      ],
+      "pitch_match": [
+        288.0,
+        432.0
+      ],
+      "sine": [
+        288.0,
+        0.0
+      ],
+      "warble": [
+        576.0,
+        528.0
+      ],
+      "warble_env": [
+        528.0,
+        816.0
+      ],
+      "warble_filter": [
+        336.0,
+        624.0
+      ],
+      "warble_mix": [
+        96.0,
+        816.0
+      ],
+      "warble_vca": [
+        912.0,
+        816.0
+      ]
+    }
+  },
+  "state": {
+    "id": "macro.synth-2",
+    "name": "Synth 2",
+    "modules": {
+      "filter": {
+        "ext": "com.dj.filter",
+        "knobs": {
+          "cutoff": {
+            "position": 0.5833333,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "drive": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "res": {
+            "position": 0.7633333,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "topology": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "gate": {
+        "ext": "com.dj.alias",
+        "knobs": {
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "note": {
+        "ext": "com.dj.alias",
+        "knobs": {
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "note_env": {
+        "ext": "com.dj.adsr",
+        "name": "note env",
+        "knobs": {
+          "attack": {
+            "position": 0.0,
+            "atten": 0.060006,
+            "offset": 0.023342334
+          },
+          "decay": {
+            "position": 0.0739454,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "gate": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "release": {
+            "position": 0.01990199,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "retrig": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "sustain": {
+            "position": 0.3809524,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "note_filter": {
+        "ext": "com.dj.attenuverter1",
+        "name": "note filter",
+        "knobs": {
+          "atten": {
+            "position": 0.42,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "offset": {
+            "position": 0.5065,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "out": {
+        "ext": "com.dj.vca",
+        "knobs": {
+          "cv": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "pitch_match": {
+        "ext": "com.dj.attenuverter1",
+        "name": "pitch match",
+        "knobs": {
+          "atten": {
+            "position": 0.44,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "offset": {
+            "position": 0.3865,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "sine": {
+        "ext": "com.dj.oscillator",
+        "knobs": {
+          "fm": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "fm_index": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pitch": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "sync": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "waveform": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble": {
+        "ext": "com.dj.lfo",
+        "knobs": {
+          "clock": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "phase": {
+            "position": 0.25,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pw": {
+            "position": 0.49999997,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "rate": {
+            "position": 0.5674057,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "ratio": {
+            "position": 0.4375,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "reset": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "shape": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble_env": {
+        "ext": "com.dj.adsr",
+        "name": "warble env",
+        "knobs": {
+          "attack": {
+            "position": 0.018570064,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "decay": {
+            "position": 0.04903467,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "gate": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "release": {
+            "position": 0.01990199,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "retrig": {
+            "position": 4.5474735e-13,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "sustain": {
+            "position": 0.52380955,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble_filter": {
+        "ext": "com.dj.attenuverter1",
+        "name": "warble filter",
+        "knobs": {
+          "atten": {
+            "position": 0.645,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "offset": {
+            "position": 0.6265,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble_mix": {
+        "ext": "com.dj.mixer",
+        "name": "warble mix",
+        "knobs": {
+          "in1_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in1_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in2_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in2_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in3_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in3_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in4_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in4_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in5_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in5_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in6_l": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in6_r": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl1": {
+            "position": 0.86,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl2": {
+            "position": 0.82,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl3": {
+            "position": 0.8,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl4": {
+            "position": 0.8,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl5": {
+            "position": 0.8,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "lvl6": {
+            "position": 0.8,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "master": {
+            "position": 1.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "mute1": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "mute2": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "mute3": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "mute4": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "mute5": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "mute6": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan1": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan2": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan3": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan4": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan5": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "pan6": {
+            "position": 0.5,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "solo1": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "solo2": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "solo3": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "solo4": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "solo5": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "solo6": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      },
+      "warble_vca": {
+        "ext": "com.dj.vca",
+        "name": "warble vca",
+        "knobs": {
+          "cv": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          },
+          "in": {
+            "position": 0.0,
+            "atten": 1.0,
+            "offset": 0.0
+          }
+        },
+        "params": {}
+      }
+    },
+    "wires": {
+      "filter": {
+        "wires": [
+          {
+            "from_jack": "lp",
+            "to": "out",
+            "to_jack": "in"
+          }
+        ]
+      },
+      "gate": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "note_env",
+            "to_jack": "gate"
+          },
+          {
+            "from_jack": "out",
+            "to": "warble_env",
+            "to_jack": "gate"
+          }
+        ]
+      },
+      "note": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "pitch_match",
+            "to_jack": "in"
+          },
+          {
+            "from_jack": "out",
+            "to": "sine",
+            "to_jack": "pitch"
+          }
+        ]
+      },
+      "note_env": {
+        "wires": [
+          {
+            "from_jack": "env",
+            "to": "note_filter",
+            "to_jack": "in"
+          },
+          {
+            "from_jack": "env",
+            "to": "out",
+            "to_jack": "cv"
+          }
+        ]
+      },
+      "note_filter": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "warble_mix",
+            "to_jack": "in2_l"
+          }
+        ]
+      },
+      "pitch_match": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "filter",
+            "to_jack": "cutoff"
+          }
+        ]
+      },
+      "sine": {
+        "wires": [
+          {
+            "from_jack": "audio",
+            "to": "filter",
+            "to_jack": "in"
+          }
+        ]
+      },
+      "warble": {
+        "wires": [
+          {
+            "from_jack": "bi",
+            "to": "warble_vca",
+            "to_jack": "in"
+          }
+        ]
+      },
+      "warble_env": {
+        "wires": [
+          {
+            "from_jack": "env",
+            "to": "warble_vca",
+            "to_jack": "cv"
+          }
+        ]
+      },
+      "warble_filter": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "warble_mix",
+            "to_jack": "in1_l"
+          }
+        ]
+      },
+      "warble_mix": {
+        "wires": [
+          {
+            "from_jack": "out_l",
+            "to": "filter",
+            "to_jack": "cutoff"
+          }
+        ]
+      },
+      "warble_vca": {
+        "wires": [
+          {
+            "from_jack": "out",
+            "to": "warble_filter",
+            "to_jack": "in"
+          }
+        ]
+      }
+    },
+    "interface": {
+      "inputs": [
+        {
+          "id": "in",
+          "node": "gate",
+          "jack": "in"
+        },
+        {
+          "id": "note_in",
+          "node": "note",
+          "jack": "in"
+        },
+        {
+          "id": "retrig",
+          "node": "warble_env",
+          "jack": "retrig"
+        },
+        {
+          "id": "attack",
+          "node": "warble_env",
+          "jack": "attack"
+        },
+        {
+          "id": "decay",
+          "node": "warble_env",
+          "jack": "decay"
+        },
+        {
+          "id": "sustain",
+          "node": "warble_env",
+          "jack": "sustain"
+        },
+        {
+          "id": "release",
+          "node": "warble_env",
+          "jack": "release"
+        },
+        {
+          "id": "note_env_retrig",
+          "node": "note_env",
+          "jack": "retrig"
+        },
+        {
+          "id": "note_env_attack",
+          "node": "note_env",
+          "jack": "attack"
+        },
+        {
+          "id": "note_env_decay",
+          "node": "note_env",
+          "jack": "decay"
+        },
+        {
+          "id": "note_env_sustain",
+          "node": "note_env",
+          "jack": "sustain"
+        },
+        {
+          "id": "note_env_release",
+          "node": "note_env",
+          "jack": "release"
+        },
+        {
+          "id": "res",
+          "node": "filter",
+          "jack": "res"
+        },
+        {
+          "id": "drive",
+          "node": "filter",
+          "jack": "drive"
+        },
+        {
+          "id": "topology",
+          "node": "filter",
+          "jack": "topology"
+        },
+        {
+          "id": "rate",
+          "node": "warble",
+          "jack": "rate"
+        },
+        {
+          "id": "shape",
+          "node": "warble",
+          "jack": "shape"
+        },
+        {
+          "id": "pw",
+          "node": "warble",
+          "jack": "pw"
+        },
+        {
+          "id": "clock",
+          "node": "warble",
+          "jack": "clock"
+        },
+        {
+          "id": "ratio",
+          "node": "warble",
+          "jack": "ratio"
+        },
+        {
+          "id": "reset",
+          "node": "warble",
+          "jack": "reset"
+        },
+        {
+          "id": "phase",
+          "node": "warble",
+          "jack": "phase"
+        },
+        {
+          "id": "in1_r",
+          "node": "warble_mix",
+          "jack": "in1_r"
+        },
+        {
+          "id": "lvl1",
+          "node": "warble_mix",
+          "jack": "lvl1"
+        },
+        {
+          "id": "pan1",
+          "node": "warble_mix",
+          "jack": "pan1"
+        },
+        {
+          "id": "in2_r",
+          "node": "warble_mix",
+          "jack": "in2_r"
+        },
+        {
+          "id": "lvl2",
+          "node": "warble_mix",
+          "jack": "lvl2"
+        },
+        {
+          "id": "pan2",
+          "node": "warble_mix",
+          "jack": "pan2"
+        },
+        {
+          "id": "in3_l",
+          "node": "warble_mix",
+          "jack": "in3_l"
+        },
+        {
+          "id": "in3_r",
+          "node": "warble_mix",
+          "jack": "in3_r"
+        },
+        {
+          "id": "lvl3",
+          "node": "warble_mix",
+          "jack": "lvl3"
+        },
+        {
+          "id": "pan3",
+          "node": "warble_mix",
+          "jack": "pan3"
+        },
+        {
+          "id": "in4_l",
+          "node": "warble_mix",
+          "jack": "in4_l"
+        },
+        {
+          "id": "in4_r",
+          "node": "warble_mix",
+          "jack": "in4_r"
+        },
+        {
+          "id": "lvl4",
+          "node": "warble_mix",
+          "jack": "lvl4"
+        },
+        {
+          "id": "pan4",
+          "node": "warble_mix",
+          "jack": "pan4"
+        },
+        {
+          "id": "in5_l",
+          "node": "warble_mix",
+          "jack": "in5_l"
+        },
+        {
+          "id": "in5_r",
+          "node": "warble_mix",
+          "jack": "in5_r"
+        },
+        {
+          "id": "lvl5",
+          "node": "warble_mix",
+          "jack": "lvl5"
+        },
+        {
+          "id": "pan5",
+          "node": "warble_mix",
+          "jack": "pan5"
+        },
+        {
+          "id": "in6_l",
+          "node": "warble_mix",
+          "jack": "in6_l"
+        },
+        {
+          "id": "in6_r",
+          "node": "warble_mix",
+          "jack": "in6_r"
+        },
+        {
+          "id": "lvl6",
+          "node": "warble_mix",
+          "jack": "lvl6"
+        },
+        {
+          "id": "pan6",
+          "node": "warble_mix",
+          "jack": "pan6"
+        },
+        {
+          "id": "master",
+          "node": "warble_mix",
+          "jack": "master"
+        },
+        {
+          "id": "fm",
+          "node": "sine",
+          "jack": "fm"
+        },
+        {
+          "id": "sync",
+          "node": "sine",
+          "jack": "sync"
+        },
+        {
+          "id": "waveform",
+          "node": "sine",
+          "jack": "waveform"
+        },
+        {
+          "id": "atten",
+          "node": "warble_filter",
+          "jack": "atten"
+        },
+        {
+          "id": "offset",
+          "node": "warble_filter",
+          "jack": "offset"
+        },
+        {
+          "id": "note_filter_atten",
+          "node": "note_filter",
+          "jack": "atten"
+        },
+        {
+          "id": "note_filter_offset",
+          "node": "note_filter",
+          "jack": "offset"
+        },
+        {
+          "id": "pitch_match_atten",
+          "node": "pitch_match",
+          "jack": "atten"
+        },
+        {
+          "id": "pitch_match_offset",
+          "node": "pitch_match",
+          "jack": "offset"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "node": "out",
+          "jack": "out"
+        },
+        {
+          "id": "env",
+          "node": "warble_env",
+          "jack": "env"
+        },
+        {
+          "id": "note_env_env",
+          "node": "note_env",
+          "jack": "env"
+        },
+        {
+          "id": "note_out",
+          "node": "note",
+          "jack": "out"
+        },
+        {
+          "id": "lp",
+          "node": "filter",
+          "jack": "lp"
+        },
+        {
+          "id": "bp",
+          "node": "filter",
+          "jack": "bp"
+        },
+        {
+          "id": "hp",
+          "node": "filter",
+          "jack": "hp"
+        },
+        {
+          "id": "notch",
+          "node": "filter",
+          "jack": "notch"
+        },
+        {
+          "id": "bi",
+          "node": "warble",
+          "jack": "bi"
+        },
+        {
+          "id": "uni",
+          "node": "warble",
+          "jack": "uni"
+        },
+        {
+          "id": "shifted",
+          "node": "warble",
+          "jack": "shifted"
+        },
+        {
+          "id": "out_l",
+          "node": "warble_mix",
+          "jack": "out_l"
+        },
+        {
+          "id": "out_r",
+          "node": "warble_mix",
+          "jack": "out_r"
+        },
+        {
+          "id": "audio",
+          "node": "sine",
+          "jack": "audio"
+        },
+        {
+          "id": "warble_vca_out",
+          "node": "warble_vca",
+          "jack": "out"
+        },
+        {
+          "id": "warble_filter_out",
+          "node": "warble_filter",
+          "jack": "out"
+        },
+        {
+          "id": "note_filter_out",
+          "node": "note_filter",
+          "jack": "out"
+        },
+        {
+          "id": "pitch_match_out",
+          "node": "pitch_match",
+          "jack": "out"
+        },
+        {
+          "id": "gate_out",
+          "node": "gate",
+          "jack": "out"
+        }
+      ],
+      "params": []
+    },
+    "positions": {
+      "filter": [
+        192.0,
+        192.0
+      ],
+      "gate": [
+        0.0,
+        240.0
+      ],
+      "note": [
+        0.0,
+        48.0
+      ],
+      "note_env": [
+        528.0,
+        144.0
+      ],
+      "note_filter": [
+        96.0,
+        624.0
+      ],
+      "out": [
+        912.0,
+        144.0
+      ],
+      "pitch_match": [
+        288.0,
+        432.0
+      ],
+      "sine": [
+        288.0,
+        0.0
+      ],
+      "warble": [
+        576.0,
+        528.0
+      ],
+      "warble_env": [
+        528.0,
+        816.0
+      ],
+      "warble_filter": [
+        336.0,
+        624.0
+      ],
+      "warble_mix": [
+        96.0,
+        816.0
+      ],
+      "warble_vca": [
+        912.0,
+        816.0
+      ]
+    }
+  }
+}

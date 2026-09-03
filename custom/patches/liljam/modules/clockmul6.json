@@ -1,0 +1,16 @@
+{
+  "ext": "com.dj.clock_mult",
+  "knobs": {
+    "clock": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mult": {
+      "position": 0.5078125,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

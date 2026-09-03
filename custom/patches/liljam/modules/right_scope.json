@@ -1,0 +1,26 @@
+{
+  "ext": "com.dj.scope",
+  "knobs": {
+    "bins": {
+      "position": 0.21875,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "hysteresis": {
+      "position": 0.22413793,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "window": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

@@ -1,8 +1,8 @@
 {
   "wires": [
     {
-      "from_jack": "bi",
-      "to": "attenuve1",
+      "from_jack": "out",
+      "to": "resonato1",
       "to_jack": "in"
     }
   ]

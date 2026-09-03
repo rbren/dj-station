@@ -1,0 +1,57 @@
+{
+  "ext": "com.dj.resonator",
+  "knobs": {
+    "brightness": {
+      "position": 0.94666666,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "damping": {
+      "position": 0.22666667,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0,
+      "wire_style": "override"
+    },
+    "mix": {
+      "position": 0.8,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "mode": {
+      "position": 0.21333334,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pitch": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "position": {
+      "position": 0.62666667,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "structure": {
+      "position": 0.3,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "trig": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "voices": {
+      "position": 0.81333333,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

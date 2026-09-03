@@ -1,0 +1,187 @@
+{
+  "ext": "macro.basic-synth",
+  "knobs": {
+    "attack": {
+      "position": 0.0031467942,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten1": {
+      "position": 0.65999997,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten2": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten3": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten4": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten5": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten6": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten7": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "atten8": {
+      "position": 1.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "decay": {
+      "position": 0.04696103,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "drive": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "fm": {
+      "position": 0.5,
+      "atten": 0.23333333,
+      "offset": 0.0
+    },
+    "gate": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in2": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in3": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in4": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in5": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in6": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in7": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "in8": {
+      "position": 0.0,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset1": {
+      "position": 0.33999997,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset2": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset3": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset4": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset5": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset6": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset7": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "offset8": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "pitch": {
+      "position": 0.5,
+      "atten": 1.0,
+      "offset": 0.0,
+      "wire_style": "override"
+    },
+    "release": {
+      "position": 0.01990199,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "res": {
+      "position": 0.15,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "retrig": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "sustain": {
+      "position": 0.35714287,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "sync": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "topology": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    },
+    "waveform": {
+      "position": 4.5474735e-13,
+      "atten": 1.0,
+      "offset": 0.0
+    }
+  },
+  "params": {}
+}

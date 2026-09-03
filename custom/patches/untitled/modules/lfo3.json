@@ -12,7 +12,7 @@
       "offset": 0.0
     },
     "pw": {
-      "position": 0.6533333,
+      "position": 0.13999997,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -22,7 +22,7 @@
       "offset": 0.0
     },
     "ratio": {
-      "position": 0.26416665,
+      "position": 0.4375,
       "atten": 1.0,
       "offset": 0.0
     },
@@ -32,7 +32,7 @@
       "offset": 0.0
     },
     "shape": {
-      "position": 0.64,
+      "position": 0.62,
       "atten": 1.0,
       "offset": 0.0
     }
