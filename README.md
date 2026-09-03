@@ -70,6 +70,15 @@ false`); if you turn it on, generate the full multi-format set (`.ico`,
 `app/` (the CLI is not a repo dependency) and list the results in
 `bundle.icon`.
 
+**macOS caveat:** the Dock icon comes only from a `.app` bundle's
+`icon.icns` — Tauri never sets it for a bare binary, so `./run.sh` (which
+execs `target/release/dj-station` directly) always shows the generic black
+"exec" icon. To see your icon: generate the set (`cd app && npx
+@tauri-apps/cli icon src-tauri/icons/icon.png`, ideally from a 1024×1024
+source), set `bundle.active: true` and add `icons/icon.icns` to
+`bundle.icon`, then `cd app && npx @tauri-apps/cli build --bundles app`
+and launch `app/src-tauri/target/release/bundle/macos/dj-station.app`.
+
 **Linux dock/taskbar caveat:** the embedded PNG only sets the per-window
 icon. GNOME (especially on Wayland) ignores that and resolves the
 dock/alt-tab icon via the window's app-id (`dj-station`, from the binary
