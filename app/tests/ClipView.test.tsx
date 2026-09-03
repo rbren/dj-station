@@ -812,6 +812,9 @@ describe('ClipView', () => {
     await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4));
     expect(clip.tapBeats).toHaveBeenCalledWith(expect.anything(), [1.0, 1.6, 2.2, 3.0]);
 
+    // Warp correction is opt-in: arm it for this session.
+    fireEvent.click(screen.getByTestId('clip-grid-correct'));
+
     // At the default correction length (every 4 beats) this run is one
     // section pinned at its ends — which define the 90 BPM average, so
     // nothing stretches and the inner beats keep their tapped feel.
@@ -879,6 +882,50 @@ describe('ClipView', () => {
     fireEvent.click(screen.getByTestId('clip-undo'));
     expect(screen.queryAllByTestId('clip-beat-line')).toHaveLength(0);
     expect(screen.queryByTestId('clip-grid-tools')).toBeNull();
+  });
+
+  it('warps nothing until the correction checkbox arms it', async () => {
+    const clip = clipMock();
+    await openTrack(clip);
+    fireEvent.click(screen.getByTestId('clip-play'));
+    await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
+    tapAt(1.0);
+    tapAt(1.6);
+    tapAt(2.2);
+    tapAt(3.0);
+    fireEvent.click(screen.getByTestId('clip-stop'));
+    await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(4));
+
+    // Off by default: the grid marks the beats exactly where they were
+    // tapped, NO warp goes on the program, and the two correction
+    // sliders are dead until the checkbox arms them.
+    const box = screen.getByTestId('clip-grid-correct') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(screen.getByTestId('clip-grid-section')).toHaveProperty('disabled', true);
+    expect(screen.getByTestId('clip-grid-smooth')).toHaveProperty('disabled', true);
+    const off = await programNow(clip, (p) => (p.beat_grid?.times.length ?? 0) === 4);
+    expect(off.warp).toEqual([]);
+    expect(off.beat_grid?.times).toEqual([1.0, 1.6, 2.2, 3.0]);
+
+    // Checking it corrects the SAME session in place…
+    fireEvent.click(box);
+    expect(box.checked).toBe(true);
+    expect(screen.getByTestId('clip-grid-section')).toHaveProperty('disabled', false);
+    expect(screen.getByTestId('clip-grid-smooth')).toHaveProperty('disabled', false);
+    fireEvent.change(screen.getByTestId('clip-grid-section'), { target: { value: '1' } });
+    const on = await programNow(clip, (p) => p.warp.length === 4);
+    expect(on.beat_grid?.times.map((t) => t.toFixed(4))).toEqual([
+      '1.0000',
+      '1.6667',
+      '2.3333',
+      '3.0000',
+    ]);
+
+    // …and unchecking takes the warp back off, beats as tapped again.
+    fireEvent.click(box);
+    const back = await programNow(clip, (p) => p.warp.length === 0);
+    expect(back.beat_grid?.times).toEqual([1.0, 1.6, 2.2, 3.0]);
+    expect(screen.getByTestId('clip-grid-section')).toHaveProperty('disabled', true);
   });
 
   it('marks the one with left shift without tapping an extra beat', async () => {
@@ -1034,6 +1081,7 @@ describe('ClipView', () => {
 
     // Correct every beat, so each section really does stretch — the case
     // where the rate steps at a boundary.
+    fireEvent.click(screen.getByTestId('clip-grid-correct'));
     fireEvent.change(screen.getByTestId('clip-grid-section'), { target: { value: '1' } });
     const hard = await programNow(clip, (p) => p.warp.length === 4);
 
@@ -1155,6 +1203,7 @@ describe('ClipView', () => {
     fireEvent.mouseDown(lane, { clientX: 500, clientY: 30 });
     await waitFor(() => expect(screen.getByTestId('clip-level-point-0')).toBeTruthy());
     expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(5);
+    fireEvent.click(screen.getByTestId('clip-grid-correct'));
     expect(screen.getByTestId('clip-grid-section')).toHaveProperty('disabled', false);
     expect(screen.getByTestId('clip-grid-fwd-plus')).toHaveProperty('disabled', false);
 
@@ -1178,6 +1227,7 @@ describe('ClipView', () => {
     tapAt(2.95);
     fireEvent.click(screen.getByTestId('clip-stop'));
     await waitFor(() => expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(5));
+    fireEvent.click(screen.getByTestId('clip-grid-correct'));
     fireEvent.change(screen.getByTestId('clip-grid-section'), { target: { value: '1' } });
     expect(screen.getAllByTestId(/^clip-stretch-/).length).toBe(4);
 

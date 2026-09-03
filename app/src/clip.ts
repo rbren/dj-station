@@ -502,13 +502,18 @@ function oneBeats(
  *  `oneTaps` are the LEFT-shift taps — the ones. They never add a beat:
  *  each is carried to the right-shift tap nearest it and from there to
  *  the beat that tap landed on, so what is kept is a FLAG on a beat the
- *  grid already has (`ClipGrid.ones`). */
+ *  grid already has (`ClipGrid.ones`).
+ *
+ *  `correct` false skips the warp correction entirely: no anchors, the
+ *  audio untouched, the grid's beats exactly where they were tapped
+ *  (their whole offset is the flam in `stats`). */
 export function tapGrid(
   beatTimes: number[],
   sectionBeats = 4,
   smoothing = 0,
   handTaps: number[] = [],
   oneTaps: number[] = [],
+  correct = true,
 ): Tapped | null {
   const taps: number[] = [];
   for (const t of [...beatTimes].sort((a, b) => a - b)) {
@@ -521,8 +526,10 @@ export function tapGrid(
   if (period <= 0) return null;
   const step = Math.max(1, Math.round(sectionBeats));
   const warp: WarpPoint[] = [];
-  for (let i = 0; i < last; i += step) warp.push([taps[i], first + i * period]);
-  warp.push([taps[last], first + last * period]);
+  if (correct) {
+    for (let i = 0; i < last; i += step) warp.push([taps[i], first + i * period]);
+    warp.push([taps[last], first + last * period]);
+  }
   const times = taps.map((t) => warpTime(warp, t, smoothing));
   const ones = oneBeats(times, warp, smoothing, handTaps, oneTaps);
   const grid: ClipGrid = { bpm: 60 / period, period, phase: first, beats: taps.length, times };

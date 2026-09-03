@@ -47,8 +47,10 @@
 // on (`ClipGrid.ones`, drawn in its own colour and filed with the clip).
 // Either way the grid
 // covers ONLY the tapped span (the grid toolbar's +/− buttons extend it
-// a beat at a time). The stretch correction happens every `sectionBeats` beats
-// (the toolbar slider, default 4): section boundaries are warped onto
+// a beat at a time). The stretch correction is OPT-IN (the toolbar's
+// checkbox, off by default — off, the grid marks the beats where they
+// were tapped and the audio is never warped) and happens every
+// `sectionBeats` beats (the toolbar slider, default 4): section boundaries are warped onto
 // the ideal grid and the beats inside keep their tapped feel, so the
 // toolbar reads out what that costs — flam (uncorrected offset), stretch
 // and the miss between the hand and the grid, max and average each. A
@@ -308,6 +310,7 @@ type TapTweak = {
   beats?: number[];
   sectionBeats?: number;
   smoothing?: number;
+  correct?: boolean;
   extBack?: number;
   extFwd?: number;
 };
@@ -324,6 +327,10 @@ type TapSpec = {
   oneTaps: number[];
   sectionBeats: number;
   smoothing: number;
+  /** Whether the warp correction is applied at all — the toolbar's
+   *  checkbox. Off, the audio is untouched and the grid is the beats
+   *  exactly where they were tapped. */
+  correct: boolean;
   extBack: number;
   extFwd: number;
 };
@@ -335,16 +342,31 @@ type TapSpec = {
 function sessionProgram(
   spec: TapSpec,
 ): { program: ClipProgram; grid: ClipGrid; warp: WarpPoint[]; stats: TapStats } | null {
-  const { base, present, beats, rawTaps, oneTaps, sectionBeats, smoothing, extBack, extFwd } = spec;
-  const tapped = tapGrid(beats, sectionBeats, smoothing, rawTaps, oneTaps);
+  const {
+    base,
+    present,
+    beats,
+    rawTaps,
+    oneTaps,
+    sectionBeats,
+    smoothing,
+    correct,
+    extBack,
+    extFwd,
+  } = spec;
+  const tapped = tapGrid(beats, sectionBeats, smoothing, rawTaps, oneTaps, correct);
   if (!tapped) return null;
-  const warp = base.warp.length
-    ? composeWarp(base.warp, tapped.warp, base.warp_smoothing, smoothing)
-    : tapped.warp;
+  // Correction off keeps the base program's warp exactly as it was: the
+  // session marks beats without moving audio.
+  const warp = !correct
+    ? base.warp
+    : base.warp.length
+      ? composeWarp(base.warp, tapped.warp, base.warp_smoothing, smoothing)
+      : tapped.warp;
   let program: ClipProgram = {
     ...present,
     warp,
-    warp_smoothing: smoothing,
+    warp_smoothing: correct ? smoothing : base.warp_smoothing,
     beat_grid: tapped.grid,
   };
   const dur = programDuration(program);
@@ -476,6 +498,10 @@ export function ClipView({
   /** How much the correction eases across a section (0…1) — the grid
    *  toolbar's second slider. */
   const [smoothing, setSmoothing] = useState(DEFAULT_WARP_SMOOTHING);
+  /** Whether the warp correction happens at all — the checkbox beside
+   *  "Correct every". Off (the default), tapping still builds a grid but
+   *  the audio is never warped, and the two sliders are dead. */
+  const [correctOn, setCorrectOn] = useState(false);
   /** The last tap commit, regenerable (see TapSession). */
   const [tapSession, setTapSession] = useState<TapSession | null>(null);
   /** The measured tempo of an untapped span, keyed by what it measured
@@ -630,6 +656,7 @@ export function ClipView({
     program,
     sectionBeats,
     smoothing,
+    correctOn,
     sel,
     liveOn,
   });
@@ -642,6 +669,7 @@ export function ClipView({
       program,
       sectionBeats,
       smoothing,
+      correctOn,
       sel,
       liveOn,
     };
@@ -705,6 +733,7 @@ export function ClipView({
         oneTaps,
         sectionBeats: live.current.sectionBeats,
         smoothing: live.current.smoothing,
+        correct: live.current.correctOn,
         extBack: 0,
         extFwd: 0,
       });
@@ -912,6 +941,7 @@ export function ClipView({
         oneTaps: session.oneTaps,
         sectionBeats: tweak.sectionBeats ?? sectionBeats,
         smoothing: tweak.smoothing ?? smoothing,
+        correct: tweak.correct ?? correctOn,
         extBack,
         extFwd,
       });
@@ -928,7 +958,7 @@ export function ClipView({
         stats: built.stats,
       });
     },
-    [program, sectionBeats, smoothing],
+    [program, sectionBeats, smoothing, correctOn],
   );
 
   const retime = useCallback(
@@ -943,6 +973,14 @@ export function ClipView({
     (ease: number) => {
       setSmoothing(ease);
       if (tunable && tapSession) regenerate(tapSession, { smoothing: ease });
+    },
+    [regenerate, tapSession, tunable],
+  );
+
+  const toggleCorrect = useCallback(
+    (on: boolean) => {
+      setCorrectOn(on);
+      if (tunable && tapSession) regenerate(tapSession, { correct: on });
     },
     [regenerate, tapSession, tunable],
   );
@@ -2137,6 +2175,14 @@ export function ClipView({
                 </button>
               </span>
               <label className="clip-grid-section">
+                <input
+                  type="checkbox"
+                  data-testid="clip-grid-correct"
+                  disabled={!tunable}
+                  checked={correctOn}
+                  onChange={(e) => toggleCorrect(e.target.checked)}
+                  title="Whether the stretch correction warps the audio at all — off keeps the beats exactly as tapped"
+                />
                 <span>Correct every</span>
                 <input
                   type="range"
@@ -2144,7 +2190,7 @@ export function ClipView({
                   max={MAX_SECTION_BEATS}
                   step={1}
                   data-testid="clip-grid-section"
-                  disabled={!tunable}
+                  disabled={!tunable || !correctOn}
                   value={sectionBeats}
                   onChange={(e) => retime(Number(e.target.value))}
                   title="How long each stretch-correction section is: between corrections the beats keep their tapped feel"
@@ -2161,7 +2207,7 @@ export function ClipView({
                   max={1}
                   step={SMOOTHING_STEP}
                   data-testid="clip-grid-smooth"
-                  disabled={!tunable}
+                  disabled={!tunable || !correctOn}
                   value={smoothing}
                   onChange={(e) => smooth(Number(e.target.value))}
                   title="How much each correction eases in and out across its section instead of changing rate at the boundary"
