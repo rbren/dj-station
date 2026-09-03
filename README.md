@@ -56,6 +56,20 @@ separated automatically, `DJ_DEMUCS_BIN` / `DJ_DEMUCS_MODEL` /
 `DJ_SCNET_CONFIG` / `DJ_SCNET_CKPT`, `DJ_SCNET_MODEL` and `DJ_SCNET_ARGS`
 (e.g. `--device_ids 0`) do the same for SCNet.
 
+## App icon / logo
+
+The app icon is the single file **`app/src-tauri/icons/icon.png`** (512×512
+RGBA PNG — Tauri requires RGBA), referenced from `bundle.icon` in
+`app/src-tauri/tauri.conf.json`. Replace that file and rebuild the shell
+(`cargo build --manifest-path app/src-tauri/Cargo.toml --release`, or just
+`./run.sh`) — the icon is embedded at compile time by `tauri-build`, so a
+frontend-only rebuild won't pick it up. There is no tray icon, no favicon
+and no in-app logo asset. Bundling is currently off (`bundle.active:
+false`); if you turn it on, generate the full multi-format set (`.ico`,
+`.icns`, sized PNGs) with `npx @tauri-apps/cli icon <source.png>` from
+`app/` (the CLI is not a repo dependency) and list the results in
+`bundle.icon`.
+
 ## State & saves — `custom/`
 
 All persistent state lives in **`custom/` inside this checkout** (the repo
