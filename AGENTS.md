@@ -206,6 +206,9 @@ These are the rules that must hold everywhere.
   (the Grid page: `GridTransport.forget`) drops what it holds when that
   moves. The Grid re-reads the store every time it becomes the open tab —
   clips are made on another page.
+- A track is not clip-editable until BOTH analysis and stem separation are
+  done: the Library keeps reporting "analyzing" and blocks its Clip/edit
+  entry point while a stem job for that track is still in flight.
 - DJ metadata (hot cues, saved loops, beatgrids, stems) is canonical in the
   library DB / analysis cache, NOT the patch: patches persist only the
   track path and per-module params, and the app layer re-applies metadata
