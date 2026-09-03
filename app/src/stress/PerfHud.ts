@@ -81,7 +81,15 @@ export function installPerfHud(subtitle: string): PerfHud {
     Object.entries(perfPhases())
       .sort((a, b) => b[1].ms - a[1].ms)
       .slice(0, HUD_PHASES)
-      .map(([label, p]) => `  ${label} ${p.ms.toFixed(1)}ms/s ×${p.calls}\n`)
+      // Items as well as milliseconds: a stage getting dearer per item is
+      // a slow machine, while a stage touching more items than it used to
+      // is a lost window or a lost decimation.
+      .map(
+        ([label, p]) =>
+          `  ${label} ${p.ms.toFixed(1)}ms/s ×${p.calls}` +
+          (p.items ? ` ${p.items} items` : '') +
+          `\n`,
+      )
       .join('');
 
   const render = () => {

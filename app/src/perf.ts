@@ -7,18 +7,29 @@
 //    when something small changes. They are exact and machine-independent,
 //    which is why the Grid's perf suite has always counted rather than
 //    timed; a count is the right assertion for a memoisation contract.
-//  - PHASE TIMES (`timed`) say WHERE the milliseconds of a redraw went —
-//    the peaks path build, the client-side peaks recompute, the rack's
-//    cable measure. A wall-clock total tells you the page got slower;
-//    phases tell you which stage to look at. Read them from the perf
-//    suites (`app/tests/perfHarness.ts`) and from the dev stress HUD.
+//  - PHASES (`timedOver`) say WHERE a redraw went — the peaks path build,
+//    the client-side peaks recompute, the rack's cable measure — as both
+//    a time and a COUNT of the material the stage touched. The time is
+//    for reading; the count is for asserting on, because a stage that
+//    takes a millisecond in jsdom cannot be timed on a shared runner but
+//    always walks exactly as many buckets as the code says it does.
+//    Read both from the perf suites (`app/tests/perfHarness.ts`) and
+//    from the dev stress HUD.
 //
-// Timing is OFF by default and the wrapper is then a plain call, so
-// production renders pay nothing but the closure.
+// Instrumentation is OFF by default and the wrapper is then a plain
+// call, so a production render pays for the closure and for whatever
+// counting the stage does inline (an addition per pass — the counts are
+// kept unconditionally so they cannot drift from the real work).
 
 export interface PerfPhase {
   calls: number;
   ms: number;
+  /** How much MATERIAL the stage touched — peak buckets read, sockets
+   *  looked up. Exact where the milliseconds are noisy: a stage that
+   *  takes a millisecond cannot be timed on a busy box, but the number
+   *  of buckets it walked is the same on every machine, so that is what
+   *  the perf suites assert on. Zero for stages that do not report it. */
+  items: number;
 }
 
 let enabled = false;
@@ -35,26 +46,36 @@ export function perfEnabled(): boolean {
   return enabled;
 }
 
-/** Time `fn` under `label` when instrumentation is on. */
-export function timed<T>(label: string, fn: () => T): T {
-  if (!enabled) return fn();
+/** Time `fn` under `label` and record how much material it touched.
+ *
+ *  The closure returns both its value and the count, because for most
+ *  stages the count is only known once the work is done (how many source
+ *  buckets a cut actually read, how many sockets a measure looked up).
+ *  Prefer asserting on the count: it is exact, and a millisecond stage on
+ *  a shared runner is not. */
+export function timedOver<T>(label: string, fn: () => { value: T; items: number }): T {
+  if (!enabled) return fn().value;
   const t0 = performance.now();
+  let items = 0;
   try {
-    return fn();
+    const r = fn();
+    items = r.items;
+    return r.value;
   } finally {
-    recordPhase(label, performance.now() - t0);
+    recordPhase(label, performance.now() - t0, items);
   }
 }
 
 /** Record a phase measured by hand (a rAF-spanning stage, say). */
-export function recordPhase(label: string, ms: number): void {
+export function recordPhase(label: string, ms: number, items = 0): void {
   if (!enabled) return;
   const p = phases.get(label);
   if (p) {
     p.calls += 1;
     p.ms += ms;
+    p.items += items;
   } else {
-    phases.set(label, { calls: 1, ms });
+    phases.set(label, { calls: 1, ms, items });
   }
 }
 
@@ -71,7 +92,11 @@ export function resetPerfPhases(): void {
 export function formatPerfPhases(): string {
   return [...phases]
     .sort((a, b) => b[1].ms - a[1].ms)
-    .map(([label, p]) => `${label}: ${p.ms.toFixed(1)}ms over ${p.calls} calls`)
+    .map(
+      ([label, p]) =>
+        `${label}: ${p.ms.toFixed(1)}ms over ${p.calls} calls` +
+        (p.items ? `, ${p.items} items` : ''),
+    )
     .join('\n');
 }
 

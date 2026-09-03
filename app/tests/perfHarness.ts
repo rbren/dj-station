@@ -111,14 +111,20 @@ export interface BenchStats {
   phaseTotals: Record<string, PerfPhase>;
 }
 
-/** One instrumented stage of a bench, as a stats object of its own: what
- *  that stage cost per run. Scaling assertions are best made against a
- *  stage rather than a whole mount — a stage is code we wrote, while a
- *  mount in jsdom is mostly jsdom. */
-export function phaseCost(stats: BenchStats, label: string): BenchStats {
+/** One instrumented stage's totals over the bench.
+ *
+ *  Throws when the stage never ran: a missing stage otherwise reports
+ *  zero and sails through every assertion made about it, and the failure
+ *  mode of an instrumented suite is a renamed label, not a slow one. */
+function stagePhase(stats: BenchStats, label: string): PerfPhase {
   const p = stats.phaseTotals[label];
-  const per = (p?.ms ?? 0) / stats.runs;
-  return { ...stats, name: `${stats.name} [${label}]`, median: per, min: per, max: per };
+  if (!p || p.calls === 0) {
+    throw new Error(
+      `perf stage "${label}" never ran during "${stats.name}" — ` +
+        `saw ${Object.keys(stats.phaseTotals).join(', ') || 'no stages at all'}`,
+    );
+  }
+  return p;
 }
 
 /** Median of an ASCENDING list; the mean of the middle two when even, so
@@ -203,20 +209,73 @@ export function expectWithinBudget(stats: BenchStats, budgetMs: number): void {
   expect(stats.median).toBeLessThanOrEqual(budget);
 }
 
-/** Fail if the work grew faster than the fixture did: `big` is `ratio`
- *  times the size of `small`, so its cost must stay under
- *  `ratio × tolerance`. Box-independent — the machine cancels out. */
-export function expectSubQuadratic(
+/** How much MATERIAL a stage touched per call — buckets read, sockets
+ *  looked up (see `items` in src/perf.ts).
+ *
+ *  This is the number to assert on wherever a stage exists. It is exact
+ *  and identical on every machine, so it needs no calibration, no
+ *  headroom and no re-baselining, and it catches the regressions that
+ *  matter (a pass that becomes two, a lookup that becomes a scan) at the
+ *  size the test happens to run rather than only under load. */
+export function phaseItemsPerCall(stats: BenchStats, label: string): number {
+  const p = stagePhase(stats, label);
+  const per = p.items / p.calls;
+  console.log(
+    `[perf] ${stats.name} [${label}]: ${per.toFixed(0)} items per call ` +
+      `(${p.items} over ${p.calls} calls, ${(p.ms / p.calls).toFixed(2)}ms each)`,
+  );
+  return per;
+}
+
+/** Fail if a stage touched more material on the bigger fixture.
+ *
+ *  For stages that cut the material down to the viewport before doing any
+ *  work: what they touch is set by the pixels on screen, so a longer file
+ *  must not move it. Counted, so `tolerance` is for the odd rounded
+ *  bucket, not for growth. */
+export function expectStageFlat(
   small: BenchStats,
   big: BenchStats,
-  sizeRatio: number,
-  tolerance = 1.6,
+  label: string,
+  tolerance = 1.1,
 ): void {
-  // A sub-millisecond baseline measures the timer, not the code.
-  const base = Math.max(small.median, 0.5);
-  const grew = big.median / base;
+  const a = phaseItemsPerCall(small, label);
+  const b = phaseItemsPerCall(big, label);
+  const grew = b / Math.max(a, 1);
+  console.log(`[perf] flatness ${label}: ×${grew.toFixed(2)} (must stay under ×${tolerance})`);
+  if (grew > tolerance) {
+    throw new Error(
+      `PERF REGRESSION — ${label} touched ×${grew.toFixed(2)} the material per call on the ` +
+        `bigger fixture (${a.toFixed(0)} → ${b.toFixed(0)} items). This stage is supposed to ` +
+        `work off the viewport, not the file; something now walks the whole source. ` +
+        `See reports/PERF_BASELINES.md.`,
+    );
+  }
+}
+
+/** Fail if a stage's material grew faster than the fixture: `big` holds
+ *  `sizeRatio` times what `small` did, so a single pass over it touches
+ *  `sizeRatio` times as much — and a pass-per-item touches its square.
+ *  Counted, so the tolerance covers rounding, not a slow machine. */
+export function expectStageLinear(
+  small: BenchStats,
+  big: BenchStats,
+  label: string,
+  sizeRatio: number,
+  tolerance = 1.3,
+): void {
+  const a = phaseItemsPerCall(small, label);
+  const b = phaseItemsPerCall(big, label);
+  const grew = b / Math.max(a, 1);
   console.log(
-    `[perf] scaling ${small.name} → ${big.name}: ×${sizeRatio} fixture cost ×${grew.toFixed(2)}`,
+    `[perf] scaling ${label}: ×${sizeRatio} fixture touched ×${grew.toFixed(2)} the material`,
   );
-  expect(grew).toBeLessThanOrEqual(sizeRatio * tolerance);
+  if (grew > sizeRatio * tolerance) {
+    throw new Error(
+      `PERF REGRESSION — ${label} touched ×${grew.toFixed(2)} the material per call for a ` +
+        `×${sizeRatio} fixture (${a.toFixed(0)} → ${b.toFixed(0)} items). A single pass would ` +
+        `be ×${sizeRatio}; this is growing faster than the material. ` +
+        `See reports/PERF_BASELINES.md.`,
+    );
+  }
 }

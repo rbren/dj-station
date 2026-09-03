@@ -12,7 +12,7 @@
 // re-render resets the mutations to the freshly-sampled truth.
 
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { timed } from '../perf';
+import { timedOver } from '../perf';
 
 /** viewBox width — all x positions are fractions of this. Exported for
  *  DeckPanel's rAF extrapolation, which computes in the same units. */
@@ -62,7 +62,13 @@ const MAX_PATH_STEPS = W;
  *  bucket per column rather than sampling one and aliasing the rest — a
  *  peak display that misses the peaks is worse than a coarse one. */
 export function peaksPath(peaks: number[], from: number, to: number, height: number): string {
-  return timed('waveform.peaksPath', () => peaksPathImpl(peaks, from, to, height));
+  // Reported material: the buckets in the window, which is what the pass
+  // walks. The Clip page hands this a viewport-sized array rather than a
+  // whole file's peaks, and the perf suite asserts on that count.
+  return timedOver('waveform.peaksPath', () => ({
+    value: peaksPathImpl(peaks, from, to, height),
+    items: Math.max(0, Math.round((to - from) * peaks.length)),
+  }));
 }
 
 function peaksPathImpl(peaks: number[], from: number, to: number, height: number): string {

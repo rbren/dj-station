@@ -12,7 +12,7 @@
 
 import { useLayoutEffect, useState } from 'react';
 import type { WireSnapshot } from '../engine';
-import { timed } from '../perf';
+import { timedOver } from '../perf';
 
 /** The 8 selectable wire colors; index 0 is the default. */
 export const WIRE_COLORS = [
@@ -171,11 +171,18 @@ export function WireOverlay({
     // stage on a big patch — timed under `rack.wireMeasure` for the perf
     // suites and the stress HUD.
     const measure = () =>
-      timed('rack.wireMeasure', () => {
+      timedOver('rack.wireMeasure', () => {
         const origin = container.getBoundingClientRect();
         const sockets = jackSockets(container);
+        // Sockets seen, plus two lookups per wire. This is the count the
+        // perf suite gates: it is jacks + 2×wires, and the quadratic
+        // version of this stage (a `querySelector` per wire end, which is
+        // what it used to be) is jacks × wires. A count says which one
+        // you have; a millisecond on a shared runner does not.
+        let touched = sockets.size;
         const next: Cable[] = [];
         for (const w of wires) {
+          touched += 2;
           const a = jackCenter(
             sockets.get(jackKey(w.from_instance, 'output', w.from_jack)),
             origin,
@@ -193,6 +200,7 @@ export function WireOverlay({
         // Only update state on real changes so observer-triggered measures
         // don't loop through our own SVG re-render.
         setCables((prev) => (cablesEqual(prev, next) ? prev : next));
+        return { value: undefined, items: touched };
       });
     const schedule = () => {
       cancelAnimationFrame(raf);

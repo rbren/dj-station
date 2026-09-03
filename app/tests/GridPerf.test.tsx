@@ -430,10 +430,13 @@ describe('Grid rendering cost', () => {
     'scrolls at a cost set by the WINDOW, not by the arrangement',
     async () => {
       let to: (px: number) => void = () => {};
+      /** Cells left in the DOM at the end of the flick — the window. */
+      let cells = 0;
       /** A flick across a few blocks, from beat 200. */
       const flick = async () => {
         for (let i = 0; i < 30; i += 1) to(200 * CELL + i * 100);
         await waitFor(() => expect(screen.getByTestId('grid-cell-row1-330')).toBeTruthy());
+        cells = document.querySelectorAll('[data-testid^="grid-cell-"]').length;
       };
       const open = (beats: number) => async () => {
         await renderBig(SCROLL_ROWS, beats);
@@ -447,18 +450,27 @@ describe('Grid rendering cost', () => {
         ...opts,
         setup: open(SCROLL_BEATS),
       });
+      const shortCells = cells;
       const long = await bench(`grid flick over ${SCROLL_BEATS * 2} beats`, flick, {
         ...opts,
         setup: open(SCROLL_BEATS * 2),
       });
+      const longCells = cells;
 
-      // Only the columns under the scrollport are in the DOM, so a flick
-      // over twice as long an arrangement is the SAME work. Anything near
-      // ×2 means the windowing has been lost and the whole set is being
-      // drawn again — the state the window was added to get out of.
+      // Only the columns under the scrollport are in the DOM, so twice as
+      // long an arrangement leaves the same number of cells on the page.
+      // This is the COUNTED form of the claim and the gate: if the
+      // windowing is lost, the whole set is in the DOM again — the state
+      // the window was added to get out of — and this is ×2 exactly,
+      // whatever the machine was doing at the time.
+      console.log(`[perf] windowed cells: ${shortCells} at ×1 beats, ${longCells} at ×2`);
+      expect(longCells).toBeLessThanOrEqual(shortCells * 1.1);
+
+      // The wall clock says the same thing, reported rather than gated:
+      // it is 30 scroll events against jsdom, so it is a useful number to
+      // read next to a change and a poor thing to fail a build on.
       const grew = long.median / Math.max(short.median, 0.5);
       console.log(`[perf] flick cost at ×2 beats: ×${grew.toFixed(2)}`);
-      expect(grew).toBeLessThanOrEqual(1.6);
     },
     TIMEOUT,
   );

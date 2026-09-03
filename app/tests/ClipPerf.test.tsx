@@ -2,10 +2,10 @@
 // audio, a quarter of a million peak buckets, a selection dragged across
 // it and an automation lane filled with breakpoints.
 //
-// The Clip page is the surface whose cost is set by the MATERIAL rather
-// than by the arrangement: every waveform it draws is a pass over the
-// source peaks, and the picture is redrawn on every edit. Two stages
-// carry that and both are instrumented (src/perf.ts):
+// The Clip page is the surface a big FILE lands on, and it redraws the
+// picture on every edit. What these benches establish is that the length
+// of the file is NOT what the drawing costs — the two stages that make
+// the picture work off the viewport. Both are instrumented (src/perf.ts):
 //   `clip.programPeaks`  — cutting the source peaks to the current edit;
 //   `waveform.peaksPath` — turning peaks into an SVG polygon.
 // The fixtures are generated here, so nothing large is committed.
@@ -15,7 +15,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClipView, __clipRenderCount } from '../src/components/ClipView';
 import type { ClipClientApi, ClipSource } from '../src/clip';
 import type { LibraryClientApi, Track } from '../src/library';
-import { bench, expectSubQuadratic, expectWithinBudget, heavy, phaseCost } from './perfHarness';
+import {
+  bench,
+  expectStageFlat,
+  expectStageLinear,
+  expectWithinBudget,
+  heavy,
+} from './perfHarness';
 
 /** A ten-minute track — a whole DJ set's worth of one file. */
 const DURATION = heavy(600, 1800);
@@ -160,26 +166,27 @@ describe('Clip page rendering performance', () => {
   );
 
   it(
-    'draws the waveform in time set by the peaks, not by their square',
+    'draws from the viewport, not from the whole file',
     async () => {
       const opts = { runs: 2, teardown: () => cleanup() };
-      const small = await bench(`clip open (${PEAKS / 2} peaks)`, () => openTrack(PEAKS / 2), opts);
+      const small = await bench(`clip open (${PEAKS / 4} peaks)`, () => openTrack(PEAKS / 4), opts);
       const big = await bench(`clip open (${PEAKS} peaks)`, () => openTrack(PEAKS), opts);
 
-      // Both stages walk the source peaks once per picture, so twice the
-      // material is twice the work — never four times it. Asserted on the
-      // instrumented stages rather than on the mount, so the measurement
-      // is of this repo's code and not of jsdom's.
-      expectSubQuadratic(
-        phaseCost(small, 'clip.programPeaks'),
-        phaseCost(big, 'clip.programPeaks'),
-        2,
-      );
-      expectSubQuadratic(
-        phaseCost(small, 'waveform.peaksPath'),
-        phaseCost(big, 'waveform.peaksPath'),
-        2,
-      );
+      // COUNTED, not timed. Both claims below are about how much material
+      // the stage touches, which is exact on any machine; the same claims
+      // made in milliseconds would be a millisecond stage against jsdom
+      // noise, and did in fact swing between ×0.4 and ×5 run to run.
+      //
+      // The picture is drawn from a viewport-sized array, so quadrupling
+      // the file leaves the drawing untouched. That is what keeps a
+      // thirty-minute track as cheap to scrub as a three-minute one, and
+      // it is lost the moment the draw path is handed the source array.
+      expectStageFlat(small, big, 'waveform.peaksPath');
+
+      // Cutting that array out of the sources is the stage that DOES read
+      // the file — once through, so ×4 the file is ×4 the reads. A cut
+      // that re-read the source per output column would be ×16 here.
+      expectStageLinear(small, big, 'clip.programPeaks', 4);
     },
     TIMEOUT,
   );
@@ -243,6 +250,11 @@ describe('Clip page rendering performance', () => {
       // Every breakpoint is an edit: the program changes, so the peaks are
       // cut again and the lane and both waveforms are redrawn. Twenty of
       // them is a normal minute of work on this page.
+      //
+      // The stage breakdown is reported, not gated: it is what says
+      // whether an editing session is spent recutting peaks or drawing
+      // them, and it is the first thing to read when this budget goes.
+      console.log(`[perf] automation phases:\n${stats.phases}`);
       expectWithinBudget(stats, heavy(1_500, 4_000));
     },
     TIMEOUT,

@@ -10,7 +10,7 @@
 // `warp_time_secs`).
 
 import { IpcClient } from './ipc';
-import { timed } from './perf';
+import { timedOver } from './perf';
 
 /** An even beat grid: the two numbers a tempo is, and how far it runs.
  *  Twin: `Grid` in `dj_analysis::beats`. */
@@ -287,18 +287,23 @@ export function programPeaks(
   sources: readonly { peaks: number[]; duration_secs: number }[],
   buckets: number,
 ): number[] {
-  return timed('clip.programPeaks', () => programPeaksImpl(program, sources, buckets));
+  // Reported material: source buckets actually read. Each region's stretch
+  // of its source is read once, so this is ~the length of the material on
+  // the timeline; the perf suite asserts it stays that way rather than
+  // becoming a multiple of it.
+  return timedOver('clip.programPeaks', () => programPeaksImpl(program, sources, buckets));
 }
 
 function programPeaksImpl(
   program: ClipProgram,
   sources: readonly { peaks: number[]; duration_secs: number }[],
   buckets: number,
-): number[] {
+): { value: number[]; items: number } {
   const spans = regionSpans(program);
   const total = spans.length ? spans[spans.length - 1].end : 0;
-  if (total <= 0 || buckets <= 0) return [];
+  if (total <= 0 || buckets <= 0) return { value: [], items: 0 };
   const out = new Array<number>(buckets).fill(0);
+  let reads = 0;
   for (const span of spans) {
     const region = program.regions[span.index];
     const source = sources[region.source];
@@ -323,10 +328,11 @@ function programPeaksImpl(
       const hi = Math.min(n - 1, Math.max(lo, Math.ceil((a + step) * perSec) - 1));
       let p = 0;
       for (let i = lo; i <= hi; i++) p = Math.max(p, source.peaks[i]);
+      reads += hi - lo + 1;
       out[b] = Math.max(out[b], p);
     }
   }
-  return out;
+  return { value: out, items: reads };
 }
 
 // ---------------------------------------------------------------------------

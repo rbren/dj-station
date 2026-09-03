@@ -104,9 +104,13 @@ sides of the IPC boundary — how long they take to DRAW (`cd app && npm run
 test:perf`, jsdom) and how fast they RENDER AUDIO (`cargo test -p dj-engine
 --release --test perf_m4 perf_ui`, reported as a multiple of realtime).
 Both run in CI on every push; `DJ_PERF_HEAVY=1` blows the fixtures up to
-the size the main-only `perf` job uses. Measured figures, the instrumented
-pipeline stages each bench attributes its time to, and how to move a
-threshold: [`reports/PERF_BASELINES.md`](reports/PERF_BASELINES.md).
+the size the main-only `perf` job uses. The render pipeline is
+instrumented, and the UI gates are counts rather than stopwatches
+wherever a count will do — buckets read, sockets looked up, cells left in
+the DOM — so they mean the same thing on a loaded CI runner as on a quiet
+desk. Measured figures, the stages each bench attributes its time to, and
+how to move a threshold:
+[`reports/PERF_BASELINES.md`](reports/PERF_BASELINES.md).
 
 ## Library & acquisition (M1)
 

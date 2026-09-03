@@ -20,14 +20,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { perfPhases, resetPerfPhases, setPerfEnabled } from '../src/perf';
 import { createMockEngine } from '../src/stress/mockEngine';
-import {
-  bench,
-  expectSubQuadratic,
-  expectWithinBudget,
-  heavy,
-  phaseCost,
-  slowdownFactor,
-} from './perfHarness';
+import { bench, expectStageLinear, expectWithinBudget, heavy, slowdownFactor } from './perfHarness';
 import App from '../src/App';
 
 /** Modules in the big fixture. 24 is a busy patch; the CI perf job's 96
@@ -110,16 +103,15 @@ describe('Rack rendering performance', () => {
       const big = await bench(`rack mount ×${MODULES * 2}`, () => mountRack(MODULES * 2), opts);
 
       // The SCALING assertion is made against an instrumented stage rather
-      // than the whole mount: the mount is mostly jsdom (which is itself
-      // superlinear in DOM size on a small heap), while `rack.wireMeasure`
-      // is code this repo owns. Looking each socket up by its own
-      // `querySelector` made it quadratic — ×25 the cost at 16 modules —
-      // and this is the assertion that catches that coming back.
-      expectSubQuadratic(
-        phaseCost(small, 'rack.wireMeasure'),
-        phaseCost(big, 'rack.wireMeasure'),
-        2,
-      );
+      // than the whole mount (the mount is mostly jsdom, which is itself
+      // superlinear in DOM size on a small heap, while `rack.wireMeasure`
+      // is code this repo owns) and it is COUNTED rather than timed: the
+      // stage reports the sockets it saw plus two lookups per wire, so
+      // one pass over a doubled patch is exactly ×2. Looking each socket
+      // up by its own `querySelector` made this jacks × wires — ×25 the
+      // cost at 16 modules — and a count says which of the two you have
+      // without depending on how loaded the box is.
+      expectStageLinear(small, big, 'rack.wireMeasure', 2);
       // The mount itself is reported, not gated: the budget above is the
       // gate on it.
       console.log(
