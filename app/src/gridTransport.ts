@@ -77,9 +77,13 @@ interface Pass {
   /** Column it begins on — the range's start, except for a first pass
    *  resumed part-way through. */
   from: number;
-  /** Column it runs to. Normally the loop's end; a FIRST pass cued from
-   *  past the loop runs to the end of the grid instead, and only then
-   *  falls into the loop. */
+  /** Column it runs to. Normally the loop's end; a pass cued from — or
+   *  overtaken by a loop moved behind — the loop runs to the end of the
+   *  grid instead, and only then falls into it.
+   *
+   *  This end, and the seconds that go with it, are RE-READ from the
+   *  grid while the pass is in flight (`#reloop`): a loop re-marked mid
+   *  play moves where this pass wraps, and nothing else. */
   to: number;
   secs: number;
   /** Keys of the copies already laid down for this pass, so a live edit
@@ -329,21 +333,20 @@ export class GridTransport {
    *  A tempo change is the one edit that cannot be spliced into a pass
    *  in flight: every copy's start is measured through the envelope from
    *  the pass's beginning, so a new envelope re-times beats that are
-   *  already sounding. Changing the loop moves the range the pass walks.
-   *  Both re-cue from where the playhead is, which keeps the grid honest
-   *  at the cost of one seam. */
+   *  already sounding. It re-cues from where the playhead is, which
+   *  keeps the grid honest at the cost of one seam.
+   *
+   *  THE LOOP IS NOT SUCH AN EDIT. It says where the pass in flight ends
+   *  and where the next one begins — two numbers ahead of the playhead —
+   *  so moving it is `#reloop`, and the sound only meets it at the wrap. */
   update(state: GridState, clips: ReadonlyMap<string, BeatClipEntry>, columns: number): void {
     const was = this.#state;
     this.#state = state;
     this.#clips = clips;
     this.#columns = columns;
     if (!this.#playing || !was) return;
-    const range = playRange(state, columns);
-    const recue =
-      JSON.stringify(was.tempo) !== JSON.stringify(state.tempo) ||
-      range.start !== this.#range.start ||
-      range.end !== this.#range.end;
-    if (recue) {
+    if (JSON.stringify(was.tempo) !== JSON.stringify(state.tempo)) {
+      const range = playRange(state, columns);
       const at = this.#at;
       // Anywhere on the grid keeps its place, loop or no loop: a lead-in
       // before the loop is a place the transport can be.
@@ -354,9 +357,74 @@ export class GridTransport {
       });
       return;
     }
+    this.#reloop(state);
     this.#resync(state);
     void this.prime(state, clips);
     this.#pump();
+  }
+
+  /** Point the pass in flight, and the one after it, at the loop as it
+   *  now stands. NOTHING SOUNDING MOVES: a loop is a pair of columns the
+   *  playhead has yet to reach, so re-marking it can only change where
+   *  this pass ends and where the next one starts — never where the
+   *  playhead is, which is what made dragging the loop re-cue the whole
+   *  transport and tear the playback apart.
+   *
+   *  Passes committed AHEAD of the clock are thrown away and laid again
+   *  from the new loop: they have not been heard, and a wrap that is no
+   *  longer where it was must not be the one already scheduled. */
+  #reloop(state: GridState): void {
+    const range = playRange(state, this.#columns);
+    const unchanged = range.start === this.#range.start && range.end === this.#range.end;
+    this.#range = range;
+    this.#looping = state.loop !== null;
+    if (unchanged) return;
+    const now = this.#now();
+    while (this.#passes.length > 1 && this.#passes[this.#passes.length - 1].at > now) {
+      this.#unlay(this.#passes.pop()!);
+    }
+    const pass = this.#passes[this.#passes.length - 1];
+    if (!pass) return;
+    pass.to = this.#endOf(state, pass, now);
+    pass.secs = rangeSecs(state.tempo, { start: pass.from, end: pass.to });
+    this.#next = this.#follow(state, pass);
+  }
+
+  /** Where a pass in flight now runs to. The loop's end while it is
+   *  still AHEAD of the playhead; the end of the grid once it is not —
+   *  a loop moved behind what is sounding is played out to the end and
+   *  fallen into there, the same as a play cued past it, rather than
+   *  jumping the playhead backwards into it. */
+  #endOf(state: GridState, pass: Pass, now: number): number {
+    const within = Math.max(0, now - pass.at);
+    const at = secsToBeat(state.tempo, beatToSecs(state.tempo, pass.from) + within);
+    return this.#range.end > at ? this.#range.end : this.#columns;
+  }
+
+  /** The pass that follows this one: the loop as it stands, or nothing
+   *  where there is no loop to come round. */
+  #follow(state: GridState, pass: Pass): Pass | null {
+    if (!this.#looping) return null;
+    return {
+      at: pass.at + pass.secs,
+      from: this.#range.start,
+      to: this.#range.end,
+      secs: rangeSecs(state.tempo, this.#range),
+      laid: new Set(),
+    };
+  }
+
+  /** Take back a pass that was committed but never heard. Voices already
+   *  SOUNDING are left to ring — a lead-in bookend laid over the seam is
+   *  material of the pass before it — and only what has yet to start is
+   *  silenced. */
+  #unlay(pass: Pass): void {
+    const now = this.#now();
+    this.#nodes = this.#nodes.filter((voice) => {
+      if (voice.pass !== pass || voice.at <= now) return true;
+      this.#drop(voice, voice.at);
+      return false;
+    });
   }
 
   /** Stop, keeping nothing: the next play starts where the caller says.
@@ -476,15 +544,7 @@ export class GridTransport {
       const pass = this.#next;
       this.#passes = [...this.#passes.slice(-3), pass];
       this.#schedule(state, pass);
-      this.#next = this.#looping
-        ? {
-            at: pass.at + pass.secs,
-            from: this.#range.start,
-            to: this.#range.end,
-            secs: rangeSecs(state.tempo, this.#range),
-            laid: new Set(),
-          }
-        : null;
+      this.#next = this.#follow(state, pass);
     }
     // Live edits: a pass still sounding gets whatever is now on the grid
     // and has not been laid down yet.

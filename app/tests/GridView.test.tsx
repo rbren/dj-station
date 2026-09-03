@@ -706,8 +706,17 @@ describe('what a drag does to the sound', () => {
     return update;
   }
 
-  it('holds the loop until the drag is let go', async () => {
-    const update = withSpy();
+  // THE LOOP IS NOT HELD BACK. It is not an edit the transport has to
+  // re-cue for — it says where the pass in flight wraps — so the page
+  // hands every column the drag passes through straight over, and the
+  // playback carries on underneath it.
+  it('hands the loop over under the pointer, without re-cueing', async () => {
+    const clips = makeClips();
+    const transport = new GridTransport(clips);
+    const update = vi.spyOn(transport, 'update');
+    const play = vi.spyOn(transport, 'play');
+    const stop = vi.spyOn(transport, 'stop');
+    show(clips, { transport });
     const ruler = await screen.findByTestId('grid-ruler');
     // The clip list lands after the first render and is itself an
     // update; the drag is what this test counts.
@@ -717,10 +726,11 @@ describe('what a drag does to the sound', () => {
     fireEvent.mouseMove(window, { clientX: 40 });
     fireEvent.mouseMove(window, { clientX: 80 });
     await waitFor(() => expect(screen.getByTestId('grid-loop-handle-start')).toBeTruthy());
-    // The loop is drawn, but the sound has not been asked to follow it.
-    expect(update).not.toHaveBeenCalled();
-    fireEvent.mouseUp(window, { clientX: 80 });
     await waitFor(() => expect(update).toHaveBeenCalled());
+    fireEvent.mouseUp(window, { clientX: 80 });
+    // Nothing about the drag re-cued or cut the sound.
+    expect(play).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
   });
 
   it('holds the tempo envelope until the drag is let go', async () => {

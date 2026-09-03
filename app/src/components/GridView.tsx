@@ -367,11 +367,11 @@ export function GridView(props: GridViewProps) {
     },
     [],
   );
-  // A DRAG IS NOT AN EDIT UNTIL IT IS LET GO, as far as the sound is
-  // concerned. Dragging the tempo envelope or the loop re-cues the
-  // transport on every pointer move, which tore the playback apart while
-  // the pointer was still down; the page holds the transport at the
-  // state the drag began on and hands it the result once.
+  // A DRAG THE TRANSPORT CANNOT SPLICE IS NOT AN EDIT UNTIL IT IS LET
+  // GO, as far as the sound is concerned. Dragging the tempo envelope
+  // re-cues the transport on every pointer move, which tore the playback
+  // apart while the pointer was still down; the page holds the transport
+  // at the state the drag began on and hands it the result once.
   const [holdAudio, setHoldAudio] = useState(false);
   const endEdit = useCallback(() => {
     setHistory(endGesture);
@@ -649,17 +649,18 @@ export function GridView(props: GridViewProps) {
 
   // EVERY FINISHED EDIT REACHES THE TRANSPORT. This is what makes the
   // grid live: the transport decides for itself what a given change
-  // means (a new placement is laid down on its own beat; a tempo or loop
-  // change re-cues), so the page just tells it the truth after every
-  // edit.
+  // means (a new placement is laid down on its own beat; a re-marked
+  // loop moves where the pass wraps; a tempo change re-cues), so the
+  // page just tells it the truth after every edit.
   //
-  // NOT DURING A DRAG, though. A tempo or loop change cannot be spliced
-  // into the pass in flight, so it re-cues — and a drag makes one of
-  // those per pointer move, which is a stutter for as long as the mouse
-  // is down. The state the pointer is passing through is not a state
-  // anyone asked to hear: `holdAudio` keeps the sound on the last
+  // NOT DURING A TEMPO OR PLACEMENT DRAG, though. A tempo change cannot
+  // be spliced into the pass in flight, so it re-cues — and a drag makes
+  // one of those per pointer move, which is a stutter for as long as the
+  // mouse is down. The state the pointer is passing through is not a
+  // state anyone asked to hear: `holdAudio` keeps the sound on the last
   // finished edit, and the release (which is where the undo step closes
-  // too) hands the transport the one result.
+  // too) hands the transport the one result. The LOOP drag needs none of
+  // that — see the ruler's move handler.
   useEffect(() => {
     if (holdAudio) return;
     transport.update(grid, byId, columns);
@@ -1040,9 +1041,10 @@ export function GridView(props: GridViewProps) {
       const col = rulerCol(e.clientX);
       if (col !== drag.from) drag.moved = true;
       if (!drag.moved) return;
-      // The loop only reaches the sound once the drag is over: every
-      // column it is dragged through would otherwise re-cue the pass.
-      setHoldAudio(true);
+      // THE LOOP IS LIVE UNDER THE POINTER, and safely so: the transport
+      // reads it as where this pass wraps, not as a reason to re-cue, so
+      // every column it is dragged through reaches the sound without
+      // moving the playhead by a sample.
       setGrid((prev) => ({ ...prev, loop: loopFromDrag(drag.anchor, col) }), 'loop');
     };
     const up = (e: globalThis.MouseEvent) => {

@@ -231,6 +231,99 @@ describe('GridTransport live editing', () => {
     expect(transport.status().column).toBeLessThan(4);
   });
 
+  // MOVING THE LOOP IS NOT A REASON TO MOVE THE PLAYBACK. The loop says
+  // where the pass in flight ends and where the next one starts — both
+  // ahead of the playhead — so re-marking it, over and over as a drag
+  // does, must leave the playhead exactly where it was.
+  it('does not move the playhead when the loop is dragged about', async () => {
+    await transport.play(gridWith({ loop: { start: 0, end: 16 } }), CLIPS, 32);
+    await advance(3);
+    // A re-cue is a new play, and a new play cuts every voice in flight:
+    // whatever else moving the loop does, it must not do that.
+    const recue = vi.spyOn(transport, 'play');
+    // Every column a drag across the ruler passes through, handed over
+    // as the page hands it over: the playhead does not budge for any.
+    for (const loop of [
+      { start: 4, end: 16 },
+      { start: 4, end: 12 },
+      { start: 6, end: 12 },
+      { start: 8, end: 24 },
+      { start: 8, end: 20 },
+    ]) {
+      const before = transport.status().column;
+      transport.update(gridWith({ loop }), CLIPS, 32);
+      expect(transport.playing).toBe(true);
+      expect(transport.status().column).toBeCloseTo(before, 6);
+      expect(recue).not.toHaveBeenCalled();
+    }
+    // And it is still running from there, not from anywhere the loop
+    // was dragged past.
+    const at = transport.status().column;
+    await advance(0.5);
+    expect(transport.status().column).toBeGreaterThan(at);
+  });
+
+  it('wraps where the loop end has been moved TO, not where it was', async () => {
+    // A 4-beat loop is 2 s at 120 bpm; opened out to 8 beats it is 4 s.
+    await transport.play(gridWith({ loop: { start: 0, end: 4 } }), CLIPS, 32);
+    await advance(1);
+    transport.update(gridWith({ loop: { start: 0, end: 8 } }), CLIPS, 32);
+    // Past the old wrap at 2 s: a transport still ending its pass there
+    // would have gone back to the top.
+    await advance(2);
+    expect(transport.status().column).toBeGreaterThan(4);
+    // The new end is where it comes round.
+    await advance(2);
+    const later = transport.status();
+    expect(later.playing).toBe(true);
+    expect(later.column).toBeLessThan(4);
+  });
+
+  // The wrap is committed to the clock a lookahead BEFORE it is heard,
+  // so a loop moved inside that window has to take the pass that was
+  // already scheduled back.
+  it('takes back a wrap already scheduled when the loop moves first', async () => {
+    await transport.play(gridWith({ loop: { start: 0, end: 4 } }), CLIPS, 32);
+    // 1.9 s in, with the wrap at 2.05 s already laid down.
+    await advance(1.9);
+    transport.update(gridWith({ loop: { start: 0, end: 8 } }), CLIPS, 32);
+    await advance(1.5);
+    expect(transport.status().column).toBeGreaterThan(4);
+  });
+
+  // A loop dragged BEHIND the playhead cannot be honoured without a jump
+  // backwards, and a jump is the one thing the loop is not allowed to
+  // do: the pass plays out the grid and falls into the loop at the end,
+  // the same as a play cued past it.
+  it('plays on to the end of the grid when the loop lands behind it', async () => {
+    await transport.play(gridWith({ beats: 16, loop: { start: 0, end: 16 } }), CLIPS, 16);
+    await advance(4);
+    const before = transport.status().column;
+    expect(before).toBeGreaterThan(7);
+    transport.update(gridWith({ beats: 16, loop: { start: 0, end: 4 } }), CLIPS, 16);
+    expect(transport.status().column).toBeCloseTo(before, 6);
+    await advance(1);
+    expect(transport.status().column).toBeGreaterThan(before);
+    // The grid runs out at 8 s, and THAT is where the loop takes over.
+    await advance(4.5);
+    const later = transport.status();
+    expect(later.playing).toBe(true);
+    expect(later.column).toBeLessThan(4);
+  });
+
+  it('a loop cleared mid-play leaves the playhead where it is', async () => {
+    await transport.play(gridWith({ loop: { start: 0, end: 8 } }), CLIPS, 32);
+    await advance(3);
+    const before = transport.status().column;
+    transport.update(gridWith({ loop: null }), CLIPS, 32);
+    expect(transport.playing).toBe(true);
+    expect(transport.status().column).toBeCloseTo(before, 6);
+    // Nothing to come round to any more: it walks on into the grid past
+    // where the loop used to end.
+    await advance(2);
+    expect(transport.status().column).toBeGreaterThan(8);
+  });
+
   it('an edit while stopped changes nothing about being stopped', () => {
     transport.update(gridWith(), CLIPS, 32);
     expect(transport.playing).toBe(false);
@@ -429,6 +522,38 @@ describe('GridTransport voices', () => {
     // The copy was un-laid along with its voice, so it is free to sound.
     expect(voices.length).toBeGreaterThan(before);
     expect(voices.some((v) => v.stoppedAt === null)).toBe(true);
+  });
+
+  // WHAT IS SOUNDING WHEN THE LOOP MOVES KEEPS SOUNDING. Only the wrap
+  // that had been committed to the clock — and never heard — is taken
+  // back, because it is no longer where the loop says it is.
+  it('cuts nothing that is already sounding when the loop is re-marked', async () => {
+    const rows = [
+      placeClip(
+        placeClip({ id: 'row1', clipId: 'c1', placements: [], levels: [] }, CLIP, 0),
+        CLIP,
+        4,
+      ),
+    ];
+    const loop = { start: 0, end: 8 };
+    await audio.play(gridWith({ rows, loop }), CLIPS, 32);
+    await settle();
+    // 3.9 s in: the copy on beat 4 is in the air and the wrap at 4.05 s
+    // has been laid down ahead of it.
+    ctxTime = 3.9;
+    await settle();
+    const sounding = voices.filter(
+      (v) => v.startedAt <= ctxTime && v.startedAt + v.duration > ctxTime,
+    );
+    const committed = voices.filter((v) => v.startedAt > ctxTime);
+    expect(sounding.length).toBeGreaterThan(0);
+    expect(committed.length).toBeGreaterThan(0);
+
+    audio.update(gridWith({ rows, loop: { start: 0, end: 16 } }), CLIPS, 32);
+    await settle();
+
+    expect(sounding.every((v) => v.stoppedAt === null)).toBe(true);
+    expect(committed.every((v) => v.stoppedAt !== null)).toBe(true);
   });
 
   it('writes a row level onto the voice it belongs to', async () => {
