@@ -88,6 +88,20 @@ export interface BeatClipStatus {
  *  FOLLOWED the clip in its track, `left` the material before it. */
 export type BleedSide = 'left' | 'right';
 
+/** A clip's whole captured area as one buffer to decode, with the two
+ *  bookends measured off it: the loop is what lies between `leadSecs`
+ *  from the start and `tailSecs` from the end. A clip saved without
+ *  bleed is a capture with both at 0. */
+export interface ClipCapture {
+  bytes: ArrayBuffer;
+  leadSecs: number;
+  tailSecs: number;
+}
+
+/** The frame the backend puts in front of a capture's WAV: two
+ *  little-endian `f64` seconds (`beat_clip_audio`, `withBleed`). */
+const CAPTURE_HEADER = 16;
+
 /** What the picker's Clips tab and the module panel need; the Tauri
  *  client below implements it and tests substitute a mock. */
 export interface BeatClipApi {
@@ -105,11 +119,12 @@ export interface BeatClipApi {
    *  track's effects rack (`fxRenderSpec`), after the stretch: the wet
    *  buffer the grid crossfades against the dry one. */
   audio(clipId: string, bpm?: number, fx?: string): Promise<ArrayBuffer | null>;
-  /** One side of the clip's BLEED as WAV bytes, re-timed like the loop.
-   *  Null where the clip was saved without that side — and optional on
-   *  the interface, because a caller that only ever loops the clip
-   *  through the engine never asks for it. */
-  bleed?(clipId: string, side: BleedSide, bpm?: number): Promise<ArrayBuffer | null>;
+  /** The clip's whole CAPTURE — lead-in, loop, tail-out, as it is filed
+   *  — re-timed like the loop, with the seconds that say where the loop
+   *  begins and ends inside it. Optional on the interface, because a
+   *  caller that only ever loops the clip through the engine never asks
+   *  for it. */
+  capture?(clipId: string, bpm?: number): Promise<ClipCapture | null>;
   /** The clip's shape in `buckets` peaks, for drawing it on a grid. */
   peaks(clipId: string, buckets: number): Promise<number[] | null>;
   /** Save/open/list Grid arrangements. The document is JSON the frontend
@@ -135,11 +150,19 @@ export class BeatClipClient extends IpcClient implements BeatClipApi {
   audio(clipId: string, bpm?: number, fx?: string) {
     return this.call<ArrayBuffer>('beat_clip_audio', { clipId, bpm, fx });
   }
-  async bleed(clipId: string, side: BleedSide, bpm?: number) {
-    // A side the clip has none of comes back as no bytes; that is not
-    // silence to decode, it is nothing to play.
-    const bytes = await this.call<ArrayBuffer>('beat_clip_bleed', { clipId, side, bpm });
-    return bytes && bytes.byteLength > 0 ? bytes : null;
+  async capture(clipId: string, bpm?: number): Promise<ClipCapture | null> {
+    const framed = await this.call<ArrayBuffer>('beat_clip_audio', {
+      clipId,
+      bpm,
+      withBleed: true,
+    });
+    if (!framed || framed.byteLength <= CAPTURE_HEADER) return null;
+    const header = new DataView(framed, 0, CAPTURE_HEADER);
+    return {
+      bytes: framed.slice(CAPTURE_HEADER),
+      leadSecs: header.getFloat64(0, true),
+      tailSecs: header.getFloat64(8, true),
+    };
   }
   peaks(clipId: string, buckets: number) {
     return this.call<number[]>('beat_clip_peaks', { clipId, buckets });

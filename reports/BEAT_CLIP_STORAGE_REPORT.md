@@ -1,9 +1,25 @@
 # Beat clip storage — bleed sidecars vs. one FLAC + timestamps
 
-Investigation only; nothing implemented. Question asked: beat clips file
-their bleed in separate FLACs — should the whole captured area (bleed +
-loop) be one FLAC with metadata timestamps marking loop start/end and the
-beats?
+> **Implemented (2026-05-22).** P1, P2 and P3 landed together. A clip is
+> now one FLAC (lead-in, loop, tail-out) with `loopSpan` in its record
+> (`crates/dj-analysis/src/clip.rs`); legacy sidecar clips still read and
+> are folded into one file on their next save. `beat_clip_audio` grew a
+> `withBleed` flag that answers with the whole capture behind a 16-byte
+> frame (lead-in and tail-out seconds), and the Grid transport takes its
+> bookends out of that one buffer by offset — one fetch, decode and
+> stretch per clip and tempo instead of three (`app/src/gridTransport.ts`,
+> `#spans`). `beat_clip_bleed` is gone. Two deviations from the plan
+> below: each piece is still stretched SEPARATELY (WSOLA slides material
+> by up to its 10 ms search radius, so one pass over the capture would
+> put the loop's first beat off the offset the caller is told to play
+> from — the "continuous phase across the seam" win is not available at
+> exact loop boundaries), and `beat_clip_peaks` needed no change, since
+> `load_beat_clip` hands back the loop already cut.
+
+The investigation that led to it, as written. Question asked: beat clips
+file their bleed in separate FLACs — should the whole captured area
+(bleed + loop) be one FLAC with metadata timestamps marking loop
+start/end and the beats?
 
 ## What is stored today
 

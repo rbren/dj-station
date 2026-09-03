@@ -239,9 +239,14 @@ These are the rules that must hold everywhere.
 - **Beat clip**: a whole-beat loop cut from a track on the **Clip page**
   and saved to the library, carrying its own cut-to-clip beat grid and
   rendered audio; it never overwrites its source track.
-- **Bleed**: audio bookends filed BESIDE a beat clip's loop (left/right
-  spans, metadata never baked into the loop), overlaid on the pass a clip
-  comes in on or drops out of.
+- **Bleed**: the audio bookends either side of a beat clip's loop,
+  overlaid on the pass a clip comes in on or drops out of. A clip is
+  filed as ONE capture — lead-in, loop, tail-out in one FLAC — and the
+  record's `loopSpan` marks where the loop is inside it; the bleed is
+  never mixed INTO the loop, and every reader takes the pieces apart
+  through `load_beat_clip`. Clips written before that (no `loopSpan`,
+  bleed in `<id>-bleed-{l,r}.flac` sidecars) still read, and are folded
+  into one file the next time they are saved.
 - **Stems**: separated sources (vocals/drums/…) cached as FLAC under
   `<data_dir>/stems/<hash>/`, keyed by separator id — the DSP fallback
   flat, every model in its own subdirectory (`htdemucs_ft`, the fast

@@ -880,7 +880,7 @@ fn deleting_a_beat_clip_takes_its_audio_with_it() {
 }
 
 #[test]
-fn a_clips_bleed_is_filed_beside_its_loop_never_inside_it() {
+fn a_clip_is_one_capture_and_its_span_marks_the_loop_inside_it() {
     let tmp = tempfile::tempdir().unwrap();
     let loop_audio = tone(220.0, 2.0);
     let bleed = BleedAudio {
@@ -901,8 +901,29 @@ fn a_clips_bleed_is_filed_beside_its_loop_never_inside_it() {
     assert!((meta.left_bleed_ms - 25.0).abs() < 0.1, "{meta:?}");
     assert!((meta.right_bleed_ms - 10.0).abs() < 0.1, "{meta:?}");
 
-    // The LOOP is exactly the beats that were saved — the bleed is two
-    // files beside it, and comes back as audio of its own.
+    // ONE file holds the lot, and the span says where the loop is in it.
+    let dir = tmp.path().join("beat-clips");
+    let mut files: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    assert_eq!(
+        files,
+        [format!("{}.flac", meta.id), format!("{}.json", meta.id)]
+    );
+    let span = meta.loop_span.expect("a clip is filed with its span");
+    assert!((span.start_secs - 0.025).abs() < 1e-9, "{span:?}");
+    assert!((span.end_secs - 2.025).abs() < 1e-9, "{span:?}");
+    let frames = |secs: f64| (secs * SR as f64) as usize;
+    let capture = dj_analysis::decode_audio(&dir.join(&meta.file)).unwrap();
+    assert_eq!(
+        capture.frames(),
+        frames(2.0) + frames(0.025) + frames(0.010)
+    );
+
+    // Taken back apart, the LOOP is exactly the beats that were saved
+    // and each bookend is the material that ran either side of them.
     let (read, audio, bleed) = load_beat_clip(tmp.path(), &meta.id).unwrap();
     assert_eq!(audio.frames(), 2 * SR as usize);
     assert_eq!(read.left_bleed_ms, meta.left_bleed_ms);
@@ -910,16 +931,73 @@ fn a_clips_bleed_is_filed_beside_its_loop_never_inside_it() {
     let right = bleed.right.expect("a right bleed was filed");
     assert_eq!(left.frames(), (0.025 * SR as f64) as usize);
     assert_eq!(right.frames(), (0.010 * SR as f64) as usize);
+    // Sample-exact: the loop begins where the lead-in ends, not a frame
+    // either side of it (16-bit FLAC, so compare at that resolution).
+    let same = |a: &[f32], b: &[f32]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4);
+    assert!(same(
+        &audio.channels[0][..64],
+        &loop_audio.channels[0][..64]
+    ));
+    assert!(same(
+        &left.channels[0][..64],
+        &tone(110.0, 0.025).channels[0][..64]
+    ));
+    assert!(same(
+        &right.channels[0][..64],
+        &tone(330.0, 0.010).channels[0][..64]
+    ));
+}
 
-    // A bleed file that has gone missing costs the overlay, not the clip.
-    std::fs::remove_file(
-        tmp.path()
-            .join("beat-clips")
-            .join(format!("{}-bleed-r.flac", meta.id)),
+#[test]
+fn a_clip_filed_under_the_old_bleed_sidecars_still_reads_and_is_folded_in_on_save() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("beat-clips");
+    std::fs::create_dir_all(&dir).unwrap();
+    // A clip as the store used to write one: the loop alone, its bleed in
+    // a file per side, and a record with no span.
+    write_clip(&dir.join("b1.flac"), &tone(220.0, 2.0)).unwrap();
+    write_clip(&dir.join("b1-bleed-l.flac"), &tone(110.0, 0.025)).unwrap();
+    write_clip(&dir.join("b1-bleed-r.flac"), &tone(330.0, 0.010)).unwrap();
+    std::fs::write(
+        dir.join("b1.json"),
+        r#"{"id":"b1","name":"legacy","bpm":120.0,"beats":4,"file":"b1.flac",
+            "stems":[],"leftBleedMs":25.0,"rightBleedMs":10.0}"#,
     )
     .unwrap();
-    let (_, _, bleed) = load_beat_clip(tmp.path(), &meta.id).unwrap();
+
+    let (meta, audio, bleed) = load_beat_clip(tmp.path(), "b1").unwrap();
+    assert!(meta.loop_span.is_none());
+    assert_eq!(audio.frames(), 2 * SR as usize);
+    assert_eq!(bleed.left.unwrap().frames(), (0.025 * SR as f64) as usize);
+    assert_eq!(bleed.right.unwrap().frames(), (0.010 * SR as f64) as usize);
+
+    // A sidecar that has gone missing costs the overlay, not the clip.
+    std::fs::remove_file(dir.join("b1-bleed-r.flac")).unwrap();
+    let (_, _, bleed) = load_beat_clip(tmp.path(), "b1").unwrap();
     assert!(bleed.left.is_some() && bleed.right.is_none());
+
+    // Saving it again is the migration: one capture, no sidecars left.
+    let meta = update_beat_clip(
+        tmp.path(),
+        "b1",
+        "legacy",
+        &tone(220.0, 2.0),
+        120.0,
+        4,
+        vec![],
+        None,
+        &BleedAudio {
+            left: Some(tone(110.0, 0.025)),
+            right: None,
+        },
+    )
+    .unwrap();
+    assert!(meta.loop_span.is_some());
+    assert!(!dir.join("b1-bleed-l.flac").exists());
+    let (_, audio, bleed) = load_beat_clip(tmp.path(), "b1").unwrap();
+    assert_eq!(audio.frames(), 2 * SR as usize);
+    assert_eq!(bleed.left.unwrap().frames(), (0.025 * SR as f64) as usize);
+    assert!(bleed.right.is_none());
 }
 
 #[test]

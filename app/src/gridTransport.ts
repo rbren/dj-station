@@ -19,15 +19,17 @@
 // remembered by key (`rowId:start`), which is what keeps a re-schedule
 // from re-triggering something already sounding.
 //
-// A copy is not ONE buffer but three: the clip, and its BLEED — the
-// material either side of it in the track it was cut from, filed beside
-// it as metadata. On a timeline the bleed goes back where it came from,
-// the left bookend ending on the copy's first beat and the right one
-// starting where its last beat ends. A copy on its own is heard as
-// lead-in, clip, tail-out; copies running back to back put one's
-// tail-out and the next one's lead-in ON the join, which is the overlay
-// a looping player (the engine, the Clip page's preview) makes of its
-// seam.
+// A copy is not ONE voice but three, all of them windows on the same
+// buffer: the clip, and its BLEED — the material either side of it in
+// the track it was cut from, which is filed and fetched in the one
+// capture as the loop (`beat_clip_audio` with the bleed, `#spans` for
+// where the loop sits inside it). On a timeline the bleed goes back
+// where it came from, the left bookend ending on the copy's first beat
+// and the right one starting where its last beat ends. A copy on its own
+// is heard as lead-in, clip, tail-out; copies running back to back put
+// one's tail-out and the next one's lead-in ON the join, which is the
+// overlay a looping player (the engine, the Clip page's preview) makes
+// of its seam.
 //
 // The playhead is DERIVED, never counted: the page asks `status()`, which
 // converts elapsed clock time back through the tempo envelope
@@ -39,7 +41,7 @@
 // so the page's controls, highlight and loop are all exercised headless.
 
 import { sharedContext } from './clipAudio';
-import type { BeatClipEntry, BleedSide } from './beatClip';
+import type { BeatClipEntry, BleedSide, ClipCapture } from './beatClip';
 import {
   beatToSecs,
   playRange,
@@ -65,10 +67,20 @@ const BLEED_SIDES: readonly BleedSide[] = ['right', 'left'];
  *  crossfaded. */
 export interface GridAudioSource {
   audio(clipId: string, bpm?: number, fx?: string): Promise<ArrayBuffer | null>;
-  /** A clip's bleed, one bookend at a time and re-timed the same way.
-   *  Optional: a source that cannot hand it over simply plays the loops
-   *  bare, which is what the grid did before it asked. */
-  bleed?(clipId: string, side: BleedSide, bpm?: number): Promise<ArrayBuffer | null>;
+  /** The clip WITH its bleed: one capture, re-timed the same way, and
+   *  the seconds either bookend takes up in it. Optional: a source that
+   *  cannot hand it over simply plays the loops bare, which is what the
+   *  grid did before it asked. */
+  capture?(clipId: string, bpm?: number): Promise<ClipCapture | null>;
+}
+
+/** Where the loop sits in a decoded buffer: a capture's lead-in is
+ *  everything before it and its tail-out everything after. A buffer
+ *  fetched WITHOUT bleed (a rack's wet render, or a source that has no
+ *  captures) is all loop. */
+interface BufferSpan {
+  lead: number;
+  loop: number;
 }
 
 interface Pass {
@@ -137,10 +149,10 @@ export class GridTransport {
   #source: GridAudioSource;
   /** Decoded audio, keyed by clip AND the tempo it was stretched to. */
   #buffers = new Map<string, AudioBuffer>();
-  /** Decoded bleed bookends, keyed the same way plus the side. A clip
-   *  saved WITHOUT one is remembered as null, so it is asked for once
-   *  and not on every pass. */
-  #bleed = new Map<string, AudioBuffer | null>();
+  /** Where the loop lies inside each of those buffers, same keys: a dry
+   *  one is the whole capture, so its bookends are the material either
+   *  side of the span. */
+  #spans = new Map<string, BufferSpan>();
   /** Renders in flight, so a re-schedule does not ask twice. */
   #pending = new Set<string>();
   /** Every voice in flight. A node is remembered with the copy and pass
@@ -190,10 +202,6 @@ export class GridTransport {
     return fx ? `${clipId}@${bpm}!${fx}` : `${clipId}@${bpm}`;
   }
 
-  #bleedKey(clipId: string, bpm: number, side: BleedSide): string {
-    return `${this.#key(clipId, bpm)}:${side}`;
-  }
-
   /** The longest lead-in in hand. A pass has to be committed this much
    *  before it begins as well as a lookahead: a copy on its first beat
    *  starts sounding a bookend's length EARLIER than the pass does, and
@@ -202,16 +210,14 @@ export class GridTransport {
    *  there to smooth. */
   #leadIn(): number {
     let lead = 0;
-    for (const [key, buffer] of this.#bleed) {
-      if (buffer && key.endsWith(':left')) lead = Math.max(lead, buffer.duration);
-    }
+    for (const span of this.#spans.values()) lead = Math.max(lead, span.lead);
     return lead;
   }
 
-  /** Fetch and decode every (clip, tempo) the grid asks for — and the
-   *  bleed either side of every copy — so a pass can be scheduled
-   *  without awaiting anything: an await between "it is time" and
-   *  `start(when)` is how a clip ends up late. */
+  /** Fetch and decode every (clip, tempo) the grid asks for — bleed and
+   *  all, which is ONE buffer per clip and tempo — so a pass can be
+   *  scheduled without awaiting anything: an await between "it is time"
+   *  and `start(when)` is how a clip ends up late. */
   async prime(
     state: GridState,
     clips: ReadonlyMap<string, BeatClipEntry>,
@@ -221,7 +227,6 @@ export class GridTransport {
     if (!ctx) return;
     const columns = Math.max(this.#columns, state.beats);
     const wanted = new Map<string, { clipId: string; bpm: number; fx?: string }>();
-    const bookends = new Map<string, { clipId: string; bpm: number; side: BleedSide }>();
     for (const copy of scheduleRange(state, clips, over ?? playRange(state, columns))) {
       wanted.set(this.#key(copy.clipId, copy.bpm), { clipId: copy.clipId, bpm: copy.bpm });
       if (copy.fx) {
@@ -233,47 +238,55 @@ export class GridTransport {
           fx: copy.fx,
         });
       }
-      for (const side of BLEED_SIDES) {
-        if (!copy.bleed[side]) continue;
-        bookends.set(this.#bleedKey(copy.clipId, copy.bpm, side), {
-          clipId: copy.clipId,
-          bpm: copy.bpm,
-          side,
-        });
-      }
     }
-    await Promise.all([
-      ...[...wanted].map(async ([key, { clipId, bpm, fx }]) => {
-        if (this.#buffers.has(key) || this.#pending.has(key)) return;
-        this.#pending.add(key);
-        try {
-          const bytes = await this.#source.audio(clipId, bpm, fx);
-          if (!bytes || this.#disposed) return;
-          this.#buffers.set(key, await ctx.decodeAudioData(bytes.slice(0)));
-        } catch {
-          // A clip that will not decode simply stays silent; the grid
-          // still plays everything else.
-        } finally {
-          this.#pending.delete(key);
-        }
-      }),
-      ...[...bookends].map(async ([key, { clipId, bpm, side }]) => {
-        const fetch = this.#source.bleed;
-        if (!fetch || this.#bleed.has(key) || this.#pending.has(key)) return;
-        this.#pending.add(key);
-        try {
-          const bytes = await fetch.call(this.#source, clipId, side, bpm);
-          if (this.#disposed) return;
-          this.#bleed.set(key, bytes ? await ctx.decodeAudioData(bytes.slice(0)) : null);
-        } catch {
-          // A bookend that will not come or will not decode is a join
-          // played bare — never a clip that does not sound.
-          this.#bleed.set(key, null);
-        } finally {
-          this.#pending.delete(key);
-        }
-      }),
-    ]);
+    await Promise.all(
+      [...wanted].map(([key, { clipId, bpm, fx }]) => this.#fetch(ctx, key, clipId, bpm, fx)),
+    );
+  }
+
+  /** Decode one buffer into the cache, with the span that says where its
+   *  loop is. A DRY buffer is the clip's whole capture — the bookends
+   *  come out of it by offset, which is one request, one decode and one
+   *  stretch where fetching each side separately was three. A WET one is
+   *  the rack's render of the loop alone (the bleed rides the dry side of
+   *  the crossfade), and so is all loop. */
+  async #fetch(
+    ctx: AudioContext,
+    key: string,
+    clipId: string,
+    bpm: number,
+    fx?: string,
+  ): Promise<void> {
+    if (this.#buffers.has(key) || this.#pending.has(key)) return;
+    this.#pending.add(key);
+    try {
+      let bytes: ArrayBuffer | null = null;
+      let lead = 0;
+      let tail = 0;
+      if (!fx && this.#source.capture) {
+        const capture = await this.#source.capture(clipId, bpm);
+        if (capture) ({ bytes, leadSecs: lead, tailSecs: tail } = capture);
+      } else {
+        bytes = await this.#source.audio(clipId, bpm, fx);
+      }
+      if (!bytes || this.#disposed) return;
+      const buffer = await ctx.decodeAudioData(bytes.slice(0));
+      if (this.#disposed) return;
+      this.#buffers.set(key, buffer);
+      this.#spans.set(key, { lead, loop: Math.max(0, buffer.duration - lead - tail) });
+    } catch {
+      // A clip that will not decode simply stays silent; the grid still
+      // plays everything else.
+    } finally {
+      this.#pending.delete(key);
+    }
+  }
+
+  /** Where the loop is in a buffer already in hand. A buffer fetched
+   *  without a span behind it (a source that hands over loops bare) is
+   *  all loop. */
+  #span(key: string, buffer: AudioBuffer): BufferSpan {
+    return this.#spans.get(key) ?? { lead: 0, loop: buffer.duration };
   }
 
   /** Start at `fromColumn` (the range's start by default). Playing again
@@ -508,8 +521,8 @@ export class GridTransport {
     return { playing: true, column: this.#at };
   }
 
-  /** Drop every decode of these clips — the loop at each tempo, its wet
-   *  renders and its bookends — so the next `prime` fetches them again.
+  /** Drop every decode of these clips — the capture at each tempo and
+   *  its wet renders — so the next `prime` fetches them again.
    *
    *  A clip EDITED keeps its id (that is what makes the rows pointing at
    *  it survive the edit), so the cache key cannot tell the new audio
@@ -519,10 +532,9 @@ export class GridTransport {
     for (const clipId of clipIds) {
       const prefix = `${clipId}@`;
       for (const key of this.#buffers.keys()) {
-        if (key.startsWith(prefix)) this.#buffers.delete(key);
-      }
-      for (const key of this.#bleed.keys()) {
-        if (key.startsWith(prefix)) this.#bleed.delete(key);
+        if (!key.startsWith(prefix)) continue;
+        this.#buffers.delete(key);
+        this.#spans.delete(key);
       }
     }
   }
@@ -531,7 +543,7 @@ export class GridTransport {
     this.stop();
     this.#disposed = true;
     this.#buffers.clear();
-    this.#bleed.clear();
+    this.#spans.clear();
   }
 
   /** Lay down every pass that begins inside the lookahead, and top up the
@@ -584,7 +596,8 @@ export class GridTransport {
         pass.laid.add(copy.key);
         continue;
       }
-      const buffer = this.#buffers.get(this.#key(copy.clipId, copy.bpm));
+      const key = this.#key(copy.clipId, copy.bpm);
+      const buffer = this.#buffers.get(key);
       const wet = copy.fx ? this.#buffers.get(this.#key(copy.clipId, copy.bpm, copy.fx)) : null;
       if (!buffer || (copy.fx && !wet)) {
         // Its stretch (or its rack render) is still rendering. Leave the
@@ -594,8 +607,13 @@ export class GridTransport {
         continue;
       }
       pass.laid.add(copy.key);
-      const offset = Math.min(copy.offsetSecs, buffer.duration);
-      const duration = Math.max(0, Math.min(copy.durationSecs, buffer.duration - offset));
+      // The dry buffer is the whole capture, so the copy's own material
+      // starts a lead-in into it and ends where the tail-out begins: a
+      // copy never plays into its own bleed.
+      const span = this.#span(key, buffer);
+      const loopEnd = span.lead + span.loop;
+      const offset = Math.min(span.lead + copy.offsetSecs, loopEnd);
+      const duration = Math.max(0, Math.min(copy.durationSecs, loopEnd - offset));
       if (duration <= 0) continue;
       // An effected copy is a PAIR of sample-aligned voices — the clip
       // and the rack's render of it — whose gains split the row's level
@@ -603,11 +621,14 @@ export class GridTransport {
       // then move between them (`#resync`) instead of missing a side.
       this.#lay(ctx, pass, copy, buffer, 'dry', { at, offset, duration, copyAt: at });
       if (wet) {
-        const wetDuration = Math.max(0, Math.min(copy.durationSecs, wet.duration - offset));
+        // The rack rendered the LOOP, so the wet voice reads from the
+        // copy's own offset rather than the capture's.
+        const wetOffset = Math.min(copy.offsetSecs, wet.duration);
+        const wetDuration = Math.max(0, Math.min(copy.durationSecs, wet.duration - wetOffset));
         if (wetDuration > 0) {
           this.#lay(ctx, pass, copy, wet, 'wet', {
             at,
-            offset,
+            offset: wetOffset,
             duration: wetDuration,
             copyAt: at,
           });
@@ -687,14 +708,23 @@ export class GridTransport {
    *  join smoothed one pass late is a smaller fault than a clip that
    *  misses its beat. */
   #layBleed(ctx: AudioContext, pass: Pass, copy: ScheduledClip, at: number, now: number): void {
+    const key = this.#key(copy.clipId, copy.bpm);
+    const buffer = this.#buffers.get(key);
+    if (!buffer) return;
+    const span = this.#span(key, buffer);
     for (const side of BLEED_SIDES) {
       if (!copy.bleed[side]) continue;
-      const buffer = this.#bleed.get(this.#bleedKey(copy.clipId, copy.bpm, side));
-      if (!buffer) continue;
-      const from = side === 'right' ? at + copy.durationSecs : at - buffer.duration;
+      // The bookends are the capture either side of the loop: the
+      // lead-in in front of it, the tail-out after it.
+      const window =
+        side === 'left'
+          ? { at: 0, secs: span.lead }
+          : { at: span.lead + span.loop, secs: buffer.duration - span.lead - span.loop };
+      if (window.secs <= 0) continue;
+      const from = side === 'right' ? at + copy.durationSecs : at - window.secs;
       const start = Math.max(from, now);
-      const offset = start - from;
-      const duration = buffer.duration - offset;
+      const offset = window.at + (start - from);
+      const duration = window.secs - (start - from);
       if (duration <= 0) continue;
       // The bookend is material of the ORIGINAL clip, so it rides the
       // dry side of the crossfade: a fully wet copy plays the rack's

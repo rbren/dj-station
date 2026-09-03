@@ -241,10 +241,7 @@ fn name_after_clip(engine: &mut Engine, instance: &str, clip_name: &str) -> Stri
 
 /// A saved clip's LOOP as WAV bytes, for a surface that plays clips in
 /// the webview rather than through the engine (the Grid page schedules
-/// them itself, the way the Clip page auditions a render). The bleed
-/// stays out of these bytes — it is overlaid where it is heard, never
-/// baked into the loop — and is asked for a side at a time through
-/// [`beat_clip_bleed`].
+/// them itself, the way the Clip page auditions a render).
 ///
 /// `bpm` RE-TIMES the clip to that tempo before handing it over, and it
 /// does so by WSOLA (`beats::warp`), the same stretcher the Clip page's
@@ -258,19 +255,33 @@ fn name_after_clip(engine: &mut Engine, instance: &str, clip_name: &str) -> Stri
 /// AFTER the stretch (so it processes exactly the samples the dry path
 /// plays, and the webview's Wetness knob can crossfade the two buffers
 /// sample-for-sample).
+///
+/// `with_bleed` asks for the whole CAPTURE instead of the loop alone —
+/// lead-in, loop, tail-out, one buffer a player takes its bookends out
+/// of by offset rather than fetching, decoding and stretching three
+/// times. The response is then FRAMED: sixteen bytes of little-endian
+/// `f64` lead-in and tail-out seconds, then the WAV. Seconds and not
+/// frames because `decodeAudioData` resamples to the context's rate, so
+/// a frame count would not survive the trip. Each piece is stretched on
+/// its own, exactly as when they were three requests: WSOLA slides
+/// material by up to its search radius, so one pass over the join would
+/// leave the loop's first beat some milliseconds off the offset the
+/// caller is told to play from.
 #[tauri::command(async)]
 pub fn beat_clip_audio(
     state: State<AppState>,
     clip_id: String,
     bpm: Option<f64>,
     fx: Option<String>,
+    with_bleed: Option<bool>,
 ) -> CmdResult<tauri::ipc::Response> {
-    let (meta, audio, _) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
+    let (meta, audio, bleed) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
         .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
-    let audio = match bpm {
-        Some(bpm) if bpm > 0.0 && meta.bpm > 0.0 => stretch_to_bpm(&audio, meta.bpm, bpm),
-        _ => audio,
+    let retime = |audio: &AudioData| match bpm {
+        Some(bpm) if bpm > 0.0 && meta.bpm > 0.0 => stretch_to_bpm(audio, meta.bpm, bpm),
+        _ => audio.clone(),
     };
+    let audio = retime(&audio);
     let audio = match fx.as_deref() {
         None | Some("") => audio,
         Some(json) => {
@@ -292,45 +303,26 @@ pub fn beat_clip_audio(
             }
         }
     };
-    Ok(tauri::ipc::Response::new(dj_analysis::clip::wav16_bytes(
-        &audio,
-    )))
-}
-
-/// One side of a saved clip's BLEED as WAV bytes, for the same webview
-/// player. `"right"` is the material that FOLLOWED the clip in its track
-/// and `"left"` what ran into it — the two halves of
-/// `playback::ClipBleed`, handed over apart from the loop because they
-/// are summed where they are heard: over the seam by a looping player,
-/// either side of the copy by a timeline (the Grid page). A side the
-/// clip was saved without answers with no bytes at all.
-///
-/// `bpm` re-times it with the SAME stretch the loop gets, so a bleed
-/// still meets the seam it belongs to once the grid's tempo has moved.
-#[tauri::command(async)]
-pub fn beat_clip_bleed(
-    state: State<AppState>,
-    clip_id: String,
-    side: String,
-    bpm: Option<f64>,
-) -> CmdResult<tauri::ipc::Response> {
-    let (meta, _, bleed) = dj_analysis::clip::load_beat_clip(state.library.data_dir(), &clip_id)
-        .map_err(|e| CmdError::invalid(format!("clip: {e}")))?;
-    let audio = match side.as_str() {
-        "left" => bleed.left,
-        "right" => bleed.right,
-        _ => return Err(CmdError::invalid(format!("bleed side: {side:?}"))),
-    };
-    let Some(audio) = audio else {
-        return Ok(tauri::ipc::Response::new(Vec::<u8>::new()));
-    };
-    let audio = match bpm {
-        Some(bpm) if bpm > 0.0 && meta.bpm > 0.0 => stretch_to_bpm(&audio, meta.bpm, bpm),
-        _ => audio,
-    };
-    Ok(tauri::ipc::Response::new(dj_analysis::clip::wav16_bytes(
-        &audio,
-    )))
+    if with_bleed != Some(true) {
+        return Ok(tauri::ipc::Response::new(dj_analysis::clip::wav16_bytes(
+            &audio,
+        )));
+    }
+    // An effected buffer is the RACK's render of the loop, which the
+    // webview crossfades against the dry one; the bookends ride the dry
+    // side, so a wet capture is the loop and two empty bookends.
+    let bare = matches!(fx.as_deref(), None | Some(""));
+    let side = |audio: Option<AudioData>| audio.filter(|_| bare).map(|a| retime(&a));
+    let (left, right) = (side(bleed.left), side(bleed.right));
+    let mut bytes = Vec::new();
+    for piece in [&left, &right] {
+        let secs = piece.as_ref().map(|a| a.duration_secs()).unwrap_or(0.0);
+        bytes.extend_from_slice(&secs.to_le_bytes());
+    }
+    bytes.extend_from_slice(&dj_analysis::clip::wav16_bytes(
+        &dj_analysis::clip::join_capture(left.as_ref(), &audio, right.as_ref()),
+    ));
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// A clip's waveform, as one peak per BEAT-fraction: `buckets` samples

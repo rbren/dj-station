@@ -377,18 +377,22 @@ interface FakeVoice {
    *  many of them. */
   offset: number;
   duration: number;
-  /** How long the buffer under it is — a bleed bookend decodes to much
-   *  less than a loop, which is how the two are told apart below. */
+  /** How long the buffer under it is: a capture (loop plus both
+   *  bookends) is longer than the loop a bare source hands over, which is
+   *  how the two are told apart below. */
   bufferSecs: number;
 }
 
 let voices: FakeVoice[] = [];
 let ctxTime = 0;
 
-/** A bleed bookend's bytes and the seconds they decode to — long enough
- *  to place, far shorter than the 8 s the loop decodes to. */
-const BLEED_BYTES = 8;
+/** A bleed bookend's seconds in a capture — long enough to place, far
+ *  shorter than the 8 s of loop it brackets. */
 const BLEED_SECS = 0.25;
+/** The bytes a CAPTURE is handed over as, and the seconds they decode
+ *  to: the loop with a bookend either side of it. */
+const CAPTURE_BYTES = 24;
+const CAPTURE_SECS = 8 + 2 * BLEED_SECS;
 
 class FakeParam {
   #log: string[];
@@ -448,10 +452,10 @@ function fakeContext() {
         },
       };
     }
-    // Loops and bleed bookends are asked for with different numbers of
-    // bytes, so the decode can hand each its own length.
+    // A capture and a bare loop are handed over with different numbers
+    // of bytes, so the decode can give each its own length.
     decodeAudioData(bytes: ArrayBuffer) {
-      const duration = bytes.byteLength === BLEED_BYTES ? BLEED_SECS : 8;
+      const duration = bytes.byteLength === CAPTURE_BYTES ? CAPTURE_SECS : 8;
       return Promise.resolve({
         duration,
         length: duration * 48000,
@@ -598,12 +602,18 @@ describe('GridTransport voices', () => {
 
 describe('GridTransport bleed', () => {
   let audio: GridTransport;
-  let bleed: ReturnType<typeof vi.fn>;
+  let capture: ReturnType<typeof vi.fn>;
 
   function source(withBleed = true) {
-    bleed = vi.fn().mockResolvedValue(new ArrayBuffer(BLEED_BYTES));
+    // The clip and its bleed come over as ONE capture: the bookends are
+    // windows on it, not fetches of their own.
+    capture = vi.fn().mockResolvedValue({
+      bytes: new ArrayBuffer(CAPTURE_BYTES),
+      leadSecs: BLEED_SECS,
+      tailSecs: BLEED_SECS,
+    });
     const loops = { audio: vi.fn().mockResolvedValue(new ArrayBuffer(16)) };
-    return withBleed ? { ...loops, bleed } : loops;
+    return withBleed ? { ...loops, capture } : loops;
   }
 
   /** A row playing one copy of the 4-beat clip at each of `cols`. */
@@ -615,16 +625,16 @@ describe('GridTransport bleed', () => {
     };
   }
 
-  /** The bookends that reached Web Audio, in start order. */
+  /** The bookends that reached Web Audio, in start order. A bookend is a
+   *  window of at most a quarter second on the capture; a copy of the
+   *  4-beat clip is 2 s of it. */
   function bookends() {
-    return voices
-      .filter((v) => v.bufferSecs === BLEED_SECS)
-      .sort((a, b) => a.startedAt - b.startedAt);
+    return voices.filter((v) => v.duration <= BLEED_SECS).sort((a, b) => a.startedAt - b.startedAt);
   }
 
   /** Where the clips themselves were started. */
   function loops() {
-    return voices.filter((v) => v.bufferSecs === 8).map((v) => v.startedAt);
+    return voices.filter((v) => v.duration > BLEED_SECS).map((v) => v.startedAt);
   }
 
   async function settle() {
@@ -651,7 +661,13 @@ describe('GridTransport bleed', () => {
     // The left bookend ENDS where the clip begins; the right one starts
     // where it ends.
     expect(bookends().map((v) => v.startedAt)).toEqual([4.05 - BLEED_SECS, 4.05 + 2]);
-    expect(bookends().map((v) => v.offset)).toEqual([0, 0]);
+    // Each one is read from where its material lies in the capture: the
+    // lead-in at the front of it, the tail-out after the loop.
+    expect(bookends().map((v) => v.offset)).toEqual([0, CAPTURE_SECS - BLEED_SECS]);
+    // And the copy itself is the loop between them, never its own bleed.
+    expect(voices.filter((v) => v.duration > BLEED_SECS).map((v) => v.offset)).toEqual([
+      BLEED_SECS,
+    ]);
   });
 
   it('puts a tail-out and a lead-in on the join between two copies', async () => {
@@ -677,15 +693,12 @@ describe('GridTransport bleed', () => {
     expect(lead.duration).toBeCloseTo(0.05, 6);
   });
 
-  it('asks for each side once, however many copies want it', async () => {
+  it('asks for the capture once, however many copies want its bleed', async () => {
     await audio.play(run(0, 4, 8), CLIPS, 32);
     await settle();
-    // Three copies, six bookends — but at one tempo that is two renders,
-    // not six.
-    expect([...bleed.mock.calls].sort()).toEqual([
-      ['c1', 'left', 120],
-      ['c1', 'right', 120],
-    ]);
+    // Three copies, six bookends — but at one tempo that is ONE render,
+    // which is the point of filing the bleed in the clip's own file.
+    expect(capture.mock.calls).toEqual([['c1', 120]]);
   });
 
   // A LOOP'S WRAP IS A JOIN LIKE ANY OTHER. The last copy's tail-out
@@ -707,7 +720,8 @@ describe('GridTransport bleed', () => {
     // of them trimmed.
     const wrap = bookends().filter((v) => v.startedAt > 1 && v.startedAt < 3);
     expect(wrap.map((v) => v.startedAt)).toEqual([2.05 - BLEED_SECS, 2.05]);
-    expect(wrap.map((v) => v.offset)).toEqual([0, 0]);
+    expect(wrap.map((v) => v.offset)).toEqual([0, CAPTURE_SECS - BLEED_SECS]);
+    expect(wrap.map((v) => v.duration)).toEqual([BLEED_SECS, BLEED_SECS]);
   });
 
   // A play that runs off the end of the arrangement is not a STOP: the
@@ -729,18 +743,25 @@ describe('GridTransport bleed', () => {
   });
 
   it('plays the run anyway where the clip was filed without bleed', async () => {
-    bleed.mockResolvedValue(null);
+    // A capture of a clip with no bleed is the loop and nothing either
+    // side of it.
+    capture.mockResolvedValue({
+      bytes: new ArrayBuffer(16),
+      leadSecs: 0,
+      tailSecs: 0,
+    });
     await audio.play(run(0, 4), CLIPS, 32);
     await settle();
     expect(bookends()).toEqual([]);
     expect(loops()).toHaveLength(2);
   });
 
-  it('plays the loops bare for a source that cannot hand bleed over', async () => {
+  it('plays the loops bare for a source that cannot hand a capture over', async () => {
     audio.dispose();
     audio = new GridTransport(source(false));
     await audio.play(run(0, 4), CLIPS, 32);
     await settle();
     expect(voices.map((v) => v.bufferSecs)).toEqual([8, 8]);
+    expect(voices.map((v) => v.offset)).toEqual([0, 0]);
   });
 });
