@@ -30,6 +30,14 @@
 //! interval the last two measured. Nothing sounds until two edges have
 //! given a tempo, so a row can never come in at a rate nobody has said.
 //!
+//! …WHICH IS WHY A STOP HAS TO BE SAID. Interpolating between edges means
+//! a clock that has stopped pulsing is indistinguishable from one that is
+//! merely between beats, so a row left to itself plays on for ever at the
+//! last tempo it measured — a pause that went quiet on screen while the
+//! room still heard it. [`crate::Engine::grid_track_transport`] is the other half
+//! of a Grid pause: a held row drops its voices, stops advancing, and
+//! takes edits in silence until it is told to run again.
+//!
 //! A COPY IS A VOICE. Entering a copy's span (its lead-in bleed included)
 //! takes a voice from a small fixed pool, so two copies running into each
 //! other overlap the way the Grid page's two scheduled sources do; the
@@ -167,6 +175,12 @@ pub enum GridTrackCmd {
         audio: ClipAudio,
     },
     Program(Arc<GridTrackProgram>),
+    /// Run or hold the row. A row reads its position BETWEEN the clock's
+    /// edges, so a clock that stops pulsing is indistinguishable from one
+    /// between beats: a held row is told, and only then goes quiet.
+    Transport {
+        running: bool,
+    },
 }
 
 /// What the RT thread hands back for an off-RT drop.
@@ -351,6 +365,10 @@ pub struct GridTrackRtModule {
     anchor: f64,
     pos: f64,
     started: bool,
+    /// Whether the transport driving the row is running. TRUE until told
+    /// otherwise, so a row wired to a clock in a plain patch plays on the
+    /// edges it is given, exactly as it always has.
+    running: bool,
     last_clock: f32,
     last_reset: f32,
     interval: f32,
@@ -386,6 +404,7 @@ impl GridTrackRtModule {
             anchor: 0.0,
             pos: 0.0,
             started: false,
+            running: true,
             last_clock: 0.0,
             last_reset: 0.0,
             interval: 0.0,
@@ -432,7 +451,10 @@ impl GridTrackRtModule {
     /// a running transport does not drop the clip in flight.
     fn resync(&mut self) {
         self.reindex();
-        if !self.started {
+        // A held row takes the edit but stays quiet: the page syncs after
+        // every keystroke, and an edit made while paused must not be what
+        // starts the sound again.
+        if !self.started || !self.running {
             return;
         }
         let (lead, tail) = (self.lead_beats(), self.tail_beats());
@@ -503,6 +525,21 @@ impl HostModule for GridTrackRtModule {
                     let _ = self.garbage_tx.push(GridTrackGarbage::Program(old));
                     reload = true;
                 }
+                GridTrackCmd::Transport { running } => {
+                    self.running = running;
+                    if !running {
+                        // Held HERE, and quiet from this block on: the
+                        // position stops advancing and every copy in
+                        // flight is dropped, bookends and all.
+                        self.silence();
+                        // The count to the next edge is abandoned with it.
+                        // A held row's counter stands still, so measuring
+                        // the beat across the hold would read the fraction
+                        // it was paused on as a whole beat; the row keeps
+                        // the beat it last measured instead.
+                        self.seen_edge = false;
+                    }
+                }
             }
         }
         if reload {
@@ -543,8 +580,10 @@ impl HostModule for GridTrackRtModule {
             }
             self.last_reset = reset[s];
 
-            self.since_clock += 1.0;
-            if clock[s] >= 1.0 && self.last_clock < 1.0 {
+            if self.running {
+                self.since_clock += 1.0;
+            }
+            if clock[s] >= 1.0 && self.last_clock < 1.0 && self.running {
                 if self.seen_edge && self.since_clock <= MAX_INTERVAL_SECS * self.engine_rate {
                     self.interval = self.since_clock.max(2.0);
                 } else if self.interval <= 0.0 && self.program.start_bpm > 0.0 {
@@ -578,12 +617,13 @@ impl HostModule for GridTrackRtModule {
             }
             self.last_clock = clock[s];
 
-            if self.started && self.interval > 0.0 {
+            if self.started && self.running && self.interval > 0.0 {
                 self.pos = self.anchor + (self.since_clock as f64) / self.interval as f64;
             }
 
             // Copies the position has just entered take a voice.
             while self.started
+                && self.running
                 && self.next_copy < self.program.copies.len()
                 && self.program.copies[self.next_copy] - lead_beats <= self.pos
             {

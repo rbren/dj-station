@@ -8,6 +8,8 @@
 //!   the clips are laid — in ABSOLUTE grid columns, so a row's copy at
 //!   column 4 is heard on the fifth beat and nowhere else,
 //! - a cue plays FROM that column,
+//! - a pause silences the rows and not only the clock — a row interpolates
+//!   between clock edges, so stopping the clock alone left it playing on,
 //! - the play range wraps back to its own start, not to zero,
 //! - a row edited under a running transport is heard changed without the
 //!   transport moving,
@@ -158,6 +160,80 @@ fn the_play_range_wraps_to_its_own_start() {
         (4.0..8.0).contains(&beat),
         "wrapped inside the range: {beat}"
     );
+}
+
+#[test]
+fn pausing_the_transport_stops_the_sound() {
+    // Copies end to end, so the row is sounding whatever beat the pause
+    // lands on. A row interpolates its position BETWEEN clock edges, so a
+    // clock that simply stops pulsing left it free-running at the last
+    // measured tempo: the page's pause went quiet on screen while the
+    // audio played on.
+    let mut e = session(row_program(vec![0.0, 2.0, 4.0, 6.0], (0.0, 8.0)));
+    e.clock_set_program("gridclock", clock_program((0.0, 8.0), 0.0))
+        .unwrap();
+    e.grid_track_transport("gridrow_row1", true).unwrap();
+    e.clock_transport("gridclock", true, true).unwrap();
+    assert!(!sounding(&beats(&mut e, 2)).is_empty(), "playing sounds");
+
+    // Pause, exactly as `grid_transport { playing: false }` sends it.
+    e.grid_track_transport("gridrow_row1", false).unwrap();
+    e.clock_transport("gridclock", false, false).unwrap();
+    let peaks = beats(&mut e, 4);
+    assert!(sounding(&peaks).is_empty(), "paused is silent: {peaks:?}");
+    assert!(!e.grid_track_status("gridrow_row1").unwrap().playing);
+}
+
+#[test]
+fn an_edit_made_while_paused_stays_silent() {
+    // The page syncs after every keystroke, so a paused grid is edited
+    // through the same call a playing one is. Re-deriving the voices in
+    // flight must not be what starts the sound again.
+    let mut e = session(row_program(vec![0.0, 2.0, 4.0, 6.0], (0.0, 8.0)));
+    e.clock_set_program("gridclock", clock_program((0.0, 8.0), 0.0))
+        .unwrap();
+    e.clock_transport("gridclock", true, true).unwrap();
+    assert!(!sounding(&beats(&mut e, 2)).is_empty());
+
+    e.grid_track_transport("gridrow_row1", false).unwrap();
+    e.clock_transport("gridclock", false, false).unwrap();
+    e.grid_track_set_program(
+        "gridrow_row1",
+        row_program(vec![0.0, 2.0, 4.0, 6.0, 7.0], (0.0, 8.0)),
+    )
+    .unwrap();
+    let peaks = beats(&mut e, 4);
+    assert!(sounding(&peaks).is_empty(), "still paused: {peaks:?}");
+}
+
+#[test]
+fn play_after_a_pause_sounds_again() {
+    // Pause must hold the row, not retire it: the page cues the next play
+    // and every row has to come back in on it.
+    let mut e = session(row_program(vec![0.0, 2.0, 4.0, 6.0], (0.0, 8.0)));
+    e.clock_set_program("gridclock", clock_program((0.0, 8.0), 0.0))
+        .unwrap();
+    e.clock_transport("gridclock", true, true).unwrap();
+    assert!(!sounding(&beats(&mut e, 2)).is_empty());
+
+    e.grid_track_transport("gridrow_row1", false).unwrap();
+    e.clock_transport("gridclock", false, false).unwrap();
+    assert!(sounding(&beats(&mut e, 2)).is_empty());
+
+    // Play from column 4, the cue the page sends with a start.
+    e.grid_track_set_program(
+        "gridrow_row1",
+        GridTrackProgram {
+            start_beat: 4.0,
+            ..row_program(vec![0.0, 2.0, 4.0, 6.0], (0.0, 8.0))
+        },
+    )
+    .unwrap();
+    e.grid_track_transport("gridrow_row1", true).unwrap();
+    e.clock_set_program("gridclock", clock_program((0.0, 8.0), 4.0))
+        .unwrap();
+    e.clock_transport("gridclock", true, true).unwrap();
+    assert!(!sounding(&beats(&mut e, 2)).is_empty(), "resumes sounding");
 }
 
 #[test]

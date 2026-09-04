@@ -291,22 +291,30 @@ pub fn grid_transport(
         // Nothing has been synced yet: there is no session to run.
         return Ok(());
     }
+    let rows: Vec<String> = engine
+        .nodes
+        .iter()
+        .filter(|n| n.ext_id == GRID_TRACK_ID && n.workspace == Workspace::Grid)
+        .map(|n| n.instance_id.clone())
+        .collect();
     if let Some(from) = from {
         engine.clock_set_start(CLOCK, from).map_err(err)?;
-        let rows: Vec<String> = engine
-            .nodes
-            .iter()
-            .filter(|n| n.ext_id == GRID_TRACK_ID && n.workspace == Workspace::Grid)
-            .map(|n| n.instance_id.clone())
-            .collect();
-        for instance in rows {
-            let mut program = engine.grid_track_program(&instance).map_err(err)?;
+        for instance in &rows {
+            let mut program = engine.grid_track_program(instance).map_err(err)?;
             program.start_beat = from;
             program.start_bpm = start_bpm.unwrap_or(0.0);
             engine
-                .grid_track_set_program(&instance, program)
+                .grid_track_set_program(instance, program)
                 .map_err(err)?;
         }
+    }
+    // THE ROWS ARE TOLD, NOT ONLY THE CLOCK. A row interpolates its
+    // position between clock edges, so a clock that stops pulsing reads to
+    // it as a clock between beats and it plays on for ever. Everything
+    // lands in one block, so the hold and the stopped clock are one
+    // moment on the audio clock, as a cue is.
+    for instance in &rows {
+        engine.grid_track_transport(instance, playing).map_err(err)?;
     }
     engine
         .clock_transport(CLOCK, playing, from.is_some())

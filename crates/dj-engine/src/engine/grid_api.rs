@@ -45,6 +45,18 @@ impl Engine {
             .map_err(|_| anyhow!("too many pending grid programs"))
     }
 
+    /// Run or hold a row. Transport, not program state: a row reads its
+    /// position BETWEEN the clock's edges, so a clock that has stopped
+    /// pulsing does not stop it — this does, and a Grid pause sends it
+    /// alongside [`Engine::clock_transport`].
+    pub fn grid_track_transport(&mut self, instance_id: &str, running: bool) -> Result<()> {
+        let node = self.grid_track_node(instance_id)?;
+        let ctl = self.grid_tracks.get_mut(&node).unwrap();
+        ctl.tx
+            .push(GridTrackCmd::Transport { running })
+            .map_err(|_| anyhow!("too many pending grid track commands"))
+    }
+
     /// Hand a row the audio its clip assembles to. `bpm` is the tempo the
     /// clip was rendered at, which is what one of its beats means.
     pub fn grid_track_load(
