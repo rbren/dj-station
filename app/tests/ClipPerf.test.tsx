@@ -112,6 +112,7 @@ function clipMock(n: number): ClipClientApi {
       detail: '',
       seeds: [],
     })),
+    trackBeats: vi.fn(async () => null),
     saveBeatClip: vi.fn(async () => null),
     openBeatClip: vi.fn(async () => null),
     stemBackend: vi.fn(async () => ({
