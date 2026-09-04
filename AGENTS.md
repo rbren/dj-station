@@ -188,6 +188,9 @@ These are the rules that must hold everywhere.
   `clip.rs`, `beat_clip.rs`, `launch_control.rs`); `main.rs` keeps only
   the shell: AppState, undo/patch plumbing, rack graph edits, audio
   device commands. New commands go in the matching domain file.
+- At library startup, tracks whose full-track beat cache is absent or unreadable
+  are requeued through the existing single-track analysis worker; valid caches
+  and already queued tracks are left alone, making cache backfill resumable.
 - ALL persistent state roots in ONE directory resolved by
   `dj_library::paths` (`custom/` in the repo checkout, overridable with
   `DJ_STATION_DATA_DIR`). New state goes UNDER that dir — never a fresh
