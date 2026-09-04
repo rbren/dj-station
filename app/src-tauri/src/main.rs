@@ -1707,6 +1707,14 @@ fn main() {
     // Provider downloads run on their own threads (yt-dlp fetches take
     // seconds to minutes) and report progress into a polled snapshot.
     let downloads = dj_library::DownloadManager::new(library.clone(), hub.clone());
+    // Historical tracks from before full-track beat caching are sent through
+    // the same one-at-a-time worker as new imports. Existing cache files are
+    // left alone, and any queued work survives a restart.
+    match dj_analysis::queue_missing_track_beats(&library) {
+        Ok(queued) if queued > 0 => eprintln!("[dj-analysis] queued {queued} historical beat grid(s)"),
+        Ok(_) => {}
+        Err(e) => eprintln!("[dj-analysis] historical beat-grid scan failed: {e:#}"),
+    }
     // M3: background analysis worker. Defaults to the DSP stem separator;
     // an ONNX model can be swapped in via the `onnx` feature of
     // dj-analysis (CoreML EP on macOS, CPU EP elsewhere).

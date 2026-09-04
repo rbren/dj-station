@@ -69,8 +69,8 @@ pub use stems::{
     DEFAULT_SEPARATOR_ID, LEGACY_STEM_EXT, N_STEMS, STEM_EXT, STEM_NAMES,
 };
 pub use track_beats::{
-    analyze_track_beats, load_track_beats, select_track_seed, set_downbeat_ratio,
-    toggle_track_downbeat, TrackBeatAnalysis, TrackBeatSeed,
+    analyze_track_beats, load_track_beats, queue_missing_track_beats, select_track_seed,
+    set_downbeat_ratio, toggle_track_downbeat, TrackBeatAnalysis, TrackBeatSeed,
 };
 pub use worker::{start_worker, AnalysisSettings, AnalysisWorker};
 

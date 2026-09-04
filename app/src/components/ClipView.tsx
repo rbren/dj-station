@@ -147,6 +147,10 @@ import { ClipSelectionPane } from './ClipSelectionPane';
 import { WAVEFORM_VIEW_W as W } from './WaveformView';
 
 const WAVE_H = 120;
+/** Source-grid flags sit above, rather than over, the audio they annotate. */
+const SOURCE_FLAG_HEAD = 12;
+const SOURCE_FLAG_TICK = 5;
+const SOURCE_FLAG_W = 3;
 /** The selection pane's waveform: shorter than the source track's, which
  *  is the one you cut against. */
 const SEL_WAVE_H = 96;
@@ -1037,13 +1041,14 @@ export function ClipView({
     [regenerate, tapSession, tunable],
   );
 
-  /** Replace the source overlay with persisted analysis metadata. */
+  /** Replace the source overlay with persisted analysis metadata. This changes
+   *  markers and snapping only; the source audio's warp must keep playing. */
   const applyTrackBeats = useCallback((analysis: TrackBeatAnalysis) => {
     const grid = trackBeatGrid(analysis);
     if (!grid) return;
     setTrackBeats(analysis);
     setTapSession(null);
-    setProgram((present) => ({ ...present, warp: [], beat_grid: grid }));
+    setProgram((present) => ({ ...present, beat_grid: grid }));
     setSelection((current) =>
       current ? quantizeRange(grid, current, programDuration(live.current.program)) : current,
     );
@@ -1612,9 +1617,9 @@ export function ClipView({
         // A beat, tapped at the playhead — during playback only, and read
         // LIVE off the sounding source (whichever owns it): the status
         // playhead only advances on a tick, far too coarse for a tapped
-        // beat. LEFT shift is the same gesture for a ONE: it is kept in
-        // its own list and never becomes a beat, since the beat it means
-        // is whichever right-shift tap it landed nearest.
+        // beat. With persisted source analysis, LEFT shift is assigned to
+        // its nearest source beat immediately; the older tap session keeps
+        // its pending-one behavior until it has a grid to attach to.
         const player = liveRef.current;
         const transport = transportRef.current;
         const at =
@@ -1627,6 +1632,12 @@ export function ClipView({
           if (e.code === 'ShiftRight') {
             tapRun.current = [...tapRun.current, at];
             setTaps(tapRun.current);
+          } else if (trackBeats) {
+            const sourceGrid = trackBeatGrid(trackBeats);
+            if (sourceGrid) {
+              const index = sourceGrid.times.indexOf(nearestBeat(sourceGrid, at));
+              if (index >= 0) void toggleTrackDownbeat(index);
+            }
           } else {
             oneRun.current = [...oneRun.current, at];
             setOneTaps(oneRun.current);
@@ -1640,7 +1651,7 @@ export function ClipView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, liveOn, redo, sel, togglePlay, undo]);
+  }, [active, liveOn, redo, sel, togglePlay, toggleTrackDownbeat, trackBeats, undo]);
 
   // --- the beat grid, and what the save row says ---------------------------
   //
@@ -2088,6 +2099,7 @@ export function ClipView({
             duration={duration}
             peaks={peaks}
             waveHeight={WAVE_H}
+            overlayHeadroom={trackBeats ? SOURCE_FLAG_HEAD : 0}
             vp={vp}
             onVpChange={setVp}
             selection={selection}
@@ -2158,6 +2170,10 @@ export function ClipView({
                       <title>{stretchTitle(b.ratio)}</title>
                     </rect>
                   ))}
+              </>
+            )}
+            renderOver={(xOf) => (
+              <>
                 {grid &&
                   gridBeatTimes(grid, vpStart, vpEnd).map((t, i) => (
                     <line
@@ -2168,17 +2184,7 @@ export function ClipView({
                       x2={xOf(t)}
                       y1={0}
                       y2={WAVE_H}
-                      onMouseDown={
-                        trackBeats
-                          ? (event) => {
-                              event.stopPropagation();
-                              void toggleTrackDownbeat(grid.times.indexOf(t));
-                            }
-                          : undefined
-                      }
-                    >
-                      {trackBeats && <title>Click to restart downbeats here</title>}
-                    </line>
+                    />
                   ))}
                 {grid &&
                   gridOneTimes(grid, vpStart, vpEnd).map((t, i) => (
@@ -2190,18 +2196,42 @@ export function ClipView({
                       x2={xOf(t)}
                       y1={0}
                       y2={WAVE_H}
-                      onMouseDown={
-                        trackBeats
-                          ? (event) => {
-                              event.stopPropagation();
-                              void toggleTrackDownbeat(grid.times.indexOf(t));
-                            }
-                          : undefined
-                      }
                     >
-                      <title>{trackBeats ? 'Click to restart downbeats here' : 'the one'}</title>
+                      <title>downbeat</title>
                     </line>
                   ))}
+                {trackBeats &&
+                  grid &&
+                  [
+                    ...new Set([
+                      ...gridBeatTimes(grid, vpStart, vpEnd),
+                      ...gridOneTimes(grid, vpStart, vpEnd),
+                    ]),
+                  ]
+                    .sort((a, b) => a - b)
+                    .map((t, i) => {
+                      const index = grid.times.indexOf(t);
+                      const one = grid.ones?.includes(index);
+                      const x = xOf(t);
+                      return (
+                        <polygon
+                          key={`source-flag${i}`}
+                          data-testid={one ? 'clip-source-one-flag' : 'clip-source-beat-flag'}
+                          className={one ? 'clip-source-beat-flag is-one' : 'clip-source-beat-flag'}
+                          points={`${x - SOURCE_FLAG_W},${-SOURCE_FLAG_HEAD} ${x + SOURCE_FLAG_W},${-SOURCE_FLAG_HEAD} ${x},${-SOURCE_FLAG_TICK}`}
+                          onMouseDown={(event) => {
+                            event.stopPropagation();
+                            void toggleTrackDownbeat(index);
+                          }}
+                        >
+                          <title>
+                            {one
+                              ? 'downbeat — click to restart its count here'
+                              : 'click to restart downbeats here'}
+                          </title>
+                        </polygon>
+                      );
+                    })}
                 {taps.map((t, i) => (
                   <line
                     key={`tap${i}`}

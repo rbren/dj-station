@@ -126,6 +126,8 @@ export interface AudioTimelineProps {
   /** Peak per bucket, 0..=1, spanning the whole `duration`. */
   peaks: number[];
   waveHeight: number;
+  /** ViewBox headroom above the waveform for interactive overlay markers. */
+  overlayHeadroom?: number;
   /** Zoomed viewport; null = the whole clip. Controlled by the parent so
    *  siblings (Clip's level lane) can share the window. */
   vp: Range | null;
@@ -186,6 +188,7 @@ export function AudioTimeline({
   duration,
   peaks,
   waveHeight: H,
+  overlayHeadroom = 0,
   vp,
   onVpChange,
   selection,
@@ -511,7 +514,7 @@ export function AudioTimeline({
           ref={waveRef}
           data-testid={`${p}-waveform`}
           className={`clip-waveform ${p}-waveform`}
-          viewBox={`0 0 ${W} ${H}`}
+          viewBox={`0 ${-overlayHeadroom} ${W} ${H + overlayHeadroom}`}
           preserveAspectRatio="none"
           data-vp-start={fixed(vpStart, 3)}
           data-vp-end={fixed(vpEnd, 3)}

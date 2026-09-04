@@ -98,6 +98,29 @@ pub fn load_track_beats(data_dir: &Path, content_hash: &str) -> Result<Option<Tr
     Ok(Some(result))
 }
 
+/// Queue historical tracks whose full-track beat cache is absent or unreadable.
+///
+/// The existing analysis worker processes this queue one track at a time. A
+/// shutdown leaves untouched entries as `queued`, so the scan resumes on the
+/// next launch without reprocessing caches that were already written.
+pub fn queue_missing_track_beats(library: &dj_library::Library) -> Result<usize> {
+    let mut queued = 0;
+    for track in library.tracks()? {
+        if track.analysis_status != "done" {
+            continue;
+        }
+        let missing = !matches!(
+            load_track_beats(library.data_dir(), &track.content_hash),
+            Ok(Some(analysis)) if !analysis.seeds.is_empty()
+        );
+        if missing {
+            library.requeue_analysis(track.id)?;
+            queued += 1;
+        }
+    }
+    Ok(queued)
+}
+
 /// Choose a cached seed and persist the choice.
 pub fn select_track_seed(
     data_dir: &Path,
@@ -193,6 +216,7 @@ fn refresh_ones(seed: &mut TrackBeatSeed, ratio: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dj_library::{ImportOptions, Library};
 
     struct TestTracker;
 
@@ -216,6 +240,57 @@ mod tests {
         }
     }
 
+    fn historical_track(library: &Library, path: &Path, sample: i16) -> dj_library::Track {
+        let mut wav = hound::WavWriter::create(
+            path,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: 100,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for _ in 0..600 {
+            wav.write_sample(sample).unwrap();
+        }
+        wav.finalize().unwrap();
+        let track = library
+            .import_file(path, ImportOptions::default())
+            .unwrap()
+            .track()
+            .clone();
+        library.set_analysis_status(track.id, "done").unwrap();
+        track
+    }
+
+    #[test]
+    fn queues_only_historical_tracks_missing_a_beat_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let library = Library::open(tmp.path()).unwrap();
+        let cached = historical_track(&library, &tmp.path().join("cached.wav"), 1);
+        let missing = historical_track(&library, &tmp.path().join("missing.wav"), 2);
+        let queued = historical_track(&library, &tmp.path().join("already-queued.wav"), 3);
+        library.requeue_analysis(queued.id).unwrap();
+        let audio = AudioData {
+            channels: vec![vec![0.0; 600]],
+            sample_rate: 100,
+        };
+        analyze_track_beats(
+            library.data_dir(),
+            &cached.content_hash,
+            &audio,
+            &TestTracker,
+        )
+        .unwrap();
+
+        assert_eq!(queue_missing_track_beats(&library).unwrap(), 1);
+        assert_eq!(library.analysis_queue().unwrap()[0].id, missing.id);
+        // The missing track remains queued across a restart scan rather than
+        // being duplicated, while completed cached tracks stay untouched.
+        assert_eq!(queue_missing_track_beats(&library).unwrap(), 0);
+        assert_eq!(library.analysis_queue().unwrap()[0].id, missing.id);
+    }
     #[test]
     fn saves_all_seeds_and_restarts_downbeats_from_an_anchor() {
         let tmp = tempfile::tempdir().unwrap();

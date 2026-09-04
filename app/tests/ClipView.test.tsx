@@ -14,6 +14,7 @@ import type {
   ClipRequest,
   ClipSource,
   TrackBeatAnalysis,
+  TrackBeatSeed,
 } from '../src/clip';
 import { closeAudio } from '../src/clipAudio';
 import type { LibraryClientApi, Track } from '../src/library';
@@ -91,6 +92,16 @@ const TRACK_BEATS: TrackBeatAnalysis = {
     },
   ],
 };
+
+function derivedDownbeats(seed: TrackBeatSeed, ratio: number): number[] {
+  const anchors = [0, ...(seed.downbeats ?? [])].sort((a, b) => a - b);
+  const ones: number[] = [];
+  for (let i = 0; i < anchors.length; i += 1) {
+    const end = anchors[i + 1] ?? seed.times.length;
+    for (let beat = anchors[i]; beat < end; beat += ratio) ones.push(beat);
+  }
+  return ones;
+}
 
 function libraryMock(): LibraryClientApi {
   return {
@@ -472,7 +483,7 @@ describe('ClipView', () => {
     );
   });
 
-  it('overlays cached full-track seeds, uses playback taps to choose one, and restarts downbeats', async () => {
+  it('overlays cached full-track seeds, edits source downbeats, and uses playback taps to choose one', async () => {
     let analysis = structuredClone(TRACK_BEATS);
     const clip = clipMock({
       trackBeats: vi.fn(async () => analysis),
@@ -481,17 +492,27 @@ describe('ClipView', () => {
         return analysis;
       }),
       setDownbeatRatio: vi.fn(async (_trackId: number, ratio: number) => {
-        analysis = { ...analysis, downbeatRatio: ratio };
+        analysis = {
+          ...analysis,
+          downbeatRatio: ratio,
+          seeds: analysis.seeds.map((seed) => ({ ...seed, ones: derivedDownbeats(seed, ratio) })),
+        };
         return analysis;
       }),
       toggleTrackDownbeat: vi.fn(async (_trackId: number, seed: string, index: number) => {
         analysis = {
           ...analysis,
-          seeds: analysis.seeds.map((candidate) =>
-            candidate.seed === seed
-              ? { ...candidate, downbeats: [index], ones: [0, 4, index, index + 4] }
-              : candidate,
-          ),
+          seeds: analysis.seeds.map((candidate) => {
+            if (candidate.seed !== seed) return candidate;
+            const downbeats = candidate.downbeats?.includes(index)
+              ? candidate.downbeats.filter((beat) => beat !== index)
+              : [...(candidate.downbeats ?? []), index];
+            return {
+              ...candidate,
+              downbeats,
+              ones: derivedDownbeats({ ...candidate, downbeats }, analysis.downbeatRatio),
+            };
+          }),
         };
         return analysis;
       }),
@@ -499,8 +520,11 @@ describe('ClipView', () => {
     await openTrack(clip);
 
     expect(clip.trackBeats).toHaveBeenCalledWith(TRACK.id);
+    expect(screen.getByTestId('clip-waveform').getAttribute('viewBox')).toBe('0 -12 1000 132');
     expect(screen.getAllByTestId('clip-beat-line')).toHaveLength(20);
     expect(screen.getAllByTestId('clip-one-line')).toHaveLength(5);
+    expect(screen.getAllByTestId('clip-source-beat-flag')).toHaveLength(15);
+    expect(screen.getAllByTestId('clip-source-one-flag')).toHaveLength(5);
     expect((screen.getByTestId('clip-downbeat-ratio') as HTMLInputElement).value).toBe('4');
 
     fireEvent.change(screen.getByTestId('clip-track-grid-seed'), { target: { value: 'final1' } });
@@ -509,7 +533,7 @@ describe('ClipView', () => {
 
     fireEvent.change(screen.getByTestId('clip-downbeat-ratio'), { target: { value: '3' } });
     await waitFor(() => expect(clip.setDownbeatRatio).toHaveBeenCalledWith(TRACK.id, 3));
-    fireEvent.mouseDown(screen.getAllByTestId('clip-beat-line')[5]);
+    fireEvent.mouseDown(screen.getAllByTestId('clip-source-beat-flag')[3]);
     await waitFor(() =>
       expect(clip.toggleTrackDownbeat).toHaveBeenCalledWith(TRACK.id, 'final1', 5),
     );
@@ -517,6 +541,11 @@ describe('ClipView', () => {
 
     fireEvent.click(screen.getByTestId('clip-play'));
     await waitFor(() => expect(screen.getByTestId('clip-play').textContent).toBe('❚❚'));
+    oneAt(1.02);
+    await waitFor(() =>
+      expect(clip.toggleTrackDownbeat).toHaveBeenLastCalledWith(TRACK.id, 'final1', 1),
+    );
+    await waitFor(() => expect(screen.getAllByTestId('clip-one-line')).toHaveLength(5));
     tapAt(1.02);
     tapAt(2.01);
     tapAt(2.98);

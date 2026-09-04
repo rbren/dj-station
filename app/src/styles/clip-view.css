@@ -261,9 +261,27 @@
 }
 
 .clip-beat-line {
-  stroke: var(--ink-dim);
+  stroke: var(--cue);
   stroke-width: 1;
-  opacity: 0.6;
+  opacity: 0.8;
+}
+
+/* The source track's smaller version of the selection-pane beat flags:
+   their tips join the beat marker, and a filled green one is a downbeat. */
+.clip-source-beat-flag {
+  fill: none;
+  stroke: var(--cue);
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.clip-source-beat-flag.is-one {
+  fill: var(--ok);
+  stroke: var(--ok);
+}
+
+.clip-source-beat-flag:hover {
+  stroke: var(--ok);
 }
 
 /* The ONE: a beat marked with left-shift, drawn over its hairline so the
