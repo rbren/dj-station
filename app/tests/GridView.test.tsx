@@ -330,6 +330,52 @@ describe('GridView', () => {
     await waitFor(() => expect(play).toHaveBeenCalled());
   });
 
+  it('treats consecutive space presses as play then pause', async () => {
+    const transport = new EngineGridPlayer();
+    const pause = vi.spyOn(transport, 'pause');
+    render(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
+    await screen.findByTestId('grid-view');
+
+    fireEvent.keyDown(window, { key: ' ' });
+    fireEvent.keyDown(window, { key: ' ' });
+
+    expect(pause).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('grid-play').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('ignores held-space repeats', async () => {
+    const transport = new EngineGridPlayer();
+    const play = vi.spyOn(transport, 'play');
+    render(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
+    await screen.findByTestId('grid-view');
+
+    fireEvent.keyDown(window, { key: ' ' });
+    fireEvent.keyDown(window, { key: ' ', repeat: true });
+
+    expect(play).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('grid-play').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('shows the transport stopped immediately after returning to the Grid tab', async () => {
+    const transport = new EngineGridPlayer();
+    const { rerender } = render(
+      <GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />,
+    );
+    await screen.findByTestId('grid-view');
+    fireEvent.click(screen.getByTestId('grid-play'));
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-play').getAttribute('aria-pressed')).toBe('true'),
+    );
+
+    rerender(
+      <GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active={false} />,
+    );
+    rerender(<GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />);
+
+    expect(screen.getByTestId('grid-play').getAttribute('aria-pressed')).toBe('false');
+    expect((screen.getByTestId('grid-pause') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   // A typed field owns the keyboard while it has focus: space in the bpm
   // box is a space, not a transport command.
   it('leaves the transport keys alone while a field is focused', async () => {

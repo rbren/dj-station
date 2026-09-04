@@ -403,6 +403,18 @@ export function GridView(props: GridViewProps) {
     playing: false,
     column: 0,
   });
+  // React state commits after the event that requested it. Controls need
+  // this synchronously too: two space keydowns in one commit must be a
+  // play then a pause, never two plays from the same stale render.
+  const playback = useRef(playhead);
+  const setPlayback = useCallback((next: { playing: boolean; column: number }) => {
+    playback.current = next;
+    setPlayhead((prev) =>
+      prev.playing === next.playing && Math.floor(prev.column) === Math.floor(next.column)
+        ? prev
+        : next,
+    );
+  }, []);
   const transport = useMemo(() => props.transport ?? new EngineGridPlayer(), [props.transport]);
   /** The loop drag in flight: the edge held STILL, and whether the
    *  pointer has moved off the column it was pressed on. */
@@ -631,21 +643,19 @@ export function GridView(props: GridViewProps) {
   useEffect(() => {
     if (!active) return;
     const timer = setInterval(() => {
-      const status = transport.status();
-      setPlayhead((prev) =>
-        prev.playing === status.playing && Math.floor(prev.column) === Math.floor(status.column)
-          ? prev
-          : status,
-      );
+      setPlayback(transport.status());
     }, props.pollMs ?? POLL_MS);
     return () => clearInterval(timer);
-  }, [active, transport, props.pollMs]);
+  }, [active, transport, props.pollMs, setPlayback]);
 
   // Leaving the page stops the sound: the grid is a page you edit, not a
   // deck the room is listening to.
   useEffect(() => {
-    if (!active) transport.stop();
-  }, [active, transport]);
+    if (!active) {
+      transport.stop();
+      setPlayback({ ...playback.current, playing: false });
+    }
+  }, [active, transport, setPlayback]);
 
   // EVERY FINISHED EDIT REACHES THE TRANSPORT. This is what makes the
   // grid live: the transport decides for itself what a given change
@@ -888,40 +898,37 @@ export function GridView(props: GridViewProps) {
     (from?: number) => {
       const at = clampTo(from ?? range.start, cursor);
       void transport.play(grid, byId, columns, at);
-      setPlayhead({ playing: true, column: at });
+      setPlayback({ playing: true, column: at });
     },
-    [transport, grid, byId, columns, range, cursor],
+    [transport, grid, byId, columns, range, cursor, setPlayback],
   );
 
   /** Pause keeps the place; the next play resumes from it. */
   const pause = useCallback(() => {
     const at = transport.pause();
-    setPlayhead({ playing: false, column: at });
-  }, [transport]);
+    setPlayback({ playing: false, column: at });
+  }, [transport, setPlayback]);
 
   const toggle = useCallback(() => {
-    if (playhead.playing) pause();
-    else play(playhead.column);
-  }, [playhead.playing, playhead.column, pause, play]);
+    if (playback.current.playing) pause();
+    else play(playback.current.column);
+  }, [pause, play]);
 
   /** Put the playhead on `col`, playing or not: a seek while the music
    *  runs re-cues there, which is what a scrub means. */
   const seekTo = useCallback(
     (col: number) => {
       const at = clampTo(col, cursor);
-      if (playhead.playing) play(at);
+      if (playback.current.playing) play(at);
       else {
         transport.seek(at);
-        setPlayhead({ playing: false, column: at });
+        setPlayback({ playing: false, column: at });
       }
     },
-    [playhead.playing, cursor, play, transport],
+    [cursor, play, transport, setPlayback],
   );
 
-  const seekBy = useCallback(
-    (delta: number) => seekTo(playhead.column + delta),
-    [playhead.column, seekTo],
-  );
+  const seekBy = useCallback((delta: number) => seekTo(playback.current.column + delta), [seekTo]);
 
   const copy = useCallback(() => {
     if (selection) setBoard(copySelection(grid, byId, selection));
@@ -972,9 +979,9 @@ export function GridView(props: GridViewProps) {
       setSaved(null);
       setSelection(null);
       setDialog(null);
-      setPlayhead({ playing: false, column: 0 });
+      setPlayback({ playing: false, column: 0 });
     });
-  }, [guard, transport]);
+  }, [guard, transport, setPlayback]);
 
   const doOpen = useCallback(() => {
     guard('Open another grid', () => {
@@ -993,14 +1000,14 @@ export function GridView(props: GridViewProps) {
         setName(which);
         setSaved(JSON.stringify(toDocument(state)));
         setSelection(null);
-        setPlayhead({ playing: false, column: 0 });
+        setPlayback({ playing: false, column: 0 });
       } catch {
         // A file that will not parse is left alone rather than replacing
         // what the user has; the dialog simply closes.
       }
       setDialog(null);
     },
-    [clipApi, transport],
+    [clipApi, transport, setPlayback],
   );
 
   /** The column a page-x sits on in the RULER, whatever the pointer is
@@ -1120,7 +1127,7 @@ export function GridView(props: GridViewProps) {
       const key = e.key.toLowerCase();
       if (e.key === ' ') {
         e.preventDefault();
-        toggle();
+        if (!e.repeat) toggle();
       } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
         const back = e.key === 'ArrowLeft';
@@ -1341,7 +1348,7 @@ export function GridView(props: GridViewProps) {
             aria-pressed={playing}
             aria-label="Play"
             title={`Play (${playing ? 'playing' : 'space'})`}
-            onClick={() => play(playhead.column)}
+            onClick={() => play(playback.current.column)}
           >
             <PlayIcon />
           </button>

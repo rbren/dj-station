@@ -153,6 +153,20 @@ describe('EngineGridPlayer', () => {
     expect(player.status()).toEqual({ playing: false, column: 6.5 });
   });
 
+  it('orders a pause after the pending play it cancels', async () => {
+    const calls = record();
+    const player = new EngineGridPlayer();
+    const playing = player.play(grid(), CLIPS, 32, 0);
+    player.pause();
+    await playing;
+    await flush();
+
+    // Sync must finish first, but the start it was preparing is stale.
+    // The final engine command is the pause, never a late play.
+    expect(calls.map(([cmd]) => cmd)).toEqual(['grid_status', 'grid_sync', 'grid_transport']);
+    expect(calls[2][1]).toEqual({ playing: false });
+  });
+
   it('takes the session down with it', async () => {
     const calls = record();
     const player = new EngineGridPlayer();

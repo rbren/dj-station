@@ -120,16 +120,27 @@ export class EngineGridPlayer extends IpcClient implements GridPlayer {
   /** The last document the engine was given, to skip a sync that says
    *  nothing new — the page calls `update` after every keystroke. */
   #synced = '';
-  /** Syncs are serialized: one in flight at a time, the newest document
-   *  waiting behind it. A decode can take a moment and the engine lock
-   *  is one. */
-  #inflight: Promise<unknown> = Promise.resolve();
+  /** Every session command shares this queue. Sync can decode and take the
+   *  engine lock, so a pause must wait behind the play it cancels rather
+   *  than overtake it and leave the clock running. */
+  #commands: Promise<void> = Promise.resolve();
   /** What the page has ASKED for, which wins over a status reading taken
    *  before the command landed. */
   #playing = false;
   #column = 0;
+  /** Every transport gesture invalidates a delayed play or status reading. */
+  #intent = 0;
   #polling = false;
   #disposed = false;
+
+  #enqueue(command: () => Promise<unknown>): Promise<void> {
+    const next = this.#commands.then(command).then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#commands = next;
+    return next;
+  }
 
   update(state: GridState, clips: ReadonlyMap<string, BeatClipEntry>, columns: number): void {
     void this.#sync(state, clips, columns);
@@ -139,14 +150,13 @@ export class EngineGridPlayer extends IpcClient implements GridPlayer {
     state: GridState,
     clips: ReadonlyMap<string, BeatClipEntry>,
     columns: number,
-  ): Promise<unknown> {
-    if (this.#disposed) return Promise.resolve();
+  ): Promise<void> {
+    if (this.#disposed) return this.#commands;
     const doc = syncDoc(state, clips, columns);
     const json = JSON.stringify(doc);
-    if (json === this.#synced) return this.#inflight;
+    if (json === this.#synced) return this.#commands;
     this.#synced = json;
-    this.#inflight = this.#inflight.then(() => this.call<null>('grid_sync', { doc }));
-    return this.#inflight;
+    return this.#enqueue(() => this.call<null>('grid_sync', { doc }));
   }
 
   async play(
@@ -157,34 +167,41 @@ export class EngineGridPlayer extends IpcClient implements GridPlayer {
   ): Promise<void> {
     this.#playing = true;
     this.#column = from;
+    const intent = ++this.#intent;
     await this.#sync(state, clips, columns);
-    if (this.#disposed) return;
-    await this.call<null>('grid_transport', {
-      playing: true,
-      from,
-      // The tempo the cue sits at, read off the same envelope the lane
-      // draws: it is what lets every row come in ON the first beat.
-      startBpm: bpmAt(state.tempo, from),
-    });
+    if (this.#disposed || intent !== this.#intent || !this.#playing) return;
+    await this.#enqueue(() =>
+      this.call<null>('grid_transport', {
+        playing: true,
+        from,
+        // The tempo the cue sits at, read off the same envelope the lane
+        // draws: it is what lets every row come in ON the first beat.
+        startBpm: bpmAt(state.tempo, from),
+      }),
+    );
   }
 
   pause(): number {
     const at = this.status().column;
     this.#playing = false;
     this.#column = at;
-    void this.call<null>('grid_transport', { playing: false });
+    ++this.#intent;
+    void this.#enqueue(() => this.call<null>('grid_transport', { playing: false }));
     return at;
   }
 
   stop(): void {
     this.#playing = false;
-    void this.call<null>('grid_transport', { playing: false });
+    ++this.#intent;
+    void this.#enqueue(() => this.call<null>('grid_transport', { playing: false }));
   }
 
   seek(column: number): void {
     const at = Math.max(0, column);
     this.#column = at;
-    void this.call<null>('grid_transport', { playing: this.#playing, from: at });
+    const playing = this.#playing;
+    ++this.#intent;
+    void this.#enqueue(() => this.call<null>('grid_transport', { playing, from: at }));
   }
 
   status(): GridPlayback {
@@ -192,17 +209,18 @@ export class EngineGridPlayer extends IpcClient implements GridPlayer {
     return { playing: this.#playing, column: this.#column };
   }
 
-  /** One reading, at most one in flight. A reading taken while the page
-   *  and the engine disagree about whether the transport is running is a
-   *  reading from before the command landed, and is dropped. */
+  /** One reading, at most one in flight. A reading superseded by a
+   *  transport gesture, or one that disagrees about whether it is running,
+   *  is from before the command landed and is dropped. */
   async #poll(): Promise<void> {
     if (this.#polling || this.#disposed) return;
     this.#polling = true;
+    const intent = this.#intent;
     try {
       const status = await this.call<{ beat: number; playing: boolean }>('grid_status', undefined, {
         quiet: true,
       });
-      if (!status || status.playing !== this.#playing) return;
+      if (!status || intent !== this.#intent || status.playing !== this.#playing) return;
       this.#column = status.beat;
     } finally {
       this.#polling = false;
@@ -215,8 +233,9 @@ export class EngineGridPlayer extends IpcClient implements GridPlayer {
   forget(): void {}
 
   dispose(): void {
+    if (this.#disposed) return;
     this.stop();
     this.#disposed = true;
-    void this.call<null>('grid_teardown');
+    void this.#enqueue(() => this.call<null>('grid_teardown'));
   }
 }
