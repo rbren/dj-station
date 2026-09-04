@@ -63,6 +63,9 @@ command (cold and warm) are in `reports/TIMINGS_REPORT.md`.
   `npm test` runs the heavy perf suites AFTER the others rather than
   beside them (`vitest run` on its own still includes them). Before blaming
   a flake on your change, check whether it fails when run alone.
+- Keep every `ClipClientApi` test fixture in sync with its interface. In
+  particular, perf fixtures must implement `trackBeats` (return `null` to
+  exercise the intended uncached-analysis rendering path).
 - PERF SUITES. `npm run test:perf` (Rack/Grid/Clip UI rendering) and
   `cargo test -p dj-engine --release --test perf_m4 perf_ui` (the same
   three surfaces' audio rendering) are the perf gate; `DJ_PERF_HEAVY=1`
