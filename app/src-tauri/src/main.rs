@@ -680,6 +680,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                         .map(|mm| dj_engine::manifest::OutputDecl {
                             id: mm.name.clone(),
                             name: mm.name.clone(),
+                            alias: None,
                             display: None,
                         })
                         .collect();
@@ -691,6 +692,7 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                         .map(|mm| dj_engine::manifest::JackDecl {
                             id: mm.name.clone(),
                             name: mm.name.clone(),
+                            alias: None,
                             default: 0.0,
                             audio: false,
                             capture: false,
@@ -710,12 +712,14 @@ fn engine_nodes(state: State<AppState>) -> CmdResult<Vec<NodeSnapshot>> {
                             let mut outs = vec![dj_engine::manifest::OutputDecl {
                                 id: format!("t{}", t.jack),
                                 name: t.name.clone(),
+                                alias: None,
                                 display: None,
                             }];
                             if t.data.jack_count() == 2 {
                                 outs.push(dj_engine::manifest::OutputDecl {
                                     id: format!("t{}", t.jack + 1),
                                     name: format!("{} vel", t.name),
+                                    alias: None,
                                     display: None,
                                 });
                             }

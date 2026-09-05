@@ -98,6 +98,8 @@ export interface DecksSlotProps {
   onJack(jack: string, kind: 'input' | 'output', shift: boolean): void;
   /** Whether a jack is armed as the pending wire's end. */
   isArmed(jack: string, kind: 'input' | 'output'): boolean;
+  /** The deck the keyboard is on (h/l, `:3`) — drawn as a highlight. */
+  cursor?: boolean;
   /** Whether a jack has a cable in it. */
   isWired(jack: string, kind: 'input' | 'output'): boolean;
   /** Outline color for an armed jack — the pending cable's color. */
@@ -145,8 +147,9 @@ export function DecksSlot(props: DecksSlotProps) {
 
   return (
     <section
-      className={`decks-slot${empty ? ' decks-slot-empty' : ''}`}
+      className={`decks-slot key-row${empty ? ' decks-slot-empty' : ''}`}
       data-testid={`decks-slot-${slot.slot}`}
+      data-cursor={props.cursor ? 'true' : 'false'}
       aria-label={`Deck ${n}`}
       style={{ '--deck-level': glow.toFixed(3) } as CSSProperties}
     >

@@ -221,6 +221,7 @@ pub fn clock_manifest() -> Manifest {
             JackDecl {
                 id: "bpm".into(),
                 name: "BPM".into(),
+                alias: None,
                 default: 120.0,
                 audio: false,
                 capture: false,
@@ -239,6 +240,7 @@ pub fn clock_manifest() -> Manifest {
             JackDecl {
                 id: "run".into(),
                 name: "Run".into(),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -254,6 +256,7 @@ pub fn clock_manifest() -> Manifest {
             JackDecl {
                 id: "reset".into(),
                 name: "Reset".into(),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -271,16 +274,19 @@ pub fn clock_manifest() -> Manifest {
             OutputDecl {
                 id: "clock".into(),
                 name: "Clock".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "reset".into(),
                 name: "Reset".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "phase".into(),
                 name: "Phase".into(),
+                alias: None,
                 display: None,
             },
         ],

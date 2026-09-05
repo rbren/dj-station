@@ -56,6 +56,31 @@ separated automatically, `DJ_DEMUCS_BIN` / `DJ_DEMUCS_MODEL` /
 `DJ_SCNET_CONFIG` / `DJ_SCNET_CKPT`, `DJ_SCNET_MODEL` and `DJ_SCNET_ARGS`
 (e.g. `--device_ids 0`) do the same for SCNet.
 
+## Keyboard
+
+The whole app is drivable from the keyboard, vim-style. Press `?` (or the
+`?` tab) for the full map: the global keys plus the open tab's own.
+
+- **`:` is command mode.** The bar at the bottom lights up every key that
+  would do something next, and the UI itself grows the hints — the rack's
+  panels wear their letter, the grid numbers its tracks. `:r` `:d` `:g`
+  `:c` `:l` jump to Rack, Decks, Grid, Clip and Library.
+- **`h` `j` `k` `l` are the arrow keys**, everywhere and always: a list, a
+  rack, a bank of decks, the grid. `Enter` takes what is highlighted,
+  `Esc` backs out.
+- **The Grid reads as a buffer.** A beat is a character and a bar is a
+  word: `w`/`b`/`e`, `0`/`$`, `gg`/`G`, a count prefix (`8l`, `3w`), `v`
+  to mark a rectangle, `y`/`d`/`x` to yank and delete, `p` to paste.
+- **The Rack wires by name.** Each module wears a letter taken from its
+  name (a digit distinguishes repeats: `a1`, `a2`), and each jack one
+  taken from its own — so `:wa1osi` runs a cable from the first ADSR's
+  `out` to the scope's `in`. A module's manifest can name the letters
+  itself (`"alias"` on an input or an output); everything else is
+  derived. Bare `w` is the same as `:w`.
+- **Typing always wins.** No shortcut fires while a text field, a
+  textarea or any editable region has the keyboard, and a modal suspends
+  the layer entirely.
+
 ## App icon / logo
 
 The app icon is the single file **`app/src-tauri/icons/icon.png`** (512×512

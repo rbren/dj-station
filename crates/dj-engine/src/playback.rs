@@ -38,6 +38,7 @@ pub fn playback_manifest() -> Manifest {
             JackDecl {
                 id: "play_gate".into(),
                 name: "Play Gate".into(),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -53,6 +54,7 @@ pub fn playback_manifest() -> Manifest {
             JackDecl {
                 id: "speed".into(),
                 name: "Speed".into(),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -68,6 +70,7 @@ pub fn playback_manifest() -> Manifest {
             JackDecl {
                 id: "loop".into(),
                 name: "Loop".into(),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -85,11 +88,13 @@ pub fn playback_manifest() -> Manifest {
             OutputDecl {
                 id: "audio_l".into(),
                 name: "Audio L".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "audio_r".into(),
                 name: "Audio R".into(),
+                alias: None,
                 display: None,
             },
         ],

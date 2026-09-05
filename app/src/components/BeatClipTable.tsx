@@ -51,6 +51,8 @@ export interface BeatClipTableProps {
   /** The row a picker's keyboard is on. Absent means nothing is picked
    *  and the rows are not a selection. */
   selectedClipId?: string | null;
+  /** The row the LIST keyboard (j/k, the arrows) is on, by index. */
+  cursor?: number | null;
   /** Aiming at a row (hover) — the picker's cursor follows the pointer. */
   onSelect?(clip: BeatClipEntry): void;
   /** Choosing a row (click). */
@@ -172,6 +174,7 @@ export function BeatClipTable({
   testId,
   label,
   selectedClipId,
+  cursor,
   onSelect,
   onActivate,
   onFilterTrack,
@@ -215,11 +218,13 @@ export function BeatClipTable({
         </tr>
       </thead>
       <tbody>
-        {clips.map((c) => (
+        {clips.map((c, i) => (
           <tr
             key={c.clipId}
+            className="key-row"
             data-testid={`${testId}-row`}
             data-clip-id={c.clipId}
+            data-cursor={i === cursor ? 'true' : 'false'}
             aria-selected={picking ? c.clipId === selectedClipId : undefined}
             onMouseEnter={onSelect && (() => onSelect(c))}
             onClick={onActivate && (() => onActivate(c))}

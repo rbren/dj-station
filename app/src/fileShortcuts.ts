@@ -5,17 +5,7 @@
 // control has focus or while a modal dialog owns the keyboard.
 
 import { useEffect } from 'react';
-
-/** True when a shortcut keydown should be left to a form control. */
-export function isEditableTarget(t: EventTarget | null): boolean {
-  return (
-    t instanceof HTMLElement &&
-    (t.tagName === 'INPUT' ||
-      t.tagName === 'SELECT' ||
-      t.tagName === 'TEXTAREA' ||
-      t.isContentEditable)
-  );
-}
+import { isEditableTarget } from './keys';
 
 export interface FileShortcuts {
   /** cmd/ctrl+S: save under the current name. */

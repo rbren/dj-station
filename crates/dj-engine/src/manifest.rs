@@ -89,6 +89,10 @@ impl Manifest {
 pub struct JackDecl {
     pub id: String,
     pub name: String,
+    /// The letter the UI's keyboard layer offers for this jack (`:w`
+    /// wire sentences). None = derived from the name's first letter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
     #[serde(default)]
     pub default: f32,
     /// Audio pass-through jack: values only ever arrive by wire, so the UI
@@ -114,6 +118,10 @@ pub struct JackDecl {
 pub struct OutputDecl {
     pub id: String,
     pub name: String,
+    /// The letter the UI's keyboard layer offers for this jack (`:w`
+    /// wire sentences). None = derived from the name's first letter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
     /// Display unit/mapping for the output's telemetry value; None = Volts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<DisplaySpec>,

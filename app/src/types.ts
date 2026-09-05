@@ -42,6 +42,9 @@ export interface DisplaySpec {
 export interface JackDecl {
   id: string;
   name: string;
+  /** Keyboard letter for `:` wire commands; absent = derived from the
+   *  name (see `rackKeys.jackAliases`). */
+  alias?: string | null;
   default?: number;
   /** Audio pass-through jack: renders as a plain jack with no manual
    *  control and no CV/attenuverter settings (values only arrive by wire). */
@@ -53,6 +56,9 @@ export interface JackDecl {
 export interface OutputDecl {
   id: string;
   name: string;
+  /** Keyboard letter for `:` wire commands; absent = derived from the
+   *  name (see `rackKeys.jackAliases`). */
+  alias?: string | null;
   display?: DisplaySpec | null;
 }
 

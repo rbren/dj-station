@@ -19,7 +19,17 @@ import {
   type NodeSnapshot,
   type Workspace,
 } from './engine';
-import { isEditableTarget, useFileShortcuts } from './fileShortcuts';
+import { useFileShortcuts } from './fileShortcuts';
+import { directionFor, isBareKey, isEditableTarget, stepIndex } from './keys';
+import { KeyboardProvider, useCommandSourceOn, useKeyboardLayer } from './keyboard';
+import {
+  moduleAliases,
+  rackCommandEntries,
+  rackOrder,
+  RackHintsContext,
+  type JackPrompt,
+} from './rackKeys';
+import { PAGE_KEYS, PAGE_LABELS, type PageId } from './shortcuts';
 import { RackKeysContext } from './keyScope';
 import { library, type Track } from './library';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
@@ -107,7 +117,11 @@ const WIRE_COLORS_KEY = 'dj-wire-colors';
 const LAST_WIRE_COLOR_KEY = 'dj-wire-last-color';
 const NUM_WIRE_COLORS = WIRE_COLORS.length;
 
-type View = 'rack' | 'library' | 'clip' | 'decks' | 'grid';
+type View = PageId;
+
+/** The module that maps every letter to a note: while one is racked the
+ *  rack's bare-letter commands stand down (see `qwertyRacked`). */
+const QWERTY_TYPE = 'builtin.qwerty';
 
 /** The page the engine plays for while `view` is the open tab: the Rack is
  *  the whole patch, the Decks page its bank, the Grid page its session
@@ -1126,18 +1140,40 @@ export default function App() {
     [requestNewPatch, openSaveAsDialog, openOpenDialog, workspace, setPatchName],
   );
 
+  /** A dialog owns the keyboard: every app-level shortcut stands down. */
+  const modalOpen =
+    fileDialog !== null ||
+    confirmDiscard !== null ||
+    collapseName !== null ||
+    macroOverwrite !== null ||
+    pickerOpen;
+
   // cmd/ctrl+S / +O / +N mirror File > Save / Open Patch… / New Patch.
   useFileShortcuts({
     save: savePatch,
     open: openOpenDialog,
     create: requestNewPatch,
-    modalOpen:
-      fileDialog !== null ||
-      confirmDiscard !== null ||
-      collapseName !== null ||
-      macroOverwrite !== null ||
-      pickerOpen,
+    modalOpen,
   });
+
+  // ---- the `:` command layer -------------------------------------------
+  //
+  // App owns it (it is app-global) and hands it to the pages through
+  // KeyboardProvider; the page jumps below are its first source, so `:r`
+  // means the Rack tab whatever page contributed the rest.
+  const keyboard = useKeyboardLayer({ page: view, suspended: modalOpen });
+  useCommandSourceOn(
+    keyboard,
+    'pages',
+    () =>
+      (Object.keys(PAGE_KEYS) as View[]).map((id) => ({
+        keys: PAGE_KEYS[id],
+        label: PAGE_LABELS[id],
+        group: 'Pages',
+        run: () => setView(id),
+      })),
+    0,
+  );
 
   // The File menu as context-menu items: the rack-background right-click
   // menu renders exactly this list, and each entry reuses the same action
@@ -1614,6 +1650,83 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [view, store, refresh, changeZoom, copyModules, pasteModules, removeModules, setSelected]);
 
+  // ---- rack commands: module letters, jack letters, `:w` wires ----------
+  //
+  // The letters are derived from what the panels are CALLED, so the chip
+  // in a title bar is the whole documentation (rackKeys.ts).
+  const [jackPrompt, setJackPrompt] = useState<JackPrompt | null>(null);
+  const moduleAliasMap = useMemo(() => moduleAliases(nodes), [nodes]);
+  const rackHints = useMemo(
+    () => ({ aliases: moduleAliasMap, jackPrompt }),
+    [moduleAliasMap, jackPrompt],
+  );
+  // A command that ends (or is abandoned) stops asking for a jack. Done
+  // during render so the letters never outlive the bar by a frame.
+  if (!keyboard.session && jackPrompt !== null) setJackPrompt(null);
+
+  /** Make a wire the way a click would, cable colour and all. */
+  const connectJacks = useCallback(
+    async (from: { instance: string; jack: string }, to: { instance: string; jack: string }) => {
+      const color = loadJson(LAST_WIRE_COLOR_KEY, 0);
+      await engine.connectWire(from, to);
+      const key = `${from.instance}:${from.jack}->${to.instance}:${to.jack}`;
+      setWireColors((prev) => {
+        const next = { ...prev, [key]: color };
+        saveJson(WIRE_COLORS_KEY, next);
+        return next;
+      });
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const rackPage = view === 'rack' || view === 'decks';
+  useCommandSourceOn(keyboard, 'rack', () =>
+    rackPage
+      ? rackCommandEntries({
+          nodes,
+          aliases: moduleAliasMap,
+          connect: (from, to) => void connectJacks(from, to),
+          select: (instance) => setSelected([instance]),
+          prompt: setJackPrompt,
+        })
+      : [],
+  );
+
+  /** A racked QWERTY module owns every letter (they are its notes), so
+   *  the rack's bare-letter keys stand down while one is on the canvas —
+   *  `:` still reaches all of them. */
+  const qwertyRacked = useMemo(() => nodes.some((n) => n.type_id === QWERTY_TYPE), [nodes]);
+
+  // Bare rack keys: `w` starts a wire (exactly `:w`), and hjkl / the
+  // arrows walk the selection through the panels in reading order.
+  useEffect(() => {
+    if (!rackPage || qwertyRacked) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (keyboard.capturing || modalOpen || !isBareKey(e) || isEditableTarget(e.target)) return;
+      if (e.key === 'w') {
+        e.preventDefault();
+        keyboard.openCommand('w');
+        return;
+      }
+      const direction = directionFor(e.key);
+      if (!direction) return;
+      e.preventDefault();
+      const order = rackOrder(nodes, store.getState().positions);
+      if (order.length === 0) return;
+      const chosen = store.getState().selected;
+      const at = chosen.length > 0 ? order.indexOf(chosen[chosen.length - 1]) : -1;
+      const next = stepIndex(
+        at < 0 ? null : at,
+        direction === 'down' || direction === 'right' ? 1 : -1,
+        order.length,
+      );
+      if (next !== null) setSelected([order[next]]);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [keyboard, modalOpen, nodes, qwertyRacked, rackPage, setSelected, store]);
+
   // Click-to-add from the picker: land the module under the cursor
   // (pan/zoom-aware, kept inside the viewport by addModule), then close the
   // modal — the panel appears where the user was already looking.
@@ -2061,419 +2174,430 @@ export default function App() {
   ]);
 
   return (
-    <main className="app">
-      <TooltipLayer />
-      <header className="app-header">
-        <h1>dj-station</h1>
-        <nav className="app-tabs">
-          <button
-            className={view === 'rack' ? 'tab active' : 'tab'}
-            onClick={() => setView('rack')}
-            data-testid="tab-rack"
-          >
-            Rack
-          </button>
-          <button
-            className={view === 'decks' ? 'tab active' : 'tab'}
-            onClick={() => setView('decks')}
-            data-testid="tab-decks"
-          >
-            Decks
-          </button>
-          <button
-            className={view === 'grid' ? 'tab active' : 'tab'}
-            onClick={() => setView('grid')}
-            data-testid="tab-grid"
-          >
-            Grid
-          </button>
-          <button
-            className={view === 'clip' ? 'tab active' : 'tab'}
-            onClick={() => setView('clip')}
-            data-testid="tab-clip"
-          >
-            Clip
-          </button>
-          <button
-            className={view === 'library' ? 'tab active' : 'tab'}
-            onClick={() => setView('library')}
-            data-testid="tab-library"
-          >
-            Library
-          </button>
-        </nav>
-        {selected.length > 0 && collapseName === null && (
-          <button
-            className="collapse-macro-btn"
-            data-testid="collapse-macro-btn"
-            onClick={() => setCollapseName('')}
-          >
-            Collapse to Macro ({selected.length})
-          </button>
-        )}
-        {collapseName !== null && (
-          <form
-            className="collapse-macro-form"
-            data-testid="collapse-macro-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void collapseToMacro(collapseName);
-            }}
-          >
-            <input
-              autoFocus
-              placeholder="macro name"
-              data-testid="collapse-macro-name"
-              value={collapseName}
-              onChange={(e) => setCollapseName(e.target.value)}
-            />
-            <button type="submit" data-testid="collapse-macro-confirm">
-              Create
+    <KeyboardProvider api={keyboard}>
+      <main className="app">
+        <TooltipLayer />
+        <header className="app-header">
+          <h1>dj-station</h1>
+          <nav className="app-tabs">
+            <button
+              className={view === 'rack' ? 'tab active' : 'tab'}
+              onClick={() => setView('rack')}
+              data-testid="tab-rack"
+            >
+              Rack
             </button>
-            <button type="button" onClick={() => setCollapseName(null)}>
-              Cancel
+            <button
+              className={view === 'decks' ? 'tab active' : 'tab'}
+              onClick={() => setView('decks')}
+              data-testid="tab-decks"
+            >
+              Decks
             </button>
-          </form>
+            <button
+              className={view === 'grid' ? 'tab active' : 'tab'}
+              onClick={() => setView('grid')}
+              data-testid="tab-grid"
+            >
+              Grid
+            </button>
+            <button
+              className={view === 'clip' ? 'tab active' : 'tab'}
+              onClick={() => setView('clip')}
+              data-testid="tab-clip"
+            >
+              Clip
+            </button>
+            <button
+              className={view === 'library' ? 'tab active' : 'tab'}
+              onClick={() => setView('library')}
+              data-testid="tab-library"
+            >
+              Library
+            </button>
+            <button
+              className="tab tab-help"
+              data-testid="key-help-btn"
+              title="Keyboard shortcuts (?)"
+              aria-label="Keyboard shortcuts"
+              onClick={() => keyboard.setHelpOpen(true)}
+            >
+              ?
+            </button>
+          </nav>
+          {selected.length > 0 && collapseName === null && (
+            <button
+              className="collapse-macro-btn"
+              data-testid="collapse-macro-btn"
+              onClick={() => setCollapseName('')}
+            >
+              Collapse to Macro ({selected.length})
+            </button>
+          )}
+          {collapseName !== null && (
+            <form
+              className="collapse-macro-form"
+              data-testid="collapse-macro-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void collapseToMacro(collapseName);
+              }}
+            >
+              <input
+                autoFocus
+                placeholder="macro name"
+                data-testid="collapse-macro-name"
+                value={collapseName}
+                onChange={(e) => setCollapseName(e.target.value)}
+              />
+              <button type="submit" data-testid="collapse-macro-confirm">
+                Create
+              </button>
+              <button type="button" onClick={() => setCollapseName(null)}>
+                Cancel
+              </button>
+            </form>
+          )}
+        </header>
+        <ErrorBanner />
+        {ctxMenu && (
+          <ContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            items={ctxMenuItems}
+            onClose={() => setCtxMenu(null)}
+          />
         )}
-      </header>
-      <ErrorBanner />
-      {ctxMenu && (
-        <ContextMenu
-          x={ctxMenu.x}
-          y={ctxMenu.y}
-          items={ctxMenuItems}
-          onClose={() => setCtxMenu(null)}
-        />
-      )}
-      {docs && (
-        <DocsPanel typeId={docs.typeId} manifest={docs.manifest} onClose={() => setDocs(null)} />
-      )}
-      {fileDialog && (
-        <div
-          className="file-dialog-backdrop"
-          data-testid="file-dialog"
-          onClick={() => setFileDialog(null)}
-        >
-          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
-            {fileDialog === 'save-as' ? (
-              <>
-                <h3>Save Patch As</h3>
-                <input
-                  className="patch-name"
-                  data-testid="file-dialog-name"
-                  value={saveAsName ?? patchName}
-                  autoFocus
-                  onChange={(e) => setSaveAsName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
+        {docs && (
+          <DocsPanel typeId={docs.typeId} manifest={docs.manifest} onClose={() => setDocs(null)} />
+        )}
+        {fileDialog && (
+          <div
+            className="file-dialog-backdrop"
+            data-testid="file-dialog"
+            onClick={() => setFileDialog(null)}
+          >
+            <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+              {fileDialog === 'save-as' ? (
+                <>
+                  <h3>Save Patch As</h3>
+                  <input
+                    className="patch-name"
+                    data-testid="file-dialog-name"
+                    value={saveAsName ?? patchName}
+                    autoFocus
+                    onChange={(e) => setSaveAsName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        void savePatch(saveAsName ?? patchName);
+                        setFileDialog(null);
+                      }
+                    }}
+                  />
+                  <button
+                    data-testid="file-dialog-confirm"
+                    onClick={() => {
                       void savePatch(saveAsName ?? patchName);
                       setFileDialog(null);
-                    }
-                  }}
-                />
-                <button
-                  data-testid="file-dialog-confirm"
-                  onClick={() => {
-                    void savePatch(saveAsName ?? patchName);
-                    setFileDialog(null);
-                  }}
-                >
-                  Save
-                </button>
-              </>
-            ) : (
-              <>
-                <h3>Open Patch</h3>
-                {patchList.length === 0 && <p className="file-dialog-empty">no saved patches</p>}
-                <ul className="file-dialog-list">
-                  {patchList.map((n) => (
-                    <li key={n}>
-                      <button
-                        data-testid={`file-dialog-patch-${n}`}
-                        onClick={() => {
-                          setFileDialog(null);
-                          requestLoadPatch(n);
-                        }}
-                      >
-                        {n}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-            <button
-              className="file-dialog-cancel"
-              data-testid="file-dialog-cancel"
-              onClick={() => setFileDialog(null)}
-            >
-              Cancel
-            </button>
+                    }}
+                  >
+                    Save
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h3>Open Patch</h3>
+                  {patchList.length === 0 && <p className="file-dialog-empty">no saved patches</p>}
+                  <ul className="file-dialog-list">
+                    {patchList.map((n) => (
+                      <li key={n}>
+                        <button
+                          data-testid={`file-dialog-patch-${n}`}
+                          onClick={() => {
+                            setFileDialog(null);
+                            requestLoadPatch(n);
+                          }}
+                        >
+                          {n}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              <button
+                className="file-dialog-cancel"
+                data-testid="file-dialog-cancel"
+                onClick={() => setFileDialog(null)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-      {confirmDiscard && (
-        <div
-          className="file-dialog-backdrop"
-          data-testid="unsaved-dialog"
-          onClick={() => setConfirmDiscard(null)}
-        >
-          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>Unsaved Changes</h3>
-            <p className="file-dialog-empty">
-              “{patchName}” has unsaved changes. Save them before continuing?
-            </p>
-            <button
-              data-testid="unsaved-save"
-              onClick={() => {
-                const { proceed } = confirmDiscard;
-                setConfirmDiscard(null);
-                void savePatch().then(proceed);
-              }}
-            >
-              Save
-            </button>
-            <button
-              data-testid="unsaved-discard"
-              onClick={() => {
-                const { proceed } = confirmDiscard;
-                setConfirmDiscard(null);
-                proceed();
-              }}
-            >
-              Discard
-            </button>
-            <button
-              className="file-dialog-cancel"
-              data-testid="unsaved-cancel"
-              onClick={() => setConfirmDiscard(null)}
-            >
-              Cancel
-            </button>
+        )}
+        {confirmDiscard && (
+          <div
+            className="file-dialog-backdrop"
+            data-testid="unsaved-dialog"
+            onClick={() => setConfirmDiscard(null)}
+          >
+            <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+              <h3>Unsaved Changes</h3>
+              <p className="file-dialog-empty">
+                “{patchName}” has unsaved changes. Save them before continuing?
+              </p>
+              <button
+                data-testid="unsaved-save"
+                onClick={() => {
+                  const { proceed } = confirmDiscard;
+                  setConfirmDiscard(null);
+                  void savePatch().then(proceed);
+                }}
+              >
+                Save
+              </button>
+              <button
+                data-testid="unsaved-discard"
+                onClick={() => {
+                  const { proceed } = confirmDiscard;
+                  setConfirmDiscard(null);
+                  proceed();
+                }}
+              >
+                Discard
+              </button>
+              <button
+                className="file-dialog-cancel"
+                data-testid="unsaved-cancel"
+                onClick={() => setConfirmDiscard(null)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-      {macroOverwrite && (
-        <div
-          className="file-dialog-backdrop"
-          data-testid="macro-overwrite-dialog"
-          onClick={() => setMacroOverwrite(null)}
-        >
-          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>Overwrite Macro?</h3>
-            <p className="file-dialog-empty">
-              A macro named “{macroOverwrite.name}” already exists. Saving will replace its
-              definition — rack instances keep their own copies until they pull it.
-            </p>
-            <button
-              data-testid="macro-overwrite-confirm"
-              onClick={() => {
-                const name = collapseName;
-                setMacroOverwrite(null);
-                if (name) void collapseToMacro(name, true);
-              }}
-            >
-              Overwrite
-            </button>
-            <button
-              className="file-dialog-cancel"
-              data-testid="macro-overwrite-cancel"
-              onClick={() => setMacroOverwrite(null)}
-            >
-              Cancel
-            </button>
+        )}
+        {macroOverwrite && (
+          <div
+            className="file-dialog-backdrop"
+            data-testid="macro-overwrite-dialog"
+            onClick={() => setMacroOverwrite(null)}
+          >
+            <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+              <h3>Overwrite Macro?</h3>
+              <p className="file-dialog-empty">
+                A macro named “{macroOverwrite.name}” already exists. Saving will replace its
+                definition — rack instances keep their own copies until they pull it.
+              </p>
+              <button
+                data-testid="macro-overwrite-confirm"
+                onClick={() => {
+                  const name = collapseName;
+                  setMacroOverwrite(null);
+                  if (name) void collapseToMacro(name, true);
+                }}
+              >
+                Overwrite
+              </button>
+              <button
+                className="file-dialog-cancel"
+                data-testid="macro-overwrite-cancel"
+                onClick={() => setMacroOverwrite(null)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-      {macroPull && (
-        <div
-          className="file-dialog-backdrop"
-          data-testid="macro-pull-dialog"
-          onClick={() => setMacroPull(null)}
-        >
-          <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>Pull Latest?</h3>
-            <p className="file-dialog-empty">
-              “{macroPull.name}” goes back to the saved definition. Every edit made inside this
-              instance is discarded.
-            </p>
-            <button
-              data-testid="macro-pull-confirm"
-              onClick={() => {
-                const group = macroPull;
-                setMacroPull(null);
-                void pullMacroInstance(group);
-              }}
-            >
-              Pull Latest
-            </button>
-            <button
-              className="file-dialog-cancel"
-              data-testid="macro-pull-cancel"
-              onClick={() => setMacroPull(null)}
-            >
-              Cancel
-            </button>
+        )}
+        {macroPull && (
+          <div
+            className="file-dialog-backdrop"
+            data-testid="macro-pull-dialog"
+            onClick={() => setMacroPull(null)}
+          >
+            <div className="file-dialog" onClick={(e) => e.stopPropagation()}>
+              <h3>Pull Latest?</h3>
+              <p className="file-dialog-empty">
+                “{macroPull.name}” goes back to the saved definition. Every edit made inside this
+                instance is discarded.
+              </p>
+              <button
+                data-testid="macro-pull-confirm"
+                onClick={() => {
+                  const group = macroPull;
+                  setMacroPull(null);
+                  void pullMacroInstance(group);
+                }}
+              >
+                Pull Latest
+              </button>
+              <button
+                className="file-dialog-cancel"
+                data-testid="macro-pull-cancel"
+                onClick={() => setMacroPull(null)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-      {/* The Grid stays mounted so the arrangement survives a tab switch
+        )}
+        {/* The Grid stays mounted so the arrangement survives a tab switch
           (the Clip editor's arrangement); it hides itself and stops its
           own playback while inactive. */}
-      <GridView clips={beatClip} active={view === 'grid'} />
-      {view === 'library' && (
-        <LibraryView
-          client={library}
-          clips={beatClip}
-          onEdit={(t) => {
-            clipView.current?.open(t.id);
-            setView('clip');
-          }}
-          onEditClip={(c) => {
-            clipView.current?.openClip(c.clipId);
-            setView('clip');
-          }}
-        />
-      )}
-      {/* The clip editor stays mounted so the edit survives tab switches;
+        <GridView clips={beatClip} active={view === 'grid'} />
+        {view === 'library' && (
+          <LibraryView
+            client={library}
+            clips={beatClip}
+            onEdit={(t) => {
+              clipView.current?.open(t.id);
+              setView('clip');
+            }}
+            onEditClip={(c) => {
+              clipView.current?.openClip(c.clipId);
+              setView('clip');
+            }}
+          />
+        )}
+        {/* The clip editor stays mounted so the edit survives tab switches;
           it hides itself and pauses playback while inactive. */}
-      <ClipView clip={clipClient} library={library} active={view === 'clip'} ref={clipView} />
-      {pickerOpen && (
-        <ModulePicker
-          modules={moduleLib}
-          clips={beatClips}
-          onAdd={addFromPicker}
-          onAddClip={addClipFromPicker}
-          onClose={() => setPickerOpen(false)}
-          onRenameMacro={renameMacroDef}
-          onDeleteMacro={deleteMacroDef}
-        />
-      )}
-      {/* The rack stays mounted on other pages (hidden, not unmounted, so
+        <ClipView clip={clipClient} library={library} active={view === 'clip'} ref={clipView} />
+        {pickerOpen && (
+          <ModulePicker
+            modules={moduleLib}
+            clips={beatClips}
+            onAdd={addFromPicker}
+            onAddClip={addClipFromPicker}
+            onClose={() => setPickerOpen(false)}
+            onRenameMacro={renameMacroDef}
+            onDeleteMacro={deleteMacroDef}
+          />
+        )}
+        {/* The rack stays mounted on other pages (hidden, not unmounted, so
           panel state survives) — RackKeysContext tells its window key
           listeners (QwertyPanel, MidiPanel) to go quiet and release. The
           Decks tab shows the SAME canvas, dressed in deck chrome: the
           tempo bar above, the eight strips below (flex `order` places
           them around .rack-area), and a screen-space cable overlay for
           the wires that touch the bank's chrome jacks. */}
-      <div
-        className={`app-body${view === 'decks' ? ' decks-mode' : ''}`}
-        ref={setAppBodyEl}
-        style={view === 'rack' || view === 'decks' ? undefined : { display: 'none' }}
-      >
-        <RackKeysContext.Provider value={view === 'rack' || view === 'decks'}>
-          <RackStoreContext.Provider value={store}>
-            <DeckUIContext.Provider value={deckUI}>
-              <AudioUIContext.Provider value={audioUI}>
-                {/* The bank keeps RUNNING when the tab is not looking (its
+        <div
+          className={`app-body${view === 'decks' ? ' decks-mode' : ''}`}
+          ref={setAppBodyEl}
+          style={view === 'rack' || view === 'decks' ? undefined : { display: 'none' }}
+        >
+          <RackKeysContext.Provider value={view === 'rack' || view === 'decks'}>
+            <RackHintsContext.Provider value={rackHints}>
+              <RackStoreContext.Provider value={store}>
+                <DeckUIContext.Provider value={deckUI}>
+                  <AudioUIContext.Provider value={audioUI}>
+                    {/* The bank keeps RUNNING when the tab is not looking (its
                     clock never stops; it is only held back at the outputs),
                     so unmounting the chrome costs nothing. */}
-                {view === 'decks' && (
-                  <DecksView
-                    key={decksEpoch}
-                    onJackClick={onJackClick}
-                    wires={wires}
-                    pending={pending}
-                    wireColors={wireColors}
-                    overlayContainer={appBodyEl}
-                    overlayLayoutKey={`${JSON.stringify(positions)}|${pan.x},${pan.y},${zoom}`}
-                    onGraphChange={() => void refresh()}
-                  />
-                )}
-                <div
-                  className="rack-area"
-                  ref={setRackEl}
-                  data-testid="rack-area"
-                  style={{
-                    backgroundPosition: `${pan.x}px ${pan.y}px`,
-                    backgroundSize: `${dotGridSize(zoom)}px ${dotGridSize(zoom)}px`,
-                  }}
-                  onDragOver={onRackDragOver}
-                  onDrop={onRackDrop}
-                  onContextMenu={onRackContextMenu}
-                  onMouseDown={(e) => {
-                    // Pressing the rack background abandons a pending wire,
-                    // clears the selection (unless shift/cmd/ctrl — additive
-                    // marquee), and arms a marquee sweep. Mousedown, not click:
-                    // selection happens on mousedown too, and the synthetic
-                    // click a module drag fires on the rack (mouseup landing
-                    // over the background) must not wipe the drag's own
-                    // selection.
-                    if (e.button !== 0) return;
-                    // A module's input config menu is portaled to <body>,
-                    // but its events still bubble the REACT tree to here.
-                    // Presses that landed outside the rack's own DOM subtree
-                    // are not background presses — and the preventDefault
-                    // below would cancel the mousedown's default action,
-                    // which in WebKit is what opens a <select>'s options.
-                    if (!e.currentTarget.contains(e.target as Node)) return;
-                    if ((e.target as HTMLElement).closest?.('.module-panel')) return;
-                    // The sweep must never double as a native text-selection
-                    // drag (a text selection hijacks cmd+C).
-                    e.preventDefault();
-                    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-                    const { pending, selected } = store.getState();
-                    if (pending) setPending(null);
-                    if (!additive && selected.length > 0) setSelected([]);
-                    const p = toRackCoords(e.clientX, e.clientY);
-                    setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
-                  }}
-                >
-                  <div
-                    className="rack"
-                    data-testid="rack"
-                    ref={setRackInnerEl}
-                    style={{
-                      transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                      transformOrigin: '0 0',
-                    }}
-                  >
-                    <MacroBoxes
-                      groups={macroGroups}
-                      zoom={zoom}
-                      onMoveGroup={(anchor, x, y, members) => moveGroup(anchor, x, y, members)}
-                      onMoveEnd={() => endModuleDrag()}
-                      onContextMenu={onMacroBoxContextMenu}
-                    />
-                    {/* On the Decks tab the bank has no panel in the grid:
+                    {view === 'decks' && (
+                      <DecksView
+                        key={decksEpoch}
+                        onJackClick={onJackClick}
+                        wires={wires}
+                        pending={pending}
+                        wireColors={wireColors}
+                        overlayContainer={appBodyEl}
+                        overlayLayoutKey={`${JSON.stringify(positions)}|${pan.x},${pan.y},${zoom}`}
+                        onGraphChange={() => void refresh()}
+                      />
+                    )}
+                    <div
+                      className="rack-area"
+                      ref={setRackEl}
+                      data-testid="rack-area"
+                      style={{
+                        backgroundPosition: `${pan.x}px ${pan.y}px`,
+                        backgroundSize: `${dotGridSize(zoom)}px ${dotGridSize(zoom)}px`,
+                      }}
+                      onDragOver={onRackDragOver}
+                      onDrop={onRackDrop}
+                      onContextMenu={onRackContextMenu}
+                      onMouseDown={(e) => {
+                        // Pressing the rack background abandons a pending wire,
+                        // clears the selection (unless shift/cmd/ctrl — additive
+                        // marquee), and arms a marquee sweep. Mousedown, not click:
+                        // selection happens on mousedown too, and the synthetic
+                        // click a module drag fires on the rack (mouseup landing
+                        // over the background) must not wipe the drag's own
+                        // selection.
+                        if (e.button !== 0) return;
+                        // A module's input config menu is portaled to <body>,
+                        // but its events still bubble the REACT tree to here.
+                        // Presses that landed outside the rack's own DOM subtree
+                        // are not background presses — and the preventDefault
+                        // below would cancel the mousedown's default action,
+                        // which in WebKit is what opens a <select>'s options.
+                        if (!e.currentTarget.contains(e.target as Node)) return;
+                        if ((e.target as HTMLElement).closest?.('.module-panel')) return;
+                        // The sweep must never double as a native text-selection
+                        // drag (a text selection hijacks cmd+C).
+                        e.preventDefault();
+                        const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+                        const { pending, selected } = store.getState();
+                        if (pending) setPending(null);
+                        if (!additive && selected.length > 0) setSelected([]);
+                        const p = toRackCoords(e.clientX, e.clientY);
+                        setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive });
+                      }}
+                    >
+                      <div
+                        className="rack"
+                        data-testid="rack"
+                        ref={setRackInnerEl}
+                        style={{
+                          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                          transformOrigin: '0 0',
+                        }}
+                      >
+                        <MacroBoxes
+                          groups={macroGroups}
+                          zoom={zoom}
+                          onMoveGroup={(anchor, x, y, members) => moveGroup(anchor, x, y, members)}
+                          onMoveEnd={() => endModuleDrag()}
+                          onContextMenu={onMacroBoxContextMenu}
+                        />
+                        {/* On the Decks tab the bank has no panel in the grid:
                         the deck chrome IS the bank, so its jacks resolve
                         to exactly one socket (the chrome one) and the
                         cables that touch it are the chrome overlay's. The
                         output modules its pairs are wired to are implied
                         by the top bar's faders, so they draw no panel
                         here either. */}
-                    {nodes.map((node, i) =>
-                      view === 'decks' && DECKS_HIDDEN_TYPES.has(node.type_id) ? null : (
-                        <RackModule
-                          key={node.instance_id}
-                          instanceId={node.instance_id}
-                          index={i}
-                          refresh={refresh}
-                          moveModule={moveModule}
-                          endModuleDrag={endModuleDrag}
-                          zoom={zoom}
-                          removeModule={removeModule}
-                          renameModule={renameModule}
-                          openDocs={openDocs}
-                          selectModule={selectModule}
-                          onJackClick={onJackClick}
-                          onContextMenu={onModuleContextMenu}
-                        />
-                      ),
-                    )}
-                    {marquee && (
-                      <div
-                        className="marquee"
-                        data-testid="marquee"
-                        style={{
-                          left: Math.min(marquee.x0, marquee.x1),
-                          top: Math.min(marquee.y0, marquee.y1),
-                          width: Math.abs(marquee.x1 - marquee.x0),
-                          height: Math.abs(marquee.y1 - marquee.y0),
-                        }}
-                      />
-                    )}
-                    {/* Inside the transformed rack, in rack coordinates: pan
+                        {nodes.map((node, i) =>
+                          view === 'decks' && DECKS_HIDDEN_TYPES.has(node.type_id) ? null : (
+                            <RackModule
+                              key={node.instance_id}
+                              instanceId={node.instance_id}
+                              index={i}
+                              refresh={refresh}
+                              moveModule={moveModule}
+                              endModuleDrag={endModuleDrag}
+                              zoom={zoom}
+                              removeModule={removeModule}
+                              renameModule={renameModule}
+                              openDocs={openDocs}
+                              selectModule={selectModule}
+                              onJackClick={onJackClick}
+                              onContextMenu={onModuleContextMenu}
+                            />
+                          ),
+                        )}
+                        {marquee && (
+                          <div
+                            className="marquee"
+                            data-testid="marquee"
+                            style={{
+                              left: Math.min(marquee.x0, marquee.x1),
+                              top: Math.min(marquee.y0, marquee.y1),
+                              width: Math.abs(marquee.x1 - marquee.x0),
+                              height: Math.abs(marquee.y1 - marquee.y0),
+                            }}
+                          />
+                        )}
+                        {/* Inside the transformed rack, in rack coordinates: pan
                     and zoom move the cables through the CSS transform, so
                     they are deliberately NOT part of layoutKey. Cables that
                     touch the bank's CHROME jacks on the Decks tab cannot
@@ -2483,21 +2607,23 @@ export default function App() {
                     overlay instead. A wire to a bank jack simply fails to
                     resolve here on that tab (the bank has no panel), so
                     nothing is drawn twice. */}
-                    <WireOverlay
-                      wires={wires}
-                      container={rackInnerEl}
-                      colors={wireColors}
-                      pending={view === 'decks' ? null : pending}
-                      zoom={zoom}
-                      layoutKey={JSON.stringify(positions)}
-                    />
-                  </div>
-                </div>
-              </AudioUIContext.Provider>
-            </DeckUIContext.Provider>
-          </RackStoreContext.Provider>
-        </RackKeysContext.Provider>
-      </div>
-    </main>
+                        <WireOverlay
+                          wires={wires}
+                          container={rackInnerEl}
+                          colors={wireColors}
+                          pending={view === 'decks' ? null : pending}
+                          zoom={zoom}
+                          layoutKey={JSON.stringify(positions)}
+                        />
+                      </div>
+                    </div>
+                  </AudioUIContext.Provider>
+                </DeckUIContext.Provider>
+              </RackStoreContext.Provider>
+            </RackHintsContext.Provider>
+          </RackKeysContext.Provider>
+        </div>
+      </main>
+    </KeyboardProvider>
   );
 }

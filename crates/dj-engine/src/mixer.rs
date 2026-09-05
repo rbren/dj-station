@@ -26,6 +26,7 @@ pub fn crossfader_manifest() -> Manifest {
     let audio_in = |id: &str, name: &str| JackDecl {
         id: id.into(),
         name: name.into(),
+        alias: None,
         default: 0.0,
         audio: false,
         capture: false,
@@ -47,6 +48,7 @@ pub fn crossfader_manifest() -> Manifest {
             JackDecl {
                 id: "xfade".into(),
                 name: "Crossfade".into(),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -64,11 +66,13 @@ pub fn crossfader_manifest() -> Manifest {
             OutputDecl {
                 id: "out_l".into(),
                 name: "Out L".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "out_r".into(),
                 name: "Out R".into(),
+                alias: None,
                 display: None,
             },
         ],

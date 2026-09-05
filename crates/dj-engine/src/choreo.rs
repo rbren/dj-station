@@ -69,6 +69,7 @@ pub fn choreo_manifest() -> Manifest {
     let trig = |id: &str, name: &str| JackDecl {
         id: id.into(),
         name: name.into(),
+        alias: None,
         default: 0.0,
         audio: false,
         capture: false,
@@ -95,6 +96,7 @@ pub fn choreo_manifest() -> Manifest {
             .map(|i| OutputDecl {
                 id: format!("t{i}"),
                 name: format!("Track {i}"),
+                alias: None,
                 display: None,
             })
             .collect(),

@@ -170,6 +170,7 @@ fn out_manifest(id: &str, name: &str) -> Manifest {
             .map(|(id, name)| JackDecl {
                 id: (*id).into(),
                 name: (*name).into(),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -180,6 +181,7 @@ fn out_manifest(id: &str, name: &str) -> Manifest {
                 JackDecl {
                     id: "channel_offset".into(),
                     name: "Device Channel Offset".into(),
+                    alias: None,
                     default: 0.0,
                     audio: false,
                     capture: false,
@@ -195,6 +197,7 @@ fn out_manifest(id: &str, name: &str) -> Manifest {
                 JackDecl {
                     id: "mute".into(),
                     name: "Mute".into(),
+                    alias: None,
                     default: 0.0,
                     audio: false,
                     capture: false,
@@ -233,6 +236,7 @@ pub fn midi_manifest() -> Manifest {
             .map(|i| JackDecl {
                 id: format!("led{i}"),
                 name: format!("LED {i}"),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -248,6 +252,7 @@ pub fn midi_manifest() -> Manifest {
             .map(|i| OutputDecl {
                 id: format!("map{i}"),
                 name: format!("Mapping {i}"),
+                alias: None,
                 display: None,
             })
             .chain((0..MIDI_POLY_VOICES).flat_map(|v| {
@@ -256,12 +261,14 @@ pub fn midi_manifest() -> Manifest {
                     .map(move |(id, name)| OutputDecl {
                         id: format!("v{}_{id}", v + 1),
                         name: format!("Voice {} {name}", v + 1),
+                        alias: None,
                         display: None,
                     })
             }))
             .chain(MIDI_GLOBAL_OUTS.iter().map(|(id, name)| OutputDecl {
                 id: (*id).into(),
                 name: (*name).into(),
+                alias: None,
                 display: None,
             }))
             .collect(),

@@ -99,6 +99,7 @@ pub fn beat_clip_manifest() -> Manifest {
     let trig = |id: &str, name: &str| JackDecl {
         id: id.into(),
         name: name.into(),
+        alias: None,
         default: 0.0,
         audio: false,
         capture: false,
@@ -124,6 +125,7 @@ pub fn beat_clip_manifest() -> Manifest {
             JackDecl {
                 id: "bpm".into(),
                 name: "Clip BPM".into(),
+                alias: None,
                 default: DEFAULT_BPM,
                 audio: false,
                 capture: false,
@@ -144,11 +146,13 @@ pub fn beat_clip_manifest() -> Manifest {
             OutputDecl {
                 id: "audio_l".into(),
                 name: "Audio L".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "audio_r".into(),
                 name: "Audio R".into(),
+                alias: None,
                 display: None,
             },
         ],

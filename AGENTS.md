@@ -180,6 +180,18 @@ These are the rules that must hold everywhere.
 - House frontend helpers — reuse, don't re-roll: `src/search.ts
   matchesQuery` for every search-box filter, `src/usePoll.ts usePoll` for
   panel status polling, `src/format.ts fixed` for number display.
+- The keyboard is ONE layer, not a pile of page listeners:
+  `src/keyboard.tsx` (`KeyboardProvider`, `useKeyboardLayer`,
+  `useCommandSource`, `useListKeys`), over `src/keys.ts` (`isEditableTarget`,
+  `directionFor`, `stepIndex`), `src/commands.ts` (the `:` trie),
+  `src/shortcuts.ts` (what `?` prints) and the page tables
+  `src/gridKeys.ts` / `src/rackKeys.ts`. Rules: h/j/k/l does exactly what
+  the arrows do; every list is `useListKeys` (j/k, gg/G, Enter, Esc); a
+  page offers its `:` letters through `useCommandSource` and stands them
+  down when it is not the open tab; NOTHING fires while
+  `isEditableTarget` or a modal is up. A new shortcut goes in
+  `shortcuts.ts` too — `?` is generated from it, and drift there is a
+  bug.
 - Audio decoding has ONE implementation: `dj_analysis::decode_audio`
   (symphonia). `dj-engine`'s `playback::decode_file` re-shapes its output;
   never add a second symphonia pipeline.

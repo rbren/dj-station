@@ -71,6 +71,7 @@ impl Engine {
                 .map(|j| crate::manifest::JackDecl {
                     id: j.id.clone(),
                     name: j.id.clone(),
+                    alias: None,
                     default: 0.0,
                     audio: false,
                     capture: false,
@@ -85,6 +86,7 @@ impl Engine {
                 .map(|j| crate::manifest::OutputDecl {
                     id: j.id.clone(),
                     name: j.id.clone(),
+                    alias: None,
                     display: None,
                 })
                 .collect(),

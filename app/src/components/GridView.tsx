@@ -50,7 +50,9 @@ import {
 import { beatClip as defaultClips, type BeatClipApi, type BeatClipEntry } from '../beatClip';
 import { MAX_BPM, MIN_BPM } from '../decks';
 import { fixed } from '../format';
-import { isEditableTarget } from '../fileShortcuts';
+import { isEditableTarget } from '../keys';
+import { useCommandSource, useKeyboard } from '../keyboard';
+import { IDLE_GRID_KEYS, stepGridKeys, type GridCaret, type GridKeyState } from '../gridKeys';
 import {
   addRow,
   cellKind,
@@ -387,6 +389,22 @@ export function GridView(props: GridViewProps) {
   const [saved, setSaved] = useState<string | null>(null);
   const [selection, setSelection] = useState<GridSelection | null>(null);
   const [board, setBoard] = useState<GridClipboard | null>(null);
+  // THE KEYBOARD CARET. Only its ROW is state: its column is the
+  // playhead, so `l` and `→` still move the playhead the way they always
+  // did, and everything that already aims at the playhead (paste above
+  // all) aims at the caret for free. Mirrored in a ref because two keys
+  // of one command (`d` then `w`) can arrive before a render.
+  const [caretRow, setCaretRow] = useState(0);
+  const caretRowRef = useRef(0);
+  const putCaretRow = useCallback((row: number) => {
+    caretRowRef.current = row;
+    setCaretRow(row);
+  }, []);
+  /** The half-typed command (count, operator, visual mode). */
+  const keyState = useRef<GridKeyState>(IDLE_GRID_KEYS);
+  const [pendingKeys, setPendingKeys] = useState('');
+  /** Where visual mode was entered — the far corner of the rectangle. */
+  const visualAnchor = useRef<GridCaret | null>(null);
   const [fileMenu, setFileMenu] = useState(false);
   const [zoom, setZoom] = useState(1);
   /** How far the tempo lane has been opened past `BPM_WINDOW`, each end
@@ -736,6 +754,29 @@ export function GridView(props: GridViewProps) {
     gridRef.current = grid;
     byIdRef.current = byId;
   }, [selection, orderedRows, grid, byId]);
+
+  // `:` ON THE GRID NUMBERS THE TRACKS: `:5` puts the caret on the fifth
+  // one, and the numbers appear in the gutter while the bar is open, so
+  // the key to press is written beside the thing it moves to.
+  const keyboard = useKeyboard();
+  const capturing = keyboard.capturing;
+  const showRowKeys = active && keyboard.session !== null;
+  useCommandSource('grid', () =>
+    active
+      ? orderedRows.map((row, i) => ({
+          keys: String(i + 1),
+          label: byId.get(row.clipId)?.name ?? row.id,
+          group: 'Tracks',
+          run: () => putCaretRow(i),
+        }))
+      : [],
+  );
+
+  // A row going away must not leave the caret past the end.
+  useEffect(() => {
+    const last = Math.max(0, orderedRows.length - 1);
+    if (caretRowRef.current > last) putCaretRow(last);
+  }, [orderedRows.length, putCaretRow]);
 
   const onCellDown = useCallback((_e: MouseEvent<HTMLElement>, rowId: string, col: number) => {
     cellDrag.current = { rowId, col };
@@ -1115,25 +1156,115 @@ export function GridView(props: GridViewProps) {
     setSelection(null);
   }, []);
 
-  // Keyboard: space plays, the arrows move the playhead (bare = a beat,
-  // cmd = a bar, ctrl = to the ends), cmd+C/V copy and paste. They stand
-  // down for a focused form control and while a dialog owns the keyboard,
-  // the same rule every other page here follows.
+  /** The pending command, as the header prints it (`3d`, `2g`). */
+  const pendingLabel = (state: GridKeyState): string =>
+    `${state.opCount}${state.operator ?? ''}${state.count}${state.pendingG ? 'g' : ''}`;
+
+  // THE VIM LAYER. `gridKeys.ts` says what a key ASKS for; this turns the
+  // answer into edits of the arrangement, reusing the very operations the
+  // mouse already drives (a marked rectangle, `copySelection`,
+  // `deleteSelection`, `pasteAt`) so keyboard and pointer edits are the
+  // same edits. Returns false for a key that means nothing here, leaving
+  // the page's older bindings (space, cmd+S, Enter) to have it.
+  const onVimKey = useCallback(
+    (key: string): boolean => {
+      const rows = rowsRef.current;
+      const caret: GridCaret = {
+        row: Math.min(caretRowRef.current, Math.max(0, rows.length - 1)),
+        col: Math.round(playback.current.column),
+      };
+      const { state, action, handled } = stepGridKeys(
+        keyState.current,
+        caret,
+        key,
+        { rows: rows.length, columns, barBeats: gridRef.current.barBeats },
+        selectionRef.current !== null,
+      );
+      keyState.current = state;
+      setPendingKeys(pendingLabel(state));
+      // A key can be refused and still ask for something (Escape resets
+      // the pending command, then the page's own Escape runs too).
+      if (!action) return handled;
+      const rectangle = (from: number, to: number, columns: ColumnRange): GridSelection => ({
+        rowIds: rows.slice(from, to + 1).map((r) => r.id),
+        columns,
+      });
+      // `d` YANKS BEFORE IT DELETES, the way vim's does: what was taken
+      // out is what `p` puts back.
+      const operate = (operator: 'y' | 'd', sel: GridSelection) => {
+        if (sel.rowIds.length === 0) return;
+        setBoard(copySelection(gridRef.current, byIdRef.current, sel));
+        if (operator === 'd') setGrid((prev) => deleteSelection(prev, byIdRef.current, sel));
+      };
+      switch (action.kind) {
+        case 'move': {
+          putCaretRow(action.to.row);
+          if (action.to.col !== caret.col) seekTo(action.to.col);
+          const anchor = visualAnchor.current;
+          const from = anchor && rows[Math.min(anchor.row, rows.length - 1)];
+          const to = rows[action.to.row];
+          if (state.visual && anchor && from && to) {
+            setSelection(selectionFromDrag(rows, from.id, anchor.col, to.id, action.to.col));
+          }
+          break;
+        }
+        case 'visual': {
+          const row = rows[caret.row];
+          if (action.on && row) {
+            visualAnchor.current = caret;
+            setSelection(selectionFromDrag(rows, row.id, caret.col, row.id, caret.col));
+          } else {
+            visualAnchor.current = null;
+            setSelection(null);
+          }
+          break;
+        }
+        case 'operate':
+          operate(action.operator, rectangle(action.rows[0], action.rows[1], action.columns));
+          break;
+        case 'operateSelection': {
+          const sel = selectionRef.current;
+          if (sel) operate(action.operator, sel);
+          visualAnchor.current = null;
+          setSelection(null);
+          break;
+        }
+        case 'paste':
+          if (board) setGrid((prev) => pasteAt(prev, byIdRef.current, board, action.at));
+          break;
+        case 'reset':
+          visualAnchor.current = null;
+          setSelection(null);
+          break;
+      }
+      return handled;
+    },
+    [board, columns, putCaretRow, seekTo, setGrid],
+  );
+
+  // Keyboard: space plays, the arrows and hjkl move the caret (bare = a
+  // beat or a track, cmd = a bar, ctrl = to the ends), cmd+C/V copy and
+  // paste, and the vim layer above owns the rest. They stand down for a
+  // focused form control, while a dialog owns the keyboard, and while the
+  // `:` bar or the help overlay is up — the same rule every other page
+  // here follows.
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (dialog || isEditableTarget(e.target)) return;
+      if (dialog || isEditableTarget(e.target) || capturing) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (e.key === ' ') {
         e.preventDefault();
         if (!e.repeat) toggle();
-      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      } else if (mod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        // The MODIFIED arrows are the transport's: a bar with cmd, the
+        // ends of the play range with ctrl. Bare ones are the caret's,
+        // below, which moves the playhead a beat exactly as before.
         e.preventDefault();
         const back = e.key === 'ArrowLeft';
         if (e.ctrlKey && !e.metaKey) seekTo(back ? range.start : range.end - 1);
-        else if (e.metaKey) seekBy(back ? -grid.barBeats : grid.barBeats);
-        else seekBy(back ? -1 : 1);
+        else seekBy(back ? -grid.barBeats : grid.barBeats);
       } else if (mod && key === 'c') {
         copy();
       } else if (mod && key === 'v') {
@@ -1182,6 +1313,11 @@ export function GridView(props: GridViewProps) {
         // which rows and how far.
         e.preventDefault();
         setGrid((prev) => fillSelection(prev, byId, selection));
+      } else if (!mod && onVimKey(e.key)) {
+        // The vim layer: motions, counts, y/d/p and visual mode. It runs
+        // AFTER the bindings above so nothing it knows about can take a
+        // key one of them already meant.
+        e.preventDefault();
       } else if (e.key === 'Escape') {
         setSelection(null);
         setFileMenu(false);
@@ -1193,6 +1329,7 @@ export function GridView(props: GridViewProps) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [
     active,
+    capturing,
     dialog,
     toggle,
     seekBy,
@@ -1207,6 +1344,7 @@ export function GridView(props: GridViewProps) {
     doSave,
     doOpen,
     doNew,
+    onVimKey,
     undo,
     redo,
     zoomStep,
@@ -1377,6 +1515,16 @@ export function GridView(props: GridViewProps) {
           </span>
           <span className="grid-duration mono" data-testid="grid-duration">
             {columns} beats · {clockTime(totalSecs)}
+          </span>
+          {/* WHERE THE KEYBOARD IS, and what it is waiting for — a count
+              or an operator typed but not yet answered (`3d`). */}
+          <span
+            className="grid-key-state"
+            data-testid="grid-key-state"
+            data-pending={pendingKeys ? 'true' : 'false'}
+            title="The keyboard caret (: for the track numbers, ? for the keys)"
+          >
+            track {Math.min(caretRow + 1, Math.max(1, orderedRows.length))} · {pendingKeys || '—'}
           </span>
         </div>
         {/* COPY AND PASTE, said out loud: the shortcuts are easy to miss
@@ -1575,8 +1723,19 @@ export function GridView(props: GridViewProps) {
               </div>
               {group.rows.map((row) => {
                 const clip = byId.get(row.clipId);
+                const number = orderedRows.findIndex((r) => r.id === row.id) + 1;
                 return (
-                  <div className="grid-row-title" data-testid={`grid-title-${row.id}`} key={row.id}>
+                  <div
+                    className="grid-row-title"
+                    data-testid={`grid-title-${row.id}`}
+                    data-caret={number === caretRow + 1 ? 'true' : 'false'}
+                    key={row.id}
+                  >
+                    {showRowKeys && (
+                      <span className="grid-row-key" data-testid={`grid-row-key-${row.id}`}>
+                        {number}
+                      </span>
+                    )}
                     <span className="grid-row-name" title={clip?.name}>
                       {clip?.name ?? 'clip missing'}
                     </span>

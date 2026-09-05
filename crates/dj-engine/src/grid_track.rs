@@ -252,6 +252,7 @@ pub fn grid_track_manifest() -> Manifest {
     let trig = |id: &str, name: &str| JackDecl {
         id: id.into(),
         name: name.into(),
+        alias: None,
         default: 0.0,
         audio: false,
         capture: false,
@@ -267,6 +268,7 @@ pub fn grid_track_manifest() -> Manifest {
     let knob = |id: &str, name: &str, min: f32, max: f32, default: f32| JackDecl {
         id: id.into(),
         name: name.into(),
+        alias: None,
         default,
         audio: false,
         capture: false,
@@ -282,6 +284,7 @@ pub fn grid_track_manifest() -> Manifest {
     let audio_in = |id: &str, name: &str| JackDecl {
         id: id.into(),
         name: name.into(),
+        alias: None,
         default: 0.0,
         audio: true,
         capture: false,
@@ -291,6 +294,7 @@ pub fn grid_track_manifest() -> Manifest {
     let out = |id: &str, name: &str| OutputDecl {
         id: id.into(),
         name: name.into(),
+        alias: None,
         display: None,
     };
     Manifest {
@@ -306,6 +310,7 @@ pub fn grid_track_manifest() -> Manifest {
             JackDecl {
                 id: "bpm".into(),
                 name: "BPM".into(),
+                alias: None,
                 default: 120.0,
                 audio: false,
                 capture: false,

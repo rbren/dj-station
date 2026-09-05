@@ -117,6 +117,7 @@ import {
   type ClipSourceRef,
   type ClipStemBackend,
   type ClipStemStatus,
+  beatIndexAt,
   bestTrackBeatSeed,
   trackBeatGrid,
   type ClipTapSeed,
@@ -138,7 +139,8 @@ import {
   type LiveHost,
 } from '../clipLive';
 import { logError } from '../errors';
-import { isEditableTarget } from '../fileShortcuts';
+import { isEditableTarget } from '../keys';
+import { useCommandSource, useKeyboardCapturing, useListKeys } from '../keyboard';
 import { fixed } from '../format';
 import type { LibraryClientApi, Track } from '../library';
 import { makeRenderCounter } from '../perf';
@@ -158,6 +160,11 @@ const LEVEL_H = 90;
 /** Preview peak resolution: enough per second that zooming stays sharp,
  *  within the backend's bucket cap. */
 const PEAKS_PER_SEC = 100;
+/** With no beat grid tapped yet, h/l still scrub: this far, per press. */
+const NUDGE_SECS = 0.25;
+/** Beats to a bar for w/b — the same four the Grid page counts. */
+const BAR_BEATS = 4;
+
 const MIN_BUCKETS = 1200;
 const MAX_BUCKETS = 20000;
 /** Debounce before re-rendering the preview after an edit. */
@@ -1596,11 +1603,98 @@ export function ClipView({
     }
   }, [active]);
 
-  // --- keyboard shortcuts (page-scoped; see AGENTS.md keyboard scope) ----
+  // --- the keyboard (page-scoped; see AGENTS.md keyboard scope) ---------
+  //
+  // h/l (and ←/→) walk the PLAYHEAD a beat at a time along the tapped
+  // grid, w/b a bar at a time, 0/$ to the ends of what a save would file
+  // — the Grid page's motions, over this page's units. j/k walk the stem
+  // switches and Enter flips the one the cursor is on, which is the list
+  // grammar every other page uses. `:` offers the stems by initial.
+  const capturing = useKeyboardCapturing();
+  const [stemCursor, setStemCursor] = useState<number | null>(null);
+  const stemNames = useMemo(() => backend?.stems ?? [...STEM_NAMES], [backend]);
+  const stemsSwitchable = picked?.state === 'ready' && !busy;
+  const playheadRef = useRef(0);
+  useEffect(() => {
+    playheadRef.current = playhead;
+  }, [playhead]);
+
+  const moveHead = useCallback(
+    (key: string): boolean => {
+      const { program: prog, duration: dur, sel: window } = live.current;
+      const beats = prog.beat_grid?.times ?? [];
+      const at = playheadRef.current;
+      const ends = window ?? { start: 0, end: dur };
+      const to = (secs: number) => {
+        seek(Math.min(dur, Math.max(0, secs)));
+        return true;
+      };
+      // On the grid, a step is a beat and a bar is four of them; with no
+      // grid tapped yet there are no beats to count, so the same keys
+      // nudge by a fixed step and still scrub.
+      const step = (by: number) => {
+        if (beats.length === 0) return to(at + by * NUDGE_SECS);
+        const i = Math.round(beatIndexAt(prog.beat_grid!, at));
+        return to(beats[Math.min(beats.length - 1, Math.max(0, i + by))]);
+      };
+      switch (key) {
+        case 'h':
+        case 'ArrowLeft':
+          return step(-1);
+        case 'l':
+        case 'ArrowRight':
+          return step(1);
+        case 'b':
+          return step(-BAR_BEATS);
+        case 'w':
+          return step(BAR_BEATS);
+        case '0':
+          return to(ends.start);
+        case '$':
+          return to(ends.end);
+        default:
+          return false;
+      }
+    },
+    [seek],
+  );
+
+  useListKeys({
+    length: stemNames.length,
+    active,
+    index: stemCursor,
+    onIndex: setStemCursor,
+    onActivate: (i) => {
+      if (stemsSwitchable) void toggleStem(stemNames[i]);
+    },
+    // The playhead motions are horizontal, the stem list vertical: on
+    // this page alone the two axes differ, so h/l are taken before the
+    // list sees them.
+    onKey: (e) => moveHead(e.key),
+  });
+
+  // Only while the Clip tab is the open one: the page stays mounted so an
+  // edit survives a tab switch, but its letters must not be on offer
+  // behind another page's `:`.
+  useCommandSource('clip', () =>
+    !active
+      ? []
+      : stemNames.map((name, i) => ({
+          keys: name[0].toLowerCase(),
+          label: `${stemsOn.includes(name) ? 'drop' : 'bring back'} the ${name}`,
+          group: 'Stems',
+          run: () => {
+            setStemCursor(i);
+            if (stemsSwitchable) void toggleStem(name);
+          },
+        })),
+  );
+
+  // The page's older bindings: undo/redo, space, the shift taps.
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return;
+      if (isEditableTarget(e.target) || capturing) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (mod && key === 'z' && !e.shiftKey) {
@@ -1651,7 +1745,7 @@ export function ClipView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, liveOn, redo, sel, togglePlay, toggleTrackDownbeat, trackBeats, undo]);
+  }, [active, capturing, liveOn, redo, sel, togglePlay, toggleTrackDownbeat, trackBeats, undo]);
 
   // --- the beat grid, and what the save row says ---------------------------
   //
@@ -2029,13 +2123,14 @@ export function ClipView({
           role="group"
           aria-label="Stems"
         >
-          {(backend?.stems ?? STEM_NAMES).map((name) => {
+          {stemNames.map((name, i) => {
             const on = stemsOn.includes(name);
             return (
               <button
                 key={name}
-                className={on ? 'clip-stem-on' : 'clip-stem-off'}
+                className={`key-row ${on ? 'clip-stem-on' : 'clip-stem-off'}`}
                 data-testid={`clip-stem-${name}`}
+                data-cursor={i === stemCursor ? 'true' : 'false'}
                 aria-pressed={on}
                 disabled={!stemsReady || busy}
                 title={

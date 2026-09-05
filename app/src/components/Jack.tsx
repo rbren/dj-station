@@ -16,6 +16,7 @@
 // smooths over its 100 ms (10 Hz) window.
 
 import { formatDisplay } from '../display';
+import { useRackHints } from '../rackKeys';
 import { safeNumber } from '../format';
 import { useLiveJackTelemetry } from '../rackStore';
 import type { DisplaySpec, JackTelemetry, KnobConfig } from '../types';
@@ -171,6 +172,14 @@ export function Jack({
   showLabel = true,
   readout,
 }: JackProps) {
+  // The letter to press for this jack, on screen only while a `:w` wire
+  // command is asking which one — so the panel is never littered with
+  // letters, and is fully labelled the moment they matter.
+  const { jackPrompt } = useRackHints();
+  const hint =
+    jackPrompt && jackPrompt.instance === instance && jackPrompt.kind === kind
+      ? jackPrompt.jacks[id]
+      : undefined;
   // `display` is typed number but crosses IPC as JSON, where a non-finite
   // f32 becomes `null` — read it defensively.
   const style = telemetry ? indicatorStyle(telemetry) : null;
@@ -202,6 +211,11 @@ export function Jack({
           style={style ? { background: style.color, boxShadow: style.halo } : undefined}
         />
       </span>
+      {hint && (
+        <span className="jack-key mono" data-testid={`jack-key-${kind}-${id}`}>
+          {hint}
+        </span>
+      )}
       {showLabel && <span className="jack-name">{label ?? id}</span>}
     </button>
   );

@@ -91,12 +91,14 @@ pub fn qwerty_manifest() -> Manifest {
                 } else {
                     k.to_uppercase()
                 },
+                alias: None,
                 display: None,
             })
             .chain([
                 OutputDecl {
                     id: "note".into(),
                     name: "Note".into(),
+                    alias: None,
                     display: Some(DisplaySpec {
                         unit: Some("Hz".into()),
                         map: Some(DisplayMap::VoltPerOctave {
@@ -108,6 +110,7 @@ pub fn qwerty_manifest() -> Manifest {
                 OutputDecl {
                     id: "gate".into(),
                     name: "Gate".into(),
+                    alias: None,
                     display: None,
                 },
             ])

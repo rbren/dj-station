@@ -293,6 +293,7 @@ pub fn decks_manifest() -> Manifest {
             JackDecl {
                 id: "bpm".into(),
                 name: "Bank BPM".into(),
+                alias: None,
                 default: DEFAULT_BPM,
                 audio: false,
                 capture: false,
@@ -311,6 +312,7 @@ pub fn decks_manifest() -> Manifest {
             JackDecl {
                 id: "reset".into(),
                 name: "Reset".into(),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -331,6 +333,7 @@ pub fn decks_manifest() -> Manifest {
         .chain((0..SLOTS).map(|slot| JackDecl {
             id: format!("d{}_in", slot + 1),
             name: format!("Deck {} Return", slot + 1),
+            alias: None,
             default: 0.0,
             audio: true,
             capture: false,
@@ -342,26 +345,31 @@ pub fn decks_manifest() -> Manifest {
             OutputDecl {
                 id: "audio_l".into(),
                 name: "Audio L".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "audio_r".into(),
                 name: "Audio R".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "mon_l".into(),
                 name: "Monitor L".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "mon_r".into(),
                 name: "Monitor R".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "clock".into(),
                 name: "Clock".into(),
+                alias: None,
                 display: None,
             },
         ]
@@ -372,21 +380,25 @@ pub fn decks_manifest() -> Manifest {
                 OutputDecl {
                     id: format!("d{n}_out"),
                     name: format!("Deck {n} Send"),
+                    alias: None,
                     display: None,
                 },
                 OutputDecl {
                     id: format!("d{n}_high"),
                     name: format!("Deck {n} High CV"),
+                    alias: None,
                     display: None,
                 },
                 OutputDecl {
                     id: format!("d{n}_mid"),
                     name: format!("Deck {n} Mid CV"),
+                    alias: None,
                     display: None,
                 },
                 OutputDecl {
                     id: format!("d{n}_low"),
                     name: format!("Deck {n} Low CV"),
+                    alias: None,
                     display: None,
                 },
             ]

@@ -119,6 +119,7 @@ pub fn launch_control_manifest() -> Manifest {
                 (0..ROWS).map(move |r| OutputDecl {
                     id: jack_id(col, r),
                     name: format!("{} {}", col + 1, ROW_IDS[r].1),
+                    alias: None,
                     display: None,
                 })
             })

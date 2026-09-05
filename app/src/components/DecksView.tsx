@@ -77,6 +77,7 @@ import {
 import type { WireSnapshot } from '../engine';
 import { loadJson, saveJson, type PendingWire } from '../rackStore';
 import { AudioOutputSelect, useAudioOutputs } from './AudioOutputSelect';
+import { useCommandSource, useListKeys } from '../keyboard';
 import { DecksClipPicker } from './DecksClipPicker';
 import { DecksSlot } from './DecksSlot';
 import { LiveJack } from './Jack';
@@ -486,6 +487,31 @@ export function DecksView(props: DecksViewProps) {
   const slots = useMemo(() => status?.slots ?? [], [status]);
   const shownSlots = useMemo(() => slots.map((s) => withDrafts(s, drafts)), [slots, drafts]);
 
+  // ---- the keyboard -------------------------------------------------
+  //
+  // The eight decks are a list: h/l (and j/k, and the arrows) step along
+  // it, Enter opens the clip picker for the deck the cursor is on, and
+  // `:1`…`:8` go straight to one. The picker owns the keyboard while it
+  // is up — it has its own list keys.
+  const [deckCursor, setDeckCursor] = useState<number | null>(null);
+  useListKeys({
+    length: shownSlots.length,
+    active: picking === null,
+    index: deckCursor,
+    onIndex: setDeckCursor,
+    onActivate: (i) => setPicking(i),
+  });
+  useCommandSource('decks', () =>
+    picking !== null
+      ? []
+      : shownSlots.map((slot) => ({
+          keys: String(slot.slot + 1),
+          label: slot.clip?.name ?? `Deck ${slot.slot + 1} (empty)`,
+          group: 'Decks',
+          run: () => setDeckCursor(slot.slot),
+        })),
+  );
+
   if (!bank) {
     return (
       <div className="decks-view" data-testid="decks-view">
@@ -748,6 +774,7 @@ export function DecksView(props: DecksViewProps) {
                 key={slot.slot}
                 slot={slot}
                 instance={bank}
+                cursor={slot.slot === deckCursor}
                 onLoad={() => setPicking(slot.slot)}
                 onClear={() => void write(() => api.clear(bank, slot.slot))}
                 onControl={(control, value) => setControl(slot.slot, control, value)}

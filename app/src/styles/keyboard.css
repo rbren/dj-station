@@ -1,0 +1,211 @@
+/* ── The keyboard layer ───────────────────────────────────────────────
+   The command bar `:` opens, the `?` help overlay, and the letter chips
+   the rack and the grid wear so the keys are readable off the UI itself. */
+
+.cmd-key {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+/* The command bar sits over the bottom of the app, out of the way of the
+   page it is driving. */
+.cmd-bar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 42vh;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+
+.cmd-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.cmd-typed {
+  font-size: var(--fs-md);
+  color: var(--brand);
+}
+
+.cmd-trail {
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+}
+
+.cmd-error {
+  font-size: var(--fs-xs);
+  color: var(--fault);
+}
+
+.cmd-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+
+.cmd-hint-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.cmd-hint-title {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.cmd-hint {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.cmd-hint-label {
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+}
+
+/* ── `?` ───────────────────────────────────────────────────────────── */
+
+.key-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+}
+
+.key-help {
+  width: min(880px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  padding: 16px 20px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+.key-help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.key-help-scope {
+  margin: 14px 0 6px;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 4px;
+}
+
+.key-help-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px 24px;
+}
+
+.key-help-group h4 {
+  margin: 6px 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+
+.key-help-row {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
+}
+
+.key-help-row dd {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+}
+
+/* ── letters worn by the UI ────────────────────────────────────────── */
+
+.module-alias {
+  font-size: var(--fs-nano);
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, var(--surface-sunken));
+  border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--line));
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  margin-right: 4px;
+}
+
+.tab-help {
+  font-family: var(--font-mono);
+}
+
+/* The grid's caret: the row it is on, and what it is waiting for. */
+.grid-row-title[data-caret='true'] {
+  box-shadow: inset 2px 0 0 var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+}
+
+.grid-row-key {
+  font-size: var(--fs-nano);
+  font-family: var(--font-mono);
+  color: var(--brand);
+  margin-right: 4px;
+}
+
+.grid-key-state {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-muted);
+}
+
+.grid-key-state[data-pending='true'] {
+  color: var(--cue);
+}
+
+/* The row a list's keyboard cursor is on. */
+.key-row[data-cursor='true'] {
+  outline: 1px solid var(--brand);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+}
+
+/* A jack's letter, shown only while a `:w` command is asking for one. */
+.jack-key {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  font-size: var(--fs-nano);
+  line-height: 1;
+  color: var(--surface);
+  background: var(--brand);
+  border-radius: var(--radius-sm);
+  padding: 1px 3px;
+  pointer-events: none;
+}

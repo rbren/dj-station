@@ -15,6 +15,7 @@ import {
   type ComponentType,
   type ReactNode,
 } from 'react';
+import { useRackHints } from '../rackKeys';
 import { useLiveInstanceTelemetry } from '../rackStore';
 import type {
   JackTelemetry,
@@ -211,6 +212,8 @@ export function ModulePanel(props: ModulePanelProps) {
     onSelect,
     zoom = 1,
   } = props;
+  const { aliases } = useRackHints();
+  const alias = aliases[instanceId];
   const pendingColor =
     pendingSource?.color !== undefined
       ? WIRE_COLORS[pendingSource.color % WIRE_COLORS.length]
@@ -356,6 +359,19 @@ export function ModulePanel(props: ModulePanelProps) {
             };
           }}
         >
+          {/* THE PANEL'S LETTER: what `:` selects it by, and what a `:w`
+              wire names it as. Derived from this title, so it is written
+              where the name it comes from is (rackKeys.ts). */}
+          {alias && (
+            <span
+              className="module-alias mono"
+              data-testid={`module-alias-${instanceId}`}
+              data-tip={`Press : then ${alias} to select this module`}
+              aria-hidden="true"
+            >
+              {alias}
+            </span>
+          )}
           <ModuleName
             instanceId={instanceId}
             // Macro members' ids are "<macro>/<name>" — the macro box

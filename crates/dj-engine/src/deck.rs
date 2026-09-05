@@ -86,6 +86,7 @@ pub fn deck_manifest() -> Manifest {
         JackDecl {
             id: "play_gate".into(),
             name: "Play Gate".into(),
+            alias: None,
             default: 0.0,
             audio: false,
             capture: false,
@@ -101,6 +102,7 @@ pub fn deck_manifest() -> Manifest {
         JackDecl {
             id: "speed".into(),
             name: "Pitch Fader".into(),
+            alias: None,
             default: 0.0,
             audio: false,
             capture: false,
@@ -116,6 +118,7 @@ pub fn deck_manifest() -> Manifest {
         JackDecl {
             id: "phase_nudge".into(),
             name: "Phase Nudge".into(),
+            alias: None,
             default: 0.0,
             audio: false,
             capture: false,
@@ -131,6 +134,7 @@ pub fn deck_manifest() -> Manifest {
         JackDecl {
             id: "loop_toggle".into(),
             name: "Loop Toggle".into(),
+            alias: None,
             default: 0.0,
             audio: false,
             capture: false,
@@ -148,6 +152,7 @@ pub fn deck_manifest() -> Manifest {
         inputs.push(JackDecl {
             id: format!("cue_trig{i}"),
             name: format!("Cue {i}"),
+            alias: None,
             default: 0.0,
             audio: false,
             capture: false,
@@ -165,31 +170,37 @@ pub fn deck_manifest() -> Manifest {
         OutputDecl {
             id: "audio_l".into(),
             name: "Audio L".into(),
+            alias: None,
             display: None,
         },
         OutputDecl {
             id: "audio_r".into(),
             name: "Audio R".into(),
+            alias: None,
             display: None,
         },
         OutputDecl {
             id: "beat_clock".into(),
             name: "Beat Clock".into(),
+            alias: None,
             display: None,
         },
         OutputDecl {
             id: "bar_clock".into(),
             name: "Bar Clock".into(),
+            alias: None,
             display: None,
         },
         OutputDecl {
             id: "phase".into(),
             name: "Bar Phase".into(),
+            alias: None,
             display: None,
         },
         OutputDecl {
             id: "bpm".into(),
             name: "BPM".into(),
+            alias: None,
             display: None,
         },
     ];
@@ -198,6 +209,7 @@ pub fn deck_manifest() -> Manifest {
         outputs.push(OutputDecl {
             id: format!("stem_{stem}"),
             name: format!("Stem {}{}", stem[..1].to_uppercase(), &stem[1..]),
+            alias: None,
             display: None,
         });
     }

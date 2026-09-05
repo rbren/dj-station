@@ -4,9 +4,11 @@
 // in the app; a mock here).
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
 import { LibraryView } from '../src/components/LibraryView';
+import { KeyboardProvider, useKeyboardLayer } from '../src/keyboard';
 import type {
   DownloadJob,
   LibraryClientApi,
@@ -1058,5 +1060,77 @@ describe('LibraryView', () => {
     render(<LibraryView client={mockClient()} />);
     await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(1));
     expect(screen.queryByTestId('store-tab-beat-clips')).toBeNull();
+  });
+});
+
+// The house list keys over the library's rows: the same j/k/gg/G/Enter
+// every other list here answers to, plus `/` for the search box and the
+// `:` jumps to the two tabs.
+describe('LibraryView keyboard', () => {
+  const TRACKS: Track[] = [
+    { ...LOCAL_TRACK, id: 1, title: 'Basement Loop', analysis_status: 'done' },
+    { ...LOCAL_TRACK, id: 2, title: 'Jungle Thing', analysis_status: 'done' },
+    { ...LOCAL_TRACK, id: 3, title: 'Attic Tape', analysis_status: 'done' },
+  ];
+
+  function KeyHarness({ children }: { children: ReactNode }) {
+    const api = useKeyboardLayer({ page: 'library' });
+    return <KeyboardProvider api={api}>{children}</KeyboardProvider>;
+  }
+
+  async function showLibrary(onEdit = vi.fn()) {
+    const client = mockClient({ tracks: vi.fn().mockResolvedValue(TRACKS) });
+    render(
+      <KeyHarness>
+        <LibraryView client={client} onEdit={onEdit} />
+      </KeyHarness>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(3));
+    return onEdit;
+  }
+
+  const cursorRow = () =>
+    document.querySelector('[data-testid="library-track"][data-cursor="true"]')?.textContent ??
+    null;
+
+  it('j/k and the arrows walk the rows, Enter opens one in the Clip page', async () => {
+    const onEdit = await showLibrary();
+    expect(cursorRow()).toBeNull();
+    fireEvent.keyDown(window, { key: 'j' });
+    await waitFor(() => expect(cursorRow()).toContain('Basement Loop'));
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    await waitFor(() => expect(cursorRow()).toContain('Jungle Thing'));
+    fireEvent.keyDown(window, { key: 'G' });
+    await waitFor(() => expect(cursorRow()).toContain('Attic Tape'));
+    fireEvent.keyDown(window, { key: 'k' });
+    await waitFor(() => expect(cursorRow()).toContain('Jungle Thing'));
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(cursorRow()).toBeNull());
+  });
+
+  it('/ puts the keyboard in the search box, which then swallows the keys', async () => {
+    await showLibrary();
+    fireEvent.keyDown(window, { key: '/' });
+    const box = screen.getByTestId('library-search-input');
+    await waitFor(() => expect(document.activeElement).toBe(box));
+    // Typing in it must not move the row cursor.
+    fireEvent.keyDown(box, { key: 'j' });
+    expect(cursorRow()).toBeNull();
+  });
+
+  it(': offers the tabs, and :b opens the beat clips', async () => {
+    const client = mockClient({ tracks: vi.fn().mockResolvedValue(TRACKS) });
+    render(
+      <KeyHarness>
+        <LibraryView client={client} clips={mockClips()} />
+      </KeyHarness>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('library-track')).toHaveLength(3));
+    fireEvent.keyDown(window, { key: ':' });
+    await waitFor(() => expect(screen.getByTestId('command-hint-b')).toBeTruthy());
+    fireEvent.keyDown(window, { key: 'b' });
+    await waitFor(() => expect(screen.queryByTestId('library-track')).toBeNull());
   });
 });

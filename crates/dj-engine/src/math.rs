@@ -73,6 +73,7 @@ pub fn math_manifest() -> Manifest {
         inputs: vec![JackDecl {
             id: "x".into(),
             name: "x".into(),
+            alias: None,
             default: 0.0,
             audio: false,
             capture: false,
@@ -89,6 +90,7 @@ pub fn math_manifest() -> Manifest {
             .map(|i| OutputDecl {
                 id: format!("out{i}"),
                 name: format!("i = {i}"),
+                alias: None,
                 display: None,
             })
             .collect(),

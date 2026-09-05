@@ -48,6 +48,7 @@ pub fn track_io_manifest() -> Manifest {
         inputs: vec![JackDecl {
             id: "bpm".into(),
             name: "BPM".into(),
+            alias: None,
             default: 120.0,
             audio: false,
             capture: false,
@@ -67,16 +68,19 @@ pub fn track_io_manifest() -> Manifest {
             OutputDecl {
                 id: "clock".into(),
                 name: "Clock".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "out_l".into(),
                 name: "Out L".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "out_r".into(),
                 name: "Out R".into(),
+                alias: None,
                 display: None,
             },
         ],

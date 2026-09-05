@@ -15,6 +15,7 @@ import {
 } from '../beatClip';
 import type { StemName } from '../clip';
 import { errorMessage, logError } from '../errors';
+import { useCommandSource, useListKeys } from '../keyboard';
 import { fixed } from '../format';
 import { BeatClipTable, ClipStemFilter } from './BeatClipTable';
 import type {
@@ -556,6 +557,57 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
     [jobs],
   );
 
+  // ---- the keyboard ------------------------------------------------
+  //
+  // ONE HIGHLIGHTED ROW per tab, walked with j/k or the arrows (the
+  // house list keys), opened with Enter — the same thing the row's own
+  // Clip button does. `/` is the search box, `:s` and `:b` the tabs.
+  const [cursor, setCursor] = useState<number | null>(null);
+  const searchBox = useRef<HTMLInputElement | null>(null);
+  const rowCount = tab === CLIPS_TAB ? shownClips.length : tab === SOURCES_TAB ? tracks.length : 0;
+  // Another tab is another list: the highlight does not carry across.
+  const [cursorTab, setCursorTab] = useState(tab);
+  if (cursorTab !== tab) {
+    setCursorTab(tab);
+    setCursor(null);
+  }
+
+  const openRow = useCallback(
+    (index: number) => {
+      if (tab === CLIPS_TAB) {
+        const clip = shownClips[index];
+        if (clip) onEditClip?.(clip);
+        return;
+      }
+      const track = tracks[index];
+      if (track) onEdit?.(track);
+    },
+    [onEdit, onEditClip, shownClips, tab, tracks],
+  );
+
+  const listKey = useCallback((e: KeyboardEvent) => {
+    if (e.key !== '/') return false;
+    e.preventDefault();
+    searchBox.current?.focus();
+    return true;
+  }, []);
+
+  useListKeys({
+    length: rowCount,
+    index: cursor,
+    onIndex: setCursor,
+    onActivate: openRow,
+    onKey: listKey,
+  });
+
+  useCommandSource('library', () => [
+    { keys: 's', label: 'Sources', group: 'Library', run: () => setTab(SOURCES_TAB) },
+    ...(clips
+      ? [{ keys: 'b', label: 'Beat clips', group: 'Library', run: () => setTab(CLIPS_TAB) }]
+      : []),
+    { keys: '/', label: 'search', group: 'Library', run: () => searchBox.current?.focus() },
+  ]);
+
   const openStore = useCallback(
     async (r: TrackResult) => {
       const url = await client.openStorePage(r);
@@ -624,6 +676,7 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           data-testid="library-search-input"
+          ref={searchBox}
         />
         <button type="submit" disabled={searching} data-testid="library-search-button">
           {searching ? 'Searching…' : 'Search'}
@@ -771,6 +824,7 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
           ) : (
             <BeatClipTable
               clips={shownClips}
+              cursor={cursor}
               sort={clipSort}
               onSortChange={setClipSort}
               testId="beat-clip"
@@ -818,8 +872,13 @@ export function LibraryView({ client, onEdit, onEditClip, clips }: LibraryViewPr
                 </tr>
               </thead>
               <tbody>
-                {tracks.map((t) => (
-                  <tr key={t.id} data-testid="library-track">
+                {tracks.map((t, i) => (
+                  <tr
+                    key={t.id}
+                    data-testid="library-track"
+                    className="key-row"
+                    data-cursor={i === cursor ? 'true' : 'false'}
+                  >
                     <td>
                       <EditableName
                         value={t.title}

@@ -61,6 +61,7 @@ pub fn audio_manifest() -> Manifest {
             JackDecl {
                 id: "play".into(),
                 name: "Play".into(),
+                alias: None,
                 default: 0.0,
                 audio: false,
                 capture: false,
@@ -76,6 +77,7 @@ pub fn audio_manifest() -> Manifest {
             JackDecl {
                 id: "bpm".into(),
                 name: "BPM".into(),
+                alias: None,
                 default: DEFAULT_BPM,
                 audio: false,
                 capture: false,
@@ -94,6 +96,7 @@ pub fn audio_manifest() -> Manifest {
             JackDecl {
                 id: "speed".into(),
                 name: "Speed".into(),
+                alias: None,
                 default: 1.0,
                 audio: false,
                 capture: false,
@@ -114,6 +117,7 @@ pub fn audio_manifest() -> Manifest {
             JackDecl {
                 id: "loop".into(),
                 name: "Loop".into(),
+                alias: None,
                 // High by default: a loaded track repeats until you say
                 // otherwise, so the module is useful the moment it plays.
                 default: SIGNAL_MAX,
@@ -133,16 +137,19 @@ pub fn audio_manifest() -> Manifest {
             OutputDecl {
                 id: "audio_l".into(),
                 name: "Audio L".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "audio_r".into(),
                 name: "Audio R".into(),
+                alias: None,
                 display: None,
             },
             OutputDecl {
                 id: "clock".into(),
                 name: "Clock".into(),
+                alias: None,
                 display: None,
             },
         ],

@@ -5,7 +5,9 @@
 import { appCss } from './readStyles';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { ReactNode } from 'react';
 import { DecksView } from '../src/components/DecksView';
+import { KeyboardProvider, useKeyboardLayer } from '../src/keyboard';
 import {
   beatGridLayout,
   clipParts,
@@ -1272,5 +1274,52 @@ describe('the deck chrome is the bank, on jacks', () => {
     await waitFor(() =>
       expect(api.setControl).toHaveBeenCalledWith('decks1', 2, 'insert_monitor', 1),
     );
+  });
+});
+
+// The eight decks as a list: the house keys walk it, Enter opens the
+// deck's clip picker, and `:` numbers them.
+describe('DecksView keyboard', () => {
+  function KeyHarness({ children }: { children: ReactNode }) {
+    const api = useKeyboardLayer({ page: 'decks' });
+    return <KeyboardProvider api={api}>{children}</KeyboardProvider>;
+  }
+
+  async function showKeys() {
+    const api = makeApi(makeStatus());
+    render(
+      <KeyHarness>
+        <DecksView api={api} clips={makeClips()} pollMs={NO_POLL} />
+      </KeyHarness>,
+    );
+    await waitFor(() => expect(screen.getByTestId('decks-slot-0')).toBeTruthy());
+  }
+
+  const cursorDeck = () =>
+    document
+      .querySelector('[data-cursor="true"][data-testid^="decks-slot-"]')
+      ?.getAttribute('data-testid') ?? null;
+
+  it('h/l and the arrows step across the decks', async () => {
+    await showKeys();
+    expect(cursorDeck()).toBeNull();
+    fireEvent.keyDown(window, { key: 'l' });
+    await waitFor(() => expect(cursorDeck()).toBe('decks-slot-0'));
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    await waitFor(() => expect(cursorDeck()).toBe('decks-slot-1'));
+    fireEvent.keyDown(window, { key: 'h' });
+    await waitFor(() => expect(cursorDeck()).toBe('decks-slot-0'));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(cursorDeck()).toBeNull());
+  });
+
+  it(':3 jumps to a deck and Enter opens its clip picker', async () => {
+    await showKeys();
+    fireEvent.keyDown(window, { key: ':' });
+    await waitFor(() => expect(screen.getByTestId('command-hint-3')).toBeTruthy());
+    fireEvent.keyDown(window, { key: '3' });
+    await waitFor(() => expect(cursorDeck()).toBe('decks-slot-2'));
+    fireEvent.keyDown(window, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByTestId('decks-clip-picker')).toBeTruthy());
   });
 });

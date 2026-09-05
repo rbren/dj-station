@@ -4,6 +4,8 @@
 // transport.
 
 import { appCss } from './readStyles';
+import type { ReactNode } from 'react';
+import { KeyboardProvider, useKeyboardLayer } from '../src/keyboard';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BeatClipApi, BeatClipEntry } from '../src/beatClip';
@@ -1513,5 +1515,168 @@ describe('the ruler click, end to end', () => {
     // The paste anchor is the playhead, so a playhead trapped inside the
     // loop dropped the copy back on top of the original.
     await waitFor(() => expect(screen.getByTestId('grid-clip-row1-20')).toBeTruthy());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The vim layer: the arrangement read as a buffer — a row is a line, a
+// beat a character, a bar a word.
+// ---------------------------------------------------------------------------
+
+describe('GridView vim keys', () => {
+  /** The page inside the real keyboard layer, so `:` works here too. */
+  function KeyHarness({ children }: { children: ReactNode }) {
+    const api = useKeyboardLayer({ page: 'grid' });
+    return <KeyboardProvider api={api}>{children}</KeyboardProvider>;
+  }
+
+  function showKeys(transport?: EngineGridPlayer) {
+    return render(
+      <KeyHarness>
+        <GridView clips={makeClips()} pollMs={NO_POLL} transport={transport} active />
+      </KeyHarness>,
+    );
+  }
+
+  const type = (keys: string) => {
+    for (const key of keys) fireEvent.keyDown(window, { key });
+  };
+
+  const caretRow = () =>
+    document
+      .querySelector('[data-testid^="grid-title-"][data-caret="true"]')
+      ?.getAttribute('data-testid') ?? null;
+
+  /** Load a whole track (two rows), through the picker. */
+  async function loadTrack() {
+    fireEvent.click(screen.getByTestId('grid-add'));
+    await waitFor(() => expect(screen.getByTestId('grid-picker')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('grid-picker-track-h1'));
+    await waitFor(() => expect(screen.queryByTestId('grid-picker')).toBeNull());
+  }
+
+  /** One row with a four-beat clip placed at `col`. */
+  async function loadClipAt(col: number) {
+    fireEvent.click(screen.getByTestId('grid-add'));
+    await waitFor(() => expect(screen.getByTestId('grid-picker')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('grid-picker-expand-h1'));
+    fireEvent.click(screen.getByTestId('grid-picker-clip-c1'));
+    await waitFor(() => expect(screen.queryByTestId('grid-picker')).toBeNull());
+    fireEvent.click(screen.getByTestId(`grid-cell-row1-${col}`));
+    await screen.findByTestId(`grid-clip-row1-${col}`);
+  }
+
+  const clipsInRow = () => document.querySelectorAll('[data-testid^="grid-clip-row1-"]').length;
+
+  it('h/l and the arrows walk the playhead a beat at a time', async () => {
+    const transport = new EngineGridPlayer();
+    const seek = vi.spyOn(transport, 'seek');
+    showKeys(transport);
+    await screen.findByTestId('grid-view');
+    type('l');
+    await waitFor(() => expect(seek).toHaveBeenLastCalledWith(1));
+    type('l');
+    await waitFor(() => expect(seek).toHaveBeenLastCalledWith(2));
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    await waitFor(() => expect(seek).toHaveBeenLastCalledWith(3));
+    type('h');
+    await waitFor(() => expect(seek).toHaveBeenLastCalledWith(2));
+  });
+
+  it('a count repeats the motion, and a bar is a word', async () => {
+    const transport = new EngineGridPlayer();
+    const seek = vi.spyOn(transport, 'seek');
+    showKeys(transport);
+    await screen.findByTestId('grid-view');
+    type('8l');
+    await waitFor(() => expect(seek).toHaveBeenLastCalledWith(8));
+    type('w');
+    await waitFor(() => expect(seek).toHaveBeenLastCalledWith(12));
+    type('2b');
+    await waitFor(() => expect(seek).toHaveBeenLastCalledWith(4));
+    type('0');
+    await waitFor(() => expect(seek).toHaveBeenLastCalledWith(0));
+  });
+
+  it('shows a half-typed command, and Escape drops it', async () => {
+    showKeys();
+    await screen.findByTestId('grid-view');
+    type('3');
+    await waitFor(() => expect(screen.getByTestId('grid-key-state').textContent).toContain('3'));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.getByTestId('grid-key-state').textContent).toContain('—'));
+  });
+
+  it('j/k walk the caret through the tracks, gg and G to the ends', async () => {
+    showKeys();
+    await screen.findByTestId('grid-view');
+    await loadTrack();
+    expect(caretRow()).toBe('grid-title-row1');
+    type('j');
+    await waitFor(() => expect(caretRow()).toBe('grid-title-row2'));
+    expect(screen.getByTestId('grid-key-state').textContent).toContain('track 2');
+    type('k');
+    await waitFor(() => expect(caretRow()).toBe('grid-title-row1'));
+    type('G');
+    await waitFor(() => expect(caretRow()).toBe('grid-title-row2'));
+    type('gg');
+    await waitFor(() => expect(caretRow()).toBe('grid-title-row1'));
+  });
+
+  it(': numbers the tracks, and :2 jumps to the second one', async () => {
+    showKeys();
+    await screen.findByTestId('grid-view');
+    await loadTrack();
+    expect(screen.queryByTestId('grid-row-key-row1')).toBeNull();
+    type(':');
+    await waitFor(() => expect(screen.getByTestId('grid-row-key-row1').textContent).toBe('1'));
+    expect(screen.getByTestId('grid-row-key-row2').textContent).toBe('2');
+    type('2');
+    await waitFor(() => expect(caretRow()).toBe('grid-title-row2'));
+    expect(screen.queryByTestId('grid-row-key-row1')).toBeNull();
+  });
+
+  it('dd takes the whole track and p puts it back at the caret', async () => {
+    showKeys();
+    await screen.findByTestId('grid-view');
+    await loadClipAt(4);
+    type('dd');
+    await waitFor(() => expect(clipsInRow()).toBe(0));
+    type('p');
+    await waitFor(() => expect(screen.getByTestId('grid-clip-row1-4')).toBeTruthy());
+  });
+
+  it('x deletes the beat under the caret', async () => {
+    showKeys();
+    await screen.findByTestId('grid-view');
+    await loadClipAt(0);
+    type('x');
+    await waitFor(() => expect(clipsInRow()).toBe(0));
+  });
+
+  it('v marks a rectangle the motions grow, and d takes it', async () => {
+    showKeys();
+    await screen.findByTestId('grid-view');
+    await loadClipAt(0);
+    type('v');
+    type('3l');
+    await waitFor(() =>
+      expect(screen.getByTestId('grid-cell-row1-2').getAttribute('data-selected')).toBe('true'),
+    );
+    type('d');
+    await waitFor(() => expect(clipsInRow()).toBe(0));
+    // Visual mode ends with the operator, as vim's does.
+    expect(screen.getByTestId('grid-cell-row1-2').getAttribute('data-selected')).not.toBe('true');
+  });
+
+  it('stands down while a field has the keyboard', async () => {
+    const transport = new EngineGridPlayer();
+    const seek = vi.spyOn(transport, 'seek');
+    showKeys(transport);
+    await screen.findByTestId('grid-view');
+    const bpm = screen.getByTestId('grid-bpm');
+    fireEvent.keyDown(bpm, { key: 'l' });
+    fireEvent.keyDown(bpm, { key: '3' });
+    expect(seek).not.toHaveBeenCalled();
   });
 });

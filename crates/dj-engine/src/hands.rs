@@ -96,6 +96,7 @@ pub fn hands_manifest() -> Manifest {
             .map(|(id, name)| OutputDecl {
                 id: (*id).into(),
                 name: (*name).into(),
+                alias: None,
                 display: None,
             })
             .collect(),

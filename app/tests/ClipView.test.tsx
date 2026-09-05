@@ -2459,4 +2459,62 @@ describe('ClipView', () => {
     await waitFor(() => expect(stemsReady()).toBe(true));
     expect(joins()).toHaveLength(1);
   });
+
+  // The house keys on this page: the playhead is walked like a line of
+  // text (a beat is a character, a bar a word) and the stem switches are
+  // a list.
+  describe('the keyboard', () => {
+    /** The playhead, in seconds, as the readout says it. */
+    const readout = () => screen.getByTestId('clip-playhead-readout').textContent ?? '';
+
+    it('h/l and the arrows walk the playhead, 0 goes back to the start', async () => {
+      const clip = clipMock();
+      await openTrack(clip);
+      expect(readout()).toBe('0:00.00');
+      fireEvent.keyDown(window, { key: 'l' });
+      await waitFor(() => expect(readout()).toBe('0:00.25'));
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+      await waitFor(() => expect(readout()).toBe('0:00.50'));
+      fireEvent.keyDown(window, { key: 'h' });
+      await waitFor(() => expect(readout()).toBe('0:00.25'));
+      // A bar is a word here too, and 0 is the start of what a save files.
+      fireEvent.keyDown(window, { key: 'w' });
+      await waitFor(() => expect(readout()).toBe('0:01.25'));
+      fireEvent.keyDown(window, { key: '0' });
+      await waitFor(() => expect(readout()).toBe('0:00.00'));
+    });
+
+    it('j/k walk the stem switches and Enter flips the one under the cursor', async () => {
+      const clip = clipMock();
+      await openTrack(clip);
+      await waitFor(() => expect(stemsReady()).toBe(true));
+      const cursorStem = () =>
+        document
+          .querySelector('[data-cursor="true"][data-testid^="clip-stem-"]')
+          ?.getAttribute('data-testid') ?? null;
+      const stems = screen
+        .getAllByTestId(/^clip-stem-(drums|vocals|bass|other)$/)
+        .map((el) => el.getAttribute('data-testid'));
+      fireEvent.keyDown(window, { key: 'j' });
+      await waitFor(() => expect(cursorStem()).toBe(stems[0]));
+      fireEvent.keyDown(window, { key: 'j' });
+      await waitFor(() => expect(cursorStem()).toBe(stems[1]));
+      fireEvent.keyDown(window, { key: 'k' });
+      await waitFor(() => expect(cursorStem()).toBe(stems[0]));
+      fireEvent.keyDown(window, { key: 'Enter' });
+      await waitFor(() =>
+        expect(screen.getByTestId(stems[0]!).getAttribute('aria-pressed')).toBe('false'),
+      );
+    });
+
+    it('stands down while the clip is being named', async () => {
+      const clip = clipMock();
+      await openTrack(clip);
+      const name = screen.getByTestId('clip-name');
+      fireEvent.keyDown(name, { key: 'l' });
+      fireEvent.keyDown(name, { key: 'j' });
+      expect(readout()).toBe('0:00.00');
+      expect(screen.getByTestId('clip-stem-drums').getAttribute('data-cursor')).toBe('false');
+    });
+  });
 });
