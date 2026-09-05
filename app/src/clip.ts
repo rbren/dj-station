@@ -630,24 +630,33 @@ export function composeWarp(
   return out;
 }
 
-/** The grid's beats inside a view, thinned to at most `cap` lines so
- *  zooming out cannot fill the waveform with hairlines. Only the covered
- *  span has beats — the grid does not continue across the clip. */
-export function gridBeatTimes(grid: ClipGrid, from: number, to: number, cap = 240): number[] {
+/** The grid's beats inside a view. Every beat is shown at every zoom level;
+ *  the grid only covers the span that was tapped or analyzed. */
+export function gridBeatTimes(grid: ClipGrid, from: number, to: number): number[] {
   const ts = grid.times;
   if (ts.length === 0 || to <= from) return [];
-  let step = 1;
-  while (ts.length / step > cap) step *= 2;
-  const out: number[] = [];
-  for (let i = 0; i < ts.length; i += step) {
-    if (ts[i] >= from && ts[i] <= to) out.push(ts[i]);
+
+  // `times` is ordered, so find the viewport's range without scanning the
+  // full-track cache on every render.
+  let start = 0;
+  let end = ts.length;
+  while (start < end) {
+    const middle = Math.floor((start + end) / 2);
+    if (ts[middle] < from) start = middle + 1;
+    else end = middle;
   }
-  return out;
+  const first = start;
+  end = ts.length;
+  while (start < end) {
+    const middle = Math.floor((start + end) / 2);
+    if (ts[middle] <= to) start = middle + 1;
+    else end = middle;
+  }
+
+  return ts.slice(first, end);
 }
 
-/** The times of the grid's ONE beats inside a view. There are only ever
- *  a handful, so they are never thinned the way `gridBeatTimes` thins the
- *  rest — a marked downbeat has to stay visible zoomed out. */
+/** The times of the grid's downbeats inside a view. */
 export function gridOneTimes(grid: ClipGrid, from: number, to: number): number[] {
   if (!grid.ones || to <= from) return [];
   const out: number[] = [];

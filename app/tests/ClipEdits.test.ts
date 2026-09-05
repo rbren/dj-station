@@ -521,14 +521,15 @@ describe('the grid covers only what was tapped (or extended)', () => {
   // The perfect grid of the taps above: beats at 1, 5/3, 7/3, 3.
   const grid = tapGrid([1.0, 1.6, 2.2, 3.0], 1)!.grid;
 
-  it('draws beats inside the covered span only, thinned when dense', () => {
+  it('draws every beat inside the covered span at every zoom level', () => {
     expect(gridBeatTimes(grid, 0, 10)).toHaveLength(4);
     expect(gridBeatTimes(grid, 0, 2)).toEqual([1, grid.times[1]]);
-    const dense = tapGrid(
-      Array.from({ length: 100 }, (_, i) => i * 0.5),
-      1,
-    )!.grid;
-    expect(gridBeatTimes(dense, 0, 60, 30).length).toBeLessThanOrEqual(30);
+    const long = {
+      ...grid,
+      times: Array.from({ length: 1_000 }, (_, i) => i * 0.5),
+    };
+    expect(gridBeatTimes(long, 0, 600)).toEqual(long.times);
+    expect(gridBeatTimes(long, 50, 52)).toEqual(long.times.slice(100, 105));
   });
 
   it('quantizes ends inside the coverage outward, and frees ends beyond it', () => {
